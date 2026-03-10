@@ -1,0 +1,24 @@
+{
+  "name": "pip-skills",
+  "owner": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "description": "Claude Code skills for serious engineering work. Architectural doctrine enforcement and PR review, built for real workflows and shared because they might help yours.",
+  "plugins": [
+    {
+      "name": "puritan",
+      "source": "./plugins/puritan",
+      "description": "Architectural doctrine enforcement through composable lenses. Covenant for planning, Inquisition for auditing, Scriptorium for writing new doctrine.",
+      "category": "engineering",
+      "tags": ["architecture", "ddd", "cqrs", "event-sourcing", "audit", "lenses"]
+    },
+    {
+      "name": "tribunal",
+      "source": "./plugins/tribunal",
+      "description": "PR comment review, categorisation, prioritisation and resolution. No heresy goes unaddressed.",
+      "category": "engineering",
+      "tags": ["pr-review", "code-review", "github", "feedback"]
+    }
+  ]
+}

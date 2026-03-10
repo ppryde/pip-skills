@@ -1,0 +1,10 @@
+{
+  "name": "puritan",
+  "version": "0.1.0",
+  "description": "Architectural doctrine enforcement through composable lenses. Covenant, Inquisition, and Scriptorium.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": ["architecture", "ddd", "cqrs", "event-sourcing", "lenses", "audit", "doctrine"]
+}
