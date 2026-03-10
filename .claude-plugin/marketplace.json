@@ -1,0 +1,78 @@
+{
+  "name": "pip-skills",
+  "displayName": "pip-skills: Engineering Workflow Skills",
+  "description": "A curated collection of Claude Code skills for serious engineering work. Covers the full development lifecycle — PR review, architectural auditing, security scanning, test generation, documentation, debugging, and more.",
+  "version": "1.0.0",
+  "author": {
+    "name": "ppryde",
+    "github": "https://github.com/ppryde"
+  },
+  "categories": [
+    "Code Review",
+    "Architecture",
+    "Security",
+    "Testing",
+    "Documentation",
+    "Developer Productivity"
+  ],
+  "skills": [
+    {
+      "name": "pr-review",
+      "command": "/pip-skills:pr-review",
+      "description": "Thorough review of the current git diff / pull request for code quality, security, and best practices."
+    },
+    {
+      "name": "arch-audit",
+      "command": "/pip-skills:arch-audit",
+      "description": "Architectural audit of the codebase — identifies structural risks, coupling, and improvement opportunities."
+    },
+    {
+      "name": "code-review",
+      "command": "/pip-skills:code-review",
+      "description": "Focused code review of a specific file or function with actionable feedback."
+    },
+    {
+      "name": "test-gen",
+      "command": "/pip-skills:test-gen",
+      "description": "Generates comprehensive unit and integration tests for the specified code."
+    },
+    {
+      "name": "refactor",
+      "command": "/pip-skills:refactor",
+      "description": "Analyses code and suggests concrete refactoring improvements for readability, maintainability, and performance."
+    },
+    {
+      "name": "security-scan",
+      "command": "/pip-skills:security-scan",
+      "description": "Performs a security-focused review of the codebase or a specific file, identifying vulnerabilities and suggesting fixes."
+    },
+    {
+      "name": "docs-gen",
+      "command": "/pip-skills:docs-gen",
+      "description": "Generates clear, structured documentation for a module, class, or function."
+    },
+    {
+      "name": "commit-msg",
+      "command": "/pip-skills:commit-msg",
+      "description": "Generates a conventional-commit message based on the current staged diff."
+    },
+    {
+      "name": "debug-assist",
+      "command": "/pip-skills:debug-assist",
+      "description": "Systematic debugging assistant — traces errors, suggests root causes, and proposes fixes."
+    },
+    {
+      "name": "changelog",
+      "command": "/pip-skills:changelog",
+      "description": "Generates a changelog entry from recent git commits, following Keep a Changelog conventions."
+    }
+  ],
+  "installUrl": "https://github.com/ppryde/pip-skills",
+  "tags": [
+    "engineering",
+    "productivity",
+    "code-quality",
+    "architecture",
+    "security"
+  ]
+}
