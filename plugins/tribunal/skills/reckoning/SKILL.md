@@ -207,7 +207,7 @@ Classify the following as `agent` sources automatically:
 
 - `github-actions`, `dependabot`, `renovate`, `codecov`, `sonarcloud`, `coderabbitai`
 - `codeclimate`, `snyk-bot`, `lgtm-com`, `imgbot`, `greenkeeper`, `copilot`, `cubic`, `augment`
-- Any username ending in `[bot]`, `-bot`, or `_bot` (requires a separator before `bot` to avoid misclassifying human usernames like `abbot`), or containing `cubic` or `augment` as a substring (case-insensitive)
+- Any username ending in `[bot]`, `-bot`, or `_bot` (requires a separator before `bot` to avoid misclassifying human usernames like `abbot`), or starting with `cubic-` or `augment-` (case-insensitive)
 
 ### Type
 

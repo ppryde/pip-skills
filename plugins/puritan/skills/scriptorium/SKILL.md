@@ -200,8 +200,7 @@ doctrines. Numbers are scoped per prefix.
 | Messaging | MSG | 001-064 |
 | Saga | SAG | 001-065 |
 
-New doctrines must claim a unique 3-letter prefix. Number from 001 within
-that prefix.
+New doctrines must claim a unique 3-letter prefix and a numeric range block (e.g. 001-099, 100-199). Number IDs starting from 001 within your chosen range.
 
 ## Output Specification
 
