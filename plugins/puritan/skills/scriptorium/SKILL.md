@@ -16,7 +16,7 @@ disable-model-invocation: true
 - Documenting project-specific conventions (naming, folder structure) — put those in CLAUDE.md or a project README
 - The pattern is too niche for reusable rules (e.g. "how we use Redis in this one service") — that's project config, not a doctrine
 
-Common Mistakes
+## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
@@ -26,8 +26,7 @@ Common Mistakes
 | Too few violations total | Aim for 20-50 rules — fewer means the doctrine is too shallow to be useful |
 | Forgetting allowed exceptions | Real patterns have pragmatic edge cases — undocumented exceptions become false positives |
 | Not claiming a unique ID prefix | Overlapping prefixes (e.g. two doctrines both using DDD-xxx) break audit reporting |
-| Writing rules that require runtime analysis | "What to scan for" must be detectable via grep/AST/regex — not "run the test suite
-and check" |
+| Writing rules that require runtime analysis | "What to scan for" must be detectable via grep/AST/regex — not "run the test suite and check" |
 
 ## Step 1: Identify the Pattern
 
@@ -52,26 +51,55 @@ Minimum required sources:
 - 2+ recognized practitioners
 - 1+ failure case study or anti-pattern article
 
-## Step 3: Structure the Doctrine
+## Step 3: Discover Existing Doctrines
+
+Before writing, read what already exists:
+
+1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+2. Note which ID prefixes and ranges are already claimed
+3. Identify cross-reference opportunities — new doctrines should link to related existing ones
+4. Check for overlap — if an existing doctrine already covers your pattern, update it instead
+
+**Optimistic cross-referencing:** Always reference doctrines that *should* pair
+with yours, even if they don't exist yet. Use the filename they would have
+(e.g. `hexagonal.md`, `testing.md`). Inquisition already handles missing
+doctrines gracefully. When the doctrine is eventually written, the
+cross-references are already waiting. After writing a new doctrine, check
+existing doctrines for stale or missing cross-references back to yours and
+update them.
+
+## Step 4: Structure the Doctrine
 
 Use the standard template with ALL required sections:
 
 ### Header
 - Pattern name and 1-2 sentence summary
-- When to Use (problem context)
-- Why Use It (value proposition)
-- Pros and Cons table (honest trade-offs)
+- **Language Scope** — declare one of:
+  - `Language-agnostic` — detection patterns work for any language
+  - `Language-specific: <language>` — patterns only apply to one language (e.g. `Language-specific: Python`)
+  - `Language-specific: <lang1>, <lang2>` — patterns cover multiple but not all languages
+  If language-specific, the "What to scan for" column must use that language's
+  idioms explicitly. Do not write `from <pkg>.infrastructure` and leave the
+  language implicit.
+- When to Use (problem context — MUST include when NOT to use)
+- Why Use It (value proposition, 4-6 bullet points)
+- Pros and Cons table (**minimum 5 rows** — honest trade-offs with inline
+  citations for controversial claims)
 
 ### Body
-- Applicable Directories (where to scan)
-- Violation Catalog (grouped by category)
+- Applicable Directories (where to scan — use relative paths without `src/`
+  prefix, e.g. `domain/` not `src/domain/`)
+- Violation Catalog (5-8 categories, 20-50 rules total)
 - Allowed Exceptions (pragmatic flexibility)
-- Cross-Reference (related doctrines)
-- Sources and Authority (citations)
+- Cross-Reference (use **bold** with `.md` suffix: `**ddd.md**`)
+- Sources and Authority (grouped under bold H3-style labels)
 
-## Step 4: Categorize Violations
+## Step 5: Categorize Violations
 
-Group violations logically (5-8 categories typical):
+**You MUST have 5-8 categories. Fewer than 5 means you haven't thought
+broadly enough. More than 8 means you're slicing too thin.**
+
+Common category archetypes (pick 5-8 that fit your pattern):
 
 1. **Structural** — How components connect
 2. **Behavioral** — How components interact
@@ -80,10 +108,13 @@ Group violations logically (5-8 categories typical):
 5. **State** — Mutability and data flow
 6. **Performance** — Efficiency concerns
 7. **Anti-patterns** — Known bad practices
+8. **Testing / Testability** — What the pattern demands for verification
 
-Each category: 3-8 violations (too many = cognitive overload)
+Each category: 3-8 violations. Total across all categories: **20-50 rules
+minimum.** If you have fewer than 20, you're missing categories or being
+too conservative within them. Count your rules before moving to Step 6.
 
-## Step 5: Write Auditable Rules
+## Step 6: Write Auditable Rules
 
 For EACH violation, specify:
 
@@ -95,11 +126,23 @@ The "What to scan for" MUST be:
 - Concrete file patterns or code signatures
 - Detectable via grep/AST/regex
 - Specific enough to avoid false positives
+- **Describe the pattern to detect, NOT the shell command**
 
 Bad: "Poor separation of concerns"
-Good: "Controller classes with >200 LOC or >10 dependencies"
+Bad: `grep -r "import .*infrastructure" src/domain/`
+Good: `from <pkg>.infrastructure` or `import <pkg>.infrastructure` in domain/ files
+Good: Controller classes with >200 LOC or >10 dependencies
 
-## Step 6: Add Inline Citations
+**Language scope in detection patterns:** If the doctrine declared
+`Language-specific`, the "What to scan for" column must use that language's
+syntax explicitly (e.g. `import sqlalchemy` for Python, `require('express')` for
+Node). If declared `Language-agnostic`, detection patterns must describe
+structural intent without language syntax — e.g. "imports from infrastructure
+layer" not "from <pkg>.infrastructure". If a rule genuinely cannot be expressed
+in language-agnostic terms, either restrict the doctrine's Language Scope or
+split it into per-language variants.
+
+## Step 7: Add Inline Citations
 
 For rules that come from specific sources (not general consensus), add inline
 citations:
@@ -113,7 +156,7 @@ Use inline citations when:
 - The rule is controversial or has competing opinions
 - The source provides critical context
 
-## Step 7: Document Exceptions
+## Step 8: Document Exceptions
 
 Real patterns have edge cases. Document them to prevent false positives:
 
@@ -125,34 +168,114 @@ Real patterns have edge cases. Document them to prevent false positives:
 - **Performance:** Denormalized projections may break normalization rules
 ```
 
-## Step 8: Validate Completeness
+## Step 9: Validate Completeness
 
-Checklist before finishing:
-- [ ] All required sections present
-- [ ] 20-50 violation rules defined
-- [ ] Each rule has detection pattern
-- [ ] Sources cited (minimum 3-5)
-- [ ] Exceptions documented
-- [ ] Cross-references added
+Checklist before finishing — count explicitly, do not estimate:
+- [ ] All 9 required sections present and in order
+- [ ] 5-8 violation categories
+- [ ] 20-50 violation rules total (count them)
+- [ ] Each "What to scan for" describes a pattern, not a shell command
+- [ ] **Language Scope declared in header** (`Language-agnostic` or `Language-specific: <lang>`)
+- [ ] Detection patterns match declared language scope — no implicit language assumptions
+- [ ] Pros and Cons table has 5+ rows
+- [ ] Sources cited (minimum: 1 primary, 2 practitioners, 1 failure case)
+- [ ] Exceptions documented with specific justification
+- [ ] Cross-references use **bold** with `.md` suffix
+- [ ] Directory paths use relative format without `src/` prefix
 
 ## Violation ID Convention
 
-| Doctrine | ID prefix | Range |
+**The 3-letter prefix is the disambiguator.** `DDD-001` and `MSG-001` are
+distinct IDs — the numeric range is bookkeeping to track how many rules a
+doctrine has, not a global namespace. Prefixes must be unique across all
+doctrines. Numbers are scoped per prefix.
+
+| Doctrine | Prefix | Current range |
 |---|---|---|
-| DDD | DDD | 001-099 |
-| Event Sourcing | EVS | 100-199 |
-| CQRS | CQR | 200-299 |
-| Hexagonal | HEX | 300-399 |
-| Layer Boundaries | LYR | 400-499 |
+| DDD | DDD | 001-090 |
+| Event Sourcing | EVS | 100-175 |
+| CQRS | CQR | 200-264 |
+| Hexagonal | HEX | 001-042 |
+| Layer Boundaries | LYR | 400-499 (reserved) |
 | Messaging | MSG | 001-064 |
 | Saga | SAG | 001-065 |
 
-New doctrines should claim a unique prefix (3 letters) and range.
+New doctrines must claim a unique 3-letter prefix and a numeric range block (e.g. 001-099, 100-199). Number IDs starting from 001 within your chosen range.
 
-## Output Format
+## Output Specification
 
 The skill produces a complete doctrine file at:
 `${CLAUDE_SKILL_DIR}/../doctrines/<pattern-name>.md`
+
+Use `${CLAUDE_SKILL_DIR}/../doctrines/_template.md` as the structural reference.
+Every doctrine MUST contain these sections in order:
+
+```
+# [Pattern Name] Doctrine
+  → 1-2 sentence summary of what is audited
+
+## When to Use
+  → Problem context, project characteristics, scope boundaries
+  → MUST include when NOT to use
+
+## Why Use It
+  → Value proposition as bullet points
+
+## Pros and Cons
+  → Minimum 5 rows — honest trade-offs with inline citations for controversial claims
+
+## Applicable Directories
+  → Paths mapped via .architecture/config.yml
+  → Each path with explanation of what lives there
+  → Use relative paths without src/ prefix (e.g. domain/ not src/domain/)
+
+## Violation Catalog
+  → 5-8 category sections, each with:
+    ### [Category Name] Violations
+    | ID | Category | Rule | Default Severity | What to scan for |
+  → 3-8 violations per category, 20-50 total
+  → Every "What to scan for" must be grep/AST/regex detectable
+
+## Allowed Exceptions
+  → Pragmatic edge cases with specific justification
+  → Vague exceptions are not exceptions — they're loopholes
+
+## Cross-Reference
+  → Related doctrines and why they pair
+  → Optimistic: reference doctrines that SHOULD exist, even if they don't yet
+  → After writing, update existing doctrines to cross-reference back
+
+## Sources and Authority
+  → Minimum: 1 primary source, 2 practitioners, 1 failure case
+  → Inline citations in violation tables for sourced thresholds
+```
+
+### Violation Table Contract
+
+Each row in the catalog is a contract with Inquisition. The columns mean:
+
+| Column | Purpose | Rule |
+|--------|---------|------|
+| **ID** | Unique identifier | 3-letter prefix + hyphen + 3-digit number. Check existing prefixes in the ID Convention table — never reuse |
+| **Category** | Grouping slug | Lowercase with hyphens (e.g. `layer-boundary`, `event-design`) |
+| **Rule** | Human-readable statement | One line, imperative ("Domain must not import from infrastructure") |
+| **Default Severity** | `error` or `warning` | `error` = blocks commit, `warning` = advisory. Correctness → error, style/preference → warning |
+| **What to scan for** | Detection pattern | MUST be concrete: import paths, class patterns, file locations, LOC thresholds. Describe the **pattern**, not the shell command (write `import <pkg>.infrastructure in domain/ files` not `grep -r "import" src/domain/`). If you can't describe a detectable pattern, the rule isn't auditable |
+
+### Severity Guidelines
+
+- **error** — Correctness violation. Causes bugs, data loss, or architectural decay if ignored (layer breach, mutable events, missing idempotency)
+- **warning** — Quality concern. Won't break things today but accumulates debt (naming conventions, aggregate size, missing docs)
+
+### Integration Checklist
+
+After writing a doctrine, verify it works with the ecosystem:
+
+- [ ] File is at `${CLAUDE_SKILL_DIR}/../doctrines/<pattern-name>.md`
+- [ ] ID prefix is unique (not in the convention table already)
+- [ ] Add the new prefix and range to the Violation ID Convention table in this skill
+- [ ] User's `.architecture/config.yml` updated with new doctrine entry (see Inquisition SKILL.md Step 1 for config format)
+- [ ] Run `/puritan:inquisition <doctrine-name>` to smoke-test the new doctrine
 
 Ready for immediate use by Inquisition and Covenant.
 

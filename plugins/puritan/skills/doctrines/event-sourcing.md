@@ -168,4 +168,4 @@ Based on industry best practices from:
 - [Event Sourcing anti-patterns and pitfalls](https://event-driven.io/en/anti-patterns/)
 - [Event Sourcing failures: Real-world lessons](https://kitemetric.com/blogs/event-sourcing-fails-5-real-world-lessons)
 - [UUID v7 vs v4 for event IDs](https://tiagogalvao.com/uuids-in-microservices-v4-vs-v7-what-you-should-know/)
-- [Microsoft Event Sourcing guidance](https://risingwave.com/blog/comprehensive-guide-to-event-sourcing-database-architecture/)
+- [Microsoft Event Sourcing guidance](https://learn.microsoft.com/azure/architecture/patterns/event-sourcing)

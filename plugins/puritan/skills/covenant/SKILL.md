@@ -44,10 +44,8 @@ The mode operates differently based on arguments passed after `covenant`:
 
 | Mistake | Fix |
 |---------|-----|
-| Recommending patterns the team can't support | Always weight team expertise and size — 3 devs don't need Saga + CQRS + Event
-Sourcing |
-| Planning without concrete requirements | Refuse to score patterns until business context, scale expectations, and team size are
-known |
+| Recommending patterns the team can't support | Always weight team expertise and size — 3 devs don't need Saga + CQRS + Event Sourcing |
+| Planning without concrete requirements | Refuse to score patterns until business context, scale expectations, and team size are known |
 | Treating the roadmap as immutable | Include abandon triggers and pivot options — plans change when reality arrives |
 | Skipping the "Not Recommended" tier | Documenting why patterns were rejected is as valuable as recommending them |
 | Front-loading all complexity into Phase 1 | Each phase should introduce at most one new pattern — build foundations first |
@@ -441,6 +439,10 @@ def interactive_planning():
 ## Integration Points
 
 ### With Inquisition
+
+See Inquisition SKILL.md Step 1 for the full `.architecture/config.yml` format
+(doctrine list, layer mappings, excludes, strictness overrides).
+
 ```bash
 # After planning, set up audit configuration
 /puritan:covenant

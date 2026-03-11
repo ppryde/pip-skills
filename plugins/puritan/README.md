@@ -1,3 +1,4 @@
+![Puritan logo](puritan_hex_ico.png)
 # Puritan
 
 Architectural doctrine enforcement through composable lenses.

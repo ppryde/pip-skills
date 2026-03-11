@@ -35,7 +35,7 @@ The mode automatically selects scope based on arguments:
 ## When NOT to Use
 
 - User wants to write a new doctrine — use Scriptorium instead
-- Reviewing PR comments or feedback — use Tribunal (tribunal:reckoning)
+- Reviewing PR comments or feedback — use Tribunal (/tribunal:reckoning)
 - Exploring whether a pattern fits the project — use Covenant to evaluate fit
 - Codebase has no doctrine files configured — nothing to audit against
 
@@ -47,8 +47,7 @@ The mode automatically selects scope based on arguments:
 | Treating all violations as errors | Respect strictness levels — `aspirational` doctrines produce warnings, not errors |
 | Auditing generated or vendored code | Exclude `**/migrations/**`, `vendor/`, `*.generated.*` in config |
 | Ignoring the decisions.yml overrides | Team-approved exceptions are not heresies — check for overrides before reporting |
-| Running without doctrines present | Verify doctrine files exist before dispatching subagents — warn and continue with what's
-available |
+| Running without doctrines present | Verify doctrine files exist before dispatching subagents — warn and continue with what's available |
 | Reporting violations without the actual code found | Always include the concrete line/import/pattern that triggered the violation |
 
 ## Workflow
