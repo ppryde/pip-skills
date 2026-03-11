@@ -1,5 +1,5 @@
 ---
-name: pr-review-test3
+name: reckoning
 description: Use when the user mentions PR comments, PR reviews, bot feedback, review threads, or anything related to GitHub pull request review workflow. Must use for "check my PR", "triage PR feedback", "what did the bot say", "PR progress report", "show all review rounds", "resolve threads", "action PR comments", "full PR history", "what's been fixed so far", "PR progress summary". Use even if the user just says "PR review" or asks about bot review status.
 ---
 
@@ -96,7 +96,7 @@ When re-invoked after a prior round (user says "run again", "check for new comme
 Before fetching comments, check if any bot reviews are still running on the PR's head commit:
 
 ```bash
-gh api repos/{owner}/{repo}/commits/{head_sha}/check-runs --paginate
+gh api repos/{owner}/{repo}/commits/{head_sha}/check-runs -q '.check_runs[]' --paginate
 ```
 
 Get the head SHA with:
@@ -206,8 +206,8 @@ For each comment, classify across two dimensions:
 Classify the following as `agent` sources automatically:
 
 - `github-actions`, `dependabot`, `renovate`, `codecov`, `sonarcloud`, `coderabbitai`
-- `codeclimate`, `snyk-bot`, `lgtm-com`, `imgbot`, `greenkeeper`, `copilot`
-- Any username ending in `[bot]`, `-bot`, or `_bot` (requires a separator before `bot` to avoid misclassifying human usernames like `abbot`)
+- `codeclimate`, `snyk-bot`, `lgtm-com`, `imgbot`, `greenkeeper`, `copilot`, `cubic`, `augment`
+- Any username ending in `[bot]`, `-bot`, or `_bot` (requires a separator before `bot` to avoid misclassifying human usernames like `abbot`), or containing `cubic` or `augment` as a substring (case-insensitive)
 
 ### Type
 

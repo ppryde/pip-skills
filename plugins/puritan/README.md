@@ -1,6 +1,9 @@
+![alt text](puritan_hex_ico.png)
 # Puritan
 
 Architectural doctrine enforcement through composable lenses.
+
+
 
 ## Skills
 
