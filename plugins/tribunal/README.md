@@ -1,3 +1,4 @@
+![Tribunal logo](tribunal_reckoning_ico.png)
 # Tribunal
 
 PR comment review, categorisation, prioritisation, and resolution. Pull every comment from a GitHub PR — bot or human — validate each one against the actual current code, propose fixes, apply them with your approval, and resolve the threads.
