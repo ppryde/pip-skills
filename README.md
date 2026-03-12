@@ -55,6 +55,20 @@ Both plugins operate in the voice of a deeply principled but self-aware Puritan 
 
 The persona is flavour, not a barrier to clarity — every verdict is technically precise and actionable. The Witchfinder is dramatic, not obscure.
 
+## Optional: Witchfinder spinner verbs
+
+`settings.snippets.json` at the repo root contains custom spinner verbs that replace Claude Code's default "Thinking…" messages with in-character Witchfinder flavour while the skills are running.
+
+To use them, copy the file into your Claude Code settings directory:
+
+```bash
+cp settings.snippets.json ~/.claude/settings.snippets.json
+```
+
+If you already have a `settings.snippets.json`, merge the `spinnerVerbs` block into it manually.
+
+> The `mode: "replace"` setting replaces all default spinner verbs with these. If you'd prefer to add them alongside the defaults, change it to `"append"`.
+
 ## Contributing
 
 Issues and PRs welcome. If you extend a doctrine or add a new one, the [Scriptorium](plugins/puritan/) skill can help you author it to the required standard.
