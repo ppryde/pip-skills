@@ -170,7 +170,6 @@ Strong indicators (any 2+ suggest the Saga pattern is in use):
 - `orchestrators/` — saga orchestrator classes
 - `compensations/` or `domain/compensations/` — compensation / rollback logic
 - `infrastructure/workflow/` — workflow engine integration (Temporal, Camunda, Conductor)
-- `domain/commands/` paired with `domain/events/` — saga step commands and event triggers
 
 ### File signals
 Strong indicators (any 1 is significant):

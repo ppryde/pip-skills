@@ -64,10 +64,10 @@ Read detection signatures from each available doctrine — do not use a hardcode
 
 This approach means new doctrines automatically participate in discovery with no changes to this skill.
 
-Also check for key signal files (existence only, no reading):
+Also check for key signal files (existence and location only — no file reading):
 - `pyproject.toml`, `pom.xml`, `package.json`, `go.mod` → infer language
-- `docker-compose.yml` with multiple services → Microservices signal
-- `Dockerfile` at root vs per-service → Monolith vs Microservices signal
+- `docker-compose.yml` present at root → containerisation / possible Microservices signal
+- Single `Dockerfile` at repo root → monolith-leaning; multiple `Dockerfile`s in service subdirectories → Microservices-leaning
 
 ### Step D3: Present Findings for Confirmation
 

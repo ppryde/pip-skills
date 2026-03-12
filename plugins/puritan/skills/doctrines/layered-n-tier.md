@@ -117,7 +117,39 @@ Primary targets (mapped via `.architecture/config.yml`):
 |---|---|---|---|---|
 | LNT-036 | race-condition | Business services should be stateless to ensure thread safety | error | Non-final instance variables in `business/` services that are modified after init |
 | LNT-037 | missing-optimistic-lock | Updates must handle concurrent modifications | warning | `persistence/` update methods that do not use a version column or timestamp |
-| LNT-038 | async-leak | Background tasks must not outlive the request scope in presentation | warning | `async` or `Thread
+| LNT-038 | async-leak | Background tasks must not outlive the request scope in presentation | warning | `async` task creation or `Thread` / `ExecutorService` usage in `presentation/` that stores references in objects with a lifecycle longer than the current request |
+
+## Allowed Exceptions
+
+- **Migration scripts:** Data migration scripts in `database/` may contain business logic for one-time transformation — these are not subject to layer rules.
+- **Thin proxy services:** Services acting as pure pass-through adapters (e.g., a BFF gateway forwarding requests) may legitimately skip the business layer.
+- **Test helpers:** Test fixtures and factories may cross layer boundaries for setup purposes.
+- **Framework-required annotations:** Some frameworks (e.g., Spring, Django) require infrastructure annotations on business classes — use sparingly and document the reason.
+- **Legacy migration path:** During incremental refactoring, temporary layer violations are acceptable if tracked and scheduled for resolution.
+
+## Cross-Reference
+
+This doctrine pairs well with:
+- **ddd.md** — when domain complexity grows beyond simple CRUD and business logic needs richer modelling
+- **hexagonal.md** — when multiple delivery mechanisms (HTTP, CLI, queues) need to share the same business logic
+- **microservices.md** — when scalability or independent deployment requires breaking the monolith
+- **cqrs.md** — when read and write workloads diverge significantly and need separate optimisation paths
+- **resilience.md** — cross-cutting concerns like retries and circuit breakers apply at the boundary between presentation and business layers
+
+## Sources and Authority
+
+**Foundational Works:**
+- [Martin Fowler — Patterns of Enterprise Application Architecture (2002)](https://martinfowler.com/books/eaa.html) — canonical definition of layered architecture and the Sinkhole Anti-pattern
+- [Microsoft — N-tier architecture style](https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/n-tier) — modern guidance on N-tier in cloud contexts
+
+**Practitioner Guidance:**
+- [Microsoft — Layered Application Guidelines](https://learn.microsoft.com/en-us/dotnet/architecture/modern-web-apps-azure/common-web-application-architectures) — practical layer boundary rules for web applications
+- [Robert C. Martin — Clean Architecture (2017)](https://www.oreilly.com/library/view/clean-architecture-a/9780134494272/) — dependency rule and layer isolation principles
+
+**Anti-Patterns / Failure Cases:**
+- [Fowler — Sinkhole Anti-pattern](https://martinfowler.com/articles/presentation-domain-data.html) — layers that only delegate without adding value
+- [Smart UI Anti-pattern](https://www.domainlanguage.com/ddd/reference/) — business logic creeping into the presentation layer
+
 ## Detection Signatures
 
 Quick-scan heuristics for Covenant discover mode. These are recognition
