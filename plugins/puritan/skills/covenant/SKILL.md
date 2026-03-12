@@ -52,20 +52,17 @@ This is intentionally shallow — discovery mode does not read file contents.
 
 ### Step D2: Detect Pattern Signals
 
-Map directory names to likely patterns using these heuristics:
+Read detection signatures from each available doctrine — do not use a hardcoded list:
 
-| Directory found | Likely pattern |
-|---|---|
-| `domain/`, `domain/aggregates/`, `domain/events/` | DDD |
-| `domain/commands/`, `commands/`, `queries/` | CQRS |
-| `infrastructure/event_store/`, `events/store/` | Event Sourcing |
-| `sagas/`, `orchestrators/`, `compensations/` | Saga |
-| `services/*/`, multiple top-level service dirs | Microservices |
-| `modules/*/api/`, `modules/*/internal/` | Modular Monolith |
-| `bff/`, `bff/web/`, `bff/mobile/` | Backend for Frontend |
-| `ports/`, `adapters/`, `infrastructure/adapters/` | Hexagonal |
-| `clients/resilience/`, `infrastructure/resilience/` | Resilience |
-| `infrastructure/messaging/`, `events/bus/` | Messaging |
+1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+2. For each doctrine file, read **only** its `## Detection Signatures` section
+3. Score each doctrine against the directory scan from Step D1:
+   - **Strong match** — 1+ file signal OR 3+ directory signals found
+   - **Possible match** — 2 directory signals found, no file signals
+   - **Weak / no match** — 0–1 directory signals and no file signals
+4. Also check anti-signals: if any anti-signals are present, downgrade the match one level
+
+This approach means new doctrines automatically participate in discovery with no changes to this skill.
 
 Also check for key signal files (existence only, no reading):
 - `pyproject.toml`, `pom.xml`, `package.json`, `go.mod` → infer language

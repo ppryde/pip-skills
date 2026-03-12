@@ -178,6 +178,7 @@ Checklist before finishing — count explicitly, do not estimate:
 - [ ] Sources cited (minimum: 1 primary, 2 practitioners, 1 failure case)
 - [ ] Exceptions documented with specific justification
 - [ ] Cross-references use **bold** with `.md` suffix
+- [ ] `## Detection Signatures` section present with directory signals, file signals, and anti-signals
 - [ ] Directory paths use relative format without `src/` prefix
 
 ## Violation ID Convention
@@ -245,6 +246,12 @@ Every doctrine MUST contain these sections in order:
 ## Sources and Authority
   → Minimum: 1 primary source, 2 practitioners, 1 failure case
   → Inline citations in violation tables for sourced thresholds
+
+## Detection Signatures
+  → Directory signals: 3–6 directory paths that indicate this pattern is in use
+  → File signals: 2–4 file naming patterns that are strong indicators
+  → Anti-signals: 2–3 structural absences or alternative structures that rule this pattern out
+  → Recognition signals only — not violations
 ```
 
 ### Violation Table Contract

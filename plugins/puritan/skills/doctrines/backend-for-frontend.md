@@ -153,3 +153,28 @@ This doctrine pairs well with:
 **Anti-Patterns / Failure Cases:**
 - [The General-Purpose API](https://samnewman.io/patterns/architectural/bff/)
 - [The Logic-Heavy BFF (ThoughtWorks Radar)](https://www.thoughtworks.com/radar/techniques/logic-heavy-bff)
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest the BFF pattern is in use):
+- `bff/` — dedicated BFF root directory
+- `bff/web/`, `bff/mobile/`, `bff/tv/` — client-specific BFF instances
+- `bff/*/api/` — client-specific endpoint definitions
+- `bff/*/mappers/` — response aggregation and client-specific transformation logic
+- `bff/*/clients/` — downstream service proxies scoped to a client type
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*BffController.*`, `*BffService.*`, or `*BffRouter.*`
+- Aggregation files that combine multiple upstream service responses for a single client type
+- Client-specific DTO or response model files (e.g. `*MobileResponse.*`, `*WebResponse.*`, `*TvPayload.*`)
+
+### Anti-signals
+Suggest the BFF pattern is NOT in use:
+- Single API layer serving all client types from the same endpoints with no client differentiation
+- No client-specific response shaping, aggregation, or transformation layer
+- No `bff/` directory or client-differentiated backend structure

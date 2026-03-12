@@ -169,3 +169,32 @@ Based on authoritative messaging sources:
 **Delivery Guarantees:**
 - [Guaranteed Delivery Pattern](https://www.enterpriseintegrationpatterns.com/patterns/messaging/GuaranteedMessaging.html) — Enterprise Integration Patterns
 - [Message Delivery Guarantees](https://yurimelo.substack.com/p/message-delivery-guarantees-in-distributed) — Distributed systems perspective
+
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest async Messaging is in use):
+- `infrastructure/messaging/` — message broker integration and configuration
+- `workers/` or `consumers/` — background message consumer processes
+- `publishers/` or `producers/` — message publishing logic
+- `queues/` or `topics/` — queue and topic definitions
+- `domain/events/` — event contract definitions shared via the message bus
+- `api/webhooks/` — async inbound webhook handlers
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*Consumer.*` or `*Subscriber.*`
+- Files named `*Publisher.*` or `*Producer.*`
+- Files named `*MessageHandler.*` or `*EventHandler.*`
+- Broker configuration files: `celery.py`, `kafka_config.*`, `rabbitmq.*`, `sqs_config.*`, `nats_config.*`
+- Files named `*MessageBus.*` or `*EventBus.*`
+
+### Anti-signals
+Suggest async Messaging is NOT in use:
+- No message broker configuration files anywhere in the project
+- All inter-service or inter-component communication via synchronous HTTP only
+- No consumer, worker, subscriber, or publisher directories

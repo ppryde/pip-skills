@@ -151,3 +151,30 @@ Primary targets (mapped via `.architecture/config.yml`):
 **Anti-Patterns / Failure Cases:**
 - [The Distributed Monolith](https://www.geepawhill.org/2019/06/17/microservices-the-distributed-monolith/)
 - [Segment - Goodbye Microservices (2018)](https://segment.com/blog/goodbye-microservices/)
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest a Microservices architecture is in use):
+- `services/` containing multiple distinct named subdirectories (e.g. `services/orders/`, `services/payments/`)
+- Multiple top-level service directories each containing their own `Dockerfile`
+- `contracts/` or `api-specs/` — shared API definitions between services
+- `shared-libraries/` or `libs/` — cross-service shared utilities under strict governance
+- `infrastructure/` at the monorepo root — shared provisioning, service mesh config, CI templates
+
+### File signals
+Strong indicators (any 1 is significant):
+- `docker-compose.yml` at the root defining 3 or more independently named services
+- Per-service `Dockerfile` inside multiple directories at the same level
+- OpenAPI or Proto contract files (`*.proto`, `*.openapi.yml`, `*.swagger.json`) in a shared `contracts/` directory
+- Service mesh config files: `istio.yml`, `envoy.yaml`, `linkerd-config.yml`
+
+### Anti-signals
+Suggest Microservices are NOT in use:
+- Single `Dockerfile` at the project root serving the entire application
+- All business logic in a single `src/` or `app/` directory
+- No inter-service contract definitions or shared API specs
+- No independent deployment manifests per service

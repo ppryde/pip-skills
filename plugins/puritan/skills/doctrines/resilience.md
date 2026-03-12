@@ -157,3 +157,29 @@ Primary targets (mapped via `.architecture/config.yml`):
 **Anti-Patterns / Failure Cases:**
 - [The Retry Storm (Wikipedia)](https://en.wikipedia.org/wiki/Retry_storm)
 - [AWS S3 Outage Case Study](https://aws.amazon.com/message/41922/)
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest Resilience patterns are in use):
+- `infrastructure/resilience/` — global resilience policy configuration
+- `clients/resilience/` or `gateways/resilience/` — per-client resilience wrapping
+- `gateways/` — external call gateways that typically include resilience policies
+- `bff/*/clients/` — BFF downstream proxies (often incorporate resilience)
+- `services/*/integration/` — microservice integration points with external dependencies
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*CircuitBreaker.*`, `*RetryPolicy.*`, or `*Bulkhead.*`
+- Files named `*Timeout.*` or `*RateLimiter.*` in infrastructure or client directories
+- Resilience library configuration: `resilience4j.yml`, `polly_config.*`, `pybreaker_config.*`, `hystrix.yml`
+- Files named `*FallbackHandler.*` or `*FallbackStrategy.*`
+
+### Anti-signals
+Suggest Resilience patterns are NOT in use:
+- Direct HTTP or network calls with no retry, circuit breaker, or timeout wrapping
+- No resilience policy, configuration, or strategy files anywhere in the project
+- Error handling limited to basic try/catch with no structured retry or fallback logic

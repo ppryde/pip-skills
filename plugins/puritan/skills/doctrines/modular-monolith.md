@@ -158,3 +158,28 @@ This doctrine pairs well with:
 **Anti-Patterns / Failure Cases:**
 - [The Big Ball of Mud](http://www.laputan.org/mud/)
 - [The Distributed Monolith](https://microservices.io/antipatterns/distributed-monolith.html)
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest a Modular Monolith is in use):
+- `modules/` — root directory containing functional module subdirectories
+- `modules/*/api/` — explicit public interface directory inside each module
+- `modules/*/internal/` — explicit private implementation directory inside each module
+- `platform/` or `shared/` — cross-cutting infrastructure and shared utilities
+- `modules/*/db/` — per-module database migrations
+
+### File signals
+Strong indicators (any 1 is significant):
+- Module-level dependency manifests (`package.json`, `pyproject.toml`, `build.gradle`) inside `modules/*/`
+- Explicit module registration files (`module.json`, `module.config.ts`, `__init__.py` exporting a public API only)
+- `index.*` or `public_api.*` files at each module root defining the module's public surface
+
+### Anti-signals
+Suggest a Modular Monolith is NOT in use:
+- No `modules/` directory — business logic in a flat `src/` with no enforced boundaries
+- Multiple independent `Dockerfile` files per service directory (leans Microservices instead)
+- No distinction between public API and private internals within business areas

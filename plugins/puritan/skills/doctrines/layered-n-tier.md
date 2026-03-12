@@ -118,3 +118,29 @@ Primary targets (mapped via `.architecture/config.yml`):
 | LNT-036 | race-condition | Business services should be stateless to ensure thread safety | error | Non-final instance variables in `business/` services that are modified after init |
 | LNT-037 | missing-optimistic-lock | Updates must handle concurrent modifications | warning | `persistence/` update methods that do not use a version column or timestamp |
 | LNT-038 | async-leak | Background tasks must not outlive the request scope in presentation | warning | `async` or `Thread
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest Layered N-Tier is in use):
+- `presentation/` — UI components, controllers, view models, and API endpoints
+- `business/` or `service/` or `services/` — business logic and domain rules layer
+- `persistence/` or `dal/` or `data/` — data access objects and repository implementations
+- `database/` — migrations, schemas, and stored procedures
+- `common/` or `shared/` — cross-cutting utilities shared across layers
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*DAO.*` or `*DataAccessObject.*` in a persistence directory
+- Files named `*Controller.*` in `presentation/` alongside `*Service.*` in `business/`
+- ORM mapping files (`*Mapping.*`, `*OrmEntity.*`) in a `persistence/` layer
+- Files named `*Repository.*` as concrete classes (not interfaces) in `persistence/`
+
+### Anti-signals
+Suggest Layered N-Tier is NOT in use:
+- Domain-driven directory structure with `domain/`, `application/`, `infrastructure/` (leans DDD instead)
+- Multiple independent `Dockerfile` files per service (leans Microservices instead)
+- No distinct presentation, business, or persistence directories
