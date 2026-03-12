@@ -159,11 +159,9 @@ the codebase without running a full audit.
 
 ### Directory signals
 Strong indicators (any 2+ suggest a Microservices architecture is in use):
-- `services/` containing multiple distinct named subdirectories (e.g. `services/orders/`, `services/payments/`)
-- Multiple top-level service directories each containing their own `Dockerfile`
-- `contracts/` or `api-specs/` — shared API definitions between services
+- `services/` containing 3+ distinct named subdirectories each with their own `Dockerfile` (e.g. `services/orders/`, `services/payments/`, `services/shipping/`) — `services/` alone is not sufficient; Layered N-Tier and Modular Monolith apps also use it
+- `contracts/` or `api-specs/` — shared API definitions between independently deployed services
 - `shared-libraries/` or `libs/` — cross-service shared utilities under strict governance
-- `infrastructure/` at the monorepo root — shared provisioning, service mesh config, CI templates
 
 ### File signals
 Strong indicators (any 1 is significant):

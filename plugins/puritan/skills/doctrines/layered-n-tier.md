@@ -125,22 +125,27 @@ signals only — not violations. Covenant reads this section to fingerprint
 the codebase without running a full audit.
 
 ### Directory signals
-Strong indicators (any 2+ suggest Layered N-Tier is in use):
+Strong indicators (3+ together are a confident match — individual dirs are too common):
 - `presentation/` — UI components, controllers, view models, and API endpoints
-- `business/` or `service/` or `services/` — business logic and domain rules layer
-- `persistence/` or `dal/` or `data/` — data access objects and repository implementations
-- `database/` — migrations, schemas, and stored procedures
-- `common/` or `shared/` — cross-cutting utilities shared across layers
+- `business/` — business logic and domain rules layer (more specific than `services/`)
+- `persistence/` or `dal/` — data access objects and repository implementations
+- `database/` — migrations, schemas, and stored procedures (schema-focused, not event-store)
+- `common/` — cross-cutting utilities shared across layers
+
+Note: `services/` alone is NOT a reliable signal — it appears in Microservices (as independent service directories) and is too generic. Require `business/` or `persistence/` alongside it.
 
 ### File signals
-Strong indicators (any 1 is significant):
+Strong indicators (any 1 alongside 2+ directory signals is significant):
 - Files named `*DAO.*` or `*DataAccessObject.*` in a persistence directory
 - Files named `*Controller.*` in `presentation/` alongside `*Service.*` in `business/`
 - ORM mapping files (`*Mapping.*`, `*OrmEntity.*`) in a `persistence/` layer
-- Files named `*Repository.*` as concrete classes (not interfaces) in `persistence/`
+- Files named `*Repository.*` as concrete implementation classes (not interfaces) in `persistence/`
 
 ### Anti-signals
 Suggest Layered N-Tier is NOT in use:
-- Domain-driven directory structure with `domain/`, `application/`, `infrastructure/` (leans DDD instead)
-- Multiple independent `Dockerfile` files per service (leans Microservices instead)
-- No distinct presentation, business, or persistence directories
+- `domain/aggregates/` or `domain/value-objects/` present → leans DDD, not Layered
+- `infrastructure/adapters/` or `ports/` present → leans Hexagonal, not Layered
+- `infrastructure/event_store/` present → leans Event Sourcing, not Layered
+- `modules/*/api/` or `modules/*/internal/` present → leans Modular Monolith, not Layered
+- Multiple independent `Dockerfile` files in separate service directories → leans Microservices, not Layered
+- No distinct presentation, business/service, and persistence directories all present together

@@ -182,7 +182,6 @@ Strong indicators (any 2+ suggest async Messaging is in use):
 - `workers/` or `consumers/` — background message consumer processes
 - `publishers/` or `producers/` — message publishing logic
 - `queues/` or `topics/` — queue and topic definitions
-- `domain/events/` — event contract definitions shared via the message bus
 - `api/webhooks/` — async inbound webhook handlers
 
 ### File signals

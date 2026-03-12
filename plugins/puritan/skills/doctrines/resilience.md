@@ -167,8 +167,6 @@ the codebase without running a full audit.
 Strong indicators (any 2+ suggest Resilience patterns are in use):
 - `infrastructure/resilience/` — global resilience policy configuration
 - `clients/resilience/` or `gateways/resilience/` — per-client resilience wrapping
-- `gateways/` — external call gateways that typically include resilience policies
-- `bff/*/clients/` — BFF downstream proxies (often incorporate resilience)
 - `services/*/integration/` — microservice integration points with external dependencies
 
 ### File signals
