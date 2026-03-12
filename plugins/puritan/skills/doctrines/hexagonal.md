@@ -123,3 +123,31 @@ This doctrine pairs well with:
 
 **Anti-Patterns / Failure Cases:**
 - [Juan Manuel Garrido - Hexagonal Architecture: Common Mistakes](https://jmgarridopaz.github.io/static/articles/hexagonal-architecture/mistakes.html) — Case study on common implementation errors like "Adapters calling Adapters."
+
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest Hexagonal Architecture is in use):
+- `ports/` — port interface definitions (the boundary contracts)
+- `adapters/` or `infrastructure/adapters/` — adapter implementations
+- `domain/` — pure business logic isolated from infrastructure concerns
+- `application/` — use case orchestration and driving port definitions
+- `infrastructure/` alongside `domain/` with no direct coupling between them
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*Port.*` defining interface contracts
+- Files named `*Adapter.*` implementing those contracts
+- Interface files in `ports/` with corresponding implementations in `adapters/` or `infrastructure/`
+- Files named `*DrivingPort.*`, `*DrivenPort.*`, `*PrimaryPort.*`, or `*SecondaryPort.*`
+
+### Anti-signals
+Suggest Hexagonal Architecture is NOT in use:
+- No `ports/` or `adapters/` directories anywhere in the codebase
+- Infrastructure imports found directly inside `domain/` layer files
+- No clear boundary between the application core and external systems
+- Framework annotations (HTTP, ORM) mixed directly into domain classes

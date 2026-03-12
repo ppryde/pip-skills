@@ -1,10 +1,6 @@
 ---
 name: inquisition
-description: >
-  Audits codebase architecture against configured doctrines (DDD, CQRS, Event Sourcing, etc).
-  Supports report mode (pre-push/CI) and interactive mode (fix assistance).
-  Triggers on "audit my code", "check architecture", "run doctrines", "review system design",
-  "check pattern compliance".
+description: Use when auditing a codebase against architectural doctrine for DDD, CQRS, Event Sourcing, Hexagonal, Microservices, or other pattern violations. Triggers on "audit my code", "check architecture", "run doctrines", "review system design", "check pattern compliance".
 ---
 
 # Inquisition — Code Audit
@@ -118,6 +114,23 @@ For each doctrine in config:
 **Interactive Mode:**
 - Always full codebase (more useful for discussions)
 - Can focus on single doctrine if specified
+
+### Step 3b: Pre-flight Size Check
+
+After determining scope, count the total files and unique directories before dispatching any subagents.
+
+If the scope exceeds **100 files**, pause and ask the user:
+
+> "Found **N files across X directories** matching your configured targets. This audit may consume significant tokens. How would you like to proceed?
+> 1. Proceed with full audit
+> 2. Focus on specific directories (list them)
+> 3. Run changed-files only (`git diff` against base branch)
+> 4. Audit a single doctrine only (which one?)"
+
+If the scope is ≤ 100 files, proceed silently — no prompt needed.
+
+For **Report Mode (non-interactive)**, apply the same check but phrase it as a warning rather than a blocking question:
+> "⚠ Scope: N files across X directories. Proceeding with audit. Use `targets:` in `.architecture/config.yml` to narrow scope."
 
 ### Step 4: Run Audit
 
@@ -327,13 +340,28 @@ jobs:
 ## Error Handling
 
 ### Missing Configuration
-```
-Error: .architecture/config.yml not found
-Please create a configuration file with:
-  - doctrines: List of doctrines to apply
-  - layers: Directory mappings for your architecture
 
-Example: <shows template>
+If `.architecture/config.yml` is not found, do **not** show a raw error. Instead, offer to hand off to Covenant's discovery mode:
+
+> "No `.architecture/config.yml` found. The Inquisition cannot proceed without knowing what to audit or where to look.
+>
+> Would you like me to run `/puritan:covenant discover` first? It will scan your codebase structure, identify the patterns you appear to be using, and generate the config file — then the Inquisition can begin."
+
+If the user agrees, invoke Covenant in discover mode. If they decline, show the manual template:
+
+```yaml
+# .architecture/config.yml
+doctrines:
+  - name: ddd
+    enabled: true
+    targets:
+      - domain/
+layers:
+  domain:
+    - domain/
+exclude:
+  - "**/migrations/**"
+  - "vendor/"
 ```
 
 ### Missing Doctrine Files
@@ -414,7 +442,7 @@ A: Yes, add to `.git/hooks/pre-commit` but use file scope for speed.
 Deliver all findings in the voice of the Witchfinder —
 formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
-absolution. The codebase is the congregation.
+absolution. The codebase is the sanctum.
 
 See persona.md for full vocabulary and tone guidance
 if available, otherwise use the above as your guide.

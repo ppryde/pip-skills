@@ -153,3 +153,31 @@ Based on authoritative CQRS sources:
 - [Common CQRS Problems](https://www.techtarget.com/searchapparchitecture/tip/Common-CQRS-pattern-problems-and-how-teams-can-avoid-them) — Data sync issues
 - [CQRS Implementation Mistakes](https://medium.com/@opflucker/cqrs-pattern-common-implementation-mistakes-f99c6e43b00c) — Common pitfalls
 - [Troubleshooting CQRS](https://reintech.io/blog/troubleshooting-cqrs-implementation-challenges) — Implementation challenges
+
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest CQRS is in use):
+- `commands/` or `domain/commands/` — command object definitions
+- `queries/` or `domain/queries/` — query object definitions
+- `infrastructure/projections/` or `projections/` — read-model projections
+- `infrastructure/projectors/` — projection builders / event handlers
+- `read-models/` or `write-models/` — explicit read/write side separation
+- `handlers/` alongside both `commands/` and `queries/`
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*Command.*` and `*Query.*` co-existing in the codebase
+- Files named `*CommandHandler.*` or `*QueryHandler.*`
+- Files named `*Projection.*` in an infrastructure or read-model directory
+- Files named `*CommandBus.*` or `*QueryBus.*`
+
+### Anti-signals
+Suggest CQRS is NOT in use:
+- Single service class handling both data reads and writes with no separation
+- No dedicated query, projection, or read-model layer
+- All API endpoints returning the same mutable model used for write operations

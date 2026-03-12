@@ -200,3 +200,33 @@ This doctrine is based on authoritative DDD sources:
 - [Nick Tune - Domain-Driven Architecture](https://github.com/ddd-crew) — DDD Crew patterns
 - [Kamil Grzybek - DDD Starter Kit](https://github.com/kgrzybek/modular-monolith-with-ddd) — Modern C#/.NET patterns
 - [DDD Community](https://www.dddcommunity.org/) — Current best practices
+
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest DDD is in use):
+- `domain/` — core business logic layer isolated from infrastructure
+- `domain/aggregates/` — aggregate root definitions
+- `domain/entities/` — domain entity classes
+- `domain/value-objects/` or `domain/valueobjects/` — immutable value types
+- `domain/events/` — domain event definitions
+- `domain/services/` — domain service classes
+- `application/` — use case / application service orchestration layer
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*Aggregate.*` anywhere in the domain layer
+- Files named `*Repository.*` in domain (interface definitions, not implementations)
+- Files named `*ValueObject.*` or `*VO.*`
+- Files named `*DomainService.*` or `*DomainEvent.*`
+- Files named `*AggregateRoot.*`
+
+### Anti-signals
+Suggest DDD is NOT in use:
+- No separation between domain and infrastructure code
+- Controllers or HTTP handlers directly inside `domain/` directories
+- Single flat `src/` with no layered structure

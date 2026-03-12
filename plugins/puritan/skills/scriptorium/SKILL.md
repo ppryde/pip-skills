@@ -1,9 +1,6 @@
 ---
 name: scriptorium
-description: >
-  Creates new architecture doctrines from research and best practices.
-  Use when creating a new doctrine, updating an existing doctrine, or
-  converting informal architecture rules into an auditable doctrine.
+description: Use when creating a new architecture doctrine, updating an existing one, or converting informal architecture rules into an auditable format. Triggers on "write a new doctrine", "create a rule set", "add a doctrine", or "update the X doctrine".
 disable-model-invocation: true
 ---
 
@@ -156,7 +153,59 @@ Use inline citations when:
 - The rule is controversial or has competing opinions
 - The source provides critical context
 
-## Step 8: Document Exceptions
+## Step 8b: Write Detection Signatures
+
+Every doctrine must include a `## Detection Signatures` section for Covenant discover mode. This section enables lightweight pattern fingerprinting without a full audit.
+
+**Structure (always three subsections in this order):**
+
+```markdown
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest [Pattern] is in use):
+- `specific/sub/path/` — what its presence implies
+- `another/path/` — what its presence implies
+[3–6 entries]
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*PatternSpecific.*` in [layer] directories
+- Configuration files: `pattern-config.yml`
+[2–4 entries]
+
+### Anti-signals
+Suggest [Pattern] is NOT in use:
+- [Structural absence or alternative structure that rules this out]
+- [Reference to adjacent pattern it might be confused with]
+[2–4 entries]
+```
+
+**Rules for writing good signals:**
+
+| Rule | Why |
+|------|-----|
+| Use specific sub-paths (`infrastructure/event_store/`), not bare parent dirs (`infrastructure/`) | Parent dirs appear in many patterns — sub-paths are discriminating |
+| Directory signals require 2+ to confirm; file signals require only 1 | File names are more specific; directories are cheaper to create |
+| Anti-signals must name the pattern they point toward (`leans DDD`, `leans Microservices`) | Helps Covenant present a scored comparison rather than a binary yes/no |
+| Generic dirs (`services/`, `domain/`, `shared/`) must be qualified with required context | `services/` alone fires on Layered, Microservices, and Modular Monolith |
+| If your pattern co-exists legitimately with another (e.g. DDD + CQRS), do NOT add the other as an anti-signal | Expected co-existence is fine; anti-signals are for genuine exclusions only |
+
+**Crossover awareness — avoid these known collisions:**
+
+| Signal | Also fires on | Resolution |
+|--------|--------------|------------|
+| `domain/events/` | DDD, ES, CQRS, Saga | Only use as a signal in DDD and ES; exclude from Messaging/Saga |
+| `services/` directory | Layered, Microservices, Modular Monolith | Qualify with 3+ subdirs + per-service Dockerfiles for Microservices; require `modules/` for Modular Monolith |
+| `infrastructure/` bare | Hexagonal, ES, CQRS, Messaging, Resilience | Always use specific sub-path |
+| `shared/` or `common/` | Layered N-Tier, Modular Monolith | Require `modules/` context for Modular Monolith; require `persistence/` context for Layered |
+| `*Handler.*` files | CQRS, Messaging, Saga | Qualify with directory context |
+
+## Step 8c: Document Exceptions
 
 Real patterns have edge cases. Document them to prevent false positives:
 
@@ -181,6 +230,7 @@ Checklist before finishing — count explicitly, do not estimate:
 - [ ] Sources cited (minimum: 1 primary, 2 practitioners, 1 failure case)
 - [ ] Exceptions documented with specific justification
 - [ ] Cross-references use **bold** with `.md` suffix
+- [ ] `## Detection Signatures` section present with directory signals, file signals, and anti-signals
 - [ ] Directory paths use relative format without `src/` prefix
 
 ## Violation ID Convention
@@ -248,6 +298,12 @@ Every doctrine MUST contain these sections in order:
 ## Sources and Authority
   → Minimum: 1 primary source, 2 practitioners, 1 failure case
   → Inline citations in violation tables for sourced thresholds
+
+## Detection Signatures
+  → Directory signals: 3–6 directory paths that indicate this pattern is in use
+  → File signals: 2–4 file naming patterns that are strong indicators
+  → Anti-signals: 2–3 structural absences or alternative structures that rule this pattern out
+  → Recognition signals only — not violations
 ```
 
 ### Violation Table Contract
@@ -284,7 +340,7 @@ Ready for immediate use by Inquisition and Covenant.
 Deliver all findings in the voice of the Witchfinder —
 formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
-absolution. The codebase is the congregation.
+absolution. The codebase is the sanctum.
 
 See persona.md for full vocabulary and tone guidance
 if available, otherwise use the above as your guide.

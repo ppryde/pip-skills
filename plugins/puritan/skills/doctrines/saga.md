@@ -158,3 +158,30 @@ Based on authoritative saga pattern sources:
 - [Implementing Saga in .NET](https://medium.com/@serhatalftkn/implementing-the-saga-pattern-in-net-microservices-a-comprehensive-guide-9b2b1d1366b6) — .NET specifics
 - [Managing Distributed Transactions](https://dev.to/willvelida/the-saga-pattern-3o7p) — DEV Community guide
 - [Solving Distributed Transactions with Temporal](https://medium.com/skyro-tech/solving-distributed-transactions-with-the-saga-pattern-and-temporal-27ccba602833) — Temporal approach
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest the Saga pattern is in use):
+- `sagas/` or `application/sagas/` — saga definitions
+- `orchestrators/` — saga orchestrator classes
+- `compensations/` or `domain/compensations/` — compensation / rollback logic
+- `infrastructure/workflow/` — workflow engine integration (Temporal, Camunda, Conductor)
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*Saga.*` anywhere in the codebase
+- Files named `*Orchestrator.*` containing multi-step coordination logic
+- Files named `*Compensation.*` or `*Rollback.*`
+- Workflow definition files (`.workflow.yml`, Temporal workflow descriptors, Camunda BPMN)
+- Files named `*SagaStep.*` or `*SagaState.*`
+
+### Anti-signals
+Suggest the Saga pattern is NOT in use:
+- No saga, orchestrator, or compensation directory
+- Distributed operations with no rollback or compensation mechanism
+- Simple synchronous service-to-service calls with no multi-step coordination
+- All transactions handled within a single database boundary

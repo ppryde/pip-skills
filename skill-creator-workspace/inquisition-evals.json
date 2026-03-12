@@ -1,0 +1,22 @@
+[
+  {"query": "audit src/domain against the DDD doctrine, there are probably violations everywhere", "should_trigger": true},
+  {"query": "run doctrines on the whole repo", "should_trigger": true},
+  {"query": "check pattern compliance for our event sourcing setup", "should_trigger": true},
+  {"query": "something feels off about our aggregate boundaries — can u review the system design?", "should_trigger": true},
+  {"query": "the hexagonal doctrine is configured, now check the codebase against it", "should_trigger": true},
+  {"query": "audit my code pls, specifically looking for domain leakage into infra", "should_trigger": true},
+  {"query": "chek architecture of src/billing — we think it's violating CQRS somewhere", "should_trigger": true},
+  {"query": "review system design for the new microservices split we did last sprint", "should_trigger": true},
+  {"query": "we just merged a big refactor, can you run the arch audit to make sure we didn't break compliance", "should_trigger": true},
+  {"query": "find all the places where our read models are being mutated", "should_trigger": true},
+  {"query": "what patterns should we adopt for our new reporting service?", "should_trigger": false},
+  {"query": "write a rule that says aggregates must not reference other aggregate roots directly", "should_trigger": false},
+  {"query": "generate .architecture/config.yml from the existing codebase", "should_trigger": false},
+  {"query": "PR #88 got a comment about layering violations — can you resolve it?", "should_trigger": false},
+  {"query": "update the CQRS doctrine to add a rule about projection naming", "should_trigger": false},
+  {"query": "explain what hexagonal architecture is", "should_trigger": false},
+  {"query": "what's the difference between an event and a command in our system?", "should_trigger": false},
+  {"query": "create a new doctrine for enforcing saga patterns", "should_trigger": false},
+  {"query": "help me refactor this service to be more domain-driven", "should_trigger": false},
+  {"query": "show me which files violate our naming conventions", "should_trigger": false}
+]

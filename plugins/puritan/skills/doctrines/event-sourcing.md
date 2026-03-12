@@ -169,3 +169,33 @@ Based on industry best practices from:
 - [Event Sourcing failures: Real-world lessons](https://kitemetric.com/blogs/event-sourcing-fails-5-real-world-lessons)
 - [UUID v7 vs v4 for event IDs](https://tiagogalvao.com/uuids-in-microservices-v4-vs-v7-what-you-should-know/)
 - [Microsoft Event Sourcing guidance](https://learn.microsoft.com/azure/architecture/patterns/event-sourcing)
+
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest Event Sourcing is in use):
+- `infrastructure/event_store/` or `event-store/` or `eventstore/` — append-only event log persistence
+- `domain/events/` — event schema and contract definitions
+- `domain/aggregates/` — event-emitting aggregate roots
+- `infrastructure/projectors/` or `projectors/` — state-rebuilding projection handlers
+- `scripts/rebuild/` or `scripts/migration/` — event replay and migration tooling
+- `snapshots/` or `infrastructure/snapshots/` — snapshot storage
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*EventStore.*` or `*EventRepository.*`
+- Files named `*Snapshot.*` alongside event files
+- Files named `*Projector.*` or `*ProjectionBuilder.*`
+- Files named `*EventStream.*` or `*EventLog.*`
+- Files named `*Replayer.*` or `*EventReplayer.*`
+
+### Anti-signals
+Suggest Event Sourcing is NOT in use:
+- Standard mutable ORM models with no event log or append-only store
+- No event store directory or event persistence layer
+- Repository classes that update records in place (no append-only pattern visible)
+- No projection or snapshot infrastructure

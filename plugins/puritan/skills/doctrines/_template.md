@@ -74,6 +74,27 @@ This doctrine pairs well with:
 - **[other-doctrine].md** — brief explanation of relationship
 - **[other-doctrine].md** — brief explanation of relationship
 
+## Detection Signatures
+
+Quick-scan heuristics for Covenant discover mode. These are recognition
+signals only — not violations. Covenant reads this section to fingerprint
+the codebase without running a full audit.
+
+### Directory signals
+Strong indicators (any 2+ suggest this pattern is in use):
+- `[directory/]` — what its presence implies
+- `[directory/]` — what its presence implies
+
+### File signals
+Strong indicators (any 1 is significant):
+- Files named `*[Pattern].*` in [layer] directories
+- Configuration files: `[config-file]`
+
+### Anti-signals
+Suggest this pattern is NOT in use:
+- [Structural absence that rules this pattern out]
+- [Alternative structure that indicates a different pattern]
+
 ## Sources and Authority
 
 **Foundational Works:**
