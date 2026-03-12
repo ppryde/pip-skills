@@ -2,9 +2,11 @@
 
 The Resilience doctrine enforces patterns that ensure a system remains functional (perhaps in a degraded state) despite the inevitable failure of its components, network, or downstream dependencies. It aims to prevent cascading failures that turn a minor service hiccup into a total system outage.
 
+**Language Scope:** Language-agnostic
+
 ## When to Use
 
-Resilience patterns must be applied to any system involving network boundaries, such as **microservices.md**, **bff.md**, or even a **layered-n-tier.md** monolith that communicates with external APIs. It is critical for systems with strict Availability SLAs and high-concurrency environments where failures can rapidly deplete shared resources.
+Resilience patterns must be applied to any system involving network boundaries, such as **microservices.md**, **backend-for-frontend.md**, or even a **layered-n-tier.md** monolith that communicates with external APIs. It is critical for systems with strict Availability SLAs and high-concurrency environments where failures can rapidly deplete shared resources.
 
 **Do NOT use this pattern** in purely local, single-process CLI tools or simple batch scripts where failing fast and exiting is the desired behavior.
 
@@ -35,7 +37,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 
 ## Violation Catalog
 
-### Timeout & Deadline Violations
+### Timeouts & Circuit Breakers Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -44,8 +46,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | RES-003 | excessive-timeout | Timeouts should not exceed the user's patience threshold | warning | Timeouts configured for > 5s on user-facing request paths |
 | RES-004 | missing-deadline | Propagate deadlines across service boundaries | warning | Lack of `context.WithDeadline` or `X-Request-Deadline` propagation |
 | RES-005 | static-timeout | Use dynamic timeouts based on remaining request budget | warning | Hardcoded `500ms` timeout when the total request budget is variable |
-
-### Circuit Breaker Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -95,7 +95,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 | RES-029 | startup-deadlock | Do not wait for all dependencies before starting the app | warning | Blocking the `main()` thread until a DB or Cache is available |
 | RES-030 | missing-backpressure | Propagate backpressure signals to the caller | error | Catching overload errors and returning generic `500` instead of `503 Service Unavailable` |
 
-### Observability & "Silent Failure" Violations
+### Observability & Stale-Data Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -105,15 +105,13 @@ Primary targets (mapped via `.architecture/config.yml`):
 | RES-034 | opaque-latency | Measure latency *with* and *without* resilience overhead | warning | Only measuring final response time, ignoring time spent in retries |
 | RES-035 | missing-fallback-alert | Frequent fallback triggering must trigger an alert | warning | Lack of an alert for `fallback_calls_total` exceeding a threshold |
 
-### Cache & Stale-Data Violations
-
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
 | RES-036 | cache-as-fallback-only | Do not use cache-as-fallback for sensitive real-time data | error | Returning cached "Balance" or "Stock Level" during a service outage |
 | RES-037 | missing-ttl-on-fallback | Fallback data must have a strict Time-To-Live | warning | Serving fallback data that hasn't been refreshed in over 24 hours |
 | RES-038 | cache-stampede-protection | Use "Singleflight" or "Coalescing" for cache misses | warning | Multiple threads hitting the same DB record simultaneously on a cache miss |
 
-### Control Plane & Configuration Violations
+### Control Plane, Configuration & Lifecycle Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -121,8 +119,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | RES-040 | missing-dry-run | Large resilience changes should be deployable in "Audit" mode | warning | Lack of a `force_open` or `dry_run` flag in the breaker configuration |
 | RES-041 | configuration-dependency | Resilience config must not depend on a failing remote config server | error | Service failing to start its resilience layer because it can't fetch remote config |
 | RES-042 | shared-secrets-in-resilience | Resilience logs must not contain authentication headers | error | Logging the raw downstream request/response when it contains `Authorization` tokens |
-
-### Concurrency & Lifecycle Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -144,7 +140,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 ## Cross-Reference
 
 - **microservices.md** — Protecting the service mesh from cascading death.
-- **bff.md** — Ensuring the UI remains responsive even when the backend is struggling.
+- **backend-for-frontend.md** — Ensuring the UI remains responsive even when the backend is struggling.
 - **messaging.md** — Asynchronous communication as a primary resilience strategy.
 - **layered-n-tier.md** — Protecting the domain logic from slow database drivers.
 

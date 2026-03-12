@@ -1,0 +1,22 @@
+[
+  {"query": "write a new doctrine for enforcing saga orchestration patterns", "should_trigger": true},
+  {"query": "we have an informal rule that all value objects must be immutable — turn that into a proper doctrine", "should_trigger": true},
+  {"query": "add a doctrine for our anti-corruption layer requirements", "should_trigger": true},
+  {"query": "the hexagonal doctrine is missing rules about secondary adapters, update it", "should_trigger": true},
+  {"query": "create a rule set for how we handle cross-aggregate communication", "should_trigger": true},
+  {"query": "our team keeps debating projection naming — write a doctrine that settles it", "should_trigger": true},
+  {"query": "convert our architecture ADR for event sourcing into an auditable doctrine format", "should_trigger": true},
+  {"query": "update the DDD doctrine to add a rule banning anemic domain models", "should_trigger": true},
+  {"query": "I want to codify our microservices boundary rules so the inquisition can catch violations", "should_trigger": true},
+  {"query": "new doctrine: no infrastructure concerns in the domain layer, write it up", "should_trigger": true},
+  {"query": "audit src/ against all configured doctrines", "should_trigger": false},
+  {"query": "what architectural patterns fit our event-driven system?", "should_trigger": false},
+  {"query": "check my PR comments and triage them", "should_trigger": false},
+  {"query": "run the inquisition on the orders bounded context", "should_trigger": false},
+  {"query": "help me plan the architecture for our new analytics pipeline", "should_trigger": false},
+  {"query": "explain what a doctrine file looks like", "should_trigger": false},
+  {"query": "what doctrines do we currently have configured?", "should_trigger": false},
+  {"query": "generate the architecture config for discover mode", "should_trigger": false},
+  {"query": "the doctrine flagged a violation in my aggregate — how do I fix it?", "should_trigger": false},
+  {"query": "review my PR, there are some architecture comments I need to address", "should_trigger": false}
+]

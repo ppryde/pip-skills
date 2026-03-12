@@ -1,0 +1,22 @@
+[
+  {"query": "what did the bot say on my PR?", "should_trigger": true},
+  {"query": "triage the feedback on PR #312", "should_trigger": true},
+  {"query": "show me all the review threads on my open pull request", "should_trigger": true},
+  {"query": "PR progress report — what's been fixed and what's still open?", "should_trigger": true},
+  {"query": "action the PR comments from the last review round", "should_trigger": true},
+  {"query": "there are like 15 bot comments on my PR, help me work through them", "should_trigger": true},
+  {"query": "check my pr pls, reviewer left a bunch of stuff", "should_trigger": true},
+  {"query": "what review comments are still unresolved on #88?", "should_trigger": true},
+  {"query": "full PR history for #441 — I want to see every review round", "should_trigger": true},
+  {"query": "the soul is clean? show me a summary of what penance we've served on the PR", "should_trigger": true},
+  {"query": "audit my domain layer for CQRS violations", "should_trigger": false},
+  {"query": "what architecture patterns should we use for this service?", "should_trigger": false},
+  {"query": "review this function — does it follow our coding standards?", "should_trigger": false},
+  {"query": "write a doctrine for enforcing repository patterns", "should_trigger": false},
+  {"query": "can you review my code before I open a PR?", "should_trigger": false},
+  {"query": "what's the git diff between main and my branch?", "should_trigger": false},
+  {"query": "check if CI is passing on my branch", "should_trigger": false},
+  {"query": "run the inquisition before I push this PR", "should_trigger": false},
+  {"query": "I got feedback in Slack about my design — can you help me address it?", "should_trigger": false},
+  {"query": "my teammate left some notes in the doc, can we go through them?", "should_trigger": false}
+]

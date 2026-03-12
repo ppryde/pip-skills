@@ -2,6 +2,8 @@
 
 The Microservices Architecture doctrine enforces the decentralization of data, logic, and deployments. It ensures that services remain loosely coupled and independently scalable, preventing the formation of a "distributed monolith" where changes in one service require synchronized deployments across the entire fleet.
 
+**Language Scope:** Language-agnostic
+
 ## When to Use
 
 Microservices should be used for large-scale, complex systems where multiple independent teams need to deliver features at different velocities. It is appropriate when different parts of an application have vastly different scaling requirements (e.g., a high-traffic ingest service vs. a low-traffic reporting service).
@@ -35,7 +37,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 
 ## Violation Catalog
 
-### Service Boundary & Data Sovereignty Violations
+### Service Boundary, Data Sovereignty & Consistency Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -44,6 +46,14 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MCR-003 | shared-state | Services must not share mutable global state | error | Hardcoded shared keys or global caches accessed by multiple service roots |
 | MCR-004 | circular-dependency | Circular synchronous dependencies between services are forbidden | error | Service A calls B via API, and Service B calls A via API |
 | MCR-005 | leaky-persistence | Internal DB primary keys must not be exposed in public APIs | warning | Entity ID fields (UUID/Serial) from `data/` used directly in `api/` responses |
+
+| ID | Category | Rule | Default Severity | What to scan for |
+|---|---|---|---|---|
+| MCR-026 | distributed-transaction | Do not use cross-service atomic locks or 2PC | error | Usage of JTA, XA transactions, or cross-service mutexes |
+| MCR-027 | missing-compensation | Async operations must have compensation actions | error | Event listeners without a failure-handling/rollback path |
+| MCR-028 | ghost-writes | Ensure idempotency for all event consumers | error | Event handlers that perform writes without checking duplicate message IDs |
+| MCR-029 | dual-write | Do not write to DB and Broker in one local transaction | warning | Logic calling `db.save()` and `broker.publish()` sequentially |
+| MCR-030 | outbox-bypass | Use Outbox pattern for guaranteed message delivery | warning | Direct publishing to broker from business logic instead of Outbox table |
 
 ### Communication & API Violations
 
@@ -84,16 +94,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MCR-023 | missing-health-check | Every service must expose a `/health` or `/ready` endpoint | error | Absence of standard health check route in the service's API |
 | MCR-024 | opaque-failures | Services must return standard error codes (RFC 7807) | warning | Non-standard or generic `500` errors without diagnostic context |
 | MCR-025 | missing-metrics | Services must expose standard golden signals (Rate/Errors/Dur) | error | Lack of Prometheus/Metrics endpoints in service initialization |
-
-### Distributed Data & Consistency Violations
-
-| ID | Category | Rule | Default Severity | What to scan for |
-|---|---|---|---|---|
-| MCR-026 | distributed-transaction | Do not use cross-service atomic locks or 2PC | error | Usage of JTA, XA transactions, or cross-service mutexes |
-| MCR-027 | missing-compensation | Async operations must have compensation actions | error | Event listeners without a failure-handling/rollback path |
-| MCR-028 | ghost-writes | Ensure idempotency for all event consumers | error | Event handlers that perform writes without checking duplicate message IDs |
-| MCR-029 | dual-write | Do not write to DB and Broker in one local transaction | warning | Logic calling `db.save()` and `broker.publish()` sequentially |
-| MCR-030 | outbox-bypass | Use Outbox pattern for guaranteed message delivery | warning | Direct publishing to broker from business logic instead of Outbox table |
 
 ### Configuration & Environment Violations
 

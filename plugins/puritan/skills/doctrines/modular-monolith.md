@@ -2,6 +2,8 @@
 
 The Modular Monolith doctrine enforces strict logical isolation within a single deployment unit. It aims to provide the organizational benefits of microservices (team autonomy, clear boundaries) without the "distributed systems tax" of network latency and extreme operational complexity.
 
+**Language Scope:** Language-agnostic
+
 ## When to Use
 
 This pattern is the "Goldilocks" choice for systems with high domain complexity but moderate scale. Use it when the team is large enough to require independent workstreams but the infrastructure budget does not yet justify a fleet of microservices. It is the ideal "Starting Point" to prevent a codebase from becoming a "Big Ball of Mud."
@@ -66,7 +68,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MOM-014 | synchronous-coupling | Module startup must not be blocked by other modules | warning | A module's `init()` or `start()` method waiting for a response from another module |
 | MOM-015 | blocking-event-bus | Event subscribers should not block the main event bus | error | Event handlers in `internal/` performing heavy IO without async wrappers |
 
-### Platform & Shared Logic Violations
+### Platform, Shared Logic & Lifecycle Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -76,8 +78,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MOM-019 | transitive-dependency | Modules must not rely on transitive dependencies from the platform | warning | A module using a library provided implicitly by a platform dependency |
 | MOM-020 | platform-bloat | Platform layer must not exceed 20% of the total codebase size | warning | Codebase-wide LOC check: `platform/` vs total project LOC |
 
-### Dependency Injection & Lifecycle Violations
-
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
 | MOM-021 | cross-module-di | Modules must not inject internal classes from other modules | error | Dependency Injection of a class from `modules/moduleB/internal` into `moduleA` |
@@ -86,7 +86,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MOM-024 | circular-init | Module initialization must be acyclic | error | Constructor chains that lead back to the same module during startup |
 | MOM-025 | missing-graceful-shutdown | Modules must implement a cleanup/shutdown hook | warning | Modules holding resources (sockets/files) without an `onStop()` implementation |
 
-### Resource Governance Violations
+### Resource Governance & Concurrency Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -95,8 +95,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MOM-028 | connection-leak | Modules must use namespaced connection pools | warning | A single module opening > 50 concurrent DB connections without explicit config |
 | MOM-029 | unconstrained-io | Filesystem access must be scoped to a module-specific directory | error | `modules/moduleA` writing to a path used by `modules/moduleB` |
 | MOM-030 | compute-monopoly | Background tasks must be priority-labeled per module | warning | Usage of high-priority scheduler flags for non-critical module tasks |
-
-### Concurrency & Thread Safety Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -114,7 +112,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MOM-037 | missing-api-tests | Every public API class must have a corresponding contract test | warning | Classes in `modules/*/api/` with 0 test coverage in the `tests/` folder |
 | MOM-038 | integration-flakiness | Integration tests must not depend on global shared state | error | Tests that fail if run in parallel due to database state clashes between modules |
 
-### Observability & Monitoring Violations
+### Observability, Deployment & Hygiene Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -122,9 +120,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | MOM-040 | hidden-exceptions | Cross-module exceptions must be wrapped with module context | warning | Module A throwing a generic error that hides the fact it originated in Module B |
 | MOM-041 | missing-module-metrics | Each module must expose independent success/failure metrics | error | Global "Total Errors" metric without breakdown by module folder |
 | MOM-042 | trace-bypass | Cross-module calls must maintain a single trace ID | warning | Calls to Module API that do not propagate the current `Correlation-ID` |
-
-### Deployment & Hygiene Violations
-
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
 | MOM-043 | global-config-clash | Modules must use namespaced configuration keys | error | Use of generic config keys like `db.url` instead of `modules.ordering.db.url` |

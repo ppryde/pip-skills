@@ -2,6 +2,8 @@
 
 The BFF doctrine enforces the creation of specialized backend layers for specific user interfaces. It ensures that core domain services remain clean and "client-agnostic" while providing a tailored, high-performance experience for diverse clients (e.g., Mobile, Web, IoT).
 
+**Language Scope:** Language-agnostic
+
 ## When to Use
 
 Use the BFF pattern when your application supports multiple diverse client types that have significantly different data requirements, display constraints, or security profiles. It is essential when a mobile client would otherwise need to make dozens of "chatty" calls to a general-purpose API, or when a Web UI requires a different authentication flow than a Mobile app.
@@ -36,7 +38,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 
 ## Violation Catalog
 
-### Boundary & Responsibility Violations
+### Boundary, Responsibility & Mapping Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -46,7 +48,15 @@ Primary targets (mapped via `.architecture/config.yml`):
 | BFF-004 | direct-core-bypass | Clients must not bypass the BFF to call Core Services directly | warning | Frontend code containing direct URLs to `services/core/` |
 | BFF-005 | shared-bff | A single BFF must not serve multiple diverse client types | warning | One BFF handling both Mobile and Web if payloads are >30% different |
 
-### Communication & Latency Violations
+| ID | Category | Rule | Default Severity | What to scan for |
+|---|---|---|---|---|
+| BFF-021 | model-coupling | BFFs must not use Core Service DTOs as their own API response | error | `bff/*/api/` methods returning classes defined in `services/core/` |
+| BFF-022 | missing-mapper | Every BFF endpoint should use a dedicated mapper | warning | Controllers in `bff/` performing inline data transformation |
+| BFF-023 | polymorphic-leak | BFF should hide internal type hierarchies from the UI | warning | Returning internal class type names or discriminator fields in JSON |
+| BFF-024 | invalid-date-format | BFF must standardize dates to a client-preferred format | warning | Returning raw DB timestamps instead of ISO-8601 or localized strings |
+| BFF-025 | enum-leak | Do not expose internal service Enums directly to the UI | warning | Mapping core Enums 1:1 without a stable BFF-specific Enum |
+
+### Communication, Latency & Concurrency Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -55,8 +65,12 @@ Primary targets (mapped via `.architecture/config.yml`):
 | BFF-008 | payload-bloat | BFF responses must only contain fields required by the UI | error | BFF returning 1:1 copies of Core Service entities without filtering |
 | BFF-009 | excessive-hop-count | BFF endpoints should not call more than 10 downstream services | warning | A single BFF request triggering > 10 internal network calls |
 | BFF-010 | missing-pagination | BFF must forward or implement pagination for large lists | error | Endpoints returning arrays without `limit`, `offset`, or `cursor` |
+| BFF-035 | thread-leak | Async operations must use managed thread pools | error | Usage of `new Thread()` or unmanaged `CompletableFuture` in BFF logic |
+| BFF-036 | connection-monopoly | Limit the number of concurrent calls to a single Core service | warning | Lack of bulkhead configuration for high-traffic downstream services |
+| BFF-037 | unconstrained-buffers | Limit the size of incoming request bodies in the BFF | error | Missing `max-payload-size` configuration in BFF settings |
+| BFF-038 | event-loop-block | BFF must not perform synchronous IO on the main event loop | error | `fs.readFileSync` or similar blocking calls in Node.js/Netty BFFs |
 
-### Security & Authentication Violations
+### Security, Privacy & Data Sovereignty Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
 |---|---|---|---|---|
@@ -65,6 +79,11 @@ Primary targets (mapped via `.architecture/config.yml`):
 | BFF-013 | missing-cors-policy | Every BFF must have a strict, client-specific CORS policy | error | Usage of `Access-Control-Allow-Origin: *` in any `bff/` configuration |
 | BFF-014 | plaintext-transmission | PII or sensitive data must be encrypted if the client is public | warning | Lack of field-level encryption for sensitive fields in the `mappers/` layer |
 | BFF-015 | inadequate-sanitization | BFF must sanitize all inputs before forwarding to Core | error | Direct forwarding of raw UI request bodies to downstream PUT/POST calls |
+| BFF-046 | cross-region-leak | BFF should live in the same region as the client's data | warning | A US-based BFF calling EU-based core services for EU users |
+| BFF-047 | excessive-pii-handling | BFF should only "see" PII it absolutely needs for display | warning | Mapping logic that touches PII fields not used in the final response |
+| BFF-048 | missing-consent-check | BFF must respect user data consent flags | error | Returning "Marketing" data through the BFF when the `consent_flag` is false |
+| BFF-049 | unmasked-id | Mask or obfuscate internal database IDs in public responses | warning | Returning raw integer Auto-increment IDs instead of HashIDs or UUIDs |
+| BFF-050 | static-client-coupling | Avoid hard-coupling BFF DTOs to specific UI components | warning | Naming BFF DTO fields after UI elements (e.g., `SubmitButtonLabel`) |
 
 ### Resilience & Fault Tolerance Violations
 
@@ -75,16 +94,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | BFF-018 | missing-fallback | BFF endpoints must define a fallback for failed downstream calls | warning | Lack of "graceful degradation" (e.g., returning cached or empty data) |
 | BFF-019 | retry-storm | BFF retries must use exponential backoff and jitter | error | Simple loop retries found in `bff/` client logic |
 | BFF-020 | bulkhead-isolation | Use bulkheads to prevent one downstream service from killing the BFF | warning | Lack of dedicated thread pools or semaphores per downstream client |
-
-### Mapping & DTO Violations
-
-| ID | Category | Rule | Default Severity | What to scan for |
-|---|---|---|---|---|
-| BFF-021 | model-coupling | BFFs must not use Core Service DTOs as their own API response | error | `bff/*/api/` methods returning classes defined in `services/core/` |
-| BFF-022 | missing-mapper | Every BFF endpoint should use a dedicated mapper | warning | Controllers in `bff/` performing inline data transformation |
-| BFF-023 | polymorphic-leak | BFF should hide internal type hierarchies from the UI | warning | Returning internal class type names or discriminator fields in JSON |
-| BFF-024 | invalid-date-format | BFF must standardize dates to a client-preferred format | warning | Returning raw DB timestamps instead of ISO-8601 or localized strings |
-| BFF-025 | enum-leak | Do not expose internal service Enums directly to the UI | warning | Mapping core Enums 1:1 without a stable BFF-specific Enum |
 
 ### Caching & State Violations
 
@@ -105,15 +114,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | BFF-033 | logs-in-production | Avoid logging PII or raw payloads in production logs | error | Log statements in `bff/` printing `request.body` or `response.data` |
 | BFF-034 | slow-mapper | Mapping logic must not exceed 50ms per request | warning | Complex recursive mappers in `bff/*/mappers/` causing latency spikes |
 
-### Concurrency & Resource Violations
-
-| ID | Category | Rule | Default Severity | What to scan for |
-|---|---|---|---|---|
-| BFF-035 | thread-leak | Async operations must use managed thread pools | error | Usage of `new Thread()` or unmanaged `CompletableFuture` in BFF logic |
-| BFF-036 | connection-monopoly | Limit the number of concurrent calls to a single Core service | warning | Lack of bulkhead configuration for high-traffic downstream services |
-| BFF-037 | unconstrained-buffers | Limit the size of incoming request bodies in the BFF | error | Missing `max-payload-size` configuration in BFF settings |
-| BFF-038 | event-loop-block | BFF must not perform synchronous IO on the main event loop | error | `fs.readFileSync` or similar blocking calls in Node.js/Netty BFFs |
-
 ### Deployment & Hygiene Violations
 
 | ID | Category | Rule | Default Severity | What to scan for |
@@ -125,16 +125,6 @@ Primary targets (mapped via `.architecture/config.yml`):
 | BFF-043 | legacy-bloat | Remove BFF endpoints that are no longer used by the UI | warning | Endpoints in `bff/` with zero recorded traffic in the last 30 days |
 | BFF-044 | monolithic-bff-structure | Every client must have a physically isolated BFF directory | error | `bff/` containing all client logic without `web/`, `mobile/` sub-folders |
 | BFF-045 | bypass-validation | BFF must validate UI inputs before hitting the Core network | error | Lack of validation annotations on BFF API DTOs |
-
-### Data Sovereignty & Privacy Violations
-
-| ID | Category | Rule | Default Severity | What to scan for |
-|---|---|---|---|---|
-| BFF-046 | cross-region-leak | BFF should live in the same region as the client's data | warning | A US-based BFF calling EU-based core services for EU users |
-| BFF-047 | excessive-pii-handling | BFF should only "see" PII it absolutely needs for display | warning | Mapping logic that touches PII fields not used in the final response |
-| BFF-048 | missing-consent-check | BFF must respect user data consent flags | error | Returning "Marketing" data through the BFF when the `consent_flag` is false |
-| BFF-049 | unmasked-id | Mask or obfuscate internal database IDs in public responses | warning | Returning raw integer Auto-increment IDs instead of HashIDs or UUIDs |
-| BFF-050 | static-client-coupling | Avoid hard-coupling BFF DTOs to specific UI components | warning | Naming BFF DTO fields after UI elements (e.g., `SubmitButtonLabel`) |
 
 ## Allowed Exceptions
 

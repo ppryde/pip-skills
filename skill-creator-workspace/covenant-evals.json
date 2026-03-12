@@ -1,0 +1,22 @@
+[
+  {"query": "before I start building this, what patterns make sense for a CQRS-heavy order management system?", "should_trigger": true},
+  {"query": "we're greenfielding a new payments service — help me pick the right architecture", "should_trigger": true},
+  {"query": "no .architecture dir exists yet, can you scan src/ and figure out what we're doing?", "should_trigger": true},
+  {"query": "architect our new notification pipeline, we need it to scale to 10m events/day", "should_trigger": true},
+  {"query": "what should our folder structure look like if we go hexagonal?", "should_trigger": true},
+  {"query": "plan a phased rollout for migrating our monolith to microservices over 6 months", "should_trigger": true},
+  {"query": "assess our current design — does it make sense for event sourcing?", "should_trigger": true},
+  {"query": "we havent decided on patterns yet, can u help us think thru the tradeoffs for ddd vs anemic model", "should_trigger": true},
+  {"query": "generate the architecture config for this repo, treat it as discover mode", "should_trigger": true},
+  {"query": "roadmap for adding ES to our existing CRUD app — what's the phasing?", "should_trigger": true},
+  {"query": "audit my src/orders module against the hexagonal doctrine", "should_trigger": false},
+  {"query": "the inquisition flagged 3 violations in our aggregate roots, fix them", "should_trigger": false},
+  {"query": "write a doctrine for enforcing that all commands go through a command bus", "should_trigger": false},
+  {"query": "what did the bot say on PR #441?", "should_trigger": false},
+  {"query": "check if our domain layer is leaking into the infrastructure layer", "should_trigger": false},
+  {"query": "update the hexagonal doctrine to include anti-corruption layer rules", "should_trigger": false},
+  {"query": "triage the review comments on my open PR", "should_trigger": false},
+  {"query": "we already have .architecture/config.yml — run the audit", "should_trigger": false},
+  {"query": "does our current code comply with the DDD doctrine?", "should_trigger": false},
+  {"query": "explain the difference between ports and adapters in our codebase", "should_trigger": false}
+]

@@ -1,9 +1,6 @@
 ---
 name: scriptorium
-description: >
-  Creates new architecture doctrines from research and best practices.
-  Use when creating a new doctrine, updating an existing doctrine, or
-  converting informal architecture rules into an auditable doctrine.
+description: Use when creating a new architecture doctrine, updating an existing one, or converting informal architecture rules into an auditable format. Triggers on "write a new doctrine", "create a rule set", "add a doctrine", or "update the X doctrine".
 disable-model-invocation: true
 ---
 
@@ -284,7 +281,7 @@ Ready for immediate use by Inquisition and Covenant.
 Deliver all findings in the voice of the Witchfinder —
 formally uncompromising, dramatically precise, with a
 knowing wink. Violations are heresies. Resolutions are
-absolution. The codebase is the congregation.
+absolution. The codebase is the sanctum.
 
 See persona.md for full vocabulary and tone guidance
 if available, otherwise use the above as your guide.
