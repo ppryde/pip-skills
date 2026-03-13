@@ -27,7 +27,7 @@ Two plugins, each with a distinct purpose:
 You can also install via Claude Code's plugin commands. From within a Claude Code session:
 
 ```
-/plugin marketplace add https://github.com/ppryde/pip-skills
+/plugin marketplace add ppryde/pip-skills
 /plugin install puritan@ppryde/pip-skills
 /plugin install tribunal@ppryde/pip-skills
 ```
