@@ -7,42 +7,38 @@ A personal collection of Claude Code skills for serious engineering work — fro
 Two plugins, each with a distinct purpose:
 
 | Plugin | Purpose |
-|--------|---------|
-| [**Puritan**](plugins/puritan/) | Architectural doctrine enforcement — plan patterns, audit code, author rules |
-| [**Tribunal**](plugins/tribunal/) | PR review workflow — fetch, triage, validate, action, and resolve GitHub PR comments 
+| --- | --- |
+| [**Puritan**](https://github.com/ppryde/pip-skills/blob/main/plugins/puritan) | Architectural doctrine enforcement — plan patterns, audit code, author rules |
+| [**Tribunal**](https://github.com/ppryde/pip-skills/blob/main/plugins/tribunal) | PR review workflow — fetch, triage, validate, action, and resolve GitHub PR comments |
 
 ## Installing
 
-Both plugins are available directly through the Claude marketplace. Choose righteousness through GUI:
+### Marketplace Installation (Recommended)
 
-### Quick Path to Virtue (Recommended)
-
-1. **Open Claude.ai** in thy blessed browser
-2. **Settings** → **Plugins** (or use the plugins panel)
-3. **Browse marketplace** 
+1. Open Claude.ai in your browser
+2. Go to **Settings** → **Plugins**
+3. Click **Browse marketplace**
 4. Search for **Puritan** or **Tribunal**
-5. **Install** the skill(s) that speak to thy soul
-6. Return to chat, and lo—they shall be available
+5. Click **Install**
+6. The skills are now available in your chat
 
-### Alternative: Claude Code CLI Installation
+### Claude Code CLI Installation
 
-Both plugins are also installable via the Claude Code plugin system. From the Claude Code CLI:
-
-```
-/install-github-app ppryde/pip-skills
-```
-
-Or install individually:
+You can also install via Claude Code's plugin commands. From within a Claude Code session:
 
 ```
-# Puritan only
-/install-github-app ppryde/pip-skills/plugins/puritan
-
-# Tribunal only
-/install-github-app ppryde/pip-skills/plugins/tribunal
+/plugin marketplace add https://github.com/ppryde/pip-skills
+/plugin install puritan@ppryde/pip-skills
+/plugin install tribunal@ppryde/pip-skills
 ```
 
-### The Skills, Once Installed
+Or from the terminal CLI:
+
+```
+# Install both plugins
+claude plugin install puritan@ppryde/pip-skills
+claude plugin install tribunal@ppryde/pip-skills
+```
 
 After installing, the skills are available as slash commands:
 
@@ -53,7 +49,6 @@ After installing, the skills are available as slash commands:
 
 /tribunal:reckoning   — triage and action GitHub PR review comments
 ```
-
 
 ## Philosophy
 
@@ -77,7 +72,7 @@ The persona is flavour, not a barrier to clarity — every verdict is technicall
 
 To use them, copy the file into your Claude Code settings directory:
 
-```bash
+```
 cp settings.snippets.json ~/.claude/settings.snippets.json
 ```
 
@@ -87,4 +82,12 @@ If you already have a `settings.snippets.json`, merge the `spinnerVerbs` block i
 
 ## Contributing
 
-Issues and PRs welcome. If you extend a doctrine or add a new one, the [Scriptorium](plugins/puritan/) skill can help you author it to the required standard.
+Issues and PRs welcome. If you extend a doctrine or add a new one, the [Scriptorium](https://github.com/ppryde/pip-skills/blob/main/plugins/puritan) skill can help you author it to the required standard.
+
+## About
+
+A personal collection of Claude Code skills for serious engineering work — from PR review to architectural auditing. Built for my own workflows, shared because they might help yours.
+
+### License
+
+[MIT license](./LICENSE)
