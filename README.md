@@ -9,25 +9,40 @@ Two plugins, each with a distinct purpose:
 | Plugin | Purpose |
 |--------|---------|
 | [**Puritan**](plugins/puritan/) | Architectural doctrine enforcement — plan patterns, audit code, author rules |
-| [**Tribunal**](plugins/tribunal/) | PR review workflow — fetch, triage, validate, action, and resolve GitHub PR comments |
+| [**Tribunal**](plugins/tribunal/) | PR review workflow — fetch, triage, validate, action, and resolve GitHub PR comments 
 
 ## Installing
 
-Both plugins are installable via the Claude Code plugin system. From the Claude Code CLI:
+Both plugins are available directly through the Claude marketplace. Choose righteousness through GUI:
 
-```bash
+### Quick Path to Virtue (Recommended)
+
+1. **Open Claude.ai** in thy blessed browser
+2. **Settings** → **Plugins** (or use the plugins panel)
+3. **Browse marketplace** 
+4. Search for **Puritan** or **Tribunal**
+5. **Install** the skill(s) that speak to thy soul
+6. Return to chat, and lo—they shall be available
+
+### Alternative: Claude Code CLI Installation
+
+Both plugins are also installable via the Claude Code plugin system. From the Claude Code CLI:
+
+```
 /install-github-app ppryde/pip-skills
 ```
 
 Or install individually:
 
-```bash
+```
 # Puritan only
 /install-github-app ppryde/pip-skills/plugins/puritan
 
 # Tribunal only
 /install-github-app ppryde/pip-skills/plugins/tribunal
 ```
+
+### The Skills, Once Installed
 
 After installing, the skills are available as slash commands:
 
@@ -38,6 +53,7 @@ After installing, the skills are available as slash commands:
 
 /tribunal:reckoning   — triage and action GitHub PR review comments
 ```
+
 
 ## Philosophy
 
