@@ -1,0 +1,10 @@
+{
+  "name": "email-absolution",
+  "version": "0.1.0",
+  "description": "Righteous HTML email construction. Doctrines, visitation, and absolution for the transactional email sanctum.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": ["email", "html-email", "transactional", "accessibility", "deliverability", "rendering"]
+}
