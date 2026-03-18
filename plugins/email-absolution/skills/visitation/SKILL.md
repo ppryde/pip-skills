@@ -46,7 +46,7 @@ No less exacting.
 ### Step 1: Load Configuration
 
 Read `.email-absolution/config.yml`. Same requirements as the Elder.
-If absent, offer to scaffold. See `elder/SKILL.md` — Step 1 for the scaffold flow.
+If absent, offer to scaffold. See the `email-absolution:elder` skill, Step 1, for the scaffold flow.
 
 ### Step 2: Load Doctrines
 
@@ -88,7 +88,7 @@ If no email template files are found in scope:
 
 ### Step 4: Apply Config-Conditional Rules
 
-Identical to the Elder — see Step 4 of `elder/SKILL.md`.
+Identical to the Elder — see Step 4 of the `email-absolution:elder` skill.
 
 ### Step 5: Run Audit
 
@@ -108,7 +108,7 @@ offer fix / explain / skip / note-as-exception.
 ### Step 6: Apply Overrides
 
 Check `.email-absolution/decisions.yml`. Downgrade approved exceptions.
-Same logic as the Elder — see Step 6 of `elder/SKILL.md`.
+Same logic as the Elder — see Step 6 of the `email-absolution:elder` skill.
 
 ### Step 7: Output the Verdict
 

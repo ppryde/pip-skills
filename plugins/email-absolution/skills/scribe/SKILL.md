@@ -14,7 +14,7 @@ chosen.
 ## Prerequisites
 
 1. `.email-absolution/config.yml` must exist with `stack.templating` set
-2. Doctrine files must be present in `${CLAUDE_SKILL_DIR}/../../doctrines/`
+2. Doctrine files must be present in the plugin's `doctrines/` directory (two levels above this SKILL.md)
 3. The caller must describe the email purpose, data context, and any specific requirements
 
 ## Doctrines Loaded
@@ -49,10 +49,12 @@ Tooling configuration is the caller's concern, not the template's.
 | Omitting `role="presentation"` | Every layout table requires it |
 | Using CSS shorthand padding | Always use longhand: `padding-top`, etc. |
 | Relative `href` values | All URLs must be absolute HTTPS |
-| Omitting default/fallback filters | Every variable must have a fallback |
-| Forgetting the preheader | Every template needs a preheader hidden element |
+| Omitting default/fallback filters | Every output tag needs a fallback — including URLs and integers, not just strings |
+| Forgetting the preheader | First element inside `<body>` must be the hidden preheader div — clients display the first body text as preview if it's absent |
 | Omitting the unsubscribe link | Required by CAN-SPAM, GDPR, CASL, and Google/Yahoo 2024 |
 | Inline JavaScript | Forbidden in email — will be stripped and may trigger spam |
+| `box-shadow` / `border-radius` inline on elements | Put in `<head>` `<style>` block only — Outlook ignores `<style>` anyway so these degrade gracefully; inline breaks nothing but wastes bytes |
+| CSS shorthand in `<style>` block | Head-block CSS can use shorthand for non-Outlook clients; inline element styles must use longhand |
 
 ## Workflow
 
@@ -125,7 +127,7 @@ Generate a complete, send-ready template. Every generated template must satisfy:
 
 **HTML & CSS (from `html-css.md`):**
 - CSS reset block in `<head>` (`<style>` tag) covering Outlook, Apple, Gmail overrides
-- Preheader hidden div with `display:none; max-height:0; overflow:hidden; mso-hide:all`
+- **Preheader hidden div must be the very first element inside `<body>`** — use `display:none; max-height:0; overflow:hidden; mso-hide:all`. Commonly omitted. If absent, the client will show the first body text as preview.
 - Web-safe font stack fallbacks on all `font-family` declarations
 - `max-width: 600px` email wrapper
 - All styles duplicated as inline styles on elements they affect

@@ -81,7 +81,9 @@ If the user agrees, scaffold the config interactively. If they decline, show the
 
 ### Step 2: Load Doctrines
 
-Load these 8 doctrine files from `${CLAUDE_SKILL_DIR}/../../doctrines/`:
+Load these 8 doctrine files from the plugin's `doctrines/` directory.
+This SKILL.md lives at `<plugin-root>/skills/elder/SKILL.md` —
+the doctrines directory is at `<plugin-root>/doctrines/`:
 
 | Doctrine File | Always Loaded |
 |---|---|
