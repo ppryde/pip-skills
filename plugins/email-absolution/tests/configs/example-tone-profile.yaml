@@ -1,0 +1,126 @@
+# Tone profile for email-absolution elder skill
+# Pass this alongside your stack config when running an audit:
+#   /email-absolution:elder <file> with tone_profile: tests/configs/example-tone-profile.yaml
+#
+# The elder skill will assess copy quality against these rules in addition to
+# structural and rendering checks. Violations are flagged under UX/TONE categories.
+#
+# This is an EXAMPLE profile for the Acme brand (used by level-7-content.hbs).
+# Copy and adapt for your own brand.
+
+brand: Acme
+
+# ---------------------------------------------------------------------------
+# Voice and register
+# ---------------------------------------------------------------------------
+voice:
+  register: conversational         # formal | conversational | casual
+  person: second                   # first (we/our) | second (you/your) — default perspective
+  active_voice: required           # required | preferred | optional
+                                   # "required" flags passive constructions as violations
+
+# ---------------------------------------------------------------------------
+# Personalisation
+# ---------------------------------------------------------------------------
+personalisation:
+  salutation: first-name           # first-name | none | custom
+                                   # "first-name" flags "Dear Customer" / "Dear Valued Customer"
+                                   #   as a violation when a first-name variable is available
+  generic_salutations_prohibited:
+    - "Dear Customer"
+    - "Dear Valued Customer"
+    - "Dear Sir or Madam"
+    - "To whom it may concern"
+    - "Hello Friend"
+
+# ---------------------------------------------------------------------------
+# Formatting and punctuation
+# ---------------------------------------------------------------------------
+formatting:
+  all_caps:
+    allowed: never                 # never | headings-only | always
+    max_consecutive_words: 0       # 0 = all-caps words prohibited entirely
+  exclamation_marks:
+    max_per_section: 1             # flag if more than this per heading/paragraph
+    max_per_email: 2
+  sentence_case_headings: true     # flag headings that use Title Case instead of Sentence case
+
+# ---------------------------------------------------------------------------
+# CTA (call to action) copy rules
+# ---------------------------------------------------------------------------
+cta:
+  style: action-verb-first         # CTA label must begin with an action verb
+  context: required                # label must describe the destination or action
+                                   # e.g. "Shop the sale" not "Click Here"
+  prohibited_labels:               # exact matches, case-insensitive
+    - "Click Here"
+    - "Click here"
+    - "Go"
+    - "Submit"
+    - "Learn More"
+    - "Read More"
+    - "Find Out More"
+    - "See More"
+  max_primary_ctas_per_email: 1    # flag if more than one primary CTA (button) present
+                                   # secondary text-link CTAs are permitted
+
+# ---------------------------------------------------------------------------
+# Urgency language
+# ---------------------------------------------------------------------------
+urgency:
+  anchor_required: true            # true = urgency claims must include a specific
+                                   #   expiry date, time, or quantity
+                                   #   e.g. "Sale ends midnight Sunday" is fine;
+                                   #   "Act now before it's too late!" is a violation
+  prohibited_vague_phrases:
+    - "Act now"
+    - "Don't miss out"
+    - "Limited time offer"
+    - "Before it's too late"
+    - "While stocks last"          # permitted only if stock count is mentioned
+
+# ---------------------------------------------------------------------------
+# Preheader / inbox preview
+# ---------------------------------------------------------------------------
+preheader:
+  must_differ_from_subject: true   # flag if preheader text duplicates the subject line
+  must_differ_from_h1: true        # flag if preheader text duplicates the first heading
+  must_add_context: true           # flag if preheader is generic ("View this email")
+  max_characters: 90               # flag if longer than this (most clients truncate here)
+  prohibited_phrases:
+    - "View this email in your browser"
+    - "View online"
+    - "Having trouble viewing"
+    - "Click here to view"
+
+# ---------------------------------------------------------------------------
+# Unsubscribe copy
+# ---------------------------------------------------------------------------
+unsubscribe:
+  max_words: 12                    # flag unsubscribe sentences longer than this
+  tone: friendly                   # friendly | neutral | legal
+                                   # "friendly" flags legalistic or hostile phrasing
+  prohibited_openers:
+    - "If you no longer wish to receive"
+    - "If you wish to no longer receive"
+    - "To be removed from"
+    - "To unsubscribe from future"
+  preferred_pattern: "Unsubscribe · {preferences_link_label}"
+                                   # informational only — not enforced as a hard rule
+
+# ---------------------------------------------------------------------------
+# Alt text
+# ---------------------------------------------------------------------------
+alt_text:
+  non_descriptive_prohibited: true # flag alt values that describe the file not the content
+  prohibited_values:
+    - "image"
+    - "photo"
+    - "picture"
+    - "graphic"
+    - "banner"
+    - "promotional image"
+    - "promotional banner"
+    - "hero image"
+    - "email image"
+    - "logo"                       # use brand name instead, e.g. "Acme"

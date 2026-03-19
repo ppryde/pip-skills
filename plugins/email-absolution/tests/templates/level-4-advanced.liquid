@@ -1,0 +1,120 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>Your monthly summary</title>
+  <style type="text/css">
+    @font-face {
+      font-family: 'Inter';
+      src: url('https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiJ-Ek-_EeA.woff2') format('woff2');
+      font-weight: 400;
+      font-style: normal;
+    }
+    body { margin: 0; padding: 0; background-color: #f0f4f8; font-family: 'Inter', Arial, sans-serif; }
+    .two-col-left { float: left; width: 280px; }
+    .two-col-right { float: left; width: 280px; }
+    .clearfix::after { content: ''; display: table; clear: both; }
+    @media (max-width: 600px) {
+      .two-col-left, .two-col-right { float: none !important; width: 100% !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f0f4f8;">
+
+  <div style="display: none; visibility: hidden; mso-hide: all; font-size: 1px; max-height: 0; overflow: hidden;">
+    Here's your summary for {{ period | default: 'this month' }}, {{ person.first_name | default: 'there' }}.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+
+  <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"
+         style="mso-table-lspace: 0; mso-table-rspace: 0; background-color: #f0f4f8;">
+    <tr>
+      <td align="center" style="padding: 32px 16px;">
+
+        <table width="600" border="0" cellpadding="0" cellspacing="0" role="presentation"
+               style="mso-table-lspace: 0; mso-table-rspace: 0; background-color: #ffffff;">
+
+          <!-- Hero band with background image -->
+          <tr>
+            <td style="padding: 48px 40px; background-image: url('https://cdn.acme.com/email/monthly-bg.jpg'); background-size: cover; background-color: #1a56db; text-align: center;">
+              <h1 style="font-family: 'Inter', Arial, sans-serif; font-size: 28px; color: #ffffff; margin: 0 0 8px; line-height: 36px;">
+                Your {{ period | default: 'Monthly' }} Summary
+              </h1>
+              <p style="font-family: 'Inter', Arial, sans-serif; font-size: 16px; color: rgba(255, 255, 255, 0.85); margin: 0; line-height: 24px;">
+                {{ summary_subtitle | default: 'Here is what happened this month.' }}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Two-column stats using float -->
+          <tr>
+            <td style="padding: 32px 40px;">
+              <div class="clearfix">
+                <div class="two-col-left" style="background-color: #f8fafc; padding: 20px; border-radius: 8px;">
+                  <p style="font-family: Arial, sans-serif; font-size: 13px; color: #64748b; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 1px;">Revenue</p>
+                  <p style="font-family: Arial, sans-serif; font-size: 32px; font-weight: bold; color: #0f172a; margin: 0; line-height: 40px;">{{ stats.revenue | default: '$0' }}</p>
+                </div>
+                <div class="two-col-right" style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-left: 20px;">
+                  <p style="font-family: Arial, sans-serif; font-size: 13px; color: #64748b; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 1px;">Orders</p>
+                  <p style="font-family: Arial, sans-serif; font-size: 32px; font-weight: bold; color: #0f172a; margin: 0; line-height: 40px;">{{ stats.orders | default: '0' }}</p>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body content -->
+          <tr>
+            <td style="padding: 0 40px 32px;">
+              <p style="font-family: Arial, sans-serif; font-size: 16px; color: #475569; line-height: 26px; margin: 0 0 16px;">
+                Hi {{ person.first_name | default: 'there' }},
+              </p>
+              <p style="font-family: Arial, sans-serif; font-size: 16px; color: #475569; line-height: 26px; margin: 0 0 24px;">
+                {{ body_copy | default: 'Your monthly performance summary is ready to review.' }}
+              </p>
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml"
+                           xmlns:w="urn:schemas-microsoft-com:office:word"
+                           href="{{ cta_url | default: 'https://acme.com/dashboard' }}"
+                           style="height:48px;v-text-anchor:middle;width:180px;"
+                           arcsize="8%" fillcolor="#1a56db" strokecolor="#1a56db">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">
+                  View Report
+                </center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-->
+              <a href="{{ cta_url | default: 'https://acme.com/dashboard' }}"
+                 style="display: inline-block; background-color: #1a56db; color: #ffffff; font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; text-decoration: none; padding-top: 14px; padding-bottom: 14px; padding-left: 28px; padding-right: 28px; border-radius: 6px;">
+                View Report
+              </a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+
+        </table>
+
+        <!-- Footer -->
+        <table width="600" border="0" cellpadding="0" cellspacing="0" role="presentation"
+               style="mso-table-lspace: 0; mso-table-rspace: 0;">
+          <tr>
+            <td style="padding: 24px 40px; font-family: Arial, sans-serif; font-size: 12px; color: #94a3b8; line-height: 20px;">
+              <p style="margin: 0 0 8px;">
+                Acme Inc. &bull; 123 Main Street, San Francisco, CA 94105
+              </p>
+              <p style="margin: 0;">
+                <a href="{{ unsubscribe_url }}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe</a>
+                &bull;
+                <a href="https://acme.com/privacy" style="color: #94a3b8; text-decoration: underline;">Privacy</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

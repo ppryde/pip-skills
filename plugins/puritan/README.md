@@ -1,4 +1,4 @@
-![Puritan logo](puritan_hex_ico.png)
+![Puritan logo](puritan-250.png)
 # Puritan
 
 Architectural doctrine enforcement through composable lenses. Define your architecture as auditable rules, then let the Inquisition hold the codebase to them — commit by commit, or across the whole sanctum.

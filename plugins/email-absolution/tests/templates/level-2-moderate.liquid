@@ -1,0 +1,72 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your order is confirmed</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; background-color: #f4f4f4; }
+    .preheader { display: none; font-size: 1px; }
+    @media (max-width: 600px) {
+      .container { width: 100% !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f4f4;">
+
+  <span class="preheader">Your order #{{ order.id }} has been confirmed.</span>
+
+  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="padding: 20px 0;">
+        <table class="container" width="600" border="0" cellpadding="0" cellspacing="0" style="background-color: #ffffff;">
+          <tr>
+            <td style="padding: 30px 40px; min-height: 80px;">
+              <img src="https://cdn.acme.com/logo.png" width="160" alt="Acme" style="display: block;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 0 40px 30px;">
+              <h1 style="font-family: Arial, sans-serif; font-size: 24px; color: #1a1a1a; margin: 0 0 16px;">
+                Order Confirmed
+              </h1>
+              <p style="font-family: Arial, sans-serif; font-size: 16px; color: #555; line-height: 24px;">
+                Hi {{ order.customer_name }},
+              </p>
+              <p style="font-family: Arial, sans-serif; font-size: 16px; color: #555; line-height: 24px;">
+                Your order {{ order.id }} for {{ order.item_count }} item(s) totalling {{ order.total }} has been placed successfully.
+              </p>
+
+              <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+                {% for item in order.items %}
+                <tr>
+                  <td style="font-family: Arial, sans-serif; font-size: 15px; color: #333; padding-bottom: 8px;">{{ item.name }}</td>
+                  <td align="right" style="font-family: Arial, sans-serif; font-size: 15px; color: #333; padding-bottom: 8px;">{{ item.price }}</td>
+                </tr>
+                {% endfor %}
+              </table>
+
+              <a href="https://acme.com/orders/{{ order.id }}"
+                 style="background-color: #0066cc; color: #ffffff; font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; text-decoration: none; padding: 14px 28px; display: inline-block; border-radius: 4px;">
+                View Your Order
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 20px 40px; border-top: 1px solid #eeeeee; font-family: Arial, sans-serif; font-size: 12px; color: #999999;">
+              <p>You received this because you placed an order at acme.com.</p>
+              <p>
+                {% if customer.unsubscribe_url %}
+                  <a href="{{ customer.unsubscribe_url }}" style="color: #999999;">Unsubscribe</a>
+                {% endif %}
+              </p>
+              <p>&copy; 2024 Acme Inc.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

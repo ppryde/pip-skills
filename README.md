@@ -4,12 +4,13 @@ A personal collection of Claude Code skills for serious engineering work — fro
 
 ## What's in here
 
-Two plugins, each with a distinct purpose:
+Three plugins, each with a distinct purpose:
 
 | Plugin | Purpose |
 | --- | --- |
 | [**Puritan**](https://github.com/ppryde/pip-skills/blob/main/plugins/puritan) | Architectural doctrine enforcement — plan patterns, audit code, author rules |
 | [**Tribunal**](https://github.com/ppryde/pip-skills/blob/main/plugins/tribunal) | PR review workflow — fetch, triage, validate, action, and resolve GitHub PR comments |
+| [**email-absolution**](https://github.com/ppryde/pip-skills/blob/main/plugins/email-absolution) | HTML email auditing and generation — doctrines, visitation, and absolution |
 
 ## Installing
 
@@ -18,7 +19,7 @@ Two plugins, each with a distinct purpose:
 1. Open Claude.ai in your browser
 2. Go to **Settings** → **Plugins**
 3. Click **Browse marketplace**
-4. Search for **Puritan** or **Tribunal**
+4. Search for **Puritan**, **Tribunal**, or **email-absolution**
 5. Click **Install**
 6. The skills are now available in your chat
 
@@ -30,14 +31,16 @@ You can also install via Claude Code's plugin commands. From within a Claude Cod
 /plugin marketplace add ppryde/pip-skills
 /plugin install puritan@ppryde/pip-skills
 /plugin install tribunal@ppryde/pip-skills
+/plugin install email-absolution@ppryde/pip-skills
 ```
 
 Or from the terminal CLI:
 
 ```
-# Install both plugins
+# Install all plugins
 claude plugin install puritan@ppryde/pip-skills
 claude plugin install tribunal@ppryde/pip-skills
+claude plugin install email-absolution@ppryde/pip-skills
 ```
 
 After installing, the skills are available as slash commands:
@@ -48,6 +51,10 @@ After installing, the skills are available as slash commands:
 /puritan:scriptorium  — author new architecture doctrines
 
 /tribunal:reckoning   — triage and action GitHub PR review comments
+
+/email-absolution:elder      — email planning, Q&A, and config setup
+/email-absolution:visitation — audit an email template against doctrine
+/email-absolution:scribe     — generate a template correct by construction
 ```
 
 ## Philosophy
@@ -62,7 +69,7 @@ Bot reviewers and human reviewers leave dozens of comments across multiple round
 
 ## The Witchfinder
 
-Both plugins operate in the voice of a deeply principled but self-aware Puritan inspector. Violations are heresies. Fixes are absolution. The codebase is the sanctum.
+All plugins operate in the voice of a deeply principled but self-aware Puritan inspector. Violations are heresies. Fixes are absolution. The codebase is the sanctum.
 
 The persona is flavour, not a barrier to clarity — every verdict is technically precise and actionable. The Witchfinder is dramatic, not obscure.
 
