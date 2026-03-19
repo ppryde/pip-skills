@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Rules and gotchas for engineers building email templates with React Email — the Resend-maintained React/TypeScript email component library (stable: v5.2.10, March 2026). React Email renders React components to HTML strings server-side. It does not abstract cross-client layout like MJML — engineers remain responsible for email-safe CSS. Its primary advantage over text-based templating is TypeScript compile-time checking of email data shapes.
+Rules and gotchas for engineers building email templates with React Email — the Resend-maintained React/TypeScript email component library (`react-email@5.2.10`, March 2026). React Email renders React components to HTML strings server-side. It does not abstract cross-client layout like MJML — engineers remain responsible for email-safe CSS. Its primary advantage over text-based templating is TypeScript compile-time checking of email data shapes.
 
 ## Rule Catalog
 

@@ -4,7 +4,7 @@
 
 Lightweight subagent setup for researching robust HTML email practices using 6 specialized subagents. Optimized for low token usage.
 
-- One main Claude Code session orchestrates 6 **subagents** . Only 2 should run in parallel at a time to avoid loss of data due to context exhaustion
+- One main Claude Code session orchestrates 6 **subagents**. Only 2 should run in parallel at a time to avoid loss of data due to context exhaustion
 - Each writes to a **distinct Markdown file** under `docs/emails/research`
 - **No tool use** – pure research and documentation
 - Frequent progress updates prevent context loss
@@ -12,8 +12,22 @@ Lightweight subagent setup for researching robust HTML email practices using 6 s
 ---
 
 ## Main Orchestrator Prompt
-You are orchestrating 6 parallel subagents researching HTML email best practices.Your job:Spawn all 6 subagents simultaneously with their system prompts belowLet them work independently and write to their assigned docs/emails/research filesMonitor progress via file updates (don't micromanage)When all 6 docs have "COMPLETE" markers, create synthesis: docs/emails/research/ALL_EMAIL_RESEARCH_SUMMARY.mdSUBAGENT 1: Rendering & Client Compatibility
-File: docs/emails/research/email_rendering_compatibility.mdYou research HTML email rendering across clients, emphasizing transactional emails that MUST work in very old clients.
+
+```
+You are orchestrating 6 parallel subagents researching HTML email best practices.
+
+Your job:
+- Spawn all 6 subagents simultaneously with their system prompts below
+- Let them work independently and write to their assigned docs/emails/research files
+- Monitor progress via file updates (don't micromanage)
+- When all 6 docs have "COMPLETE" markers, create synthesis: docs/emails/research/ALL_EMAIL_RESEARCH_SUMMARY.md
+
+---
+
+SUBAGENT 1: Rendering & Client Compatibility
+File: docs/emails/research/email_rendering_compatibility.md
+
+You research HTML email rendering across clients, emphasizing transactional emails that MUST work in very old clients.
 
 **Research:**
 - Major clients & rendering engines (Outlook desktop, Gmail, Apple Mail, etc)
@@ -31,8 +45,14 @@ File: docs/emails/research/email_rendering_compatibility.mdYou research HTML ema
 ## Feature Support Matrix
 ## Transactional Guarantees & Workarounds
 ## Sources
-## TODOsSUBAGENT 2: HTML/CSS Coding Practices
-File: docs/emails/research/email_html_css_practices.mdYou research general HTML/CSS patterns for reliable email templates.
+## TODOs
+
+---
+
+SUBAGENT 2: HTML/CSS Coding Practices
+File: docs/emails/research/email_html_css_practices.md
+
+You research general HTML/CSS patterns for reliable email templates.
 
 **Research:**
 - Recommended HTML structures (tables vs divs)
@@ -47,8 +67,14 @@ File: docs/emails/research/email_html_css_practices.mdYou research general HTML/
 ## Recommended Patterns
 ## Component Examples
 ## Sources
-## TODOsSUBAGENT 3: Content, Copy & UX
-File: docs/emails/research/email_content_copy_ux.mdYou research email content patterns improving opens/clicks/reads.
+## TODOs
+
+---
+
+SUBAGENT 3: Content, Copy & UX
+File: docs/emails/research/email_content_copy_ux.md
+
+You research email content patterns improving opens/clicks/reads.
 
 **Research:**
 - Subject lines & preheaders that perform
@@ -63,8 +89,14 @@ File: docs/emails/research/email_content_copy_ux.mdYou research email content pa
 ## Body Structure & UX
 ## Content Checklist
 ## Sources
-## TODOsSUBAGENT 4: Accessibility & Inclusivity
-File: docs/emails/research/email_accessibility_inclusivity.mdYou research email accessibility including WCAG/EAA compliance.
+## TODOs
+
+---
+
+SUBAGENT 4: Accessibility & Inclusivity
+File: docs/emails/research/email_accessibility_inclusivity.md
+
+You research email accessibility including WCAG/EAA compliance.
 
 **Research:**
 - Semantic HTML, contrast, alt text requirements
@@ -79,8 +111,14 @@ File: docs/emails/research/email_accessibility_inclusivity.mdYou research email 
 ## Code Patterns
 ## Regulatory Context
 ## Sources
-## TODOsSUBAGENT 5: Deliverability & Technical Hygiene
-File: docs/emails/research/email_deliverability_technical_hygiene.mdYou research technical factors affecting inbox placement/rendering.
+## TODOs
+
+---
+
+SUBAGENT 5: Deliverability & Technical Hygiene
+File: docs/emails/research/email_deliverability_technical_hygiene.md
+
+You research technical factors affecting inbox placement/rendering.
 
 **Research:**
 - HTML patterns triggering spam filters
@@ -95,8 +133,14 @@ File: docs/emails/research/email_deliverability_technical_hygiene.mdYou research
 ## Pre-send QA Checklist
 ## Transactional Notes
 ## Sources
-## TODOsSUBAGENT 6: Email Templating Languages
-File: docs/emails/research/email_templating_languages_frameworks.mdYou research templating languages/frameworks for dynamic emails.
+## TODOs
+
+---
+
+SUBAGENT 6: Email Templating Languages
+File: docs/emails/research/email_templating_languages_frameworks.md
+
+You research templating languages/frameworks for dynamic emails.
 
 **Research:**
 - Handlebars, Liquid, MJML, ESP syntaxes
@@ -111,7 +155,16 @@ File: docs/emails/research/email_templating_languages_frameworks.mdYou research 
 ## Syntax Examples
 ## Workflow Patterns
 ## Sources
-## TODOsRules:Subagents write frequently to avoid context lossNever interrupt their research flowOnly combine final outputs, don't rewrite their work
+## TODOs
+
+---
+
+Rules:
+- Subagents write frequently to avoid context loss
+- Never interrupt their research flow
+- Only combine final outputs, don't rewrite their work
+```
+
 ---
 
 ## Expected File Structure
