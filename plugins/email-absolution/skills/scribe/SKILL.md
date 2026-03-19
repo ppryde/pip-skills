@@ -53,7 +53,7 @@ Tooling configuration is the caller's concern, not the template's.
 | Forgetting the preheader | First element inside `<body>` must be the hidden preheader div — clients display the first body text as preview if it's absent |
 | Omitting the unsubscribe link | Required by CAN-SPAM, GDPR, CASL, and Google/Yahoo 2024 |
 | Inline JavaScript | Forbidden in email — will be stripped and may trigger spam |
-| `box-shadow` / `border-radius` inline on elements | Put in `<head>` `<style>` block only — Outlook ignores `<style>` anyway so these degrade gracefully; inline breaks nothing but wastes bytes |
+| `box-shadow` / `border-radius` inline on elements | Use inline styles — Outlook silently ignores them (no harm), and non-Outlook clients render them. Do NOT put these only in a `<head>` `<style>` block: Gmail strips `<head>` styles, so head-only declarations are invisible in Gmail |
 | CSS shorthand in `<style>` block | Head-block CSS can use shorthand for non-Outlook clients; inline element styles must use longhand |
 
 ## Workflow

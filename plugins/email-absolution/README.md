@@ -7,7 +7,7 @@ Twelve doctrines. Three skills. No sinful templates shall pass.
 
 ## Skills
 
-- **elder** — Consultation, planning, and routing. Your first port of call.
+- **elder** — Full audit skill. Config setup, template auditing, and routing to visitation/scribe. Your first port of call.
 - **visitation** — Formal inspection of an existing email template against all doctrines.
 - **scribe** — Righteous generation of new email templates, correct by construction.
 
@@ -23,10 +23,10 @@ Twelve doctrines. Three skills. No sinful templates shall pass.
 
 Use the benchmark suite to validate rule coverage and catch regressions:
 
-- Full guide: [plugins/email-absolution/tests/TESTING.md](plugins/email-absolution/tests/TESTING.md)
-- Answer key: [plugins/email-absolution/tests/BENCHMARK.md](plugins/email-absolution/tests/BENCHMARK.md)
-- Templates: [plugins/email-absolution/tests/templates](plugins/email-absolution/tests/templates)
-- TDD notes: [docs/emails/benchmarks/2026-03-18-email-absolution-tdd.md](docs/emails/benchmarks/2026-03-18-email-absolution-tdd.md)
+- Full guide: [tests/TESTING.md](tests/TESTING.md)
+- Answer key: [tests/BENCHMARK.md](tests/BENCHMARK.md)
+- Templates: [tests/templates](tests/templates)
+- TDD notes: [../../docs/emails/benchmarks/2026-03-18-email-absolution-tdd.md](../../docs/emails/benchmarks/2026-03-18-email-absolution-tdd.md)
 
 Quick start (see the full guide for stack configs per template):
 

@@ -14,7 +14,7 @@ grimoire of known afflictions. No heresy escapes the Elder's eye.
 
 Before the Inquisition begins:
 1. `.email-absolution/config.yml` must exist — if absent, offer to scaffold it
-2. Doctrine files must be present in `${CLAUDE_SKILL_DIR}/../../doctrines/`
+2. Doctrine files must be present in the `doctrines/` directory within this plugin (sibling to the `skills/` directory)
 3. For changed-files mode: git repository with identifiable base branch
 4. `stack.templating` must be set in config — determines which per-language doctrine is loaded
 

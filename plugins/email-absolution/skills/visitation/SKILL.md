@@ -13,7 +13,7 @@ No less exacting.
 ## Prerequisites
 
 1. `.email-absolution/config.yml` must exist with `stack.templating` set
-2. Doctrine files must be present in `${CLAUDE_SKILL_DIR}/../../doctrines/`
+2. Doctrine files must be present in the `doctrines/` directory within this plugin (sibling to the `skills/` directory)
 3. For PR/branch mode: git repository with identifiable base branch or PR number
 
 ## Mode Detection
