@@ -34,7 +34,7 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-007]** `mortal` — Link text must be descriptive without relying on surrounding context.
 > "Click here", "read more", and "learn more" are meaningless when a screen reader announces them in isolation (e.g. via link list navigation). Use descriptive text: "Track your order", "Download invoice", "Confirm your email". Source: WCAG 2.1 SC 2.4.6 — Headings and Labels (Level AA); WebAIM "Links and Hypertext".
-> `detect: contextual` — check link anchor text for generic phrases
+> `detect: regex` — pattern (case insensitive): `<a\b[^>]*>\s*(?:click here|read more|learn more|view more|see more|here|click)\s*</a>`
 
 **[ACCESS-008]** `mortal` — Email must have a meaningful `<title>` element in `<head>`.
 > Screen readers announce the `<title>` when the email is opened. An absent or generic `<title>` (e.g. "Email") provides no context. Use the email subject or a descriptive title: "Order #12345 Confirmed — Acme". Source: WCAG 2.1 SC 2.4.2 — Page Titled (Level A).
@@ -46,7 +46,7 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 **[ACCESS-010]** `venial` — Lists must use semantic `<ul>` or `<ol>` markup — not manually formatted with bullets or numbers in `<p>` tags.
 > Screen readers announce "list, 3 items" for `<ul>`, giving structural context. A visually identical list created with `<p>• Item one</p>` receives no structural announcement. Outlook 2007–2019 adds unwanted margins to `<ul>`/`<ol>` — correct with MSO styles rather than removing semantic markup. Source: WCAG 2.1 SC 1.3.1.
-> `detect: contextual` — check for manually bulleted paragraphs (common patterns: `<p>•`, `<p>-`, `<p>1.`)
+> `detect: regex` — patterns: `<p[^>]*>\s*[•\*\-–▸▪►]\s` (symbol bullet); `<p[^>]*>\s*\d+[.)]\s` (numbered list in paragraph)
 
 **[ACCESS-011]** `venial` — Data tables (order summaries, line items) must use `<th scope="col">` or `<th scope="row">` for header cells.
 > Without scope attributes, screen readers cannot associate data cells with their headers, making order summaries and pricing tables inaccessible. Layout tables use `role="presentation"` (ACCESS-003); data tables use `<th>` with `scope`. Source: WCAG 2.1 SC 1.3.1; WebAIM "Tables".

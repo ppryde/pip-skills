@@ -82,7 +82,7 @@ Rules and gotchas for engineers building transactional email templates with Liqu
 
 **[LIQ-019]** `venial` — In Klaviyo, do not use raw variable names without an approved namespace prefix.
 > Klaviyo's Liquid context exposes only four top-level namespaces: `person` (profile properties), `event` (event payload — dynamic content accessed via `event.extra.*`), `organization` (account-level properties), and `unsubscribe_link`. Variable names like `{{ first_name }}`, `{{ email }}`, `{{ order_id }}`, `{{ customer.name }}`, or `{{ stats.revenue }}` are ALL undefined in Klaviyo and silently render as empty string. `{{ first_name }}` is correct in plain LiquidJS; `{{ customer.* }}` is correct in Shopify — neither works in Klaviyo. Source: Klaviyo Developer Docs — Liquid Overview.
-> `detect: contextual` — if `stack.esp` is "klaviyo", flag any `{{ variable }}` output tag whose root name is not `person`, `event`, `organization`, or `unsubscribe_link`
+> `detect: regex` — (when `stack.esp` is "klaviyo") pattern: `\{\{[-\s]*(?!person\b|event\b|organization\b|unsubscribe_link\b)[a-zA-Z_][a-zA-Z0-9_.]*[-\s]*(?:\|[^}]*)?\}\}` — matches output tags whose root variable is not in the four approved Klaviyo namespaces
 
 ---
 

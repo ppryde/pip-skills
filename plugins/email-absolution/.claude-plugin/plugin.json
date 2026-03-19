@@ -6,5 +6,5 @@
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
   },
-  "keywords": ["email", "html-email", "transactional", "accessibility", "deliverability", "rendering"]
+  "keywords": ["email", "html-email", "transactional", "accessibility", "deliverability", "rendering", "mjml"]
 }

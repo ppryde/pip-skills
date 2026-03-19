@@ -149,23 +149,66 @@ Before auditing, note which rules are conditionally active based on config:
 - `rendering_targets` governs which Outlook/Gmail/Apple Mail rules fire
 - Disable per-language rules that don't match `stack.templating`
 
+### Step 4b: Build Rule Checklist
+
+Parse all loaded doctrine files to build a complete rule inventory before any
+audit work begins. This must happen before touching any template file.
+
+For each doctrine, scan for entries matching `**[RULE-ID]**` and extract:
+- **Regex rules** — rule ID + pattern(s) from the `detect: regex` line
+- **Contextual rules** — rule ID + detection instruction from the `detect: contextual` line
+
+Apply Step 4 config-conditional filters to both lists. Remove rules whose
+condition doesn't match config (wrong ESP, wrong templating stack, wrong
+rendering targets). The result is two filtered checklists derived fresh from
+the doctrines on every run.
+
+**Do not hardcode rule IDs in this skill.** The checklists are always generated
+at audit time — never stored, never assumed.
+
 ### Step 5: Run Audit
 
-**Report Mode (parallel by doctrine group):**
+Audit proceeds in two sequential phases. Complete both phases across all
+templates in scope before moving to Step 6.
 
-Audit the templates across all 8 loaded doctrines. For each doctrine, scan each
-template file for rule violations using the detection methods specified:
+#### Phase 1 — Regex Pass (run first)
 
-- `detect: regex` — apply the pattern literally; report any match
-- `detect: contextual` — apply judgement; cite the specific construct found
-- `detect: hybrid` — apply regex first, then confirm contextually
+For each rule in the **regex checklist** (from Step 4b), apply its pattern
+to each template file. This pass is mechanical — no LLM judgment required.
 
-Collect all findings with: rule ID, severity, file, location, what was found,
-and what the rule requires.
+**Presence patterns** (a match = violation): apply the pattern; any match is
+a confirmed finding.
 
-**Interactive Mode (sequential):**
+**Absence patterns** (detect lines containing "absence check" or "flag if file
+contains X but not Y"):
+- Condition met: file matches the trigger (e.g. contains `<mjml`) AND does NOT
+  match the required tag/pattern → flag as violation
+- If trigger condition not met: rule does not apply to this file — skip silently
 
-Present each violation one at a time and offer:
+**Conditional patterns** (detect lines with `when stack.esp = X`):
+- Apply only when `stack.esp` in config matches; skip otherwise
+
+Collect all regex findings as confirmed violations before starting Phase 2.
+
+#### Phase 2 — Contextual Pass (run second)
+
+Take the **contextual checklist** (from Step 4b) and work through **every rule
+in order**. Do not skip any rule — a skipped rule is a missed heresy.
+
+For each contextual rule:
+1. State the rule ID
+2. Apply the detection instruction to each template in scope
+3. Record the outcome explicitly: **violation** (with file, location, evidence)
+   or **clean** (no violation found)
+
+**Completing the full checklist is mandatory.** If a rule is not applicable
+(filtered in Step 4b), it should not appear here — but every rule that survived
+filtering must be checked. Do not exit Phase 2 early.
+
+In **report mode**: collect all findings silently, output in Step 7.
+In **interactive mode**: present each violation as it is found, then continue.
+
+**Interactive Mode violation prompt:**
 1. Fix this heresy (apply the correction)
 2. Explain why this is a mortal sin (expand the rule reasoning)
 3. Skip for now

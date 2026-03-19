@@ -326,6 +326,42 @@ Catch rate: **9/9 (100%) — PASS ✅** (up from 56% on first re-run). All 4 reg
 | level-4-advanced | 9/11 = 82% ❌ | 11/12 = 92% ✅ | not re-run | Resolved ✅ |
 | level-6-mjml | 7/9 = 78% ❌ | 5/9 = 56% (variance) | 9/9 = 100% ✅ | Resolved ✅ |
 
+#### Doctrine patch — 2026-03-19 third pass (feature branch, pre-release)
+
+Variance reduction work. Root cause of L6 run variance (56% one run, 100% another) was
+architectural: the LLM audit pass had no guarantee of visiting every rule. Two changes made.
+
+**Phase 1 — Regex conversions (10 rules across 4 doctrine files):**
+
+Rules where `detect: contextual` was replaced with an explicit regex pattern, enabling
+mechanical grep-based checks rather than relying on LLM attention.
+
+| Rule | Doctrine | Pattern type |
+|------|----------|-------------|
+| `MJML-001` | `mjml.md` | Absence: file has `<mjml` but not `<mj-preview` |
+| `MJML-005` | `mjml.md` | Presence: `"mjml"\s*:\s*"[\^~]` in package.json |
+| `MJML-006` | `mjml.md` | Presence: `"mjml"\s*:\s*"[^"]*(?:5\.\d\|beta\|alpha\|rc\d\|canary)` |
+| `MJML-007` | `mjml.md` | Absence: file has `<mjml` but not `<mj-breakpoint` |
+| `MJML-012` | `mjml.md` | Absence: file has `<mjml` but not `<mj-title` |
+| `MJML-021` | `mjml.md` | Co-occurrence: `background-url` + `background-size` on same `<mj-section>` |
+| `HTML-023` | `html-css.md` | Presence: `@font-face\s*\{` (+ contextual for fallback check) |
+| `LIQ-019` | `liquid.md` | Conditional regex: Klaviyo non-namespaced variables |
+| `ACCESS-007` | `accessibility.md` | Presence: generic link text (`click here`, `read more`, etc.) |
+| `ACCESS-010` | `accessibility.md` | Presence: manual bullet/numbered list in `<p>` tags |
+
+**Phase 2 — Elder skill restructured (`skills/elder/SKILL.md`):**
+
+- Added **Step 4b** — at audit time, parse all loaded doctrine files and build two filtered
+  checklists (regex rules, contextual rules). No hardcoded rule IDs — derived fresh on every run.
+- Replaced **Step 5** with two sequential phases:
+  - **Phase 1 — Regex Pass**: apply regex patterns mechanically before any LLM analysis
+  - **Phase 2 — Contextual Pass**: enumerate every contextual rule in order; completing the
+    full list is mandatory — no rule may be skipped
+
+Re-run pending — benchmark results to be added after next L6 run.
+
+---
+
 #### Per-template results
 
 **level-1-obvious.liquid** — Planted: 12
