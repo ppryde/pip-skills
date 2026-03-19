@@ -19,6 +19,13 @@
       "description": "PR comment review, categorisation, prioritisation and resolution. No heresy goes unaddressed.",
       "category": "engineering",
       "tags": ["pr-review", "code-review", "github", "feedback"]
+    },
+    {
+      "name": "email-absolution",
+      "source": "./plugins/email-absolution",
+      "description": "HTML email auditing and generation under the watchful eye of the Witchfinder. Twelve doctrines. Three skills. No sinful templates shall pass.",
+      "category": "engineering",
+      "tags": ["email", "html-email", "transactional", "accessibility", "deliverability", "rendering", "mjml", "audit"]
     }
   ]
 }
