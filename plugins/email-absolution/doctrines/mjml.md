@@ -12,9 +12,10 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 > `<mj-preview>Your order has shipped.</mj-preview>` generates the correct multi-property hidden div: `display:none; max-height:0; overflow:hidden; mso-hide:all`. Hand-coded preheaders routinely omit `mso-hide:all` or use `display:none` alone, which is insufficient (see GOTCHA-028). Source: MJML Documentation.
 > `detect: contextual` — check if template has a `<mj-preview>` component; flag if hidden preheader div is hand-coded
 
-**[MJML-002]** `mortal` — Set global defaults in `<mj-attributes>` — do not repeat attributes on every component.
+**[MJML-002]** `mortal` — Set global defaults in `<mj-attributes>` — do not repeat attributes on every component. Be aware that `<mj-attributes>` defaults and per-component overrides stack, not replace.
 > Repeating `font-family="Arial, sans-serif" color="#333333"` on every `<mj-text>` inflates source and causes drift when values change. Use `<mj-attributes>` in `<mj-head>` to set component-level defaults. Source: MJML Documentation — mj-attributes.
-> `detect: contextual` — flag if the same attribute value appears on more than 3 of the same component type without a corresponding `<mj-attributes>` default
+> **Double-padding trap:** when both a global default and a per-component override set `padding`, MJML applies both in the compiled output — they stack rather than one replacing the other. Example: `<mj-section padding="0" />` in `<mj-attributes>` plus `padding="20px"` on a specific `<mj-section>` produces `padding: 20px` (override wins for the `padding` shorthand), but if `<mj-column padding="16px" />` is set globally and a column also sets `padding-top="32px"`, the column receives `padding-top: 32px` from the override and `padding-right/bottom/left: 16px` from the global — the per-side values compound from both layers. This is not a bug; it is the MJML attribute merge model. Verify the compiled `<td>` padding values in the HTML output when mixing global and per-component padding, particularly on `<mj-section>` and `<mj-column>`.
+> `detect: contextual` — flag if the same attribute value appears on more than 3 of the same component type without a corresponding `<mj-attributes>` default; also flag if both `<mj-attributes>` and individual components set padding properties, and note the stacking behaviour
 
 **[MJML-003]** `mortal` — All `src` and `href` values must be absolute HTTPS URLs.
 > MJML does not resolve relative URLs. `<mj-image src="/logo.png">` compiles to `<img src="/logo.png">` — which fails in every email client (see GOTCHA-025). Source: caniemail.com (no `<base>` support).
@@ -44,9 +45,9 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 > MJML generates the correct Outlook ghost table (`<!--[if mso]><table><tr><td>...<![endif]-->`) from section/column structure automatically. Ghost tables hand-coded in `<mj-raw>` defeat MJML's cross-client guarantees and require manual maintenance of the whitespace-gap pattern (see GOTCHA-011). Source: MJML Documentation.
 > `detect: contextual` — check for `<mj-raw>` blocks containing MSO table structures that duplicate section/column layout
 
-**[MJML-010]** `venial` — `<mj-raw>` is an escape hatch for content MJML cannot express — MSO-specific meta tags, tracking pixels, `<!--[if IE]>` conditionals. Do not use it for layout.
-> Every `<mj-raw>` block is emitted verbatim into the compiled output without table wrapping. Using it for layout bypasses MJML's cross-client rendering model and produces untested HTML.
-> `detect: contextual` — flag `<mj-raw>` blocks containing `<table>` or layout-critical HTML
+**[MJML-010]** `venial` — `<mj-raw>` is an escape hatch for content MJML cannot express — MSO-specific meta tags, tracking pixels, `<!--[if IE]>` conditionals. Do not use it for layout or dynamic content injection.
+> Every `<mj-raw>` block is emitted verbatim into the compiled output without table wrapping or sanitisation. Using it for layout bypasses MJML's cross-client rendering model and produces untested HTML. Additionally, `<mj-raw>` blocks that contain template variable placeholders (`{{variable}}`, `{{ variable }}`, `{%= var %}`) are an injection risk when those variables contain user-generated content — MJML does not sanitise `<mj-raw>` content at compile time. Dynamic content inside `<mj-raw>` is effectively equivalent to triple-stache in Handlebars (see HBS-002).
+> `detect: contextual` — flag `<mj-raw>` blocks containing `<table>` or layout-critical HTML; also flag `<mj-raw>` blocks containing template variable placeholders that may carry user-controlled content
 
 **[MJML-011]** `venial` — Dynamic data placeholders survive MJML compilation verbatim.
 > MJML does not parse content inside its components. `{{first_name}}` (Handlebars), `{{ first_name }}` (Liquid), or `{%= first_name %}` inside `<mj-text>` compile through unchanged. This enables the hybrid pattern: write layout in MJML, leave placeholders in place, compile, then inject data at runtime. Source: MJML Documentation.
@@ -56,9 +57,9 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 > `<mj-title>Order #12345 Confirmed — Acme</mj-title>` generates the HTML `<title>` element. Screen readers announce this on open. A missing or generic title fails ACCESS-008. Source: WCAG 2.1 SC 2.4.2.
 > `detect: contextual` — check every template `<mj-head>` for `<mj-title>`
 
-**[MJML-013]** `venial` — Use `<mj-button>` for CTA buttons — it generates VML for Outlook automatically.
-> `<mj-button>` produces the bulletproof VML/CSS hybrid button required for Outlook 2007–2019. Hand-coded bulletproof buttons in `<mj-raw>` are harder to maintain and a common source of incomplete MSO attributes. Use `<mj-raw>` only when `<mj-button>`'s style constraints are insufficient. Source: MJML Documentation.
-> `detect: contextual` — check if CTA buttons use `<mj-button>` or are hand-coded in `<mj-raw>`
+**[MJML-013]** `venial` — Use `<mj-button>` for CTA buttons, but understand that it does NOT generate VML rounded corners for Outlook.
+> `<mj-button>` compiles to a `<table>` + `<td>` structure with `mso-padding-alt` and `bgcolor` applied to the `<td>`, giving Outlook a solid rectangular button. It does NOT emit `<v:roundrect>` VML — Outlook 2007–2019 renders a flat rectangle regardless of the `border-radius` attribute (which is CSS-only and ignored by the Word rendering engine). For a true bulletproof VML button with rounded corners in Outlook, the `<v:roundrect>` pattern must be hand-coded in `<mj-raw>`. `<mj-button>` is still the correct default for rectangular CTA buttons; use `<mj-raw>` only when rounded corners in Outlook are a hard design requirement. Source: MJML Documentation; Stig Morten Myre "Bulletproof Buttons" (Campaign Monitor).
+> `detect: contextual` — check if CTA buttons use `<mj-button>`; if `border-radius` is set and Outlook rounded corners are claimed, flag that the compiled output will be rectangular in Outlook 2007–2019
 
 **[MJML-014]** `venial` — Set the correct display `width` on `<mj-image>` — not the file resolution width.
 > `<mj-image width="600px">` compiles to `<img width="600">`. If the source image is 1200px wide (2× retina), the compiled `width` must be 600 (display size), not 1200 (file size). Setting `width="1200px"` causes the image to overflow its container in all clients (see GOTCHA-029). Source: Campaign Monitor "Retina Images in Email".
@@ -79,6 +80,18 @@ Rules and gotchas for engineers building HTML email templates with MJML. MJML v4
 **[MJML-018]** `counsel` — In MJML v5, explicitly enable file includes in `mjml.config.js` if the project uses `<mj-include>`.
 > MJML v5 disables `<mj-include>` by default (security: prevents reading arbitrary files in server-side processing contexts). Build pipelines that use `<mj-include>` for shared headers/footers must enable includes explicitly. Source: MJML v5 security changelog.
 > `detect: contextual` — if project uses `<mj-include>`, check that v5 config enables it
+
+**[MJML-019]** `venial` — Do not set a web font as the primary value in `<mj-all font-family>`.
+> `<mj-all font-family="'BrandFont', Arial, sans-serif">` inlines the full font-family stack into every compiled element — `<table>`, `<td>`, `<a>`, and text nodes — potentially hundreds of inline repetitions per template. This inflates compiled HTML toward Gmail's 102 KB clip limit (see DELIV-005). Additionally, clients that strip `<link>` tags (Gmail) will never load the web font declared in `<mj-font>`, silently falling back without warning. Set `<mj-all font-family>` to the web-safe stack only: `font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif"`. Apply the web font stack individually to `<mj-text>`, `<mj-button>`, and other specific components where it is needed.
+> `detect: contextual` — flag if `<mj-all font-family>` value contains a non-system (web) font as its primary (first) entry
+
+**[MJML-020]** `venial` — `css-class` attribute styles compile to a `<style>` block in `<head>`, not to inline styles — Gmail strips them.
+> MJML's `css-class="my-class"` attribute writes the corresponding CSS rules into a `<style>` block in the compiled HTML `<head>`. Gmail (and other clients that strip `<head>` `<style>` blocks) silently discard all styles applied via `css-class`. This means any visual treatment — font sizes, colours, spacing, display rules — that is applied only through `css-class` will be invisible in Gmail. Styles that must survive Gmail must be set as inline attributes directly on the MJML component (`font-size`, `color`, `padding`, etc.) or via `<mj-attributes>` defaults (which MJML inlines at compile time). Use `css-class` only for styles that are intentionally Gmail-optional (e.g. dark mode media query overrides, hover effects, print styles).
+> `detect: contextual` — flag if `css-class` is used to apply styles that appear to be load-bearing (layout, typography, colour) rather than progressive-enhancement-only
+
+**[MJML-021]** `venial` — `background-size` on `<mj-section background-url>` is ignored in Outlook 2007–2019.
+> `<mj-section background-url="..." background-size="cover">` compiles to two parallel rendering paths: (1) a `<!--[if mso]>` VML block using `<v:rect>` + `<v:fill type="frame">` for Outlook, and (2) a CSS `background-image` + `background-size` inline style for all other clients. The VML `<v:fill>` element does not accept a `size` attribute equivalent to CSS `background-size: cover` — the VML path always stretches to fill the container without respecting the CSS sizing instruction. In Outlook 2007–2019 the background image is displayed but `background-size: cover` or `contain` has no effect. Design backgrounds with this constraint in mind: use images cropped to the correct aspect ratio, or accept that Outlook will not clip/fit the image to cover.
+> `detect: contextual` — flag if `<mj-section>` uses both `background-url` and `background-size` without a note acknowledging that `background-size` is ignored in Outlook 2007–2019
 
 ---
 

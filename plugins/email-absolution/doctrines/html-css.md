@@ -96,6 +96,10 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 > Logos designed for light backgrounds can become invisible or visually poor in forced-dark contexts. Provide a `light-only` version hidden in dark mode and a `dark-only` version hidden in light mode, swapped via `display: none !important` / `display: block !important` in the `@media (prefers-color-scheme: dark)` block.
 > `detect: contextual` — check if logo `<img>` elements have a dark-mode alternative
 
+**[HTML-023]** `venial` — Do not rely on `@font-face` in `<style>` blocks as the sole web font loading mechanism in email.
+> Gmail and Yahoo strip `<head>` `<style>` blocks in some rendering contexts, silently discarding any `@font-face` declarations. Outlook 2007–2019 does not support `@font-face` at all. Apple Mail and iOS Mail do support it. This means the custom font loads in roughly 20–30% of clients and is silently lost in the rest. Accept this trade-off explicitly and always declare a complete web-safe fallback stack in every `font-family` declaration (see HTML-005). Using `@font-face` without a fallback produces the client default (usually Times New Roman) in Gmail, Yahoo, and Outlook.
+> `detect: contextual` — check if any `@font-face` declaration is present; verify every `font-family` rule that uses the custom font name also includes a web-safe fallback (e.g. `'BrandFont', Arial, sans-serif`)
+
 ---
 
 ## Support Matrix

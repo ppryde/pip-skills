@@ -15,7 +15,7 @@ planted violations the skill catches vs misses.
 | `level-1-obvious.liquid` | Klaviyo / Liquid | ★☆☆☆☆☆☆ | 12 | Structural basics |
 | `level-2-moderate.liquid` | Klaviyo / Liquid | ★★☆☆☆☆☆ | 11 | Structural + Liquid |
 | `level-3-handlebars.hbs` | SendGrid / Handlebars | ★★★☆☆☆☆ | 12 | Structural + Handlebars |
-| `level-4-advanced.liquid` | Klaviyo / Liquid | ★★★★☆☆☆ | 11 | Advanced rendering |
+| `level-4-advanced.liquid` | Klaviyo / Liquid | ★★★★☆☆☆ | 12 | Advanced rendering + Klaviyo namespacing |
 | `level-5-gotchas.hbs` | SendGrid / Handlebars | ★★★★★☆☆ | 11 | Subtle structural |
 | `level-6-mjml.mjml` | SendGrid / MJML | ★★★★★★☆ | 9 | MJML compilation |
 | `level-7-content.hbs` | SendGrid / Handlebars | ★★★★★★★ | 9 | Content, tone, UX copy |
@@ -142,17 +142,18 @@ Each violation is tagged with one or more type labels:
 | Rule | Violation | Type |
 |------|-----------|------|
 | HTML-015 | `float: left` on `.two-col-left` and `.two-col-right` — float is stripped/broken in many email clients including Gmail; two-column layout must use nested tables | `CSS` |
-| HTML-014 | `@font-face` `font-family: 'Inter'` declared and applied on `<body>` — Outlook 2007–2019 and Gmail ignore web fonts; no guaranteed safe fallback in the compiled output | `CSS` |
-| GOTCHA-008 | `background-image: url(...)` in inline `style` attribute on the hero `<td>` — Gmail strips `background-image` from inline styles entirely | `CSS` |
-| GOTCHA-024 | `color: rgba(255, 255, 255, 0.85)` on subtitle text — `rgba()` with alpha channel unsupported in Outlook; text renders in default colour | `CSS` |
+| HTML-023 | `@font-face` `font-family: 'Inter'` declared in `<style>` block — Gmail and Yahoo strip `<head>` style blocks, silently discarding the declaration; no guaranteed web-font rendering in the majority of clients | `CSS` |
+| RENDER-001 | `background-image: url(...)` in inline `style` attribute on the hero `<td>` — Gmail strips the **entire** `style` attribute from any element containing `url()`, destroying all inline styles on that cell | `CSS` |
+| RENDER-012 | `color: rgba(255, 255, 255, 0.85)` on subtitle text — `rgba()` with alpha channel unsupported in Outlook 2007–2019; no hex fallback provided; text renders in default colour | `CSS` |
 | HTML-007 | Two-column layout uses `<div class="clearfix">` containing floated `<div>` elements — Outlook ignores the entire layout | `CSS` `HTML` |
 | RENDER-024 | `line-height: 36px` on `<h1>` without `mso-line-height-rule: exactly` — Outlook applies its own line-height; combined with absent rule, heading spacing is broken | `CSS` |
-| RENDER-016 | `background-size: cover` on hero `<td>` inline style — Outlook ignores `background-size`; hero background image will not scale | `CSS` |
+| RENDER-015 | `background-image: url(...)` on hero `<td>` has no VML `<v:rect>/<v:fill>` fallback — background image is invisible in Outlook 2007–2019 | `CSS` |
 
-**Venial / counsel (4):**
+**Venial / counsel (5):**
 
 | Rule | Violation | Type |
 |------|-----------|------|
+| LIQ-019 | `{{ stats.revenue }}`, `{{ stats.orders }}`, `{{ period }}`, `{{ summary_subtitle }}`, `{{ body_copy }}`, `{{ cta_url }}` — bare variable names with no Klaviyo namespace prefix; all render as empty string in Klaviyo (require `event.extra.*` or `person.*`) | `LQ` |
 | LIQ-012 / LIQ-003 | `{{ unsubscribe_url }}` — wrong Klaviyo variable name (Klaviyo uses `{{ unsubscribe_link }}`) and no `\| escape` filter | `LQ` |
 | GOTCHA-020 | Preheader `<div>` has `display: none; visibility: hidden; mso-hide: all` but is missing `opacity: 0; color: transparent` — incomplete suppression pattern | `HTML` `CSS` |
 | RENDER-024 | Hero `<p>` has `line-height: 24px` without `mso-line-height-rule: exactly` — Outlook may expand line spacing | `CSS` |
@@ -199,14 +200,14 @@ HTML email rules:
 
 | Rule | Violation | Type | Why it's MJML-specific |
 |------|-----------|------|------------------------|
-| UX-002 | No `<mj-preview>` element — compiled output has no preheader; inbox preview shows first body text | `MJML` `UX` | `<mj-preview>` is the MJML-native preheader mechanism; a plain `<div display:none>` is not the right pattern in MJML |
-| RENDER-014 | `<mj-button>` compiles to `<table>` + `<a>` — MJML does **not** emit a VML `<v:roundrect>` fallback; Outlook renders a plain underlined link | `MJML` | This looks correct from MJML source; the missing VML only becomes visible in compiled output |
-| HTML-014 | `<mj-all font-family="'Lato', Arial, sans-serif">` in `<mj-attributes>` — web font applied as global default; Outlook and Gmail ignore it; every compiled cell still uses `font-family: 'Lato', Arial` with no guaranteed rendering | `MJML` `CSS` | MJML's attribute system makes global defaults feel safe; the font failure is invisible until tested |
-| RENDER-016 | `<mj-section background-url>` with `background-size="cover"` — MJML compiles a VML conditional for the background image but passes `background-size` as inline CSS which Outlook ignores entirely | `MJML` `CSS` | MJML appears to handle background images correctly; the `background-size` compile gap is non-obvious |
-| RENDER-011 | `<mj-image>` logo missing `fluid-on-mobile="true"` — compiled output renders as fixed-width table cell; image does not scale on narrow mobile viewports | `MJML` | `fluid-on-mobile` is a MJML-specific attribute; without it the image clips rather than reflows |
-| RENDER-017 | `<mj-section padding="0">` default set via `<mj-attributes>` AND `<mj-column padding="24px 0">` on the hero column — MJML stacks section and column padding in the compiled output, creating double vertical spacing | `MJML` | The section and column padding declarations look intentional in MJML source; the stacking is a MJML layout model trap |
-| GOTCHA | `<mj-raw>` used to inject a raw `<div>` block — bypasses MJML's table structure; compiled output places a block-level `<div>` inside a `<td>`, which some clients render incorrectly; HTML errors in the raw block are invisible at compile time | `MJML` | `<mj-raw>` is idiomatic for one-off insertions but is a common source of structural bugs |
-| HTML-006 | Footer column uses `css-class="footer"` — MJML compiles `css-class` rules into a `<style>` block, not inline; Gmail strips the `<style>` block so any footer styles applied via `css-class` are lost | `MJML` `CSS` | `css-class` is the standard MJML mechanism for reusable styles; its non-inline compilation is a known MJML-Gmail gap |
+| MJML-001 / UX-002 | No `<mj-preview>` element — compiled output has no preheader; inbox preview shows first body text | `MJML` `UX` | `<mj-preview>` is the MJML-native preheader mechanism; a plain `<div display:none>` is not the right pattern in MJML |
+| MJML-013 / RENDER-014 | `<mj-button>` compiles to `<table>` + `<a>` — MJML does **not** emit a VML `<v:roundrect>` fallback; Outlook renders a plain underlined link | `MJML` | This looks correct from MJML source; the missing VML only becomes visible in compiled output |
+| MJML-019 | `<mj-all font-family="'Lato', Arial, sans-serif">` — web font set as global `mj-attributes` default; inflates compiled HTML (inlined on every `<td>`); Gmail strips `<mj-font>` link tag, silently losing the web font with no warning | `MJML` `CSS` | MJML's attribute system makes global defaults feel safe; the font inflation and link-strip failure are invisible until measured in compiled output |
+| MJML-021 | `<mj-section background-url>` with `background-size="cover"` — MJML compiles a VML conditional for the background image but passes `background-size` as inline CSS which Outlook ignores entirely | `MJML` `CSS` | MJML appears to handle background images correctly; the `background-size` compile gap is non-obvious |
+| MJML-015 | Two-column `<mj-section>` (feature cards, lines 89–102) missing `fluid-on-mobile="true"` — compiled output renders as fixed two-column layout on mobile; columns do not stack | `MJML` | `fluid-on-mobile` is a MJML-specific attribute on `<mj-section>`; without it multi-column sections never stack on narrow viewports |
+| MJML-002 | `<mj-section padding="0">` default set via `<mj-attributes>` AND `<mj-column padding="24px 0">` on the hero column — MJML stacks section and column padding in the compiled output, creating double vertical spacing | `MJML` | The section and column padding declarations look intentional in MJML source; the stacking is a MJML layout model trap |
+| MJML-010 | `<mj-raw>` block contains `{{promo_note}}` Handlebars variable — bypasses MJML's table structure and any sanitisation; user-controlled content in `<mj-raw>` is an injection risk; structural errors in the raw block are invisible at compile time | `MJML` `HBS` | `<mj-raw>` is idiomatic for one-off insertions but containing template variables makes it an injection risk covered by the updated MJML-010 |
+| MJML-020 | Footer column uses `css-class="footer"` — MJML compiles `css-class` rules into a `<style>` block, not inline; Gmail strips the `<style>` block so any footer styles applied via `css-class` are lost | `MJML` `CSS` | `css-class` is the standard MJML mechanism for reusable styles; its non-inline compilation is a known MJML-Gmail gap |
 | HBS-001 | `{{heading}}`, `{{subheading}}`, `{{first_name}}`, `{{body_copy}}`, `{{cta_url}}`, `{{cta_label}}`, `{{feature_one_copy}}`, `{{feature_two_copy}}`, `{{unsubscribe_url}}`, `{{preferences_url}}` — no `{{#if}}` guards or defaults on any variable | `HBS` | MJML compiles all attribute values verbatim; empty Handlebars variables produce broken links and blank rendered cells with no compile-time warning |
 
 **Also expected (not scored):**

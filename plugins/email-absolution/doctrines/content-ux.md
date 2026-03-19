@@ -88,6 +88,10 @@ Guards against content, copy, and structural UX patterns that undermine the effe
 > F-pattern scanning (Nielsen Norman Group 2017) relies on a clean left edge. Centred body copy breaks the scan pattern and reduces comprehension for anything over a single line.
 > `detect: contextual` — check `text-align` on primary body copy containers
 
+**[UX-021]** `venial` — Preheader text must not duplicate the primary `<h1>` heading of the email.
+> The preheader is inbox-preview real estate — read before opening. The `<h1>` is the first thing seen after opening. If both are identical the recipient sees the same words twice: once in the inbox list and once at the top of the opened email. This wastes the preheader slot entirely. Compare UX-003, which covers preheader vs subject-line duplication — this rule covers preheader vs in-email heading duplication, which is an equally common failure pattern.
+> `detect: contextual` — compare preheader text against the first `<h1>` heading content; flag if they match or differ only in punctuation
+
 ---
 
 ## Patterns & Code Examples
