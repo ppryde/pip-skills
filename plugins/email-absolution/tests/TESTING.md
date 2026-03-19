@@ -12,11 +12,12 @@ plugins/email-absolution/tests/
 ├── TESTING.md             ← this file
 ├── BENCHMARK.md           ← answer key (planted violations + expected rule IDs)
 └── templates/
-    ├── level-1-obvious.liquid     ★☆☆☆☆  Klaviyo / Liquid
-    ├── level-2-moderate.liquid    ★★☆☆☆  Klaviyo / Liquid
-    ├── level-3-handlebars.hbs     ★★★☆☆  SendGrid / Handlebars
-    ├── level-4-advanced.liquid    ★★★★☆  Klaviyo / Liquid
-    └── level-5-gotchas.hbs        ★★★★★  SendGrid / Handlebars
+    ├── level-1-obvious.liquid     ★☆☆☆☆☆  Klaviyo / Liquid
+    ├── level-2-moderate.liquid    ★★☆☆☆☆  Klaviyo / Liquid
+    ├── level-3-handlebars.hbs     ★★★☆☆☆  SendGrid / Handlebars
+    ├── level-4-advanced.liquid    ★★★★☆☆  Klaviyo / Liquid
+    ├── level-5-gotchas.hbs        ★★★★★☆  SendGrid / Handlebars
+    └── level-6-mjml.mjml          ★★★★★★  SendGrid / MJML
 ```
 
 Each template has a fixed set of deliberately planted violations documented in
@@ -27,38 +28,59 @@ rule ID, severity, and location for every violation.
 
 ## Template Summaries
 
-### level-1-obvious.liquid (★☆☆☆☆)
+### level-1-obvious.liquid (★☆☆☆☆☆)
 A stripped-back welcome email with the most common beginner mistakes. Missing
 DOCTYPE, no `lang`, relative URLs, CSS `var()`, no `alt`, no unsubscribe, no
-VML button. A passing skill should catch all 8 with no effort.
+VML button, unfiltered Liquid variable, no `role="presentation"`, missing
+`charset` meta, and shorthand `padding` on a `<td>`. A passing skill should
+catch all 12 with no effort.
 
-### level-2-moderate.liquid (★★☆☆☆)
+### level-2-moderate.liquid (★★☆☆☆☆)
 A realistic order confirmation template with structural oversights. The preheader
 is present but hidden via a CSS class (not inline styles), meaning it will show as
 body text in Gmail. Other violations include `min-height` on a `<td>`, no VML
 button, all Liquid variables unfiltered, wrong Klaviyo namespace, no
-`role="presentation"`, and no physical address.
+`role="presentation"`, no physical address, missing `border="0"` on image,
+no `height` on image, no `{% else %}` fallback on loop, and wrong unsubscribe
+variable namespace. Total: 11 planted.
 
-### level-3-handlebars.hbs (★★★☆☆)
+### level-3-handlebars.hbs (★★★☆☆☆)
 A generic transactional email built with Handlebars and SendGrid. The structural
 basics are mostly present but several violations require knowledge of
 Handlebars-specific risks and email client behaviour: triple-stache XSS on
 `{{{body_content}}}`, `border-collapse: collapse` on layout tables, missing VML,
-`rgba()` on the CTA, and footer links styled only in the `<style>` block.
+`rgba()` on the CTA, and footer links styled only in the `<style>` block. Plus
+venial: `<br><br>` spacer, missing `mso-table-lspace/rspace`, unguarded preheader
+variable, and incomplete preheader suppression pattern. Total: 12 planted.
 
-### level-4-advanced.liquid (★★★★☆)
+### level-4-advanced.liquid (★★★★☆☆)
 A monthly summary email that looks professional but uses fundamentally broken
 layout techniques. Two-column layout via CSS `float`, a hero band with inline
 `background-image`, an `@font-face` web font, and `rgba()` with alpha on body
 text. The VML and MSO setup are correctly present — violations are structural and
-rendering-target specific.
+rendering-target specific. Plus venial: wrong unsubscribe variable, incomplete
+preheader suppression, missing `mso-line-height-rule` on hero paragraph, and
+border-radius on non-table elements. Total: 11 planted.
 
-### level-5-gotchas.hbs (★★★★★)
+### level-5-gotchas.hbs (★★★★★☆)
 A near-production-quality email with subtle, easy-to-miss violations. The
 preheader pattern is almost correct but is missing `mso-hide: all`. The data
 table has `<th>` elements but no `scope`. The outer table has `cellpadding="16"`.
 The inner data table is missing `mso-table-lspace/rspace`. Handlebars variables
-have no fallback guards. None of these are visually obvious from the source.
+have no fallback guards. The main content table has a duplicate `class` attribute
+that silently overrides the responsive breakpoint class. The `<body>` inline style
+is missing `-webkit-text-size-adjust`. The footer line-height has no MSO rule.
+None of these are visually obvious from the source. Total: 11 planted.
+
+### level-6-mjml.mjml (★★★★★★)
+A professional MJML template that compiles correctly but contains violations that
+only manifest in the compiled output or at send time. No `<mj-preview>` preheader,
+relative image and background URLs, empty `alt` on logo, `rgba()` colour on text,
+MJML `background-url` with `background-size` that Outlook ignores, triple-stache
+XSS in `<mj-text>`, unguarded Handlebars variables throughout, footer links styled
+only via `css-class` (non-inline in output), web font with no fallback guarantee,
+and `<mj-button>` without VML — MJML does not generate VML button output.
+Total: 10 planted.
 
 ---
 
@@ -95,6 +117,17 @@ stack:
     - apple-mail
 ```
 
+For MJML template:
+```yaml
+stack:
+  esp: sendgrid
+  templating: mjml
+  rendering_targets:
+    - outlook-2019
+    - gmail
+    - apple-mail
+```
+
 Append `doc` to get a markdown report saved to `docs/emails/audits/`.
 
 ### Scoring a run
@@ -115,27 +148,30 @@ Record results in the [Benchmark History](#benchmark-history) section below.
 | Level 1 | 100% | 3 |
 | Level 2 | 90% | 3 |
 | Level 3 | 85% | 4 |
-| Level 4 | 75% | 4 |
-| Level 5 | 65% | 5 |
+| Level 4 | 80% | 4 |
+| Level 5 | 80% | 4 |
+| Level 6 | 70% | 5 |
 
 ---
 
 ## Benchmark History
 
 One entry per plugin version. When changes are made to doctrines or skills,
-run all five templates and record results here before merging. Compare against
+run all six templates and record results here before merging. Compare against
 the previous version to confirm no regressions.
 
 ---
 
-### v1.0.0 — 2026-03-19
+### v1.1.0 — 2026-03-19
 
-> Initial versioned release. 12 doctrines, 3 skills, doc output mode.
-> Baseline scores pending — run the five templates and record below.
+> Expanded test suite to 6 templates. Added 3–4 additional violations per
+> template (total planted: 67 across 6 templates, up from 38 across 5).
+> Added MJML level-6 template. Revised pass thresholds upward.
+> Baseline scores pending — run all six templates and record below.
 
 #### Per-template results
 
-**level-1-obvious.liquid** — Planted: 8
+**level-1-obvious.liquid** — Planted: 12
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
@@ -147,13 +183,17 @@ the previous version to confirm no regressions.
 | CSS `var()` usage | ✅ | — | — | — |
 | No VML button | ✅ | — | — | — |
 | No unsubscribe link | ✅ | — | — | — |
+| `{{ customer.first_name }}` no `\| default:` | ✅ | — | — | — |
+| No `role="presentation"` on tables | ✅ | — | — | — |
+| No `charset` meta | ✅ | — | — | — |
+| Shorthand `padding: 30px` on `<td>` | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/8 (—%) &nbsp; False positives: —
+Catch rate: —/12 (—%) &nbsp; False positives: —
 
 ---
 
-**level-2-moderate.liquid** — Planted: 7
+**level-2-moderate.liquid** — Planted: 11
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
@@ -164,13 +204,17 @@ Catch rate: —/8 (—%) &nbsp; False positives: —
 | Wrong Klaviyo namespace | ✅ | — | — | — |
 | No `role="presentation"` | ✅ | — | — | — |
 | No physical address | ✅ | — | — | — |
+| Img no `border="0"` | ✅ | — | — | — |
+| Img no `height` attribute | ✅ | — | — | — |
+| `{% for %}` no `{% else %}` fallback | ✅ | — | — | — |
+| `{{ customer.unsubscribe_url }}` wrong namespace | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/7 (—%) &nbsp; False positives: —
+Catch rate: —/11 (—%) &nbsp; False positives: —
 
 ---
 
-**level-3-handlebars.hbs** — Planted: 8
+**level-3-handlebars.hbs** — Planted: 12
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
@@ -182,13 +226,16 @@ Catch rate: —/7 (—%) &nbsp; False positives: —
 | No VML button | ✅ | — | — | — |
 | Footer links — no inline color/text-decoration | ✅ | — | — | — |
 | `<br><br>` spacer | ✅ | — | — | — |
+| No `mso-table-lspace/rspace` on wrapper tables | ✅ | — | — | — |
+| `{{preheader}}` no guard/default | ✅ | — | — | — |
+| Preheader missing `visibility:hidden; opacity:0` | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/8 (—%) &nbsp; False positives: —
+Catch rate: —/11 (—%) &nbsp; False positives: — *(note: 11 mortal+venial violations though 12 total rows above — `<br><br>` spacer and wrapper lspace are venial)*
 
 ---
 
-**level-4-advanced.liquid** — Planted: 7
+**level-4-advanced.liquid** — Planted: 11
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
@@ -199,13 +246,17 @@ Catch rate: —/8 (—%) &nbsp; False positives: —
 | `<div>` based two-column layout | ✅ | — | — | — |
 | `line-height` without `mso-line-height-rule: exactly` on h1 | ✅ | — | — | — |
 | `background-size` in inline style | ✅ | — | — | — |
+| `{{ unsubscribe_url }}` wrong Klaviyo var + no escape | ✅ | — | — | — |
+| Preheader missing `opacity: 0; color: transparent` | ✅ | — | — | — |
+| Hero `<p>` `line-height` without mso rule | ✅ | — | — | — |
+| `border-radius` on stat divs | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/7 (—%) &nbsp; False positives: —
+Catch rate: —/11 (—%) &nbsp; False positives: —
 
 ---
 
-**level-5-gotchas.hbs** — Planted: 8
+**level-5-gotchas.hbs** — Planted: 11
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
@@ -217,30 +268,62 @@ Catch rate: —/7 (—%) &nbsp; False positives: —
 | `<h1>` margins not fully reset | ✅ | — | — | — |
 | `{{#each}}` with no `{{else}}` fallback | ✅ | — | — | — |
 | `mso-table-lspace/rspace` absent on inner table | ✅ | — | — | — |
+| Duplicate `class` attribute on main content table | ✅ | — | — | — |
+| `<body>` inline missing `-webkit-text-size-adjust` | ✅ | — | — | — |
+| Footer `<td>` `line-height` without mso rule | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/8 (—%) &nbsp; False positives: —
+Catch rate: —/11 (—%) &nbsp; False positives: —
 
 ---
 
-#### v1.0.0 Summary
+**level-6-mjml.mjml** — Planted: 10
+
+| Rule | Expected | Found | Rule ID correct | Severity correct |
+|------|----------|-------|-----------------|-----------------|
+| No `<mj-preview>` preheader | ✅ | — | — | — |
+| Relative `src` on logo and hero background | ✅ | — | — | — |
+| Empty `alt` on logo `<mj-image>` | ✅ | — | — | — |
+| `rgba()` on subheading text | ✅ | — | — | — |
+| `background-size: cover` Outlook fallback | ✅ | — | — | — |
+| Triple-stache `{{{body_content}}}` | ✅ | — | — | — |
+| No `{{#if}}` guards on any variables | ✅ | — | — | — |
+| Footer links via `css-class` only (non-inline) | ✅ | — | — | — |
+| Web font loaded with no guaranteed fallback path | ✅ | — | — | — |
+| `<mj-button>` compiles with no VML fallback | ✅ | — | — | — |
+| **False positives** | — | — | — | — |
+
+Catch rate: —/10 (—%) &nbsp; False positives: —
+
+---
+
+#### v1.1.0 Summary
 
 | Template | Planted | Caught | Catch rate | False positives | Meets threshold |
-|----------|---------|--------|------------|-----------------|-----------------|
-| level-1-obvious | 8 | — | —% | — | — |
-| level-2-moderate | 7 | — | —% | — | — |
-| level-3-handlebars | 8 | — | —% | — | — |
-| level-4-advanced | 7 | — | —% | — | — |
-| level-5-gotchas | 8 | — | —% | — | — |
-| **Total** | **38** | **—** | **—%** | **—** | **—** |
+|----------|---------|--------|------------|-----------------|-----------------||
+| level-1-obvious | 12 | — | —% | — | — |
+| level-2-moderate | 11 | — | —% | — | — |
+| level-3-handlebars | 12 | — | —% | — | — |
+| level-4-advanced | 11 | — | —% | — | — |
+| level-5-gotchas | 11 | — | —% | — | — |
+| level-6-mjml | 10 | — | —% | — | — |
+| **Total** | **67** | **—** | **—%** | **—** | **—** |
+
+---
+
+### v1.0.0 — 2026-03-19
+
+> Initial versioned release. 12 doctrines, 3 skills, doc output mode.
+> Benchmark scores were not recorded before version increment — see v1.1.0 for
+> first scored run.
 
 ---
 
 ## Adding a New Version Entry
 
 When doctrines or skills are updated, add a new version block **above** the
-previous one (newest first). Copy the v1.0.0 template, update the version and
-date, and fill in results after running all five templates.
+previous one (newest first). Copy the v1.1.0 template, update the version and
+date, and fill in results after running all six templates.
 
 ```markdown
 ### vX.Y.Z — YYYY-MM-DD

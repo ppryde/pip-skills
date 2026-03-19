@@ -1,0 +1,89 @@
+<mjml>
+  <mj-head>
+    <mj-title>{{subject}}</mj-title>
+
+    <mj-font name="Poppins" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700" />
+
+    <mj-attributes>
+      <mj-text font-family="Poppins, Arial, sans-serif" font-size="16px" line-height="26px" color="#333333" />
+    </mj-attributes>
+
+    <mj-style>
+      .footer-link a { color: #888888 !important; text-decoration: underline; }
+    </mj-style>
+  </mj-head>
+
+  <mj-body background-color="#f4f4f4">
+
+    <!-- Hero section -->
+    <mj-section background-color="#1a56db" background-url="/images/hero-bg.jpg" background-size="cover">
+      <mj-column>
+        <mj-image src="/images/logo-white.png" width="140px" alt="" align="left" />
+        <mj-text color="#ffffff" font-size="28px" font-weight="bold" line-height="36px">
+          {{heading}}
+        </mj-text>
+        <mj-text color="rgba(255, 255, 255, 0.85)" font-size="16px">
+          {{subheading}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Body copy -->
+    <mj-section background-color="#ffffff" padding="32px 40px">
+      <mj-column>
+        <mj-text>
+          Hi {{first_name}},
+        </mj-text>
+        <mj-text>
+          {{{body_content}}}
+        </mj-text>
+
+        <!-- CTA button -->
+        <mj-button background-color="#1a56db"
+                   color="#ffffff"
+                   font-size="16px"
+                   font-weight="bold"
+                   border-radius="6px"
+                   href="{{cta_url}}"
+                   padding="14px 28px">
+          {{cta_label}}
+        </mj-button>
+
+      </mj-column>
+    </mj-section>
+
+    <!-- Two-column features -->
+    <mj-section background-color="#f8fafc" padding="24px 40px">
+      <mj-column>
+        <mj-text font-size="13px" color="#64748b" font-weight="bold">Feature One</mj-text>
+        <mj-text>{{feature_one_copy}}</mj-text>
+      </mj-column>
+      <mj-column>
+        <mj-text font-size="13px" color="#64748b" font-weight="bold">Feature Two</mj-text>
+        <mj-text>{{feature_two_copy}}</mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Divider -->
+    <mj-section background-color="#ffffff">
+      <mj-column>
+        <mj-divider border-color="#e5e5e5" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Footer -->
+    <mj-section background-color="#ffffff" padding="20px 40px">
+      <mj-column>
+        <mj-text font-size="12px" color="#888888" css-class="footer-link">
+          Acme Inc. &bull; 350 Fifth Avenue, New York, NY 10118
+        </mj-text>
+        <mj-text font-size="12px" color="#888888" css-class="footer-link">
+          <a href="{{unsubscribe_url}}">Unsubscribe</a> &bull;
+          <a href="{{preferences_url}}">Email preferences</a> &bull;
+          <a href="https://acme.com/privacy">Privacy policy</a>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+  </mj-body>
+</mjml>
