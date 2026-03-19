@@ -358,7 +358,25 @@ mechanical grep-based checks rather than relying on LLM attention.
   - **Phase 2 — Contextual Pass**: enumerate every contextual rule in order; completing the
     full list is mandatory — no rule may be skipped
 
-Re-run pending — benchmark results to be added after next L6 run.
+**level-6-mjml re-run (third pass)** — Planted: 9
+
+| # | Planted violation | Caught | Rule(s) |
+|---|---|---|---|
+| 1 | No `<mj-preview>`, subject line length | ✅ | MJML-001, UX-002 |
+| 2 | `<mj-button>` no VML roundrect | ✅ | MJML-013, RENDER-014 |
+| 3 | `<mj-all font-family>` web font primary | ✅ | MJML-019 |
+| 4 | `background-url` + `background-size` co-occurrence | ✅ | MJML-021 |
+| 5 | Two-column section missing `fluid-on-mobile` | ✅ | MJML-015 |
+| 6 | Double-padding stacking trap | ✅ | MJML-002 |
+| 7 | `<mj-raw>` template variable injection risk | ✅ | MJML-010 |
+| 8 | `css-class` load-bearing styles, Gmail strips them | ✅ | MJML-020 |
+| 9 | Handlebars variables with no fallback guard | ✅ | HBS-001 |
+
+Catch rate: **9/9 (100%) — PASS ✅**
+
+Notable: MJML-021 (background-size) was caught via the new regex pattern — co-occurrence match on
+`background-url` + `background-size` on the same `<mj-section>` element. Previously a contextual
+check that was missed on one run. The Phase 2 mandatory enumeration also ensured no rule was skipped.
 
 ---
 
