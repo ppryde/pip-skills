@@ -1,3 +1,4 @@
+![Email Absolution logo](email-absolution-250.png)
 # email-absolution
 
 HTML email development under the watchful eye of the Witchfinder.
