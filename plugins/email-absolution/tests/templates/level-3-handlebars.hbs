@@ -1,0 +1,74 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{subject}}</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; background-color: #f9f9f9; }
+    table { border-collapse: collapse; }
+    a { color: #1a56db; text-decoration: underline; }
+    .footer a { color: #888888; }
+    @media (max-width: 600px) {
+      .wrapper { width: 100% !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f9f9f9;">
+
+  <div style="display: none; max-height: 0; overflow: hidden; mso-hide: all;">
+    {{preheader}}
+  </div>
+
+  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="padding: 32px 16px;">
+
+        <table class="wrapper" width="600" border="0" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px;">
+          <tr>
+            <td style="padding: 32px 40px 0;">
+              <img src="https://cdn.acme.com/email/logo.png" width="140" height="40" alt="Acme" style="display: block; border: 0;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 24px 40px;">
+              <h1 style="font-family: Arial, sans-serif; font-size: 26px; color: #111111; margin: 0 0 12px;">
+                {{heading}}
+              </h1>
+              <div style="font-family: Arial, sans-serif; font-size: 16px; color: #444444; line-height: 26px;">
+                {{{body_content}}}
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 40px 32px;">
+              <a href="{{cta_url}}"
+                 style="background-color: rgba(26, 86, 219, 1); color: #ffffff; font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; text-decoration: none; padding: 14px 32px; display: inline-block; border-radius: 6px;">
+                {{cta_label}}
+              </a>
+            </td>
+          </tr>
+        </table>
+
+        <br><br>
+
+        <table class="wrapper footer" width="600" border="0" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="padding: 20px 40px; font-family: Arial, sans-serif; font-size: 12px; color: #888888; line-height: 20px;">
+              <p style="margin: 0 0 8px;">You're receiving this because you have an account at acme.com.</p>
+              <p style="margin: 0;">
+                <a href="{{unsubscribe_url}}">Unsubscribe</a> &middot;
+                <a href="{{preferences_url}}">Email preferences</a> &middot;
+                <a href="https://acme.com/privacy">Privacy policy</a>
+              </p>
+              <p style="margin: 8px 0 0;">&copy; 2024 Acme Inc.</p>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>
