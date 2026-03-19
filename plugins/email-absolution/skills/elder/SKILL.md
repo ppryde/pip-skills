@@ -25,8 +25,13 @@ Before the Inquisition begins:
 | `/email-absolution:elder` (no args) | Report | Changed files (git diff against base branch) |
 | `/email-absolution:elder full` | Report | All email templates in configured paths |
 | `/email-absolution:elder interactive` | Interactive | All templates — violation-by-violation fix loop |
+| `/email-absolution:elder doc` | Doc | Changed files — saves rich markdown report to `docs/emails/audits/` |
 | `/email-absolution:elder <file>` | Report | Single named template file |
+| `/email-absolution:elder <file> doc` | Doc | Single template — saves rich markdown report |
 | Called from hook/CI | Report | Changed files |
+
+**Doc mode** outputs a structured markdown file with summary tables and full explainers
+rather than a terminal report. See Step 7b for the doc format specification.
 
 ## When NOT to Use
 
@@ -240,6 +245,116 @@ FOUND RIGHTEOUS (2 templates):
 
 VERDICT: The sanctum is not clean. Absolve 3 mortal sins before sending.
 ```
+
+### Step 7b: Doc Output Format
+
+When `doc` mode is requested, save the report as a markdown file to
+`docs/emails/audits/YYYY-MM-DD-<template-slug>.md` (create the directory if absent).
+
+The doc format uses the structure below. Follow this layout exactly — do not
+collapse sections or revert to the terminal format.
+
+```markdown
+# Email Audit — <Template Name>
+**Date:** YYYY-MM-DD
+**Skill:** email-absolution:elder
+**Stack:** <ESP> / <Templating> / <Rendering targets>
+**Template:** <filename or description>
+
+> **Note:** <Any context the user provides about the template — e.g. "example template,
+> copy is illustrative". Omit this block if no context was given.>
+
+---
+
+## Strengths — Found Righteous
+
+<Table of everything the template gets RIGHT. Two columns: Area | What's right.
+Be thorough — this section matters. A long table here is a compliment, not padding.
+Group by theme: Document structure / Outlook MSO / Table layout / Images / etc.>
+
+| Area | What's right |
+|------|-------------|
+| ... | ... |
+
+---
+
+## Mortal Sins — Must Be Absolved Before Send (N)
+
+<First: a quick-reference summary table. One row per finding.>
+
+| Rule | Location | Issue |
+|------|----------|-------|
+| HBS-002 | `<title>` | Triple-stache on `{{{subject}}}` — XSS risk |
+| ... | ... | ... |
+
+<Then: a full explainer for every mortal sin. Each explainer has:
+- Bold heading: [RULE-ID] Short description
+- Location line
+- What was found (quote the actual code where possible)
+- Why it matters (one sentence)
+- Fix: code block showing the corrected pattern>
+
+### [RULE-ID] Description
+
+**Location:** file / element
+
+Found: `<actual code>`
+
+Why it matters: <one sentence>.
+
+**Fix:**
+    ```language
+    <corrected code>
+    ```
+
+---
+
+## Venial Sins — Should Be Absolved (N)
+
+<First: summary table>
+
+| Rule | Location | Issue |
+|------|----------|-------|
+| ... | ... | ... |
+
+<Then: explainers in the same format as mortal sins, but fix blocks are
+shown only when a code example adds meaningful clarity — otherwise a prose
+fix description is sufficient.>
+
+---
+
+## Counsel from the Elders (N)
+
+<First: summary table>
+
+| Rule | Advisory |
+|------|---------|
+| ... | ... |
+
+<Then: brief explainers — 2–4 sentences each. No code block required unless
+the counsel is actionable with a specific snippet.>
+
+---
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Mortal sins | N |
+| Venial sins | N |
+| Counsel | N |
+| Found righteous | N |
+
+<One short paragraph: overall verdict on the template's state, what the
+concentrations of violations tell us, and what fixing the mortals unlocks.>
+```
+
+**File naming:** use a kebab-case slug of the template name or description.
+Example: `2026-03-18-order-confirmation-klaviyo.md`
+
+**Found Righteous section:** populate generously. Every confirmed-compliant pattern
+deserves acknowledgement — it gives the recipient useful signal about what to
+replicate in other templates.
 
 ## Subagent Contract
 
