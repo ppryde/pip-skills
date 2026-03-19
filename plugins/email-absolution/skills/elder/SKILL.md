@@ -278,17 +278,36 @@ Group by theme: Document structure / Outlook MSO / Table layout / Images / etc.>
 
 ---
 
-## Mortal Sins — Must Be Absolved Before Send (N)
+## Issues at a Glance
 
-<First: a quick-reference summary table. One row per finding.>
+<All three summary tables together — mortal sins first, then venial, then counsel.
+This gives the reader a complete picture before diving into any detail.>
+
+### Mortal Sins — Must Be Absolved Before Send (N)
 
 | Rule | Location | Issue |
 |------|----------|-------|
 | HBS-002 | `<title>` | Triple-stache on `{{{subject}}}` — XSS risk |
 | ... | ... | ... |
 
-<Then: a full explainer for every mortal sin. Each explainer has:
-- Bold heading: [RULE-ID] Short description
+### Venial Sins — Should Be Absolved (N)
+
+| Rule | Location | Issue |
+|------|----------|-------|
+| ... | ... | ... |
+
+### Counsel from the Elders (N)
+
+| Rule | Advisory |
+|------|---------|
+| ... | ... |
+
+---
+
+## Mortal Sins — Detail
+
+<Full explainer for every mortal sin. Each explainer has:
+- Heading: ### [RULE-ID] Short description
 - Location line
 - What was found (quote the actual code where possible)
 - Why it matters (one sentence)
@@ -309,29 +328,16 @@ Why it matters: <one sentence>.
 
 ---
 
-## Venial Sins — Should Be Absolved (N)
+## Venial Sins — Detail
 
-<First: summary table>
-
-| Rule | Location | Issue |
-|------|----------|-------|
-| ... | ... | ... |
-
-<Then: explainers in the same format as mortal sins, but fix blocks are
-shown only when a code example adds meaningful clarity — otherwise a prose
-fix description is sufficient.>
+<Explainers in the same format as mortal sins. Fix blocks shown only when a
+code example adds meaningful clarity — otherwise a prose fix is sufficient.>
 
 ---
 
-## Counsel from the Elders (N)
+## Counsel — Detail
 
-<First: summary table>
-
-| Rule | Advisory |
-|------|---------|
-| ... | ... |
-
-<Then: brief explainers — 2–4 sentences each. No code block required unless
+<Brief explainers — 2–4 sentences each. No code block required unless
 the counsel is actionable with a specific snippet.>
 
 ---
