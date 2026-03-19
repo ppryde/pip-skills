@@ -19,6 +19,21 @@ Twelve doctrines. Three skills. No sinful templates shall pass.
 /email-absolution:scribe         # Generate a template
 ```
 
+## Testing
+
+Use the benchmark suite to validate rule coverage and catch regressions:
+
+- Full guide: [plugins/email-absolution/tests/TESTING.md](plugins/email-absolution/tests/TESTING.md)
+- Answer key: [plugins/email-absolution/tests/BENCHMARK.md](plugins/email-absolution/tests/BENCHMARK.md)
+- Templates: [plugins/email-absolution/tests/templates](plugins/email-absolution/tests/templates)
+- TDD notes: [docs/emails/benchmarks/2026-03-18-email-absolution-tdd.md](docs/emails/benchmarks/2026-03-18-email-absolution-tdd.md)
+
+Quick start (see the full guide for stack configs per template):
+
+```
+/email-absolution:elder plugins/email-absolution/tests/templates/level-1-obvious.liquid doc
+```
+
 ## Configuration
 
 On first invocation, `elder` will offer to create `.email-absolution/config.yml` via a setup questionnaire. Individual email templates may have their own `email.config.yml` in their directory. Per-email configs inherit from the project config and only need to specify overrides.
