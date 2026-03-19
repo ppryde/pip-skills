@@ -28,9 +28,9 @@ Guards against HTML and CSS patterns that cause broken or invisible content in m
 > Outlook 2007–2019 (Word renderer) does not support `<div>`-based layouts, `float`, or flexbox. Tables are the only layout primitive guaranteed to work across all clients. Source: [caniemail.com/features/css-display-flex](https://www.caniemail.com/features/css-display-flex/).
 > `detect: contextual` — check if structural layout (columns, wrappers, sections) uses non-table elements
 
-**[RENDER-006]** `mortal` — All layout `<table>` elements must have `border="0" cellpadding="0" cellspacing="0"`.
-> Without these attributes, browsers and Outlook apply default table borders, cell spacing, and padding that create phantom gaps and misalignments. These must be HTML attributes, not CSS.
-> `detect: regex` — pattern: `<table(?![^>]*\bcellpadding=)[^>]*>`
+**[RENDER-006]** `mortal` — All layout `<table>` elements must have `border="0" cellpadding="0" cellspacing="0"`, and `border-collapse` must never be set to `collapse` on layout tables.
+> Without these attributes, browsers and Outlook apply default table borders, cell spacing, and padding that create phantom gaps and misalignments. These must be HTML attributes, not CSS. Additionally, `border-collapse: collapse` in a `<style>` block or inline style causes Outlook 2007–2019 to render double borders and cell spacing artefacts; always use `border-collapse: separate` or omit the property entirely.
+> `detect: regex` — two patterns: (1) `<table(?![^>]*\bcellpadding=)[^>]*>` — flags any `<table>` missing `cellpadding`; (2) `border-collapse\s*:\s*collapse` — flags `collapse` value anywhere in styles
 
 **[RENDER-007]** `mortal` — All layout `<table>` elements must have `role="presentation"`.
 > Screen readers announce table structure for data tables. Layout tables must declare `role="presentation"` to suppress this. This is both a rendering and accessibility requirement — its absence causes screen readers to announce "table, 3 columns, 5 rows" for visual layout scaffolding. Source: WCAG 2.1.
