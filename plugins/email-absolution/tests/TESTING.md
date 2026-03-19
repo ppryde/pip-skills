@@ -12,12 +12,13 @@ plugins/email-absolution/tests/
 ├── TESTING.md             ← this file
 ├── BENCHMARK.md           ← answer key (planted violations + expected rule IDs)
 └── templates/
-    ├── level-1-obvious.liquid     ★☆☆☆☆☆  Klaviyo / Liquid
-    ├── level-2-moderate.liquid    ★★☆☆☆☆  Klaviyo / Liquid
-    ├── level-3-handlebars.hbs     ★★★☆☆☆  SendGrid / Handlebars
-    ├── level-4-advanced.liquid    ★★★★☆☆  Klaviyo / Liquid
-    ├── level-5-gotchas.hbs        ★★★★★☆  SendGrid / Handlebars
-    └── level-6-mjml.mjml          ★★★★★★  SendGrid / MJML
+    ├── level-1-obvious.liquid     ★☆☆☆☆☆☆  Klaviyo / Liquid         structural basics
+    ├── level-2-moderate.liquid    ★★☆☆☆☆☆  Klaviyo / Liquid         structural + Liquid
+    ├── level-3-handlebars.hbs     ★★★☆☆☆☆  SendGrid / Handlebars    structural + Handlebars
+    ├── level-4-advanced.liquid    ★★★★☆☆☆  Klaviyo / Liquid         advanced rendering
+    ├── level-5-gotchas.hbs        ★★★★★☆☆  SendGrid / Handlebars    subtle structural
+    ├── level-6-mjml.mjml          ★★★★★★☆  SendGrid / MJML          MJML compilation
+    └── level-7-content.hbs        ★★★★★★★  SendGrid / Handlebars    content, tone, UX copy
 ```
 
 Each template has a fixed set of deliberately planted violations documented in
@@ -72,15 +73,26 @@ that silently overrides the responsive breakpoint class. The `<body>` inline sty
 is missing `-webkit-text-size-adjust`. The footer line-height has no MSO rule.
 None of these are visually obvious from the source. Total: 11 planted.
 
-### level-6-mjml.mjml (★★★★★★)
-A professional MJML template that compiles correctly but contains violations that
-only manifest in the compiled output or at send time. No `<mj-preview>` preheader,
-relative image and background URLs, empty `alt` on logo, `rgba()` colour on text,
-MJML `background-url` with `background-size` that Outlook ignores, triple-stache
-XSS in `<mj-text>`, unguarded Handlebars variables throughout, footer links styled
-only via `css-class` (non-inline in output), web font with no fallback guarantee,
-and `<mj-button>` without VML — MJML does not generate VML button output.
-Total: 10 planted.
+### level-6-mjml.mjml (★★★★★★☆)
+A professional MJML template with violations that are entirely MJML-specific —
+they require knowledge of how MJML compiles and where its abstractions hide bugs.
+No `<mj-preview>`, `<mj-button>` without VML output, web font as global
+`<mj-attributes>` default, `background-size` ignored by Outlook despite
+`background-url`, `<mj-image>` without `fluid-on-mobile`, double-padding from
+stacked section+column defaults, `<mj-raw>` structural injection, `css-class`
+compiling to non-inline `<style>` block, and unguarded Handlebars variables.
+Total: 9 planted.
+
+### level-7-content.hbs (★★★★★★★)
+A structurally correct promotional email with deliberate content, tone, and UX
+copy violations. The HTML and CSS are clean — violations require the skill to
+evaluate copy quality, CTA strength, personalisation, tone of voice, and UX
+writing patterns. Tests: preheader duplicates heading, ALL CAPS heading with
+excessive punctuation, "Click Here" CTA, "Dear Valued Customer" opening (no
+personalisation despite available variable), passive-voice body copy, vague
+urgency copy, three competing CTAs with no hierarchy, hostile multi-sentence
+unsubscribe block, and non-descriptive image alt text.
+Total: 9 planted.
 
 ---
 
@@ -128,6 +140,17 @@ stack:
     - apple-mail
 ```
 
+For the content/tone template (same stack as level-3):
+```yaml
+stack:
+  esp: sendgrid
+  templating: handlebars
+  rendering_targets:
+    - outlook-2019
+    - gmail
+    - apple-mail
+```
+
 Append `doc` to get a markdown report saved to `docs/emails/audits/`.
 
 ### Scoring a run
@@ -143,14 +166,18 @@ Record results in the [Benchmark History](#benchmark-history) section below.
 
 ### Minimum passing thresholds
 
+All templates require a minimum 90% catch rate. Level 7 (content/tone) has a
+higher false-positive tolerance because content judgements involve interpretation.
+
 | Template level | Minimum catch rate | Max false positives |
 |---------------|-------------------|---------------------|
-| Level 1 | 100% | 3 |
+| Level 1 | 90% | 3 |
 | Level 2 | 90% | 3 |
-| Level 3 | 85% | 4 |
-| Level 4 | 80% | 4 |
-| Level 5 | 80% | 4 |
-| Level 6 | 70% | 5 |
+| Level 3 | 90% | 4 |
+| Level 4 | 90% | 4 |
+| Level 5 | 90% | 4 |
+| Level 6 | 90% | 4 |
+| Level 7 | 90% | 6 |
 
 ---
 
@@ -162,12 +189,15 @@ the previous version to confirm no regressions.
 
 ---
 
-### v1.1.0 — 2026-03-19
+### v1.2.0 — 2026-03-19
 
-> Expanded test suite to 6 templates. Added 3–4 additional violations per
-> template (total planted: 67 across 6 templates, up from 38 across 5).
-> Added MJML level-6 template. Revised pass thresholds upward.
-> Baseline scores pending — run all six templates and record below.
+> Added level-7-content.hbs — first template focused on copy quality, tone of
+> voice, and UX writing rather than rendering or structure. Redesigned level-6
+> MJML template with violations specific to MJML compilation behaviour (removed
+> generic HTML violations; added mj-button VML gap, fluid-on-mobile, double-padding,
+> mj-raw injection, mj-attributes web font, background-size compile gap).
+> All pass thresholds unified to 90%. Total planted: 76 across 7 templates.
+> Baseline scores pending — run all seven templates and record below.
 
 #### Per-template results
 
@@ -197,7 +227,7 @@ Catch rate: —/12 (—%) &nbsp; False positives: —
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
-| Preheader hidden via CSS class (not inline) | ✅ | — | — | — |
+| Preheader hidden via CSS class | ✅ | — | — | — |
 | `min-height` on `<td>` | ✅ | — | — | — |
 | No VML button | ✅ | — | — | — |
 | All Liquid vars unfiltered | ✅ | — | — | — |
@@ -231,7 +261,7 @@ Catch rate: —/11 (—%) &nbsp; False positives: —
 | Preheader missing `visibility:hidden; opacity:0` | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/11 (—%) &nbsp; False positives: — *(note: 11 mortal+venial violations though 12 total rows above — `<br><br>` spacer and wrapper lspace are venial)*
+Catch rate: —/11 (—%) &nbsp; False positives: —
 
 ---
 
@@ -244,7 +274,7 @@ Catch rate: —/11 (—%) &nbsp; False positives: — *(note: 11 mortal+venial v
 | `background-image` in inline style | ✅ | — | — | — |
 | `rgba()` with alpha on text | ✅ | — | — | — |
 | `<div>` based two-column layout | ✅ | — | — | — |
-| `line-height` without `mso-line-height-rule: exactly` on h1 | ✅ | — | — | — |
+| `line-height` without `mso-line-height-rule` on h1 | ✅ | — | — | — |
 | `background-size` in inline style | ✅ | — | — | — |
 | `{{ unsubscribe_url }}` wrong Klaviyo var + no escape | ✅ | — | — | — |
 | Preheader missing `opacity: 0; color: transparent` | ✅ | — | — | — |
@@ -277,27 +307,45 @@ Catch rate: —/11 (—%) &nbsp; False positives: —
 
 ---
 
-**level-6-mjml.mjml** — Planted: 10
+**level-6-mjml.mjml** — Planted: 9
 
 | Rule | Expected | Found | Rule ID correct | Severity correct |
 |------|----------|-------|-----------------|-----------------|
 | No `<mj-preview>` preheader | ✅ | — | — | — |
-| Relative `src` on logo and hero background | ✅ | — | — | — |
-| Empty `alt` on logo `<mj-image>` | ✅ | — | — | — |
-| `rgba()` on subheading text | ✅ | — | — | — |
-| `background-size: cover` Outlook fallback | ✅ | — | — | — |
-| Triple-stache `{{{body_content}}}` | ✅ | — | — | — |
-| No `{{#if}}` guards on any variables | ✅ | — | — | — |
-| Footer links via `css-class` only (non-inline) | ✅ | — | — | — |
-| Web font loaded with no guaranteed fallback path | ✅ | — | — | — |
-| `<mj-button>` compiles with no VML fallback | ✅ | — | — | — |
+| `<mj-button>` no VML output | ✅ | — | — | — |
+| Web font as `mj-attributes` global default | ✅ | — | — | — |
+| `background-size` ignored by Outlook despite `background-url` | ✅ | — | — | — |
+| `<mj-image>` no `fluid-on-mobile` | ✅ | — | — | — |
+| Double-padding from section + column stacking | ✅ | — | — | — |
+| `<mj-raw>` structural injection risk | ✅ | — | — | — |
+| `css-class` compiles to non-inline style block | ✅ | — | — | — |
+| No `{{#if}}` guards on any Handlebars variables | ✅ | — | — | — |
 | **False positives** | — | — | — | — |
 
-Catch rate: —/10 (—%) &nbsp; False positives: —
+Catch rate: —/9 (—%) &nbsp; False positives: —
 
 ---
 
-#### v1.1.0 Summary
+**level-7-content.hbs** — Planted: 9
+
+| Rule | Expected | Found | Rule ID correct | Severity correct |
+|------|----------|-------|-----------------|-----------------|
+| Preheader duplicates h1 heading | ✅ | — | — | — |
+| ALL CAPS heading with `!!!` | ✅ | — | — | — |
+| `Click Here` CTA — no context | ✅ | — | — | — |
+| `Dear Valued Customer` — no personalisation | ✅ | — | — | — |
+| Passive voice throughout body copy | ✅ | — | — | — |
+| Vague urgency — no specific date/time | ✅ | — | — | — |
+| Three competing CTAs, no hierarchy | ✅ | — | — | — |
+| Long legalistic unsubscribe block | ✅ | — | — | — |
+| `alt="promotional image"` — non-descriptive | ✅ | — | — | — |
+| **False positives** | — | — | — | — |
+
+Catch rate: —/9 (—%) &nbsp; False positives: —
+
+---
+
+#### v1.2.0 Summary
 
 | Template | Planted | Caught | Catch rate | False positives | Meets threshold |
 |----------|---------|--------|------------|-----------------|-----------------||
@@ -306,10 +354,19 @@ Catch rate: —/10 (—%) &nbsp; False positives: —
 | level-3-handlebars | 12 | — | —% | — | — |
 | level-4-advanced | 11 | — | —% | — | — |
 | level-5-gotchas | 11 | — | —% | — | — |
-| level-6-mjml | 10 | — | —% | — | — |
-| **Total** | **67** | **—** | **—%** | **—** | **—** |
+| level-6-mjml | 9 | — | —% | — | — |
+| level-7-content | 9 | — | —% | — | — |
+| **Total** | **75** | **—** | **—%** | **—** | **—** |
 
 ---
+
+### v1.1.0 — 2026-03-19
+
+> Expanded test suite to 6 templates. Added 3–4 additional violations per
+> template (total planted: 67 across 6 templates, up from 38 across 5).
+> Added MJML level-6 template. Revised pass thresholds upward.
+> Baseline scores not recorded before version increment — see v1.2.0 for
+> first scored run.
 
 ### v1.0.0 — 2026-03-19
 
