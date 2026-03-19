@@ -1,5 +1,5 @@
 # Email Audit — Wayflyer Brand Refresh Template
-**Date:** 2026-03-18
+**Date:** 2026-03-19
 **Skill:** email-absolution:elder
 **Stack:** SendGrid / Handlebars / Outlook 2019 + Gmail + Apple Mail
 **Template:** Brand refresh base template (example layout — copy is illustrative)
@@ -43,13 +43,53 @@ are confirmed correct:
 
 ---
 
-## Mortal Sins — Must Be Absolved Before Send (11)
+## Issues at a Glance
 
-> Placeholder copy findings excluded per note above. Structural and code violations only.
+### Mortal Sins — Must Be Absolved Before Send (11)
+
+| Rule | Location | Issue |
+|------|----------|-------|
+| HBS-002 | `<title>`, `{{#each snippets}}` | Triple-stache on `{{{subject}}}` and `{{{snippet}}}` — XSS risk |
+| HBS-001 | CTA button, footer | Critical URL variables (`{{login_link}}`, `{{{unsubscribe}}}`) have no fallback protection |
+| RENDER-003 | Header logo `<img>` | Missing `border="0"` HTML attribute — Outlook renders a blue border on linked images |
+| HTML-013 | Header logo `<img>` | Missing `height` HTML attribute — layout reflows when image is blocked |
+| RENDER-007 / ACCESS-003 | `html_block` tables, `footer_links`, `icons_block` | Inner layout tables missing `role="presentation"` |
+| ACCESS-011 | `block-7` data tables | Data tables lack `<th scope>` headers — screen readers cannot associate labels with values |
+| HTML-006 | All footer `<a>` elements | No inline `color` / `text-decoration` — Gmail strips `<style>` block link rules |
+| HTML-001 | Greeting, closing, footer `<p>` elements | Missing `margin: 0` inline — Outlook applies its own paragraph margins |
+| UX-002 / DELIV-006 | `<body>` | No preheader element — inbox preview will pull greeting and body copy |
+| ACCESS-020 | `block-6` snippets `<ul>` | Missing Outlook list margin MSO conditional |
+| HBS-008 | `block-7` data tables | Date values will need `formatDate` helper when hardcoded values become variables |
+
+### Venial Sins — Should Be Absolved (7)
+
+| Rule | Location | Issue |
+|------|----------|-------|
+| HTML-007 | Between blocks 5 and 6 | `<br><br>` used as vertical spacer |
+| RENDER-014 | CTA button | VML button structure non-canonical — `<a>` wraps both VML and non-Outlook div |
+| RENDER-024 | Outer `<tbody>` | `line-height: 24px` lacks `mso-line-height-rule: exactly` |
+| RENDER-012 | Button div | `background-color: rgba(28, 23, 25)` — use hex `#1c1719` |
+| RENDER-023 | Background cells | `bgcolor` HTML attribute absent — some Outlook builds ignore CSS `background-color` |
+| ACCESS-009 | `block-6` "Example List" heading | `<h3>` may be better as `<p><strong>` if this is a label, not a section heading |
+| ACCESS-012 | Footer wrapper | `font-size: 12px` below 14px minimum (accepted industry exception for footer legal copy) |
+
+### Counsel from the Elders (5)
+
+| Rule | Advisory |
+|------|---------|
+| RENDER-021 | Add `<meta name="x-apple-disable-message-reformatting">` — prevents iOS Mail zooming the layout |
+| HTML-017 | Add `:root { color-scheme: light; }` to `<style>` block for broader WebKit dark mode coverage |
+| RENDER-023 | Add `bgcolor="#ffffff"` on outermost `<table class="nl-container">` as backstop for ancient clients |
+| GOTCHA-018 | When real copy is written: open with the key transactional fact — Apple Intelligence surfaces it in notifications |
+| TOOL-008 | Document the SendGrid vendor lock-in decision in `.email-absolution/config.yml` |
+
+---
+
+## Mortal Sins — Detail
 
 ### [HBS-002] Triple-stache on untrusted variables — XSS risk
 
-**Location:** `<title>{{{subject}}}</title>` and `{{{snippet}}}` in list items
+**Location:** `<title>{{{subject}}}</title>` and `{{{snippet}}}` in `{{#each snippets}}`
 
 `{{{subject}}}` renders HTML-unescaped. `subject` is almost certainly a plain-text
 value — an email subject line — and must use double-stache `{{subject}}`. Triple-stache
@@ -116,8 +156,8 @@ The `html_block` data tables are a special case: if they present data (revenue d
 reference IDs), they should be `role="table"` with `<th scope>` headers — not
 `role="presentation"`.
 
-**Fix:** Add `role="presentation"` to all layout tables. Reclassify the data tables per
-the ACCESS-011 fix below.
+**Fix:** Add `role="presentation"` to all layout tables. Reclassify the data tables
+per the ACCESS-011 fix below.
 
 ---
 
@@ -140,7 +180,6 @@ values. They use `<th>` only for the caption row without a `scope` attribute, an
       <th scope="row">Revenue generated from:</th>
       <td>{{revenue_from}}</td>
     </tr>
-    ...
   </tbody>
 </table>
 ```
@@ -204,7 +243,7 @@ Insert immediately after `<body>`, before the first `<table>`.
 Outlook applies large default left margins to `<ul>` elements. The MSO conditional
 fix is absent.
 
-**Fix:** Add to `<head>` `<style>` block or before the list:
+**Fix:** Add to `<head>` `<style>` block:
 ```html
 <!--[if mso]><style>ul,ol{margin-left:20px!important;}</style><![endif]-->
 ```
@@ -223,29 +262,126 @@ raw ISO strings must not be rendered directly. Register and use a `formatDate` h
 
 ---
 
-## Venial Sins — Should Be Absolved (7)
+## Venial Sins — Detail
 
-| Rule | Finding | Fix |
-|------|---------|-----|
-| HTML-007 | `<br><br>` used as vertical spacer between blocks 5 and 6 | Replace with `<tr><td height="16" style="font-size:0;line-height:16px;">&nbsp;</td></tr>` |
-| RENDER-014 | VML button structure non-canonical — `<a>` wraps both VML and non-Outlook div | Move `href` onto `<v:roundrect href="{{login_link}}">` and isolate `<a>` inside `<!--[if !mso]><!--> ... <!--<![endif]-->` |
-| RENDER-024 | `line-height: 24px` on outer `<tbody>` lacks `mso-line-height-rule: exactly` | Add `mso-line-height-rule: exactly;` to every element with an explicit `line-height` value |
-| RENDER-012 | `background-color: rgba(28, 23, 25)` on button div | Use `background-color: #1c1719` — hex is unambiguous; VML `fillcolor="#1c1719"` already covers Outlook correctly |
-| RENDER-023 | `bgcolor` HTML attribute absent on background cells | Add `bgcolor="#ffffff"` as an HTML attribute alongside CSS `background-color` on primary cells |
-| ACCESS-009 | "Example List" heading (`<h3>`) in `block-6` may be better as `<p><strong>` | If "Example List" is a label rather than a true section heading, use `<p><strong>` to avoid diluting heading navigation |
-| ACCESS-012 | Footer text `font-size: 12px` below 14px minimum | Accepted industry exception for footer legal copy. Contrast #575355 on #fff = ~7:1 (compliant). No action required unless accessibility compliance is strict. |
+### [HTML-007] `<br><br>` spacer between sections
+
+`<br><br>` appears between the heading blocks (block-5) and the list block (block-6).
+Bare line-break elements are unreliable as spacers in Outlook.
+
+**Fix:** Replace with a dedicated spacer row:
+```html
+<tr><td height="16" style="font-size:0;line-height:16px;">&nbsp;</td></tr>
+```
 
 ---
 
-## Counsel from the Elders (5)
+### [RENDER-014] VML button structure non-canonical
 
-| Rule | Advisory |
-|------|---------|
-| RENDER-021 | Add `<meta name="x-apple-disable-message-reformatting">` to `<head>` — prevents iOS Mail zooming and rescaling the layout |
-| HTML-017 | Add `:root { color-scheme: light; }` to `<style>` block for broader WebKit dark mode coverage |
-| RENDER-023 | Add `bgcolor="#ffffff"` on the outermost `<table class="nl-container">` as a backstop for ancient clients |
-| GOTCHA-018 | When real copy is written: open with the key transactional fact as the first sentence — Apple Intelligence (iOS 18+) surfaces it in inbox notifications |
-| TOOL-008 | Document the SendGrid vendor lock-in decision in `.email-absolution/config.yml` |
+The `<a>` element wraps both the VML conditional and the non-Outlook div together.
+The canonical pattern places `href` directly on `<v:roundrect>` (making it
+independently clickable in Outlook) and isolates the `<a>` div inside
+`<!--[if !mso]><!--> ... <!--<![endif]-->`.
+
+The current structure works in practice but is non-standard and may break in some
+older Outlook builds.
+
+---
+
+### [RENDER-024] `line-height` without `mso-line-height-rule: exactly`
+
+`line-height: 24px` on the outer `<tbody>` has no `mso-line-height-rule: exactly`
+companion. Outlook adds extra leading to explicit line-height values without it.
+
+**Fix:** Add `mso-line-height-rule: exactly;` alongside every explicit `line-height`
+declaration.
+
+---
+
+### [RENDER-012] `rgba()` on button div — use hex
+
+`background-color: rgba(28, 23, 25)` on the non-Outlook button div. Although the
+VML `fillcolor="#1c1719"` covers Outlook correctly, using hex throughout is cleaner
+and avoids any edge-case `rgba()` parsing differences.
+
+**Fix:** `background-color: #1c1719`
+
+---
+
+### [RENDER-023] `bgcolor` attribute absent on background cells
+
+All background colours are set via CSS `background-color` only. Some older Outlook
+builds and webmail clients ignore CSS `background-color` but respect `bgcolor`.
+
+**Fix:** Add `bgcolor="#ffffff"` as an HTML attribute alongside `style="background-color: #fff"`
+on primary background cells and tables.
+
+---
+
+### [ACCESS-009] "Example List" `<h3>` may warrant `<p><strong>` instead
+
+The "Example List" label in `block-6` uses an `<h3>` heading. If this is a label
+for the list below rather than a true content section heading, using `<p><strong>`
+is more semantically accurate and avoids diluting the heading navigation for
+screen reader users who navigate by heading level.
+
+---
+
+### [ACCESS-012] Footer `font-size: 12px`
+
+Footer text at 12px is below the 14px body text minimum. This is an accepted
+industry exception for footer legal copy provided contrast is maintained.
+Current contrast: #575355 on #fff ≈ 7:1 — compliant. No action required unless
+strict WCAG 2.1 AA compliance is a hard requirement for footer content.
+
+---
+
+## Counsel — Detail
+
+### [RENDER-021] Add `x-apple-disable-message-reformatting` meta
+
+```html
+<meta name="x-apple-disable-message-reformatting">
+```
+Prevents iOS Mail from detecting the email as "too narrow" and zooming or
+reformatting the layout. Apple Mail is a declared rendering target.
+
+---
+
+### [HTML-017] Add `color-scheme` CSS declaration
+
+```css
+:root { color-scheme: light; }
+```
+Add to the `<style>` block alongside the existing `<meta name="color-scheme">`
+tags for broader WebKit client coverage.
+
+---
+
+### [RENDER-023] `bgcolor` on outermost table
+
+```html
+<table class="nl-container" ... bgcolor="transparent">
+```
+A `bgcolor` backstop on the outermost wrapper ensures the background intent
+survives in ancient clients that ignore all CSS.
+
+---
+
+### [GOTCHA-018] Open with the key transactional fact
+
+Apple Intelligence (iOS 18+) surfaces the first body sentence in inbox
+notifications in place of preheader text. When real copy is written, ensure the
+first substantive sentence is the key action or fact — e.g.
+"Your application for funding requires your attention." — not a greeting.
+
+---
+
+### [TOOL-008] Document the SendGrid vendor lock-in decision
+
+SendGrid Dynamic Templates create meaningful vendor lock-in. Document the
+trade-off and rationale in `.email-absolution/config.yml` or an architecture
+decision record so future maintainers understand the constraint.
 
 ---
 
@@ -260,9 +396,8 @@ raw ISO strings must not be rendered directly. Register and use a `formatDate` h
 
 The template has strong structural foundations — MSO setup, VML button, absolute
 HTTPS URLs, role attributes on most tables, unsubscribe conditional, and a solid CSS
-reset stack. The violations are concentrated in four areas: Handlebars safety (HBS-002
-triple-stache, HBS-001 missing fallbacks), inline style completeness (border on img,
-margin on p, color/text-decoration on footer links), preheader absence, and the
-data table accessibility pattern.
-
-None of the mortal sins require structural rework. All are targeted, isolated fixes.
+reset stack. The violations concentrate in four areas: Handlebars safety (triple-stache
+and missing URL guards), inline style completeness (border on img, margin on p,
+color/text-decoration on footer links), preheader absence, and the data table
+accessibility pattern. None of the mortal sins require structural rework — all are
+targeted, isolated fixes.
