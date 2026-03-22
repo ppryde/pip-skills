@@ -54,7 +54,7 @@ This is intentionally shallow — discovery mode does not read file contents.
 
 Read detection signatures from each available doctrine — do not use a hardcoded list:
 
-1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/covenant/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
 2. For each doctrine file, read **only** its `## Detection Signatures` section
 3. Score each doctrine against the directory scan from Step D1:
    - **Strong match** — 1+ file signal OR 3+ directory signals found
@@ -161,7 +161,7 @@ After writing, inform the user:
 
 Do not rely on a hardcoded or memorised list of patterns. Load the available doctrine set dynamically:
 
-1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/covenant/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
 2. For each doctrine file, read its `## When to Use` section to understand the fit criteria and scope boundaries
 3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning, and discovery scoring
 

@@ -1,6 +1,6 @@
 {
   "name": "puritan",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Architectural doctrine enforcement through composable lenses. Covenant, Inquisition, and Scriptorium.",
   "author": {
     "name": "Pip",
