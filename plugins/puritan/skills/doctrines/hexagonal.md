@@ -110,6 +110,8 @@ This doctrine pairs well with:
 - **testing.md** — Validates that the "Inside" is tested purely with mocks/fakes.
 - **resilience.md** — Handles failures in Driven Adapters (Retries, Circuit Breakers).
 - **logging.md** — Standardizes how "Inside" events are captured without violating purity.
+- **strategy.md** — Concrete Driven Adapters implementing the same port interface are a Strategy application; strategy.md governs their internal structure and wiring.
+- **repository.md** — Repository interfaces are Driven Ports; concrete implementations are Adapters. HEX-010 (ports as interfaces) and REP-002 (interface in domain layer) are complementary rules enforcing the same boundary.
 
 ## Sources and Authority
 

@@ -143,6 +143,7 @@ Primary targets (mapped via `.architecture/config.yml`):
 - **backend-for-frontend.md** — Ensuring the UI remains responsive even when the backend is struggling.
 - **messaging.md** — Asynchronous communication as a primary resilience strategy.
 - **layered-n-tier.md** — Protecting the domain logic from slow database drivers.
+- **strategy.md** — Circuit breaker and retry policies are frequently implemented as strategies; strategy.md governs the interface design and wiring that makes those policies swappable.
 
 ## Sources and Authority
 

@@ -135,6 +135,7 @@ This doctrine pairs well with:
 - **microservices.md** — when scalability or independent deployment requires breaking the monolith
 - **cqrs.md** — when read and write workloads diverge significantly and need separate optimisation paths
 - **resilience.md** — cross-cutting concerns like retries and circuit breakers apply at the boundary between presentation and business layers
+- **repository.md** — formalises the persistence layer boundary; LNT-009 (no business logic in persistence) and REP-020 express the same invariant from complementary angles
 
 ## Sources and Authority
 

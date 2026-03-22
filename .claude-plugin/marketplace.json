@@ -11,7 +11,7 @@
       "source": "./plugins/puritan",
       "description": "Architectural doctrine enforcement through composable lenses. Covenant for planning, Inquisition for auditing, Scriptorium for writing new doctrine.",
       "category": "engineering",
-      "tags": ["architecture", "ddd", "cqrs", "event-sourcing", "audit", "lenses"]
+      "tags": ["architecture", "audit", "lenses", "ddd", "cqrs", "event-sourcing", "hexagonal", "layered-architecture", "messaging", "microservices", "modular-monolith", "resilience", "saga", "repository", "strategy", "backend-for-frontend"]
     },
     {
       "name": "tribunal",
