@@ -19,21 +19,17 @@ chosen.
 
 ## Doctrines Loaded
 
-The Scribe loads 6 doctrines — a focused set for generation.
-Content and UX rules are advisory; the Scribe follows them but does not
-load `content-ux.md` as a blocking constraint.
-Tooling configuration is the caller's concern, not the template's.
+Load dynamically — do not hardcode the list:
 
-| Doctrine File | Loaded |
-|---|---|
-| `rendering.md` | Yes |
-| `html-css.md` | Yes |
-| `accessibility.md` | Yes |
-| `deliverability.md` | Yes |
-| `gotchas.md` | Yes |
-| `[stack.templating].md` | Yes |
-| `content-ux.md` | No — advisory only |
-| `tooling.md` | No — caller's pipeline concern |
+1. List all `*.md` files in `<plugin-root>/doctrines/` — this SKILL.md lives at `<plugin-root>/skills/scribe/SKILL.md`, so the doctrines directory is two levels up from here
+2. Separate into **per-language doctrines** (filenames matching: `liquid`, `handlebars`, `mjml`, `react-email`, `maizzle`) and **core doctrines** (everything else)
+3. Load all core doctrines **except** two intentional exclusions:
+   - `content-ux.md` — advisory only for generation; the Scribe follows these rules but they are not blocking constraints
+   - `tooling.md` — pipeline/tooling configuration is the caller's concern, not the template's
+4. Load the per-language doctrine matching `stack.templating` from config; skip gracefully if none matches
+5. Any other core doctrine found in the directory is loaded as a blocking constraint
+
+This ensures new doctrines added to the plugin are included automatically. Only `content-ux.md` and `tooling.md` remain intentionally non-blocking for generation purposes.
 
 ## When NOT to Use
 

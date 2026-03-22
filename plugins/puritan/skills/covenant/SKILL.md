@@ -155,6 +155,18 @@ After writing, inform the user:
 | Front-loading all complexity into Phase 1 | Each phase should introduce at most one new pattern — build foundations first |
 | Ignoring operational maturity | A team at DevOps Level 2 cannot operate Event Sourcing + CQRS + microservices simultaneously |
 
+## Step 0: Load Available Doctrines
+
+**Always run this before any other step — planning mode and discovery mode both.**
+
+Do not rely on a hardcoded or memorised list of patterns. Load the available doctrine set dynamically:
+
+1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+2. For each doctrine file, read its `## When to Use` section to understand the fit criteria and scope boundaries
+3. Use this list — and only this list — as the candidate patterns for recommendation, roadmap planning, and discovery scoring
+
+This ensures new doctrines automatically participate in planning with no changes to this skill. If the doctrines directory is empty or unreadable, warn the user and proceed with built-in knowledge as a fallback only.
+
 ## Workflow
 
 ### Step 1: Gather Requirements

@@ -50,18 +50,15 @@ If absent, offer to scaffold. See the `email-absolution:elder` skill, Step 1, fo
 
 ### Step 2: Load Doctrines
 
-Same 8 doctrines as the Elder — no reduction in scope:
+Same doctrine set as the Elder — full scope, no reduction. Load dynamically:
 
-| Doctrine File | Loaded |
-|---|---|
-| `rendering.md` | Yes |
-| `html-css.md` | Yes |
-| `content-ux.md` | Yes |
-| `accessibility.md` | Yes |
-| `deliverability.md` | Yes |
-| `gotchas.md` | Yes |
-| `tooling.md` | Yes |
-| `[stack.templating].md` | Yes |
+1. List all `*.md` files in `<plugin-root>/doctrines/` — this SKILL.md lives at `<plugin-root>/skills/visitation/SKILL.md`, so the doctrines directory is two levels up from here
+2. Separate into **per-language doctrines** (filenames matching: `liquid`, `handlebars`, `mjml`, `react-email`, `maizzle`) and **core doctrines** (everything else)
+3. Load all core doctrines
+4. Load the per-language doctrine matching `stack.templating` from config; skip gracefully if none matches
+5. Warn if any file is missing — continue with available doctrines
+
+New doctrines added to the plugin are automatically included with no changes to this skill.
 
 ### Step 3: Determine Scope
 
