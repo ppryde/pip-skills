@@ -6,5 +6,5 @@
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
   },
-  "keywords": ["architecture", "audit", "doctrine", "lenses", "ddd", "cqrs", "event-sourcing", "hexagonal", "layered-architecture", "messaging", "microservices", "modular-monolith", "resilience", "saga", "repository", "strategy", "backend-for-frontend"]
+  "keywords": ["architecture", "audit", "doctrine", "lenses", "ddd", "cqrs", "event-sourcing", "hexagonal", "layered-n-tier", "messaging", "microservices", "modular-monolith", "resilience", "saga", "repository", "strategy", "backend-for-frontend"]
 }

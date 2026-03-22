@@ -31,7 +31,7 @@ Use the Repository pattern in any system with a meaningful separation between bu
 | In-memory fakes make unit tests fast and independent | Risk of generic "grab-bag" repository accumulating every possible query ([Stemmler, 2019](https://khalilstemmler.com/articles/typescript-domain-driven-design/repository-dto-mapper/)) |
 | Single authoritative path to each aggregate prevents scattered ORM calls | Teams unfamiliar with the pattern mistake it for a DAO and add update/delete mutations directly ([Percival & Gregory, 2020](https://www.cosmicpython.com/book/chapter_02_repository.html)) |
 | Enables storage technology swap without touching service code | Thin pass-through repositories add indirection with no real benefit (Fowler's Sinkhole Anti-pattern) |
-| Makes transaction scope explicit — the repository is not responsible for commits | N+1 query risks increase if repositories load eagerly and callers are unaware |
+| Makes transaction scope explicit — the repository is not responsible for commits | N+1 query risks increase if repositories rely on lazily loaded relationships and callers trigger per-row navigation without explicit eager-loading |
 | Query logic is consolidated — one place to fix a slow query | ORM change-tracking can conflict with repository semantics if not handled carefully |
 
 ## Applicable Directories
@@ -165,7 +165,7 @@ This doctrine pairs well with:
 - [Khalil Stemmler — Repository, DTO, and Mapper (2019)](https://khalilstemmler.com/articles/typescript-domain-driven-design/repository-dto-mapper/) — Practitioner guidance on interface-first design, domain-language method naming, mapper responsibilities, and the risk of generic repositories accumulating unbounded query methods.
 
 **Anti-Patterns / Failure Cases:**
-- [Harry Percival & Bob Gregory — Unit of Work chapter (Cosmic Python, 2020)](https://www.cosmicpython.com/book/chapter_06_uow.html) — Documents the failure mode of passing ORM session objects through the call stack, breaking persistence ignorance and making unit tests impossible without a live database. Establishes explicit commit as a design requirement. The pathology: when `Session` leaks into services, every unit test needs a live database, and the repository layer becomes a performance.
+- [Harry Percival & Bob Gregory — Unit of Work chapter (Cosmic Python, 2020)](https://www.cosmicpython.com/book/chapter_06_uow.html) — Documents the failure mode of passing ORM session objects through the call stack, breaking persistence ignorance and making unit tests impossible without a live database. Establishes explicit commit as a design requirement. The pathology: when `Session` leaks into services, every unit test needs a live database, and the repository layer becomes a performance bottleneck.
 - Khalil Stemmler — Tackling complexity in TypeScript (2019) — Identifies the "generic grab-bag repository" anti-pattern: teams that implement a single generic `Repository<T>` with `getAll()`, `update()`, `delete()` methods for every entity type end up rebuilding a DAO with extra steps. The encapsulation benefit dissolves — every caller still needs to know which fields to filter on and the repository accumulates unbounded query permutations until it becomes unmaintainable.
 
 ## Detection Signatures
