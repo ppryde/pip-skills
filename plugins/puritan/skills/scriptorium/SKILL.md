@@ -52,7 +52,7 @@ Minimum required sources:
 
 Before writing, read what already exists:
 
-1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/scriptorium/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
 2. Note which ID prefixes and ranges are already claimed
 3. Identify cross-reference opportunities — new doctrines should link to related existing ones
 4. Check for overlap — if an existing doctrine already covers your pattern, update it instead
@@ -257,9 +257,9 @@ New doctrines must claim a unique 3-letter prefix and a numeric range block (e.g
 ## Output Specification
 
 The skill produces a complete doctrine file at:
-`${CLAUDE_SKILL_DIR}/../doctrines/<pattern-name>.md`
+`<plugin-root>/skills/doctrines/<pattern-name>.md`
 
-Use `${CLAUDE_SKILL_DIR}/../doctrines/_template.md` as the structural reference.
+Use `<plugin-root>/skills/doctrines/_template.md` as the structural reference.
 Every doctrine MUST contain these sections in order:
 
 ```
@@ -329,7 +329,7 @@ Each row in the catalog is a contract with Inquisition. The columns mean:
 
 After writing a doctrine, verify it works with the ecosystem:
 
-- [ ] File is at `${CLAUDE_SKILL_DIR}/../doctrines/<pattern-name>.md`
+- [ ] File is at `<plugin-root>/skills/doctrines/<pattern-name>.md`
 - [ ] ID prefix is unique (not in the convention table already)
 - [ ] Add the new prefix and range to the Violation ID Convention table in this skill
 - [ ] User's `.architecture/config.yml` updated with new doctrine entry (see Inquisition SKILL.md Step 1 for config format)

@@ -12,7 +12,7 @@ helping maintain consistency and catch violations early.
 
 Before running an audit:
 1. `.architecture/config.yml` must exist with doctrine configuration, if it doesn't guide user through creating one
-2. Doctrine files must be present in `${CLAUDE_SKILL_DIR}/../doctrines/`
+2. Doctrine files must be present in `<plugin-root>/skills/doctrines/` — this SKILL.md lives at `<plugin-root>/skills/inquisition/SKILL.md`, so doctrines are the `doctrines/` sibling within the same `skills/` directory
 3. For changed-files mode: git repository with identifiable base branch
 
 ## Mode Detection
@@ -99,7 +99,7 @@ overrides:
 ### Step 2: Discover Doctrines
 
 For each doctrine in config:
-1. Check if `${CLAUDE_SKILL_DIR}/../doctrines/<name>.md` exists
+1. Check if `<plugin-root>/skills/doctrines/<name>.md` exists
 2. Parse doctrine file for violation catalog
 3. Validate doctrine structure (all required sections)
 4. Warn if doctrine missing but continue with others
@@ -331,7 +331,7 @@ jobs:
 
 Do not use a hardcoded list. Discover available doctrines dynamically at runtime:
 
-1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+1. List all `*.md` files in `<plugin-root>/skills/doctrines/`, **excluding any file whose basename starts with `_`** (e.g. `_template.md`) — this SKILL.md lives at `<plugin-root>/skills/inquisition/SKILL.md`, so the doctrines directory is the `doctrines/` sibling within the same `skills/` directory
 2. Each `.md` file is an available doctrine — its filename without extension is the doctrine name
 3. Present the full dynamic list when the user asks what doctrines are available
 4. If a doctrine is configured in `.architecture/config.yml` but its file is missing, warn and continue with what is available
@@ -391,7 +391,7 @@ Warning: Could not parse 3 files:
 
 ### Adding a New Doctrine
 1. Create doctrine file via Scriptorium: `/puritan:scriptorium`
-2. Doctrine is written to `${CLAUDE_SKILL_DIR}/../doctrines/<name>.md`
+2. Doctrine is written to `<plugin-root>/skills/doctrines/<name>.md`
 3. Add to `.architecture/config.yml`
 4. Run `/puritan:inquisition <name>` to test
 
