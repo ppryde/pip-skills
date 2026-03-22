@@ -86,30 +86,17 @@ If the user agrees, scaffold the config interactively. If they decline, show the
 
 ### Step 2: Load Doctrines
 
-Load these 8 doctrine files from the plugin's `doctrines/` directory.
-This SKILL.md lives at `<plugin-root>/skills/elder/SKILL.md` —
-the doctrines directory is at `<plugin-root>/doctrines/`:
+Do not use a hardcoded list. Discover available doctrines dynamically:
 
-| Doctrine File | Always Loaded |
-|---|---|
-| `rendering.md` | Yes |
-| `html-css.md` | Yes |
-| `content-ux.md` | Yes |
-| `accessibility.md` | Yes |
-| `deliverability.md` | Yes |
-| `gotchas.md` | Yes |
-| `tooling.md` | Yes |
-| `[stack.templating].md` | Yes — determined by config |
+1. List all `*.md` files in `<plugin-root>/doctrines/` — this SKILL.md lives at `<plugin-root>/skills/elder/SKILL.md`, so the doctrines directory is two levels up from here
+2. Separate the results into two groups:
+   - **Per-language doctrines** — files whose basename matches a known templating slug: `liquid`, `handlebars`, `mjml`, `react-email`, `maizzle`
+   - **Core doctrines** — all other `.md` files in the directory
+3. Load all core doctrines
+4. Load the per-language doctrine matching `stack.templating` from config (if one exists); skip gracefully if `stack.templating` is `html` or has no matching file
+5. Warn if the `doctrines/` directory is empty or unreadable — continue with what is available
 
-`[stack.templating].md` maps as:
-- `liquid` → `liquid.md`
-- `handlebars` → `handlebars.md`
-- `mjml` → `mjml.md`
-- `react-email` → `react-email.md`
-- `maizzle` → `maizzle.md`
-- `html` → no per-language doctrine (skip gracefully)
-
-Warn if any doctrine file is missing — continue with available doctrines.
+This ensures new doctrines added to the plugin are automatically included in every audit with no changes to this skill.
 
 ### Step 3: Determine Scope
 
