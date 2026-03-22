@@ -146,6 +146,7 @@ This doctrine pairs well with:
 - **saga.md** — distributed transaction patterns (if separate)
 - **resilience.md** — circuit breakers, retries, timeouts
 - **monitoring.md** — metrics, tracing, alerting for async systems
+- **strategy.md** — background job runners (inline vs. queued) are strategies over messaging infrastructure; strategy.md governs the interface design and wiring of those runner implementations.
 
 ## Sources and Authority
 
