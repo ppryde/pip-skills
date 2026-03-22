@@ -1,6 +1,6 @@
 ---
 name: inquisition
-description: Use when auditing a codebase against architectural doctrine for DDD, CQRS, Event Sourcing, Hexagonal, Microservices, or other pattern violations. Triggers on "audit my code", "check architecture", "run doctrines", "review system design", "check pattern compliance".
+description: Use when auditing a codebase against architectural doctrine. Triggers on "audit my code", "check architecture", "run doctrines", "review system design", "check pattern compliance".
 ---
 
 # Inquisition — Code Audit
@@ -329,13 +329,14 @@ jobs:
 
 ## Available Doctrines
 
-| Doctrine | Focus | Violations | Severity Range |
-|---|---|---|---|
-| ddd | Domain-Driven Design patterns | 42 | Layer boundaries, aggregates, value objects |
-| event-sourcing | Event store implementation | 47 | Immutability, replay, snapshots |
-| cqrs | Command/Query separation | 35 | Read/write isolation, consistency |
-| messaging | Async communication | 64 | Delivery guarantees, idempotency |
-| saga | Distributed transactions | 65 | Compensation, isolation, state |
+Do not use a hardcoded list. Discover available doctrines dynamically at runtime:
+
+1. List files in `${CLAUDE_SKILL_DIR}/../doctrines/` (skip `_template.md`)
+2. Each `.md` file is an available doctrine — its filename without extension is the doctrine name
+3. Present the full dynamic list when the user asks what doctrines are available
+4. If a doctrine is configured in `.architecture/config.yml` but its file is missing, warn and continue with what is available
+
+This ensures new doctrines automatically participate in audits with no changes to this skill.
 
 ## Error Handling
 
