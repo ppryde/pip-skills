@@ -8,83 +8,83 @@ Guards against HTML patterns that exclude users with visual, motor, or cognitive
 
 ---
 
-**[ACCESS-001]** `mortal` — All `<img>` elements must have an `alt` attribute.
+**[ACCESS-001]** `transactional: mortal | marketing: mortal` — All `<img>` elements must have an `alt` attribute.
 > Screen readers announce the filename when `alt` is absent ("one-pixel-spacer-dot-gif"). Omitting `alt` entirely is never correct. Decorative images use `alt=""`. Informative images use descriptive text. Source: WCAG 2.1 SC 1.1.1 — Non-text Content (Level A).
 > `detect: regex` — pattern: `<img(?![^>]*\balt=)[^>]*>`
 
-**[ACCESS-002]** `mortal` — Decorative images must use `alt=""` (empty string, not omitted, not a space).
+**[ACCESS-002]** `transactional: mortal | marketing: mortal` — Decorative images must use `alt=""` (empty string, not omitted, not a space).
 > `alt=" "` (a space) is not treated as empty by all screen readers — some announce it as an unlabelled image or pause. `alt` omitted causes filename announcement. Empty string `alt=""` is the correct signal for decorative content. Source: WebAIM "Alternative Text"; WCAG 2.1 SC 1.1.1.
 > `detect: regex` — pattern: `<img[^>]*\balt=["']\s+["'][^>]*>` (alt with only whitespace)
 
-**[ACCESS-003]** `mortal` — All layout `<table>` elements must have `role="presentation"`.
+**[ACCESS-003]** `transactional: mortal | marketing: mortal` — All layout `<table>` elements must have `role="presentation"`.
 > Without `role="presentation"`, screen readers announce table structure ("table, 3 columns, 5 rows") for every visual layout table, creating noise that obscures actual content. Layout tables must be marked as presentational. Source: WCAG 2.1 SC 1.3.1 — Info and Relationships (Level A); caniemail.com/features/html-role/ (~73% support).
 > `detect: regex` — pattern: `<table(?![^>]*\brole=)[^>]*>`
 
-**[ACCESS-004]** `mortal` — `<html>` element must have `lang` attribute set to the primary language of the email.
+**[ACCESS-004]** `transactional: mortal | marketing: mortal` — `<html>` element must have `lang` attribute set to the primary language of the email.
 > Screen readers use the `lang` attribute to select the correct pronunciation engine and language rules. Without it, JAWS and NVDA fall back to the system default, mispronouncing non-English content. Source: WCAG 2.1 SC 3.1.1 — Language of Page (Level A).
 > `detect: regex` — pattern: `<html(?![^>]*\blang=)[^>]*>`
 
-**[ACCESS-005]** `mortal` — Body text must meet WCAG 2.1 AA contrast ratio of 4.5:1 against its background.
+**[ACCESS-005]** `transactional: mortal | marketing: mortal` — Body text must meet WCAG 2.1 AA contrast ratio of 4.5:1 against its background.
 > Users with low vision or colour vision deficiency cannot read insufficient-contrast text. The WCAG 2.1 AA minimum is 4.5:1 for normal text (under 18px regular or 14px bold). Common failure: `#999999` on white is only 2.9:1 — use `#767676` as the minimum grey on white. Source: WCAG 2.1 SC 1.4.3 — Contrast (Minimum, Level AA).
 > `detect: contextual` — verify text colour/background colour combinations against 4.5:1 threshold
 
-**[ACCESS-006]** `mortal` — CTA buttons and interactive elements must meet 3:1 contrast ratio against adjacent colours.
+**[ACCESS-006]** `transactional: mortal | marketing: mortal` — CTA buttons and interactive elements must meet 3:1 contrast ratio against adjacent colours.
 > UI component contrast (buttons, links as distinct from body) requires a minimum 3:1 ratio between the component and adjacent colours per WCAG 2.1. A blue button (`#0066cc`) on white achieves 4.6:1 — compliant. Source: WCAG 2.1 SC 1.4.11 — Non-text Contrast (Level AA).
 > `detect: contextual` — check button background vs surrounding background colour ratio
 
-**[ACCESS-007]** `mortal` — Link text must be descriptive without relying on surrounding context.
+**[ACCESS-007]** `transactional: mortal | marketing: mortal` — Link text must be descriptive without relying on surrounding context.
 > "Click here", "read more", and "learn more" are meaningless when a screen reader announces them in isolation (e.g. via link list navigation). Use descriptive text: "Track your order", "Download invoice", "Confirm your email". Source: WCAG 2.1 SC 2.4.6 — Headings and Labels (Level AA); WebAIM "Links and Hypertext".
 > `detect: regex` — pattern (case insensitive): `<a\b[^>]*>\s*(?:click here|read more|learn more|view more|see more|here|click)\s*</a>`
 
-**[ACCESS-008]** `mortal` — Email must have a meaningful `<title>` element in `<head>`.
+**[ACCESS-008]** `transactional: mortal | marketing: mortal` — Email must have a meaningful `<title>` element in `<head>`.
 > Screen readers announce the `<title>` when the email is opened. An absent or generic `<title>` (e.g. "Email") provides no context. Use the email subject or a descriptive title: "Order #12345 Confirmed — Acme". Source: WCAG 2.1 SC 2.4.2 — Page Titled (Level A).
 > `detect: regex` — pattern: `<title\s*>(\s*|email\s*|untitled\s*)</title>` (absent or generic title)
 
-**[ACCESS-009]** `venial` — Heading hierarchy must be logical: one `<h1>`, followed by `<h2>`, `<h3>` with no skipped levels.
+**[ACCESS-009]** `transactional: venial | marketing: venial` — Heading hierarchy must be logical: one `<h1>`, followed by `<h2>`, `<h3>` with no skipped levels.
 > Screen reader users navigate by headings. A heading structure that jumps from `<h1>` to `<h3>` or uses headings purely for visual sizing disrupts this navigation pattern. Every email should have exactly one `<h1>`. Source: WCAG 2.1 SC 1.3.1 — Info and Relationships.
 > `detect: contextual` — check heading sequence for skipped levels and multiple h1 elements
 
-**[ACCESS-010]** `venial` — Lists must use semantic `<ul>` or `<ol>` markup — not manually formatted with bullets or numbers in `<p>` tags.
+**[ACCESS-010]** `transactional: venial | marketing: venial` — Lists must use semantic `<ul>` or `<ol>` markup — not manually formatted with bullets or numbers in `<p>` tags.
 > Screen readers announce "list, 3 items" for `<ul>`, giving structural context. A visually identical list created with `<p>• Item one</p>` receives no structural announcement. Outlook 2007–2019 adds unwanted margins to `<ul>`/`<ol>` — correct with MSO styles rather than removing semantic markup. Source: WCAG 2.1 SC 1.3.1.
 > `detect: regex` — patterns: `<p[^>]*>\s*[•\*\-–▸▪►]\s` (symbol bullet); `<p[^>]*>\s*\d+[.)]\s` (numbered list in paragraph)
 
-**[ACCESS-011]** `venial` — Data tables (order summaries, line items) must use `<th scope="col">` or `<th scope="row">` for header cells.
+**[ACCESS-011]** `transactional: venial | marketing: venial` — Data tables (order summaries, line items) must use `<th scope="col">` or `<th scope="row">` for header cells.
 > Without scope attributes, screen readers cannot associate data cells with their headers, making order summaries and pricing tables inaccessible. Layout tables use `role="presentation"` (ACCESS-003); data tables use `<th>` with `scope`. Source: WCAG 2.1 SC 1.3.1; WebAIM "Tables".
 > `detect: contextual` — check if tables containing price/item/quantity data have `<th>` with scope attributes
 
-**[ACCESS-012]** `venial` — Minimum font size for body text is 14px. 16px is preferred.
+**[ACCESS-012]** `transactional: venial | marketing: venial` — Minimum font size for body text is 14px. 16px is preferred.
 > iOS Mail auto-inflates fonts below 13px, potentially breaking layouts. Users with low vision rely on adequate base font sizes. `pt` units render inconsistently across email clients — use `px` exclusively. Source: Email on Acid "Mobile Email Rendering" (2022); WCAG 2.1 SC 1.4.4 — Resize Text.
 > `detect: regex` — pattern: `font-size\s*:\s*([0-9]+)px` (flag values below 14, excluding footer/legal text)
 
-**[ACCESS-013]** `venial` — Body text must have `line-height` of at least 1.4 (1.5 preferred).
+**[ACCESS-013]** `transactional: venial | marketing: venial` — Body text must have `line-height` of at least 1.4 (1.5 preferred).
 > WCAG 2.1 SC 1.4.12 (Text Spacing, Level AA) specifies that content must remain accessible when line height is set to 1.5× font size. Compact line spacing reduces readability for users with dyslexia, cognitive disabilities, and low vision. Source: WCAG 2.1 SC 1.4.12 — Text Spacing (Level AA).
 > `detect: contextual` — check line-height on primary body text paragraphs
 
-**[ACCESS-014]** `venial` — Tap targets must be at least 44×44px.
+**[ACCESS-014]** `transactional: venial | marketing: venial` — Tap targets must be at least 44×44px.
 > Apple Human Interface Guidelines require 44×44px tap targets on iOS. Google Material Design specifies 48×48dp. Email buttons must have sufficient padding on the `<a>` element to meet this size. A CTA with `line-height: 44px` and horizontal padding creates the correct target. Source: Apple HIG; Google Material Design.
 > `detect: contextual` — check button `<a>` or `<td>` computed height from line-height and padding
 
-**[ACCESS-015]** `venial` — Colour must not be the sole means of conveying information.
+**[ACCESS-015]** `transactional: venial | marketing: venial` — Colour must not be the sole means of conveying information.
 > Users with colour vision deficiency cannot distinguish colour-only signals. Red error text must have an icon or label. Status indicators (active/paused) need text labels, not just colour differences. Link text must be distinguishable from body text via underline or weight, not colour alone. Source: WCAG 2.1 SC 1.4.1 — Use of Colour (Level A).
 > `detect: contextual` — check if error states, status badges, and links are distinguishable without colour
 
-**[ACCESS-016]** `venial` — `aria-label` on links and buttons must provide meaningful context in supporting clients.
+**[ACCESS-016]** `transactional: venial | marketing: venial` — `aria-label` on links and buttons must provide meaningful context in supporting clients.
 > `aria-label` overrides the accessible name of an element for screen readers in ~58% of clients. However, Outlook 2007–2019 strips `aria-label` entirely. Visible link text must always be descriptive without relying solely on `aria-label` — it is an enhancement layer, not the primary accessibility mechanism. Source: caniemail.com/features/html-aria-label/ (~58.5% support).
 > `detect: contextual` — check if any links rely solely on `aria-label` for their accessible name with no visible descriptive text
 
-**[ACCESS-017]** `venial` — Do not use `aria-describedby` or `aria-labelledby` as the primary accessibility mechanism for Gmail, Outlook.com, or Fastmail audiences.
+**[ACCESS-017]** `transactional: venial | marketing: venial` — Do not use `aria-describedby` or `aria-labelledby` as the primary accessibility mechanism for Gmail, Outlook.com, or Fastmail audiences.
 > Gmail, Fastmail, and Outlook.com prefix element `id` values but do not update `aria-describedby`/`aria-labelledby` references, breaking the reference silently. Outlook 2007–2019 strips `id` attributes entirely. Use `aria-label` directly instead of reference-based ARIA where broad client support is needed. Source: caniemail.com/features/html-aria-describedby/ (~41% support).
 > `detect: regex` — pattern: `aria-(?:describedby|labelledby)=`
 
-**[ACCESS-018]** `counsel` — Plain-text MIME version must be a complete, coherent rendering of the HTML content.
+**[ACCESS-018]** `transactional: counsel | marketing: counsel` — Plain-text MIME version must be a complete, coherent rendering of the HTML content.
 > Screen reader users and accessibility tools on corporate mail gateways sometimes default to plain text. A stub ("View this in HTML") fails these users. CAN-SPAM also requires that required content (physical address, opt-out) appears in plain text. Source: WCAG 2.1; CAN-SPAM Act.
 > `detect: contextual` — check if email config indicates plain-text version is present and complete
 
-**[ACCESS-019]** `counsel` — Linked images alongside visible text should use `alt=""` to prevent double-announcing.
+**[ACCESS-019]** `transactional: counsel | marketing: counsel` — Linked images alongside visible text should use `alt=""` to prevent double-announcing.
 > When an image is linked alongside visible text (e.g. a logo beside the company name), screen readers will announce both the alt text and the visible text. Use `alt=""` on the image when visible text already provides the link's context. Source: WCAG 2.1 SC 1.1.1; WebAIM "Alternative Text".
 > `detect: contextual` — check for linked images with non-empty alt that appear adjacent to link text conveying the same information
 
-**[ACCESS-020]** `counsel` — Outlook 2007–2019 list margin fix should be included when `<ul>` or `<ol>` is present.
+**[ACCESS-020]** `transactional: counsel | marketing: counsel` — Outlook 2007–2019 list margin fix should be included when `<ul>` or `<ol>` is present.
 > Outlook adds large unwanted margins to lists. The MSO-specific conditional comment fix prevents lists from appearing indented off-screen in some Outlook configurations. Source: standard Outlook pattern.
 > `detect: regex` — pattern: `<[uo]l(?![^>]*mso)[^>]*>` (check if MSO list margin fix is present elsewhere in template)
 

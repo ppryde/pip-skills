@@ -10,6 +10,11 @@ examined against all doctrines: rendering safety, HTML and CSS discipline,
 content and UX covenant, accessibility law, deliverability law, and the
 grimoire of known afflictions. No heresy escapes the Elder's eye.
 
+## Tool Discipline
+
+Use dedicated tools throughout — not Bash equivalents:
+- Read files → `Read` tool | Find files → `Glob` tool | Search content → `Grep` tool
+
 ## Prerequisites
 
 Before the Inquisition begins:
@@ -61,6 +66,7 @@ Read `.email-absolution/config.yml`:
 stack:
   esp: klaviyo            # klaviyo | sendgrid | postmark | mailchimp | resend | custom
   templating: liquid      # liquid | handlebars | mjml | react-email | maizzle | html
+  email_type: marketing   # marketing | transactional (default: marketing)
   rendering_targets:
     - outlook-2019        # outlook-2019 | outlook-new | gmail | apple-mail | yahoo
     - gmail
@@ -83,6 +89,10 @@ If `.email-absolution/config.yml` is not found:
 > Shall I scaffold one? I will ask a few questions about your ESP, templating stack, and email directory paths — then the Inquisition may begin in earnest."
 
 If the user agrees, scaffold the config interactively. If they decline, show the template above.
+
+If `stack.email_type` is missing or empty, ask the caller to choose `transactional`
+or `marketing`. If they decline or are unsure, default to `marketing` and state the
+assumption in the verdict.
 
 ### Step 2: Load Doctrines
 
@@ -135,6 +145,7 @@ Before auditing, note which rules are conditionally active based on config:
 - Rules marked `stack.esp == "postmark"` — active only for postmark (e.g. HBS-004 Mustache)
 - `rendering_targets` governs which Outlook/Gmail/Apple Mail rules fire
 - Disable per-language rules that don't match `stack.templating`
+- Use the severity track that matches `stack.email_type`
 
 ### Step 4b: Build Rule Checklist
 
@@ -144,10 +155,12 @@ audit work begins. This must happen before touching any template file.
 For each doctrine, scan for entries matching `**[RULE-ID]**` and extract:
 - **Regex rules** — rule ID + pattern(s) from the `detect: regex` line
 - **Contextual rules** — rule ID + detection instruction from the `detect: contextual` line
+- **Hybrid rules** — rule ID + regex pattern(s) + contextual instruction from the `detect: hybrid` line; these appear in **both** the regex checklist (Phase 1) and the contextual checklist (Phase 2)
+- **Severity** — each rule header contains a token of the form `` `transactional: <level> | marketing: <level>` ``; extract the level matching `stack.email_type` and record it as the rule's active severity
 
-Apply Step 4 config-conditional filters to both lists. Remove rules whose
+Apply Step 4 config-conditional filters to all three lists. Remove rules whose
 condition doesn't match config (wrong ESP, wrong templating stack, wrong
-rendering targets). The result is two filtered checklists derived fresh from
+rendering targets). The result is three filtered checklists derived fresh from
 the doctrines on every run.
 
 **Do not hardcode rule IDs in this skill.** The checklists are always generated
@@ -161,7 +174,8 @@ templates in scope before moving to Step 6.
 #### Phase 1 — Regex Pass (run first)
 
 For each rule in the **regex checklist** (from Step 4b), apply its pattern
-to each template file. This pass is mechanical — no LLM judgment required.
+to each template file. This includes both pure `regex` rules and the regex
+portion of `hybrid` rules. This pass is mechanical — no LLM judgment required.
 
 **Presence patterns** (a match = violation): apply the pattern; any match is
 a confirmed finding.
@@ -180,7 +194,8 @@ Collect all regex findings as confirmed violations before starting Phase 2.
 #### Phase 2 — Contextual Pass (run second)
 
 Take the **contextual checklist** (from Step 4b) and work through **every rule
-in order**. Do not skip any rule — a skipped rule is a missed heresy.
+in order**. This includes both pure `contextual` rules and the contextual
+portion of `hybrid` rules. Do not skip any rule — a skipped rule is a missed heresy.
 
 For each contextual rule:
 1. State the rule ID

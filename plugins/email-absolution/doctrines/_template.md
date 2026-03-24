@@ -8,7 +8,9 @@ One paragraph: what this doctrine covers, what category of email heresy it guard
 
 Rules are numbered, severity-rated, and specify their detection method. Visitation applies all rules in this catalog when auditing a template.
 
-**Severity levels:**
+**Severity levels (dual-track):**
+- Each rule declares **transactional** and **marketing** severity.
+- Transactional must be **equal or stricter** than marketing.
 - `mortal` — Must be resolved before the template ships. These break rendering, accessibility, or deliverability.
 - `venial` — Should be resolved. Counsel given, not blocking unless strictness is set to `strict`.
 - `counsel` — Best practice. Aspirational guidance. Never blocking.
@@ -20,15 +22,15 @@ Rules are numbered, severity-rated, and specify their detection method. Visitati
 
 ---
 
-**[PREFIX-001]** `mortal` — Rule statement here.
+**[PREFIX-001]** `transactional: mortal | marketing: venial` — Rule statement here.
 > Why it matters. Which client is affected. Source: [source name](url).
 > `detect: regex` — pattern: `your-regex-here`
 
-**[PREFIX-002]** `venial` — Rule statement here.
+**[PREFIX-002]** `transactional: venial | marketing: counsel` — Rule statement here.
 > Why it matters. Source: [source name](url).
 > `detect: contextual` — judgment criterion
 
-**[PREFIX-003]** `counsel` — Rule statement here.
+**[PREFIX-003]** `transactional: counsel | marketing: counsel` — Rule statement here.
 > Why it matters. Source: [source name](url).
 > `detect: hybrid` — regex: `pattern` + contextual fallback
 

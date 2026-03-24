@@ -8,6 +8,18 @@ Built for real workflows, shared because they might help yours.
 - **puritan** — architectural doctrine suite (covenant, inquisition, scriptorium)
 - **tribunal** — PR comment review, categorisation and resolution
 
+## Tool Discipline
+
+Skills in this repo instruct Claude to read doctrine files, scan templates, and search codebases.
+Always use dedicated tools — not Bash — for these operations:
+
+- **File search** → `Glob` tool, not `find` or `ls`
+- **Content search** → `Grep` tool, not `grep` or `rg`
+- **Read files** → `Read` tool, not `cat`, `head`, or `tail`
+- **Edit files** → `Edit` tool, not `sed` or `awk`
+
+Using Bash for these triggers permission prompts on every call. Dedicated tools are pre-approved and render more clearly in the UI.
+
 ## Persona — The Witchfinder
 When working within this repo, adopt the voice of a deeply principled
 but self-aware Puritan inspector.

@@ -8,87 +8,87 @@ Guards against content, copy, and structural UX patterns that undermine the effe
 
 ---
 
-**[UX-001]** `mortal` — Subject line must be 40–50 characters for mobile-safe display.
+**[UX-001]** `transactional: mortal | marketing: mortal` — Subject line must be 40–50 characters for mobile-safe display.
 > Mobile clients truncate subject lines at 33–41 characters depending on screen width and OS font scaling. The 40–50 character range is the safest cross-client target. Subjects over 60 characters are truncated on all mobile clients. Source: Campaign Monitor Benchmark Data 2023.
 > `detect: contextual` — check `subject:` in email.config.yml; flag if over 60 characters; warn if over 50
 
-**[UX-002]** `mortal` — Preheader text must be explicitly set and under 90 characters.
+**[UX-002]** `transactional: mortal | marketing: mortal` — Preheader text must be explicitly set and under 90 characters.
 > If no preheader is configured, mail clients pull the first visible body text — often a navigation link or "View in browser" notice. Gmail adjusts preheader width inversely to subject length; target 85–100 combined characters. Source: Litmus "Ultimate Guide to Email Preheader Text" 2022.
 > `detect: contextual` — check `preheader:` field in email.config.yml; flag if absent or over 90 chars
 
-**[UX-003]** `venial` — Preheader must extend or complement the subject line — never repeat it.
+**[UX-003]** `transactional: venial | marketing: venial` — Preheader must extend or complement the subject line — never repeat it.
 > A preheader that restates the subject wastes the second-highest-value inbox real estate. "Your order is confirmed. Your order is confirmed." Source: Litmus 2022.
 > `detect: contextual` — check if preheader and subject text are identical or near-identical
 
-**[UX-004]** `mortal` — All template variables must have fallback values. A naked `{{ first_name }}` or `{{firstName}}` with no fallback sends "Hi , your order..." to thousands of recipients when data is incomplete.
+**[UX-004]** `transactional: mortal | marketing: mortal` — All template variables must have fallback values. A naked `{{ first_name }}` or `{{firstName}}` with no fallback sends "Hi , your order..." to thousands of recipients when data is incomplete.
 > Merge tag failures are silent — the variable renders as an empty string without errors. Always define fallbacks: `{{ first_name | default: "Valued Customer" }}` (Liquid), `{{#if firstName}}{{firstName}}{{else}}Valued Customer{{/if}}` (Handlebars). Source: Mailchimp Email Marketing Benchmarks 2023.
 > `detect: regex` — pattern: `\{\{[\s]*[a-zA-Z_][a-zA-Z0-9_.]*[\s]*\}\}(?!\s*\|)` (output without filter/fallback — check per-engine syntax)
 
-**[UX-005]** `mortal` — CTA button copy must not use generic phrases: "Click here", "Read more", "Learn more", "Submit", "Go now", "Find out more".
+**[UX-005]** `transactional: mortal | marketing: mortal` — CTA button copy must not use generic phrases: "Click here", "Read more", "Learn more", "Submit", "Go now", "Find out more".
 > Generic CTA copy is accessibility-hostile (screen readers announce it without context) and performs poorly vs. descriptive alternatives. "Click here" announces as meaningless in link-list navigation. Source: WebAIM "Links and Hypertext" 2023; Campaign Monitor CTA Guide 2022.
 > `detect: regex` — pattern: `(?i)>(?:\s*)(click here|read more|learn more|submit|go now|find out more|click to|continue)(?:\s*)<`
 
-**[UX-006]** `venial` — CTA copy must be verb-first and 2–5 words.
+**[UX-006]** `transactional: venial | marketing: venial` — CTA copy must be verb-first and 2–5 words.
 > "Download the report" beats "Report download" — the first word sets intent. Single words ("Submit", "Go") are too vague. First-person copy ("Get my guide") outperforms second-person ("Get your guide") by 7–14% CTR in published A/B tests. Source: Unbounce Conversion Benchmark Report 2022.
 > `detect: contextual` — review CTA button text for verb-first pattern
 
-**[UX-007]** `venial` — Transactional emails should have a single primary CTA.
+**[UX-007]** `transactional: venial | marketing: venial` — Transactional emails should have a single primary CTA.
 > Every additional CTA reduces the probability of any CTA being clicked — Hick's Law. When multiple CTAs are unavoidable (digest, weekly summary), use visual hierarchy: one button, remaining as smaller text links. Source: Campaign Monitor "Best Email CTA Strategies" 2022.
 > `detect: contextual` — count distinct CTA button elements; flag if more than one has equal visual weight
 
-**[UX-008]** `mortal` — Use bulletproof HTML/VML buttons — not image-based buttons.
+**[UX-008]** `transactional: mortal | marketing: mortal` — Use bulletproof HTML/VML buttons — not image-based buttons.
 > Image buttons disappear when images are blocked, and approximately 43% of recipients have images blocked by default in some clients (Litmus "Email Client Market Share" 2023). The CTA is the most important element — it must render without images. Use `<a>` with inline styles + VML Outlook fallback (see RENDER-014).
 > `detect: contextual` — check if CTAs use `<a>` or `<img>` as the interactive element
 
-**[UX-009]** `venial` — At least one CTA must be visible above the fold without scrolling.
+**[UX-009]** `transactional: venial | marketing: venial` — At least one CTA must be visible above the fold without scrolling.
 > On mobile, the visible area is approximately the first 500–600px of rendered height. Recipients who do not scroll never see below-fold CTAs. Source: Litmus "Email Design Reference" 2023.
 > `detect: contextual` — check that first CTA appears in the first third of template structure
 
-**[UX-010]** `venial` — Transactional emails must have one purpose. Order confirmations confirm orders. Shipping notifications confirm shipping. Do not combine with upsell content.
+**[UX-010]** `transactional: venial | marketing: venial` — Transactional emails must have one purpose. Order confirmations confirm orders. Shipping notifications confirm shipping. Do not combine with upsell content.
 > Multi-purpose transactional emails increase cognitive load at a moment when the user's primary need is task confirmation. Mixing purposes also risks CAN-SPAM reclassification. Source: Litmus "Transactional Email Best Practices" 2023.
 > `detect: contextual` — advisory; check template type in email.config.yml against content sections
 
-**[UX-011]** `venial` — Lead with the key fact — inverted pyramid structure. State the main point in the first sentence.
+**[UX-011]** `transactional: venial | marketing: venial` — Lead with the key fact — inverted pyramid structure. State the main point in the first sentence.
 > Eye-tracking research (Nielsen Norman Group F-Pattern 2017) confirms that readers scan from the top. The first full sentence after the preheader/header is what Apple Intelligence and Gmail snippets will surface as the summary. Source: Nielsen Norman Group.
 > `detect: contextual` — advisory; verify first body sentence contains the key transactional fact
 
-**[UX-012]** `counsel` — Body copy paragraphs must be 3–4 sentences maximum.
+**[UX-012]** `transactional: counsel | marketing: counsel` — Body copy paragraphs must be 3–4 sentences maximum.
 > Email is a low-attention medium. Dense paragraphs are read less thoroughly than identical content broken into smaller chunks. Source: Nielsen Norman Group "How Little Do Users Read?" 2020.
 > `detect: contextual` — advisory
 
-**[UX-013]** `venial` — Do not inject marketing urgency language into transactional emails at anxious moments.
+**[UX-013]** `transactional: venial | marketing: venial` — Do not inject marketing urgency language into transactional emails at anxious moments.
 > "Your password was reset. WHILE YOU'RE HERE — CHECK OUT OUR SALE!" treats a security moment as a sales opportunity, erodes trust, and causes recipients to doubt the email's legitimacy. Urgency in transactional email must be factual: "This link expires in 60 minutes." Source: Litmus "Transactional Email Best Practices" 2023.
 > `detect: contextual` — check template type against presence of promotional language patterns
 
-**[UX-014]** `mortal` — Critical transactional content — order details, amounts, tracking numbers — must be live text, not embedded in images.
+**[UX-014]** `transactional: mortal | marketing: mortal` — Critical transactional content — order details, amounts, tracking numbers — must be live text, not embedded in images.
 > Images are blocked by default in many corporate email clients. If the order summary is an image, corporate users see a blank white area where their order details should be. Live text is searchable, accessible, and renders without images. Source: Litmus "Images Off in Outlook".
 > `detect: contextual` — check that transactional data fields are in text nodes, not only in image assets
 
-**[UX-015]** `venial` — Password reset emails must state the link expiry time explicitly.
+**[UX-015]** `transactional: venial | marketing: venial` — Password reset emails must state the link expiry time explicitly.
 > "This link expires in 60 minutes" is security information, not urgency marketing. Users who do not act on the email need to know whether to request a new one. Source: OWASP Forgot Password Cheat Sheet 2023.
 > `detect: contextual` — check password-reset template type for expiry time copy
 
-**[UX-016]** `mortal` — Unsubscribe link must be clearly visible in the footer — not hidden, minimised, or rendered in low-contrast text.
+**[UX-016]** `transactional: mortal | marketing: mortal` — Unsubscribe link must be clearly visible in the footer — not hidden, minimised, or rendered in low-contrast text.
 > Deliberately obscuring the unsubscribe mechanism is a dark pattern flagged by Gmail's spam classifier. It also violates GDPR/ICO requirements for easy unsubscribe access. Source: Google Postmaster Tools documentation 2023; ICO Direct Marketing Guidance 2020.
 > `detect: contextual` — check footer for unsubscribe link presence and verify it is not rendered in text smaller than 10px or contrast below 3:1
 
-**[UX-017]** `venial` — Transactional emails must include trust signals: company trading name, a reference number, and a support contact method.
+**[UX-017]** `transactional: venial | marketing: venial` — Transactional emails must include trust signals: company trading name, a reference number, and a support contact method.
 > These allow recipients to verify the email is legitimate. An order confirmation without a company name and order number looks like phishing. Source: Litmus "Transactional Email Best Practices" 2023.
 > `detect: contextual` — check footer/header for company name and support contact; check template variables include order/reference number
 
-**[UX-018]** `mortal` — Never include full card numbers, bank account numbers, or passwords in email body content.
+**[UX-018]** `transactional: mortal | marketing: mortal` — Never include full card numbers, bank account numbers, or passwords in email body content.
 > Full card numbers are PCI DSS prohibited in email. Passwords must never be sent in plaintext. Show only partial identifiers: last 4 digits of card, masked account numbers. Source: PCI DSS v4.0; OWASP.
 > `detect: regex` — pattern: `\b[3-9]\d{13,15}\b` (16-digit sequences suggesting unmasked card numbers)
 
-**[UX-019]** `counsel` — Emoji in subject lines must not be the sole carrier of meaning, and must not exceed one per subject line.
+**[UX-019]** `transactional: counsel | marketing: counsel` — Emoji in subject lines must not be the sole carrier of meaning, and must not exceed one per subject line.
 > Enterprise mail gateways strip non-ASCII characters. "🚀 Your shipment" becomes " Your shipment" after stripping. Multiple emoji read as spam to both algorithms and humans. Source: Campaign Monitor 2022.
 > `detect: contextual` — check subject line in email.config.yml for emoji usage
 
-**[UX-020]** `counsel` — Left-align body text. Reserve centred alignment for headings and short single-line CTAs only.
+**[UX-020]** `transactional: counsel | marketing: counsel` — Left-align body text. Reserve centred alignment for headings and short single-line CTAs only.
 > F-pattern scanning (Nielsen Norman Group 2017) relies on a clean left edge. Centred body copy breaks the scan pattern and reduces comprehension for anything over a single line.
 > `detect: contextual` — check `text-align` on primary body copy containers
 
-**[UX-021]** `venial` — Preheader text must not duplicate the primary `<h1>` heading of the email.
+**[UX-021]** `transactional: venial | marketing: venial` — Preheader text must not duplicate the primary `<h1>` heading of the email.
 > The preheader is inbox-preview real estate — read before opening. The `<h1>` is the first thing seen after opening. If both are identical the recipient sees the same words twice: once in the inbox list and once at the top of the opened email. This wastes the preheader slot entirely. Compare UX-003, which covers preheader vs subject-line duplication — this rule covers preheader vs in-email heading duplication, which is an equally common failure pattern.
 > `detect: contextual` — compare preheader text against the first `<h1>` heading content; flag if they match or differ only in punctuation
 
