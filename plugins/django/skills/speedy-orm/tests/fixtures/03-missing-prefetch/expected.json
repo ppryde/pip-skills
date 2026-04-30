@@ -1,0 +1,34 @@
+[
+  {
+    "id": "FETCH-010",
+    "severity_internal": "high",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:19",
+    "savings_basis": "static",
+    "signals_caveat": false
+  },
+  {
+    "id": "FETCH-010",
+    "severity_internal": "high",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:29",
+    "savings_basis": "static",
+    "signals_caveat": false
+  },
+  {
+    "id": "FETCH-011",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
+    "location_pattern": "target.py:36",
+    "savings_basis": "static",
+    "signals_caveat": false
+  },
+  {
+    "id": "FETCH-012",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
+    "location_pattern": "target.py:43",
+    "savings_basis": "static",
+    "signals_caveat": false
+  }
+]

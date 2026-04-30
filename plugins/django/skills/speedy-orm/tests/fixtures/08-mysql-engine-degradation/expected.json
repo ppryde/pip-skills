@@ -1,0 +1,10 @@
+[
+  {
+    "id": "IDX-040",
+    "severity_internal": "info",
+    "tier_displayed": "banner",
+    "location_pattern": "target.py:18",
+    "savings_basis": "unknown",
+    "signals_caveat": false
+  }
+]

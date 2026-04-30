@@ -1,0 +1,18 @@
+[
+  {
+    "id": "WRITE-006",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
+    "location_pattern": "target.py:19",
+    "savings_basis": "unknown",
+    "signals_caveat": false
+  },
+  {
+    "id": "WRITE-007",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
+    "location_pattern": "target.py:23",
+    "savings_basis": "unknown",
+    "signals_caveat": false
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "FETCH-030",
+    "severity_internal": "critical",
+    "tier_displayed": "critical",
+    "location_pattern": "templates/orders.html:2",
+    "savings_basis": "static",
+    "signals_caveat": false
+  },
+  {
+    "id": "FETCH-001",
+    "severity_internal": "high",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:22",
+    "savings_basis": "static",
+    "signals_caveat": false
+  }
+]
