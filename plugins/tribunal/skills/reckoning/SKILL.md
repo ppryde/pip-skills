@@ -15,7 +15,7 @@ A skill for pulling, categorising, assessing, and presenting actionable solution
 | 2. Check | Verify bot reviews are complete | Ask if still running |
 | 3. Fetch | Pull all comments (3 APIs + GraphQL) | No |
 | 4. Categorise | Source (agent/human) + type (9 categories) | No |
-| 5. Validate | Read code at each referenced location | Default on; skip if user asks |
+| 5. Validate | Read code at each referenced location | Default on; skip on user request; offer category batching if >50 comments |
 | 6. Prioritise | Critical → High → Medium → Low | No |
 | 7. Present | Structured summary with proposed fixes | No |
 | 8. Action | Apply approved fixes only | Explicit approval required |
