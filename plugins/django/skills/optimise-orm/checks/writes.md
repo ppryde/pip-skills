@@ -51,7 +51,7 @@ When `signal_dependencies[<Model>]` is non-empty, fix templates for WRITE-001/00
 
 ## Audit-framework escalation
 
-If `easy_audit`, `auditlog`, `simple_history`, or `reversion` is detected in `INSTALLED_APPS` (see PAT-070), WRITE-006/007/009 escalate from `medium` → `critical`. WRITE-008 escalates when the raw SQL touches a table covered by an audit listener. `pghistory` uses Postgres triggers and is tagged `signals_safe=true` — **does not trigger escalation**.
+If `easyaudit`, `auditlog`, `simple_history`, or `reversion` is detected in `INSTALLED_APPS` (see PAT-070), WRITE-006/007/009 escalate from `medium` → `critical`. WRITE-008 escalates when the raw SQL touches a table covered by an audit listener. `pghistory` uses Postgres triggers and is tagged `signals_safe=true` — **does not trigger escalation**.
 
 ## How to scan
 
@@ -246,7 +246,7 @@ Follow-up: confirm the model matches a key in `signal_dependencies`.
 **Suggested fix template:**
 ```python
 # Same mitigations as WRITE-006.
-# If using easy_audit or similar, you MUST either:
+# If using easyaudit or similar, you MUST either:
 # 1. Use individual .save() calls (slower, signal-safe)
 # 2. Manually call audit log creation after bulk op
 # 3. Accept the audit gap and document it

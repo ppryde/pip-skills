@@ -15,7 +15,7 @@ from .models import Order
 
 async def order_detail_view(request, pk):
     """PAT-050: sync .get() inside async view — blocks event loop."""
-    order = Order.objects.get(pk=pk)  # noqa: PAT-050 would fire here
+    order = Order.objects.get(pk=pk)  # PAT-050 fires here — sync .get() in async view
     return JsonResponse({"id": order.id, "status": order.status})
 
 

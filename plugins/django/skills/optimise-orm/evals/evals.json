@@ -41,7 +41,7 @@
       "id": 6,
       "name": "audit-framework-bypass-easyaudit",
       "prompt": "Audit /django:optimise-orm tests/fixtures/06-audit-framework-bypass/target.py — verify audit-aware escalation",
-      "expected_output": "PAT-070 banner detected; WRITE-006/007/009 escalated from medium to 🔥 Critical due to easy_audit in INSTALLED_APPS; signals_caveat blocks present",
+      "expected_output": "PAT-070 banner detected; WRITE-006/007/009 escalated from medium to 🔥 Critical due to easyaudit in INSTALLED_APPS; signals_caveat blocks present",
       "files": ["tests/fixtures/06-audit-framework-bypass/"]
     },
     {

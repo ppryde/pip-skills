@@ -65,12 +65,12 @@ Invokes `claude "/django:optimise-orm <target> --report --no-explain"` against e
 | 03 | missing-prefetch | Missing `prefetch_related` for M2M | FETCH-010, FETCH-011 |
 | 04 | column-overfetching | Wide field unread by callers | FETCH-020, FETCH-022 |
 | 05 | missing-index-postgres | Filter on un-indexed column | IDX-001, IDX-010 |
-| 06 | audit-framework-bypass | WRITE-006/007 with `easy_audit` — escalation to critical | WRITE-006, WRITE-007, PAT-070 |
+| 06 | audit-framework-bypass | WRITE-006/007 with `easyaudit` — escalation to critical | WRITE-006, WRITE-007, PAT-070 |
 | 07 | suppression-marker | `# noqa: optimise-orm WRITE-006` inline suppression | WRITE-006 suppressed |
 | 08 | mysql-engine-degradation | IDX-040 GIN demoted (not PG) | IDX-040 → info banner |
 | 09 | non-django-target | File with no ORM usage — exit clean path | (none) |
 | 10 | symbol-resolution-ambiguous | Bareword symbol with multiple definitions | (disambiguation prompt) |
-| 11 | pghistory-no-bypass-warning | pghistory present — no signal escalation | PAT-070, WRITE-001 no-escalate |
+| 11 | pghistory-no-bypass-warning | pghistory present — no signal escalation | PAT-070, WRITE-006/007 no-escalate |
 | 12 | async-orm-django-4-1 | Sync ORM calls in async views | PAT-050 |
 
 ---

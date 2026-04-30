@@ -241,9 +241,9 @@ live_checks() {
     fi
     fixtures=("$match")
   else
-    while IFS= read -r -d '' dir; do
+    while IFS= read -r dir; do
       fixtures+=("$dir")
-    done < <(find "$FIXTURES_DIR" -maxdepth 1 -mindepth 1 -type d -print0 | sort -z)
+    done < <(find "$FIXTURES_DIR" -maxdepth 1 -mindepth 1 -type d | sort)
   fi
 
   if [[ ${#fixtures[@]} -eq 0 ]]; then
@@ -269,18 +269,20 @@ live_checks() {
 
     local target_path="$fixture_dir/target.py"
     local expected_path="$fixture_dir/expected.json"
-    local report_path
+    local report_path stderr_path
     report_path=$(mktemp "/tmp/optimise-orm-live-XXXXXX.md")
+    stderr_path=$(mktemp /tmp/optimise-orm-stderr-XXXXXX)
 
     # Invoke skill with --report so we can parse frontmatter
     echo "  Running: /django:optimise-orm $target_path --report --no-explain"
     if ! claude "/django:optimise-orm $target_path --report --no-explain" \
-         --output "$report_path" 2>/tmp/optimise-orm-stderr; then
-      fail "$fixture_name — skill invocation failed"
-      cat /tmp/optimise-orm-stderr >&2
-      rm -f "$report_path"
+         --output "$report_path" 2>"$stderr_path"; then
+      fail "$fixture_name — skill invocation failed (stderr: $stderr_path)"
+      cat "$stderr_path" >&2
+      rm -f "$report_path" "$stderr_path"
       continue
     fi
+    rm -f "$stderr_path"
 
     # Parse report frontmatter findings_count
     local actual_critical actual_medium actual_low

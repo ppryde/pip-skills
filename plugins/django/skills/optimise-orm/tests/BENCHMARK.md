@@ -57,7 +57,8 @@ Then tally detection counts per code per fixture from the logs and fill in the t
 | 09-non-django-target | (none — exit clean) | — | — | — | — | — | — | — | — |
 | 10-symbol-resolution-ambiguous | (disambiguation prompt) | — | — | — | — | — | — | — | — |
 | 11-pghistory-no-bypass-warning | PAT-070 | info | — | — | — | — | — | — | — |
-| 11-pghistory-no-bypass-warning | WRITE-001 (no escalation) | critical | — | — | — | — | — | — | — |
+| 11-pghistory-no-bypass-warning | WRITE-006 (no escalation) | medium | — | — | — | — | — | — | — |
+| 11-pghistory-no-bypass-warning | WRITE-007 (no escalation) | medium | — | — | — | — | — | — | — |
 | 12-async-orm-django-4-1 | PAT-050 | medium | — | — | — | — | — | — | — |
 
 ---

@@ -55,7 +55,7 @@ Or reference the plugin directory directly in your Claude Code settings.
 **Compact stdout (default):**
 
 ```
-⚠ Audit framework detected: easy_audit — WRITE findings involving bulk ops will escalate to critical.
+⚠ Audit framework detected: easyaudit — WRITE findings involving bulk ops will escalate to critical.
 
 Found 5 findings on apps/orders/views.py
 🔥 2 critical · 🟠 2 medium · 🔵 1 low
@@ -96,7 +96,7 @@ Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md`. Includes
 
 ## Signal and audit framework awareness
 
-optimise-orm detects Django signal listeners (`pre_save`, `post_save`, `pre_delete`, `post_delete`) and audit history packages (`easy_audit`, `auditlog`, `simple_history`, `reversion`, `pghistory`) before running checks.
+optimise-orm detects Django signal listeners (`pre_save`, `post_save`, `pre_delete`, `post_delete`) and audit history packages (`easyaudit` (django-easy-audit), `auditlog`, `simple_history`, `reversion`, `pghistory`) before running checks.
 
 - **Signal listeners present:** Write findings (WRITE-001/002/003/020) append a structured caveat listing each bypassed listener, what it does, and 2–3 mitigations. Finding severity stays unchanged — the performance issue is still real.
 - **Audit framework detected:** WRITE-006/007/009 escalate from `medium` → `critical`.

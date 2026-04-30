@@ -158,10 +158,11 @@ For each doctrine, scan for entries matching `**[RULE-ID]**` and extract:
 - **Hybrid rules** — rule ID + regex pattern(s) + contextual instruction from the `detect: hybrid` line; these appear in **both** the regex checklist (Phase 1) and the contextual checklist (Phase 2)
 - **Severity** — each rule header contains a token of the form `` `transactional: <level> | marketing: <level>` ``; extract the level matching `stack.email_type` and record it as the rule's active severity
 
-Apply Step 4 config-conditional filters to all three lists. Remove rules whose
+Apply Step 4 config-conditional filters to both lists. Remove rules whose
 condition doesn't match config (wrong ESP, wrong templating stack, wrong
-rendering targets). The result is three filtered checklists derived fresh from
-the doctrines on every run.
+rendering targets). The result is two filtered checklists (regex and
+contextual) derived fresh from the doctrines on every run — hybrid rules
+appear in both.
 
 **Do not hardcode rule IDs in this skill.** The checklists are always generated
 at audit time — never stored, never assumed.

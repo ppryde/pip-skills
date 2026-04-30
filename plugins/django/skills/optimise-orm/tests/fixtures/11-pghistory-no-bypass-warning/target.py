@@ -8,7 +8,7 @@ Therefore:
   - WRITE-006 should NOT escalate to critical (stays at medium).
   - WRITE-007 should NOT escalate to critical (stays at medium).
 
-This contrasts with fixture 06 where easy_audit causes escalation.
+This contrasts with fixture 06 where easyaudit causes escalation.
 
 The skill must detect pghistory in INSTALLED_APPS and apply the
 signals_safe exception — PAT-070 info banner still fires (audit framework

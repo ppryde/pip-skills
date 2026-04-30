@@ -359,7 +359,7 @@ summary = Order.objects.using("replica").filter(year=2024).aggregate(total=Sum("
 
 ### PAT-070
 
-**Signature:** `easy_audit`, `auditlog`, `simple_history`, `reversion`, or `pghistory` detected in `INSTALLED_APPS`. This is an info-level banner emitted once in the report header — no per-line finding. Its presence triggers severity escalation for WRITE-006/007/009 (except `pghistory`, which is `signals_safe=true`).
+**Signature:** `easyaudit`, `auditlog`, `simple_history`, `reversion`, or `pghistory` detected in `INSTALLED_APPS`. This is an info-level banner emitted once in the report header — no per-line finding. Its presence triggers severity escalation for WRITE-006/007/009 (except `pghistory`, which is `signals_safe=true`).
 
 **Grep / AST hints:**
 ```regex

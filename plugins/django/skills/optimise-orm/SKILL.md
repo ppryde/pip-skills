@@ -90,9 +90,11 @@ Detect audit and history frameworks in `INSTALLED_APPS` / requirements:
 
 | Package | Tag |
 |---|---|
-| `easy_audit`, `auditlog`, `simple_history`, `reversion` | `audit_framework=true` |
+| `easyaudit`, `auditlog`, `simple_history`, `reversion` | `audit_framework=true` |
 | `haystack`, `watson` | `search_framework=true` |
 | `pghistory` | `signals_safe=true` (uses PG triggers, not Django signals) |
+
+> Note: `easyaudit` is the Django app label of the `django-easy-audit` package — grep `INSTALLED_APPS` entries, not requirements.
 
 Also grep for:
 - `@receiver(pre_save\|post_save\|pre_delete\|post_delete, sender=<Model>)` patterns
@@ -214,7 +216,7 @@ unknown savings (`?`)                                      → use internal-seve
 
 #### Audit-framework escalation (WRITE group)
 
-When `easy_audit`, `auditlog`, `simple_history`, or `reversion` is detected (PAT-070 fires):
+When `easyaudit`, `auditlog`, `simple_history`, or `reversion` is detected (PAT-070 fires):
 - WRITE-006, WRITE-007, WRITE-009: escalate from `medium` → `critical`
 - WRITE-008: stays at `medium` (may escalate to `critical` depending on what the raw SQL touches)
 - `pghistory`: `signals_safe=true` — does **not** trigger escalation
