@@ -152,20 +152,25 @@ static_shape_checks() {
   done
 
   # --- 7. Each check file lists its codes in frontmatter ---
-  declare -A GROUP_CODES
-  GROUP_CODES[fetching]="FETCH-001 FETCH-002 FETCH-003 FETCH-010 FETCH-011 FETCH-012 FETCH-020 FETCH-021 FETCH-022 FETCH-030 FETCH-031 FETCH-032"
-  GROUP_CODES[cardinality]="CARD-001 CARD-002 CARD-003 CARD-010 CARD-011 CARD-020 CARD-021"
-  GROUP_CODES[aggregation]="AGG-001 AGG-002 AGG-010 AGG-011 AGG-020 AGG-030 AGG-031 AGG-040"
-  GROUP_CODES[writes]="WRITE-001 WRITE-002 WRITE-003 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040"
-  GROUP_CODES[iteration]="ITER-001 ITER-002 ITER-010 ITER-011"
-  GROUP_CODES[indexes]="IDX-001 IDX-002 IDX-010 IDX-011 IDX-020 IDX-030 IDX-040 IDX-041 IDX-050 IDX-060 IDX-061"
-  GROUP_CODES[joins]="JOIN-001 JOIN-002 JOIN-010 JOIN-011"
-  GROUP_CODES[patterns]="PAT-001 PAT-002 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070"
+  # NOTE: bash 3.2 (macOS default) lacks associative arrays, so we use a function
+  # with a case lookup. Keep the lists aligned with the design spec §4.
+  codes_for_group() {
+    case "$1" in
+      fetching)    echo "FETCH-001 FETCH-002 FETCH-003 FETCH-010 FETCH-011 FETCH-012 FETCH-020 FETCH-021 FETCH-022 FETCH-030 FETCH-031 FETCH-032" ;;
+      cardinality) echo "CARD-001 CARD-002 CARD-003 CARD-010 CARD-011 CARD-020 CARD-021" ;;
+      aggregation) echo "AGG-001 AGG-002 AGG-010 AGG-011 AGG-020 AGG-030 AGG-031 AGG-040" ;;
+      writes)      echo "WRITE-001 WRITE-002 WRITE-003 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040" ;;
+      iteration)   echo "ITER-001 ITER-002 ITER-010 ITER-011" ;;
+      indexes)     echo "IDX-001 IDX-002 IDX-010 IDX-011 IDX-020 IDX-030 IDX-040 IDX-041 IDX-050 IDX-060 IDX-061" ;;
+      joins)       echo "JOIN-001 JOIN-002 JOIN-010 JOIN-011" ;;
+      patterns)    echo "PAT-001 PAT-002 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070" ;;
+    esac
+  }
 
   for group in "${EXPECTED_GROUPS[@]}"; do
     local file="$CHECKS_DIR/$group.md"
     [[ -f "$file" ]] || continue
-    for code in ${GROUP_CODES[$group]}; do
+    for code in $(codes_for_group "$group"); do
       if grep -q "$code" "$file"; then
         pass "checks/$group.md contains $code"
       else
