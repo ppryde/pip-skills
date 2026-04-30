@@ -1,4 +1,4 @@
-# speedy-orm Variance Benchmark
+# optimise-orm Variance Benchmark
 
 Tracks LLM output variance across repeated runs on the 12 core fixtures. Methodology follows the precedent in `plugins/email-absolution/tests/BENCHMARK.md`.
 
@@ -25,7 +25,7 @@ A fixture **passes** if all its required critical findings hit 5/5 and all requi
 ```bash
 # Run all fixtures 5 times and capture results to a log
 for i in 1 2 3 4 5; do
-  ./run.sh --live >> /tmp/speedy-orm-bench-run-$i.log 2>&1
+  ./run.sh --live >> /tmp/optimise-orm-bench-run-$i.log 2>&1
 done
 ```
 

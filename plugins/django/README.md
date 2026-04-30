@@ -4,7 +4,7 @@ Django ORM performance auditor. Targets a source file or symbol, checks it again
 
 ## The skill
 
-### speedy-orm (`/django:speedy-orm`)
+### optimise-orm (`/django:optimise-orm`)
 
 Audits a Django source file or symbol for ORM performance issues: N+1 queries, bulk-write loops, missing indexes, column over-fetching, inefficient aggregations, and more. Findings are ranked by estimated query savings and grouped into three displayed tiers.
 
@@ -26,16 +26,16 @@ Or reference the plugin directory directly in your Claude Code settings.
 ## Usage
 
 ```
-/django:speedy-orm <target> [flags]
+/django:optimise-orm <target> [flags]
 ```
 
 ### Target forms
 
 | Invocation | What happens |
 |---|---|
-| `/django:speedy-orm apps/orders/views.py` | Audit all ORM calls in the file |
-| `/django:speedy-orm apps.orders.views.OrderListView` | Resolve symbol, audit that class body only |
-| `/django:speedy-orm OrderListView` | Search project for definition; disambiguate if multiple matches |
+| `/django:optimise-orm apps/orders/views.py` | Audit all ORM calls in the file |
+| `/django:optimise-orm apps.orders.views.OrderListView` | Resolve symbol, audit that class body only |
+| `/django:optimise-orm OrderListView` | Search project for definition; disambiguate if multiple matches |
 
 ### Flags
 
@@ -43,7 +43,7 @@ Or reference the plugin directory directly in your Claude Code settings.
 |---|---|---|
 | `--parallel` | off | Fan out 8 subagents (one per check-group); merge and rank results |
 | `--no-explain` | off | Skip EXPLAIN even when DB is reachable |
-| `--report` | off | Write full markdown report to `reports/speedy-orm/<slug>-<timestamp>.md` |
+| `--report` | off | Write full markdown report to `reports/optimise-orm/<slug>-<timestamp>.md` |
 | `--engine=<pg\|mysql\|sqlite\|oracle>` | auto-detect | Override DB engine detection |
 | `--only=<group,group>` | all groups | Run only the named check-groups |
 | `--skip=<group,group>` | none | Skip the named check-groups (`--only` and `--skip` cannot be combined) |
@@ -75,7 +75,7 @@ Estimated savings if all addressed: ~620–1450 ms
 
 **Full report (`--report`):**
 
-Written to `reports/speedy-orm/apps-orders-views-20260430-143200.md`. Includes current code excerpts, suggested fix templates, EXPLAIN evidence (when available), and signal-bypass caveats for write findings.
+Written to `reports/optimise-orm/apps-orders-views-20260430-143200.md`. Includes current code excerpts, suggested fix templates, EXPLAIN evidence (when available), and signal-bypass caveats for write findings.
 
 ---
 
@@ -96,7 +96,7 @@ Written to `reports/speedy-orm/apps-orders-views-20260430-143200.md`. Includes c
 
 ## Signal and audit framework awareness
 
-speedy-orm detects Django signal listeners (`pre_save`, `post_save`, `pre_delete`, `post_delete`) and audit history packages (`easy_audit`, `auditlog`, `simple_history`, `reversion`, `pghistory`) before running checks.
+optimise-orm detects Django signal listeners (`pre_save`, `post_save`, `pre_delete`, `post_delete`) and audit history packages (`easy_audit`, `auditlog`, `simple_history`, `reversion`, `pghistory`) before running checks.
 
 - **Signal listeners present:** Write findings (WRITE-001/002/003/020) append a structured caveat listing each bypassed listener, what it does, and 2–3 mitigations. Finding severity stays unchanged — the performance issue is still real.
 - **Audit framework detected:** WRITE-006/007/009 escalate from `medium` → `critical`.
@@ -110,10 +110,10 @@ Suppress specific findings inline:
 
 ```python
 # Suppress one code on this line
-qs = Order.objects.all()  # noqa: speedy-orm FETCH-002
+qs = Order.objects.all()  # noqa: optimise-orm FETCH-002
 
-# Suppress all speedy-orm codes on this line
-qs = Order.objects.select_related()  # noqa: speedy-orm
+# Suppress all optimise-orm codes on this line
+qs = Order.objects.select_related()  # noqa: optimise-orm
 ```
 
 Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not shown in the report body.
@@ -134,12 +134,12 @@ Info-level findings (PAT-070, WRITE-005) appear as a header banner before the ti
 
 ## Testing
 
-See [`skills/speedy-orm/tests/README.md`](skills/speedy-orm/tests/README.md) for how to run the test harness.
+See [`skills/optimise-orm/tests/README.md`](skills/optimise-orm/tests/README.md) for how to run the test harness.
 
 ```bash
 # Static-shape validation (fast, CI-safe)
-./skills/speedy-orm/tests/run.sh
+./skills/optimise-orm/tests/run.sh
 
 # Live invocation against all 12 fixtures (requires API key)
-./skills/speedy-orm/tests/run.sh --live
+./skills/optimise-orm/tests/run.sh --live
 ```

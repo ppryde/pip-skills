@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test harness for django:speedy-orm
+# Test harness for django:optimise-orm
 # Modes:
 #   (no args)   — static-shape validation only (fast, CI-safe)
 #   --live      — live invocation against all fixtures (requires API key + Claude CLI)
@@ -141,7 +141,7 @@ static_shape_checks() {
   # --- 6. Severity mapping rules are present in SKILL.md ---
   SEVERITY_PATTERNS=(
     "critical" "savings_midpoint" "confidence_weight" "sort_key"
-    "header banner" "noqa: speedy-orm"
+    "header banner" "noqa: optimise-orm"
   )
   for pattern in "${SEVERITY_PATTERNS[@]}"; do
     if grep -q "$pattern" "$SKILL_DIR/SKILL.md"; then
@@ -270,14 +270,14 @@ live_checks() {
     local target_path="$fixture_dir/target.py"
     local expected_path="$fixture_dir/expected.json"
     local report_path
-    report_path=$(mktemp "/tmp/speedy-orm-live-XXXXXX.md")
+    report_path=$(mktemp "/tmp/optimise-orm-live-XXXXXX.md")
 
     # Invoke skill with --report so we can parse frontmatter
-    echo "  Running: /django:speedy-orm $target_path --report --no-explain"
-    if ! claude "/django:speedy-orm $target_path --report --no-explain" \
-         --output "$report_path" 2>/tmp/speedy-orm-stderr; then
+    echo "  Running: /django:optimise-orm $target_path --report --no-explain"
+    if ! claude "/django:optimise-orm $target_path --report --no-explain" \
+         --output "$report_path" 2>/tmp/optimise-orm-stderr; then
       fail "$fixture_name — skill invocation failed"
-      cat /tmp/speedy-orm-stderr >&2
+      cat /tmp/optimise-orm-stderr >&2
       rm -f "$report_path"
       continue
     fi

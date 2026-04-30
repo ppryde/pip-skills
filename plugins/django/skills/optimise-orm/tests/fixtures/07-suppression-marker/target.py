@@ -1,7 +1,7 @@
 """
 Suppression marker fixture.
 
-WRITE-006 on line 16 is suppressed with: # noqa: speedy-orm WRITE-006
+WRITE-006 on line 16 is suppressed with: # noqa: optimise-orm WRITE-006
 The skill should:
   - NOT emit WRITE-006 as a finding in the body
   - Count it in the report frontmatter suppressed: 1
@@ -14,7 +14,7 @@ from .models import Invoice
 
 
 def void_invoices(invoice_ids):
-    Invoice.objects.filter(pk__in=invoice_ids).update(voided=True)  # noqa: speedy-orm WRITE-006
+    Invoice.objects.filter(pk__in=invoice_ids).update(voided=True)  # noqa: optimise-orm WRITE-006
 
 
 def import_invoices(data):

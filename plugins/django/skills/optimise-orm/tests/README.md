@@ -1,4 +1,4 @@
-# speedy-orm Tests
+# optimise-orm Tests
 
 ## Running the tests
 
@@ -38,7 +38,7 @@ Static-shape tests pass quickly and are suitable for CI.
 
 ### Live mode
 
-Invokes `claude "/django:speedy-orm <target> --report --no-explain"` against each fixture, then:
+Invokes `claude "/django:optimise-orm <target> --report --no-explain"` against each fixture, then:
 
 1. Parses the report frontmatter to extract `findings_count`.
 2. Compares against the fixture's `expected.json`.
@@ -66,7 +66,7 @@ Invokes `claude "/django:speedy-orm <target> --report --no-explain"` against eac
 | 04 | column-overfetching | Wide field unread by callers | FETCH-020, FETCH-022 |
 | 05 | missing-index-postgres | Filter on un-indexed column | IDX-001, IDX-010 |
 | 06 | audit-framework-bypass | WRITE-006/007 with `easy_audit` — escalation to critical | WRITE-006, WRITE-007, PAT-070 |
-| 07 | suppression-marker | `# noqa: speedy-orm WRITE-006` inline suppression | WRITE-006 suppressed |
+| 07 | suppression-marker | `# noqa: optimise-orm WRITE-006` inline suppression | WRITE-006 suppressed |
 | 08 | mysql-engine-degradation | IDX-040 GIN demoted (not PG) | IDX-040 → info banner |
 | 09 | non-django-target | File with no ORM usage — exit clean path | (none) |
 | 10 | symbol-resolution-ambiguous | Bareword symbol with multiple definitions | (disambiguation prompt) |
