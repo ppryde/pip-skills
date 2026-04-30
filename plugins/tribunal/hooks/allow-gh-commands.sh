@@ -37,8 +37,17 @@ case "$cmd" in
   # Repo detection and fork check
   "gh repo view "*)             allow ;;
 
-  # PR detection, listing, branch checkout
-  "gh pr view "* | "gh pr list "* | "gh pr checkout "*)  allow ;;
+  # PR detection — view and list are read-only by design
+  "gh pr view "*   | "gh pr view")  allow ;;
+  "gh pr list "*   | "gh pr list")  allow ;;
+  # PR checkout — strict: only the bare numeric form, no flags
+  # (the skill only ever calls `gh pr checkout <pr_number>`; --force et al
+  # would silently discard uncommitted local work)
+  "gh pr checkout "*)
+    if [[ "$cmd" =~ ^gh\ pr\ checkout\ [0-9]+$ ]]; then
+      allow
+    fi
+    ;;
 
   # REST API — specific resource paths only
   "gh api repos/"*"/pulls/"*)   allow ;;

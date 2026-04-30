@@ -13,4 +13,4 @@ INSTALLED_APPS = [
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Django version context for the skill
-DJANGO_VERSION = (4, 2, 0)
+DJANGO_VERSION = (4, 1, 0)

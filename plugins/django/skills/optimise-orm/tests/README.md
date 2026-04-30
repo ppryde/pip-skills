@@ -85,15 +85,15 @@ Each fixture's `expected.json` is an array of required finding objects:
     "id": "FETCH-030",
     "severity_internal": "critical",
     "tier_displayed": "critical",
-    "location": "target.py",
+    "location_pattern": "templates/orders.html:2",
     "savings_basis": "static",
-    "signals_caveat": null
+    "signals_caveat": false
   },
   {
     "id": "WRITE-001",
     "severity_internal": "critical",
     "tier_displayed": "critical",
-    "location": "target.py",
+    "location_pattern": "target.py:14",
     "savings_basis": "static",
     "signals_caveat": true
   }
@@ -104,9 +104,9 @@ Fields:
 - `id` — check code (required; used for report body search)
 - `severity_internal` — expected internal severity before tier mapping
 - `tier_displayed` — expected displayed tier (`critical`, `medium`, `low`, `info`)
-- `location` — file or file:line reference (checked against report body)
+- `location_pattern` — file:line reference (e.g. `target.py:22`, `templates/orders.html:2`); the harness greps the report body for this pattern as part of validating each finding
 - `savings_basis` — `static`, `explain`, or `unknown`
-- `signals_caveat` — `true` if a signal-bypass caveat block is expected; `null` if not
+- `signals_caveat` — boolean: `true` if a signal-bypass caveat block is expected for this finding, `false` otherwise
 
 ---
 

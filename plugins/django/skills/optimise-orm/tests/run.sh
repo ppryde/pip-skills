@@ -297,7 +297,7 @@ live_checks() {
     actual_low=$(grep 'low:' "$report_path" | head -1 | grep -o '[0-9]*' || echo 0)
 
     # Parse expected.json for required findings — hard-fail on parse error.
-    local required_critical required_ids
+    local required_critical
     if ! required_critical=$(python3 -c "
 import json, sys
 try:
@@ -311,16 +311,45 @@ print(sum(1 for f in data if f.get('tier_displayed') == 'critical'))
       rm -f "$report_path"
       exit 2
     fi
-    if ! required_ids=$(python3 -c "
+    local required_medium required_low
+    if ! required_medium=$(python3 -c "
 import json, sys
 try:
     data = json.load(open('$expected_path'))
 except Exception as e:
     print(f'PARSE_ERROR: {e}', file=sys.stderr)
     sys.exit(1)
-print(' '.join(f['id'] for f in data))
+print(sum(1 for f in data if f.get('tier_displayed') == 'medium'))
 " 2>&1); then
-      echo "ERROR: failed to parse $expected_path (required ids): $required_ids" >&2
+      echo "ERROR: failed to parse $expected_path (medium count): $required_medium" >&2
+      rm -f "$report_path"
+      exit 2
+    fi
+    if ! required_low=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('$expected_path'))
+except Exception as e:
+    print(f'PARSE_ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+print(sum(1 for f in data if f.get('tier_displayed') == 'low'))
+" 2>&1); then
+      echo "ERROR: failed to parse $expected_path (low count): $required_low" >&2
+      rm -f "$report_path"
+      exit 2
+    fi
+    # Parse expected.json for required (id, location_pattern) pairs.
+    local required_pairs
+    if ! required_pairs=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('$expected_path'))
+except Exception as e:
+    print(f'PARSE_ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+print('\n'.join(f\"{f['id']}|{f.get('location_pattern','')}\" for f in data))
+" 2>&1); then
+      echo "ERROR: failed to parse $expected_path (required pairs): $required_pairs" >&2
       rm -f "$report_path"
       exit 2
     fi
@@ -332,14 +361,28 @@ print(' '.join(f['id'] for f in data))
       pass "$fixture_name — critical findings count OK ($actual_critical)"
     fi
 
-    # Check each required finding ID appears in the report
-    for code in $required_ids; do
-      if grep -q "$code" "$report_path"; then
-        pass "$fixture_name — required finding $code present"
+    # Check medium findings (≥80% threshold per spec §7.3)
+    local medium_threshold=$(( required_medium * 80 / 100 ))
+    if [[ "$required_medium" -gt 0 && "$actual_medium" -lt "$medium_threshold" ]]; then
+      fail "$fixture_name — medium findings: expected ≥${medium_threshold} (80% of $required_medium), got $actual_medium"
+    elif [[ "$required_medium" -gt 0 ]]; then
+      pass "$fixture_name — medium findings count OK ($actual_medium / $required_medium)"
+    fi
+
+    # Low findings — informational only, not enforced
+    if [[ "$required_low" -gt 0 ]]; then
+      echo "  INFO: $fixture_name — low findings: $actual_low (required $required_low, not enforced)"
+    fi
+
+    # Check each required (id, location_pattern) pair appears in the report.
+    while IFS='|' read -r code loc_pattern; do
+      [[ -z "$code" ]] && continue
+      if grep -q "$code" "$report_path" && grep -q "$loc_pattern" "$report_path"; then
+        pass "$fixture_name — required finding $code @ $loc_pattern present"
       else
-        fail "$fixture_name — required finding $code NOT found in report"
+        fail "$fixture_name — required finding $code @ $loc_pattern NOT found in report"
       fi
-    done
+    done <<< "$required_pairs"
 
     rm -f "$report_path"
   done
