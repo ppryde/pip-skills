@@ -8,75 +8,75 @@ Rules and gotchas for engineers building email templates with Maizzle — the Ta
 
 ---
 
-**[MZL-001]** `mortal` — Run `maizzle build production` for all output intended for sending — not `maizzle serve` output.
+**[MZL-001]** `transactional: mortal | marketing: mortal` — Run `maizzle build production` for all output intended for sending — not `maizzle serve` output.
 > `maizzle serve` produces development builds: CSS is not inlined, images use localhost paths, minification is off. Sending a development build sends unstyled HTML with broken image URLs. Source: Maizzle documentation — build environments.
 > `detect: contextual` — check CI/CD pipeline to confirm the production build command is used for ESP delivery
 
-**[MZL-002]** `mortal` — Pin Maizzle and Tailwind CSS to exact versions in `package.json`.
+**[MZL-002]** `transactional: mortal | marketing: mortal` — Pin Maizzle and Tailwind CSS to exact versions in `package.json`.
 > Tailwind v3 → v4 is a major breaking change affecting how Maizzle processes CSS. Maizzle v4 → v5 changed the build engine (Vite replaces Browsersync). Floating semver (`^5.5.0`, `^3.4.17`) causes undetected visual regressions on `npm install`. Source: Maizzle v5 changelog; Tailwind CSS v4 migration guide.
 > `detect: contextual` — check package.json for caret/tilde ranges on `maizzle` and `tailwindcss`
 
-**[MZL-003]** `mortal` — Do not use Tailwind `flex`, `grid`, `inline-flex`, or `inline-grid` utilities for structural layout.
+**[MZL-003]** `transactional: mortal | marketing: mortal` — Do not use Tailwind `flex`, `grid`, `inline-flex`, or `inline-grid` utilities for structural layout.
 > Flexbox and grid are not supported in Outlook 2007–2019 or Gmail (for non-Google accounts). Maizzle does not restrict these utilities — they compile and inline successfully but silently fail in major clients. Use table-based HTML for all structural layout. Use `flex` utilities only inside `@media` queries scoped to clients known to support it. Source: caniemail.com.
 > `detect: contextual` — check if flex/grid utilities appear on layout-critical structural elements
 
-**[MZL-004]** `mortal` — Do not use Tailwind CSS variable utilities (`bg-[var(--colour)]`, `text-[var(--colour)]`) in email templates.
+**[MZL-004]** `transactional: mortal | marketing: mortal` — Do not use Tailwind CSS variable utilities (`bg-[var(--colour)]`, `text-[var(--colour)]`) in email templates.
 > CSS Custom Properties are not supported in Outlook 2007–2019, Gmail, or Yahoo Mail (see GOTCHA-024). Maizzle's CSS inlining step resolves static Tailwind values at build time, but arbitrary `var()` references cannot be statically resolved — they are emitted as-is into inline styles. Source: caniemail.com.
 > `detect: regex` — pattern: `\bvar\(--[^)]+\)`
 
-**[MZL-005]** `mortal` — Add all dynamically composed class names to the Tailwind `safelist` in `tailwind.config.js`.
+**[MZL-005]** `transactional: mortal | marketing: mortal` — Add all dynamically composed class names to the Tailwind `safelist` in `tailwind.config.js`.
 > Tailwind's content scanner detects class names as literal strings. Classes built via string interpolation in Nunjucks expressions (`"bg-" + colour`) or component props are invisible to the scanner and their CSS is purged. List dynamic classes in `safelist` with regex patterns if needed.
 > `detect: contextual` — check if any class names are composed dynamically; verify `safelist` covers them
 
-**[MZL-006]** `mortal` — Compiled output in `build/` or `dist/` must never be hand-edited.
+**[MZL-006]** `transactional: mortal | marketing: mortal` — Compiled output in `build/` or `dist/` must never be hand-edited.
 > `maizzle build` overwrites compiled output entirely. Manual edits to compiled files are silently discarded by the next build, creating invisible drift between source and deployed HTML.
 > `detect: contextual` — advisory; check if `build/` is committed as source-of-truth rather than generated artefact
 
-**[MZL-007]** `mortal` — Test compiled HTML output in real email clients — not only the Maizzle dev browser preview.
+**[MZL-007]** `transactional: mortal | marketing: mortal` — Test compiled HTML output in real email clients — not only the Maizzle dev browser preview.
 > The Maizzle browser preview renders in a modern browser engine. Compiled HTML must be tested in Outlook (Word engine), Gmail, and Apple Mail for cross-client issues that are invisible in browser rendering.
 > `detect: contextual` — advisory; verify QA process includes real email client testing
 
-**[MZL-008]** `venial` — Verify `inlineCSS: true` and `minifyHTML: true` are set in the production config environment.
+**[MZL-008]** `transactional: venial | marketing: venial` — Verify `inlineCSS: true` and `minifyHTML: true` are set in the production config environment.
 > Production config (`config.production.js`) should have CSS inlining enabled (so Tailwind classes become inline styles) and HTML minification enabled (to reduce size and eliminate whitespace gaps). These are off in development — confirm production config explicitly.
 > `detect: contextual` — check `config.production.js` for `css.inline` and `minify` settings
 
-**[MZL-009]** `venial` — Set `prettify: false` in production config.
+**[MZL-009]** `transactional: venial | marketing: venial` — Set `prettify: false` in production config.
 > Pretty-printed output adds newlines and indentation between table elements. Whitespace text nodes between `<td>` elements cause 4px layout gaps in some email clients (see GOTCHA-011). Production output should be compact.
 > `detect: contextual` — check production config for `prettify` setting
 
-**[MZL-010]** `venial` — Set explicit `width` and `height` HTML attributes on all `<img>` elements — Tailwind width utilities alone are not sufficient for Outlook 2007–2019.
+**[MZL-010]** `transactional: venial | marketing: venial` — Set explicit `width` and `height` HTML attributes on all `<img>` elements — Tailwind width utilities alone are not sufficient for Outlook 2007–2019.
 > Outlook Windows ignores CSS `width` on images. The HTML `width` attribute is the only reliable size control. Use both: `<img width="600" class="w-full" alt="...">` — CSS for responsive scaling, attribute for Outlook. Source: Campaign Monitor CSS support guide.
 > `detect: contextual` — check `<img>` elements for explicit `width` and `height` HTML attributes
 
-**[MZL-011]** `venial` — Use Tailwind's `!important` utilities (prefix `!`) to override email client default styles.
+**[MZL-011]** `transactional: venial | marketing: venial` — Use Tailwind's `!important` utilities (prefix `!`) to override email client default styles.
 > Email clients inject their own CSS resets. `!bg-white` (compiles to `background-color: #ffffff !important`) overrides Outlook's default grey body background. Standard Tailwind utilities without `!important` can be overridden by client defaults.
 > `detect: contextual` — advisory; when client-default overrides are needed, use `!` prefix
 
-**[MZL-012]** `venial` — For Outlook background images, use VML — either Maizzle's `<x-bg-image>` component or manually coded VML conditionals.
+**[MZL-012]** `transactional: venial | marketing: venial` — For Outlook background images, use VML — either Maizzle's `<x-bg-image>` component or manually coded VML conditionals.
 > Standard CSS `background-image` is not supported in Outlook 2007–2019 (see RENDER-015). Maizzle does not abstract this automatically. The VML approach must be explicitly implemented in templates that use background images. Source: Maizzle documentation; Campaign Monitor VML guide.
 > `detect: contextual` — check templates using `bg-[url(...)]` Tailwind classes or CSS `background-image` for Outlook VML fallback
 
-**[MZL-013]** `venial` — Use `x-component` (or Maizzle's component include syntax) for shared email parts.
+**[MZL-013]** `transactional: venial | marketing: venial` — Use `x-component` (or Maizzle's component include syntax) for shared email parts.
 > Duplicate header and footer HTML across templates creates divergence. Use Maizzle's component system to maintain a single source of truth for shared components.
 > `detect: contextual` — check for duplicate HTML blocks (>10 lines) across templates without component includes
 
-**[MZL-014]** `venial` — Use front matter for per-template settings — subject, preheader, from name, and CSS overrides.
+**[MZL-014]** `transactional: venial | marketing: venial` — Use front matter for per-template settings — subject, preheader, from name, and CSS overrides.
 > Maizzle passes front matter fields into the template as `page.subject`, `page.preheader`, etc. This keeps send metadata alongside the template it describes and enables per-template `<title>` generation.
 > `detect: contextual` — advisory; check if templates use front matter for metadata
 
-**[MZL-015]** `venial` — Configure `removeUnusedCSS: true` in production only. Leave it disabled in development to avoid false negatives when iterating.
+**[MZL-015]** `transactional: venial | marketing: venial` — Configure `removeUnusedCSS: true` in production only. Leave it disabled in development to avoid false negatives when iterating.
 > CSS removal is destructive — it strips classes not found in the template source. During development, temporarily commented-out classes or classes under construction are real and should not be removed. Source: Maizzle documentation — removeUnusedCSS.
 > `detect: contextual` — check that `removeUnusedCSS` is false in local/development config and true in production
 
-**[MZL-016]** `counsel` — Understand the layered build pipeline: Nunjucks (layout time) → Tailwind (CSS time) → inline (deploy time) → data injection (send time).
+**[MZL-016]** `transactional: counsel | marketing: counsel` — Understand the layered build pipeline: Nunjucks (layout time) → Tailwind (CSS time) → inline (deploy time) → data injection (send time).
 > Maizzle uses Nunjucks for template logic (`{% if %}`, `{% for %}`, `{% macro %}`). This handles layout-time logic when building the template. Per-recipient data injection (Handlebars placeholders, Liquid variables) happens at send time after Maizzle compilation. Nunjucks and Handlebars use conflicting `{{` syntax — use MJML-style approach: write Handlebars placeholders in Maizzle source and ensure Nunjucks does not evaluate them.
 > `detect: contextual` — advisory; verify Handlebars/Liquid placeholders survive Maizzle compilation
 
-**[MZL-017]** `counsel` — Start new email types from Maizzle starter templates rather than blank HTML.
+**[MZL-017]** `transactional: counsel | marketing: counsel` — Start new email types from Maizzle starter templates rather than blank HTML.
 > Maizzle starters include correct table structure, Outlook ghost table conditionals, meta tags (`x-apple-disable-message-reformatting`, `color-scheme`), and tested responsive patterns. Starting from blank HTML requires manually adding all these — a common source of omissions.
 > `detect: contextual` — advisory
 
-**[MZL-018]** `counsel` — PostCSS plugins that generate modern CSS (e.g. `postcss-preset-env` with CSS variable output) can introduce email-unsafe properties into the compiled output.
+**[MZL-018]** `transactional: counsel | marketing: counsel` — PostCSS plugins that generate modern CSS (e.g. `postcss-preset-env` with CSS variable output) can introduce email-unsafe properties into the compiled output.
 > PostCSS `postcss-preset-env` with `stage: 0` may transform properties in ways that produce CSS variables or calc() expressions. Audit your PostCSS plugin configuration to verify the compiled output contains only email-safe CSS. Source: PostCSS documentation.
 > `detect: contextual` — review PostCSS config for plugins that may introduce CSS variables or modern transforms
 

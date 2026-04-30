@@ -11,6 +11,11 @@ reviewed. No heresy is authored into existence. The Scribe does not invent —
 it executes the doctrine faithfully, in the templating language the sanctum has
 chosen.
 
+## Tool Discipline
+
+Use dedicated tools throughout — not Bash equivalents:
+- Read files → `Read` tool | Find files → `Glob` tool | Search content → `Grep` tool
+
 ## Prerequisites
 
 1. `.email-absolution/config.yml` must exist with `stack.templating` set
@@ -59,6 +64,7 @@ This ensures new doctrines added to the plugin are included automatically. Only 
 Read `.email-absolution/config.yml`. Extract:
 - `stack.templating` — the template language to use
 - `stack.esp` — governs ESP-specific variable conventions (e.g. Klaviyo `person.` namespace)
+- `stack.email_type` — `transactional` or `marketing` (optional; ask if missing)
 - `stack.rendering_targets` — governs which client-specific patterns are required
 
 If config absent, ask the caller for `stack.templating` and `stack.esp` before proceeding.
@@ -77,6 +83,9 @@ If the caller's brief is incomplete, ask before generating. Required inputs:
 
 A terse brief is acceptable:
 > "Order confirmation for a Shopify store using Klaviyo Liquid. Variables: order, customer."
+
+If the email type is not specified, ask. If the caller declines or is unsure, assume
+`marketing` and declare the assumption explicitly in the output.
 
 The Scribe will make reasonable assumptions and declare them explicitly in the output.
 
@@ -110,6 +119,12 @@ elements. Confirm `config.production.js` considerations in a comment.
 ### Step 4: Generate the Template
 
 Generate a complete, send-ready template. Every generated template must satisfy:
+
+**Severity application (transactional vs marketing):**
+- Doctrines now declare dual severity in each rule header.
+- If email type is `transactional`, treat `transactional` severity as the binding constraint.
+- If email type is `marketing`, treat `marketing` severity as the binding constraint.
+- `mortal` rules are non-negotiable; `venial` rules should be met; `counsel` rules are optional.
 
 **Rendering (from `rendering.md`):**
 - Table-based structure throughout

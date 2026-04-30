@@ -15,7 +15,7 @@ A skill for pulling, categorising, assessing, and presenting actionable solution
 | 2. Check | Verify bot reviews are complete | Ask if still running |
 | 3. Fetch | Pull all comments (3 APIs + GraphQL) | No |
 | 4. Categorise | Source (agent/human) + type (9 categories) | No |
-| 5. Validate | Read code at each referenced location | Default on; skip resolved/stale |
+| 5. Validate | Read code at each referenced location | Default on; skip on user request; offer category batching if >50 comments |
 | 6. Prioritise | Critical → High → Medium → Low | No |
 | 7. Present | Structured summary with proposed fixes | No |
 | 8. Action | Apply approved fixes only | Explicit approval required |
@@ -227,24 +227,7 @@ Review bodies from APPROVED or COMMENT-state reviews may still contain actionabl
 
 ## Step 5: Validate Comments
 
-### 5a. Pre-filter: skip resolved and stale comments
-
-Before doing any file reads, partition the unresolved comments from Steps 3–4 into two buckets:
-
-- **Current**: comment's `commit_id` matches the PR's `headRefOid`
-- **Stale**: comment's `commit_id` differs from `headRefOid` (targets an older commit)
-
-**Do not validate stale comments.** Mark them as "Likely invalid — targets older commit {short_sha}, code has changed since" without reading any files. Present stale comments in Step 7 under a separate "### Stale (older commits)" section at Low priority so the user can still see them, but do not spend file reads on them. The vast majority of stale bot comments have already been addressed by subsequent commits — validating them wastes time and context.
-
-Resolved comments were already filtered out in Step 3d and should never reach this step.
-
-### 5b. Fast path
-
-After filtering resolved and stale comments, count the remaining **current + unresolved** items. If there are **5 or fewer**, skip the full categorise → validate → prioritise ceremony (Steps 4–6) and go directly to a compact presentation (Step 7) with inline categorisation and validation. This handles the common case where the developer has been iterating on the PR and most feedback is already addressed — the user just wants to see what's left without ceremony.
-
-### 5c. Validate current comments
-
-For the remaining current + unresolved comments, validate by default — reading the actual code catches false positives from bot reviewers commenting on outdated context. Only skip if the user explicitly asks to skip, or if there are >50 such comments (offer to validate by category type — e.g. "Would you like me to validate all, or start with blocking/logic/security categories first?" — since priority tiers are not assigned until Step 6).
+Validate by default — reading the actual code catches false positives from bot reviewers commenting on outdated context. Only skip if the user explicitly asks to skip, or if there are >50 comments (offer to validate by category type — e.g. "Would you like me to validate all, or start with blocking/logic/security categories first?" — since priority tiers are not assigned until Step 6).
 
 If the referenced file is in a generated/vendored directory (same indicators as Step 8: `vendor/`, `generated/`, `node_modules/`, `__generated__`, "DO NOT EDIT" header, lock files), skip line-level validation and mark as "Not assessed — generated/vendored file." Still present the comment with a note that fixes should target the source. Similarly, if the referenced file is binary (images, compiled artifacts, fonts — detected by extension like `.png`, `.jpg`, `.woff`, `.so`, `.wasm`), skip line-level validation and mark as "Not assessed — binary file."
 
@@ -266,6 +249,8 @@ For each comment targeting a specific file and line:
 For PR-level comments without a specific code reference, skip validation and mark as "not assessed".
 
 If the referenced file no longer exists or the line number is beyond the file's current length, first check for renames: `git diff <commit_id>..HEAD --diff-filter=R --name-status` to detect if the file was renamed rather than deleted. If a rename is detected, validate against the new file path at the corresponding line and append "— renamed from `old_path` to `new_path`" to the file reference. If truly deleted, mark validity as "Likely invalid" with the reason "referenced file/line no longer exists in the current branch." Still present the comment to the user — it may indicate an issue that was resolved by deletion.
+
+When a comment's `commit_id` differs from the current HEAD (stale comment), the referenced line number may no longer correspond to the same code. Use `git diff <commit_id>..HEAD -- <path>` to check if the file has been modified. If the old commit SHA is unreachable (force-push), attempt validation against the current file content using code quoted in the comment body rather than relying on the line number. If the comment quotes no code context and the line has changed, mark validity as "Uncertain — file changed since review, line reference may be stale."
 
 Do **not** hide or auto-dismiss any comments based on validity. Always present all comments to the user with the validity assessment clearly shown, so they can make the final call.
 
@@ -432,7 +417,6 @@ This summary can be requested at any point during the workflow. It does not requ
 | Confusing `minimizeComment` with resolve | `minimizeComment` is moderation; use `resolveReviewThread` |
 | Ignoring PR-level issue comments | These have no `pull_request_review_id` — group separately |
 | Skipping data fetch in progress report mode | Progress report still needs Steps 1–3 — only Steps 4–9 are skipped |
-| Validating stale/resolved comments | Only validate current-commit + unresolved comments — stale ones skip validation (Step 5a) |
 
 ## Notes and Edge Cases
 
@@ -441,7 +425,7 @@ This summary can be requested at any point during the workflow. It does not requ
 - **GraphQL rate limiting**: Separate from REST (5000 points/hour, variable cost per query). If a GraphQL query returns a rate limit error (`RATE_LIMITED`), inform the user and offer two options: (1) proceed without thread resolution status (all comments treated as potentially unresolved), or (2) wait and retry. If rate limiting occurs mid-pagination (some pages fetched, some not), inform the user that thread resolution data is partial and mark any comments whose threads were not checked as "resolution status unknown" rather than defaulting to unresolved. Do not silently skip the GraphQL data
 - **Draft PRs**: If `gh pr view` shows the PR is in draft state, include a notice in the Step 7 summary header: "**Note:** This PR is in draft state. Reviewer feedback may be incomplete." Proceed with the full workflow otherwise — draft PRs can still have actionable review comments
 - **Closed or merged PRs**: If `gh pr view` shows state `MERGED` or `CLOSED`, include a notice in the Step 7 header. For merged PRs, proceed normally (user may want to review feedback or resolve threads). For closed (unmerged) PRs, ask before proceeding past Step 7: "This PR is closed and not merged. Code changes would apply to the branch but won't reach the target. Would you like to proceed with actioning, or just review the summary?"
-- **Stale comments in triage**: Stale comments (where `commit_id` differs from `headRefOid`) are pre-filtered in Step 5a — they skip validation entirely and are presented in a separate "Stale (older commits)" section at Low priority. This is the single biggest performance optimisation for PRs with multiple bot review rounds
+- **Stale comments in triage**: When processing review comments, compare each review's `commit_id` to the PR's current `headRefOid`. If they differ, note the comment as targeting an older commit — this context is useful during validation (append "— on older commit" to the file:line reference)
 - **API errors**: If any `gh api` call (REST or GraphQL) returns an HTTP error, malformed JSON, or network timeout, inform the user which API call failed and what data will be missing. Offer to retry or continue without that data source (e.g., proceed without thread resolution if GraphQL fails). Do not silently skip failed API calls.
 - **Repo-root paths**: File paths from the GitHub API are relative to the repository root. Resolve all paths via `git rev-parse --show-toplevel` rather than the current working directory. If a file is outside the agent's accessible scope, mark validation as "Not assessed — file outside current working scope."
 

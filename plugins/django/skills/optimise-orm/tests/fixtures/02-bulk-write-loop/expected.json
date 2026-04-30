@@ -1,0 +1,18 @@
+[
+  {
+    "id": "WRITE-001",
+    "severity_internal": "critical",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:14",
+    "savings_basis": "static",
+    "signals_caveat": false
+  },
+  {
+    "id": "WRITE-002",
+    "severity_internal": "high",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:24",
+    "savings_basis": "static",
+    "signals_caveat": false
+  }
+]

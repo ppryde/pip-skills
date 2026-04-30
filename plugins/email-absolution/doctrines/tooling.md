@@ -10,63 +10,63 @@ Selection guidance and cross-tool rules for email templating pipelines. This doc
 
 ---
 
-**[TOOL-001]** `mortal` — Declare the templating stack in `.email-absolution/config.yml` as `stack.templating`.
+**[TOOL-001]** `transactional: mortal | marketing: mortal` — Declare the templating stack in `.email-absolution/config.yml` as `stack.templating`.
 > Without this declaration, skills cannot load the correct per-language doctrine. The scribe skill will refuse to generate code until a templating language is declared. Source: email-absolution plugin config schema.
 > `detect: contextual` — check `.email-absolution/config.yml` for `stack.templating` field
 
-**[TOOL-002]** `mortal` — Do not mix templating syntax from two different engines in one template file.
+**[TOOL-002]** `transactional: mortal | marketing: mortal` — Do not mix templating syntax from two different engines in one template file.
 > Handlebars `{{#each}}` inside a Liquid template causes partial renders without errors. The Liquid engine passes `{{#each}}` through as literal text; recipients see raw template syntax. The same applies to Mustache `{{#section}}` inside Handlebars, or Jinja2 `{% for %}` inside a Nunjucks file that uses a non-compatible Jinja2 filter. Source: engineering incident patterns.
 > `detect: contextual` — check template files for mixed syntax markers from multiple engines
 
-**[TOOL-003]** `mortal` — Compiled output (MJML `dist/`, Maizzle `build/`) must never be hand-edited.
+**[TOOL-003]** `transactional: mortal | marketing: mortal` — Compiled output (MJML `dist/`, Maizzle `build/`) must never be hand-edited.
 > The next compile overwrites any manual changes. Edits to compiled output create invisible drift between source and deployed HTML — the next CI build deploys source-derived output that silently discards the hand-edit.
 > `detect: contextual` — check if dist/build files are committed with modifications not reflected in source
 
-**[TOOL-004]** `mortal` — Pin email toolchain versions exactly in `package.json` or `requirements.txt`.
+**[TOOL-004]** `transactional: mortal | marketing: mortal` — Pin email toolchain versions exactly in `package.json` or `requirements.txt`.
 > MJML patch releases have changed spacing and table structure. React Email patch releases have changed component HTML output. Maizzle v4 → v5 changed the build engine. Tailwind v3 → v4 is a breaking change. Floating semver (`^`, `~`) causes undetected visual regressions on `npm install` or `pip install`.
 > `detect: contextual` — check package.json / requirements.txt for caret/tilde ranges on email toolchain packages
 
-**[TOOL-005]** `mortal` — MJML v5 (beta as of March 2025) must not be used in production without thorough visual regression testing.
+**[TOOL-005]** `transactional: mortal | marketing: mortal` — MJML v5 (beta as of March 2025) must not be used in production without thorough visual regression testing.
 > Breaking changes in MJML v5: file includes disabled by default (security), minification backend replaced (htmlnano/cssnano replaces html-minifier/js-beautify), `mj-body` HTML structure changed, Node.js 16/18 dropped (requires 20, 22, or 24). Source: MJML v5.0.0-beta.1 changelog, March 2025.
 > `detect: contextual` — check package.json for MJML version; flag beta/v5 references
 
-**[TOOL-006]** `mortal` — Test the full rendering pipeline end-to-end, not only the template output.
+**[TOOL-006]** `transactional: mortal | marketing: mortal` — Test the full rendering pipeline end-to-end, not only the template output.
 > Screenshot tools (Litmus, Email on Acid) do not test: dynamic rendering failures, broken ESP API calls, missing MIME parts, or truncation at the 102 KB Gmail clip. A screenshot test can pass while a production send fails silently. Source: Email on Acid "Limitations of Screenshot Testing".
 > `detect: contextual` — advisory; verify test suite includes a real send-and-receive test
 
-**[TOOL-007]** `venial` — Use the build-step compilation pattern for MJML and Maizzle: compile at CI time, inject data at runtime.
+**[TOOL-007]** `transactional: venial | marketing: venial` — Use the build-step compilation pattern for MJML and Maizzle: compile at CI time, inject data at runtime.
 > Compiling MJML at send time (per-request) introduces compile latency into the send path. Pre-compiled HTML is a static asset; data injection at send time is fast. Source: MJML Documentation "Use with Node.js".
 > `detect: contextual` — advisory; check if MJML compilation happens at build/CI or at send time
 
-**[TOOL-008]** `venial` — ESP-native templates (SendGrid Dynamic Templates, Postmark Templates, Mailchimp) create vendor lock-in. Document this trade-off explicitly.
+**[TOOL-008]** `transactional: venial | marketing: venial` — ESP-native templates (SendGrid Dynamic Templates, Postmark Templates, Mailchimp) create vendor lock-in. Document this trade-off explicitly.
 > Template source lives inside the ESP. Migrating ESPs requires rewriting all templates. Logic capabilities are limited to what the ESP exposes (SendGrid's Handlebars subset lacks custom helpers; Postmark is Mustache with no block helpers). Source: SendGrid and Postmark documentation.
 > `detect: contextual` — if stack.esp is "sendgrid" or "postmark", flag that templates live in the ESP
 
-**[TOOL-009]** `venial` — Maintain a plain-text version for every email template.
+**[TOOL-009]** `transactional: venial | marketing: venial` — Maintain a plain-text version for every email template.
 > React Email, MJML, and Maizzle do not generate plain text automatically. Author plain text manually or use a library (`html-to-text` for Node.js, `premailer` for Python/Ruby). Plain-text parts are required for DELIV-007 compliance and are read by spam filters. Source: SpamAssassin rule documentation.
 > `detect: contextual` — check if project has a plain-text generation strategy
 
-**[TOOL-010]** `venial` — In the MJML + ESP hybrid pattern, verify that ESP placeholder syntax is preserved verbatim through MJML compilation.
+**[TOOL-010]** `transactional: venial | marketing: venial` — In the MJML + ESP hybrid pattern, verify that ESP placeholder syntax is preserved verbatim through MJML compilation.
 > MJML does not interpret non-MJML content. `{{first_name}}` (Handlebars) or `{{ first_name }}` (Liquid) inside `<mj-text>` compiles through to the output HTML unchanged. However, some preprocessors or minifiers may mangle double-brace syntax. Verify with a compilation smoke test. Source: MJML Documentation.
 > `detect: contextual` — run compilation smoke test and grep for placeholder syntax in dist output
 
-**[TOOL-011]** `counsel` — Use MJML when the team needs cross-client responsive layout without hand-writing table/VML markup and the template set is moderate in size.
+**[TOOL-011]** `transactional: counsel | marketing: counsel` — Use MJML when the team needs cross-client responsive layout without hand-writing table/VML markup and the template set is moderate in size.
 > MJML compiles `.mjml` XML to cross-client HTML with inlined CSS, MSO conditionals, and VML buttons automatically. Best for teams with a JavaScript build pipeline and 5–50 templates. Not suited to teams that need full control of generated HTML.
 > `detect: contextual` — selection guidance
 
-**[TOOL-012]** `counsel` — Use Handlebars when the team is in a Node.js/JavaScript stack and needs a familiar, logic-minimal templating language with custom helper support.
+**[TOOL-012]** `transactional: counsel | marketing: counsel` — Use Handlebars when the team is in a Node.js/JavaScript stack and needs a familiar, logic-minimal templating language with custom helper support.
 > Handlebars is widely understood, has an excellent helper ecosystem, and integrates natively with SendGrid Dynamic Templates (Handlebars subset). Best for JavaScript-first teams. Note: SendGrid's Handlebars subset omits `@index`/`@first`/`@last` loop metadata and custom helpers — see HBS-003.
 > `detect: contextual` — selection guidance
 
-**[TOOL-013]** `counsel` — Use Liquid when sending via Klaviyo or another Liquid-native ESP, or when the team prioritises sandboxed rendering safety.
+**[TOOL-013]** `transactional: counsel | marketing: counsel` — Use Liquid when sending via Klaviyo or another Liquid-native ESP, or when the team prioritises sandboxed rendering safety.
 > Liquid has no filesystem access and cannot execute arbitrary code — safe to evaluate user-influenced templates. It is the native language of Klaviyo's template engine. Ruby and JavaScript ports are production-grade. Source: Shopify Liquid open-source documentation.
 > `detect: contextual` — selection guidance
 
-**[TOOL-014]** `counsel` — Use React Email when the team is TypeScript-first and wants compile-time type checking of email data shapes.
+**[TOOL-014]** `transactional: counsel | marketing: counsel` — Use React Email when the team is TypeScript-first and wants compile-time type checking of email data shapes.
 > React Email's primary advantage over text templating is typed component props. A data model change that renames `order.id` to `order.orderId` fails the TypeScript build rather than silently sending broken emails. Suited to Node.js stacks where application models can be shared with email component interfaces. Source: React Email Documentation.
 > `detect: contextual` — selection guidance
 
-**[TOOL-015]** `counsel` — Use Maizzle when the team is fluent in Tailwind CSS and prefers writing plain HTML rather than learning MJML's component model.
+**[TOOL-015]** `transactional: counsel | marketing: counsel` — Use Maizzle when the team is fluent in Tailwind CSS and prefers writing plain HTML rather than learning MJML's component model.
 > Maizzle applies Tailwind's utility workflow to email, compiling and inlining CSS at build time. It does not abstract table-based layout — developers write tables directly or use Maizzle starter templates. Best for Tailwind-fluent teams who want that workflow without MJML's DSL. Source: Maizzle Framework documentation.
 > `detect: contextual` — selection guidance
 

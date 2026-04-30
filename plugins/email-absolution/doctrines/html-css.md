@@ -8,95 +8,95 @@ Guards against HTML structure and CSS usage patterns that produce broken, unstyl
 
 ---
 
-**[HTML-001]** `mortal` — Never use `<p>` tags for spacing or layout.
+**[HTML-001]** `transactional: mortal | marketing: mortal` — Never use `<p>` tags for spacing or layout.
 > Outlook 2007–2019 applies its own default margins to `<p>` elements that vary by Word version and cannot be fully reset via CSS. This causes inconsistent spacing between versions and breaks pixel-level layouts. Use table cell padding for spacing instead. If `<p>` is used for paragraph text, always include `style="margin: 0; padding: 0;"` explicitly.
 > `detect: regex` — pattern: `<p(?![^>]*style="[^"]*margin:\s*0)[^>]*>`
 
-**[HTML-002]** `mortal` — Headings (`<h1>`–`<h6>`) must have `margin: 0` set inline.
+**[HTML-002]** `transactional: mortal | marketing: mortal` — Headings (`<h1>`–`<h6>`) must have `margin: 0` set inline.
 > Outlook and most clients apply browser-default margins to headings. Without an inline `margin: 0`, headings introduce unexpected vertical gaps above and below them that compound in multi-section layouts.
 > `detect: regex` — pattern: `<h[1-6](?![^>]*style="[^"]*margin)[^>]*>`
 
-**[HTML-003]** `mortal` — `display: none` on any element must be accompanied by `mso-hide: all`.
+**[HTML-003]** `transactional: mortal | marketing: venial` — `display: none` on any element must be accompanied by `mso-hide: all`.
 > Outlook 2007–2019 ignores `display: none` for some element types, rendering hidden content (preheaders, mobile-only blocks, dark mode swaps) visibly. `mso-hide: all` is the MSO-specific equivalent and must accompany every `display: none` declaration. Source: standard Outlook workaround pattern.
 > `detect: regex` — pattern: `display:\s*none(?![^"]{0,120}mso-hide)`
 
-**[HTML-004]** `mortal` — Do not nest `<table>` elements more than 3–4 levels deep.
+**[HTML-004]** `transactional: mortal | marketing: mortal` — Do not nest `<table>` elements more than 3–4 levels deep.
 > Deep table nesting causes rendering performance issues and layout glitches in older Outlook and Yahoo clients. Heavily nested tables also become unmaintainable. Flatten layout where possible; use padding and spacer rows for spacing rather than nested tables.
 > `detect: contextual` — count table nesting depth; flag structures exceeding 4 levels
 
-**[HTML-005]** `mortal` — `font-family` declarations must include at least one web-safe fallback.
+**[HTML-005]** `transactional: mortal | marketing: mortal` — `font-family` declarations must include at least one web-safe fallback.
 > Custom fonts (`@font-face`) are not supported in Gmail, Yahoo, or Outlook 2007–2019. If a custom font is declared without a web-safe fallback (e.g., `font-family: 'MyFont'`), these clients render the browser default (usually Times New Roman), which is almost never acceptable for production email. Source: [caniemail.com](https://www.caniemail.com/).
 > `detect: regex` — pattern: `font-family\s*:\s*['"]?[A-Za-z][^;'"]*['"]?\s*[;"]` (check for single font — no comma following)
 
-**[HTML-006]** `mortal` — `<a>` elements with custom colours must have `color` and `text-decoration` set via inline style.
+**[HTML-006]** `transactional: venial | marketing: counsel` — `<a>` elements with custom colours must have `color` and `text-decoration` set via inline style.
 > Outlook.com, older Yahoo, and Gmail may strip `<a>` colour rules from `<style>` blocks. Without inline styles on the `<a>` element itself, link colours revert to the client's default blue underlined style, which breaks branded button colours and link styling in footers and body text.
 > `detect: regex` — pattern: `<a\s[^>]*href=[^>]*>` (check if each linked anchor has an inline style attribute)
 
-**[HTML-007]** `venial` — Do not use `<br>` tags as spacing substitutes between content blocks.
+**[HTML-007]** `transactional: venial | marketing: counsel` — Do not use `<br>` tags as spacing substitutes between content blocks.
 > `<br>` spacing is inconsistent across clients — some add extra padding, some collapse multiple `<br>` tags. Use table rows with a fixed-height `<td>` (height attribute + font-size: 0) for reliable vertical spacing between content blocks.
 > `detect: contextual` — check for `<br>` elements used outside paragraph or heading context (i.e. as spacers between table rows)
 
-**[HTML-008]** `venial` — Use `padding-top`, `padding-right`, `padding-bottom`, `padding-left` instead of `padding` shorthand on `<td>` elements.
+**[HTML-008]** `transactional: venial | marketing: counsel` — Use `padding-top`, `padding-right`, `padding-bottom`, `padding-left` instead of `padding` shorthand on `<td>` elements.
 > Outlook 2007–2019 has inconsistent shorthand padding parsing. Explicit directional properties are more reliably applied. Also, Outlook's vertical padding row bug — all cells in a row inherit the largest vertical padding value — means vertical padding should be applied to at most one `<td>` per row. Source: [caniemail.com/features/css-padding](https://www.caniemail.com/features/css-padding/).
 > `detect: regex` — pattern: `<td[^>]*style="[^"]*\bpadding\s*:\s*\d`
 
-**[HTML-009]** `venial` — Inline all layout-critical CSS directly on elements.
+**[HTML-009]** `transactional: mortal | marketing: venial` — Inline all layout-critical CSS directly on elements.
 > Gmail strips `<head>` `<style>` blocks in some rendering contexts. Styles critical to layout — `background-color`, `color`, `font-family`, `font-size`, `line-height`, `padding-*`, `width`, `border` — must be inlined. `<style>` block rules may be used as a progressive enhancement layer (dark mode, hover states, responsive breakpoints) but cannot be the sole source of layout-critical styles.
 > `detect: contextual` — check if structural elements (outer wrapper, content cell, text) have inline styles for the properties listed above
 
-**[HTML-010]** `venial` — Do not use `float` or `position: absolute/relative` for structural layout.
+**[HTML-010]** `transactional: mortal | marketing: venial` — Do not use `float` or `position: absolute/relative` for structural layout.
 > Both are unreliable across email clients. `float` is partially supported but collapses unpredictably in Outlook and some webmail. `position: absolute/relative` is unsupported in most webmail clients. Use table-based layout for all structural positioning.
 > `detect: regex` — pattern: `style="[^"]*(?:float\s*:|position\s*:\s*(?:absolute|relative|fixed))`
 
-**[HTML-011]** `venial` — Do not use `border-radius` as the sole method for rounded buttons in cross-client emails.
+**[HTML-011]** `transactional: venial | marketing: counsel` — Do not use `border-radius` as the sole method for rounded buttons in cross-client emails.
 > Outlook 2007–2019 does not support `border-radius`. Buttons with rounded corners will appear as square-cornered boxes in Outlook unless a VML `<v:roundrect>` fallback is present. The CSS `border-radius` may remain for modern clients but must not be the only implementation. Source: [caniemail.com](https://www.caniemail.com/).
 > `detect: contextual` — check if elements with `border-radius` inside CTA sections have an accompanying VML fallback
 
-**[HTML-012]** `venial` — `<img>` elements inside `<a>` elements must have `border="0"` and `style="text-decoration: none;"` on the wrapping `<a>`.
+**[HTML-012]** `transactional: venial | marketing: counsel` — `<img>` elements inside `<a>` elements must have `border="0"` and `style="text-decoration: none;"` on the wrapping `<a>`.
 > Some clients render a blue underline or border around linked images. `border="0"` on the `<img>` and `text-decoration: none` on the `<a>` prevent both. The HTML attribute `border="0"` is required in addition to CSS `border: 0`.
 > `detect: regex` — pattern: `<a[^>]*>\s*<img(?![^>]*\bborder=)[^>]*>`
 
-**[HTML-013]** `venial` — All images must have explicit `width` and `height` HTML attributes.
+**[HTML-013]** `transactional: venial | marketing: counsel` — All images must have explicit `width` and `height` HTML attributes.
 > Without explicit dimensions, images that are blocked or slow to load cause the email layout to reflow or collapse. Explicit dimensions preserve layout structure even when images are not shown. `max-width: 100%` may be used in CSS to allow images to shrink on narrow viewports, but the HTML attribute dimensions remain required.
 > `detect: regex` — pattern: `<img(?![^>]*\bwidth=)[^>]*>` or `<img(?![^>]*\bheight=)[^>]*>`
 
-**[HTML-014]** `venial` — Do not use `margin: auto` for centering content.
+**[HTML-014]** `transactional: venial | marketing: counsel` — Do not use `margin: auto` for centering content.
 > Outlook 2007–2019 does not support `margin: auto`. Centre-align content using `align="center"` on the `<td>` containing the content or `text-align: center` on the `<td>`. For the content table itself, wrap it in a 100%-wide outer table with `align="center"` on its cell.
 > `detect: regex` — pattern: `style="[^"]*margin(?:-left|-right)?\s*:\s*auto`
 
-**[HTML-015]** `venial` — Do not use `<span>` for layout or spacing purposes.
+**[HTML-015]** `transactional: venial | marketing: counsel` — Do not use `<span>` for layout or spacing purposes.
 > `margin` on `<span>` is not supported in Outlook 2007–2019. `<span>` is appropriate for inline text styling (colour, font-weight) but must not be relied upon for layout spacing or structural positioning.
 > `detect: contextual` — check for `<span>` elements with margin or padding used in structural contexts
 
-**[HTML-016]** `counsel` — Use `@media` queries to stack columns on mobile, but never rely on them as the only path to mobile usability.
+**[HTML-016]** `transactional: venial | marketing: counsel` — Use `@media` queries to stack columns on mobile, but never rely on them as the only path to mobile usability.
 > Gmail Android and some webmail clients do not support `@media` queries. The hybrid layout pattern (table with `display: inline-block` columns) provides fluid mobile behaviour without media queries. Use `@media` queries as an enhancement layer on top of a hybrid base that already works without them.
 > `detect: contextual` — check if any multi-column layout depends solely on @media stacking without a hybrid fallback
 
-**[HTML-017]** `counsel` — Declare `color-scheme: light dark` on the `:root` element in the `<style>` block alongside the equivalent `<meta>` tags.
+**[HTML-017]** `transactional: counsel | marketing: counsel` — Declare `color-scheme: light dark` on the `:root` element in the `<style>` block alongside the equivalent `<meta>` tags.
 > Declaring `color-scheme` via CSS in addition to the `<meta>` tag provides broader coverage across WebKit-based clients that look for either signal. Without this, some clients apply forced colour inversion instead of using the email's own dark mode styles. Source: Litmus "Dark Mode Email Design Guide".
 > `detect: regex` — pattern: `color-scheme` (check for both meta tag and CSS declaration)
 
-**[HTML-018]** `counsel` — Dark mode overrides in `@media (prefers-color-scheme: dark)` must use `!important` on all declarations.
+**[HTML-018]** `transactional: counsel | marketing: counsel` — Dark mode overrides in `@media (prefers-color-scheme: dark)` must use `!important` on all declarations.
 > Inline styles have higher specificity than `<style>` block rules. Dark mode overrides that target inline-styled elements (the default for email) must include `!important` to win the specificity battle. Without `!important`, dark mode overrides have no effect on inlined colour properties.
 > `detect: regex` — pattern: `prefers-color-scheme:\s*dark` (check that rules inside use `!important`)
 
-**[HTML-019]** `counsel` — Yahoo/AOL/Fastmail/HEY users always see the light mode design.
+**[HTML-019]** `transactional: counsel | marketing: counsel` — Yahoo/AOL/Fastmail/HEY users always see the light mode design.
 > Yahoo Mail and AOL transform `@media (prefers-color-scheme)` into a non-matching rule. Fastmail renders it as `@media none`. HEY renders it as `@media (false)`. These clients silently discard dark mode overrides — do not design light mode as an afterthought.
 > `detect: contextual` — advisory note; no code pattern to check
 
-**[HTML-020]** `counsel` — Use `bgcolor` HTML attribute alongside CSS `background-color` on `<td>` and `<table>` elements.
+**[HTML-020]** `transactional: counsel | marketing: counsel` — Use `bgcolor` HTML attribute alongside CSS `background-color` on `<td>` and `<table>` elements.
 > Some Outlook builds and older clients ignore CSS `background-color` but respect the deprecated `bgcolor` attribute. Using both ensures background colours render everywhere. The `bgcolor` value must be a hex colour (no `rgba`, no named colours).
 > `detect: contextual` — check primary background cells for both bgcolor attribute and CSS background-color
 
-**[HTML-021]** `counsel` — Do not nest `<a>` elements.
+**[HTML-021]** `transactional: counsel | marketing: counsel` — Do not nest `<a>` elements.
 > Nested anchor elements are invalid HTML and produce unpredictable rendering across email clients. Some clients select the inner `<a>` and ignore the outer; others produce completely broken output. This situation typically arises in frameworks that auto-wrap linked images inside a second link.
 > `detect: regex` — pattern: `<a[^>]*>(?:[^<]|<(?!a[^>]*/?>))*<a` (nested anchor)
 
-**[HTML-022]** `counsel` — Provide a dark-mode image variant for logos and icons using class-based swap.
+**[HTML-022]** `transactional: counsel | marketing: counsel` — Provide a dark-mode image variant for logos and icons using class-based swap.
 > Logos designed for light backgrounds can become invisible or visually poor in forced-dark contexts. Provide a `light-only` version hidden in dark mode and a `dark-only` version hidden in light mode, swapped via `display: none !important` / `display: block !important` in the `@media (prefers-color-scheme: dark)` block.
 > `detect: contextual` — check if logo `<img>` elements have a dark-mode alternative
 
-**[HTML-023]** `venial` — Do not rely on `@font-face` in `<style>` blocks as the sole web font loading mechanism in email.
+**[HTML-023]** `transactional: venial | marketing: counsel` — Do not rely on `@font-face` in `<style>` blocks as the sole web font loading mechanism in email.
 > Gmail and Yahoo strip `<head>` `<style>` blocks in some rendering contexts, silently discarding any `@font-face` declarations. Outlook 2007–2019 does not support `@font-face` at all. Apple Mail and iOS Mail do support it. This means the custom font loads in roughly 20–30% of clients and is silently lost in the rest. Accept this trade-off explicitly and always declare a complete web-safe fallback stack in every `font-family` declaration (see HTML-005). Using `@font-face` without a fallback produces the client default (usually Times New Roman) in Gmail, Yahoo, and Outlook.
 > `detect: regex` — part 1 (presence flag): pattern `@font-face\s*\{` — if found, confirms custom font is in use and this rule applies; part 2 (fallback check): contextual — for each custom font name found in `@font-face`, verify every `font-family` declaration using that name also includes a named web-safe fallback (not just the generic `sans-serif`)
 

@@ -10,6 +10,11 @@ or a single file named by the caller. It applies the full doctrine set but
 confines its gaze to the templates actually in play. Faster than the Elder.
 No less exacting.
 
+## Tool Discipline
+
+Use dedicated tools throughout — not Bash equivalents:
+- Read files → `Read` tool | Find files → `Glob` tool | Search content → `Grep` tool
+
 ## Prerequisites
 
 1. `.email-absolution/config.yml` must exist with `stack.templating` set
@@ -47,6 +52,10 @@ No less exacting.
 
 Read `.email-absolution/config.yml`. Same requirements as the Elder.
 If absent, offer to scaffold. See the `email-absolution:elder` skill, Step 1, for the scaffold flow.
+
+If `stack.email_type` is missing or empty, ask the caller to choose `transactional`
+or `marketing`. If they decline or are unsure, default to `marketing` and state the
+assumption in the verdict.
 
 ### Step 2: Load Doctrines
 
@@ -86,6 +95,9 @@ If no email template files are found in scope:
 ### Step 4: Apply Config-Conditional Rules
 
 Identical to the Elder — see Step 4 of the `email-absolution:elder` skill.
+Also apply the email-type severity track: each rule header contains a token of the
+form `` `transactional: <level> | marketing: <level>` `` — extract the level matching
+`stack.email_type` and record it as the rule's active severity.
 
 ### Step 5: Run Audit
 

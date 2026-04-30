@@ -1,0 +1,10 @@
+[
+  {
+    "id": "WRITE-007",
+    "severity_internal": "critical",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:20",
+    "savings_basis": "unknown",
+    "signals_caveat": true
+  }
+]

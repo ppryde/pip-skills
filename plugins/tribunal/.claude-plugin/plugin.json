@@ -1,10 +1,11 @@
 {
   "name": "tribunal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "PR comment review, categorisation, prioritisation and resolution. No heresy goes unaddressed.",
   "author": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
   },
-  "keywords": ["pr-review", "code-review", "github", "feedback", "automation"]
+  "keywords": ["pr-review", "code-review", "github", "feedback", "automation"],
+  "hooks": "./hooks/hooks.json"
 }

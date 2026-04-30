@@ -8,83 +8,83 @@ Guards against sending infrastructure failures, authentication gaps, and content
 
 ---
 
-**[DELIV-001]** `mortal` — SPF must be published for the sending domain.
+**[DELIV-001]** `transactional: mortal | marketing: mortal` — SPF must be published for the sending domain.
 > SPF (RFC 7208) allows receiving MTAs to verify that the sending IP is authorised to send on behalf of your domain. Missing SPF causes messages to fail authentication checks. Google and Yahoo (2024) require valid SPF alignment for all senders. Source: [RFC 7208](https://datatracker.ietf.org/doc/html/rfc7208); [Google Sender Guidelines 2024](https://support.google.com/mail/answer/81126).
 > `detect: contextual` — check that `stack.esp` config implies SPF is configured; flag as requiring infrastructure verification
 
-**[DELIV-002]** `mortal` — DKIM must be configured with a minimum 2048-bit RSA key, signing at least the `from`, `to`, `subject`, `date`, and `message-id` headers.
+**[DELIV-002]** `transactional: mortal | marketing: mortal` — DKIM must be configured with a minimum 2048-bit RSA key, signing at least the `from`, `to`, `subject`, `date`, and `message-id` headers.
 > DKIM (RFC 6376) provides cryptographic proof that the message was authorised by the signing domain. RSA-1024 keys are deprecated and rejected by Gmail. The `h=` header list must include `from` for DMARC alignment. Google and Yahoo (2024) require passing DKIM alignment. Source: [RFC 6376](https://datatracker.ietf.org/doc/html/rfc6376); Google Sender Guidelines 2024.
 > `detect: contextual` — check stack.esp config implies DKIM is configured; flag key size and signed headers as requiring infrastructure verification
 
-**[DELIV-003]** `mortal` — DMARC must be published at minimum `p=none` with a valid `rua=` reporting address.
+**[DELIV-003]** `transactional: mortal | marketing: mortal` — DMARC must be published at minimum `p=none` with a valid `rua=` reporting address.
 > DMARC (RFC 7489) ties SPF and DKIM together and requires identifier alignment — the authenticated domain must match the RFC5322 `From:` domain. Google and Yahoo (2024) require DMARC published for bulk senders. `p=none` is the minimum; progression to `p=quarantine` then `p=reject` is required for full protection. Source: [RFC 7489](https://datatracker.ietf.org/doc/html/rfc7489); Google Sender Guidelines 2024.
 > `detect: contextual` — infrastructure verification required; flag absence of DMARC intent in project config
 
-**[DELIV-004]** `mortal` — All image URLs must use HTTPS. HTTP image URLs are blocked by default in most modern clients and reduce trust scores.
+**[DELIV-004]** `transactional: mortal | marketing: mortal` — All image URLs must use HTTPS. HTTP image URLs are blocked by default in most modern clients and reduce trust scores.
 > HTTP image URLs trigger security warnings in Gmail, iOS Mail, and Outlook. Many corporate security proxies block HTTP content entirely. Serving images over HTTP also reduces the sender's technical hygiene score with spam filters. Source: Campaign Monitor; Litmus Email Design Guide.
 > `detect: regex` — pattern: `(?:src|href)=["']http://`
 
-**[DELIV-005]** `mortal` — Total HTML must remain under 102 KB (102,400 bytes).
+**[DELIV-005]** `transactional: mortal | marketing: mortal` — Total HTML must remain under 102 KB (102,400 bytes).
 > Gmail clips email HTML at exactly 102 KB. Content beyond this limit is hidden behind a "[Message clipped] View entire message" link. Transactional content (order details, CTAs) placed after the clip is effectively invisible to users who don't click through. Source: [caniemail.com/features/html-style](https://www.caniemail.com/features/html-style/).
 > `detect: contextual` — estimate compiled HTML size; flag templates approaching or exceeding the limit
 
-**[DELIV-006]** `mortal` — MIME structure must be `multipart/alternative` with `text/plain` before `text/html`.
+**[DELIV-006]** `transactional: mortal | marketing: mortal` — MIME structure must be `multipart/alternative` with `text/plain` before `text/html`.
 > RFC 2046 requires `text/plain` to appear before `text/html` in `multipart/alternative` (parts listed in increasing order of preference; the last supported part renders). Inverting this causes plain-text-only clients to display raw HTML source. Missing plain-text parts raise spam scores on Barracuda and Proofpoint filters. Source: [RFC 2046 §5.1.4](https://datatracker.ietf.org/doc/html/rfc2046#section-5.1.4).
 > `detect: contextual` — check email.config.yml for MIME structure configuration or flag for manual verification
 
-**[DELIV-007]** `mortal` — Plain-text version must be a complete, coherent prose rendering — not a stub.
+**[DELIV-007]** `transactional: mortal | marketing: mortal` — Plain-text version must be a complete, coherent prose rendering — not a stub.
 > Stub plain-text bodies ("Please view the HTML version") raise spam scores and fail CAN-SPAM's requirement that required content (physical address, opt-out) be present and readable in plain text. Some corporate mail gateways default to plain text entirely. Source: CAN-SPAM Act (15 U.S.C. §7704); Postmark "Plain-Text Emails".
 > `detect: contextual` — check if email.config.yml or template tooling generates a genuine plain-text version
 
-**[DELIV-008]** `mortal` — Do not use consumer URL shorteners (bit.ly, tinyurl, t.co) in email links.
+**[DELIV-008]** `transactional: mortal | marketing: mortal` — Do not use consumer URL shorteners (bit.ly, tinyurl, t.co) in email links.
 > Consumer shortener domains accumulate spam reputation and are permanently blocklisted in SURBL and URIBL. The obscured destination is itself a spam signal. If a shortener service has an outage, all links in sent messages break. Use a dedicated tracking subdomain instead (`click.example.com/c/[token]`). Source: [Postmark: URL Shorteners and Deliverability](https://postmarkapp.com/blog/url-shorteners-hurt-email-deliverability).
 > `detect: regex` — pattern: `href=["']https?://(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly)/`
 
-**[DELIV-009]** `mortal` — Do not use ALL-CAPS words in subject lines or excessive capitalisation in body text.
+**[DELIV-009]** `transactional: mortal | marketing: mortal` — Do not use ALL-CAPS words in subject lines or excessive capitalisation in body text.
 > SpamAssassin's `UPPERCASE_25_50` and higher rules fire when 25–75%+ of body words are capitalised. ALL-CAPS subject lines are one of the oldest and most reliable spam signals. Source: [Apache SpamAssassin HTML rules](https://spamassassin.apache.org/full/3.4.x/doc/Mail_SpamAssassin_Plugin_HTMLEval.html).
 > `detect: contextual` — check subject field in email.config.yml and primary body text for excessive capitalisation
 
-**[DELIV-010]** `mortal` — Marketing-style spam trigger words must not appear in transactional email subject lines.
+**[DELIV-010]** `transactional: mortal | marketing: mortal` — Marketing-style spam trigger words must not appear in transactional email subject lines.
 > Phrases like "Act now", "Limited time offer", "Free gift", "You have been selected", and financial urgency language raise composite spam scores. Transactional emails should use purely functional, transactional language. Source: HubSpot "Spam Trigger Words"; Mailchimp "Spam Filters".
 > `detect: contextual` — check subject line in email.config.yml for promotional/urgency language
 
-**[DELIV-011]** `venial` — List-Unsubscribe and List-Unsubscribe-Post headers must be present for subscribed/marketing mail sent at ≥ 5,000 messages/day to Gmail or Yahoo.
+**[DELIV-011]** `transactional: venial | marketing: venial` — List-Unsubscribe and List-Unsubscribe-Post headers must be present for subscribed/marketing mail sent at ≥ 5,000 messages/day to Gmail or Yahoo.
 > Google and Yahoo (2024) require one-click unsubscribe (RFC 8058) for bulk senders. The `List-Unsubscribe-Post: List-Unsubscribe=One-Click` header enables Gmail's UI "Unsubscribe" button. The HTTPS endpoint must accept POST requests without redirects, remove the subscriber within 2 days, and not require session state or cookies. Source: [RFC 8058](https://www.rfc-editor.org/rfc/rfc8058); Google Sender Guidelines 2024.
 > `detect: contextual` — check email.config.yml `unsubscribe: true` flag; if marketing email, verify header is configured in ESP settings
 
-**[DELIV-012]** `venial` — Physical mailing address must appear in the email footer.
+**[DELIV-012]** `transactional: venial | marketing: venial` — Physical mailing address must appear in the email footer.
 > CAN-SPAM (US) requires a physical postal address in every commercial email. CASL (Canada) requires sender identification. This applies to transactional emails that contain any promotional content. Purely transactional messages (order confirmation, password reset) are exempt under CAN-SPAM's transactional exception (§7702(17)) but including the address is best practice regardless. Source: CAN-SPAM Act (15 U.S.C. §7704).
 > `detect: contextual` — check if footer section contains a physical address
 
-**[DELIV-013]** `venial` — Do not use raw IP addresses as link destinations.
+**[DELIV-013]** `transactional: venial | marketing: venial` — Do not use raw IP addresses as link destinations.
 > Links using raw IP addresses (e.g., `http://192.0.2.1/track`) are a strong spam signal and are scored by SpamAssassin URI rules. All tracking and redirect links must use proper domain names. Source: SpamAssassin URI rules; Postmark "Why Emails Go to Spam".
 > `detect: regex` — pattern: `href=["']https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}`
 
-**[DELIV-014]** `venial` — Images must not have invisible or hidden `alt` text to evade spam filters.
+**[DELIV-014]** `transactional: venial | marketing: venial` — Images must not have invisible or hidden `alt` text to evade spam filters.
 > Font colour identical to background, `font-size: 0`, `display: none` on large text blocks, and `overflow: hidden` on zero-height containers are all scored by spam filters as deceptive content padding. The preheader pattern (which does use `display: none`) is a known-good exception, but bulk hidden text is not. Source: SpamAssassin HTML rules.
 > `detect: contextual` — check for large hidden text blocks that are not preheaders
 
-**[DELIV-015]** `venial` — Email must include at least 500 characters of live (non-image) text for messages containing significant images.
+**[DELIV-015]** `transactional: venial | marketing: venial` — Email must include at least 500 characters of live (non-image) text for messages containing significant images.
 > Spam filters penalise high image-to-text ratios. Single-image emails with no text body (other than a footer) are high-risk. There is no universally applicable magic ratio, but ensuring substantial live text content defends against content-based filtering. Source: Campaign Monitor "Image-to-Text Ratio"; Litmus HTML Email Design Guide.
 > `detect: contextual` — estimate live text content vs image content ratio
 
-**[DELIV-016]** `venial` — DMARC should progress from `p=none` to `p=quarantine` then `p=reject` once authentication is stable.
+**[DELIV-016]** `transactional: venial | marketing: venial` — DMARC should progress from `p=none` to `p=quarantine` then `p=reject` once authentication is stable.
 > `p=none` monitors but takes no enforcement action. `p=quarantine` routes failing mail to spam. `p=reject` causes receiving MTAs to discard failing messages at SMTP time. Google's stated roadmap indicates `p=none` will eventually be insufficient. Progressive tightening is required. Source: [RFC 7489](https://datatracker.ietf.org/doc/html/rfc7489); Google Sender Guidelines 2024.
 > `detect: contextual` — advisory; check project documentation for DMARC policy posture
 
-**[DELIV-017]** `venial` — Spam complaint rate must remain below 0.10% for Gmail; below 0.30% triggers delivery rejection.
+**[DELIV-017]** `transactional: venial | marketing: venial` — Spam complaint rate must remain below 0.10% for Gmail; below 0.30% triggers delivery rejection.
 > Google Postmaster Tools reports spam complaint rates. Rates above 0.08% trigger warnings. Above 0.10% triggers enforcement action. Above 0.30% causes delivery rejection. Complaint rates are driven by unsubscribe friction, unexpected email content, and poor list hygiene. Source: [Google Postmaster Tools](https://support.google.com/mail/answer/81126).
 > `detect: contextual` — operational concern; flag in config review if tracking is not configured
 
-**[DELIV-018]** `counsel` — Hard bounces must be suppressed immediately and permanently.
+**[DELIV-018]** `transactional: counsel | marketing: counsel` — Hard bounces must be suppressed immediately and permanently.
 > Sending to hard-bounced addresses (permanent delivery failures — address does not exist) is a major blocklist trigger. Repeated attempts to non-existent addresses raise the sender's bounce rate, damaging IP reputation. Source: RFC 5321 §4.2; Postmark "Bounce Handling".
 > `detect: contextual` — advisory; flag if email config indicates bounce handling is not configured at ESP level
 
-**[DELIV-019]** `counsel` — Tracking pixels should be hosted on a dedicated subdomain with proper Content-Type headers.
+**[DELIV-019]** `transactional: counsel | marketing: counsel` — Tracking pixels should be hosted on a dedicated subdomain with proper Content-Type headers.
 > Apple Mail Privacy Protection (iOS 15+) pre-fetches all remote content through Apple's proxy servers, inflating open rates. Gmail's image proxy serves cached copies. Mixing tracking pixel domains with main website domains conflates web-browsing reputation with mail reputation. Use a dedicated subdomain (`track.example.com`). Source: Apple Mail Privacy Protection; Litmus "Email Tracking Pixels".
 > `detect: contextual` — check tracking configuration in email.config.yml
 
-**[DELIV-020]** `counsel` — SPF record must not exceed 10 DNS lookups.
+**[DELIV-020]** `transactional: counsel | marketing: counsel` — SPF record must not exceed 10 DNS lookups.
 > RFC 7208 §4.6.4 specifies that SPF evaluation must not require more than 10 DNS lookups. Exceeding this returns `permerror`, which many receivers treat as `fail`. Monitor with MXToolbox or dmarcian. Source: [RFC 7208 §4.6.4](https://datatracker.ietf.org/doc/html/rfc7208#section-4.6.4).
 > `detect: contextual` — advisory; flag for infrastructure review
 

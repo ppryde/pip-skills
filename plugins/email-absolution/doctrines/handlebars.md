@@ -8,71 +8,71 @@ Rules and gotchas for engineers building transactional email templates with Hand
 
 ---
 
-**[HBS-001]** `mortal` — All template variables must have fallback values. No variable should render as an empty string silently.
+**[HBS-001]** `transactional: mortal | marketing: mortal` — All template variables must have fallback values. No variable should render as an empty string silently.
 > `{{firstName}}` renders as empty string when the value is missing. "Hi , your order..." is sent to thousands of recipients when data is incomplete. Use conditional blocks or a registered `defaultIfEmpty` helper for every optional field. Source: production email incident patterns.
 > `detect: contextual` — test every template with a payload where all optional string fields are `undefined`
 
-**[HBS-002]** `mortal` — Use `{{variable}}` (double-stache) for all user-provided content. Triple-stache `{{{rawHtml}}}` must only be used for pre-rendered, trusted HTML from your own system.
+**[HBS-002]** `transactional: mortal | marketing: mortal` — Use `{{variable}}` (double-stache) for all user-provided content. Triple-stache `{{{rawHtml}}}` must only be used for pre-rendered, trusted HTML from your own system.
 > Triple-stache bypasses HTML escaping. If the value contains user-generated content, this is an XSS vector in email webview rendering and in-app browser contexts (opening links, CSP-exempted webviews). Source: OWASP XSS Prevention Cheat Sheet.
 > `detect: regex` — pattern: `\{\{\{[^}]+\}\}\}`
 
-**[HBS-003]** `mortal` — Do not rely on `@index`, `@first`, or `@last` loop metadata in `{{#each}}` when templates run through SendGrid Dynamic Templates.
+**[HBS-003]** `transactional: mortal | marketing: mortal` — Do not rely on `@index`, `@first`, or `@last` loop metadata in `{{#each}}` when templates run through SendGrid Dynamic Templates.
 > SendGrid's Handlebars subset does not document `@index`/`@first`/`@last` as supported. Templates that use these work in local Handlebars.js but silently fail in SendGrid — the metadata variables render as empty or cause unexpected output. Source: SendGrid Dynamic Templates documentation.
 > `detect: regex` — pattern: `@(?:index|first|last)\b`
 
-**[HBS-004]** `mortal` — Postmark uses Mustache, not Handlebars. Do not use `{{#each}}`, `{{#if condition}}`, or custom helpers in Postmark templates.
+**[HBS-004]** `transactional: mortal | marketing: mortal` — Postmark uses Mustache, not Handlebars. Do not use `{{#each}}`, `{{#if condition}}`, or custom helpers in Postmark templates.
 > Postmark's template engine is standard Mustache (RFC). Mustache uses `{{#section}}` for both conditionals (renders if truthy) and loops (renders once per array element). `{{^section}}` renders when the value is falsy or the array is empty. No block helpers, no custom helpers, no `@index` metadata. Source: Postmark developer documentation.
 > `detect: contextual` — if `stack.esp` is "postmark", flag `{{#each}}`, `{{#if}}` comparisons, and `@`-variables
 
-**[HBS-005]** `mortal` — Partials must be registered with `Handlebars.registerPartial()` before `Handlebars.compile()` is called. Unregistered partials throw at compile time — not at send time.
+**[HBS-005]** `transactional: mortal | marketing: mortal` — Partials must be registered with `Handlebars.registerPartial()` before `Handlebars.compile()` is called. Unregistered partials throw at compile time — not at send time.
 > Missing partial registration causes an immediate error. More dangerous is the inverse: partial registration in one service instance not reflected in another (e.g., in a multi-process Node.js cluster). Use a centralised registration module loaded at startup.
 > `detect: contextual` — verify all `{{> partial_name}}` references have corresponding `registerPartial()` calls in the initialisation module
 
-**[HBS-006]** `mortal` — Never concatenate unescaped user data into the template source string before `Handlebars.compile()`. This is a server-side template injection (SSTI) vector.
+**[HBS-006]** `transactional: mortal | marketing: mortal` — Never concatenate unescaped user data into the template source string before `Handlebars.compile()`. This is a server-side template injection (SSTI) vector.
 > Template source must come from trusted files. User data is passed as the context object to the compiled function. Any pattern that builds the template string from user input allows injection of Handlebars syntax — including `{{#each}}` loops that expose server-side data objects.
 > `detect: contextual` — code review concern; flag any code path that builds a template string from request parameters
 
-**[HBS-007]** `venial` — Register a `formatCurrency` helper for monetary values. Do not format currency inline.
+**[HBS-007]** `transactional: venial | marketing: venial` — Register a `formatCurrency` helper for monetary values. Do not format currency inline.
 > Inline currency (`${{price}}`) outputs `$9.9` for a `9.90` float. Currency formatting requires locale-aware handling of decimal places and symbol placement. Register once, use everywhere. Source: Handlebars.js helper documentation.
 > `detect: contextual` — check for monetary variables used without a currency format helper
 
-**[HBS-008]** `venial` — Register a `formatDate` helper for date values. Never render raw ISO 8601 strings into email copy.
+**[HBS-008]** `transactional: venial | marketing: venial` — Register a `formatDate` helper for date values. Never render raw ISO 8601 strings into email copy.
 > `2026-03-18T14:00:00.000Z` in email copy is unacceptable. A `formatDate` helper converts to locale-appropriate display: "Wednesday 18 March 2026". Source: Handlebars.js guide.
 > `detect: regex` — pattern: `\{\{[^}]*[Dd]ate[^}]*\}\}(?![^{]*formatDate)` (date variable without format helper)
 
-**[HBS-009]** `venial` — Pre-compile templates at build/deploy time using `Handlebars.precompile()`. Do not call `Handlebars.compile()` per send in a high-volume pipeline.
+**[HBS-009]** `transactional: venial | marketing: venial` — Pre-compile templates at build/deploy time using `Handlebars.precompile()`. Do not call `Handlebars.compile()` per send in a high-volume pipeline.
 > `Handlebars.compile()` parses and compiles the template source on every invocation. Pre-compiled templates are JavaScript functions — send-time rendering is orders of magnitude faster. Source: Handlebars.js API documentation.
 > `detect: contextual` — check if the production send path calls `Handlebars.compile()` on the template source
 
-**[HBS-010]** `venial` — Handlebars `{{#if}}` tests truthiness only — no comparison operators. Comparisons must be expressed as registered helpers.
+**[HBS-010]** `transactional: venial | marketing: venial` — Handlebars `{{#if}}` tests truthiness only — no comparison operators. Comparisons must be expressed as registered helpers.
 > `{{#if user.tier === "vip"}}` is not valid Handlebars — the `===` is syntax Handlebars does not parse. It silently evaluates to falsy. Register a helper: `{{#ifEquals user.tier "vip"}}...{{/ifEquals}}`. Source: Handlebars.js guide — built-in helpers.
 > `detect: regex` — pattern: `\{\{#if[^}]*(?:===|!==|>=|<=|>|<)[^}]*\}\}`
 
-**[HBS-011]** `venial` — Use partials for shared email components (header, footer, CTA button, order row).
+**[HBS-011]** `transactional: venial | marketing: venial` — Use partials for shared email components (header, footer, CTA button, order row).
 > Duplicating boilerplate across templates creates divergence — the footer in `order-confirmation.hbs` and `shipping-notification.hbs` slowly drift. Partials enforce a single source of truth for shared components.
 > `detect: contextual` — check if multiple templates contain identical HTML blocks (>10 lines) without using a partial
 
-**[HBS-012]** `venial` — `{{else}}` blocks must contain a complete, readable fallback — not empty `<td>` elements or whitespace.
+**[HBS-012]** `transactional: venial | marketing: venial` — `{{else}}` blocks must contain a complete, readable fallback — not empty `<td>` elements or whitespace.
 > Recipients who trigger the else path (no order items, no shipping address) must still see a meaningful email. An empty else block produces a broken layout with missing table cells or conspicuous blank spaces.
 > `detect: contextual` — check `{{else}}` blocks for empty or whitespace-only content
 
-**[HBS-013]** `venial` — Escape HTML entities in subject lines and preheaders — they are plain text fields.
+**[HBS-013]** `transactional: venial | marketing: venial` — Escape HTML entities in subject lines and preheaders — they are plain text fields.
 > `&amp;`, `&lt;`, `&gt;` in subject lines render as literal HTML entity strings in email clients. If your template data is HTML-escaped before injection, the subject field receives `Acme &amp; Co.` and displays as `Acme &amp; Co.` in the inbox. Pre-process entity decoding for subject/preheader fields.
 > `detect: contextual` — check if subject/preheader values pass through HTML unescaping before being passed to the ESP API
 
-**[HBS-014]** `venial` — Test with a deliberately incomplete payload — all optional fields `undefined`, all arrays empty.
+**[HBS-014]** `transactional: venial | marketing: venial` — Test with a deliberately incomplete payload — all optional fields `undefined`, all arrays empty.
 > The `{{#each items}}` empty path and the `{{#unless}}` truthy path are the most common sources of broken layout. Comprehensive testing always uses complete data. Fail testing uses null/undefined/empty-array data.
 > `detect: contextual` — advisory; ensure test harness includes a "minimum data" test fixture
 
-**[HBS-015]** `counsel` — Use `{{#with}}` sparingly to reduce nesting verbosity — not as a general code-organisation strategy.
+**[HBS-015]** `transactional: counsel | marketing: counsel` — Use `{{#with}}` sparingly to reduce nesting verbosity — not as a general code-organisation strategy.
 > `{{#with order.shipping}}...{{/with}}` gives direct access to `address`, `city`, `postcode` without `order.shipping.` prefix. Overuse makes templates opaque — `{{city}}` with no clear context makes code review and debugging harder.
 > `detect: contextual` — advisory
 
-**[HBS-016]** `counsel` — Remove `{{log}}` helper calls before deploying templates to production.
+**[HBS-016]** `transactional: counsel | marketing: counsel` — Remove `{{log}}` helper calls before deploying templates to production.
 > `{{log someValue}}` outputs to the console during local development. It has no output in the rendered HTML but is extraneous in production template files.
 > `detect: regex` — pattern: `\{\{log\s`
 
-**[HBS-017]** `counsel` — For SendGrid Dynamic Templates, prefer the Template API for version management over inlining template HTML in API calls.
+**[HBS-017]** `transactional: counsel | marketing: counsel` — For SendGrid Dynamic Templates, prefer the Template API for version management over inlining template HTML in API calls.
 > Templates stored in the SendGrid dashboard can be versioned and rolled back without a code deployment. A/B testing, scheduling, and suppression lists are also manageable at the template level.
 > `detect: contextual` — advisory; check if SendGrid calls use `template_id` vs inline `content`
 

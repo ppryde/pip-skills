@@ -1,0 +1,26 @@
+[
+  {
+    "id": "FETCH-020",
+    "severity_internal": "high",
+    "tier_displayed": "critical",
+    "location_pattern": "target.py:13",
+    "savings_basis": "unknown",
+    "signals_caveat": false
+  },
+  {
+    "id": "FETCH-022",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
+    "location_pattern": "target.py:13",
+    "savings_basis": "unknown",
+    "signals_caveat": false
+  },
+  {
+    "id": "FETCH-021",
+    "severity_internal": "medium",
+    "tier_displayed": "medium",
+    "location_pattern": "target.py:17",
+    "savings_basis": "static",
+    "signals_caveat": false
+  }
+]
