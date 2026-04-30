@@ -1,9 +1,9 @@
 ---
-name: speedy-orm
-description: Use when the user wants to audit a Django file or symbol for ORM performance issues: N+1 queries, missing indexes, bulk-write loops, over-fetching, or any Django QuerySet anti-pattern. Triggers on "check my ORM", "audit Django performance", "find N+1", "optimise queries", "review queryset", or any mention of a Django source file alongside performance concerns.
+name: optimise-orm
+description: Use when the user wants to audit a Django Python file, view, model, or symbol for ORM performance issues — N+1 queries, missing or composite indexes, bulk-write loops (.save() in loops), over-fetching wide columns, signal-bypassing .update()/bulk_* calls, slow QuerySets, slow admin changelists, slow DRF endpoints, or any Django ORM anti-pattern. Use whenever the user shares a Django file path or dotted symbol alongside performance concerns ("slow", "killing prod", "N+1", "hits the DB once per row", "make X faster", "review queryset", "audit performance", "EXPLAIN this", "optimise queries"). Do NOT use for non-Django code (SQLAlchemy, raw SQL outside the ORM, Flask), schema migrations or column adds, validation/correctness bugs, or tooling setup (Django Debug Toolbar, Silk).
 ---
 
-# speedy-orm — Django ORM Performance Auditor
+# optimise-orm — Django ORM Performance Auditor
 
 Audits a Django source file or symbol against ~70 ORM-performance heuristics. Ranks findings by impact across three displayed tiers. Emits a compact stdout report; optionally writes a full markdown report file.
 
@@ -24,10 +24,10 @@ Audits a Django source file or symbol against ~70 ORM-performance heuristics. Ra
 
 ---
 
-## 2. Invocation API
+## Invocation
 
 ```
-/django:speedy-orm <target> [flags]
+/django:optimise-orm <target> [flags]
 ```
 
 **Target (positional, required):**
@@ -44,14 +44,14 @@ Audits a Django source file or symbol against ~70 ORM-performance heuristics. Ra
 |---|---|---|
 | `--parallel` | off | Fan out one subagent per check-group (8 in flight); lead merges + ranks. Skip when target < 50 LoC. |
 | `--no-explain` | EXPLAIN runs by default | Skip EXPLAIN even when DB is reachable |
-| `--report` | off | Write detailed report to `reports/speedy-orm/<target-slug>-<timestamp>.md` |
+| `--report` | off | Write detailed report to `reports/optimise-orm/<target-slug>-<timestamp>.md` |
 | `--engine=<pg\|mysql\|sqlite\|oracle>` | auto | Override DB-engine detection |
 | `--only=<group,group>` | all | Run a subset of check-groups (e.g. `--only=indexes,fetching`) |
 | `--skip=<group,group>` | none | Inverse of `--only`. Conflicts with `--only` |
 
 ---
 
-## 3. Workflow
+## Workflow
 
 ### Step 1: Argument Resolution
 
@@ -108,7 +108,7 @@ Build a `{model → signal_dependencies}` map. This map is passed to all check g
    > `No Django ORM usage detected. Nothing to analyse.`
    Stop cleanly (exit 0).
 
-**Suppression markers:** Before collecting findings, note any lines containing `# noqa: speedy-orm` suppressions. A line with `# noqa: speedy-orm <CODE>` suppresses that specific code on that line. A bare `# noqa: speedy-orm` suppresses all codes on that line. Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not displayed in the body.
+**Suppression markers:** Before collecting findings, note any lines containing `# noqa: optimise-orm` suppressions. A line with `# noqa: optimise-orm <CODE>` suppresses that specific code on that line. A bare `# noqa: optimise-orm` suppresses all codes on that line. Suppressed findings are counted in the report frontmatter (`suppressed: N`) but not displayed in the body.
 
 ### Step 4: Caller-Discovery
 
@@ -156,93 +156,20 @@ If a subagent fails or times out, continue with results from the rest and add a 
 }
 ```
 
-**Active check-group files (this SKILL.md is the orchestrator; per-check detail lives in the files below):**
+**Active check-group files** — this SKILL.md is the orchestrator; per-check detail (signature, grep hints, savings formula, fix template) lives in each group file. The full code → severity → rule lookup is in `checks/INDEX.md`.
 
-| Group | File | Prefix | Codes |
-|---|---|---|---|
-| Fetching | `checks/fetching.md` | `FETCH` | FETCH-001, 002, 003, 010, 011, 012, 020, 021, 022, 030, 031, 032 |
-| Cardinality | `checks/cardinality.md` | `CARD` | CARD-001, 002, 003, 010, 011, 020, 021 |
-| Aggregation | `checks/aggregation.md` | `AGG` | AGG-001, 002, 010, 011, 020, 030, 031, 040 |
-| Writes | `checks/writes.md` | `WRITE` | WRITE-001, 002, 003, 005, 006, 007, 008, 009, 010, 020, 030, 031, 040 |
-| Iteration | `checks/iteration.md` | `ITER` | ITER-001, 002, 010, 011 |
-| Indexes | `checks/indexes.md` | `IDX` | IDX-001, 002, 010, 011, 020, 030, 040, 041, 050, 060, 061 |
-| Joins | `checks/joins.md` | `JOIN` | JOIN-001, 002, 010, 011 |
-| Patterns | `checks/patterns.md` | `PAT` | PAT-001, 002, 010, 011, 020, 030, 040, 050, 060, 061, 070 |
+| Group | File | Codes |
+|---|---|---|
+| Fetching | `checks/fetching.md` | FETCH-001 FETCH-002 FETCH-003 FETCH-010 FETCH-011 FETCH-012 FETCH-020 FETCH-021 FETCH-022 FETCH-030 FETCH-031 FETCH-032 |
+| Cardinality | `checks/cardinality.md` | CARD-001 CARD-002 CARD-003 CARD-010 CARD-011 CARD-020 CARD-021 |
+| Aggregation | `checks/aggregation.md` | AGG-001 AGG-002 AGG-010 AGG-011 AGG-020 AGG-030 AGG-031 AGG-040 |
+| Writes | `checks/writes.md` | WRITE-001 WRITE-002 WRITE-003 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040 |
+| Iteration | `checks/iteration.md` | ITER-001 ITER-002 ITER-010 ITER-011 |
+| Indexes | `checks/indexes.md` | IDX-001 IDX-002 IDX-010 IDX-011 IDX-020 IDX-030 IDX-040 IDX-041 IDX-050 IDX-060 IDX-061 |
+| Joins | `checks/joins.md` | JOIN-001 JOIN-002 JOIN-010 JOIN-011 |
+| Patterns | `checks/patterns.md` | PAT-001 PAT-002 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070 |
 
-**Quick-reference check inventory (full detail in each group file):**
-
-| ID | Group | Rule | Default Severity |
-|---|---|---|---|
-| FETCH-001 | Fetching | Missing `select_related` for FK in loop | high |
-| FETCH-002 | Fetching | Bare `select_related()` fetches every FK | medium |
-| FETCH-003 | Fetching | `select_related` chain > 3 deep across nullable FKs | low |
-| FETCH-010 | Fetching | Missing `prefetch_related` for reverse/M2M in loop | high |
-| FETCH-011 | Fetching | `Prefetch()` with custom QS would reduce work | medium |
-| FETCH-012 | Fetching | Nested prefetch missing `to_attr` causes silent re-fetch | medium |
-| FETCH-020 | Fetching | Wide column over-fetched and unread by callers | high |
-| FETCH-021 | Fetching | `.values()` / `.values_list(flat=True)` opportunity | medium |
-| FETCH-022 | Fetching | `.only()` viable: callers read only a subset | medium |
-| FETCH-030 | Fetching | N+1 in template `{% for %}` loop | critical |
-| FETCH-031 | Fetching | N+1 in DRF `SerializerMethodField` / nested serializer | critical |
-| FETCH-032 | Fetching | N+1 hidden in `__str__` / `__repr__` | high |
-| CARD-001 | Cardinality | `len(qs)` evaluates entire queryset | high |
-| CARD-002 | Cardinality | `qs.count() > 0` should be `qs.exists()` | medium |
-| CARD-003 | Cardinality | `if qs:` triggers full evaluation | high |
-| CARD-010 | Cardinality | Loop of `.get(pk=…)` should be `in_bulk()` | high |
-| CARD-011 | Cardinality | `filter(pk__in=...)` then dict-build → `in_bulk(pks)` | low |
-| CARD-020 | Cardinality | `Paginator` on huge table without `.count` override | medium |
-| CARD-021 | Cardinality | Deep `OFFSET` paging | medium |
-| AGG-001 | Aggregation | Python `sum`/`max`/`min` over queryset | high |
-| AGG-002 | Aggregation | `Counter()`/`groupby` on queryset rows | medium |
-| AGG-010 | Aggregation | Python `if/else` over rows → `Case`/`When` | medium |
-| AGG-011 | Aggregation | `Coalesce`/`Greatest`/`Least` opportunities | low |
-| AGG-020 | Aggregation | Python date/string ops should be DB-side | low |
-| AGG-030 | Aggregation | `.filter(pk__in=other.values('pk'))` → `Exists()` | medium |
-| AGG-031 | Aggregation | Per-row `.filter().first()` → `Subquery` annotation | high |
-| AGG-040 | Aggregation | Python rank / running-sum loop | medium |
-| WRITE-001 | Writes | Loop of `.save()` → `bulk_create` | critical |
-| WRITE-002 | Writes | Loop of `.save()` for existing rows → `bulk_update` | high |
-| WRITE-003 | Writes | `get_or_create` in loop → `bulk_create(..., update_conflicts=True)` | medium |
-| WRITE-005 | Writes | Model has signal listeners — bulk ops bypass them (info banner) | info |
-| WRITE-006 | Writes | Existing `.update()` on model with `pre_save`/`post_save` listeners | medium (critical if audit) |
-| WRITE-007 | Writes | Existing `bulk_create()`/`bulk_update()` on model with listeners | medium (critical if audit) |
-| WRITE-008 | Writes | Existing `.raw()` writing to model with listeners | medium |
-| WRITE-009 | Writes | Existing `QuerySet.delete()` on model with `pre_delete`/`post_delete` | medium (critical if audit) |
-| WRITE-010 | Writes | `.save()` without `update_fields=` rewrites entire row | medium |
-| WRITE-020 | Writes | Read-modify-write loop → `qs.update(<f>=F('<f>') + 1)` | high |
-| WRITE-030 | Writes | Many writes outside `transaction.atomic` | medium |
-| WRITE-031 | Writes | `select_for_update` outside `atomic` block | high |
-| WRITE-040 | Writes | `post_save` handler issues queries (hidden N+1 on bulk write) | medium |
-| ITER-001 | Iteration | Large queryset materialised without `.iterator(chunk_size=…)` | high |
-| ITER-002 | Iteration | `iterator()` without `chunk_size` on Postgres | low |
-| ITER-010 | Iteration | Same QuerySet evaluated twice in scope | medium |
-| ITER-011 | Iteration | `.all()` chained to fresh `.filter()` thrashes cache | low |
-| IDX-001 | Indexes | Filter column without `db_index`/`Meta.indexes` | high |
-| IDX-002 | Indexes | `order_by(<f>)` without index | medium |
-| IDX-010 | Indexes | Multi-column filter → composite index needed | high |
-| IDX-011 | Indexes | Composite index column order doesn't match common queries | low |
-| IDX-020 | Indexes | Soft-delete/status filter → partial index opportunity | medium |
-| IDX-030 | Indexes | `Lower('email')` filtered → expression index | medium |
-| IDX-040 | Indexes | `JSONField`/`ArrayField` filtered without GIN (PG) | high |
-| IDX-041 | Indexes | Append-only timestamps without `BrinIndex` (PG, large tables) | low |
-| IDX-050 | Indexes | Duplicate/prefix-covered indexes | low |
-| IDX-060 | Indexes | `Meta.ordering` triggers sort without index | medium |
-| IDX-061 | Indexes | `order_by('?')` is full-table sort | high |
-| JOIN-001 | Joins | Chained M2M `.filter()` produces row explosion | high |
-| JOIN-002 | Joins | `.distinct()` masking a join explosion | medium |
-| JOIN-010 | Joins | Multi-condition relation filter done in Python | medium |
-| JOIN-011 | Joins | `FilteredRelation` would unify Q+select_related+annotate | low |
-| PAT-001 | Patterns | `__icontains` on un-indexed text → pg_trgm GIN | medium |
-| PAT-002 | Patterns | `unaccent`/full-text candidates | low |
-| PAT-010 | Patterns | `JSONField` `__contains`/`__has_key` un-indexed | high |
-| PAT-011 | Patterns | `KeyTransform` index opportunity for hot keys | medium |
-| PAT-020 | Patterns | Default manager filtering soft-delete benefits from partial index | medium |
-| PAT-030 | Patterns | `GenericForeignKey` accessed in loop without `GenericPrefetch` | high |
-| PAT-040 | Patterns | `.raw()`/`.extra()` flagged for review | low |
-| PAT-050 | Patterns | Sync ORM call in async view (Django ≥ 4.1) | medium |
-| PAT-060 | Patterns | `CONN_MAX_AGE = 0` on production settings | low |
-| PAT-061 | Patterns | Read-heavy query that could `.using('replica')` | low |
-| PAT-070 | Patterns | Audit/history framework detected — header banner | info |
+For the full per-code rule + default severity lookup, read `checks/INDEX.md` once at the start of a run.
 
 ### Step 6: EXPLAIN Enrichment
 
@@ -335,9 +262,9 @@ Total = sum of midpoints; range = `min(low_estimates)–max(high_estimates)`.
 
 #### Report file (`--report`)
 
-Path: `reports/speedy-orm/<target-slug>-<YYYYMMDD-HHMMSS>.md`
+Path: `reports/optimise-orm/<target-slug>-<YYYYMMDD-HHMMSS>.md`
 
-On first `--report` run, ensure `reports/speedy-orm/` is in `.gitignore`. If the entry already exists, skip silently. If the directory cannot be created or the `.gitignore` write fails: `Cannot write report to <path>: <reason>` — stop.
+On first `--report` run, ensure `reports/optimise-orm/` is in `.gitignore`. If the entry already exists, skip silently. If the directory cannot be created or the `.gitignore` write fails: `Cannot write report to <path>: <reason>` — stop.
 
 **Report frontmatter:**
 ```yaml
@@ -367,15 +294,15 @@ suppressed: 0
 
 ---
 
-## 6. Suppression Markers
+## Suppression Markers
 
-- `# noqa: speedy-orm FETCH-001` — suppress code FETCH-001 on that line only
-- `# noqa: speedy-orm` — suppress all speedy-orm codes on that line
+- `# noqa: optimise-orm FETCH-001` — suppress code FETCH-001 on that line only
+- `# noqa: optimise-orm` — suppress all optimise-orm codes on that line
 - Suppressed findings are counted in `suppressed: N` in the report frontmatter; not displayed in the body
 
 ---
 
-## 6.4 Error Handling Matrix
+## Error Handling
 
 | Failure | Behaviour | User sees |
 |---|---|---|
