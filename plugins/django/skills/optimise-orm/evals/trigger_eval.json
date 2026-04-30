@@ -1,0 +1,22 @@
+[
+  {"query": "this view is taking like 8 seconds to load and the page only shows 50 customers, can you check apps/customers/views.py", "should_trigger": true},
+  {"query": "I think we have an n+1 in the order list — apps.orders.views.OrderListView is the suspect", "should_trigger": true},
+  {"query": "django admin for our products is super slow when i open the change list, /api/admin/products/ takes ages, ProductAdmin is in apps/products/admin.py", "should_trigger": true},
+  {"query": "audit /django:optimise-orm apps/billing/api.py — i'm worried about queryset usage", "should_trigger": true},
+  {"query": "can you optimise this Django view, the API endpoint is killing prod /api/v2/invoices/", "should_trigger": true},
+  {"query": "look at apps/dashboard/views.py — i added a chart that pulls aggregate data and it brought down the staging server", "should_trigger": true},
+  {"query": "the orders queryset is doing way too many queries when iterating — apps/orders/services.py around line 44", "should_trigger": true},
+  {"query": "find n+1 queries in apps/customers/serializers.py — it's a DRF nested serializer that lists addresses per customer", "should_trigger": true},
+  {"query": "speed up this django code apps.orders.views.OrderImporter.run, it's a CSV import that takes 6 minutes for 5000 rows and i think it's calling .save() in a loop", "should_trigger": true},
+  {"query": "the admin list_display on Customer hits the DB once per row when rendering, the changelist with 200 customers is unusable, can you suggest fixes", "should_trigger": true},
+  {"query": "rename the customer model from User to Customer and update all the foreign keys", "should_trigger": false},
+  {"query": "fix the bug where customer.email validation accepts spaces in the local part", "should_trigger": false},
+  {"query": "audit our SQLAlchemy session.query() performance in apps/billing/ — there are too many round trips", "should_trigger": false},
+  {"query": "this Postgres query is slow: SELECT * FROM customers WHERE email LIKE '%foo%' — can you suggest a better index", "should_trigger": false},
+  {"query": "review my Django REST Framework serializer field naming conventions in apps/api/serializers/customer.py", "should_trigger": false},
+  {"query": "the customer count is wrong on the dashboard, the home view says 1500 but the DB has 1750 — can you find the bug", "should_trigger": false},
+  {"query": "help me set up Django Debug Toolbar in our local dev environment so I can profile views myself", "should_trigger": false},
+  {"query": "write a Django migration to add a `verified_at` datetime column to Customer with a default of null", "should_trigger": false},
+  {"query": "add a celery task that sends welcome emails to new customers after Customer.save()", "should_trigger": false},
+  {"query": "explain how Django's ORM lazy evaluation works — when does a queryset actually hit the DB", "should_trigger": false}
+]

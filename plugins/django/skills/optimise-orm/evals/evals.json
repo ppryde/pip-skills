@@ -1,0 +1,91 @@
+{
+  "skill_name": "optimise-orm",
+  "description": "Eval set for django:optimise-orm. Each eval points at a self-contained fixture under ../tests/fixtures/. Each fixture has a target.py (the file the skill should analyse), settings.py (DB engine + INSTALLED_APPS context), models.py (where applicable), and expected.json (the required findings the skill must emit). The richer per-fixture expectations live in expected.json — this evals.json is the skill-creator-compatible pointer surface.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "basic-n-plus-one",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/01-basic-n-plus-one/target.py — find ORM performance issues",
+      "expected_output": "FETCH-030 (N+1 in template) + FETCH-001 (missing select_related) appear as 🔥 Critical findings",
+      "files": ["tests/fixtures/01-basic-n-plus-one/"]
+    },
+    {
+      "id": 2,
+      "name": "bulk-write-loop",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/02-bulk-write-loop/target.py",
+      "expected_output": "WRITE-001 (loop of .save()) appears as 🔥 Critical with bulk_create fix template",
+      "files": ["tests/fixtures/02-bulk-write-loop/"]
+    },
+    {
+      "id": 3,
+      "name": "missing-prefetch",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/03-missing-prefetch/target.py",
+      "expected_output": "FETCH-010, FETCH-011, FETCH-012 surface with prefetch_related/Prefetch fix templates",
+      "files": ["tests/fixtures/03-missing-prefetch/"]
+    },
+    {
+      "id": 4,
+      "name": "column-overfetching-with-callers",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/04-column-overfetching/target.py — exercise caller-grep",
+      "expected_output": "FETCH-020/021/022 surface; caller-grep against callers.py informs confidence",
+      "files": ["tests/fixtures/04-column-overfetching/"]
+    },
+    {
+      "id": 5,
+      "name": "missing-index-postgres",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/05-missing-index-postgres/target.py",
+      "expected_output": "IDX-001, IDX-002, IDX-010, IDX-040 surface with PG-aware suggestions (GIN, composite)",
+      "files": ["tests/fixtures/05-missing-index-postgres/"]
+    },
+    {
+      "id": 6,
+      "name": "audit-framework-bypass-easyaudit",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/06-audit-framework-bypass/target.py — verify audit-aware escalation",
+      "expected_output": "PAT-070 banner detected; WRITE-006/007/009 escalated from medium to 🔥 Critical due to easy_audit in INSTALLED_APPS; signals_caveat blocks present",
+      "files": ["tests/fixtures/06-audit-framework-bypass/"]
+    },
+    {
+      "id": 7,
+      "name": "suppression-marker",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/07-suppression-marker/target.py",
+      "expected_output": "Lines with `# noqa: optimise-orm WRITE-006` are suppressed from findings; report frontmatter shows suppressed: N count",
+      "files": ["tests/fixtures/07-suppression-marker/"]
+    },
+    {
+      "id": 8,
+      "name": "mysql-engine-degradation",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/08-mysql-engine-degradation/target.py",
+      "expected_output": "IDX-040 (GIN suggestion) demoted to info banner because engine is MySQL, not PG",
+      "files": ["tests/fixtures/08-mysql-engine-degradation/"]
+    },
+    {
+      "id": 9,
+      "name": "non-django-target-clean-exit",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/09-non-django-target/target.py",
+      "expected_output": "Skill exits cleanly with `No Django ORM usage detected. Nothing to analyse.`",
+      "files": ["tests/fixtures/09-non-django-target/"]
+    },
+    {
+      "id": 10,
+      "name": "symbol-resolution-ambiguous",
+      "prompt": "Audit /django:optimise-orm OrderListView — verify disambiguation prompt when symbol matches multiple files",
+      "expected_output": "Skill lists matching files and asks user to pick a dotted path before continuing",
+      "files": ["tests/fixtures/10-symbol-resolution-ambiguous/"]
+    },
+    {
+      "id": 11,
+      "name": "pghistory-no-bypass-warning",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/11-pghistory-no-bypass-warning/target.py",
+      "expected_output": "WRITE-006 does NOT escalate because pghistory uses PG triggers (signals_safe=true); no signals_caveat block",
+      "files": ["tests/fixtures/11-pghistory-no-bypass-warning/"]
+    },
+    {
+      "id": 12,
+      "name": "async-orm-django-4-1",
+      "prompt": "Audit /django:optimise-orm tests/fixtures/12-async-orm-django-4-1/target.py",
+      "expected_output": "PAT-050 surfaces — sync ORM call inside async def view; suggest aget/afilter (Django ≥ 4.1)",
+      "files": ["tests/fixtures/12-async-orm-django-4-1/"]
+    }
+  ],
+  "notes": "The richer machine-readable expectations live in each fixture's expected.json (with severity_internal, tier_displayed, location_pattern, savings_basis, signals_caveat). Live runs should use tests/run.sh --live which invokes the skill against each fixture and diffs findings against expected.json. The evals here are the skill-creator-compatible pointer set."
+}
