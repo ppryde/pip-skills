@@ -68,7 +68,7 @@ Then tally detection counts per code per fixture from the logs and fill in the t
 - `07-suppression-marker`: detection rate for the suppressed code measures absence (0/5 is correct; >0/5 is a regression).
 - `09-non-django-target`: a pass is a clean exit with `No Django ORM usage detected.` message (no findings emitted).
 - `10-symbol-resolution-ambiguous`: a pass is the skill surfacing a disambiguation prompt rather than running checks silently.
-- `11-pghistory-no-bypass-warning`: WRITE-001 must fire but must NOT include a signal-escalation caveat (pghistory is `signals_safe`).
+- `11-pghistory-no-bypass-warning`: WRITE-006/007 must fire at base `medium` and must NOT escalate to `critical` (pghistory is `signals_safe`). PAT-070 banner expected.
 
 ---
 

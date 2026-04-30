@@ -230,6 +230,12 @@ live_checks() {
     exit 2
   fi
 
+  # python3 is required for expected.json parsing — fail loudly if missing.
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 is required for live mode (expected.json parsing)" >&2
+    exit 2
+  fi
+
   # Determine which fixtures to run
   local fixtures=()
   if [[ -n "$FIXTURE_FILTER" ]]; then
@@ -290,22 +296,37 @@ live_checks() {
     actual_medium=$(grep 'medium:' "$report_path" | head -1 | grep -o '[0-9]*' || echo 0)
     actual_low=$(grep 'low:' "$report_path" | head -1 | grep -o '[0-9]*' || echo 0)
 
-    # Parse expected.json for required findings
+    # Parse expected.json for required findings — hard-fail on parse error.
     local required_critical required_ids
-    required_critical=$(python3 -c "
+    if ! required_critical=$(python3 -c "
 import json, sys
-data = json.load(open('$expected_path'))
+try:
+    data = json.load(open('$expected_path'))
+except Exception as e:
+    print(f'PARSE_ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
 print(sum(1 for f in data if f.get('tier_displayed') == 'critical'))
-" 2>/dev/null || echo "?")
-
-    required_ids=$(python3 -c "
+" 2>&1); then
+      echo "ERROR: failed to parse $expected_path (critical count): $required_critical" >&2
+      rm -f "$report_path"
+      exit 2
+    fi
+    if ! required_ids=$(python3 -c "
 import json, sys
-data = json.load(open('$expected_path'))
+try:
+    data = json.load(open('$expected_path'))
+except Exception as e:
+    print(f'PARSE_ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
 print(' '.join(f['id'] for f in data))
-" 2>/dev/null || echo "")
+" 2>&1); then
+      echo "ERROR: failed to parse $expected_path (required ids): $required_ids" >&2
+      rm -f "$report_path"
+      exit 2
+    fi
 
     # Check critical findings (zero variance allowed per spec §7.3)
-    if [[ "$required_critical" != "?" ]] && [[ "$actual_critical" -lt "$required_critical" ]]; then
+    if [[ "$actual_critical" -lt "$required_critical" ]]; then
       fail "$fixture_name — critical findings: expected ≥$required_critical, got $actual_critical"
     else
       pass "$fixture_name — critical findings count OK ($actual_critical)"

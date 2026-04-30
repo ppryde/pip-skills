@@ -156,8 +156,6 @@ Product.objects.filter(metadata__color="red")
 
 # After — expression index on extracted key (Postgres)
 from django.db.models import Index
-from django.db.models.functions import Cast
-from django.contrib.postgres.fields import JSONField
 from django.db.models.expressions import RawSQL
 
 class Product(models.Model):

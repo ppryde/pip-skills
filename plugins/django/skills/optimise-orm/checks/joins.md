@@ -44,13 +44,16 @@ Follow-up: confirm both filter calls reference the same M2M relation prefix (e.g
 # Before — two JOINs on the same M2M table; multiplies rows
 articles = Article.objects.filter(tags__name="python").filter(tags__name="django")
 
-# After — single JOIN, both conditions in one filter
-from django.db.models import Q
-articles = Article.objects.filter(tags__name="python", tags__name="django")
-# Note: for AND-across-rows on M2M, use annotations:
-articles = Article.objects.filter(tags__name__in=["python", "django"]).annotate(
-    tag_count=Count("tags")
-).filter(tag_count=2)
+# After — one JOIN, AND-across-rows via annotation + Count
+from django.db.models import Count, Q
+
+articles = (
+    Article.objects.filter(tags__name__in=["python", "django"])
+    .annotate(
+        matched_tags=Count("tags", filter=Q(tags__name__in=["python", "django"]))
+    )
+    .filter(matched_tags=2)
+)
 ```
 
 ---

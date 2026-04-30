@@ -14,14 +14,13 @@ else
   exit 0
 fi
 
-# Reject state-changing REST flags — keep the allowlist read-only.
+# Reject any state-changing REST flag — match at token boundaries with any separator.
+# Catches: -X POST | -XPOST | -X=POST | --method POST | --method=POST |
+#          -f key=val | -fkey=val | -F raw | -d body | -dbody | --input file | --data ...
 case "$cmd" in
-  "gh api graphql"*) ;;  # GraphQL has its own allowlist below
+  "gh api graphql"*) ;;  # GraphQL handled below
   "gh api"*)
-    if [[ "$cmd" == *" -X "* || "$cmd" == *" --method "* || \
-          "$cmd" == *" -f "* || "$cmd" == *" --field "* || \
-          "$cmd" == *" -F "* || "$cmd" == *" --input "* || \
-          "$cmd" == *" -d "* || "$cmd" == *" --data "* ]]; then
+    if [[ " $cmd " =~ [[:space:]](-X|--method|-f|--field|-F|--input|-d|--data)([[:space:]]|=|[!-~]) ]]; then
       exit 0
     fi
     ;;
@@ -47,11 +46,17 @@ case "$cmd" in
   "gh api repos/"*"/commits/"*) allow ;;
   "gh api repos/"*"/contents/"*) allow ;;
 
-  # GraphQL — inspect query body and allow only the two operations tribunal needs:
-  # - reviewThreads (fetch thread resolution status)
-  # - resolveReviewThread (resolve a thread after actioning)
+  # GraphQL — only allow the two operation shapes tribunal:reckoning emits.
   "gh api graphql "*)
-    if [[ "$cmd" == *"reviewThreads"* ]] || [[ "$cmd" == *"resolveReviewThread"* ]]; then
+    # Read-only thread fetch: must contain pullRequest( + reviewThreads( + isResolved,
+    # and must NOT contain the keyword 'mutation' anywhere.
+    if [[ "$cmd" == *"pullRequest("*"reviewThreads("*"isResolved"* ]] && \
+       [[ "$cmd" != *"mutation"* ]]; then
+      allow
+    # Single-thread resolution mutation: must contain the literal mutation header
+    # and threadId, and must NOT contain the read-side reviewThreads( field.
+    elif [[ "$cmd" == *"mutation { resolveReviewThread(input:"*"threadId:"* ]] && \
+         [[ "$cmd" != *"reviewThreads("* ]]; then
       allow
     fi
     ;;
