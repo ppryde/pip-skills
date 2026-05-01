@@ -14,6 +14,10 @@ else
   exit 0
 fi
 
+# Fast path: this hook only acts on `gh ...` commands. Bail immediately on
+# anything else so plain Bash calls (grep/find/cat/etc.) don't pay the cost.
+[[ "$cmd" != gh\ * && "$cmd" != "gh" ]] && exit 0
+
 # Reject any state-changing REST flag — match at token boundaries with any separator.
 # Catches: -X POST | -XPOST | -X=POST | --method POST | --method=POST |
 #          -f key=val | -fkey=val | -F raw | -d body | -dbody | --input file | --data ...
