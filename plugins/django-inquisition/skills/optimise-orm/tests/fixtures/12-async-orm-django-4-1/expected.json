@@ -3,7 +3,7 @@
     "id": "PAT-050",
     "severity_internal": "medium",
     "tier_displayed": "medium",
-    "location_pattern": "target.py:17",
+    "location_pattern": "target.py:18",
     "savings_basis": "static",
     "signals_caveat": false
   },
@@ -11,7 +11,7 @@
     "id": "PAT-050",
     "severity_internal": "medium",
     "tier_displayed": "medium",
-    "location_pattern": "target.py:23",
+    "location_pattern": "target.py:24",
     "savings_basis": "static",
     "signals_caveat": false
   },
@@ -19,7 +19,7 @@
     "id": "PAT-050",
     "severity_internal": "medium",
     "tier_displayed": "medium",
-    "location_pattern": "target.py:29",
+    "location_pattern": "target.py:31",
     "savings_basis": "static",
     "signals_caveat": false
   }

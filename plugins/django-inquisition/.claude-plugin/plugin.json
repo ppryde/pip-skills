@@ -1,6 +1,6 @@
 {
   "name": "django-inquisition",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Django ORM performance auditor. Audits source files and symbols against ~70 ORM heuristics, ranks findings by impact, and emits a tier-grouped report.",
   "author": {
     "name": "Pip",

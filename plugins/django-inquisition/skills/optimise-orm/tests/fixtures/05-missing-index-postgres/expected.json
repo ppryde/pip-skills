@@ -3,7 +3,7 @@
     "id": "IDX-001",
     "severity_internal": "high",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:14",
+    "location_pattern": "target.py:15",
     "savings_basis": "unknown",
     "signals_caveat": false
   },
@@ -11,7 +11,7 @@
     "id": "IDX-002",
     "severity_internal": "medium",
     "tier_displayed": "medium",
-    "location_pattern": "target.py:19",
+    "location_pattern": "target.py:20",
     "savings_basis": "unknown",
     "signals_caveat": false
   },
@@ -19,7 +19,7 @@
     "id": "IDX-010",
     "severity_internal": "high",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:24",
+    "location_pattern": "target.py:25",
     "savings_basis": "unknown",
     "signals_caveat": false
   },
@@ -27,7 +27,7 @@
     "id": "IDX-040",
     "severity_internal": "high",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:29",
+    "location_pattern": "target.py:30",
     "savings_basis": "unknown",
     "signals_caveat": false
   }

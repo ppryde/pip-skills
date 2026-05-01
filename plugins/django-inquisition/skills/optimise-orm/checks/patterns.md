@@ -154,15 +154,21 @@ Follow-up: confirm the left-hand side resolves to a `JSONField` traversal (doubl
 # Before — scans entire JSON blob per row
 Product.objects.filter(metadata__color="red")
 
-# After — expression index on extracted key (Postgres)
+# After — expression index on the extracted key using KeyTextTransform.
+# Portable across PG/MySQL/SQLite (the ORM emits the right expression per
+# backend) and survives column renames; prefer this over RawSQL.
 from django.db.models import Index
-from django.db.models.expressions import RawSQL
+from django.db.models.fields.json import KeyTextTransform
 
 class Product(models.Model):
     metadata = models.JSONField()
+
     class Meta:
         indexes = [
-            Index(RawSQL("(metadata->>'color')", []), name="product_metadata_color_idx")
+            Index(
+                KeyTextTransform("color", "metadata"),
+                name="product_metadata_color_idx",
+            ),
         ]
 ```
 

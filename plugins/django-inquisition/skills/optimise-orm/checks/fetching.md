@@ -93,8 +93,13 @@ for order in orders:
 - Low: Bare call found but model definition not available.
 
 **Savings formula:**
-- Depends on number of unused FK joins. Estimate `(num_fk_fields - 1) × per_query_overhead`.
-- Constants: PG = 2ms, MySQL = 4ms, SQLite = 1ms
+- Each unused FK becomes an extra JOIN in the **same** query (no extra round-trip — `select_related()` is one SELECT regardless of FK count). Cost is per-row JOIN work plus a wider result row, and grows with row count and join-target table size.
+- Estimate `(num_fk_fields - num_used) × per_join_overhead_ms`.
+- Per-join overhead (rough, indexed FK):
+  - PG: 0.5–2 ms small tables, 5–20 ms large/unindexed
+  - MySQL: similar to PG
+  - SQLite: 0.2–1 ms
+- Mark `savings_basis: static` and use the lower bound when row counts are unknown.
 
 **Suggested fix template:**
 ```python
