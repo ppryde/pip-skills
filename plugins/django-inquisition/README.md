@@ -1,10 +1,10 @@
-# django
+# django-inquisition
 
 Django ORM performance auditor. Targets a source file or symbol, checks it against ~70 ORM heuristics, and emits a ranked, tier-grouped findings report.
 
 ## The skill
 
-### optimise-orm (`/django:optimise-orm`)
+### optimise-orm (`/django-inquisition:optimise-orm`)
 
 Audits a Django source file or symbol for ORM performance issues: N+1 queries, bulk-write loops, missing indexes, column over-fetching, inefficient aggregations, and more. Findings are ranked by estimated query savings and grouped into three displayed tiers.
 
@@ -16,7 +16,7 @@ Add this plugin to Claude Code via the plugin registry or by cloning pip-skills 
 
 ```bash
 # From the pip-skills root
-claude-code plugin add ./plugins/django
+claude-code plugin add ./plugins/django-inquisition
 ```
 
 Or reference the plugin directory directly in your Claude Code settings.
@@ -26,16 +26,16 @@ Or reference the plugin directory directly in your Claude Code settings.
 ## Usage
 
 ```
-/django:optimise-orm <target> [flags]
+/django-inquisition:optimise-orm <target> [flags]
 ```
 
 ### Target forms
 
 | Invocation | What happens |
 |---|---|
-| `/django:optimise-orm apps/orders/views.py` | Audit all ORM calls in the file |
-| `/django:optimise-orm apps.orders.views.OrderListView` | Resolve symbol, audit that class body only |
-| `/django:optimise-orm OrderListView` | Search project for definition; disambiguate if multiple matches |
+| `/django-inquisition:optimise-orm apps/orders/views.py` | Audit all ORM calls in the file |
+| `/django-inquisition:optimise-orm apps.orders.views.OrderListView` | Resolve symbol, audit that class body only |
+| `/django-inquisition:optimise-orm OrderListView` | Search project for definition; disambiguate if multiple matches |
 
 ### Flags
 

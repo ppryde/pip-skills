@@ -1,4 +1,4 @@
-# Evals for `django:optimise-orm`
+# Evals for `django-inquisition:optimise-orm`
 
 Two eval sets, two purposes:
 
@@ -9,7 +9,7 @@ Two eval sets, two purposes:
 **Run live tests via the existing harness:**
 
 ```bash
-cd plugins/django/skills/optimise-orm
+cd plugins/django-inquisition/skills/optimise-orm
 bash tests/run.sh --live
 ```
 
@@ -37,8 +37,8 @@ export ANTHROPIC_API_KEY=sk-ant-…
 # Run the loop (5 iterations, train/test split, opens an HTML report at the end)
 cd ~/.claude-personal/plugins/cache/claude-plugins-official/skill-creator/unknown/skills/skill-creator
 python3.11 -m scripts.run_loop \
-  --eval-set /Users/philip.pryde/repos/pip-skills/plugins/django/skills/optimise-orm/evals/trigger_eval.json \
-  --skill-path /Users/philip.pryde/repos/pip-skills/plugins/django/skills/optimise-orm \
+  --eval-set /Users/philip.pryde/repos/pip-skills/plugins/django-inquisition/skills/optimise-orm/evals/trigger_eval.json \
+  --skill-path /Users/philip.pryde/repos/pip-skills/plugins/django-inquisition/skills/optimise-orm \
   --model claude-opus-4-7 \
   --max-iterations 5 \
   --verbose

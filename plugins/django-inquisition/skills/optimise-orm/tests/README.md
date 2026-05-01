@@ -38,7 +38,7 @@ Static-shape tests pass quickly and are suitable for CI.
 
 ### Live mode
 
-Invokes `claude "/django:optimise-orm <target> --report --no-explain"` against each fixture, then:
+Invokes `claude "/django-inquisition:optimise-orm <target> --report --no-explain"` against each fixture, then:
 
 1. Parses the report frontmatter to extract `findings_count`.
 2. Compares against the fixture's `expected.json`.

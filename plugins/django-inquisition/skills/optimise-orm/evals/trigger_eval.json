@@ -2,7 +2,7 @@
   {"query": "this view is taking like 8 seconds to load and the page only shows 50 customers, can you check apps/customers/views.py", "should_trigger": true},
   {"query": "I think we have an n+1 in the order list — apps.orders.views.OrderListView is the suspect", "should_trigger": true},
   {"query": "django admin for our products is super slow when i open the change list, /api/admin/products/ takes ages, ProductAdmin is in apps/products/admin.py", "should_trigger": true},
-  {"query": "audit /django:optimise-orm apps/billing/api.py — i'm worried about queryset usage", "should_trigger": true},
+  {"query": "audit /django-inquisition:optimise-orm apps/billing/api.py — i'm worried about queryset usage", "should_trigger": true},
   {"query": "can you optimise this Django view, the API endpoint is killing prod /api/v2/invoices/", "should_trigger": true},
   {"query": "look at apps/dashboard/views.py — i added a chart that pulls aggregate data and it brought down the staging server", "should_trigger": true},
   {"query": "the orders queryset is doing way too many queries when iterating — apps/orders/services.py around line 44", "should_trigger": true},

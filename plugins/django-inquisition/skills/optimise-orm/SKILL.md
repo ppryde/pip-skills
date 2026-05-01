@@ -27,7 +27,7 @@ Audits a Django source file or symbol against ~70 ORM-performance heuristics. Ra
 ## Invocation
 
 ```
-/django:optimise-orm <target> [flags]
+/django-inquisition:optimise-orm <target> [flags]
 ```
 
 **Target (positional, required):**
