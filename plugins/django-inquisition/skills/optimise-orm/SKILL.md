@@ -260,7 +260,7 @@ Found 6 findings on apps/orders/views.py
 Estimated savings if all addressed: ~770–1665 ms
 ```
 
-Total = sum of midpoints; range = `min(low_estimates)–max(high_estimates)`.
+Total = sum of midpoints; range = `sum(low_estimates)–sum(high_estimates)` (not min/max — sum each end across all findings).
 
 #### Report file (`--report`)
 
@@ -331,7 +331,7 @@ suppressed: 0
 | Flagging engine-specific findings on the wrong engine | Check engine against finding's engine tag; demote to info if mismatch |
 | Reporting FETCH-020/022 with zero caller evidence | Mark confidence: low; do not drop the finding entirely |
 | Escalating WRITE-006/007/009 without detecting an audit package | Only escalate when `audit_framework=true` — not on plain signal listeners |
-| Forgetting pghistory is signals-safe | `pghistory` uses PG triggers; it does NOT bypass Django signals — do not add signal caveats |
+| Adding signal-bypass caveats to WRITE findings on `pghistory`-using models | `pghistory` records history via Postgres triggers, not Django signals. `.update()` / `bulk_create` / `qs.delete()` still trigger those Postgres triggers, so history is preserved — do not append a signal-bypass caveat or escalate WRITE-006/007/009 |
 | Sorting findings by internal severity instead of savings midpoint | Sort key is `-savings_midpoint_ms` first; internal severity is for tier mapping only |
 | Emitting suppressed findings in the report body | Suppressed findings go only in the frontmatter `suppressed: N` count |
 

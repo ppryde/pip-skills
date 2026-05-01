@@ -3,7 +3,7 @@
     "id": "FETCH-010",
     "severity_internal": "high",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:19",
+    "location_pattern": "target.py:20",
     "savings_basis": "static",
     "signals_caveat": false
   },
@@ -11,7 +11,7 @@
     "id": "FETCH-010",
     "severity_internal": "high",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:29",
+    "location_pattern": "target.py:30",
     "savings_basis": "static",
     "signals_caveat": false
   },
@@ -19,7 +19,7 @@
     "id": "FETCH-011",
     "severity_internal": "medium",
     "tier_displayed": "medium",
-    "location_pattern": "target.py:36",
+    "location_pattern": "target.py:39",
     "savings_basis": "static",
     "signals_caveat": false
   },
@@ -27,7 +27,7 @@
     "id": "FETCH-012",
     "severity_internal": "medium",
     "tier_displayed": "medium",
-    "location_pattern": "target.py:43",
+    "location_pattern": "target.py:49",
     "savings_basis": "static",
     "signals_caveat": false
   }

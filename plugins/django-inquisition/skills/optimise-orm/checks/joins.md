@@ -78,20 +78,37 @@ Follow-up: check the queryset chain for any `.filter(<relation>__...)` calls tha
 - Mark `savings_basis: unknown`.
 
 **Suggested fix template:**
+
+> ⚠ Do not blindly remove `.distinct()`. If a single parent row can have multiple children that all match the predicate, the JOIN still produces duplicate parent rows. Choose between Fix A (collapse JOINs, keep `distinct()` if dupes are still possible) or Fix B (replace JOIN with `Exists()`, no dupes possible).
+
 ```python
-# Before — join explosion masked by .distinct()
+# Before — two .filter() calls cause two separate JOINs against `items`.
+# The .distinct() then masks the row explosion in a sort/dedupe pass.
 orders = Order.objects.filter(
     items__product__category="electronics"
 ).filter(
     items__product__in_stock=True
 ).distinct()
 
-# After — fix the join structure so distinct() is unnecessary
-from django.db.models import Q
+# Fix A — collapse to a single JOIN. Predicates AND inside one join row,
+# so the join can no longer match an "electronics item" against a different
+# "in-stock item". Keep .distinct() if a single Order can still own multiple
+# items that all match (single-JOIN-multi-match still yields duplicate parents).
 orders = Order.objects.filter(
     items__product__category="electronics",
-    items__product__in_stock=True
+    items__product__in_stock=True,
+).distinct()
+
+# Fix B — replace the JOIN with an Exists() subquery. No JOIN against the
+# parent, no row explosion, .distinct() unnecessary. Generally faster on
+# large parent tables when most parents match only a few children.
+from django.db.models import Exists, OuterRef
+matching_items = OrderItem.objects.filter(
+    order=OuterRef("pk"),
+    product__category="electronics",
+    product__in_stock=True,
 )
+orders = Order.objects.filter(Exists(matching_items))
 ```
 
 ---

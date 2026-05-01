@@ -384,6 +384,33 @@ print('\n'.join(f\"{f['id']}|{f.get('location_pattern','')}\" for f in data))
       fi
     done <<< "$required_pairs"
 
+    # Optional: validate suppressed-count from expected_meta.json (fixtures
+    # exercising # noqa: optimise-orm markers). Other fixtures lack this file
+    # and skip silently.
+    local meta_path="$fixture_dir/expected_meta.json"
+    if [[ -f "$meta_path" ]]; then
+      local required_suppressed actual_suppressed
+      if ! required_suppressed=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('$meta_path'))
+except Exception as e:
+    print(f'PARSE_ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+print(data.get('suppressed_count', 0))
+" 2>&1); then
+        echo "ERROR: failed to parse $meta_path: $required_suppressed" >&2
+        rm -f "$report_path"
+        exit 2
+      fi
+      actual_suppressed=$(grep -E '^suppressed:[[:space:]]*[0-9]+' "$report_path" | head -1 | grep -oE '[0-9]+' || echo 0)
+      if [[ "$actual_suppressed" -eq "$required_suppressed" ]]; then
+        pass "$fixture_name — suppressed count OK ($actual_suppressed)"
+      else
+        fail "$fixture_name — suppressed: expected $required_suppressed, got $actual_suppressed"
+      fi
+    fi
+
     rm -f "$report_path"
   done
 }

@@ -290,7 +290,11 @@ MyModel.objects.filter(pk=obj_id).update(status="done")
 ```regex
 \w+\.(objects\.)?(filter|exclude|all)\(.*\)\.delete\(\)
 ```
-Also bare `qs.delete()` patterns.
+Plus a second pass for **bare variable** `.delete()` calls — `Model.objects.filter(...).delete()` is the easy form, but the harder case is when the queryset is bound to a name first:
+```regex
+\b(?!self\.)(?!cls\.)\w+\.delete\(\s*\)
+```
+For each match of the bare form, walk back over the preceding lines in the same function and check whether the variable was assigned a queryset (`= Model.objects…` or `.filter(...)` / `.exclude(...)` / `.all()` chain) — if yes, treat it as `qs.delete()`. If the variable was assigned a single model instance (`Model.objects.get(...)` or `Model(...)`) it's `instance.delete()`, which DOES fire signals — skip.
 
 **Confidence rules:**
 - High: `.delete()` on queryset, model has `pre_delete`/`post_delete` registered.
