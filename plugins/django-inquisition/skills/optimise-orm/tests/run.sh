@@ -122,12 +122,12 @@ static_shape_checks() {
     FETCH-020 FETCH-021 FETCH-022 FETCH-030 FETCH-031 FETCH-032
     CARD-001 CARD-002 CARD-003 CARD-010 CARD-011 CARD-020 CARD-021
     AGG-001 AGG-002 AGG-010 AGG-011 AGG-020 AGG-030 AGG-031 AGG-040
-    WRITE-001 WRITE-002 WRITE-003 WRITE-005 WRITE-006 WRITE-007
+    WRITE-001 WRITE-002 WRITE-003 WRITE-004 WRITE-005 WRITE-006 WRITE-007
     WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040
     ITER-001 ITER-002 ITER-010 ITER-011
     IDX-001 IDX-002 IDX-010 IDX-011 IDX-020 IDX-030 IDX-040 IDX-041 IDX-050 IDX-060 IDX-061
     JOIN-001 JOIN-002 JOIN-010 JOIN-011
-    PAT-001 PAT-002 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070
+    PAT-001 PAT-002 PAT-003 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070
   )
 
   for code in "${EXPECTED_CODES[@]}"; do
@@ -159,11 +159,11 @@ static_shape_checks() {
       fetching)    echo "FETCH-001 FETCH-002 FETCH-003 FETCH-010 FETCH-011 FETCH-012 FETCH-020 FETCH-021 FETCH-022 FETCH-030 FETCH-031 FETCH-032" ;;
       cardinality) echo "CARD-001 CARD-002 CARD-003 CARD-010 CARD-011 CARD-020 CARD-021" ;;
       aggregation) echo "AGG-001 AGG-002 AGG-010 AGG-011 AGG-020 AGG-030 AGG-031 AGG-040" ;;
-      writes)      echo "WRITE-001 WRITE-002 WRITE-003 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040" ;;
+      writes)      echo "WRITE-001 WRITE-002 WRITE-003 WRITE-004 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040" ;;
       iteration)   echo "ITER-001 ITER-002 ITER-010 ITER-011" ;;
       indexes)     echo "IDX-001 IDX-002 IDX-010 IDX-011 IDX-020 IDX-030 IDX-040 IDX-041 IDX-050 IDX-060 IDX-061" ;;
       joins)       echo "JOIN-001 JOIN-002 JOIN-010 JOIN-011" ;;
-      patterns)    echo "PAT-001 PAT-002 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070" ;;
+      patterns)    echo "PAT-001 PAT-002 PAT-003 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070" ;;
     esac
   }
 
@@ -279,10 +279,11 @@ live_checks() {
     report_path=$(mktemp "/tmp/optimise-orm-live-XXXXXX.md")
     stderr_path=$(mktemp /tmp/optimise-orm-stderr-XXXXXX)
 
-    # Invoke skill with --report so we can parse frontmatter
-    echo "  Running: /django-inquisition:optimise-orm $target_path --report --no-explain"
-    if ! claude "/django-inquisition:optimise-orm $target_path --report --no-explain" \
-         --output "$report_path" 2>"$stderr_path"; then
+    # Invoke skill with --report so we can parse frontmatter. Use `claude -p`
+    # (the documented headless mode) and redirect stdout to capture the report.
+    echo "  Running: claude -p '/django-inquisition:optimise-orm $target_path --report --no-explain'"
+    if ! claude -p "/django-inquisition:optimise-orm $target_path --report --no-explain" \
+         >"$report_path" 2>"$stderr_path"; then
       fail "$fixture_name — skill invocation failed (stderr: $stderr_path)"
       cat "$stderr_path" >&2
       rm -f "$report_path" "$stderr_path"
@@ -296,63 +297,36 @@ live_checks() {
     actual_medium=$(grep 'medium:' "$report_path" | head -1 | grep -o '[0-9]*' || echo 0)
     actual_low=$(grep 'low:' "$report_path" | head -1 | grep -o '[0-9]*' || echo 0)
 
-    # Parse expected.json for required findings — hard-fail on parse error.
-    local required_critical
-    if ! required_critical=$(python3 -c "
+    # Parse expected.json once: emit `<critical> <medium> <low>` on line 1
+    # then one `<id>|<location_pattern>` per finding. Single python3 invocation
+    # replaces four separate parse attempts.
+    local parsed
+    if ! parsed=$(python3 - "$expected_path" <<'PY' 2>&1
 import json, sys
+path = sys.argv[1]
 try:
-    data = json.load(open('$expected_path'))
+    data = json.load(open(path))
 except Exception as e:
-    print(f'PARSE_ERROR: {e}', file=sys.stderr)
+    print(f"PARSE_ERROR: {e}", file=sys.stderr)
     sys.exit(1)
-print(sum(1 for f in data if f.get('tier_displayed') == 'critical'))
-" 2>&1); then
-      echo "ERROR: failed to parse $expected_path (critical count): $required_critical" >&2
+counts = {"critical": 0, "medium": 0, "low": 0}
+for f in data:
+    counts[f.get("tier_displayed", "")] = counts.get(f.get("tier_displayed", ""), 0) + 1
+print(f"{counts['critical']} {counts['medium']} {counts['low']}")
+for f in data:
+    print(f"{f['id']}|{f.get('location_pattern', '')}")
+PY
+    ); then
+      echo "ERROR: failed to parse $expected_path: $parsed" >&2
       rm -f "$report_path"
       exit 2
     fi
-    local required_medium required_low
-    if ! required_medium=$(python3 -c "
-import json, sys
-try:
-    data = json.load(open('$expected_path'))
-except Exception as e:
-    print(f'PARSE_ERROR: {e}', file=sys.stderr)
-    sys.exit(1)
-print(sum(1 for f in data if f.get('tier_displayed') == 'medium'))
-" 2>&1); then
-      echo "ERROR: failed to parse $expected_path (medium count): $required_medium" >&2
-      rm -f "$report_path"
-      exit 2
-    fi
-    if ! required_low=$(python3 -c "
-import json, sys
-try:
-    data = json.load(open('$expected_path'))
-except Exception as e:
-    print(f'PARSE_ERROR: {e}', file=sys.stderr)
-    sys.exit(1)
-print(sum(1 for f in data if f.get('tier_displayed') == 'low'))
-" 2>&1); then
-      echo "ERROR: failed to parse $expected_path (low count): $required_low" >&2
-      rm -f "$report_path"
-      exit 2
-    fi
-    # Parse expected.json for required (id, location_pattern) pairs.
-    local required_pairs
-    if ! required_pairs=$(python3 -c "
-import json, sys
-try:
-    data = json.load(open('$expected_path'))
-except Exception as e:
-    print(f'PARSE_ERROR: {e}', file=sys.stderr)
-    sys.exit(1)
-print('\n'.join(f\"{f['id']}|{f.get('location_pattern','')}\" for f in data))
-" 2>&1); then
-      echo "ERROR: failed to parse $expected_path (required pairs): $required_pairs" >&2
-      rm -f "$report_path"
-      exit 2
-    fi
+
+    local required_critical required_medium required_low required_pairs
+    required_critical=$(echo "$parsed" | sed -n '1p' | awk '{print $1}')
+    required_medium=$(echo "$parsed" | sed -n '1p' | awk '{print $2}')
+    required_low=$(echo "$parsed" | sed -n '1p' | awk '{print $3}')
+    required_pairs=$(echo "$parsed" | sed -n '2,$p')
 
     # Check critical findings (zero variance allowed per spec §7.3)
     if [[ "$actual_critical" -lt "$required_critical" ]]; then

@@ -11,6 +11,9 @@ checks:
   - id: WRITE-003
     title: get_or_create in loop → bulk_create with update_conflicts
     severity_base: medium
+  - id: WRITE-004
+    title: update_or_create in loop → bulk_create with update_conflicts + update_fields
+    severity_base: high
   - id: WRITE-005
     title: Signal listeners present — bulk recommendations bypass them (info banner)
     severity_base: info
@@ -171,6 +174,48 @@ Tag.objects.bulk_create(
     update_conflicts=True,
     unique_fields=["name"],
     update_fields=[],  # no-op update, just skip duplicates
+)
+```
+
+---
+
+### WRITE-004
+
+**Signature:** `update_or_create(...)` called inside a loop — each call issues a `SELECT`, then either an `UPDATE` (existing) or `INSERT` (new). On a 1k-row import this is 2k–3k round trips. Django 4.1+ `bulk_create(..., update_conflicts=True, update_fields=[...])` collapses the loop into a single statement that performs the UPSERT atomically.
+
+**Grep / AST hints:**
+```regex
+\.update_or_create\(
+```
+Follow-up: confirm the call is inside a loop body. Locate `defaults={...}` to derive the `update_fields=[...]` list for the bulk equivalent. Note any `defaults` value that is **not** statically derivable from row input (e.g. computed timestamps, callables) — the bulk form may need a different per-row strategy.
+
+**Confidence rules:**
+- High: `update_or_create` inside loop, Django ≥ 4.1, `defaults` keys are static from row input.
+- Medium: `update_or_create` inside loop, Django version not confirmed, OR `defaults` includes computed values that need a workaround.
+- Low: `update_or_create` inside complex branching where some iterations skip the call.
+
+**Savings formula:**
+- `(N - 1) × 2 × per_query_overhead` (each call is SELECT + INSERT/UPDATE).
+- Constants: PG = 2ms, MySQL = 4ms, SQLite = 1ms.
+- Severity is `high` because this is the most expensive of the loop-write patterns: each iteration is two DB round trips, and these tend to live in nightly imports where N is large.
+
+**Audit caveat:** When `signal_dependencies[<Model>]` non-empty, append caveat block. The bulk equivalent bypasses signals; same mitigations as WRITE-001/003.
+
+**Suggested fix template:**
+```python
+# Before (Django < 4.1 approach shown for reference)
+for row in data:
+    Product.objects.update_or_create(
+        sku=row["sku"],
+        defaults={"name": row["name"], "price": row["price"]},
+    )
+
+# After (Django 4.1+) — single statement UPSERT.
+Product.objects.bulk_create(
+    [Product(sku=row["sku"], name=row["name"], price=row["price"]) for row in data],
+    update_conflicts=True,
+    unique_fields=["sku"],
+    update_fields=["name", "price"],  # the `defaults={...}` keys
 )
 ```
 

@@ -8,6 +8,9 @@ checks:
   - id: PAT-002
     title: unaccent / full-text search candidates
     severity_base: low
+  - id: PAT-003
+    title: __regex / __iregex on un-indexed text — full-table scan per query
+    severity_base: medium
   - id: PAT-010
     title: JSONField __contains / __has_key un-indexed
     severity_base: high
@@ -109,6 +112,53 @@ from django.contrib.postgres.search import SearchVector, SearchQuery
 Article.objects.annotate(
     search=SearchVector("title", "body")
 ).filter(search=SearchQuery(q))
+```
+
+---
+
+### PAT-003
+
+**Signature:** `.filter(<field>__regex=...)` or `.filter(<field>__iregex=...)` on a text column. Regex lookups are not index-eligible on any major engine — the DB must apply the pattern to every row. On large tables this is a sequential scan per query. The pattern can usually be rewritten as `__startswith` / `__endswith` / `__contains` / `__icontains` (which can use trigram GIN on PG) or, when the regex is genuinely needed, as a Postgres trigram-indexed `~` / `~*` operator using `pg_trgm`.
+
+**Grep / AST hints:**
+```regex
+\.filter\(\w+__i?regex=
+```
+Follow-up: confirm the field is a `CharField`/`TextField`. Inspect the regex string — if it has anchors (`^…`) or is a literal substring with regex syntax accidentally enabled, suggest the simpler equivalent. Check `Meta.indexes` for a GIN trigram index on the field.
+
+**Confidence rules:**
+- High: `__regex`/`__iregex` on text field confirmed, no trigram GIN index, regex is rewritable as `__startswith`/`__contains`.
+- Medium: `__regex` on text field, regex genuinely needed (alternation, character classes), no trigram index.
+- Low: `__regex` on field whose type is not determinable, or in a branch that may rarely fire.
+
+**Savings formula:**
+- Sequential scan replaced by index scan when rewritable. Savings proportional to table size.
+- Mark `savings_basis: unknown`.
+
+**Suggested fix template:**
+```python
+# Before — full-table regex scan per query
+User.objects.filter(username__iregex=r"^john")
+
+# After (option A) — strip the regex if the intent is a prefix match.
+User.objects.filter(username__istartswith="john")
+
+# After (option B) — keep regex semantics but back it with a trigram GIN index
+# on Postgres, then use the raw `~*` operator (Django's __iregex maps to ~*).
+from django.contrib.postgres.indexes import GinIndex
+
+class User(models.Model):
+    username = models.CharField(max_length=150)
+    class Meta:
+        indexes = [
+            GinIndex(
+                fields=["username"],
+                opclasses=["gin_trgm_ops"],
+                name="user_username_trgm_idx",
+            ),
+        ]
+# Then enable extension in a migration:
+# CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
 ---

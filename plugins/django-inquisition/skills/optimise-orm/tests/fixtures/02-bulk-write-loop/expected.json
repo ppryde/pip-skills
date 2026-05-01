@@ -13,6 +13,7 @@
     "tier_displayed": "critical",
     "location_pattern": "target.py:31",
     "savings_basis": "static",
+    "savings_midpoint_ms": 200,
     "signals_caveat": false
   }
 ]
