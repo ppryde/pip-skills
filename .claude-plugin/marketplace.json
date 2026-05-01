@@ -1,5 +1,6 @@
 {
   "name": "pip-skills",
+  "version": "1.1.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -26,6 +27,13 @@
       "description": "HTML email auditing and generation under the watchful eye of the Witchfinder. Twelve doctrines. Three skills. No sinful templates shall pass.",
       "category": "engineering",
       "tags": ["email", "html-email", "transactional", "accessibility", "deliverability", "rendering", "mjml", "audit"]
+    },
+    {
+      "name": "django-inquisition",
+      "source": "./plugins/django-inquisition",
+      "description": "Django ORM performance auditor. Audits source files and symbols against ~70 ORM heuristics, ranks findings by impact, and emits a tier-grouped report.",
+      "category": "engineering",
+      "tags": ["django", "orm", "performance", "database", "postgresql", "mysql", "sqlite", "queryset", "n-plus-one", "indexes", "bulk", "optimisation"]
     }
   ]
 }

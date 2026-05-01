@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test harness for django:optimise-orm
+# Test harness for django-inquisition:optimise-orm
 # Modes:
 #   (no args)   — static-shape validation only (fast, CI-safe)
 #   --live      — live invocation against all fixtures (requires API key + Claude CLI)
@@ -280,8 +280,8 @@ live_checks() {
     stderr_path=$(mktemp /tmp/optimise-orm-stderr-XXXXXX)
 
     # Invoke skill with --report so we can parse frontmatter
-    echo "  Running: /django:optimise-orm $target_path --report --no-explain"
-    if ! claude "/django:optimise-orm $target_path --report --no-explain" \
+    echo "  Running: /django-inquisition:optimise-orm $target_path --report --no-explain"
+    if ! claude "/django-inquisition:optimise-orm $target_path --report --no-explain" \
          --output "$report_path" 2>"$stderr_path"; then
       fail "$fixture_name — skill invocation failed (stderr: $stderr_path)"
       cat "$stderr_path" >&2

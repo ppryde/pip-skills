@@ -4,13 +4,14 @@ A personal collection of Claude Code skills for serious engineering work — fro
 
 ## What's in here
 
-Three plugins, each with a distinct purpose:
+Four plugins, each with a distinct purpose:
 
 | Plugin | Purpose |
 | --- | --- |
 | [**Puritan**](https://github.com/ppryde/pip-skills/blob/main/plugins/puritan) | Architectural doctrine enforcement — plan patterns, audit code, author rules |
 | [**Tribunal**](https://github.com/ppryde/pip-skills/blob/main/plugins/tribunal) | PR review workflow — fetch, triage, validate, action, and resolve GitHub PR comments |
 | [**email-absolution**](https://github.com/ppryde/pip-skills/blob/main/plugins/email-absolution) | HTML email auditing and generation — doctrines, visitation, and absolution |
+| [**django-inquisition**](https://github.com/ppryde/pip-skills/blob/main/plugins/django-inquisition) | Django ORM performance auditor — ~70 heuristics, tier-grouped findings, signal-aware |
 
 ## Installing
 
@@ -19,7 +20,7 @@ Three plugins, each with a distinct purpose:
 1. Open Claude.ai in your browser
 2. Go to **Settings** → **Plugins**
 3. Click **Browse marketplace**
-4. Search for **Puritan**, **Tribunal**, or **email-absolution**
+4. Search for **Puritan**, **Tribunal**, **email-absolution**, or **django-inquisition**
 5. Click **Install**
 6. The skills are now available in your chat
 
@@ -32,6 +33,7 @@ You can also install via Claude Code's plugin commands. From within a Claude Cod
 /plugin install puritan@ppryde/pip-skills
 /plugin install tribunal@ppryde/pip-skills
 /plugin install email-absolution@ppryde/pip-skills
+/plugin install django-inquisition@ppryde/pip-skills
 ```
 
 Or from the terminal CLI:
@@ -41,6 +43,7 @@ Or from the terminal CLI:
 claude plugin install puritan@ppryde/pip-skills
 claude plugin install tribunal@ppryde/pip-skills
 claude plugin install email-absolution@ppryde/pip-skills
+claude plugin install django-inquisition@ppryde/pip-skills
 ```
 
 After installing, the skills are available as slash commands:
@@ -55,6 +58,8 @@ After installing, the skills are available as slash commands:
 /email-absolution:elder      — email planning, Q&A, and config setup
 /email-absolution:visitation — audit an email template against doctrine
 /email-absolution:scribe     — generate a template correct by construction
+
+/django-inquisition:optimise-orm — audit a Django file or symbol for ORM performance issues
 ```
 
 ## Philosophy
