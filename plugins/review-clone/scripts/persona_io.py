@@ -168,6 +168,20 @@ def _format_scalar(val: Any) -> str:
     if isinstance(val, (int, float)):
         return str(val)
     s = str(val)
+    # Quote strings that would coerce to a non-string type on read-back
+    if s in ("", "true", "false", "null", "~", "[]", "{}"):
+        return f'"{s}"'
+    try:
+        int(s)
+        return f'"{s}"'
+    except ValueError:
+        pass
+    try:
+        float(s)
+        return f'"{s}"'
+    except ValueError:
+        pass
+    # Quote strings containing parser-sensitive characters
     if any(c in s for c in (":", "#", "\n")) or s.strip() != s:
         return f'"{s}"'
     return s

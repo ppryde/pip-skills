@@ -75,3 +75,23 @@ def test_append_drift_entry_archives_beyond_cap(tmp_path):
     assert archive.exists()
     archived_lines = archive.read_text().strip().split("\n")
     assert len(archived_lines) == 5
+
+
+def test_format_scalar_quotes_ambiguous_literals(tmp_path):
+    """Strings that look like type literals must round-trip as strings."""
+    from scripts.persona_io import write_persona, read_frontmatter
+
+    path = tmp_path / "PERSONA.md"
+    tricky = {
+        "alias": "true",
+        "handles": ["null", "42", "3.14", "[]", ""],
+        "repo": "false",
+        "drift_log": [],
+        "drift_log_archived_count": 0,
+    }
+    write_persona(path, tricky, "## Voice\nx")
+    fm = read_frontmatter(path)
+
+    assert fm["alias"] == "true"
+    assert fm["handles"] == ["null", "42", "3.14", "[]", ""]
+    assert fm["repo"] == "false"
