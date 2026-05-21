@@ -110,3 +110,52 @@ def _coerce_scalar(val: str) -> Any:
     except ValueError:
         pass
     return val
+
+
+def write_persona(path: Path, frontmatter: dict[str, Any], body: str) -> None:
+    """Atomic write of PERSONA.md (frontmatter + body)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yaml = _dump_yaml(frontmatter)
+    content = f"---\n{yaml}---\n\n{body.rstrip()}\n"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _dump_yaml(data: dict[str, Any], indent: int = 0) -> str:
+    """Dump the constrained YAML subset. Inverse of _parse_yaml."""
+    lines: list[str] = []
+    pad = " " * indent
+    for key, val in data.items():
+        if isinstance(val, dict):
+            lines.append(f"{pad}{key}:")
+            lines.append(_dump_yaml(val, indent + 2))
+        elif isinstance(val, list):
+            if not val:
+                lines.append(f"{pad}{key}: []")
+            else:
+                lines.append(f"{pad}{key}:")
+                for item in val:
+                    if isinstance(item, dict):
+                        first_key = next(iter(item))
+                        lines.append(f"{pad}  - {first_key}: {_format_scalar(item[first_key])}")
+                        for k, v in list(item.items())[1:]:
+                            lines.append(f"{pad}    {k}: {_format_scalar(v)}")
+                    else:
+                        lines.append(f"{pad}  - {_format_scalar(item)}")
+        else:
+            lines.append(f"{pad}{key}: {_format_scalar(val)}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _format_scalar(val: Any) -> str:
+    if val is None:
+        return "null"
+    if isinstance(val, bool):
+        return "true" if val else "false"
+    if isinstance(val, (int, float)):
+        return str(val)
+    s = str(val)
+    if any(c in s for c in (":", "#", "\n")) or s.strip() != s:
+        return f'"{s}"'
+    return s
