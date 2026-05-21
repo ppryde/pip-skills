@@ -15,6 +15,10 @@ You are setting up a new `review-clone` persona. The user wants you to derive a 
 - Per-persona slash command: `~/.claude/commands/review-as-<alias>.md`
 - Drift log overflow: `~/.claude/review-clone/<alias>/drift.log`
 
+## Conventions
+
+`<plugin>` throughout this skill refers to the absolute path of the `review-clone` plugin directory in this Claude Code install. When invoking shell commands, the calling session resolves this from its plugin loader context (typically `~/.claude/plugins/cache/...` or similar). When you see `<plugin>/scripts/collect.py` below, substitute the resolved absolute path.
+
 ## Procedure
 
 ### Step 0 — Re-clone check
@@ -22,12 +26,12 @@ You are setting up a new `review-clone` persona. The user wants you to derive a 
 Check if any personas already exist. Run:
 
 ```bash
-python3 -c "from scripts.persona_io import list_personas; print('\n'.join(list_personas()))"
+ls ~/.claude/review-clone/ 2>/dev/null | while read d; do
+  [ -f ~/.claude/review-clone/$d/PERSONA.md ] && echo "$d"
+done
 ```
 
-(or, equivalent: `ls ~/.claude/review-clone/` filtered to dirs containing `PERSONA.md`).
-
-If the user's intended alias is taken, present this 3-way prompt:
+If the user's intended alias appears in the output, present this 3-way prompt:
 
 > A persona `<alias>` already exists (last scanned <last_scanned_at>).
 > 1. **Refresh** — pull comments since last scan, fold into existing rules
@@ -76,7 +80,7 @@ Capture stdout (the JSON snapshot). Stream stderr to the user so they see progre
 
 ### Step 4 — Pre-extract gate
 
-Read `snapshot.json.counts`. Display:
+Read the `counts` field from `snapshot.json`. Display:
 
 > Scraped **<prs> PRs**, **<review_comments + issue_comments> comments**, **<pr_descriptions> PR descriptions** for `<alias>`.
 
