@@ -1,6 +1,7 @@
 """PERSONA.md frontmatter R/W and drift log helpers for review-clone."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -83,8 +84,19 @@ def _parse_list(lines: list[str], indent: int) -> tuple[list[Any], int]:
         if not stripped.startswith("- "):
             return items, i
         val = stripped[2:].strip()
-        items.append(_coerce_scalar(val))
-        i += 1
+        # If the item looks like "key: value" it's a dict entry — parse as block.
+        if ":" in val and not val.startswith('"'):
+            first_key, _, first_val = val.partition(":")
+            first_val = first_val.strip()
+            item: dict[str, Any] = {first_key: _coerce_scalar(first_val)}
+            # Collect any continuation lines at indent+2 (the dict's body indent).
+            rest, consumed = _parse_block(lines[i + 1 :], indent + 2)
+            item.update(rest)
+            items.append(item)
+            i += 1 + consumed
+        else:
+            items.append(_coerce_scalar(val))
+            i += 1
     return items, i
 
 
@@ -159,3 +171,37 @@ def _format_scalar(val: Any) -> str:
     if any(c in s for c in (":", "#", "\n")) or s.strip() != s:
         return f'"{s}"'
     return s
+
+
+DRIFT_LOG_CAP = 20
+
+
+def append_drift_entry(persona_path: Path, entry: dict[str, Any]) -> None:
+    """Append a drift entry to PERSONA.md frontmatter, capping at DRIFT_LOG_CAP.
+
+    Oldest entries beyond the cap are appended (as JSON lines) to a sidecar
+    ``drift.log`` in the same directory, and ``drift_log_archived_count`` is
+    incremented.
+    """
+    text = persona_path.read_text(encoding="utf-8")
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        raise ValueError(f"No frontmatter in {persona_path}")
+    fm = _parse_yaml(match.group(1))
+    body = text[match.end():]
+
+    log = list(fm.get("drift_log") or [])
+    log.append(entry)
+
+    overflow = log[:-DRIFT_LOG_CAP] if len(log) > DRIFT_LOG_CAP else []
+    log = log[-DRIFT_LOG_CAP:]
+
+    if overflow:
+        archive_path = persona_path.parent / "drift.log"
+        with archive_path.open("a", encoding="utf-8") as f:
+            for old in overflow:
+                f.write(json.dumps(old) + "\n")
+        fm["drift_log_archived_count"] = int(fm.get("drift_log_archived_count", 0)) + len(overflow)
+
+    fm["drift_log"] = log
+    write_persona(persona_path, fm, body.lstrip("\n"))
