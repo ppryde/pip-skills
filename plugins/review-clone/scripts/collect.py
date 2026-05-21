@@ -11,6 +11,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 PERSONA_ROOT = Path(
     os.environ.get("REVIEW_CLONE_ROOT", "") or Path.home() / ".claude" / "review-clone"
@@ -76,6 +77,107 @@ def discover_prs(repo: str, handles: list[str], since: str) -> list[int]:
         for pr in _gh_search(repo, handle, since):
             seen.add(pr["number"])
     return sorted(seen)
+
+
+def _gh_get(api_path: str, paginate: bool = False) -> Any:
+    """Call `gh api <path>` and return parsed JSON."""
+    cmd = ["gh", "api", api_path]
+    if paginate:
+        cmd.append("--paginate")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return json.loads(result.stdout) if result.stdout.strip() else []
+
+
+def _matches_path_filter(path: str, paths: list[str], extensions: list[str]) -> bool:
+    if not paths and not extensions:
+        return True
+    if paths and any(path.startswith(p) for p in paths):
+        return True
+    if extensions and any(path.endswith(e) for e in extensions):
+        return True
+    return False
+
+
+def fetch_pr(
+    repo: str,
+    number: int,
+    handles: list[str],
+    paths: list[str],
+    extensions: list[str],
+) -> dict:
+    """Fetch one PR's metadata + filtered comments + reply threads.
+
+    Returns a dict with pr_meta, review_comments (with diff_hunk + reply_thread),
+    issue_comments, and pr_description (if authored by any handle).
+    """
+    pr_meta = _gh_get(f"/repos/{repo}/pulls/{number}")
+    review_comments = _gh_get(f"/repos/{repo}/pulls/{number}/comments", paginate=True)
+    issue_comments = _gh_get(f"/repos/{repo}/issues/{number}/comments", paginate=True)
+
+    handle_set = set(handles)
+
+    # Index review comments by id for threading
+    by_id = {c["id"]: c for c in review_comments}
+
+    # Keep top-level (no in_reply_to_id) comments by our handles, matching
+    # path/ext filter. Attach the full reply thread regardless of author.
+    kept_reviews = []
+    for c in review_comments:
+        if c.get("in_reply_to_id") is not None:
+            continue
+        if c["user"]["login"] not in handle_set:
+            continue
+        if not _matches_path_filter(c["path"], paths, extensions):
+            continue
+        thread = [
+            {
+                "id": r["id"],
+                "user": r["user"]["login"],
+                "body": r["body"],
+            }
+            for r in review_comments
+            if r.get("in_reply_to_id") == c["id"]
+        ]
+        kept_reviews.append({
+            "id": c["id"],
+            "user": c["user"]["login"],
+            "path": c["path"],
+            "body": c["body"],
+            "diff_hunk": c.get("diff_hunk", ""),
+            "html_url": c["html_url"],
+            "created_at": c["created_at"],
+            "reply_thread": thread,
+        })
+
+    # Issue comments: no path; just filter by handle
+    kept_issues = [
+        {
+            "id": c["id"],
+            "user": c["user"]["login"],
+            "body": c["body"],
+            "html_url": c["html_url"],
+            "created_at": c["created_at"],
+        }
+        for c in issue_comments
+        if c["user"]["login"] in handle_set
+    ]
+
+    # PR description: capture if authored by a handle
+    pr_description = None
+    if pr_meta["user"]["login"] in handle_set:
+        pr_description = pr_meta.get("body") or ""
+
+    return {
+        "pr_meta": {
+            "number": pr_meta["number"],
+            "title": pr_meta["title"],
+            "author": pr_meta["user"]["login"],
+            "merged": pr_meta.get("merged", False),
+        },
+        "review_comments": kept_reviews,
+        "issue_comments": kept_issues,
+        "pr_description": pr_description,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
