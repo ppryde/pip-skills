@@ -114,3 +114,26 @@ def test_persona_helpers(tmp_path, monkeypatch):
     assert persona_io.persona_exists("jen")
     assert persona_io.list_personas() == ["jen"]
     assert persona_io.persona_dir("jen") == tmp_path / "jen"
+
+
+def test_case_sensitive_literal_strings_roundtrip(tmp_path):
+    """Capitalised variants of YAML literals must round-trip as strings, not bool/null."""
+    from scripts.persona_io import write_persona, read_frontmatter
+
+    path = tmp_path / "PERSONA.md"
+    # These are case-variants that would previously coerce via .lower()
+    write_persona(
+        path,
+        {
+            "alias": "True",      # would have become bool True
+            "handles": ["NULL", "False", "TRUE", "None"],
+            "repo": "FALSE",      # would have become bool False
+            "drift_log": [],
+            "drift_log_archived_count": 0,
+        },
+        "## Voice\nx",
+    )
+    fm = read_frontmatter(path)
+    assert fm["alias"] == "True"
+    assert fm["handles"] == ["NULL", "False", "TRUE", "None"]
+    assert fm["repo"] == "FALSE"

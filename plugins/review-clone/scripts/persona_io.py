@@ -131,11 +131,11 @@ def _coerce_scalar(val: str) -> Any:
         return []
     if val == "{}":
         return {}
-    if val.lower() == "true":
+    if val == "true":
         return True
-    if val.lower() == "false":
+    if val == "false":
         return False
-    if val.lower() in ("null", "~", ""):
+    if val in ("null", "~", ""):
         return None
     try:
         return int(val)
