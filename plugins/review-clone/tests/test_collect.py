@@ -91,3 +91,62 @@ def test_fetch_pr_captures_pr_description_if_authored_by_handle():
         )
 
     assert result["pr_description"] == "FUNDE-123 — adds a new widget."
+
+
+def test_fetch_pr_handles_null_user_accounts():
+    """Comments/PRs with user=null (deleted accounts) don't crash."""
+    from scripts.collect import fetch_pr
+
+    with patch("scripts.collect._gh_get") as mock_get:
+        mock_get.side_effect = [
+            # pr_meta with null user (ghosted PR author)
+            {
+                "number": 999,
+                "title": "Ghost PR",
+                "user": None,
+                "merged": False,
+                "body": "ignored",
+            },
+            # review_comments with one ghost commenter + one real
+            [
+                {
+                    "id": 9001,
+                    "user": None,
+                    "path": "x.tsx",
+                    "body": "from ghost",
+                    "diff_hunk": "@@",
+                    "html_url": "u1",
+                    "in_reply_to_id": None,
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "id": 9002,
+                    "user": {"login": "jen"},
+                    "path": "x.tsx",
+                    "body": "from jen",
+                    "diff_hunk": "@@",
+                    "html_url": "u2",
+                    "in_reply_to_id": None,
+                    "created_at": "2026-01-01T00:01:00Z",
+                },
+            ],
+            # issue_comments with one ghost
+            [{
+                "id": 9003,
+                "user": None,
+                "body": "issue from ghost",
+                "html_url": "u3",
+                "created_at": "2026-01-01T00:02:00Z",
+            }],
+        ]
+        result = fetch_pr(repo="o/r", number=999, handles=["jen"], paths=[], extensions=[])
+
+    # Ghost reviewer skipped, jen's comment kept
+    assert len(result["review_comments"]) == 1
+    assert result["review_comments"][0]["id"] == 9002
+    # Ghost issue comment skipped (None can never be in handle_set)
+    assert len(result["issue_comments"]) == 0
+    # Ghost PR author → pr_description not captured
+    assert result["pr_description"] is None
+    # pr_meta.author is None (preserves the ghosted state for downstream)
+    assert result["pr_meta"]["author"] is None

@@ -88,6 +88,12 @@ def _gh_get(api_path: str, paginate: bool = False) -> Any:
     return json.loads(result.stdout) if result.stdout.strip() else []
 
 
+def _login(obj: dict) -> str | None:
+    """Return the `user.login` from a gh API object, or None for ghosted accounts."""
+    user = obj.get("user")
+    return user["login"] if user else None
+
+
 def _matches_path_filter(path: str, paths: list[str], extensions: list[str]) -> bool:
     if not paths and not extensions:
         return True
@@ -125,14 +131,14 @@ def fetch_pr(
     for c in review_comments:
         if c.get("in_reply_to_id") is not None:
             continue
-        if c["user"]["login"] not in handle_set:
+        if _login(c) not in handle_set:
             continue
         if not _matches_path_filter(c["path"], paths, extensions):
             continue
         thread = [
             {
                 "id": r["id"],
-                "user": r["user"]["login"],
+                "user": _login(r),
                 "body": r["body"],
             }
             for r in review_comments
@@ -140,7 +146,7 @@ def fetch_pr(
         ]
         kept_reviews.append({
             "id": c["id"],
-            "user": c["user"]["login"],
+            "user": _login(c),
             "path": c["path"],
             "body": c["body"],
             "diff_hunk": c.get("diff_hunk", ""),
@@ -153,25 +159,25 @@ def fetch_pr(
     kept_issues = [
         {
             "id": c["id"],
-            "user": c["user"]["login"],
+            "user": _login(c),
             "body": c["body"],
             "html_url": c["html_url"],
             "created_at": c["created_at"],
         }
         for c in issue_comments
-        if c["user"]["login"] in handle_set
+        if _login(c) in handle_set
     ]
 
     # PR description: capture if authored by a handle
     pr_description = None
-    if pr_meta["user"]["login"] in handle_set:
+    if _login(pr_meta) in handle_set:
         pr_description = pr_meta.get("body") or ""
 
     return {
         "pr_meta": {
             "number": pr_meta["number"],
             "title": pr_meta["title"],
-            "author": pr_meta["user"]["login"],
+            "author": _login(pr_meta),
             "merged": pr_meta.get("merged", False),
         },
         "review_comments": kept_reviews,
