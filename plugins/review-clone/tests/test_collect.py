@@ -150,3 +150,43 @@ def test_fetch_pr_handles_null_user_accounts():
     assert result["pr_description"] is None
     # pr_meta.author is None (preserves the ghosted state for downstream)
     assert result["pr_meta"]["author"] is None
+
+
+def test_run_collect_writes_raw_and_snapshot(tmp_path, monkeypatch):
+    import scripts.collect as collect_mod
+
+    monkeypatch.setattr(collect_mod, "PERSONA_ROOT", tmp_path)
+
+    fixture = json.loads(Path("tests/fixtures/sample_pr.json").read_text())
+
+    with patch.object(collect_mod, "discover_prs", return_value=[100]), \
+         patch.object(collect_mod, "fetch_pr", return_value={
+             "pr_meta": {"number": 100, "title": "x", "author": "jane", "merged": True},
+             "review_comments": [{"id": 1, "user": "jen", "path": "f.tsx",
+                                  "body": "x", "diff_hunk": "@@", "reply_thread": [],
+                                  "html_url": "u", "created_at": "2026-05-01T10:00:00Z"}],
+             "issue_comments": [],
+             "pr_description": None,
+         }):
+        snapshot = collect_mod.run_collect(
+            alias="jen",
+            handles=["jen"],
+            repo="o/r",
+            months=6,
+            paths=["frontend/"],
+            extensions=[".tsx"],
+            since=None,
+        )
+
+    persona_dir = tmp_path / "jen"
+    raw_dir = persona_dir / "raw"
+    assert raw_dir.exists()
+    assert (raw_dir / "pr-100.json").exists()
+    assert (persona_dir / "snapshot.json").exists()
+
+    saved = json.loads((persona_dir / "snapshot.json").read_text())
+    assert saved["counts"]["prs"] == 1
+    assert saved["counts"]["review_comments"] == 1
+    assert saved["counts"]["issue_comments"] == 0
+    assert saved["counts"]["pr_descriptions"] == 0
+    assert saved["window"]["months"] == 6

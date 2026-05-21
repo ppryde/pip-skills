@@ -186,6 +186,62 @@ def fetch_pr(
     }
 
 
+def _compute_since(months: int) -> str:
+    now = datetime.now(timezone.utc)
+    delta = timedelta(days=30 * months)
+    return (now - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def run_collect(
+    *,
+    alias: str,
+    handles: list[str],
+    repo: str,
+    months: int,
+    paths: list[str],
+    extensions: list[str],
+    since: str | None,
+) -> dict:
+    """Full scrape pipeline. Writes raw/ + snapshot.json. Returns the snapshot dict."""
+    since = since or _compute_since(months)
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    persona_dir = PERSONA_ROOT / alias
+    raw_dir = persona_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    prs = discover_prs(repo, handles, since)
+    print(f"Discovered {len(prs)} PRs touching {','.join(handles)} since {since}", file=sys.stderr)
+
+    counts = {"prs": 0, "review_comments": 0, "issue_comments": 0, "pr_descriptions": 0}
+
+    for i, n in enumerate(prs, 1):
+        print(f"  [{i}/{len(prs)}] fetching PR #{n}", file=sys.stderr)
+        data = fetch_pr(repo, n, handles, paths, extensions)
+        if not data["review_comments"] and not data["issue_comments"] and not data["pr_description"]:
+            continue  # PR had nothing matching the filter
+        (raw_dir / f"pr-{n}.json").write_text(json.dumps(data, indent=2))
+        counts["prs"] += 1
+        counts["review_comments"] += len(data["review_comments"])
+        counts["issue_comments"] += len(data["issue_comments"])
+        if data["pr_description"]:
+            counts["pr_descriptions"] += 1
+
+    snapshot = {
+        "alias": alias,
+        "collected_at": now_iso,
+        "since": since,
+        "until": now_iso,
+        "repo": repo,
+        "handles": handles,
+        "filters": {"paths": paths, "extensions": extensions},
+        "window": {"months": months, "since": since},
+        "counts": counts,
+    }
+    (persona_dir / "snapshot.json").write_text(json.dumps(snapshot, indent=2))
+    return snapshot
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
     if args.months > WINDOW_CAP_MONTHS and not args.since:
@@ -194,7 +250,18 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    # TODO: implement scrape in Task 7+
+
+    snapshot = run_collect(
+        alias=args.alias,
+        handles=[h.strip() for h in args.handles.split(",") if h.strip()],
+        repo=args.repo,
+        months=args.months,
+        paths=[p.strip() for p in args.paths.split(",") if p.strip()],
+        extensions=[e.strip() for e in args.extensions.split(",") if e.strip()],
+        since=args.since,
+    )
+    # Print the snapshot to stdout (machine-readable) for the skill to consume
+    print(json.dumps(snapshot))
     return 0
 
 
