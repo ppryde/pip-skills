@@ -190,3 +190,30 @@ def test_run_collect_writes_raw_and_snapshot(tmp_path, monkeypatch):
     assert saved["counts"]["issue_comments"] == 0
     assert saved["counts"]["pr_descriptions"] == 0
     assert saved["window"]["months"] == 6
+
+
+def test_run_collect_skips_unchanged_prs_in_refresh_mode(tmp_path, monkeypatch):
+    """When --since is set, discover_prs is called with that date directly,
+    NOT a recomputed months-based date."""
+    import scripts.collect as collect_mod
+
+    monkeypatch.setattr(collect_mod, "PERSONA_ROOT", tmp_path)
+
+    captured_since = []
+
+    def fake_discover(repo, handles, since):
+        captured_since.append(since)
+        return []
+
+    with patch.object(collect_mod, "discover_prs", side_effect=fake_discover):
+        collect_mod.run_collect(
+            alias="jen",
+            handles=["jen"],
+            repo="o/r",
+            months=6,
+            paths=[],
+            extensions=[],
+            since="2026-05-01T00:00:00Z",
+        )
+
+    assert captured_since == ["2026-05-01T00:00:00Z"]
