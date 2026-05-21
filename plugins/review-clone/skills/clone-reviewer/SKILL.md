@@ -19,7 +19,15 @@ You are setting up a new `review-clone` persona. The user wants you to derive a 
 
 ### Step 0 — Re-clone check
 
-Run `python <plugin>/scripts/persona_io.py --list` (or use the helper inline) to check if any personas already exist. If the user's intended alias is taken, present this 3-way prompt:
+Check if any personas already exist. Run:
+
+```bash
+python3 -c "from scripts.persona_io import list_personas; print('\n'.join(list_personas()))"
+```
+
+(or, equivalent: `ls ~/.claude/review-clone/` filtered to dirs containing `PERSONA.md`).
+
+If the user's intended alias is taken, present this 3-way prompt:
 
 > A persona `<alias>` already exists (last scanned <last_scanned_at>).
 > 1. **Refresh** — pull comments since last scan, fold into existing rules
