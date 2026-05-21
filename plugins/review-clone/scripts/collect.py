@@ -55,6 +55,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _gh_search(repo: str, handle: str, since: str) -> list[dict]:
+    """Call `gh search prs --json number,updatedAt`. Returns list of PR dicts."""
+    cmd = [
+        "gh", "search", "prs",
+        "--repo", repo,
+        "--involves", handle,
+        "--updated", f">={since}",
+        "--limit", "1000",
+        "--json", "number,updatedAt",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return json.loads(result.stdout) if result.stdout.strip() else []
+
+
+def discover_prs(repo: str, handles: list[str], since: str) -> list[int]:
+    """Return deduplicated list of PR numbers touched by any handle since the given ISO date."""
+    seen: set[int] = set()
+    for handle in handles:
+        for pr in _gh_search(repo, handle, since):
+            seen.add(pr["number"])
+    return sorted(seen)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
     if args.months > WINDOW_CAP_MONTHS and not args.since:
