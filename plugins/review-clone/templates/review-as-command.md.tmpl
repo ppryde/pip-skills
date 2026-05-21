@@ -1,0 +1,13 @@
+---
+description: Review the current branch as {{ALIAS}} (last calibrated {{LAST_SCANNED_AT}}). Modes: review (default), refresh, chat.
+---
+
+Invoke the `review-as` skill for persona `{{ALIAS}}`.
+
+Parsing rule:
+- No args → `review` mode
+- First arg `refresh` → `refresh` mode
+- First arg `chat` → `chat` mode; the rest of the args are the prompt
+- Anything else → `chat` mode; full args are the prompt
+
+$ARGUMENTS
