@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,29 @@ from typing import Any
 # we can parse without external deps. See parse_yaml below.
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
+
+PERSONA_ROOT = Path(os.environ.get("REVIEW_CLONE_ROOT", "") or Path.home() / ".claude" / "review-clone")
+
+
+def persona_dir(alias: str) -> Path:
+    return PERSONA_ROOT / alias
+
+
+def persona_path(alias: str) -> Path:
+    return persona_dir(alias) / "PERSONA.md"
+
+
+def persona_exists(alias: str) -> bool:
+    return persona_path(alias).exists()
+
+
+def list_personas() -> list[str]:
+    if not PERSONA_ROOT.exists():
+        return []
+    return sorted(
+        p.name for p in PERSONA_ROOT.iterdir()
+        if p.is_dir() and (p / "PERSONA.md").exists()
+    )
 
 
 def read_frontmatter(path: Path) -> dict[str, Any]:

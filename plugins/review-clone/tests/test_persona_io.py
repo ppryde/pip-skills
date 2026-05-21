@@ -95,3 +95,22 @@ def test_format_scalar_quotes_ambiguous_literals(tmp_path):
     assert fm["alias"] == "true"
     assert fm["handles"] == ["null", "42", "3.14", "[]", ""]
     assert fm["repo"] == "false"
+
+
+def test_persona_helpers(tmp_path, monkeypatch):
+    from scripts import persona_io
+
+    monkeypatch.setattr(persona_io, "PERSONA_ROOT", tmp_path)
+
+    assert persona_io.list_personas() == []
+    assert not persona_io.persona_exists("jen")
+
+    persona_io.write_persona(
+        persona_io.persona_path("jen"),
+        {"alias": "jen", "drift_log": [], "drift_log_archived_count": 0},
+        "## Voice\nx",
+    )
+
+    assert persona_io.persona_exists("jen")
+    assert persona_io.list_personas() == ["jen"]
+    assert persona_io.persona_dir("jen") == tmp_path / "jen"
