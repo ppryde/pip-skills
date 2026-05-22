@@ -75,7 +75,7 @@ Read `output_default` from frontmatter:
 
   Plus a toggle: "Make this the default for /review-as-<alias>?" If yes, write `output_default` back to PERSONA frontmatter using `persona_io.write_persona`.
 
-  File path when used: `.review-clone/last-review-<alias>.md` in repo root.
+  File path when used: `.review-clone/last-review-<alias>.md` in repo root. Create `.review-clone/` via `mkdir -p .review-clone/` if it doesn't exist before writing.
 
 ### 6 — Emit
 
