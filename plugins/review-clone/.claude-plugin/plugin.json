@@ -1,6 +1,6 @@
 {
   "name": "review-clone",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Clone a reviewer's voice and rules from their public GitHub review history. Run branch reviews, refresh from new comments, or chat as the persona — every finding grounded in a cited real comment.",
   "author": {
     "name": "Pip",

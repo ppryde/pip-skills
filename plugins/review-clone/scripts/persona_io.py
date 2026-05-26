@@ -16,18 +16,22 @@ PERSONA_ROOT = Path(os.environ.get("REVIEW_CLONE_ROOT", "") or Path.home() / ".c
 
 
 def persona_dir(alias: str) -> Path:
+    """Return the directory holding a persona's files."""
     return PERSONA_ROOT / alias
 
 
 def persona_path(alias: str) -> Path:
+    """Return the path to a persona's PERSONA.md."""
     return persona_dir(alias) / "PERSONA.md"
 
 
 def persona_exists(alias: str) -> bool:
+    """Return True if a PERSONA.md exists for the alias."""
     return persona_path(alias).exists()
 
 
 def list_personas() -> list[str]:
+    """Return the sorted aliases of every persona on disk."""
     if not PERSONA_ROOT.exists():
         return []
     return sorted(
@@ -94,6 +98,7 @@ def _parse_block(lines: list[str], indent: int) -> tuple[dict[str, Any], int]:
 
 
 def _parse_list(lines: list[str], indent: int) -> tuple[list[Any], int]:
+    """Parse a YAML block sequence; return (items, lines consumed)."""
     items: list[Any] = []
     i = 0
     while i < len(lines):
@@ -125,6 +130,7 @@ def _parse_list(lines: list[str], indent: int) -> tuple[list[Any], int]:
 
 
 def _coerce_scalar(val: str) -> Any:
+    """Coerce a raw YAML scalar string to its Python type."""
     if val.startswith('"') and val.endswith('"'):
         return val[1:-1]
     if val == "[]":
@@ -185,6 +191,7 @@ def _dump_yaml(data: dict[str, Any], indent: int = 0) -> str:
 
 
 def _format_scalar(val: Any) -> str:
+    """Render a Python scalar as a YAML value, quoting when ambiguous."""
     if val is None:
         return "null"
     if isinstance(val, bool):
