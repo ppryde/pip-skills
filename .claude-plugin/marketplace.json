@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.1.1",
+  "version": "1.2.1",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -34,6 +34,13 @@
       "description": "Django ORM performance auditor. Audits source files and symbols against ~70 ORM heuristics, ranks findings by impact, and emits a tier-grouped report.",
       "category": "engineering",
       "tags": ["django", "orm", "performance", "database", "postgresql", "mysql", "sqlite", "queryset", "n-plus-one", "indexes", "bulk", "optimisation"]
+    },
+    {
+      "name": "review-clone",
+      "source": "./plugins/review-clone",
+      "description": "Clone a reviewer's voice and rules from their public GitHub review history. Every finding cites a real comment; the persona never invents APIs.",
+      "category": "engineering",
+      "tags": ["code-review", "pr-review", "github", "persona", "voice", "review-bot"]
     }
   ]
 }
