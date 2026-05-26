@@ -54,6 +54,13 @@ Read the file at HEAD too (not just the hunk) — context matters for rules that
 
 For each rule in the PERSONA body, decide if it applies to any changed file. If yes, draft a finding.
 
+When a finding fires, record its **line anchor** from the hunk it sits in — you need this for inline PR posting (Step 5, `post-inline-pr`):
+- `path` — repo-relative file path
+- `line` — line number in the file at HEAD the comment points at
+- `side` — `RIGHT` for an added or context line, `LEFT` for a removed line
+
+If a finding can't be pinned to a single line in the diff, leave its anchor empty; it becomes a general comment when posted.
+
 ### 4 — Verification gate (run BEFORE emitting each finding)
 
 **6a — API reality check.** If the rule names a function/helper/flag/component:
@@ -68,18 +75,19 @@ For each rule in the PERSONA body, decide if it applies to any changed file. If 
 
 Read `output_default` from frontmatter:
 - If set → use it silently
-- If null → present three options:
+- If null → present four options:
   1. **Summary in chat, details in file** (`summary-chat-details-file`)
   2. **All in chat** (`all-chat`)
   3. **All in file** (`all-file`)
+  4. **Post inline to PR** (`post-inline-pr`) — see Step 6b
 
   Plus a toggle: "Make this the default for /review-as-<alias>?" If yes, write `output_default` back to PERSONA frontmatter using `persona_io.write_persona`.
 
   File path when used: `.review-clone/last-review-<alias>.md` in repo root. Create `.review-clone/` via `mkdir -p .review-clone/` if it doesn't exist before writing.
 
-### 6 — Emit
+### 6a — Emit to chat / file
 
-Format:
+For `summary-chat-details-file`, `all-chat`, `all-file`. Format:
 
 ```
 # /review-as-<alias> — <branch> vs origin/main
@@ -98,6 +106,57 @@ Snapshot: <last_scanned_at> · <N> files in scope
 ```
 
 If no findings: emit the persona's "nothing to say" line (from voice section), or default to "Nothing from me. Good to push."
+
+### 6b — Post inline to PR (`post-inline-pr`)
+
+Only when the selected output is `post-inline-pr`. Every message posted to the PR — inline comment **and** summary — is prefixed `[From <alias>]:` so a human can never mistake the clone for the real reviewer. `<alias>` is the slug verbatim, not a display name.
+
+**1 — Resolve the PR.** 
+
+```bash
+gh pr view --json number,headRepositoryOwner,headRepository
+```
+
+If there is no open PR for the branch, do NOT post:
+
+> No open PR for `<branch>`. Falling back to chat output.
+
+Then emit via 6a and stop.
+
+**2 — Zero findings.** Do not post anything. Emit the persona's "nothing to say" line and stop.
+
+**3 — Confirmation gate (never auto-post).** Split findings into *anchorable* (have `path`/`line`/`side`) and *un-anchorable*. Print a preview and wait for an explicit yes:
+
+> About to post to PR #`<n>`: `<N>` inline comments + `<M>` general. Proceed? (y/n)
+
+On "no" → fall back to 6a, do not post.
+
+**4 — Post one batched review.** Build each comment body as `[From <alias>]: <severity> — <comment>` followed by a blank line and `Citation: <url>`. Submit all anchorable findings in a single review:
+
+```bash
+gh api repos/<owner>/<repo>/pulls/<n>/reviews \
+  -f event=COMMENT \
+  -f 'comments[][path]=<path>' \
+  -F 'comments[][line]=<line>' \
+  -f 'comments[][side]=<RIGHT|LEFT>' \
+  -f "comments[][body]=[From <alias>]: <severity> — <comment>
+
+Citation: <url>"
+```
+
+Repeat the `comments[][...]` field group once per anchorable finding. Use `-F` (not `-f`) for `line` so it is sent as a number.
+
+**5 — Un-anchorable findings.** Bundle them into the review's summary `body` (also prefixed `[From <alias>]:`), passed as `-f 'body=...'` on the same call. If there are *no* anchorable findings, post them instead as a single general comment:
+
+```bash
+gh pr comment <n> --body "[From <alias>]: <bundled findings>"
+```
+
+**6 — On failure.** If the `gh api` call fails, surface the error verbatim and emit the findings to chat (6a) so nothing is lost.
+
+**7 — Confirm.** On success:
+
+> Posted `<N>` inline + `<M>` general to PR #`<n>` as `[From <alias>]:`.
 
 ---
 

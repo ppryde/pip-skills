@@ -21,6 +21,7 @@ WINDOW_CAP_MONTHS = 6
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse collect.py's command-line arguments."""
     p = argparse.ArgumentParser(
         prog="collect.py",
         description="Scrape a reviewer's GitHub comments for review-clone.",
@@ -95,6 +96,7 @@ def _login(obj: dict) -> str | None:
 
 
 def _matches_path_filter(path: str, paths: list[str], extensions: list[str]) -> bool:
+    """Return True if path matches any prefix or extension filter (or none set)."""
     if not paths and not extensions:
         return True
     if paths and any(path.startswith(p) for p in paths):
@@ -187,6 +189,7 @@ def fetch_pr(
 
 
 def _compute_since(months: int) -> str:
+    """Return the ISO-8601 UTC cutoff `months` before now."""
     now = datetime.now(timezone.utc)
     delta = timedelta(days=30 * months)
     return (now - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -243,6 +246,7 @@ def run_collect(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: collect a reviewer's comments and write a snapshot."""
     args = parse_args(argv if argv is not None else sys.argv[1:])
     if args.months > WINDOW_CAP_MONTHS and not args.since:
         print(
