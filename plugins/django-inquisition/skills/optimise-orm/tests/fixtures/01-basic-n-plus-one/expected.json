@@ -11,8 +11,9 @@
     "id": "FETCH-001",
     "severity_internal": "high",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:22",
+    "location_pattern": "target.py:29",
     "savings_basis": "static",
+    "savings_midpoint_ms": 250,
     "signals_caveat": false
   }
 ]

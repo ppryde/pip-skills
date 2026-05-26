@@ -1,4 +1,4 @@
-# Check Index — all 70 codes
+# Check Index — all 72 codes
 
 Master lookup table for `optimise-orm`. Use this to find which group file owns each code, what severity it defaults to, and the one-line rule. Full per-code detail (signature, grep hints, savings formula, fix template) lives in the group file.
 
@@ -53,6 +53,7 @@ Files are listed in the order the orchestrator walks them.
 | WRITE-001 | critical | Loop of `.save()` → `bulk_create` |
 | WRITE-002 | high | Loop of `.update()` / `.save()` → `bulk_update` |
 | WRITE-003 | medium | `get_or_create` in loop → `bulk_create(..., update_conflicts=True)` |
+| WRITE-004 | high | `update_or_create` in loop → `bulk_create(..., update_conflicts=True, update_fields=[...])` |
 | WRITE-005 | info (banner) | Model has signal listeners — bulk recommendations bypass them |
 | WRITE-006 | medium → critical w/ audit | Existing `.update()` on a model with signal listeners |
 | WRITE-007 | medium → critical w/ audit | Existing `bulk_create` / `bulk_update` on a model with listeners |
@@ -104,6 +105,7 @@ Files are listed in the order the orchestrator walks them.
 |---|---|---|
 | PAT-001 | medium | `__icontains` on un-indexed text → suggest pg_trgm GIN |
 | PAT-002 | low | `unaccent` / full-text candidates |
+| PAT-003 | medium | `__regex` / `__iregex` on un-indexed text — full-table scan per query |
 | PAT-010 | high | `JSONField` `__contains` / `__has_key` un-indexed (cross-ref IDX-040) |
 | PAT-011 | medium | `KeyTransform` index opportunity for hot keys |
 | PAT-020 | medium | Default manager filtering soft-delete benefits from partial index |

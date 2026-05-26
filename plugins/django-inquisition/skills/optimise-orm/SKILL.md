@@ -165,11 +165,11 @@ If a subagent fails or times out, continue with results from the rest and add a 
 | Fetching | `checks/fetching.md` | FETCH-001 FETCH-002 FETCH-003 FETCH-010 FETCH-011 FETCH-012 FETCH-020 FETCH-021 FETCH-022 FETCH-030 FETCH-031 FETCH-032 |
 | Cardinality | `checks/cardinality.md` | CARD-001 CARD-002 CARD-003 CARD-010 CARD-011 CARD-020 CARD-021 |
 | Aggregation | `checks/aggregation.md` | AGG-001 AGG-002 AGG-010 AGG-011 AGG-020 AGG-030 AGG-031 AGG-040 |
-| Writes | `checks/writes.md` | WRITE-001 WRITE-002 WRITE-003 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040 |
+| Writes | `checks/writes.md` | WRITE-001 WRITE-002 WRITE-003 WRITE-004 WRITE-005 WRITE-006 WRITE-007 WRITE-008 WRITE-009 WRITE-010 WRITE-020 WRITE-030 WRITE-031 WRITE-040 |
 | Iteration | `checks/iteration.md` | ITER-001 ITER-002 ITER-010 ITER-011 |
 | Indexes | `checks/indexes.md` | IDX-001 IDX-002 IDX-010 IDX-011 IDX-020 IDX-030 IDX-040 IDX-041 IDX-050 IDX-060 IDX-061 |
 | Joins | `checks/joins.md` | JOIN-001 JOIN-002 JOIN-010 JOIN-011 |
-| Patterns | `checks/patterns.md` | PAT-001 PAT-002 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070 |
+| Patterns | `checks/patterns.md` | PAT-001 PAT-002 PAT-003 PAT-010 PAT-011 PAT-020 PAT-030 PAT-040 PAT-050 PAT-060 PAT-061 PAT-070 |
 
 For the full per-code rule + default severity lookup, read `checks/INDEX.md` once at the start of a run.
 
@@ -260,7 +260,7 @@ Found 6 findings on apps/orders/views.py
 Estimated savings if all addressed: ~770–1665 ms
 ```
 
-Total = sum of midpoints; range = `min(low_estimates)–max(high_estimates)`.
+Total = sum of midpoints; range = `sum(low_estimates)–sum(high_estimates)` (not min/max — sum each end across all findings).
 
 #### Report file (`--report`)
 
@@ -331,7 +331,7 @@ suppressed: 0
 | Flagging engine-specific findings on the wrong engine | Check engine against finding's engine tag; demote to info if mismatch |
 | Reporting FETCH-020/022 with zero caller evidence | Mark confidence: low; do not drop the finding entirely |
 | Escalating WRITE-006/007/009 without detecting an audit package | Only escalate when `audit_framework=true` — not on plain signal listeners |
-| Forgetting pghistory is signals-safe | `pghistory` uses PG triggers; it does NOT bypass Django signals — do not add signal caveats |
+| Adding signal-bypass caveats to WRITE findings on `pghistory`-using models | `pghistory` records history via Postgres triggers, not Django signals. `.update()` / `bulk_create` / `qs.delete()` still trigger those Postgres triggers, so history is preserved — do not append a signal-bypass caveat or escalate WRITE-006/007/009 |
 | Sorting findings by internal severity instead of savings midpoint | Sort key is `-savings_midpoint_ms` first; internal severity is for tier mapping only |
 | Emitting suppressed findings in the report body | Suppressed findings go only in the frontmatter `suppressed: N` count |
 
