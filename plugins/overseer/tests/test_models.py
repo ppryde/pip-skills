@@ -3,6 +3,7 @@ import pytest
 from scripts.models import (
     Card,
     CardParseError,
+    append_to_section,
     format_tokens,
     parse_tokens,
     split_frontmatter,
@@ -144,3 +145,91 @@ class TestCardParse:
         card = Card.from_text(SAMPLE_CARD)
         assert "estimate: 400k" in card.to_text()
         assert "actual: 310k" in card.to_text()
+
+
+NOW = "2026-07-08T15:00"
+
+
+def make_card() -> Card:
+    return Card.from_text(SAMPLE_CARD)
+
+
+class TestAppendToSection:
+    def test_appends_inside_section(self):
+        body = "## Progress log\n- old line\n\n## Verification\nevidence"
+        out = append_to_section(body, "## Progress log", "- new line")
+        assert out.index("- new line") < out.index("## Verification")
+        assert out.index("- old line") < out.index("- new line")
+
+    def test_appends_to_last_section(self):
+        out = append_to_section("## Progress log\n- old", "## Progress log", "- new")
+        assert out.endswith("- new")
+
+    def test_missing_section_is_created(self):
+        out = append_to_section("## Goal\nhi", "## Progress log", "- new")
+        assert "## Progress log\n- new" in out
+
+
+class TestMutations:
+    def test_set_stage(self):
+        card = make_card()
+        card.set_stage("verification", NOW)
+        assert (card.status, card.stage, card.updated) == ("in-flight", "verification", NOW)
+
+    def test_set_bad_stage_raises(self):
+        with pytest.raises(CardParseError):
+            make_card().set_stage("coding", NOW)
+
+    def test_block_preserves_stage(self):
+        card = make_card()
+        card.block("user: scope question", NOW)
+        assert card.status == "blocked"
+        assert card.blocked_on == "user: scope question"
+        assert card.stage == "impl-review"
+
+    def test_unblock_returns_to_in_flight(self):
+        card = make_card()
+        card.block("user: q", NOW)
+        card.unblock(NOW)
+        assert card.status == "in-flight"
+        assert card.blocked_on is None
+
+    def test_unblock_without_stage_returns_to_planned(self):
+        card = Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\n---\nx")
+        card.block("card: WF-011", NOW)
+        card.unblock(NOW)
+        assert card.status == "planned"
+
+    def test_complete_clears_stage(self):
+        card = make_card()
+        card.complete(NOW)
+        assert (card.status, card.stage) == ("done", None)
+
+    def test_abandon(self):
+        card = make_card()
+        card.abandon(NOW)
+        assert card.status == "abandoned"
+
+    def test_log_progress_adds_tokens_and_line(self):
+        card = make_card()
+        card.log_progress("impl agent: steps 1-3 done", 120_000, NOW)
+        assert card.budget_actual == 430_000
+        assert f"- {NOW} — impl agent: steps 1-3 done (~120k tokens)" in card.body
+
+    def test_log_review_rounds_auto_increment(self):
+        card = make_card()
+        card.log_review("impl-review", 2, "found wanting — 2 findings", NOW)
+        card.log_review("impl-review", 2, "approved", NOW)
+        assert card.review_rounds("impl-review") == 2
+        assert "### impl-review — round 2 (2 reviewers)\nVerdict: approved" in card.body
+
+    def test_tripwire(self):
+        card = make_card()
+        assert card.tripwire_breached is False
+        card.log_progress("big burn", 490_000, NOW)  # 310k + 490k = 800k >= 2*400k
+        assert card.tripwire_breached is True
+
+    def test_tripwire_without_estimate_never_fires(self):
+        card = Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\n---\nx")
+        card.log_progress("work", 10_000_000, NOW)
+        assert card.tripwire_breached is False

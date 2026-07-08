@@ -63,6 +63,23 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, match.group(2)
 
 
+def append_to_section(body: str, header: str, content: str) -> str:
+    """Insert content at the end of the named `## ` section, creating it if absent."""
+    lines = body.split("\n")
+    if header not in lines:
+        return f"{body.rstrip()}\n\n{header}\n{content}"
+    start = lines.index(header)
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+    while end - 1 > start and lines[end - 1].strip() == "":
+        end -= 1
+    lines.insert(end, content)
+    return "\n".join(lines)
+
+
 @dataclass
 class Card:
     """One unit of work. The card file is the source of truth; the index is a view."""
@@ -135,3 +152,51 @@ class Card:
         }
         front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
         return f"---\n{front}\n---\n\n{self.body.strip()}\n"
+
+    def set_stage(self, stage: str, now: str) -> None:
+        if stage not in STAGES:
+            raise CardParseError(f"unknown stage: {stage!r}")
+        self.stage = stage
+        self.status = "in-flight"
+        self.updated = now
+
+    def block(self, reason: str, now: str) -> None:
+        self.status = "blocked"
+        self.blocked_on = reason
+        self.updated = now
+
+    def unblock(self, now: str) -> None:
+        self.status = "in-flight" if self.stage else "planned"
+        self.blocked_on = None
+        self.updated = now
+
+    def complete(self, now: str) -> None:
+        self.status = "done"
+        self.stage = None
+        self.updated = now
+
+    def abandon(self, now: str) -> None:
+        self.status = "abandoned"
+        self.stage = None
+        self.updated = now
+
+    def log_progress(self, note: str, tokens: int, now: str) -> None:
+        self.budget_actual += tokens
+        line = f"- {now} — {note} (~{format_tokens(tokens)} tokens)"
+        self.body = append_to_section(self.body, "## Progress log", line)
+        self.updated = now
+
+    def log_review(self, stage: str, reviewers: int, verdict: str, now: str) -> None:
+        round_no = self.review_rounds(stage) + 1
+        block = f"### {stage} — round {round_no} ({reviewers} reviewers)\nVerdict: {verdict}"
+        self.body = append_to_section(self.body, "## Review log", block)
+        self.updated = now
+
+    def review_rounds(self, stage: str) -> int:
+        return self.body.count(f"### {stage} — round ")
+
+    @property
+    def tripwire_breached(self) -> bool:
+        if self.budget_estimate is None:
+            return False
+        return self.budget_actual >= 2 * self.budget_estimate
