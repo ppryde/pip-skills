@@ -66,7 +66,12 @@ def save_card(root: Path, card: Card) -> Path:
 
 
 def quarantine(root: Path, path: Path) -> Path:
-    target = root / "archive" / "corrupt" / path.name
+    corrupt_dir = root / "archive" / "corrupt"
+    target = corrupt_dir / path.name
+    counter = 0
+    while target.exists():
+        counter += 1
+        target = corrupt_dir / f"{path.stem}.{counter}{path.suffix}"
     path.rename(target)
     return target
 

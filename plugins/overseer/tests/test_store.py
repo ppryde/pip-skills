@@ -92,6 +92,18 @@ class TestSaveLoad:
         assert not bad.exists()
         assert quarantined[0].read_text() == "no frontmatter at all"
 
+    def test_quarantine_collision_does_not_overwrite(self, root):
+        bad = root / "cards" / "WF-002-broken.md"
+        bad.write_text("first corruption")
+        load_live_cards(root)
+        bad.write_text("second corruption")
+        _, quarantined = load_live_cards(root)
+        corrupt_dir = root / "archive" / "corrupt"
+        assert (corrupt_dir / "WF-002-broken.md").read_text() == "first corruption"
+        assert quarantined == [corrupt_dir / "WF-002-broken.1.md"]
+        assert quarantined[0].read_text() == "second corruption"
+        assert len(list(corrupt_dir.glob("*.md"))) == 2
+
 
 class TestArchive:
     def test_archive_moves_card(self, root):

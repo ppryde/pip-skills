@@ -113,6 +113,8 @@ class Card:
         if stage is not None and stage not in STAGES:
             raise CardParseError(f"unknown stage: {stage!r}")
         budget = meta.get("budget") or {}
+        if not isinstance(budget, dict):
+            raise CardParseError(f"budget is not a mapping: {budget!r}")
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),

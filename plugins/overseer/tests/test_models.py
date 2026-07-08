@@ -136,6 +136,10 @@ class TestCardParse:
                 "---\nid: WF-001\ntitle: T\nstatus: in-flight\nstage: coding\n---\nbody\n"
             )
 
+    def test_non_mapping_budget_raises(self):
+        with pytest.raises(CardParseError, match="budget"):
+            Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx")
+
     def test_round_trip_is_lossless(self):
         card = Card.from_text(SAMPLE_CARD)
         again = Card.from_text(card.to_text())
