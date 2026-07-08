@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 import yaml
 
@@ -60,3 +61,77 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     if not isinstance(meta, dict):
         raise CardParseError("frontmatter is not a mapping")
     return meta, match.group(2)
+
+
+@dataclass
+class Card:
+    """One unit of work. The card file is the source of truth; the index is a view."""
+
+    id: str
+    title: str
+    status: str = "planned"
+    stage: str | None = None
+    complexity: str | None = None
+    jira: str | None = None
+    sprint: str | None = None
+    branch: str | None = None
+    worktree: str | None = None
+    budget_estimate: int | None = None
+    budget_actual: int = 0
+    created: str = ""
+    updated: str = ""
+    blocked_on: str | None = None
+    body: str = ""
+
+    @classmethod
+    def from_text(cls, text: str) -> "Card":
+        meta, body = split_frontmatter(text)
+        for key in ("id", "title", "status"):
+            if not meta.get(key):
+                raise CardParseError(f"missing required field: {key}")
+        status = str(meta["status"])
+        if status not in STATUSES:
+            raise CardParseError(f"unknown status: {status!r}")
+        stage = meta.get("stage")
+        if stage is not None and stage not in STAGES:
+            raise CardParseError(f"unknown stage: {stage!r}")
+        budget = meta.get("budget") or {}
+        return cls(
+            id=str(meta["id"]),
+            title=str(meta["title"]),
+            status=status,
+            stage=stage,
+            complexity=meta.get("complexity"),
+            jira=meta.get("jira"),
+            sprint=meta.get("sprint"),
+            branch=meta.get("branch"),
+            worktree=meta.get("worktree"),
+            budget_estimate=parse_tokens(budget.get("estimate")),
+            budget_actual=parse_tokens(budget.get("actual")) or 0,
+            created=str(meta.get("created", "")),
+            updated=str(meta.get("updated", "")),
+            blocked_on=meta.get("blocked_on"),
+            body=body.strip(),
+        )
+
+    def to_text(self) -> str:
+        meta = {
+            "id": self.id,
+            "jira": self.jira,
+            "title": self.title,
+            "status": self.status,
+            "stage": self.stage,
+            "complexity": self.complexity,
+            "sprint": self.sprint,
+            "branch": self.branch,
+            "worktree": self.worktree,
+            "budget": {
+                "estimate": format_tokens(self.budget_estimate),
+                "actual": format_tokens(self.budget_actual),
+            },
+            "created": self.created,
+            "updated": self.updated,
+            "blocked_on": self.blocked_on,
+        }
+        front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
+        return f"---\n{front}\n---\n\n{self.body.strip()}\n"
