@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 from scripts.models import Card, CardParseError
 
 WORKFLOW_DIRNAME = ".workflow"
+SCRATCH_DIRNAME = "scratch"
+SCRATCH_STATE_SUBDIR = "workflow"
 _MINTED_ID_RE = re.compile(r"\AWF-(\d+)-")
 
 
@@ -14,15 +17,39 @@ def workflow_root(repo_root: Path) -> Path:
     return repo_root / WORKFLOW_DIRNAME
 
 
+def _is_gitignored(repo_root: Path, relpath: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", relpath],
+            cwd=repo_root,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def state_root(repo_root: Path) -> Path:
+    """Resolve the overseer state root. Existing .workflow/ always wins."""
+    existing = workflow_root(repo_root)
+    if existing.is_dir() and any(existing.iterdir()):
+        return existing
+    scratch = repo_root / SCRATCH_DIRNAME
+    if scratch.is_dir() and _is_gitignored(repo_root, SCRATCH_DIRNAME):
+        return scratch / SCRATCH_STATE_SUBDIR
+    return existing
+
+
 def init_workflow(repo_root: Path) -> Path:
-    root = workflow_root(repo_root)
+    root = state_root(repo_root)
     for sub in ("cards", "sprints", "archive/cards", "archive/corrupt"):
         (root / sub).mkdir(parents=True, exist_ok=True)
-    gitignore = repo_root / ".gitignore"
-    existing = gitignore.read_text() if gitignore.exists() else ""
-    if f"{WORKFLOW_DIRNAME}/" not in existing.split("\n"):
-        suffix = "" if existing in ("", "\n") or existing.endswith("\n") else "\n"
-        gitignore.write_text(f"{existing}{suffix}{WORKFLOW_DIRNAME}/\n")
+    if root == workflow_root(repo_root):
+        gitignore = repo_root / ".gitignore"
+        existing = gitignore.read_text() if gitignore.exists() else ""
+        if f"{WORKFLOW_DIRNAME}/" not in existing.split("\n"):
+            suffix = "" if existing in ("", "\n") or existing.endswith("\n") else "\n"
+            gitignore.write_text(f"{existing}{suffix}{WORKFLOW_DIRNAME}/\n")
     return root
 
 
