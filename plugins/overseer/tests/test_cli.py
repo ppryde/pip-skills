@@ -252,3 +252,19 @@ class TestUsageTelemetry:
     def test_usage_empty(self, repo, capsys):
         assert run(repo, "usage") == 0
         assert "No usage recorded" in capsys.readouterr().out
+
+    def test_usage_skips_corrupt_line_and_warns(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        usage_path = workflow_root(repo) / "usage.jsonl"
+        with usage_path.open("a") as fh:
+            fh.write("not valid json\n")
+        capsys.readouterr()
+        assert run(repo, "usage") == 0
+        captured = capsys.readouterr()
+        assert "worker: 30k" in captured.out
+        assert "total: 30k" in captured.out
+        assert "corrupt usage line" in captured.err
+
+    def test_log_usage_rejects_invalid_role(self, repo):
+        assert run(repo, "log-usage", "WF-001", "--role", "reviwer", "--tokens", "1k") == 1

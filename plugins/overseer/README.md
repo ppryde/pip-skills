@@ -15,6 +15,7 @@ adversarial review loops.
 - Session resume and handoff: `resume` reports everything in flight, and `handoff`
   prepares context for seamless resumption in a new session.
 - Corrupt cards are quarantined to `archive/corrupt/`, never silently lost.
+- `log-usage`/`usage` record and summarise per-dispatch token spend.
 
 ## Skills
 
@@ -37,3 +38,4 @@ poetry run mypy scripts
 ```
 
 Design spec: `docs/superpowers/specs/2026-07-08-workflow-ledger-design.md`.
+Phase 2 design spec: `docs/superpowers/specs/2026-07-09-overseer-orchestration-design.md`.

@@ -273,7 +273,10 @@ def cmd_log_usage(args: argparse.Namespace) -> int:
 
 
 def cmd_usage(args: argparse.Namespace) -> int:
-    summary = summarise(load_usage(workflow_root(args.root)), args.card)
+    entries, skipped = load_usage(workflow_root(args.root))
+    if skipped:
+        print(f"warning: {skipped} corrupt usage line(s) skipped", file=sys.stderr)
+    summary = summarise(entries, args.card)
     if args.json:
         print(json.dumps(summary, indent=2))
         return 0
@@ -372,7 +375,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")
-    p.add_argument("--role", required=True)
+    p.add_argument(
+        "--role",
+        required=True,
+        choices=["planner", "worker", "reviewer", "fixer", "orchestrator"],
+    )
     p.add_argument("--tokens", required=True)
     p.add_argument("--stage")
     p.add_argument("--tier")

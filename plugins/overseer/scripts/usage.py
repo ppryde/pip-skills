@@ -12,11 +12,20 @@ def append_usage(root: Path, entry: dict) -> None:
         fh.write(json.dumps(entry) + "\n")
 
 
-def load_usage(root: Path) -> list[dict]:
+def load_usage(root: Path) -> tuple[list[dict], int]:
     path = root / USAGE_FILENAME
     if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        return [], 0
+    entries: list[dict] = []
+    skipped = 0
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            skipped += 1
+    return entries, skipped
 
 
 def summarise(entries: list[dict], card_id: str | None = None) -> dict:

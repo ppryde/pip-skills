@@ -19,12 +19,14 @@ the first dispatch; templates live at `../../templates/`.
 ## On invocation
 1. Run `resume` (ledger CLI). In-flight cards → offer resume/park/abandon
    per card; re-enter at the recorded stage, never earlier.
-2. Declare comms mode: if named-teammate spawning is available, team mode;
-   otherwise subagent mode. Log it: `log-progress <id> --note "comms: <mode>" --tokens 0`.
+2. Detect whether named-teammate spawning is available: if so, team mode;
+   otherwise subagent mode. That is your comms mode for this session.
 
 ## Stage playbook
-- **bootstrap** — `new-card` (`--jira`/`--linear` key when one exists), pull
-  latest main, create worktree + branch `<type>/<id>-<slug>`,
+- **bootstrap** — `new-card` (`--jira`/`--linear` key when one exists),
+  `set-stage <id> bootstrap`, `log-progress <id> --note "comms: <mode>"
+  --tokens 0` (so a crash mid-bootstrap leaves a resumable in-flight card),
+  pull latest main, create worktree + branch `<type>/<id>-<slug>`,
   `set-field --branch --worktree`, `set-stage <id> planning`.
 - **planning** — dispatch planner (template `planner.md`, tier per policy).
   Plan lands in the card's `## Plan` (you write it via Edit on the card —
@@ -91,6 +93,9 @@ coordination overhead as role `orchestrator` (best estimate of tokens spent
 on this card outside dispatches). `usage` / `usage --card <id>` summarises
 by role and card. This data exists so a future review can find where this
 skill itself burns tokens — cheap honest entries beat missing ones.
+Telemetry is measurement only — card budgets and the 2× tripwire are
+fed solely by log-progress; reviewer/planner/orchestrator spend
+lands in usage.jsonl, not in budget.actual.
 
 ## Context stewardship
 - After each card completes (and each review round on L cards) assess your
