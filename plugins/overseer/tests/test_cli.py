@@ -287,3 +287,12 @@ class TestUsageTelemetry:
 
     def test_log_usage_rejects_invalid_role(self, repo):
         assert run(repo, "log-usage", "WF-001", "--role", "reviwer", "--tokens", "1k") == 1
+
+
+class TestTouchesField:
+    def test_set_touches_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001",
+                   "--touches", "src/auth/, src/models.py") == 0
+        content = find_card_path(state_root(repo), "WF-001").read_text()
+        assert "- src/auth/" in content and "- src/models.py" in content

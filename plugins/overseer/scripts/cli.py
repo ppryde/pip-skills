@@ -168,6 +168,8 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.worktree = args.worktree
     if args.pr:
         card.pr = args.pr
+    if args.touches is not None:
+        card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
     card.updated = _now()
     _sync(args.root, card)
     print(f"{card.id} updated")
@@ -333,6 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--branch")
     p.add_argument("--worktree")
     p.add_argument("--pr")
+    p.add_argument("--touches")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("log-progress")
