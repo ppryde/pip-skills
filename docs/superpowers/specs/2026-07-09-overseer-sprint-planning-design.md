@@ -30,6 +30,7 @@ sets are resolved here.
 | Cleanup/disposal ownership | Reference the skill's procedure, don't restate it | One source of truth for the guardrails; overseer suppresses auto-fire and reaches for the exact procedure at the moments it owns. Rejects verbatim copy (drifts) and full delegation (its local-merge menu breaks the merge gate) |
 | Local merge / end-of-work menu | Rejected, on the record | The merge gate is absolute: the user merges. The card lifecycle replaces the 4-option menu |
 | Spec split | Phase 3 and phase 4 get separate specs | Established rite: each phase is its own spec → plan → implement cycle |
+| State-root home | Resolved once for the whole plugin: existing `.workflow/` wins, else git-ignored `scratch/workflow/`, else `.workflow/` | Consolidates all overseer state (incl. the phase-4 KB) under one root; existing-state-wins removes migration risk; supersedes phase-4's own KB resolver |
 
 ## 1. Estimation calibration
 
@@ -177,7 +178,44 @@ overseer verifies in the card's worktree before the PR and does not re-run
 tests on the merged result. This is recorded so the gap is a decision, not an
 oversight.
 
-## 5. CLI additions
+## 5. Unified state-root resolution
+
+Today the state root is hard-wired: `store.py:workflow_root()` returns
+`<repo>/.workflow`, and every card, sprint, archive and usage path hangs off
+it. This phase makes the root **resolved once, consistently, for the whole
+plugin** — so overseer's state (and the phase-4 knowledge base) can live under
+a repo-local scratch directory when the project keeps one.
+
+**Resolution order** (`store.py:state_root(repo_root)`, replacing
+`workflow_root`):
+
+1. If `<repo>/.workflow/` already exists with content → use it.
+   **Existing state always wins** — a shipped ledger is never relocated or
+   orphaned.
+2. Else if `<repo>/scratch/` exists and is git-ignored (`git check-ignore`)
+   → `<repo>/scratch/workflow/`.
+3. Else → `<repo>/.workflow/`.
+
+Rules:
+
+- The scratch branch requires `scratch/` to be *already* git-ignored; overseer
+  never adds it (the project owns that directory). The `.workflow/` branch
+  keeps the phase-1 behaviour of self-adding `.workflow/` to `.gitignore`.
+- Resolution is **deterministic and read-only** — it never moves files. There
+  is no migration: a repo that already has `.workflow/` stays there forever by
+  rule 1. A fresh repo with a scratch dir starts under `scratch/workflow/`.
+- Because the root is resolved once, the phase-4 knowledge base needs no
+  resolver of its own: it lives at `<state-root>/knowledge/` and the separate
+  `knowledge_root` marker is dropped (see the phase-4 spec).
+- `init` (bootstrap) resolves the root, creates the subdirs there, and — only
+  on the `.workflow/` branch — ensures the `.gitignore` entry.
+
+**Doctrine consequence.** Skill and template prose stop hard-coding
+`.workflow/`. `ledger/SKILL.md`, `orchestrate/SKILL.md` and `implementer.md`
+refer to *the resolved state root* (and note the resolution rule once, in the
+ledger skill), so no skill promises a path the resolver might not choose.
+
+## 6. CLI additions
 
 1. `calibration [--json]` — §1. Pure read.
 2. `conflicts [--sprint <id>] [--json]` — §2. Pure read.
@@ -185,30 +223,38 @@ oversight.
 4. `set-sprint-status <id> closed` — extended with the retro rollup (§1).
 
 All built with the phase-1/2 TDD + ruff + mypy discipline. §4 is doctrine
-(SKILL.md + templates), not code, except where `resume` grows branch/worktree
-existence checks (4.4).
+(SKILL.md + templates), not code; §5 is a `store.py` change (the resolver) plus
+the prose updates that follow from it, except where `resume` grows
+branch/worktree existence checks (4.4).
 
-## 6. Deliverable layout
+## 7. Deliverable layout
 
 ```
 plugins/overseer/
-  skills/orchestrate/
-    SKILL.md                # + Relation to superpowers; bootstrap/cleanup/abandon doctrine
-    policy.md               # unchanged
+  skills/
+    ledger/SKILL.md         # + state-root resolution rule; prose de-hardcoded
+    orchestrate/
+      SKILL.md              # + Relation to superpowers; bootstrap/cleanup/abandon; resolved-root prose
+      policy.md             # unchanged
   templates/
     planner.md              # + {{calibration}} input
+    implementer.md          # prose de-hardcoded (resolved root)
     sprint-reviewer.md      # new (§3)
-  scripts/                  # calibration, conflicts, --touches, retro rollup, resume checks
-  tests/                    # extended per §5
+  scripts/                  # state_root resolver, calibration, conflicts, --touches, retro rollup, resume checks
+  tests/                    # extended per §6
 ```
 
-## 7. Testing
+## 8. Testing
 
 - CLI: pytest file-in/file-out per convention — calibration maths against
   fixture archives (including skipped-card handling); conflict detection
   pairs (overlap, prefix-vs-file, no-overlap, sprint scoping); `--touches`
   round-trip; retro rollup on close; resume branch/worktree verification
   against fixture worktrees.
+- State-root resolution: all three branches (existing `.workflow/` wins;
+  git-ignored `scratch/` → `scratch/workflow/`; neither → `.workflow/`),
+  the not-git-ignored-scratch fallback, and the "never relocate existing
+  state" guarantee, against fixture repos.
 - Doctrine: verified by running one real sprint end-to-end — draft,
   pre-review, gate, activate, close — and checking the sprint file against
   every contract point above.

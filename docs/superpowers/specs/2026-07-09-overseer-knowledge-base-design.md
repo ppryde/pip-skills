@@ -18,27 +18,24 @@ view, a single writer through the ledger CLI.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Home | Git-ignored; existing scratch folder wins over `.workflow/` | User decision. Knowledge is per-checkout for now; Obsidian export covers sharing later |
+| Home | `<state-root>/knowledge/`, where the state root is resolved by phase 3 | The KB lives wherever the rest of overseer's state lives — one resolver, no separate KB-only marker. Git-ignored; per-checkout for now; Obsidian export covers sharing later |
 | Granularity | One file per fact + regenerated index | CLI can verify/retire one fact without prose surgery; mirrors the proven card pattern. Rejected: topical files (`testing.md`) |
 | Who writes | Orchestrator only, via CLI | Agents propose in reports; the single-writer model from phase 1 holds |
 | Retirement | Move to `retired/`, never delete | The corpse teaches too; `superseded_by` preserves the chain |
 | Staleness | Computed from `verified` age (90 days), applied at index regeneration | No cron, no daemon — the index rebuild is the heartbeat |
 
-## 1. Layout & root resolution
+## 1. Layout
 
-**Root resolution, in order:**
-
-1. If a git-ignored scratch folder already exists at the repo root —
-   `scratch/`, `.scratch/`, or `scratchpad/` (checked in that order with
-   `git check-ignore`) — the knowledge base lives at `<scratch>/knowledge/`.
-2. Otherwise `.workflow/knowledge/`.
-
-The resolved root is recorded at `.workflow/knowledge_root` on first write,
-and every subsequent CLI call reads that marker — the KB never silently
-relocates because a scratch folder appeared later.
+The knowledge base has **no root resolver of its own.** It lives at
+`<state-root>/knowledge/`, where `<state-root>` is whatever phase 3's unified
+`state_root()` resolves for this repo (existing `.workflow/` wins, else a
+git-ignored `scratch/workflow/`, else `.workflow/` — see the phase-3 spec §5).
+Because that resolution is deterministic and never relocates existing state,
+the KB inherits the same guarantee for free; the separate `knowledge_root`
+marker from the earlier draft is gone.
 
 ```
-<root>/knowledge/
+<state-root>/knowledge/
   knowledge.md              # regenerated index — a view; facts are the truth
   facts/
     KB-001-serial-integration-tests.md
@@ -115,13 +112,13 @@ retired bodies stay out of the index.
 4. `facts [--tag <t>] [--stale] [--json]` — pure-read listing/filtering.
 
 Same TDD + ruff + mypy discipline as every prior phase. Corrupt fact files
-quarantine exactly as cards do: moved to `<root>/knowledge/corrupt/` with a
-loud report, never silently skipped or overwritten.
+quarantine exactly as cards do: moved to `<state-root>/knowledge/corrupt/`
+with a loud report, never silently skipped or overwritten.
 
 ## 7. Testing
 
-- Root resolution: fixture repos with and without git-ignored scratch
-  folders, marker-file persistence, no silent relocation.
+- Location: facts land under the phase-3-resolved state root (spot-checked;
+  the resolver itself is tested in phase 3, not re-tested here).
 - Fact round-trips: mint → verify → stale flip at 90 days → retire with
   supersession chain; index regeneration at each step.
 - `facts` filtering incl. `--stale` and `--json`.
