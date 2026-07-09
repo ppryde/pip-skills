@@ -65,11 +65,17 @@ def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _report_quarantined(quarantined: list[Path]) -> None:
+    for path in quarantined:
+        print(f"QUARANTINED: {path}", file=sys.stderr)
+
+
 def _sync(repo_root: Path, card: Card) -> None:
     """Write ordering per spec: card first, then the index view."""
     root = workflow_root(repo_root)
     save_card(root, card)
-    rebuild_index(repo_root, repo_root.resolve().name, _now())
+    quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
+    _report_quarantined(quarantined)
 
 
 def _load(repo_root: Path, card_id: str) -> Card:
@@ -85,8 +91,16 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_new_card(args: argparse.Namespace) -> int:
     root = workflow_root(args.root)
+    card_id = args.jira or mint_id(root)
+    try:
+        find_card_path(root, card_id)
+    except FileNotFoundError:
+        pass
+    else:
+        print(f"error: card {card_id} already exists", file=sys.stderr)
+        return 1
     card = Card(
-        id=args.jira or mint_id(root),
+        id=card_id,
         title=args.title,
         status="planned",
         jira=args.jira,
@@ -197,7 +211,8 @@ def cmd_new_sprint(args: argparse.Namespace) -> int:
 def cmd_rollup_sprint(args: argparse.Namespace) -> int:
     root = workflow_root(args.root)
     sprint = load_sprint(sprint_path(root, args.sprint_id))
-    cards, _ = load_live_cards(root)
+    cards, quarantined = load_live_cards(root)
+    _report_quarantined(quarantined)
     save_sprint(root, rollup(sprint, cards))
     print(f"{args.sprint_id} rolled up")
     return 0
@@ -205,13 +220,14 @@ def cmd_rollup_sprint(args: argparse.Namespace) -> int:
 
 def cmd_rebuild_index(args: argparse.Namespace) -> int:
     quarantined = rebuild_index(args.root, args.root.resolve().name, _now())
-    for path in quarantined:
-        print(f"QUARANTINED: {path}", file=sys.stderr)
+    _report_quarantined(quarantined)
     print("index rebuilt")
     return 0
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
+    _, quarantined = load_live_cards(workflow_root(args.root))
+    _report_quarantined(quarantined)
     entries = resume_entries(args.root)
     print(json.dumps(entries, indent=2) if args.json else format_report(entries))
     return 0

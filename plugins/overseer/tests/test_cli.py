@@ -41,6 +41,14 @@ class TestInitAndNewCard:
         run(repo, "new-card", "--title", "Fix the thing")
         assert "WF-001" in (workflow_root(repo) / "ledger.md").read_text()
 
+    def test_new_card_duplicate_jira_id_rejected(self, repo, capsys):
+        assert run(repo, "new-card", "--title", "A", "--jira", "PROJ-142") == 0
+        capsys.readouterr()
+        assert run(repo, "new-card", "--title", "B", "--jira", "PROJ-142") == 1
+        assert "already exists" in capsys.readouterr().err
+        matches = list((workflow_root(repo) / "cards").glob("PROJ-142-*.md"))
+        assert len(matches) == 1
+
 
 class TestLifecycle:
     def test_stage_and_block_flow(self, repo):
@@ -62,6 +70,14 @@ class TestLifecycle:
     def test_unknown_card_errors(self, repo, capsys):
         assert run(repo, "set-stage", "WF-999", "planning") == 1
         assert "error:" in capsys.readouterr().err
+
+    def test_set_stage_reports_quarantined_cards_loudly(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        bad = workflow_root(repo) / "cards" / "WF-999-broken.md"
+        bad.write_text("no frontmatter at all")
+        capsys.readouterr()
+        assert run(repo, "set-stage", "WF-001", "planning") == 0
+        assert "QUARANTINED" in capsys.readouterr().err
 
 
 class TestProgressAndReview:

@@ -160,6 +160,7 @@ class Card:
             raise CardParseError(f"unknown stage: {stage!r}")
         self.stage = stage
         self.status = "in-flight"
+        self.blocked_on = None
         self.updated = now
 
     def block(self, reason: str, now: str) -> None:

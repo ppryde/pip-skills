@@ -184,6 +184,12 @@ class TestMutations:
         with pytest.raises(CardParseError):
             make_card().set_stage("coding", NOW)
 
+    def test_set_stage_clears_stale_blocked_on(self):
+        card = make_card()
+        card.block("user: q", NOW)
+        card.set_stage("verification", NOW)
+        assert card.blocked_on is None
+
     def test_block_preserves_stage(self):
         card = make_card()
         card.block("user: scope question", NOW)

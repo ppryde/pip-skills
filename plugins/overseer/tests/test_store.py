@@ -114,6 +114,18 @@ class TestArchive:
         assert not (root / "cards" / "WF-001-fix-the-thing.md").exists()
         assert (root / "archive" / "cards" / "WF-001-fix-the-thing.md").exists()
 
+    def test_archive_collision_uniquifies_and_preserves_first(self, root):
+        first = make_card("WF-005", title="Same title", body="## Goal\nfirst body")
+        archive_card(root, first)
+        second = make_card("WF-005", title="Same title", body="## Goal\nsecond body")
+        target = archive_card(root, second)
+        archive_dir = root / "archive" / "cards"
+        assert (archive_dir / "WF-005-same-title.md").exists()
+        assert target == archive_dir / "WF-005-same-title.1.md"
+        assert target.exists()
+        assert "first body" in (archive_dir / "WF-005-same-title.md").read_text()
+        assert "second body" in target.read_text()
+
     def test_load_archived_newest_first(self, root):
         older = make_card("WF-001", status="done", updated="2026-07-01T09:00")
         newer = make_card("WF-002", status="done", updated="2026-07-05T09:00")

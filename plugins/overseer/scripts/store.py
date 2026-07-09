@@ -65,13 +65,19 @@ def save_card(root: Path, card: Card) -> Path:
     return path
 
 
-def quarantine(root: Path, path: Path) -> Path:
-    corrupt_dir = root / "archive" / "corrupt"
-    target = corrupt_dir / path.name
+def _uniquify(target: Path) -> Path:
+    """If target exists, append a numeric suffix ({stem}.1{suffix}, .2, …) until free."""
+    original = target
     counter = 0
     while target.exists():
         counter += 1
-        target = corrupt_dir / f"{path.stem}.{counter}{path.suffix}"
+        target = original.parent / f"{original.stem}.{counter}{original.suffix}"
+    return target
+
+
+def quarantine(root: Path, path: Path) -> Path:
+    corrupt_dir = root / "archive" / "corrupt"
+    target = _uniquify(corrupt_dir / path.name)
     path.rename(target)
     return target
 
@@ -89,7 +95,7 @@ def load_live_cards(root: Path) -> tuple[list[Card], list[Path]]:
 
 
 def archive_card(root: Path, card: Card) -> Path:
-    target = root / "archive" / "cards" / f"{card.id}-{slugify(card.title)}.md"
+    target = _uniquify(root / "archive" / "cards" / f"{card.id}-{slugify(card.title)}.md")
     target.write_text(card.to_text())
     live = card_path(root, card)
     if live.exists():
