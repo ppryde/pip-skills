@@ -82,6 +82,22 @@ python .../cli.py --root . resume
   `--sprint` at creation, and `rollup-sprint <id>` after any card change to
   refresh the sprint's card table and budget actuals.
 
+## Knowledge base
+
+A living store of durable, falsifiable facts under the state root
+(`knowledge/`). The CLI is the only writer; the index (`knowledge.md`) is a
+view.
+
+- `add-fact --statement "<falsifiable sentence>" --tags "testing,auth" --source <card-id> [--body "..."]`
+  mints the next `KB-nnn`. Only mint facts that are falsifiable — "the auth
+  fixtures share a DB schema", not "auth is tricky".
+- `verify-fact <id>` when a fact is relied on and still holds — bumps its
+  verified date and clears any stale mark.
+- `retire-fact <id> [--superseded-by <id>]` when a fact is refuted or
+  superseded — moves it to `retired/`, never deletes it.
+- `facts [--tag <t>] [--stale] [--json]` lists live facts; facts older than
+  90 days show `[STALE]` and must be re-verified before they are trusted.
+
 ## Reporting style
 
 Concise and factual, with the odd dry aside. Lead with card id and stage;
