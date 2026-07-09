@@ -91,7 +91,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_new_card(args: argparse.Namespace) -> int:
     root = workflow_root(args.root)
-    card_id = args.jira or mint_id(root)
+    card_id = args.jira or args.linear or mint_id(root)
     try:
         find_card_path(root, card_id)
     except FileNotFoundError:
@@ -104,6 +104,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         title=args.title,
         status="planned",
         jira=args.jira,
+        linear=args.linear,
         complexity=args.complexity,
         sprint=args.sprint,
         budget_estimate=parse_tokens(args.estimate),
@@ -164,6 +165,8 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.branch = args.branch
     if args.worktree:
         card.worktree = args.worktree
+    if args.pr:
+        card.pr = args.pr
     card.updated = _now()
     _sync(args.root, card)
     print(f"{card.id} updated")
@@ -242,7 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("new-card")
     p.add_argument("--title", required=True)
-    p.add_argument("--jira")
+    ref = p.add_mutually_exclusive_group()
+    ref.add_argument("--jira")
+    ref.add_argument("--linear")
     p.add_argument("--complexity", choices=["S", "M", "L"])
     p.add_argument("--sprint")
     p.add_argument("--estimate")
@@ -272,6 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("card_id")
     p.add_argument("--branch")
     p.add_argument("--worktree")
+    p.add_argument("--pr")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("log-progress")

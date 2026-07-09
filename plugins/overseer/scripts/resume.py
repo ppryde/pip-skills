@@ -23,6 +23,7 @@ def _entry(repo_root: Path, card: Card) -> dict:
         "stage": card.stage,
         "round": round_no,
         "branch": card.branch,
+        "pr": card.pr,
         "worktree": card.worktree,
         "worktree_exists": worktree_exists,
         "blocked_on": card.blocked_on,
@@ -48,5 +49,8 @@ def format_report(entries: list[dict]) -> str:
         worktree = e["worktree"] or "no worktree"
         if e["worktree"] and not e["worktree_exists"]:
             worktree += " (MISSING)"
-        lines.append(f"- {e['id']} — {e['title']}: {stage} | {worktree} | {e['budget']}")
+        line = f"- {e['id']} — {e['title']}: {stage} | {worktree} | {e['budget']}"
+        if e["pr"]:
+            line += f" | PR: {e['pr']}"
+        lines.append(line)
     return "\n".join(lines)

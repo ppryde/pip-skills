@@ -52,3 +52,18 @@ class TestFormatReport:
         save_card(root, card("WF-001", stage="verification"))
         report = format_report(resume_entries(tmp_path))
         assert "WF-001" in report and "verification" in report
+
+
+class TestPrInResume:
+    def test_entry_carries_pr(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001", stage="awaiting-merge",
+                             pr="https://github.com/x/y/pull/9"))
+        entry = resume_entries(tmp_path)[0]
+        assert entry["pr"] == "https://github.com/x/y/pull/9"
+
+    def test_report_shows_pr(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001", stage="awaiting-merge",
+                             pr="https://github.com/x/y/pull/9"))
+        assert "PR: https://github.com/x/y/pull/9" in format_report(resume_entries(tmp_path))

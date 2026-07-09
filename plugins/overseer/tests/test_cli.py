@@ -137,6 +137,31 @@ class TestSprintsAndResume:
         assert "clean slate" in capsys.readouterr().out
 
 
+class TestLinearAndPr:
+    def test_new_card_linear_id(self, repo, capsys):
+        assert run(repo, "new-card", "--title", "Webhooks", "--linear", "ENG-42") == 0
+        assert "ENG-42" in capsys.readouterr().out
+        content = find_card_path(workflow_root(repo), "ENG-42").read_text()
+        assert "linear: ENG-42" in content
+
+    def test_jira_linear_mutually_exclusive(self, repo):
+        assert run(repo, "new-card", "--title", "T",
+                   "--jira", "PROJ-1", "--linear", "ENG-1") == 1
+
+    def test_duplicate_linear_id_guarded(self, repo, capsys):
+        run(repo, "new-card", "--title", "A", "--linear", "ENG-42")
+        capsys.readouterr()
+        assert run(repo, "new-card", "--title", "B", "--linear", "ENG-42") == 1
+        assert "already exists" in capsys.readouterr().err
+
+    def test_set_field_pr(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001",
+                   "--pr", "https://github.com/x/y/pull/9") == 0
+        content = find_card_path(workflow_root(repo), "WF-001").read_text()
+        assert "pr: https://github.com/x/y/pull/9" in content
+
+
 def test_direct_script_invocation(tmp_path):
     """cli.py must work when invoked as a script, not just as a module."""
     cli = Path(__file__).parent.parent / "scripts" / "cli.py"
