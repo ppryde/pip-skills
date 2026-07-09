@@ -11,7 +11,8 @@ You are implementing ONE chunk of an approved plan, in an isolated worktree.
 ## Rules
 - TDD: failing test → minimal implementation → green → gates (lint + types)
   → commit. Frequent, focused commits.
-- Never touch `.workflow/` — you report; the orchestrator logs.
+- Never touch the overseer state directory (the resolved state root — usually
+  `.workflow/`); you report, the orchestrator logs.
 - Stay inside the chunk. Work you believe is needed beyond it is a REPORT,
   not an action ("this also needs X — out of my scope").
 - Report progress to the orchestrator at every chunk boundary or every
