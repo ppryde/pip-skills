@@ -40,6 +40,14 @@ from scripts.store import (  # noqa: E402
     state_root,
 )
 from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
+from scripts.knowledge import (  # noqa: E402
+    Fact,
+    ensure_kb,
+    knowledge_root,
+    mint_fact_id,
+    rebuild_knowledge_index,
+    save_fact,
+)
 
 CARD_BODY_TEMPLATE = """## Goal
 {goal}
@@ -359,6 +367,26 @@ def cmd_calibration(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_add_fact(args: argparse.Namespace) -> int:
+    kb = knowledge_root(args.root)
+    ensure_kb(kb)
+    tags = [t.strip() for t in (args.tags or "").split(",") if t.strip()]
+    fact = Fact(
+        id=mint_fact_id(kb),
+        statement=args.statement,
+        tags=tags,
+        source=args.source,
+        created=_today(),
+        verified=_today(),
+        status="active",
+        body=args.body or "",
+    )
+    save_fact(kb, fact)
+    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    print(fact.id)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -468,6 +496,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("calibration")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_calibration)
+
+    p = sub.add_parser("add-fact")
+    p.add_argument("--statement", required=True)
+    p.add_argument("--tags")
+    p.add_argument("--source")
+    p.add_argument("--body")
+    p.set_defaults(func=cmd_add_fact)
 
     return parser
 

@@ -380,3 +380,23 @@ class TestCalibrationCommand:
         out = capsys.readouterr().out
         assert "No completed cards" not in out
         assert "skipped" in out
+
+
+class TestKnowledgeAddFact:
+    def test_add_fact_mints_and_indexes(self, repo, capsys):
+        assert run(repo, "add-fact", "--statement", "Serial tests only",
+                   "--tags", "testing, ci", "--source", "WF-012") == 0
+        out = capsys.readouterr().out
+        assert "KB-001" in out
+        kb = state_root(repo) / "knowledge"
+        fact_file = next((kb / "facts").glob("KB-001-*.md"))
+        content = fact_file.read_text()
+        assert "statement: Serial tests only" in content
+        assert "source: WF-012" in content
+        assert "- testing" in content and "- ci" in content
+        assert "KB-001" in (kb / "knowledge.md").read_text()
+
+    def test_add_fact_second_id(self, repo, capsys):
+        run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
+        run(repo, "add-fact", "--statement", "B", "--source", "WF-1")
+        assert "KB-002" in capsys.readouterr().out
