@@ -60,6 +60,9 @@ python .../cli.py --root . resume
 - **Decisions:** significant decisions and trade-offs go in the card's
   `## Decisions` section — append via Edit on the card file is the one
   exception to the no-direct-edits rule, since prose is not state.
+- **Index out of sync or corrupt cards suspected:** run `rebuild-index` —
+  regenerates ledger.md from the card files (cards are the truth) and reports
+  any quarantined cards.
 
 ## Finishing
 

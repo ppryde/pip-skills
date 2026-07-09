@@ -11,11 +11,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from scripts.index import rebuild_index
-from scripts.models import Card, CardParseError, format_tokens, parse_tokens
-from scripts.resume import format_report, resume_entries
-from scripts.sprints import Sprint, load_sprint, rollup, save_sprint, sprint_path
-from scripts.store import (
+if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.index import rebuild_index  # noqa: E402
+from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
+from scripts.resume import format_report, resume_entries  # noqa: E402
+from scripts.sprints import Sprint, load_sprint, rollup, save_sprint, sprint_path  # noqa: E402
+from scripts.store import (  # noqa: E402
     archive_card,
     find_card_path,
     init_workflow,

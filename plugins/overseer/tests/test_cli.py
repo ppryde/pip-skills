@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -116,3 +119,13 @@ class TestSprintsAndResume:
     def test_resume_empty(self, repo, capsys):
         assert run(repo, "resume") == 0
         assert "clean slate" in capsys.readouterr().out
+
+
+def test_direct_script_invocation(tmp_path):
+    """cli.py must work when invoked as a script, not just as a module."""
+    cli = Path(__file__).parent.parent / "scripts" / "cli.py"
+    result = subprocess.run(
+        [sys.executable, str(cli), "--root", str(tmp_path), "init"],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr.decode()
