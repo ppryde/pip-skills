@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.models import Card, format_tokens
-from scripts.store import load_live_cards, workflow_root
+from scripts.store import load_live_cards, state_root
 
 
 def _entry(repo_root: Path, card: Card) -> dict:
@@ -32,7 +32,7 @@ def _entry(repo_root: Path, card: Card) -> dict:
 
 
 def resume_entries(repo_root: Path) -> list[dict]:
-    cards, _ = load_live_cards(workflow_root(repo_root))
+    cards, _ = load_live_cards(state_root(repo_root))
     return [
         _entry(repo_root, c) for c in cards if c.status in ("in-flight", "blocked")
     ]
@@ -58,7 +58,7 @@ def format_report(entries: list[dict]) -> str:
 
 def handoff_data(repo_root: Path) -> dict:
     """Everything a fresh session needs, derived in one scan."""
-    root = workflow_root(repo_root)
+    root = state_root(repo_root)
     cards, quarantined = load_live_cards(root)
     entries = [_entry(repo_root, c) for c in cards
                if c.status in ("in-flight", "blocked")]

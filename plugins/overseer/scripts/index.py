@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.models import Card, format_tokens
-from scripts.store import load_archived_cards, load_live_cards, workflow_root
+from scripts.store import load_archived_cards, load_live_cards, state_root
 
 RECENTLY_DONE_LIMIT = 5
 
@@ -69,7 +69,7 @@ def generate_index(
 
 
 def rebuild_index(repo_root: Path, project: str, now: str) -> list[Path]:
-    root = workflow_root(repo_root)
+    root = state_root(repo_root)
     cards, quarantined = load_live_cards(root)
     recently_done = load_archived_cards(root)[:RECENTLY_DONE_LIMIT]
     (root / "ledger.md").write_text(generate_index(project, cards, recently_done, now))

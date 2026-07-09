@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.cli import main
-from scripts.store import find_card_path, workflow_root
+from scripts.store import find_card_path, state_root, workflow_root
 
 
 @pytest.fixture
@@ -176,6 +176,25 @@ class TestSetSprintStatus:
     def test_missing_sprint_errors(self, repo, capsys):
         assert run(repo, "set-sprint-status", "nope", "active") == 1
         assert "error:" in capsys.readouterr().err
+
+
+class TestStateRootWiring:
+    def test_init_uses_scratch_when_gitignored(self, tmp_path):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        (tmp_path / ".gitignore").write_text("scratch/\n")
+        (tmp_path / "scratch").mkdir()
+        assert main(["--root", str(tmp_path), "init"]) == 0
+        assert (tmp_path / "scratch" / "workflow" / "ledger.md").exists()
+        assert not (tmp_path / ".workflow").exists()
+
+    def test_new_card_lands_in_resolved_root(self, tmp_path):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        (tmp_path / ".gitignore").write_text("scratch/\n")
+        (tmp_path / "scratch").mkdir()
+        main(["--root", str(tmp_path), "init"])
+        assert main(["--root", str(tmp_path), "new-card", "--title", "T"]) == 0
+        root = state_root(tmp_path)
+        assert list((root / "cards").glob("WF-001-*.md"))
 
 
 def test_direct_script_invocation(tmp_path):

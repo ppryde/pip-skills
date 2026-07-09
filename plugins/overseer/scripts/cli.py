@@ -26,7 +26,7 @@ from scripts.store import (  # noqa: E402
     load_live_cards,
     mint_id,
     save_card,
-    workflow_root,
+    state_root,
 )
 from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
 
@@ -73,25 +73,25 @@ def _report_quarantined(quarantined: list[Path]) -> None:
 
 def _sync(repo_root: Path, card: Card) -> None:
     """Write ordering per spec: card first, then the index view."""
-    root = workflow_root(repo_root)
+    root = state_root(repo_root)
     save_card(root, card)
     quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
     _report_quarantined(quarantined)
 
 
 def _load(repo_root: Path, card_id: str) -> Card:
-    return load_card(find_card_path(workflow_root(repo_root), card_id))
+    return load_card(find_card_path(state_root(repo_root), card_id))
 
 
 def cmd_init(args: argparse.Namespace) -> int:
     init_workflow(args.root)
     rebuild_index(args.root, args.root.resolve().name, _now())
-    print(f"initialised {workflow_root(args.root)}")
+    print(f"initialised {state_root(args.root)}")
     return 0
 
 
 def cmd_new_card(args: argparse.Namespace) -> int:
-    root = workflow_root(args.root)
+    root = state_root(args.root)
     card_id = args.jira or args.linear or mint_id(root)
     try:
         find_card_path(root, card_id)
@@ -145,7 +145,7 @@ def cmd_unblock(args: argparse.Namespace) -> int:
 def _close(args: argparse.Namespace, verb: str) -> int:
     card = _load(args.root, args.card_id)
     card.complete(_now()) if verb == "done" else card.abandon(_now())
-    root = workflow_root(args.root)
+    root = state_root(args.root)
     archive_card(root, card)
     rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"{card.id} {card.status}, archived")
@@ -207,13 +207,13 @@ def cmd_new_sprint(args: argparse.Namespace) -> int:
         started=_today(),
         body=SPRINT_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
-    save_sprint(workflow_root(args.root), sprint)
+    save_sprint(state_root(args.root), sprint)
     print(sprint.id)
     return 0
 
 
 def cmd_rollup_sprint(args: argparse.Namespace) -> int:
-    root = workflow_root(args.root)
+    root = state_root(args.root)
     sprint = load_sprint(sprint_path(root, args.sprint_id))
     cards, quarantined = load_live_cards(root)
     _report_quarantined(quarantined)
@@ -223,7 +223,7 @@ def cmd_rollup_sprint(args: argparse.Namespace) -> int:
 
 
 def cmd_set_sprint_status(args: argparse.Namespace) -> int:
-    root = workflow_root(args.root)
+    root = state_root(args.root)
     sprint = load_sprint(sprint_path(root, args.sprint_id))
     sprint.status = args.status
     save_sprint(root, sprint)
@@ -239,7 +239,7 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
-    _, quarantined = load_live_cards(workflow_root(args.root))
+    _, quarantined = load_live_cards(state_root(args.root))
     _report_quarantined(quarantined)
     entries = resume_entries(args.root)
     print(json.dumps(entries, indent=2) if args.json else format_report(entries))
@@ -267,13 +267,13 @@ def cmd_log_usage(args: argparse.Namespace) -> int:
         "tokens": parse_tokens(args.tokens) or 0,
         "round": args.round,
     }
-    append_usage(workflow_root(args.root), entry)
+    append_usage(state_root(args.root), entry)
     print(f"usage logged: {args.card_id} {args.role} {args.tokens}")
     return 0
 
 
 def cmd_usage(args: argparse.Namespace) -> int:
-    entries, skipped = load_usage(workflow_root(args.root))
+    entries, skipped = load_usage(state_root(args.root))
     if skipped:
         print(f"warning: {skipped} corrupt usage line(s) skipped", file=sys.stderr)
     summary = summarise(entries, args.card)
