@@ -1,13 +1,13 @@
 # overseer
 
-Workflow orchestration for serious engineering work. Phase 1 and 2: a persistent
+Workflow orchestration for serious engineering work. Phases 1–3: a persistent
 per-repo ledger of cards, stages, sprints and token budgets that survives session
 crashes, plus orchestration that drives cards end-to-end with delegated agents and
-adversarial review loops.
+adversarial review loops, integrated with sprint planning and superpowers.
 
 ## What it does
 
-- `.workflow/` directory (gitignored) holding one markdown card per unit of
+- `.workflow/` or git-ignored `scratch/workflow/` directory holding one markdown card per unit of
   work, a regenerated `ledger.md` index, and sprint files with budget rollups.
 - Card lifecycle: `planned → in-flight → done`, with `blocked`/`abandoned`
   exits and seven in-flight stages from `bootstrap` to `awaiting-merge`.
@@ -16,6 +16,10 @@ adversarial review loops.
   prepares context for seamless resumption in a new session.
 - Corrupt cards are quarantined to `archive/corrupt/`, never silently lost.
 - `log-usage`/`usage` record and summarise per-dispatch token spend.
+- Estimation calibration and conflict detection: `calibration` command to forecast sprint velocity,
+  `conflicts` command to detect file-conflict patterns before merge.
+- Retro rollup on sprint close: `set-sprint-status closed` aggregates lessons and burn metrics.
+- Sprint pre-review: SPRINT GATE doctrine for superpowers integration, validation before stage entry.
 
 ## Skills
 
@@ -24,9 +28,6 @@ adversarial review loops.
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,
   drift/budget/unresponsiveness watchdogs, and context-stewardship handoff.
-
-Later phases add sprint planning (estimation calibration, conflict
-detection) and a living best-practices knowledge base.
 
 ## Development
 
