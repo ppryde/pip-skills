@@ -423,3 +423,39 @@ class TestKnowledgeVerifyRetire:
     def test_verify_missing_fact_errors(self, repo, capsys):
         assert run(repo, "verify-fact", "KB-404") == 1
         assert "error:" in capsys.readouterr().err
+
+
+class TestKnowledgeFacts:
+    def test_facts_lists_and_filters_by_tag(self, repo, capsys):
+        run(repo, "add-fact", "--statement", "A", "--tags", "testing", "--source", "W1")
+        run(repo, "add-fact", "--statement", "B", "--tags", "auth", "--source", "W1")
+        capsys.readouterr()
+        assert run(repo, "facts", "--tag", "testing") == 0
+        out = capsys.readouterr().out
+        assert "KB-001" in out and "KB-002" not in out
+
+    def test_facts_json(self, repo, capsys):
+        run(repo, "add-fact", "--statement", "A", "--tags", "x", "--source", "W1")
+        capsys.readouterr()
+        assert run(repo, "facts", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data[0]["id"] == "KB-001" and data[0]["status"] == "active"
+
+    def test_facts_stale_filter_shows_effective_staleness(self, repo, capsys):
+        run(repo, "add-fact", "--statement", "Old", "--source", "W1")
+        # Age the fact on disk so effective_status(today) == stale.
+        kb = state_root(repo) / "knowledge"
+        fact_file = next((kb / "facts").glob("KB-001-*.md"))
+        aged = "\n".join(
+            "verified: 2020-01-01" if line.startswith("verified:") else line
+            for line in fact_file.read_text().splitlines()
+        ) + "\n"
+        fact_file.write_text(aged)
+        capsys.readouterr()
+        assert run(repo, "facts", "--stale", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert len(data) == 1 and data[0]["status"] == "stale"
+
+    def test_facts_empty(self, repo, capsys):
+        assert run(repo, "facts") == 0
+        assert "No facts" in capsys.readouterr().out

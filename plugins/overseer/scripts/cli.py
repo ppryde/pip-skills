@@ -46,6 +46,7 @@ from scripts.knowledge import (  # noqa: E402
     find_fact_path,
     knowledge_root,
     load_fact,
+    load_facts,
     mint_fact_id,
     rebuild_knowledge_index,
     retire_fact_file,
@@ -412,6 +413,38 @@ def cmd_retire_fact(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_facts(args: argparse.Namespace) -> int:
+    kb = knowledge_root(args.root)
+    facts, quarantined = load_facts(kb)
+    _report_quarantined(quarantined)
+    today = _today()
+    rows = []
+    for f in facts:
+        effective = f.effective_status(today)
+        if args.tag and args.tag not in f.tags:
+            continue
+        if args.stale and effective != "stale":
+            continue
+        rows.append({
+            "id": f.id,
+            "statement": f.statement,
+            "tags": f.tags,
+            "verified": f.verified,
+            "status": effective,
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("No stale facts." if args.stale else "No facts.")
+        return 0
+    for r in rows:
+        mark = " [STALE]" if r["status"] == "stale" else ""
+        tags = ", ".join(r["tags"]) or "no tags"
+        print(f"{r['id']} ({tags}){mark}: {r['statement']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -537,6 +570,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("fact_id")
     p.add_argument("--superseded-by", dest="superseded_by")
     p.set_defaults(func=cmd_retire_fact)
+
+    p = sub.add_parser("facts")
+    p.add_argument("--tag")
+    p.add_argument("--stale", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_facts)
 
     return parser
 
