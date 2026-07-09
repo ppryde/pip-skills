@@ -43,9 +43,12 @@ from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
 from scripts.knowledge import (  # noqa: E402
     Fact,
     ensure_kb,
+    find_fact_path,
     knowledge_root,
+    load_fact,
     mint_fact_id,
     rebuild_knowledge_index,
+    retire_fact_file,
     save_fact,
 )
 
@@ -387,6 +390,28 @@ def cmd_add_fact(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_fact(args: argparse.Namespace) -> int:
+    kb = knowledge_root(args.root)
+    fact = load_fact(find_fact_path(kb, args.fact_id))
+    fact.verified = _today()
+    fact.status = "active"
+    save_fact(kb, fact)
+    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    print(f"{fact.id} verified {fact.verified}")
+    return 0
+
+
+def cmd_retire_fact(args: argparse.Namespace) -> int:
+    kb = knowledge_root(args.root)
+    fact = load_fact(find_fact_path(kb, args.fact_id))
+    fact.status = "retired"
+    fact.superseded_by = args.superseded_by
+    retire_fact_file(kb, fact)
+    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    print(f"{fact.id} retired")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -503,6 +528,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source")
     p.add_argument("--body")
     p.set_defaults(func=cmd_add_fact)
+
+    p = sub.add_parser("verify-fact")
+    p.add_argument("fact_id")
+    p.set_defaults(func=cmd_verify_fact)
+
+    p = sub.add_parser("retire-fact")
+    p.add_argument("fact_id")
+    p.add_argument("--superseded-by", dest="superseded_by")
+    p.set_defaults(func=cmd_retire_fact)
 
     return parser
 

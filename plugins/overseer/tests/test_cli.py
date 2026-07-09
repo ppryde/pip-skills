@@ -400,3 +400,26 @@ class TestKnowledgeAddFact:
         run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
         run(repo, "add-fact", "--statement", "B", "--source", "WF-1")
         assert "KB-002" in capsys.readouterr().out
+
+
+class TestKnowledgeVerifyRetire:
+    def test_verify_sets_active_status(self, repo):
+        run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
+        assert run(repo, "verify-fact", "KB-001") == 0
+        kb = state_root(repo) / "knowledge"
+        content = next((kb / "facts").glob("KB-001-*.md")).read_text()
+        assert "status: active" in content
+
+    def test_retire_moves_and_records_supersede(self, repo):
+        run(repo, "add-fact", "--statement", "Old truth", "--source", "WF-1")
+        assert run(repo, "retire-fact", "KB-001", "--superseded-by", "KB-002") == 0
+        kb = state_root(repo) / "knowledge"
+        assert not list((kb / "facts").glob("KB-001-*"))
+        retired_file = next((kb / "retired").glob("KB-001-*.md"))
+        content = retired_file.read_text()
+        assert "status: retired" in content
+        assert "superseded_by: KB-002" in content
+
+    def test_verify_missing_fact_errors(self, repo, capsys):
+        assert run(repo, "verify-fact", "KB-404") == 1
+        assert "error:" in capsys.readouterr().err
