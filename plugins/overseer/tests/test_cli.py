@@ -177,6 +177,17 @@ class TestSetSprintStatus:
         assert run(repo, "set-sprint-status", "nope", "active") == 1
         assert "error:" in capsys.readouterr().err
 
+    def test_close_writes_retro(self, repo):
+        run(repo, "new-sprint", "2026-07-S3")
+        run(repo, "new-card", "--title", "T", "--sprint", "2026-07-S3",
+            "--complexity", "M", "--estimate", "400k")
+        run(repo, "log-progress", "WF-001", "--note", "burn", "--tokens", "520k")
+        run(repo, "done", "WF-001")
+        assert run(repo, "set-sprint-status", "2026-07-S3", "closed") == 0
+        content = (state_root(repo) / "sprints" / "2026-07-S3.md").read_text()
+        assert "status: closed" in content
+        assert "| WF-001 | 400k | 520k | 1.30× | done |" in content
+
 
 class TestStateRootWiring:
     def test_init_uses_scratch_when_gitignored(self, tmp_path):
