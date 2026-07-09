@@ -24,7 +24,10 @@ living best-practices knowledge base → phase 4.
 | Orchestrator identity | The main session, following a SKILL.md | One brain, no relay hops; ledger already provides crash recovery. Must actively steward its own context (see §7) |
 | Architecture | Doctrine + thin code | Judgment lives in prose (SKILL.md, templates, policy table); state lives in tested Python (CLI additions). Rejected: policy-as-code conductor (hard-codes judgment calls); extending the ledger skill (mega-scroll) |
 | Review termination | Unanimous approval, complexity-scaled round cap | Caps: S=2, M=3, L=4 rounds per review stage. Cap hit → card blocked for user adjudication |
-| Reviewer count | Scales with card size: S=1, M=2, L=3 | Deliberate relaxation of the original "at least two" for S cards; escalation valve re-grades a card upward if it outgrows its band |
+| Reviewer count | Scales with card size: S=1, M=2, L=3 first pass then 2 | Deliberate relaxation of the original "at least two" for S cards; escalation valve re-grades a card upward if it outgrows its band |
+| Plans propose PR boundaries | Every plan includes a PR decomposition; user can re-cut at the plan gate | Each PR = isolated work releasable without breaking anything |
+| Unresponsive/drift thresholds | Token-based, complexity-scaled (§2, §6) | Cadence S/M/L ≈ 30k/50k/80k; unresponsive at 2× cadence |
+| Very large cards | Split at planning where feasible; unsplittable L gets front-loaded panel (3 → 2 reviewers) | First pass covers the ground; later loops stay cheaper |
 | Comms | Hub-and-spoke; team mode adds peer channels with orchestrator CC | Subagent mode: pure hub-and-spoke. Team mode: peer messages allowed, every one also sent to the orchestrator |
 | Human gates | Plan gate + merge gate, with PR stacking for simple cards | Batching minimises interactions: qualifying S cards stack into one branch/PR and present plan gates together |
 
@@ -37,7 +40,7 @@ recorded stage.
 | Stage | Orchestrator actions |
 |---|---|
 | `bootstrap` | `new-card` (Jira key or minted id); pull latest main; create worktree + branch (`<type>/<id>-<slug>`); `set-field --branch --worktree`; declare comms mode on the progress log |
-| `planning` | Dispatch a planner agent with the goal and repo context; plan lands in the card's `## Plan` (wider picture first, then granular chunks). L cards get a second planning pass |
+| `planning` | Dispatch a planner agent with the goal and repo context; plan lands in the card's `## Plan` (wider picture first, then granular chunks). The plan MUST include a **PR decomposition**: how the work splits into separate PRs, where each PR is isolated work that can be released on its own without breaking anything (no half-wired features, no dangling references). L cards get a second planning pass |
 | `plan-review` | Adversarial loop per policy (§3–4); verdicts recorded via `log-review` |
 | **PLAN GATE** | Present approved plan + estimate + flagged trade-offs to the user; batched for stacked cards. Proceed only on approval |
 | `implementation` | Dispatch worker agent(s) in the card's worktree; chunk-by-chunk; progress via `log-progress` |
@@ -50,11 +53,19 @@ recorded stage.
 A single policy table lives in the plugin as a doctrine file
 (`skills/orchestrate/policy.md`) so it can be tuned without code changes:
 
-| Complexity | Planner | Workers | Reviewers | Rounds cap | Notes |
-|---|---|---|---|---|---|
-| S | mid-tier | 1 × cheap tier | 1 × mid-tier | 2 | eligible for PR stacking |
-| M | mid-tier | 1–2 × mid-tier | 2 × mid-tier, distinct lenses | 3 | |
-| L | strong tier | mid-tier, work split into chunks | 3, one on the strongest tier | 4 | second planning pass before plan-review |
+| Complexity | Planner | Workers | Reviewers | Rounds cap | Progress cadence | Unresponsive after | Notes |
+|---|---|---|---|---|---|---|---|
+| S | mid-tier | 1 × cheap tier | 1 × mid-tier | 2 | ~30k tokens | 60k without a report | eligible for PR stacking |
+| M | mid-tier | 1–2 × mid-tier | 2 × mid-tier, distinct lenses | 3 | ~50k tokens | 100k without a report | |
+| L | strong tier | mid-tier, work split into chunks | round 1: 3 (one strongest tier); rounds 2+: 2 (strongest tier retained) | 4 | ~80k tokens | 160k without a report | second planning pass before plan-review |
+
+**Very large cards are split first.** At planning, the planner must attempt to
+decompose an L card into multiple smaller cards (each independently
+releasable, per the PR-decomposition rule). Only a card that genuinely cannot
+be split keeps L treatment — and then gets the front-loaded panel above:
+three adversarial reviewers on the first pass of each review stage, dropping
+to two (the strongest-tier reviewer always retained) for subsequent loops,
+where the ground has already been covered.
 
 Standing delegation rules:
 
@@ -120,7 +131,9 @@ Reviewers are adversarial by charter, written into the reviewer template:
 ## 6. Gates, PR stacking, drift & budget
 
 **Plan gate.** After plan-review passes: user sees the plan, the estimate,
-and flagged trade-offs. Batched for stacked cards.
+flagged trade-offs, and the **PR decomposition** — how the work will land as
+separate PRs, each releasable in isolation without breaking anything. The
+user can re-cut the PR boundaries at this gate. Batched for stacked cards.
 
 **Merge gate.** `awaiting-merge` is the user's, unchanged from phase 1.
 
@@ -131,13 +144,19 @@ all cards in the stack are S; none has tripped scope-creep escalation; and
 the batch was pre-declared or user-approved. A card that deviates mid-flight
 is evicted to its own branch and gates separately.
 
-**Drift-watching.** Workers `log-progress` at each chunk boundary (or ~every
-50k tokens). The orchestrator compares reports against the approved plan:
-minor deviation → corrected in-flight, noted on the card; material deviation
-→ scope-creep escalation to the user before further spend. The 2× tripwire
-stays hard (CLI exit 2 → card stops, user gets the overrun story). A worker
-silent past its expected chunk cost is pinged once, then the card goes
-`blocked: "agent: unresponsive"`.
+**Drift-watching.** Workers `log-progress` at each chunk boundary or at the
+complexity-scaled progress cadence (§2: S ~30k, M ~50k, L ~80k tokens),
+whichever comes first. The orchestrator compares reports against the
+approved plan: minor deviation → corrected in-flight, noted on the card;
+material deviation → scope-creep escalation to the user before further
+spend. The 2× tripwire stays hard (CLI exit 2 → card stops, user gets the
+overrun story).
+
+**Unresponsiveness** is defined in tokens, scaled with complexity (§2): a
+worker that has consumed twice its progress cadence (S 60k, M 100k, L 160k
+tokens) without a progress report is pinged once; if the ping produces no
+report, the card goes `blocked: "agent: unresponsive"` rather than silently
+stalling.
 
 ## 7. Context stewardship & handoff
 
