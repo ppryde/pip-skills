@@ -20,6 +20,10 @@ adversarial review loops, integrated with sprint planning and superpowers.
   `conflicts` command to detect file-conflict patterns before merge.
 - Retro rollup on sprint close: `set-sprint-status closed` aggregates lessons and burn metrics.
 - Sprint pre-review: SPRINT GATE doctrine for superpowers integration, validation before stage entry.
+- Living knowledge base: durable facts under `knowledge/` with per-fact verification dates;
+  facts marked `[STALE]` after 90 days untouched; retirement to `retired/` (never deleted, supports
+  `superseded_by` chains); corrupt facts quarantined to `knowledge/corrupt/`; `knowledge.md` index
+  with active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
 
 ## Skills
 
@@ -28,6 +32,9 @@ adversarial review loops, integrated with sprint planning and superpowers.
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,
   drift/budget/unresponsiveness watchdogs, and context-stewardship handoff.
+- **knowledge** — manage durable facts via `add-fact`, `verify-fact`, `retire-fact`, and `facts`
+  commands; facts are automatically marked `[STALE]` after 90 days without re-verification;
+  corrupted facts are quarantined, never lost; injected into orchestration templates via `{{knowledge}}`.
 
 ## Development
 
