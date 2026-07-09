@@ -264,3 +264,23 @@ class TestLinearAndPrFields:
         card = Card.from_text(SAMPLE_CARD)
         assert card.linear is None
         assert card.pr is None
+
+
+class TestTouches:
+    def test_touches_round_trip(self):
+        from scripts.models import Card
+        card = Card(
+            id="WF-001", title="T", status="planned",
+            created="2026-07-09", updated="2026-07-09T10:00",
+            touches=["src/auth/", "src/models.py"], body="## Goal\nx",
+        )
+        parsed = Card.from_text(card.to_text())
+        assert parsed.touches == ["src/auth/", "src/models.py"]
+
+    def test_touches_absent_defaults_empty(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-002\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).touches == []

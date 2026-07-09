@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import yaml
 
@@ -95,6 +95,7 @@ class Card:
     branch: str | None = None
     worktree: str | None = None
     pr: str | None = None
+    touches: list[str] = field(default_factory=list)
     budget_estimate: int | None = None
     budget_actual: int = 0
     created: str = ""
@@ -129,6 +130,7 @@ class Card:
             branch=meta.get("branch"),
             worktree=meta.get("worktree"),
             pr=meta.get("pr"),
+            touches=[str(t) for t in (meta.get("touches") or [])],
             budget_estimate=parse_tokens(budget.get("estimate")),
             budget_actual=parse_tokens(budget.get("actual")) or 0,
             created=str(meta.get("created", "")),
@@ -150,6 +152,7 @@ class Card:
             "branch": self.branch,
             "worktree": self.worktree,
             "pr": self.pr,
+            "touches": self.touches or None,
             "budget": {
                 "estimate": format_tokens(self.budget_estimate),
                 "actual": format_tokens(self.budget_actual),
