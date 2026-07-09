@@ -118,6 +118,13 @@ class Card:
         budget = meta.get("budget") or {}
         if not isinstance(budget, dict):
             raise CardParseError(f"budget is not a mapping: {budget!r}")
+        touches_raw = meta.get("touches")
+        if isinstance(touches_raw, list):
+            touches = [str(t) for t in touches_raw]
+        elif touches_raw:
+            touches = [str(touches_raw)]
+        else:
+            touches = []
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
@@ -130,7 +137,7 @@ class Card:
             branch=meta.get("branch"),
             worktree=meta.get("worktree"),
             pr=meta.get("pr"),
-            touches=[str(t) for t in (meta.get("touches") or [])],
+            touches=touches,
             budget_estimate=parse_tokens(budget.get("estimate")),
             budget_actual=parse_tokens(budget.get("actual")) or 0,
             created=str(meta.get("created", "")),

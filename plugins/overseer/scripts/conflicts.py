@@ -7,7 +7,7 @@ _ACTIVE = ("planned", "in-flight")
 
 
 def _norm(p: str) -> str:
-    return p.strip().rstrip("/")
+    return p.strip().removeprefix("./").rstrip("/")
 
 
 def paths_overlap(a: str, b: str) -> bool:

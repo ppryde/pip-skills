@@ -14,7 +14,7 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.calibration import calibrate  # noqa: E402
+from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
@@ -331,12 +331,18 @@ def cmd_calibration(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(report, indent=2))
         return 0
-    total = sum(report["bands"][b]["count"] for b in ("S", "M", "L"))
+    total = sum(report["bands"][b]["count"] for b in BANDS)
     if not total:
-        print("No completed cards to calibrate from.")
+        if report["skipped"]:
+            print(
+                f"{report['skipped']} completed card(s) skipped "
+                "(no estimate or no actual); no calibratable samples."
+            )
+        else:
+            print("No completed cards to calibrate from.")
         return 0
     lines = ["# Calibration (actual ÷ estimate)", ""]
-    for b in ("S", "M", "L"):
+    for b in BANDS:
         band = report["bands"][b]
         if not band["count"]:
             lines.append(f"- {b}: no samples")

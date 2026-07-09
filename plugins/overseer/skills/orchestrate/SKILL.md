@@ -34,7 +34,8 @@ the first dispatch; templates live at `../../templates/`.
   refs/remotes/origin/HEAD`, falling back to `git merge-base` inspection — never
   assume `main`), create worktree + branch `<type>/<id>-<slug>`,
   `set-field --branch --worktree`, `set-stage <id> planning`.
-- **planning** — dispatch planner (template `planner.md`, tier per policy).
+- **planning** — run `calibration` and pass its figures into `{{calibration}}`
+  when dispatching the planner (template `planner.md`, tier per policy).
   Plan lands in the card's `## Plan` (you write it via Edit on the card —
   prose exception). L cards: attempt split first; if split, create the child
   cards and abandon-or-shrink the parent, logging the decision. L keeps a

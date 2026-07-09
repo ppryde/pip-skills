@@ -284,3 +284,12 @@ class TestTouches:
             "created: 2026-07-09\nupdated: 2026-07-09T10:00\n---\n\n## Goal\nx\n"
         )
         assert Card.from_text(text).touches == []
+
+    def test_touches_scalar_not_exploded_to_characters(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-003\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n"
+            "touches: src/a.py\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).touches == ["src/a.py"]

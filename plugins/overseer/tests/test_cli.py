@@ -370,3 +370,13 @@ class TestCalibrationCommand:
         capsys.readouterr()
         assert run(repo, "calibration") == 0
         assert "No completed cards" in capsys.readouterr().out
+
+    def test_calibration_all_skipped(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "log-progress", "WF-001", "--note", "burn", "--tokens", "10k")
+        run(repo, "done", "WF-001")
+        capsys.readouterr()
+        assert run(repo, "calibration") == 0
+        out = capsys.readouterr().out
+        assert "No completed cards" not in out
+        assert "skipped" in out

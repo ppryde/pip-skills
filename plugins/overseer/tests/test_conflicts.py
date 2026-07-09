@@ -16,6 +16,9 @@ class TestPathsOverlap:
         assert paths_overlap("src/auth", "src/auth/views.py")
         assert paths_overlap("src/auth/", "src/auth/views.py")
 
+    def test_leading_dot_slash_normalised(self):
+        assert paths_overlap("./src/auth", "src/auth/views.py")
+
     def test_sibling_prefix_no_false_positive(self):
         assert not paths_overlap("src/models.py", "src/models_helper.py")
 
