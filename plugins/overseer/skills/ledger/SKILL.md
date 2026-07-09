@@ -4,15 +4,20 @@ description: >
   Persistent per-repo work ledger: cards, stages, sprints, token budgets and
   session resume. Use when starting a piece of tracked work, when the user asks
   "what's in flight", "resume where we left off", "start a new card/task",
-  "log progress", or at the start of any session in a repo with a .workflow/
-  directory. Phase 1 of overseer — state only; orchestration arrives later.
+  "log progress", or at the start of any session in a repo with an overseer
+  state directory (`.workflow/` or `scratch/workflow/`). Phase 1 of overseer
+  — state only; orchestration arrives later.
 ---
 
 # Overseer Ledger
 
-Manage `.workflow/` — the single source of truth for planned, in-flight and
-completed work in this repo. **Never edit `.workflow/` files directly**; drive
-everything through the CLI so write-ordering (card first, index second) holds:
+Manage the overseer **state root** — the single source of truth for planned,
+in-flight and completed work in this repo. The state root is resolved once:
+an existing `.workflow/` with content wins; otherwise, if the repo keeps a
+git-ignored `scratch/` directory, state lives in `scratch/workflow/`;
+otherwise `.workflow/`. The CLI resolves this for you — commands below refer
+to it as the state root. **Never edit its files directly**; drive everything
+through the CLI so write-ordering (card first, index second) holds:
 
 ```bash
 python plugins/overseer/scripts/cli.py --root <repo-root> <command> ...
@@ -29,11 +34,11 @@ python .../cli.py --root . resume
 
 - If cards are in flight, report them to the user and offer per card:
   **resume / park as blocked / abandon**. Never silently start fresh.
-- Resuming a card: read its file under `.workflow/cards/`, re-enter at the
-  recorded stage — never earlier, never assume later. If the report shows
+- Resuming a card: read its file under the state root's `cards/`, re-enter at
+  the recorded stage — never earlier, never assume later. If the report shows
   `(MISSING)` next to the worktree, recreate it from the recorded branch
   before continuing.
-- If `.workflow/` does not exist and the user wants tracked work: run `init`.
+- If no state root exists yet and the user wants tracked work: run `init`.
 
 ## Starting a new piece of work
 
