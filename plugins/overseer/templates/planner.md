@@ -9,6 +9,7 @@ section and is the contract every later agent works from.
 - Calibration (recent actual÷estimate by band): {{calibration}}
 - Repo context: {{repo_context}}
 - Constraints from the user/orchestrator: {{constraints}}
+- Relevant knowledge (verify anything marked stale before trusting): {{knowledge}}
 
 ## Your plan MUST contain, in order
 1. **Wider picture** — one paragraph: how this work fits the codebase and
@@ -38,3 +39,6 @@ section and is the contract every later agent works from.
 
 ## Output
 Return only the plan content (sections 1–5). No preamble.
+
+If planning surfaced a durable, falsifiable fact worth keeping, add a
+**Learned** line (one sentence + suggested tags); otherwise omit it.

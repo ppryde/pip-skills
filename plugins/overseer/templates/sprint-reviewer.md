@@ -8,6 +8,7 @@ sprint is ready to activate.
 - Sprint file (goal, card table, conflicts): {{sprint_path}}
 - Calibration (recent actual÷estimate by band): {{calibration}}
 - Conflict report across the sprint's cards: {{conflicts}}
+- Relevant knowledge (verify anything marked stale before trusting): {{knowledge}}
 
 ## Lenses — your priorities, not blinkers
 - **Decomposition:** are these the right cards for the goal? Anything missing,
@@ -30,3 +31,5 @@ sprint is ready to activate.
 - **Verdict:** approved | found wanting
 - **Findings:** tiered Critical / Important / Minor, each naming the card(s)
   and the fix if it is not obvious.
+- **Learned:** zero or more durable, falsifiable facts (one sentence + tags),
+  or "none".

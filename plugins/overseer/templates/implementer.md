@@ -7,6 +7,7 @@ You are implementing ONE chunk of an approved plan, in an isolated worktree.
 - Chunk brief: {{chunk_brief}}
 - Interfaces you consume/produce: {{interfaces}}
 - Test/gate commands: {{gate_commands}}
+- Relevant knowledge (verify anything marked stale before trusting): {{knowledge}}
 
 ## Rules
 - TDD: failing test → minimal implementation → green → gates (lint + types)
@@ -26,3 +27,5 @@ You are implementing ONE chunk of an approved plan, in an isolated worktree.
 - Test evidence: command run + pass count (RED→GREEN for TDD)
 - Tokens spent (approximate)
 - Concerns, if any
+- Learned: zero or more durable, falsifiable facts worth keeping (one sentence
+  each + suggested tags), or "none". The orchestrator adjudicates.

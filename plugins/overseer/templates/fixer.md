@@ -8,6 +8,7 @@ this work; your context of it survives.
   trivial alongside): {{findings}}
 - Worktree: {{worktree}}
 - Test/gate commands: {{gate_commands}}
+- Relevant knowledge (verify anything marked stale before trusting): {{knowledge}}
 
 ## Rules
 - One dispatch fixes the whole round's findings — do not cherry-pick.
@@ -20,3 +21,5 @@ this work; your context of it survives.
 ## Report (final message, under 12 lines)
 - Status, commit SHA(s), per-finding disposition (fixed / disputed with
   reason), test evidence, tokens spent.
+- Learned: zero or more durable, falsifiable facts worth keeping (one sentence
+  each + suggested tags), or "none". The orchestrator adjudicates.
