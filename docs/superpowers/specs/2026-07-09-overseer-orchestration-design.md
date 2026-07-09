@@ -192,6 +192,13 @@ discipline:
    ids: new optional `linear` frontmatter field, id = the key when given
    (mutually exclusive with `--jira`; the duplicate-id guard applies
    identically).
+5. `log-usage` / `usage` — dispatch-level token telemetry (added at user
+   request mid-build): the orchestrator logs every dispatch's token cost
+   (card, role, stage, tier, round) to `.workflow/usage.jsonl`, plus its own
+   coordination overhead per card as role `orchestrator`; `usage [--card]
+   [--json]` aggregates by role and card. Purpose: a future review can
+   measure where the orchestrate skill itself burns tokens and target
+   reductions.
 
 ## 9. Deliverable layout
 
