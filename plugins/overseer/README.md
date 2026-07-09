@@ -1,8 +1,9 @@
 # overseer
 
-Workflow orchestration for serious engineering work. Phase 1: the ledger — a
-persistent, per-repo record of cards, stages, sprints and token budgets that
-survives session crashes and context loss.
+Workflow orchestration for serious engineering work. Phase 1 and 2: a persistent
+per-repo ledger of cards, stages, sprints and token budgets that survives session
+crashes, plus orchestration that drives cards end-to-end with delegated agents and
+adversarial review loops.
 
 ## What it does
 
@@ -11,15 +12,20 @@ survives session crashes and context loss.
 - Card lifecycle: `planned → in-flight → done`, with `blocked`/`abandoned`
   exits and seven in-flight stages from `bootstrap` to `awaiting-merge`.
 - Token budgets with a 2× tripwire: overruns stop the card and escalate.
-- Session resume: `resume` reports everything in flight and at what stage.
+- Session resume and handoff: `resume` reports everything in flight, and `handoff`
+  prepares context for seamless resumption in a new session.
 - Corrupt cards are quarantined to `archive/corrupt/`, never silently lost.
 
 ## Skills
 
 - **ledger** — drive the `.workflow/` state through the CLI.
+- **orchestrate** — drive a card end-to-end: delegated planning and
+  implementation, adversarial review loops scaled by complexity (1/2/3
+  reviewers, capped rounds), plan + merge gates with S-card PR stacking,
+  drift/budget/unresponsiveness watchdogs, and context-stewardship handoff.
 
-Later phases add orchestration (agent teams, adversarial review loops) and
-sprint planning on top of these schemas.
+Later phases add sprint planning (estimation calibration, conflict
+detection) and a living best-practices knowledge base.
 
 ## Development
 
