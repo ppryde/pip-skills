@@ -162,6 +162,22 @@ class TestLinearAndPr:
         assert "pr: https://github.com/x/y/pull/9" in content
 
 
+class TestSetSprintStatus:
+    def test_activates_sprint(self, repo):
+        run(repo, "new-sprint", "2026-07-S2")
+        assert run(repo, "set-sprint-status", "2026-07-S2", "active") == 0
+        content = (workflow_root(repo) / "sprints" / "2026-07-S2.md").read_text()
+        assert "status: active" in content
+
+    def test_invalid_status_exits_1(self, repo):
+        run(repo, "new-sprint", "2026-07-S2")
+        assert run(repo, "set-sprint-status", "2026-07-S2", "running") == 1
+
+    def test_missing_sprint_errors(self, repo, capsys):
+        assert run(repo, "set-sprint-status", "nope", "active") == 1
+        assert "error:" in capsys.readouterr().err
+
+
 def test_direct_script_invocation(tmp_path):
     """cli.py must work when invoked as a script, not just as a module."""
     cli = Path(__file__).parent.parent / "scripts" / "cli.py"

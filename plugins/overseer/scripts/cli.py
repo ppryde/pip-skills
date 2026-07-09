@@ -17,7 +17,7 @@ if __package__ in (None, ""):  # direct script invocation: put plugin root on sy
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
 from scripts.resume import format_report, resume_entries  # noqa: E402
-from scripts.sprints import Sprint, load_sprint, rollup, save_sprint, sprint_path  # noqa: E402
+from scripts.sprints import SPRINT_STATUSES, Sprint, load_sprint, rollup, save_sprint, sprint_path  # noqa: E402
 from scripts.store import (  # noqa: E402
     archive_card,
     find_card_path,
@@ -221,6 +221,15 @@ def cmd_rollup_sprint(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_set_sprint_status(args: argparse.Namespace) -> int:
+    root = workflow_root(args.root)
+    sprint = load_sprint(sprint_path(root, args.sprint_id))
+    sprint.status = args.status
+    save_sprint(root, sprint)
+    print(f"{sprint.id} → {args.status}")
+    return 0
+
+
 def cmd_rebuild_index(args: argparse.Namespace) -> int:
     quarantined = rebuild_index(args.root, args.root.resolve().name, _now())
     _report_quarantined(quarantined)
@@ -302,6 +311,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("rollup-sprint")
     p.add_argument("sprint_id")
     p.set_defaults(func=cmd_rollup_sprint)
+
+    p = sub.add_parser("set-sprint-status")
+    p.add_argument("sprint_id")
+    p.add_argument("status", choices=sorted(SPRINT_STATUSES))
+    p.set_defaults(func=cmd_set_sprint_status)
 
     sub.add_parser("rebuild-index").set_defaults(func=cmd_rebuild_index)
 
