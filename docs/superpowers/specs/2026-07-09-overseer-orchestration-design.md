@@ -39,7 +39,7 @@ recorded stage.
 
 | Stage | Orchestrator actions |
 |---|---|
-| `bootstrap` | `new-card` (Jira key or minted id); pull latest main; create worktree + branch (`<type>/<id>-<slug>`); `set-field --branch --worktree`; declare comms mode on the progress log |
+| `bootstrap` | `new-card` (Jira or Linear key, else minted id); pull latest main; create worktree + branch (`<type>/<id>-<slug>`); `set-field --branch --worktree`; declare comms mode on the progress log |
 | `planning` | Dispatch a planner agent with the goal and repo context; plan lands in the card's `## Plan` (wider picture first, then granular chunks). The plan MUST include a **PR decomposition**: how the work splits into separate PRs, where each PR is isolated work that can be released on its own without breaking anything (no half-wired features, no dangling references). L cards get a second planning pass |
 | `plan-review` | Adversarial loop per policy (§3–4); verdicts recorded via `log-review` |
 | **PLAN GATE** | Present approved plan + estimate + flagged trade-offs to the user; batched for stacked cards. Proceed only on approval |
@@ -90,6 +90,9 @@ Reviewers are adversarial by charter, written into the reviewer template:
   submitting.
 - On M/L cards, each reviewer gets a **distinct lens** (correctness,
   spec-compliance, maintainability/security) rather than identical passes.
+  A lens is a **priority, not a blinker**: every reviewer remains a general
+  adversarial reviewer — the security-lens reviewer still flags typing or
+  logic defects it trips over; the lens only directs where it digs deepest.
 - Approval must be earned against resistance; a reviewer who merely confirms
   the implementer's story has failed their charter.
 
@@ -185,6 +188,10 @@ discipline:
    in-flight and blocked cards with stage/round/worktree/branch/pr/budget,
    quarantine warnings, and the resume instruction line. `--json` variant for
    machine use.
+4. `new-card --linear <KEY>` — Linear tracker keys join Jira as external card
+   ids: new optional `linear` frontmatter field, id = the key when given
+   (mutually exclusive with `--jira`; the duplicate-id guard applies
+   identically).
 
 ## 9. Deliverable layout
 
