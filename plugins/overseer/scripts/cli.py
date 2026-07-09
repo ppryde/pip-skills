@@ -42,6 +42,7 @@ from scripts.store import (  # noqa: E402
 from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
 from scripts.knowledge import (  # noqa: E402
     Fact,
+    FactParseError,
     ensure_kb,
     find_fact_path,
     knowledge_root,
@@ -589,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result: int = args.func(args)
         return result
-    except (CardParseError, FileNotFoundError) as exc:
+    except (CardParseError, FactParseError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

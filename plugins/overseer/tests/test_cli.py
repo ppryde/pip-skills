@@ -424,6 +424,28 @@ class TestKnowledgeVerifyRetire:
         assert run(repo, "verify-fact", "KB-404") == 1
         assert "error:" in capsys.readouterr().err
 
+    def test_verify_corrupt_fact_errors_cleanly(self, repo, capsys):
+        run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
+        kb = state_root(repo) / "knowledge"
+        fact_path = next((kb / "facts").glob("KB-001-*.md"))
+        fact_path.write_text(
+            "---\nid: KB-001\nstatement: x\nstatus: bogus\n---\nbody\n"
+        )
+        capsys.readouterr()
+        assert run(repo, "verify-fact", "KB-001") == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_retire_corrupt_fact_errors_cleanly(self, repo, capsys):
+        run(repo, "add-fact", "--statement", "A", "--source", "WF-1")
+        kb = state_root(repo) / "knowledge"
+        fact_path = next((kb / "facts").glob("KB-001-*.md"))
+        fact_path.write_text(
+            "---\nid: KB-001\nstatement: x\nstatus: bogus\n---\nbody\n"
+        )
+        capsys.readouterr()
+        assert run(repo, "retire-fact", "KB-001") == 1
+        assert "error:" in capsys.readouterr().err
+
 
 class TestKnowledgeFacts:
     def test_facts_lists_and_filters_by_tag(self, repo, capsys):

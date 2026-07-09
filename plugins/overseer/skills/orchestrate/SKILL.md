@@ -126,7 +126,10 @@ writer; agents propose, you adjudicate.
   facts whose tags/paths intersect this card's `touches`, goal, or chunk brief
   — never the whole corpus. An empty selection injects nothing. Facts marked
   `[STALE]` go in with their marker; the agent treats them as claims to
-  re-verify.
+  re-verify. Select via the `facts` command, which computes effective
+  staleness live — never by reading `knowledge.md`, whose staleness only
+  refreshes on the next write, so a stale fact could otherwise be injected
+  unmarked.
 - **Mint.** Each report may carry a **Learned** line. Adjudicate it: mint only
   falsifiable, non-duplicate facts via `add-fact` (source = the card id).
   Reject the vague and the already-known.

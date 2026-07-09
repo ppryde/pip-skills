@@ -27,14 +27,15 @@ adversarial review loops, integrated with sprint planning and superpowers.
 
 ## Skills
 
-- **ledger** — drive the `.workflow/` state through the CLI.
+- **ledger** — drive the `.workflow/` state and the knowledge base through the CLI: cards,
+  stages, sprints and budgets, plus durable facts via `add-fact`, `verify-fact`, `retire-fact`,
+  and `facts` (auto-marked `[STALE]` after 90 days without re-verification; corrupted facts
+  quarantined, never lost).
 - **orchestrate** — drive a card end-to-end: delegated planning and
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,
-  drift/budget/unresponsiveness watchdogs, and context-stewardship handoff.
-- **knowledge** — manage durable facts via `add-fact`, `verify-fact`, `retire-fact`, and `facts`
-  commands; facts are automatically marked `[STALE]` after 90 days without re-verification;
-  corrupted facts are quarantined, never lost; injected into orchestration templates via `{{knowledge}}`.
+  drift/budget/unresponsiveness watchdogs, and context-stewardship handoff;
+  injects knowledge base facts into templates via `{{knowledge}}`.
 
 ## Development
 
