@@ -206,3 +206,49 @@ class TestHandoffCommand:
         assert run(repo, "handoff", "--json") == 0
         data = json.loads(capsys.readouterr().out)
         assert data["in_flight"][0]["id"] == "WF-001"
+
+
+class TestUsageTelemetry:
+    def test_log_usage_appends_jsonl(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "log-usage", "WF-001", "--role", "reviewer",
+                   "--stage", "impl-review", "--tier", "mid",
+                   "--tokens", "48k", "--round", "2") == 0
+        lines = (workflow_root(repo) / "usage.jsonl").read_text().strip().split("\n")
+        entry = json.loads(lines[0])
+        assert entry["card"] == "WF-001" and entry["role"] == "reviewer"
+        assert entry["tokens"] == 48_000 and entry["round"] == 2
+        assert entry["stage"] == "impl-review" and entry["tier"] == "mid"
+        assert entry["ts"]
+
+    def test_log_usage_accumulates(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "20k")
+        content = (workflow_root(repo) / "usage.jsonl").read_text()
+        assert len(content.strip().split("\n")) == 2
+
+    def test_usage_summary(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        run(repo, "log-usage", "WF-001", "--role", "reviewer", "--tokens", "50k")
+        capsys.readouterr()
+        assert run(repo, "usage") == 0
+        out = capsys.readouterr().out
+        assert "worker: 30k" in out and "reviewer: 50k" in out
+        assert "total: 80k" in out
+
+    def test_usage_card_filter_json(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        run(repo, "new-card", "--title", "B")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        run(repo, "log-usage", "WF-002", "--role", "worker", "--tokens", "99k")
+        capsys.readouterr()
+        assert run(repo, "usage", "--card", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["total"] == 30_000
+        assert data["by_role"] == {"worker": 30_000}
+
+    def test_usage_empty(self, repo, capsys):
+        assert run(repo, "usage") == 0
+        assert "No usage recorded" in capsys.readouterr().out

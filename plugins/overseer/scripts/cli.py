@@ -28,6 +28,7 @@ from scripts.store import (  # noqa: E402
     save_card,
     workflow_root,
 )
+from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
 
 CARD_BODY_TEMPLATE = """## Goal
 {goal}
@@ -256,6 +257,37 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_log_usage(args: argparse.Namespace) -> int:
+    entry = {
+        "ts": _now(),
+        "card": args.card_id,
+        "role": args.role,
+        "stage": args.stage,
+        "tier": args.tier,
+        "tokens": parse_tokens(args.tokens) or 0,
+        "round": args.round,
+    }
+    append_usage(workflow_root(args.root), entry)
+    print(f"usage logged: {args.card_id} {args.role} {args.tokens}")
+    return 0
+
+
+def cmd_usage(args: argparse.Namespace) -> int:
+    summary = summarise(load_usage(workflow_root(args.root)), args.card)
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0
+    if not summary["total"]:
+        print("No usage recorded.")
+        return 0
+    lines = [f"# Usage — total: {format_tokens(summary['total'])}", "", "## By role"]
+    lines += [f"- {r}: {format_tokens(t)}" for r, t in sorted(summary["by_role"].items())]
+    lines += ["", "## By card"]
+    lines += [f"- {c}: {format_tokens(t)}" for c, t in sorted(summary["by_card"].items())]
+    print("\n".join(lines))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -337,6 +369,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_handoff)
+
+    p = sub.add_parser("log-usage")
+    p.add_argument("card_id")
+    p.add_argument("--role", required=True)
+    p.add_argument("--tokens", required=True)
+    p.add_argument("--stage")
+    p.add_argument("--tier")
+    p.add_argument("--round", type=int)
+    p.set_defaults(func=cmd_log_usage)
+
+    p = sub.add_parser("usage")
+    p.add_argument("--card")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_usage)
 
     return parser
 
