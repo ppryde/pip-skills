@@ -186,3 +186,23 @@ def test_direct_script_invocation(tmp_path):
         capture_output=True,
     )
     assert result.returncode == 0, result.stderr.decode()
+
+
+class TestHandoffCommand:
+    def test_handoff_text_and_loud_quarantine(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-stage", "WF-001", "implementation")
+        (workflow_root(repo) / "cards" / "WF-777-bad.md").write_text("garbage")
+        capsys.readouterr()
+        assert run(repo, "handoff") == 0
+        captured = capsys.readouterr()
+        assert "# Handoff briefing" in captured.out
+        assert "QUARANTINED" in captured.err
+
+    def test_handoff_json(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-stage", "WF-001", "planning")
+        capsys.readouterr()
+        assert run(repo, "handoff", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["in_flight"][0]["id"] == "WF-001"

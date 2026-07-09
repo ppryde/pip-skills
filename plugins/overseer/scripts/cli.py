@@ -16,7 +16,7 @@ if __package__ in (None, ""):  # direct script invocation: put plugin root on sy
 
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
-from scripts.resume import format_report, resume_entries  # noqa: E402
+from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
 from scripts.sprints import SPRINT_STATUSES, Sprint, load_sprint, rollup, save_sprint, sprint_path  # noqa: E402
 from scripts.store import (  # noqa: E402
     archive_card,
@@ -245,6 +245,17 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_handoff(args: argparse.Namespace) -> int:
+    data = handoff_data(args.root)
+    for path in data["quarantined"]:
+        print(f"QUARANTINED: {path}", file=sys.stderr)
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(handoff_report(args.root, data))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -322,6 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("resume")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_resume)
+
+    p = sub.add_parser("handoff")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_handoff)
 
     return parser
 

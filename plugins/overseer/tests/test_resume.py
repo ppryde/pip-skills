@@ -67,3 +67,49 @@ class TestPrInResume:
         save_card(root, card("WF-001", stage="awaiting-merge",
                              pr="https://github.com/x/y/pull/9"))
         assert "PR: https://github.com/x/y/pull/9" in format_report(resume_entries(tmp_path))
+
+
+class TestHandoff:
+    def _populate(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001", stage="implementation",
+                             branch="feat/stack-a", budget_estimate=100_000))
+        save_card(root, card("WF-002", stage="impl-review", branch="feat/stack-a",
+                             pr="https://github.com/x/y/pull/7"))
+        save_card(root, card("WF-003", status="blocked", stage="planning",
+                             blocked_on="user: scope q"))
+        save_card(root, card("WF-004", status="planned", stage=None, complexity="S"))
+        (root / "cards" / "WF-666-bad.md").write_text("garbage")
+        return root
+
+    def test_data_sections(self, tmp_path):
+        from scripts.resume import handoff_data
+
+        self._populate(tmp_path)
+        data = handoff_data(tmp_path)
+        assert [e["id"] for e in data["in_flight"]] == ["WF-001", "WF-002"]
+        assert [e["id"] for e in data["blocked"]] == ["WF-003"]
+        assert data["planned"] == [{"id": "WF-004", "title": "T WF-004",
+                                    "complexity": "S"}]
+        assert data["stacks"] == {"feat/stack-a": ["WF-001", "WF-002"]}
+        assert len(data["quarantined"]) == 1
+        assert data["quarantined"][0].endswith("WF-666-bad.md")
+
+    def test_report_renders_all_sections(self, tmp_path):
+        from scripts.resume import handoff_report
+
+        self._populate(tmp_path)
+        report = handoff_report(tmp_path)
+        for expected in ("# Handoff briefing", "## In flight", "WF-001",
+                         "PR: https://github.com/x/y/pull/7", "## Blocked",
+                         "user: scope q", "## Planned", "WF-004",
+                         "## Stacks", "feat/stack-a: WF-001, WF-002",
+                         "## Quarantined", "WF-666-bad.md", "## Resume",
+                         "resume"):
+            assert expected in report
+
+    def test_empty_ledger_report(self, tmp_path):
+        from scripts.resume import handoff_report
+
+        init_workflow(tmp_path)
+        assert "clean slate" in handoff_report(tmp_path)
