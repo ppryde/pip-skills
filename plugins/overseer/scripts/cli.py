@@ -14,6 +14,7 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.calibration import calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
@@ -23,6 +24,7 @@ from scripts.store import (  # noqa: E402
     archive_card,
     find_card_path,
     init_workflow,
+    load_archived_cards,
     load_card,
     load_live_cards,
     mint_id,
@@ -311,6 +313,34 @@ def cmd_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_calibration(args: argparse.Namespace) -> int:
+    cards = load_archived_cards(state_root(args.root))
+    report = calibrate(cards)
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    total = sum(report["bands"][b]["count"] for b in ("S", "M", "L"))
+    if not total:
+        print("No completed cards to calibrate from.")
+        return 0
+    lines = ["# Calibration (actual ÷ estimate)", ""]
+    for b in ("S", "M", "L"):
+        band = report["bands"][b]
+        if not band["count"]:
+            lines.append(f"- {b}: no samples")
+            continue
+        mult = f", suggest ×{band['multiplier']}" if band["multiplier"] else ""
+        lines.append(
+            f"- {b}: n={band['count']}, median {band['median']}, "
+            f"mean {band['mean']}{mult}"
+        )
+    if report["skipped"]:
+        lines.append(f"\n_{report['skipped']} completed card(s) skipped "
+                     "(no estimate or no actual)._")
+    print("\n".join(lines))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -416,6 +446,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--card")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_usage)
+
+    p = sub.add_parser("calibration")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_calibration)
 
     return parser
 

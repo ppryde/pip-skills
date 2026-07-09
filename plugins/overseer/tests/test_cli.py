@@ -327,3 +327,27 @@ class TestConflictsCommand:
         assert run(repo, "conflicts", "--sprint", "2026-07-S1", "--json") == 0
         data = json.loads(capsys.readouterr().out)
         assert data == [["WF-001", "WF-002", ["src/x.py"]]]
+
+
+class TestCalibrationCommand:
+    def _finish(self, repo, cid, est, act):
+        run(repo, "new-card", "--title", cid, "--complexity", "S",
+            "--estimate", est)
+        run(repo, "log-progress", cid, "--note", "done", "--tokens", act)
+        run(repo, "done", cid)
+
+    def test_calibration_json(self, repo, capsys):
+        run(repo, "new-card", "--title", "T", "--complexity", "S",
+            "--estimate", "100k")
+        run(repo, "log-progress", "WF-001", "--note", "burn", "--tokens", "140k")
+        run(repo, "done", "WF-001")
+        capsys.readouterr()
+        assert run(repo, "calibration", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["bands"]["S"]["count"] == 1
+        assert data["bands"]["S"]["multiplier"] == 1.4
+
+    def test_calibration_empty(self, repo, capsys):
+        capsys.readouterr()
+        assert run(repo, "calibration") == 0
+        assert "No completed cards" in capsys.readouterr().out
