@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.2.1",
+  "version": "1.4.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -41,6 +41,13 @@
       "description": "Clone a reviewer's voice and rules from their public GitHub review history. Every finding cites a real comment; the persona never invents APIs.",
       "category": "engineering",
       "tags": ["code-review", "pr-review", "github", "persona", "voice", "review-bot"]
+    },
+    {
+      "name": "overseer",
+      "source": "./plugins/overseer",
+      "description": "Persistent work ledger: cards, stages, sprints and token budgets that survive session loss. Phase 1 of workflow orchestration.",
+      "category": "engineering",
+      "tags": ["workflow", "ledger", "sprints", "orchestration", "task-tracking", "budgets", "resume"]
     }
   ]
 }
