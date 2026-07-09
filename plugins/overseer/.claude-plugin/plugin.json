@@ -1,0 +1,10 @@
+{
+  "name": "overseer",
+  "version": "0.1.0",
+  "description": "Workflow orchestration foundation: a persistent per-repo ledger of cards, sprints and token budgets. Phase 1 of the overseer plugin — state only.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": ["workflow", "ledger", "sprints", "orchestration", "task-tracking", "budgets"]
+}
