@@ -296,3 +296,34 @@ class TestTouchesField:
                    "--touches", "src/auth/, src/models.py") == 0
         content = find_card_path(state_root(repo), "WF-001").read_text()
         assert "- src/auth/" in content and "- src/models.py" in content
+
+
+class TestConflictsCommand:
+    def test_conflicts_text(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        run(repo, "new-card", "--title", "B")
+        run(repo, "set-field", "WF-001", "--touches", "src/auth/")
+        run(repo, "set-field", "WF-002", "--touches", "src/auth/views.py")
+        capsys.readouterr()
+        assert run(repo, "conflicts") == 0
+        out = capsys.readouterr().out
+        assert "WF-001" in out and "WF-002" in out and "src/auth" in out
+
+    def test_conflicts_none(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        capsys.readouterr()
+        assert run(repo, "conflicts") == 0
+        assert "No conflicts" in capsys.readouterr().out
+
+    def test_conflicts_json_and_sprint_scope(self, repo, capsys):
+        run(repo, "new-sprint", "2026-07-S1")
+        run(repo, "new-card", "--title", "A", "--sprint", "2026-07-S1")
+        run(repo, "new-card", "--title", "B", "--sprint", "2026-07-S1")
+        run(repo, "new-card", "--title", "C")
+        run(repo, "set-field", "WF-001", "--touches", "src/x.py")
+        run(repo, "set-field", "WF-002", "--touches", "src/x.py")
+        run(repo, "set-field", "WF-003", "--touches", "src/x.py")
+        capsys.readouterr()
+        assert run(repo, "conflicts", "--sprint", "2026-07-S1", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == [["WF-001", "WF-002", ["src/x.py"]]]

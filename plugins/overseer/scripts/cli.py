@@ -14,6 +14,7 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
@@ -248,6 +249,23 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_conflicts(args: argparse.Namespace) -> int:
+    cards, quarantined = load_live_cards(state_root(args.root))
+    _report_quarantined(quarantined)
+    if args.sprint:
+        cards = [c for c in cards if c.sprint == args.sprint]
+    conflicts = find_conflicts(cards)
+    if args.json:
+        print(json.dumps([[a, b, paths] for a, b, paths in conflicts], indent=2))
+        return 0
+    if not conflicts:
+        print("No conflicts.")
+        return 0
+    for a, b, paths in conflicts:
+        print(f"{a} ~ {b}: {', '.join(paths)}")
+    return 0
+
+
 def cmd_handoff(args: argparse.Namespace) -> int:
     data = handoff_data(args.root)
     for path in data["quarantined"]:
@@ -371,6 +389,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("resume")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_resume)
+
+    p = sub.add_parser("conflicts")
+    p.add_argument("--sprint")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_conflicts)
 
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
