@@ -775,6 +775,16 @@ deviates mid-flight is evicted to its own branch and gates separately.
   (`[peer-cc]` summary prefix), and nothing peers agree is real until it's
   on the card. If it isn't in the ledger, it didn't happen.
 
+## Telemetry (self-monitoring)
+After EVERY dispatch returns, log its cost — the harness reports each
+subagent's token usage with its result:
+`log-usage <card> --role planner|worker|reviewer|fixer --stage <stage>
+--tier <tier> --tokens <n> [--round <r>]`. At card completion, log your own
+coordination overhead as role `orchestrator` (best estimate of tokens spent
+on this card outside dispatches). `usage` / `usage --card <id>` summarises
+by role and card. This data exists so a future review can find where this
+skill itself burns tokens — cheap honest entries beat missing ones.
+
 ## Context stewardship
 - After each card completes (and each review round on L cards) assess your
   context load: at ~70% warn the user and stop accepting new cards; at ~85%
@@ -857,6 +867,8 @@ $V $CLI new-card --title "Smoke orchestration" --linear ENG-99 --complexity S --
 $V $CLI set-stage ENG-99 implementation
 $V $CLI set-field ENG-99 --branch feat/eng-99 --pr https://github.com/x/y/pull/1
 $V $CLI new-sprint 2026-07-S9 && $V $CLI set-sprint-status 2026-07-S9 active
+$V $CLI log-usage ENG-99 --role worker --stage implementation --tier cheap --tokens 42k
+$V $CLI usage
 $V $CLI handoff
 ```
 
@@ -867,6 +879,189 @@ Expected: all exit 0; handoff briefing shows ENG-99 in flight with the PR URL, t
 ```bash
 git add plugins/overseer .claude-plugin/marketplace.json
 git commit -m "feat(overseer): orchestrate docs, v0.2.0, marketplace 1.5.0"
+```
+
+---
+
+### Task 8: Usage telemetry — `log-usage` and `usage`
+
+*(Added mid-execution at user request. Execution order: after Task 4, before Tasks 5–6, so the doctrine can reference these commands.)*
+
+**Files:**
+- Create: `plugins/overseer/scripts/usage.py`
+- Modify: `plugins/overseer/scripts/cli.py`
+- Test: `plugins/overseer/tests/test_cli.py` (append)
+
+**Interfaces:**
+- Consumes: `workflow_root`, `parse_tokens`, `format_tokens`, `_now` (existing).
+- Produces:
+  - `scripts/usage.py`: `append_usage(root: Path, entry: dict) -> None` (appends one JSON line to `.workflow/usage.jsonl`); `load_usage(root: Path) -> list[dict]`; `summarise(entries: list[dict], card_id: str | None = None) -> dict` with keys `"total": int`, `"by_role": dict[str, int]`, `"by_card": dict[str, int]`.
+  - CLI `log-usage CARD_ID --role R --tokens N [--stage S] [--tier T] [--round I]` — appends `{"ts", "card", "role", "stage", "tier", "tokens" (int), "round"}`.
+  - CLI `usage [--card ID] [--json]` — summary by role and card; `"No usage recorded."` when empty.
+- Purpose: dispatch-level token telemetry so a future review can find where the orchestrate skill itself burns tokens.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `plugins/overseer/tests/test_cli.py`:
+
+```python
+class TestUsageTelemetry:
+    def test_log_usage_appends_jsonl(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "log-usage", "WF-001", "--role", "reviewer",
+                   "--stage", "impl-review", "--tier", "mid",
+                   "--tokens", "48k", "--round", "2") == 0
+        lines = (workflow_root(repo) / "usage.jsonl").read_text().strip().split("\n")
+        entry = json.loads(lines[0])
+        assert entry["card"] == "WF-001" and entry["role"] == "reviewer"
+        assert entry["tokens"] == 48_000 and entry["round"] == 2
+        assert entry["stage"] == "impl-review" and entry["tier"] == "mid"
+        assert entry["ts"]
+
+    def test_log_usage_accumulates(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "20k")
+        content = (workflow_root(repo) / "usage.jsonl").read_text()
+        assert len(content.strip().split("\n")) == 2
+
+    def test_usage_summary(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        run(repo, "log-usage", "WF-001", "--role", "reviewer", "--tokens", "50k")
+        capsys.readouterr()
+        assert run(repo, "usage") == 0
+        out = capsys.readouterr().out
+        assert "worker: 30k" in out and "reviewer: 50k" in out
+        assert "total: 80k" in out
+
+    def test_usage_card_filter_json(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        run(repo, "new-card", "--title", "B")
+        run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
+        run(repo, "log-usage", "WF-002", "--role", "worker", "--tokens", "99k")
+        capsys.readouterr()
+        assert run(repo, "usage", "--card", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["total"] == 30_000
+        assert data["by_role"] == {"worker": 30_000}
+
+    def test_usage_empty(self, repo, capsys):
+        assert run(repo, "usage") == 0
+        assert "No usage recorded" in capsys.readouterr().out
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd plugins/overseer && ../../.venv/bin/python -m pytest tests/test_cli.py -k UsageTelemetry -v`
+Expected: FAIL — argparse invalid choice `log-usage` (remapped to exit 1, asserted as 0).
+
+- [ ] **Step 3: Implement**
+
+`plugins/overseer/scripts/usage.py`:
+
+```python
+"""Dispatch-level token telemetry: usage.jsonl append and aggregation."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+USAGE_FILENAME = "usage.jsonl"
+
+
+def append_usage(root: Path, entry: dict) -> None:
+    with (root / USAGE_FILENAME).open("a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+def load_usage(root: Path) -> list[dict]:
+    path = root / USAGE_FILENAME
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def summarise(entries: list[dict], card_id: str | None = None) -> dict:
+    if card_id:
+        entries = [e for e in entries if e.get("card") == card_id]
+    by_role: dict[str, int] = {}
+    by_card: dict[str, int] = {}
+    for e in entries:
+        tokens = int(e.get("tokens") or 0)
+        role = e.get("role") or "?"
+        card = e.get("card") or "?"
+        by_role[role] = by_role.get(role, 0) + tokens
+        by_card[card] = by_card.get(card, 0) + tokens
+    return {"total": sum(by_role.values()), "by_role": by_role, "by_card": by_card}
+```
+
+`plugins/overseer/scripts/cli.py` — add `from scripts.usage import append_usage, load_usage, summarise` (with `# noqa: E402` matching the neighbouring imports), then:
+
+```python
+def cmd_log_usage(args: argparse.Namespace) -> int:
+    entry = {
+        "ts": _now(),
+        "card": args.card_id,
+        "role": args.role,
+        "stage": args.stage,
+        "tier": args.tier,
+        "tokens": parse_tokens(args.tokens) or 0,
+        "round": args.round,
+    }
+    append_usage(workflow_root(args.root), entry)
+    print(f"usage logged: {args.card_id} {args.role} {args.tokens}")
+    return 0
+
+
+def cmd_usage(args: argparse.Namespace) -> int:
+    summary = summarise(load_usage(workflow_root(args.root)), args.card)
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0
+    if not summary["total"]:
+        print("No usage recorded.")
+        return 0
+    lines = [f"# Usage — total: {format_tokens(summary['total'])}", "", "## By role"]
+    lines += [f"- {r}: {format_tokens(t)}" for r, t in sorted(summary["by_role"].items())]
+    lines += ["", "## By card"]
+    lines += [f"- {c}: {format_tokens(t)}" for c, t in sorted(summary["by_card"].items())]
+    print("\n".join(lines))
+    return 0
+```
+
+…and in `build_parser()`:
+
+```python
+    p = sub.add_parser("log-usage")
+    p.add_argument("card_id")
+    p.add_argument("--role", required=True)
+    p.add_argument("--tokens", required=True)
+    p.add_argument("--stage")
+    p.add_argument("--tier")
+    p.add_argument("--round", type=int)
+    p.set_defaults(func=cmd_log_usage)
+
+    p = sub.add_parser("usage")
+    p.add_argument("--card")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_usage)
+```
+
+(`format_tokens` is already imported in cli.py.)
+
+- [ ] **Step 4: Run affected + full suites**
+
+Run: `cd plugins/overseer && ../../.venv/bin/python -m pytest tests/test_cli.py -k UsageTelemetry -v && ../../.venv/bin/python -m pytest -q`
+Expected: PASS everywhere.
+
+- [ ] **Step 5: Lint, type-check, commit**
+
+Run: `cd plugins/overseer && ../../.venv/bin/python -m ruff check scripts tests && ../../.venv/bin/python -m mypy scripts`
+
+```bash
+git add plugins/overseer
+git commit -m "feat(overseer): dispatch-level token telemetry (log-usage, usage)"
 ```
 
 ---
