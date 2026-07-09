@@ -1,6 +1,17 @@
 import pytest
 
-from scripts.knowledge import Fact, FactParseError, is_stale
+from scripts.knowledge import (
+    Fact,
+    FactParseError,
+    ensure_kb,
+    find_fact_path,
+    is_stale,
+    load_facts,
+    load_retired,
+    mint_fact_id,
+    retire_fact_file,
+    save_fact,
+)
 
 
 def make_fact(fact_id: str = "KB-001", **overrides: object) -> Fact:
@@ -67,3 +78,56 @@ class TestStaleness:
     def test_effective_status_leaves_retired(self):
         fact = make_fact(status="retired", verified="2026-01-01")
         assert fact.effective_status("2026-07-09") == "retired"
+
+
+@pytest.fixture
+def kb(tmp_path):
+    root = tmp_path / "knowledge"
+    ensure_kb(root)
+    return root
+
+
+class TestStoreOps:
+    def test_ensure_creates_dirs(self, tmp_path):
+        root = tmp_path / "knowledge"
+        ensure_kb(root)
+        for sub in ("facts", "retired", "corrupt"):
+            assert (root / sub).is_dir()
+
+    def test_mint_first_id(self, kb):
+        assert mint_fact_id(kb) == "KB-001"
+
+    def test_mint_skips_facts_and_retired(self, kb):
+        save_fact(kb, make_fact("KB-004"))
+        retire_fact_file(kb, make_fact("KB-007", status="retired"))
+        assert mint_fact_id(kb) == "KB-008"
+
+    def test_save_and_find(self, kb):
+        save_fact(kb, make_fact("KB-001", statement="Serial tests only"))
+        path = find_fact_path(kb, "KB-001")
+        assert path.name.startswith("KB-001-")
+        assert path.parent == kb / "facts"
+
+    def test_find_missing_raises(self, kb):
+        with pytest.raises(FileNotFoundError):
+            find_fact_path(kb, "KB-999")
+
+    def test_load_facts_sorted_and_quarantines_corrupt(self, kb):
+        save_fact(kb, make_fact("KB-002", statement="B"))
+        save_fact(kb, make_fact("KB-001", statement="A"))
+        bad = kb / "facts" / "KB-003-broken.md"
+        bad.write_text("no frontmatter here")
+        facts, quarantined = load_facts(kb)
+        assert [f.id for f in facts] == ["KB-001", "KB-002"]
+        assert quarantined == [kb / "corrupt" / "KB-003-broken.md"]
+        assert not bad.exists()
+        assert (kb / "corrupt" / "KB-003-broken.md").read_text() == "no frontmatter here"
+
+    def test_retire_moves_file(self, kb):
+        save_fact(kb, make_fact("KB-001"))
+        fact = make_fact("KB-001", status="retired", superseded_by="KB-002")
+        retire_fact_file(kb, fact)
+        assert not list((kb / "facts").glob("KB-001-*"))
+        retired = load_retired(kb)
+        assert [f.id for f in retired] == ["KB-001"]
+        assert retired[0].superseded_by == "KB-002"
