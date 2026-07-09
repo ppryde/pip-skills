@@ -1,14 +1,30 @@
 """Session-start resume detection: what was in flight, and at what stage."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from scripts.models import Card, format_tokens
 from scripts.store import load_live_cards, state_root
 
 
+def _branch_exists(repo_root: Path, branch: str | None) -> bool:
+    if not branch:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _entry(repo_root: Path, card: Card) -> dict:
     worktree_exists = card.worktree is not None and (repo_root / card.worktree).is_dir()
+    branch_exists = _branch_exists(repo_root, card.branch)
     round_no = (
         card.review_rounds(card.stage)
         if card.stage and card.stage.endswith("review")
@@ -23,6 +39,7 @@ def _entry(repo_root: Path, card: Card) -> dict:
         "stage": card.stage,
         "round": round_no,
         "branch": card.branch,
+        "branch_exists": branch_exists,
         "pr": card.pr,
         "worktree": card.worktree,
         "worktree_exists": worktree_exists,
@@ -50,6 +67,8 @@ def format_report(entries: list[dict]) -> str:
         if e["worktree"] and not e["worktree_exists"]:
             worktree += " (MISSING)"
         line = f"- {e['id']} — {e['title']}: {stage} | {worktree} | {e['budget']}"
+        if e["branch"] and not e["branch_exists"]:
+            line += " (branch MISSING)"
         if e["pr"]:
             line += f" | PR: {e['pr']}"
         lines.append(line)

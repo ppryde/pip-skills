@@ -136,6 +136,14 @@ class TestSprintsAndResume:
         assert run(repo, "resume") == 0
         assert "clean slate" in capsys.readouterr().out
 
+    def test_resume_flags_missing_branch(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-stage", "WF-001", "implementation")
+        run(repo, "set-field", "WF-001", "--branch", "feat/ghost")
+        capsys.readouterr()
+        assert run(repo, "resume") == 0
+        assert "branch MISSING" in capsys.readouterr().out
+
 
 class TestLinearAndPr:
     def test_new_card_linear_id(self, repo, capsys):

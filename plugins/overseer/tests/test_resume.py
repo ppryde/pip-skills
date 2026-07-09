@@ -1,5 +1,7 @@
+import subprocess
+
 from scripts.models import Card
-from scripts.resume import format_report, resume_entries
+from scripts.resume import _branch_exists, format_report, resume_entries
 from scripts.store import init_workflow, save_card
 
 NOW = "2026-07-08T15:00"
@@ -12,6 +14,32 @@ def card(card_id: str, **overrides: object) -> Card:
     )
     fields.update(overrides)
     return Card(**fields)  # type: ignore[arg-type]
+
+
+def _git_init(path):
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+
+
+class TestBranchExists:
+    def test_none_branch_is_false(self, tmp_path):
+        assert _branch_exists(tmp_path, None) is False
+
+    def test_missing_branch_is_false(self, tmp_path):
+        _git_init(tmp_path)
+        assert _branch_exists(tmp_path, "feature/nope") is False
+
+    def test_present_branch_is_true(self, tmp_path):
+        _git_init(tmp_path)
+        (tmp_path / "f").write_text("x")
+        subprocess.run(["git", "add", "f"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "branch", "feat/x"], cwd=tmp_path, check=True)
+        assert _branch_exists(tmp_path, "feat/x") is True
+
+    def test_non_git_dir_is_false(self, tmp_path):
+        assert _branch_exists(tmp_path, "main") is False
 
 
 class TestResumeEntries:
