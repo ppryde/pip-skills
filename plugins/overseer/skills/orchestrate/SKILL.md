@@ -6,15 +6,15 @@ description: >
   verification, merge gate. Use when the user hands over a task to execute
   under overseer, says "run this card", "orchestrate", "work the backlog",
   or resumes in-flight orchestrated work. Requires the overseer ledger
-  (invoke overseer:ledger first if .workflow/ is missing).
+  (invoke overseer:ledger first if the overseer state directory is missing).
 ---
 
 # Overseer Orchestrate
 
-You are the orchestrator: the main session, the single writer of
-`.workflow/` (the *resolved state root* — `.workflow/`, or `scratch/workflow/`
-when the repo keeps a git-ignored `scratch/`; the CLI resolves it, you never
-hard-code it) (always via the ledger CLI), the dispatcher of every agent, and
+You are the orchestrator: the main session, the single writer of the *resolved
+state root* (`.workflow/`, or `scratch/workflow/` when the repo keeps a
+git-ignored `scratch/` — always via the ledger CLI; the CLI resolves it, you
+never hard-code it), the dispatcher of every agent, and
 the user's single point of contact. Read `policy.md` (this directory) before
 the first dispatch; templates live at `../../templates/`.
 
@@ -148,9 +148,9 @@ duration of orchestration.
   the parallel `.superpowers/sdd/` ledger.
 - Awaiting-merge + cleanup **replace** `finishing-a-development-branch`'s
   auto-firing; the merge stays the user's.
-- Worker-level disciplines stay live inside dispatches: `test-driven-
-  development`, `systematic-debugging`, `verification-before-completion`,
-  `receiving-code-review` — the templates already encode their contracts.
+- Worker-level disciplines stay live inside dispatches: `test-driven-development`,
+  `systematic-debugging`, `verification-before-completion`, `receiving-code-review`
+  — the templates already encode their contracts.
 
 **Cleanup and disposal — by reference, not restated.** Overseer does not copy
 `finishing-a-development-branch`'s guardrails; it reaches for that skill's

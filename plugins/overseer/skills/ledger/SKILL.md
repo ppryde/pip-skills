@@ -45,7 +45,7 @@ python .../cli.py --root . resume
 1. `new-card --title "..." [--jira PROJ-142] [--complexity S|M|L] [--estimate 300k] [--goal "..."]`
    - Use the Jira key as the id when one exists; otherwise an id is minted.
    - Complexity bands for estimates: S ≈ 100–200k, M ≈ 300–500k, L ≈ 700k+.
-2. `set-stage <id> bootstrap`, then: pull latest main, create a worktree and
+2. `set-stage <id> bootstrap`, then: pull the repo's base branch (detect it, do not assume `main`), create a worktree and
    branch (branch name: `<type>/<id>-<slug>`), record them with
    `set-field <id> --branch ... --worktree ...`.
 3. Advance stages as work proceeds:
