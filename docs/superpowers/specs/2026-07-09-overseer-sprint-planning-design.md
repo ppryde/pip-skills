@@ -27,6 +27,7 @@ sets are resolved here.
 | Pre-review depth | One strong-tier reviewer, single pass, no loop | A sprint file is a cheap pre-spend artifact; the user gate is the second reviewer. Rejected: scaled panels, full adversarial loop |
 | Superpowers fix location | This spec (phase 3), not a phase-2 amendment | User decision: one coherent spec; collision accepted as live until phase 3 ships |
 | finishing-a-development-branch gaps | Adopt all four (disposal, provenance guardrails, base-branch detection, CI assumption) | Strictly additive to the approved cleanup item |
+| Cleanup/disposal ownership | Reference the skill's procedure, don't restate it | One source of truth for the guardrails; overseer suppresses auto-fire and reaches for the exact procedure at the moments it owns. Rejects verbatim copy (drifts) and full delegation (its local-merge menu breaks the merge gate) |
 | Local merge / end-of-work menu | Rejected, on the record | The merge gate is absolute: the user merges. The card lifecycle replaces the 4-option menu |
 | Spec split | Phase 3 and phase 4 get separate specs | Established rite: each phase is its own spec → plan → implement cycle |
 
@@ -104,17 +105,25 @@ duplicate worktree creation, a second execution engine with its own progress
 ledger (`.superpowers/sdd/progress.md` vs `.workflow/`), and an end-of-work
 menu that offers local merges against overseer's merge-gate doctrine.
 
-**4.1 Precedence.** `orchestrate/SKILL.md` gains a "Relation to superpowers"
-section: **while a card is under orchestration, orchestrate owns the
-pipeline.**
+**4.1 Precedence — suppress, don't co-run.** `orchestrate/SKILL.md` gains a
+"Relation to superpowers" section that explicitly overrides the meta-skill's
+"1% chance → you must invoke" reflex for the duration of orchestration:
+**while a card is under orchestration, orchestrate owns the pipeline, and the
+process skills below do NOT auto-fire.** This is the token-waste guard — only
+one skill runs each stage, never two doing the same work. Overseer may still
+*reach for* a suppressed skill's specific procedure when it owns the moment
+(see §4.5), but the skill never activates on its own.
 
-- Planning subsumes `brainstorming` and `writing-plans` (card plans live on
-  the card; spec docs remain correct at the meta level, e.g. designing
-  overseer itself or a pre-card spec for very large work).
-- Implementation + impl-review subsume `subagent-driven-development` and
-  `executing-plans` — one execution engine, one ledger (`.workflow/`).
-- Awaiting-merge subsumes `finishing-a-development-branch`; the merge remains
-  the user's.
+- Planning **replaces** `brainstorming` and `writing-plans` for card work
+  (card plans live on the card). Those skills still govern meta-level work —
+  designing overseer itself, or a pre-card spec for very large work — which is
+  not "under orchestration".
+- Implementation + impl-review **replace** `subagent-driven-development` and
+  `executing-plans` — one execution engine, one ledger (`.workflow/`), never
+  the parallel `.superpowers/sdd/` ledger.
+- Awaiting-merge + cleanup **replace** `finishing-a-development-branch`'s
+  auto-firing; the merge remains the user's, and overseer reaches for that
+  skill's cleanup/disposal procedure by reference (§4.5–4.6).
 - Worker-level disciplines stay live inside dispatches:
   `test-driven-development`, `systematic-debugging`,
   `verification-before-completion`, `receiving-code-review` — the templates
@@ -136,22 +145,32 @@ verifies each in-flight card's recorded branch and worktree still exist,
 flagging (not silently recreating) any that are missing; the orchestrator
 recreates them only with the user's confirmation.
 
-**4.5 Post-merge cleanup.** After the user confirms a card's PR is merged,
-the orchestrator removes the card's worktree and deletes the local branch,
-inheriting the provenance guardrails verbatim:
+**4.5 Post-merge cleanup — by reference, not restated.** After the user
+confirms a card's PR is merged, the orchestrator disposes of the card's
+worktree and local branch by **applying `finishing-a-development-branch`'s
+cleanup procedure** — that skill remains the single source of truth for the
+guardrails (only remove overseer-created worktrees; exit harness-owned
+workspaces via the native tool; `git worktree remove` from the main repo root
+then `git worktree prune`; never force-delete an unmerged branch). Overseer
+does not copy those rules — it points to them, so they cannot drift. What
+overseer *adds* on top is only the constraint that this runs post-merge-gate,
+against the specific card's recorded worktree/branch.
 
-- only remove worktrees overseer created (recorded on the card);
-- harness-owned workspaces are exited via the native tool, never removed
-  manually;
-- always run `git worktree remove` from the main repo root, then
-  `git worktree prune`;
-- never force-delete an unmerged branch during normal cleanup.
+**4.6 Abandon disposal — same reference.** `abandon` invokes the same
+`finishing-a-development-branch` disposal path (its "discard" option): state
+what will be destroyed (branch, worktree, uncommitted work), require a typed
+`discard` confirmation, and on refusal leave both in place and note it on the
+card. Overseer adds nothing here but the trigger (card abandonment) — the
+mechanics and the confirmation gate are the skill's.
 
-**4.6 Abandon disposal.** `abandon` gains a disposal step in doctrine: the
-orchestrator states what will be destroyed (branch, worktree, uncommitted
-work) and requires a typed `discard` confirmation from the user before
-deleting; without it, the branch and worktree are left in place and noted on
-the card.
+**Why reference, not reimplement.** These are the only two points where
+overseer and `finishing-a-development-branch` do the same physical work.
+Restating the guardrails would create a second copy that drifts when the
+skill changes; delegating the whole skill is impossible because its 4-option
+menu leads with a local merge that violates overseer's merge gate. So
+overseer suppresses the skill from *auto-firing* (§4.1) and instead reaches
+for exactly its cleanup/disposal procedure at the two moments overseer owns —
+reuse without runtime overlap.
 
 **4.7 Stated assumption.** Post-merge verification is CI's responsibility:
 overseer verifies in the card's worktree before the PR and does not re-run
