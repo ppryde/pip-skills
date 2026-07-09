@@ -243,3 +243,24 @@ class TestMutations:
         card = Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\n---\nx")
         card.log_progress("work", 10_000_000, NOW)
         assert card.tripwire_breached is False
+
+
+class TestLinearAndPrFields:
+    def test_linear_round_trip(self):
+        card = Card.from_text(
+            "---\nid: ENG-42\nlinear: ENG-42\ntitle: T\nstatus: planned\n---\nx"
+        )
+        assert card.linear == "ENG-42"
+        assert Card.from_text(card.to_text()) == card
+        assert "linear: ENG-42" in card.to_text()
+
+    def test_pr_round_trip(self):
+        card = Card.from_text(SAMPLE_CARD)
+        card.pr = "https://github.com/ppryde/pip-skills/pull/22"
+        again = Card.from_text(card.to_text())
+        assert again.pr == card.pr
+
+    def test_both_default_none(self):
+        card = Card.from_text(SAMPLE_CARD)
+        assert card.linear is None
+        assert card.pr is None

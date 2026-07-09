@@ -90,9 +90,11 @@ class Card:
     stage: str | None = None
     complexity: str | None = None
     jira: str | None = None
+    linear: str | None = None
     sprint: str | None = None
     branch: str | None = None
     worktree: str | None = None
+    pr: str | None = None
     budget_estimate: int | None = None
     budget_actual: int = 0
     created: str = ""
@@ -122,9 +124,11 @@ class Card:
             stage=stage,
             complexity=meta.get("complexity"),
             jira=meta.get("jira"),
+            linear=meta.get("linear"),
             sprint=meta.get("sprint"),
             branch=meta.get("branch"),
             worktree=meta.get("worktree"),
+            pr=meta.get("pr"),
             budget_estimate=parse_tokens(budget.get("estimate")),
             budget_actual=parse_tokens(budget.get("actual")) or 0,
             created=str(meta.get("created", "")),
@@ -137,6 +141,7 @@ class Card:
         meta = {
             "id": self.id,
             "jira": self.jira,
+            "linear": self.linear,
             "title": self.title,
             "status": self.status,
             "stage": self.stage,
@@ -144,6 +149,7 @@ class Card:
             "sprint": self.sprint,
             "branch": self.branch,
             "worktree": self.worktree,
+            "pr": self.pr,
             "budget": {
                 "estimate": format_tokens(self.budget_estimate),
                 "actual": format_tokens(self.budget_actual),
