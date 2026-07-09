@@ -5,10 +5,13 @@ from scripts.knowledge import (
     FactParseError,
     ensure_kb,
     find_fact_path,
+    generate_knowledge_index,
     is_stale,
+    knowledge_root,
     load_facts,
     load_retired,
     mint_fact_id,
+    rebuild_knowledge_index,
     retire_fact_file,
     save_fact,
 )
@@ -131,3 +134,33 @@ class TestStoreOps:
         retired = load_retired(kb)
         assert [f.id for f in retired] == ["KB-001"]
         assert retired[0].superseded_by == "KB-002"
+
+
+class TestIndex:
+    def test_generate_lists_active_and_stale_and_counts_retired(self):
+        active = make_fact("KB-001", statement="Alpha truth", status="active")
+        stale = make_fact("KB-002", statement="Beta truth", status="stale")
+        retired = make_fact("KB-009", statement="Gamma truth", status="retired")
+        out = generate_knowledge_index([active, stale], [retired], "2026-07-09")
+        assert "KB-001" in out and "Alpha truth" in out
+        assert "## Stale" in out and "KB-002" in out and "Beta truth" in out
+        assert "## Retired: 1" in out
+        assert "KB-009" not in out  # retired ids/bodies stay out of the index
+        assert "Gamma truth" not in out
+
+    def test_rebuild_persists_stale_flip(self, tmp_path):
+        kb = knowledge_root(tmp_path)
+        ensure_kb(kb)
+        save_fact(kb, make_fact("KB-001", status="active", verified="2026-01-01"))
+        quarantined = rebuild_knowledge_index(tmp_path, "2026-07-09")
+        assert quarantined == []
+        reloaded = load_facts(kb)[0][0]
+        assert reloaded.status == "stale"
+        assert (kb / "knowledge.md").exists()
+
+    def test_rebuild_leaves_fresh_active(self, tmp_path):
+        kb = knowledge_root(tmp_path)
+        ensure_kb(kb)
+        save_fact(kb, make_fact("KB-001", status="active", verified="2026-07-08"))
+        rebuild_knowledge_index(tmp_path, "2026-07-09")
+        assert load_facts(kb)[0][0].status == "active"

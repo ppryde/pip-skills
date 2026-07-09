@@ -177,3 +177,46 @@ def retire_fact_file(kb: Path, fact: Fact) -> Path:
     if live.exists():
         live.unlink()
     return target
+
+
+def generate_knowledge_index(
+    facts: list[Fact], retired: list[Fact], now: str
+) -> str:
+    active = [f for f in facts if f.status == "active"]
+    stale = [f for f in facts if f.status == "stale"]
+
+    lines = [f"# Knowledge — {len(active)} active", f"Updated: {now}", ""]
+    lines.append("## Active")
+    if active:
+        lines += ["| Fact | Statement | Tags | Verified |", "|---|---|---|---|"]
+        for f in active:
+            tags = ", ".join(f.tags) or "—"
+            lines.append(f"| {f.id} | {f.statement} | {tags} | {f.verified or '?'} |")
+    else:
+        lines.append("_No active facts._")
+
+    lines += ["", "## Stale — verify before trusting"]
+    if stale:
+        for f in stale:
+            tags = ", ".join(f.tags) or "—"
+            lines.append(f"- {f.id} — {f.statement} ({tags}, last verified {f.verified or '?'})")
+    else:
+        lines.append("_None._")
+
+    lines += ["", f"## Retired: {len(retired)}",
+              "See `retired/` for superseded and refuted facts."]
+    return "\n".join(lines) + "\n"
+
+
+def rebuild_knowledge_index(repo_root: Path, today: str) -> list[Path]:
+    kb = knowledge_root(repo_root)
+    ensure_kb(kb)
+    facts, quarantined = load_facts(kb)
+    for fact in facts:
+        effective = fact.effective_status(today)
+        if effective != fact.status:
+            fact.status = effective
+            save_fact(kb, fact)
+    retired = load_retired(kb)
+    (kb / "knowledge.md").write_text(generate_knowledge_index(facts, retired, today))
+    return quarantined
