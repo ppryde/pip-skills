@@ -288,7 +288,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:  # argparse --help (0) or usage error (2)
+        return 0 if not exc.code else 1
     try:
         result: int = args.func(args)
         return result

@@ -84,6 +84,18 @@ class TestProgressAndReview:
         assert "### plan-review — round 1 (2 reviewers)" in content
 
 
+class TestUsageErrors:
+    def test_missing_required_flag_exits_1_not_2(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "log-progress", "WF-001", "--note", "x") == 1
+
+    def test_invalid_stage_exits_1_with_error(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "set-stage", "WF-001", "coding") == 1
+        assert "error:" in capsys.readouterr().err
+
+
 class TestSprintsAndResume:
     def test_sprint_rollup(self, repo):
         run(repo, "new-sprint", "2026-07-S1", "--estimate", "2.1M")
