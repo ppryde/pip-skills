@@ -84,3 +84,18 @@ class TestRollup:
         path = save_sprint(root, Sprint.from_text(SAMPLE_SPRINT))
         assert path == root / "sprints" / "2026-07-S1.md"
         assert path.exists()
+
+
+class TestRetroRollup:
+    def test_writes_est_vs_actual_table(self):
+        from scripts.sprints import retro_rollup
+        sprint = Sprint.from_text(SAMPLE_SPRINT)
+        cards = [
+            card("WF-001", complexity="M", status="done",
+                 budget_estimate=400_000, budget_actual=520_000),
+            card("WF-099", sprint="other", budget_actual=1),
+        ]
+        rolled = retro_rollup(sprint, cards)
+        assert "| WF-001 | 400k | 520k | 1.30× | done |" in rolled.body
+        assert "WF-099" not in rolled.body
+        assert "## Retro" in rolled.body

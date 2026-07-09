@@ -92,6 +92,23 @@ def rollup(sprint: Sprint, cards: list[Card]) -> Sprint:
     )
 
 
+def retro_rollup(sprint: Sprint, cards: list[Card]) -> Sprint:
+    mine = sorted((c for c in cards if c.sprint == sprint.id), key=lambda c: c.id)
+    rows = [
+        "| Card | Est | Actual | Ratio | Status |",
+        "|---|---|---|---|---|",
+    ]
+    for c in mine:
+        est = format_tokens(c.budget_estimate) or "?"
+        act = format_tokens(c.budget_actual) or "0"
+        ratio = (f"{c.budget_actual / c.budget_estimate:.2f}×"
+                 if c.budget_estimate else "—")
+        rows.append(f"| {c.id} | {est} | {act} | {ratio} | {c.status} |")
+    return dc_replace(
+        sprint, body=replace_section(sprint.body, "## Retro", "\n".join(rows))
+    )
+
+
 def sprint_path(root: Path, sprint_id: str) -> Path:
     return root / "sprints" / f"{sprint_id}.md"
 
