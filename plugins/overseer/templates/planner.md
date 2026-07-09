@@ -6,6 +6,7 @@ section and is the contract every later agent works from.
 ## Inputs
 - Goal: {{goal}}
 - Complexity grading so far: {{complexity}} (you may recommend a re-grade)
+- Calibration (recent actual÷estimate by band): {{calibration}}
 - Repo context: {{repo_context}}
 - Constraints from the user/orchestrator: {{constraints}}
 
@@ -19,8 +20,10 @@ section and is the contract every later agent works from.
    isolated work releasable on its own without breaking anything: no
    half-wired features, no dangling references, tests green at every PR
    boundary. A single-PR answer is fine when honest — say why.
-4. **Estimate** — token budget proposal per the policy bands, with one line
-   of justification.
+4. **Estimate** — token budget proposal per the policy bands, adjusted by the
+   calibration figures above. If a band is running hot or cold, cite it
+   ("S is running ×1.4 lately — estimating 180k, not 130k"). One line of
+   justification.
 5. **Trade-offs** — decisions you made and the alternatives you rejected,
    with why. These feed the card's `## Decisions`.
 
