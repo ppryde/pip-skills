@@ -557,6 +557,18 @@ class TestHookBackends:
         assert run(repo, "session-start-hook") == 0
         assert capsys.readouterr().out.strip() == ""
 
+    def test_session_start_injects_handoff_only_once(self, repo, capsys, monkeypatch):
+        from scripts import orchestrator as orch
+        orch.promote(repo)
+        orch.request_clear(repo, "ARCHIVE-ME")
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
+        assert run(repo, "session-start-hook") == 0
+        assert "ARCHIVE-ME" in capsys.readouterr().out
+        # second spin-up: handoff was archived on first inject, so nothing now
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "startup"})
+        assert run(repo, "session-start-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
 
 class TestKnowledgeFacts:
     def test_facts_lists_and_filters_by_tag(self, repo, capsys):

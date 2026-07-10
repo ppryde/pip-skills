@@ -63,6 +63,30 @@ class TestConsume:
         assert orch.clear_flag(tmp_path).exists()
 
 
+class TestConsumeHandoff:
+    def test_returns_text_and_archives(self, tmp_path):
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        orch.request_clear(tmp_path, "BRIEFING BODY")
+        assert orch.consume_handoff(tmp_path) == "BRIEFING BODY"
+        assert not orch.handoff_path(tmp_path).exists()          # live handoff gone
+        archived = list(orch.handoff_archive_dir(tmp_path).glob("handoff*.md"))
+        assert len(archived) == 1
+        assert archived[0].read_text() == "BRIEFING BODY"        # archived, not lost
+
+    def test_none_when_no_handoff(self, tmp_path):
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        assert orch.consume_handoff(tmp_path) is None
+
+    def test_injects_at_most_once(self, tmp_path):
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        orch.request_clear(tmp_path, "ONE SHOT")
+        assert orch.consume_handoff(tmp_path) == "ONE SHOT"
+        assert orch.consume_handoff(tmp_path) is None            # second launch: nothing
+
+
 class TestCooldown:
     def test_request_clear_refuses_during_cooldown(self, tmp_path):
         init_workflow(tmp_path)

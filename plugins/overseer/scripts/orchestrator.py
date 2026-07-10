@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from scripts.store import state_root
+from scripts.store import _uniquify, state_root
 
 COOLDOWN_TTL_SECONDS = 300
 
@@ -117,3 +117,34 @@ def read_handoff(repo_root: Path) -> str | None:
         return path.read_text()
     except OSError:
         return None
+
+
+def handoff_archive_dir(repo_root: Path) -> Path:
+    return orchestrator_dir(repo_root) / "archive"
+
+
+def consume_handoff(repo_root: Path) -> str | None:
+    """Read the pending handoff, then archive it so it injects at most once.
+
+    Returns the handoff text, or None if there is no pending handoff. Archiving
+    (move to <state_root>/orchestrator/archive/, uniquified) clears the
+    re-injection gate — the handoff file's presence IS that gate — so a later
+    unrelated launch will not re-inject a stale briefing. Quarantine-safe:
+    on any archive failure it still removes the live handoff so re-injection
+    cannot repeat, and never raises.
+    """
+    path = handoff_path(repo_root)
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    archive = handoff_archive_dir(repo_root)
+    archive.mkdir(parents=True, exist_ok=True)
+    target = _uniquify(archive / "handoff.md")
+    try:
+        path.rename(target)
+    except OSError:
+        path.unlink(missing_ok=True)  # best-effort: at least stop re-injection
+    return text

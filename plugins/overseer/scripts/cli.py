@@ -415,7 +415,7 @@ def cmd_stop_hook(args: argparse.Namespace) -> int:
 def cmd_session_start_hook(args: argparse.Namespace) -> int:
     root = _hook_root(args)
     if orch.is_active(root):
-        handoff = orch.read_handoff(root)
+        handoff = orch.consume_handoff(root)
         if handoff:
             payload = {
                 "hookSpecificOutput": {
