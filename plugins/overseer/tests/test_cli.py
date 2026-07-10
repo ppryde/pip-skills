@@ -513,6 +513,51 @@ class TestOrchestratorCommands:
         assert run(repo, "request-clear") == 0
 
 
+class TestHookBackends:
+    def _stdin(self, monkeypatch, payload):
+        import io
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    def test_stop_hook_dispatches_when_armed(self, repo, capsys, monkeypatch):
+        from scripts import orchestrator as orch
+        orch.promote(repo)
+        orch.request_clear(repo, "H")
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "stop-hook") == 0
+        assert "DISPATCH_CLEAR" in capsys.readouterr().out
+        assert not orch.clear_flag(repo).exists()
+
+    def test_stop_hook_silent_without_flag(self, repo, capsys, monkeypatch):
+        from scripts import orchestrator as orch
+        orch.promote(repo)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "stop-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_stop_hook_silent_on_bad_stdin(self, repo, capsys, monkeypatch):
+        import io
+        monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+        assert run(repo, "stop-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_session_start_injects_handoff(self, repo, capsys, monkeypatch):
+        from scripts import orchestrator as orch
+        orch.promote(repo)
+        orch.request_clear(repo, "HANDOFF PAYLOAD")
+        orch.consume_clear_flag(repo)  # cooldown set, as after an auto /clear
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
+        assert run(repo, "session-start-hook") == 0
+        out = capsys.readouterr().out
+        assert "HANDOFF PAYLOAD" in out
+        assert "additionalContext" in out
+        assert orch.cooldown_marker(repo).exists() is False  # re-armed
+
+    def test_session_start_silent_when_inactive(self, repo, capsys, monkeypatch):
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "startup"})
+        assert run(repo, "session-start-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+
 class TestKnowledgeFacts:
     def test_facts_lists_and_filters_by_tag(self, repo, capsys):
         run(repo, "add-fact", "--statement", "A", "--tags", "testing", "--source", "W1")

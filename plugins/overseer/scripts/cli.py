@@ -396,6 +396,38 @@ def cmd_request_clear(args: argparse.Namespace) -> int:
     return 1
 
 
+def _hook_root(args: argparse.Namespace) -> Path:
+    try:
+        payload = json.loads(sys.stdin.read())
+        cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    except (json.JSONDecodeError, OSError, ValueError):
+        cwd = None
+    return Path(cwd) if cwd else args.root
+
+
+def cmd_stop_hook(args: argparse.Namespace) -> int:
+    root = _hook_root(args)
+    if orch.consume_clear_flag(root):
+        print("DISPATCH_CLEAR")
+    return 0
+
+
+def cmd_session_start_hook(args: argparse.Namespace) -> int:
+    root = _hook_root(args)
+    if orch.is_active(root):
+        handoff = orch.read_handoff(root)
+        if handoff:
+            payload = {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": handoff,
+                }
+            }
+            print(json.dumps(payload))
+        orch.arm_ready(root)
+    return 0
+
+
 def cmd_log_usage(args: argparse.Namespace) -> int:
     entry = {
         "ts": _now(),
@@ -690,6 +722,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("request-clear")
     p.add_argument("--notes")
     p.set_defaults(func=cmd_request_clear)
+
+    sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)
+    sub.add_parser("session-start-hook").set_defaults(func=cmd_session_start_hook)
 
     return parser
 
