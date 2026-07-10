@@ -478,6 +478,41 @@ class TestConfigAndContext:
         assert "ctx" in capsys.readouterr().out
 
 
+class TestOrchestratorCommands:
+    def test_promote_reports_manual_without_tmux(self, repo, capsys, monkeypatch):
+        monkeypatch.delenv("TMUX", raising=False)
+        assert run(repo, "promote-orchestrator") == 0
+        out = capsys.readouterr().out
+        assert "manual" in out
+        from scripts import orchestrator as orch
+        assert orch.is_active(repo)
+
+    def test_promote_reports_auto_with_tmux(self, repo, capsys, monkeypatch):
+        monkeypatch.setenv("TMUX", "/tmp/tmux-501/default,123,0")
+        assert run(repo, "promote-orchestrator") == 0
+        assert "auto" in capsys.readouterr().out
+
+    def test_request_clear_refused_when_not_promoted(self, repo, capsys):
+        assert run(repo, "request-clear") == 1
+        assert "inactive" in capsys.readouterr().err
+
+    def test_request_clear_arms_after_promote(self, repo, capsys):
+        run(repo, "promote-orchestrator")
+        capsys.readouterr()
+        assert run(repo, "request-clear", "--notes", "preserve the auth spike") == 0
+        from scripts import orchestrator as orch
+        assert orch.clear_flag(repo).exists()
+        assert "preserve the auth spike" in orch.read_handoff(repo)
+
+    def test_pause_blocks_request_clear(self, repo, capsys):
+        run(repo, "promote-orchestrator")
+        assert run(repo, "context-guard", "pause") == 0
+        assert run(repo, "request-clear") == 1
+        assert "paused" in capsys.readouterr().err
+        assert run(repo, "context-guard", "resume") == 0
+        assert run(repo, "request-clear") == 0
+
+
 class TestKnowledgeFacts:
     def test_facts_lists_and_filters_by_tag(self, repo, capsys):
         run(repo, "add-fact", "--statement", "A", "--tags", "testing", "--source", "W1")

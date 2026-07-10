@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -354,6 +355,47 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_promote_orchestrator(args: argparse.Namespace) -> int:
+    orch.promote(args.root)
+    mode = str(load_config(args.root)["context.mode"])
+    auto = "auto" if os.environ.get("TMUX") else "manual"
+    hint = (
+        "Stop hook will send /clear unattended"
+        if auto == "auto"
+        else "no tmux — checkpoint and ask the user to type /clear"
+    )
+    print(f"orchestrator active ({auto}, {mode} run mode) — {hint}")
+    return 0
+
+
+def cmd_context_guard(args: argparse.Namespace) -> int:
+    if args.action == "pause":
+        orch.pause(args.root)
+        print("auto-handover paused")
+    else:
+        orch.resume(args.root)
+        print("auto-handover resumed")
+    return 0
+
+
+_REQUEST_CLEAR_REASON = {
+    "inactive": "inactive — not an active orchestrator (run promote-orchestrator first)",
+    "paused": "auto-handover is paused (context-guard resume to re-enable)",
+    "cooldown": "just cleared — cooldown active, nothing to do",
+}
+
+
+def cmd_request_clear(args: argparse.Namespace) -> int:
+    text = handoff_report(args.root, notes=args.notes)
+    result = orch.request_clear(args.root, text)
+    if result == "armed":
+        print("handover armed — will /clear at end of this turn (auto) "
+              "or on your /clear (manual)")
+        return 0
+    print(f"request-clear refused: {_REQUEST_CLEAR_REASON[result]}", file=sys.stderr)
+    return 1
+
+
 def cmd_log_usage(args: argparse.Namespace) -> int:
     entry = {
         "ts": _now(),
@@ -638,6 +680,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_config)
 
     sub.add_parser("context").set_defaults(func=cmd_context)
+
+    sub.add_parser("promote-orchestrator").set_defaults(func=cmd_promote_orchestrator)
+
+    p = sub.add_parser("context-guard")
+    p.add_argument("action", choices=["pause", "resume"])
+    p.set_defaults(func=cmd_context_guard)
+
+    p = sub.add_parser("request-clear")
+    p.add_argument("--notes")
+    p.set_defaults(func=cmd_request_clear)
 
     return parser
 
