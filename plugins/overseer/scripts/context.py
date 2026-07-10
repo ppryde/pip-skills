@@ -54,7 +54,10 @@ def context_tokens(transcript_path: Path) -> int | None:
             latest = usage
     if latest is None:
         return None
-    return sum(int(latest.get(field, 0) or 0) for field in _USAGE_FIELDS)
+    try:
+        return sum(int(latest.get(field, 0) or 0) for field in _USAGE_FIELDS)
+    except (ValueError, TypeError):
+        return None
 
 
 def context_percent(tokens: int, window: int = DEFAULT_WINDOW) -> int:

@@ -74,6 +74,13 @@ class TestContextTokens:
         )
         assert context_tokens(t) == 100
 
+    def test_none_when_usage_field_non_numeric(self, tmp_path):
+        t = tmp_path / "t.jsonl"
+        t.write_text(
+            '{"type":"assistant","message":{"usage":{"input_tokens":"abc"}}}\n'
+        )
+        assert context_tokens(t) is None
+
 
 class TestPercentAndLine:
     def test_percent(self):
