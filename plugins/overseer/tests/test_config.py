@@ -1,0 +1,53 @@
+import pytest
+
+from scripts.config import (
+    DEFAULTS,
+    ConfigError,
+    config_path,
+    get_config,
+    load_config,
+    set_config,
+)
+from scripts.store import init_workflow
+
+
+class TestDefaults:
+    def test_load_on_empty_repo_returns_defaults(self, tmp_path):
+        init_workflow(tmp_path)
+        assert load_config(tmp_path) == DEFAULTS
+
+    def test_get_falls_back_to_default(self, tmp_path):
+        init_workflow(tmp_path)
+        assert get_config(tmp_path, "context.threshold") == 35
+        assert get_config(tmp_path, "context.mode") == "local"
+
+
+class TestSetAndGet:
+    def test_set_threshold_coerces_int(self, tmp_path):
+        init_workflow(tmp_path)
+        assert set_config(tmp_path, "context.threshold", "40") == 40
+        assert get_config(tmp_path, "context.threshold") == 40
+        assert config_path(tmp_path).exists()
+
+    def test_set_mode_validates_choice(self, tmp_path):
+        init_workflow(tmp_path)
+        assert set_config(tmp_path, "context.mode", "remote") == "remote"
+        with pytest.raises(ConfigError):
+            set_config(tmp_path, "context.mode", "nonsense")
+
+    def test_unknown_key_rejected(self, tmp_path):
+        init_workflow(tmp_path)
+        with pytest.raises(ConfigError):
+            set_config(tmp_path, "context.bogus", "1")
+
+    def test_threshold_out_of_range_rejected(self, tmp_path):
+        init_workflow(tmp_path)
+        with pytest.raises(ConfigError):
+            set_config(tmp_path, "context.threshold", "150")
+
+
+class TestCorruptFile:
+    def test_corrupt_json_falls_back_to_defaults(self, tmp_path):
+        init_workflow(tmp_path)
+        config_path(tmp_path).write_text("{ not json")
+        assert load_config(tmp_path) == DEFAULTS
