@@ -169,6 +169,25 @@ machinery beyond what conversion already uses.
   `Stop` hook to return `exit 2` / `decision: "block"` ("don't stop, keep going").
   Our hook never does; it always `exit 0`. The `stop_hook_active` guard that
   blocking hooks need is irrelevant here because we never block.
+- **Fail-safe exit wrapper (defence in depth).** Every hook script — the `Stop`
+  hook especially — opens with a fail-safe so that *any* internal error (a missing
+  `tmux`, a bad session target, a parse failure, an unhandled exception) still
+  exits `0`. The correct exit code is guaranteed **structurally**, not just on the
+  happy path, so the hook can never accidentally surface a blocking `exit 2`:
+
+  ```bash
+  #!/usr/bin/env bash
+  # A non-zero exit from a Stop hook can block the model (exit 2 = keep going).
+  # trap fires on EVERY exit path — normal end, `set -e` trip, any command
+  # failure — and forces code 0 no matter what happened above it.
+  trap 'exit 0' EXIT
+  # ...dispatcher logic; side-effects (tmux send-keys) backgrounded and
+  #    individually tolerant (`... || true`) so nothing here can escape...
+  ```
+
+  The same wrapper is applied to the `SessionStart` hook for consistency (there a
+  bad exit is non-blocking, but a guaranteed-clean exit keeps behaviour uniform
+  and its `additionalContext` stdout is emitted before the trap fires).
 - **No re-fire.** The hook removes the `clear-requested` flag **before** sending
   `/clear`. A "just-cleared" cooldown (per root) prevents the freshly-reset,
   near-empty session from immediately re-flagging.
@@ -206,7 +225,10 @@ auto/manual modes. Keep the existing "no heroic high-context finishes" spirit.
   state transitions, and enriched `handoff_report`, following the existing
   `tests/` patterns and the worktree `.venv` gate (pytest/ruff/mypy).
 - Hook scripts: shell-level tests asserting the `Stop` hook always exits 0 and is
-  a no-op without a flag/marker, and that flag removal precedes dispatch.
+  a no-op without a flag/marker, that flag removal precedes dispatch, and that the
+  fail-safe wrapper holds — it still exits 0 under **induced internal failure**
+  (e.g. `tmux` absent from `PATH`, a non-existent session target, malformed hook
+  input on stdin).
 - A documented manual end-to-end check (the spike harness, generalised): promote
   → threshold → `/clear` → `SessionStart(clear)` re-inject, verified by markers.
 
