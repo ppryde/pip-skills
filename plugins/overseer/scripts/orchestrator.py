@@ -140,11 +140,18 @@ def consume_handoff(repo_root: Path) -> str | None:
         text = path.read_text()
     except OSError:
         return None
-    archive = handoff_archive_dir(repo_root)
-    archive.mkdir(parents=True, exist_ok=True)
-    target = _uniquify(archive / "handoff.md")
+    # The text is now in hand — from here we MUST return it, never raise
+    # (the docstring's contract). Archiving is best-effort; if it fails we
+    # still try to remove the live handoff so a stale briefing cannot re-inject,
+    # and even that removal is guarded.
     try:
+        archive = handoff_archive_dir(repo_root)
+        archive.mkdir(parents=True, exist_ok=True)
+        target = _uniquify(archive / "handoff.md")
         path.rename(target)
     except OSError:
-        path.unlink(missing_ok=True)  # best-effort: at least stop re-injection
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
     return text

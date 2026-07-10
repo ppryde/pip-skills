@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from scripts import orchestrator as orch
 from scripts.store import init_workflow
 
@@ -85,6 +87,46 @@ class TestConsumeHandoff:
         orch.request_clear(tmp_path, "ONE SHOT")
         assert orch.consume_handoff(tmp_path) == "ONE SHOT"
         assert orch.consume_handoff(tmp_path) is None            # second launch: nothing
+
+    def test_returns_text_when_archive_rename_fails(self, tmp_path, monkeypatch):
+        # Archiving may fail (rename raises); the text is already in hand, so the
+        # handoff must still be returned and the live file cleared (best-effort).
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        orch.request_clear(tmp_path, "SURVIVES RENAME")
+
+        def boom(*_a, **_k):
+            raise OSError("rename failed")
+
+        monkeypatch.setattr(Path, "rename", boom)
+        assert orch.consume_handoff(tmp_path) == "SURVIVES RENAME"   # no raise
+        assert not orch.handoff_path(tmp_path).exists()             # fallback unlink ran
+
+    def test_never_raises_when_rename_and_unlink_both_fail(self, tmp_path, monkeypatch):
+        # The residual the never-raise docstring must honour: BOTH the archive
+        # rename and the fallback unlink raise a non-FileNotFound OSError.
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        orch.request_clear(tmp_path, "STILL FINE")
+
+        def boom(*_a, **_k):
+            raise OSError("io failed")
+
+        monkeypatch.setattr(Path, "rename", boom)
+        monkeypatch.setattr(Path, "unlink", boom)
+        assert orch.consume_handoff(tmp_path) == "STILL FINE"       # never raises
+
+    def test_never_raises_when_archive_mkdir_fails(self, tmp_path, monkeypatch):
+        # mkdir of the archive dir can also fail; text already read → still returned.
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        orch.request_clear(tmp_path, "MKDIR BOOM")
+
+        def boom(*_a, **_k):
+            raise OSError("mkdir failed")
+
+        monkeypatch.setattr(Path, "mkdir", boom)
+        assert orch.consume_handoff(tmp_path) == "MKDIR BOOM"       # never raises
 
 
 class TestCooldown:
