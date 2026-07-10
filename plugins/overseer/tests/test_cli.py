@@ -447,6 +447,37 @@ class TestKnowledgeVerifyRetire:
         assert "error:" in capsys.readouterr().err
 
 
+class TestConfigAndContext:
+    def test_config_get_default(self, repo, capsys):
+        assert run(repo, "config", "get", "context.threshold") == 0
+        assert capsys.readouterr().out.strip() == "35"
+
+    def test_config_set_then_get(self, repo, capsys):
+        assert run(repo, "config", "set", "context.threshold", "42") == 0
+        capsys.readouterr()
+        run(repo, "config", "get", "context.threshold")
+        assert capsys.readouterr().out.strip() == "42"
+
+    def test_config_set_invalid_returns_1(self, repo, capsys):
+        assert run(repo, "config", "set", "context.mode", "bogus") == 1
+        assert "context.mode" in capsys.readouterr().err
+
+    def test_context_unknown_without_transcript(self, repo, capsys, monkeypatch):
+        # No transcript under a throwaway HOME → "ctx unknown"
+        monkeypatch.setenv("HOME", str(repo / "empty-home"))
+        assert run(repo, "context") == 0
+        assert "ctx unknown" in capsys.readouterr().out
+
+    def test_resume_footer_only_when_active(self, repo, capsys, monkeypatch):
+        monkeypatch.setenv("HOME", str(repo / "empty-home"))
+        run(repo, "resume")
+        assert "ctx" not in capsys.readouterr().out
+        from scripts import orchestrator as orch
+        orch.promote(repo)
+        run(repo, "resume")
+        assert "ctx" in capsys.readouterr().out
+
+
 class TestKnowledgeFacts:
     def test_facts_lists_and_filters_by_tag(self, repo, capsys):
         run(repo, "add-fact", "--statement", "A", "--tags", "testing", "--source", "W1")

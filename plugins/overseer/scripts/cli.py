@@ -10,6 +10,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -40,6 +41,9 @@ from scripts.store import (  # noqa: E402
     state_root,
 )
 from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
+from scripts import context as ctx  # noqa: E402
+from scripts import orchestrator as orch  # noqa: E402
+from scripts.config import ConfigError, get_config, load_config, set_config  # noqa: E402
 from scripts.knowledge import (  # noqa: E402
     Fact,
     FactParseError,
@@ -272,7 +276,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
     _, quarantined = load_live_cards(state_root(args.root))
     _report_quarantined(quarantined)
     entries = resume_entries(args.root)
-    print(json.dumps(entries, indent=2) if args.json else format_report(entries))
+    output = json.dumps(entries, indent=2) if args.json else format_report(entries)
+    if not args.json:
+        output += _context_footer(args.root)
+    print(output)
     return 0
 
 
@@ -300,7 +307,50 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(data, indent=2))
     else:
-        print(handoff_report(args.root, data))
+        print(handoff_report(args.root, data) + _context_footer(args.root))
+    return 0
+
+
+def _context_footer(repo_root: Path) -> str:
+    """`ctx NN%` line for commands the orchestrator reads at decision points.
+
+    Best-effort: silent empty string unless promoted and a transcript resolves.
+    """
+    try:
+        if not orch.is_active(repo_root):
+            return ""
+        cfg = load_config(repo_root)
+        transcript = ctx.find_transcript(repo_root.resolve(), Path.home())
+        tokens = ctx.context_tokens(transcript) if transcript else None
+        pct = (
+            ctx.context_percent(tokens, cast(int, cfg["context.window"]))
+            if tokens is not None
+            else None
+        )
+        return "\n" + ctx.context_line(pct, cast(int, cfg["context.threshold"]))
+    except Exception:  # noqa: BLE001 — a footer must never break its host command
+        return ""
+
+
+def cmd_config(args: argparse.Namespace) -> int:
+    if args.action == "get":
+        print(get_config(args.root, args.key))
+        return 0
+    set_config(args.root, args.key, args.value)
+    print(f"{args.key} = {get_config(args.root, args.key)}")
+    return 0
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    cfg = load_config(args.root)
+    transcript = ctx.find_transcript(args.root.resolve(), Path.home())
+    tokens = ctx.context_tokens(transcript) if transcript else None
+    pct = (
+        ctx.context_percent(tokens, cast(int, cfg["context.window"]))
+        if tokens is not None
+        else None
+    )
+    print(ctx.context_line(pct, cast(int, cfg["context.threshold"])))
     return 0
 
 
@@ -578,6 +628,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_facts)
 
+    p = sub.add_parser("config")
+    csub = p.add_subparsers(dest="action", required=True)
+    cget = csub.add_parser("get")
+    cget.add_argument("key")
+    cset = csub.add_parser("set")
+    cset.add_argument("key")
+    cset.add_argument("value")
+    p.set_defaults(func=cmd_config)
+
+    sub.add_parser("context").set_defaults(func=cmd_context)
+
     return parser
 
 
@@ -590,7 +651,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result: int = args.func(args)
         return result
-    except (CardParseError, FactParseError, FileNotFoundError) as exc:
+    except (CardParseError, FactParseError, FileNotFoundError, ConfigError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
