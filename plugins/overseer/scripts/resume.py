@@ -96,9 +96,13 @@ def handoff_data(repo_root: Path) -> dict:
     }
 
 
-def handoff_report(repo_root: Path, data: dict | None = None) -> str:
+def handoff_report(
+    repo_root: Path, data: dict | None = None, notes: str | None = None
+) -> str:
     data = data or handoff_data(repo_root)
     lines = [f"# Handoff briefing — {data['project']}", ""]
+    if notes and notes.strip():
+        lines += ["## Orchestrator notes", "", notes.strip(), ""]
     lines.append("## In flight")
     lines.append(format_report(data["in_flight"]) if data["in_flight"]
                  else "Nothing in flight — clean slate.")

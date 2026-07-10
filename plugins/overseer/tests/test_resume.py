@@ -97,6 +97,26 @@ class TestPrInResume:
         assert "PR: https://github.com/x/y/pull/9" in format_report(resume_entries(tmp_path))
 
 
+class TestEnrichedHandoff:
+    def test_notes_absent_by_default(self, tmp_path):
+        from scripts.resume import handoff_report
+        from scripts.store import init_workflow
+
+        init_workflow(tmp_path)
+        assert "## Orchestrator notes" not in handoff_report(tmp_path)
+
+    def test_notes_embedded_verbatim(self, tmp_path):
+        from scripts.resume import handoff_report
+        from scripts.store import init_workflow
+
+        init_workflow(tmp_path)
+        report = handoff_report(tmp_path, notes="Watch the flaky auth test on WF-002.")
+        assert "## Orchestrator notes" in report
+        assert "Watch the flaky auth test on WF-002." in report
+        # notes precede the in-flight rollup
+        assert report.index("## Orchestrator notes") < report.index("## In flight")
+
+
 class TestHandoff:
     def _populate(self, tmp_path):
         root = init_workflow(tmp_path)
