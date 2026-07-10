@@ -6,9 +6,12 @@ files and never raises on a missing path.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from scripts.store import state_root
+
+COOLDOWN_TTL_SECONDS = 300
 
 
 def orchestrator_dir(repo_root: Path) -> Path:
@@ -63,12 +66,26 @@ def resume(repo_root: Path) -> None:
     paused_flag(repo_root).unlink(missing_ok=True)
 
 
+def _cooldown_active(repo_root: Path) -> bool:
+    marker = cooldown_marker(repo_root)
+    if not marker.exists():
+        return False
+    try:
+        age = time.time() - marker.stat().st_mtime
+    except OSError:
+        return False
+    if age >= COOLDOWN_TTL_SECONDS:
+        marker.unlink(missing_ok=True)  # expired dispatch — self-heal, allow re-arm
+        return False
+    return True
+
+
 def request_clear(repo_root: Path, handoff_text: str) -> str:
     if not is_active(repo_root):
         return "inactive"
     if is_paused(repo_root):
         return "paused"
-    if cooldown_marker(repo_root).exists():
+    if _cooldown_active(repo_root):
         return "cooldown"
     _ensure(repo_root)
     handoff_path(repo_root).write_text(handoff_text)

@@ -8,7 +8,6 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 STOP = PLUGIN_ROOT / "hooks" / "stop.sh"
 SESSION_START = PLUGIN_ROOT / "hooks" / "session-start.sh"
-PYTHON = PLUGIN_ROOT.parent.parent / ".venv" / "bin" / "python"
 # Resolved once, up front: a test that clobbers $PATH (to simulate a missing
 # `tmux`) would otherwise also make the `bash` interpreter itself unresolvable
 # via list-form subprocess.run (which looks up the program name in env["PATH"]),

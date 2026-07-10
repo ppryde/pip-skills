@@ -79,3 +79,15 @@ class TestCooldown:
         orch.arm_ready(tmp_path)
         assert not orch.cooldown_marker(tmp_path).exists()
         assert orch.request_clear(tmp_path, "H3") == "armed"
+
+    def test_expired_cooldown_allows_rearm(self, tmp_path):
+        import os
+        init_workflow(tmp_path)
+        orch.promote(tmp_path)
+        orch.request_clear(tmp_path, "H")
+        orch.consume_clear_flag(tmp_path)  # sets cooldown
+        marker = orch.cooldown_marker(tmp_path)
+        old = marker.stat().st_mtime - (orch.COOLDOWN_TTL_SECONDS + 1)
+        os.utime(marker, (old, old))
+        assert orch.request_clear(tmp_path, "H2") == "armed"
+        assert not marker.exists()  # expired cooldown was cleared

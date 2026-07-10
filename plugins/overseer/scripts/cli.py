@@ -400,7 +400,7 @@ def _hook_root(args: argparse.Namespace) -> Path:
     try:
         payload = json.loads(sys.stdin.read())
         cwd = payload.get("cwd") if isinstance(payload, dict) else None
-    except (json.JSONDecodeError, OSError, ValueError):
+    except (ValueError, OSError):
         cwd = None
     return Path(cwd) if cwd else args.root
 
