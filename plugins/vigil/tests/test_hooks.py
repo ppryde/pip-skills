@@ -116,3 +116,20 @@ class TestSessionStartHook:
                       env, tmp_path)
         assert result.returncode == 0
         assert result.stdout.strip() == ""
+
+
+class TestPackaging:
+    def test_plugin_manifest_valid(self):
+        data = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())
+        assert data["name"] == "vigil"
+        assert data["version"] == "0.1.0"
+
+    def test_marketplace_lists_vigil(self):
+        mkt = PLUGIN_ROOT.parent.parent / ".claude-plugin" / "marketplace.json"
+        data = json.loads(mkt.read_text())
+        names = [p["name"] for p in data["plugins"]]
+        assert "vigil" in names
+
+    def test_skill_and_command_present(self):
+        assert (PLUGIN_ROOT / "skills" / "vigil" / "SKILL.md").exists()
+        assert (PLUGIN_ROOT / "commands" / "handover.md").exists()

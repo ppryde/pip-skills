@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -48,6 +48,13 @@
       "description": "Persistent work ledger plus card orchestration: delegated agents, adversarial review loops, budget tripwires and session handoff.",
       "category": "engineering",
       "tags": ["workflow", "ledger", "sprints", "orchestration", "task-tracking", "budgets", "resume", "agents", "review-loops"]
+    },
+    {
+      "name": "vigil",
+      "source": "./plugins/vigil",
+      "description": "Portable context handover: measure a session's context usage (ctx NN%) and reset in-process via /clear at points you choose, resuming from a re-injected handover. Works in any repo; ships fail-safe Stop/SessionStart hooks.",
+      "category": "engineering",
+      "tags": ["context", "handover", "session", "tmux", "portability", "hooks", "resume"]
     }
   ]
 }
