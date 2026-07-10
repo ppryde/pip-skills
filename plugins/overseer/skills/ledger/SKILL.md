@@ -1,12 +1,13 @@
 ---
 name: ledger
 description: >
-  Persistent per-repo work ledger: cards, stages, sprints, token budgets and
-  session resume. Use when starting a piece of tracked work, when the user asks
-  "what's in flight", "resume where we left off", "start a new card/task",
-  "log progress", or at the start of any session in a repo with an overseer
-  state directory (`.workflow/` or `scratch/workflow/`). Phase 1 of overseer
-  — state only; orchestration arrives later.
+  Persistent per-repo work ledger: cards, stages, sprints, token budgets, a
+  durable knowledge base of facts, and session resume/handoff. Use when starting
+  a piece of tracked work, when the user asks "what's in flight", "resume where
+  we left off", "start a new card/task", "log progress", to record or recall a
+  durable fact, or at the start of any session in a repo with an overseer state
+  directory (`.workflow/` or `scratch/workflow/`). The state layer beneath the
+  orchestrate skill; drive it through the overseer CLI, never by editing files.
 ---
 
 # Overseer Ledger

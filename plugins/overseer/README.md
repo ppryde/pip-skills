@@ -52,7 +52,15 @@ adversarial review loops, integrated with sprint planning and superpowers.
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,
   drift/budget/unresponsiveness watchdogs, and context-stewardship handoff;
-  injects knowledge base facts into templates via `{{knowledge}}`.
+  injects knowledge base facts into templates via `{{knowledge}}`. A lean
+  driver (`SKILL.md`) with detailed sub-playbooks in `references/` loaded only
+  when a stage needs them, to keep the orchestrator's context small.
+
+## Commands
+
+- **/handover** — manually trigger a context handover: write an enriched
+  handover and reset the orchestrator's context (or advise `/clear`), per the
+  context-stewardship protocol. The manual counterpart to the agent-driven reset.
 
 ## Development
 
