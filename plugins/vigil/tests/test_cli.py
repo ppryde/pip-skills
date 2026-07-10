@@ -82,6 +82,11 @@ class TestHandover:
         assert run(repo, "handover", "--notes", "x") == 1
         assert "vigil begin" in capsys.readouterr().err
 
+    def test_missing_content_file_refused(self, repo, capsys):
+        run(repo, "begin")
+        assert run(repo, "handover", "--no-snapshot", "--content-file", "/no/such/file") == 1
+        assert "content-file" in capsys.readouterr().err
+
 
 class TestHookBackends:
     def _stdin(self, monkeypatch, payload):

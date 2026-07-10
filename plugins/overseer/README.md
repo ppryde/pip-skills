@@ -45,8 +45,9 @@ adversarial review loops, integrated with sprint planning and superpowers.
 - **orchestrate** — drive a card end-to-end: delegated planning and
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,
-  drift/budget/unresponsiveness watchdogs, and context-stewardship handoff;
-  injects knowledge base facts into templates via `{{knowledge}}`. A lean
+  drift/budget/unresponsiveness watchdogs, and context-stewardship handoff via
+  the vigil plugin; injects knowledge base facts into templates via
+  `{{knowledge}}`. A lean
   driver (`SKILL.md`) with detailed sub-playbooks in `references/` loaded only
   when a stage needs them, to keep the orchestrator's context small.
 

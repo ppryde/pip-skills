@@ -74,7 +74,13 @@ def _assemble_handover(args: argparse.Namespace) -> str | None:
     if not args.no_snapshot:
         parts.append(snap.session_snapshot(args.root.resolve()))
     if args.content_file:
-        raw = sys.stdin.read() if args.content_file == "-" else Path(args.content_file).read_text()
+        if args.content_file == "-":
+            raw = sys.stdin.read()
+        else:
+            try:
+                raw = Path(args.content_file).read_text()
+            except OSError as exc:
+                raise ValueError(f"--content-file unreadable: {exc}") from exc
         if raw.strip():
             parts.append(raw.strip())
     if args.notes:
@@ -175,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
         return result
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"handover refused: {exc}", file=sys.stderr)
         return 1
 
 

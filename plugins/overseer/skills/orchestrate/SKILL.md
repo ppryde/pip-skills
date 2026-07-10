@@ -89,12 +89,15 @@ Full rationale: `references/telemetry.md`.
 
 ## Context stewardship
 Context handover is provided by the **`vigil`** plugin (a soft dependency). Begin
-the watch with `vigil begin`; check `vigil context` at stage boundaries; hand
-over by piping your ledger rollup into vigil (`handoff | vigil handover
---no-snapshot --content-file -`) when you are over threshold at a clean stop
-point, when a card completes, or on command. If `vigil` isn't installed, tell the
-user once that it enables `/clear` handover, and continue. Full protocol:
-`references/context-stewardship.md`. Manual trigger: the `/handover` command (vigil).
+the watch with `python plugins/vigil/scripts/cli.py --root . begin`; check
+`python plugins/vigil/scripts/cli.py --root . context` at stage boundaries; hand
+over by piping your ledger rollup into vigil (`python
+plugins/overseer/scripts/cli.py --root . handoff | python
+plugins/vigil/scripts/cli.py --root . handover --no-snapshot --content-file -`)
+when you are over threshold at a clean stop point, when a card completes, or on
+command. If `vigil` isn't installed, tell the user once that it enables
+`/clear` handover, and continue. Full protocol: `references/context-stewardship.md`.
+Manual trigger: the `/handover` command (vigil).
 
 ## Communication with the user
 Concise and factual, a dash of wit, no rambling. Lead with card id + stage.

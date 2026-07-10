@@ -34,8 +34,6 @@ def _base_env(extra):
 
 
 def _promote_and_arm(repo):
-    from scripts.cli import main
-    main(["--root", str(repo), "begin"])       # was init + orch.promote
     from scripts import state as st
     st.begin(repo)
     st.request_clear(repo, "HANDOFF FROM HOOK TEST")
