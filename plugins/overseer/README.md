@@ -5,6 +5,17 @@ per-repo ledger of cards, stages, sprints and token budgets that survives sessio
 crashes, plus orchestration that drives cards end-to-end with delegated agents and
 adversarial review loops, integrated with sprint planning and superpowers.
 
+## Requirements
+
+- **Python 3.11+** with PyYAML.
+- **tmux** — required for automatic in-process context handover (the orchestrator
+  resets its own context via `/clear` at points it chooses). tmux owns the pty,
+  injects the `/clear` keystroke, and tears down cleanly. Install with
+  `brew install tmux` (macOS) or your package manager. Without tmux the
+  orchestrator still runs, but context handover is **manual** (it checkpoints and
+  asks you to type `/clear`). Apple's bundled `screen` (v4.00.03) cannot drive
+  the modern TUI and is not supported.
+
 ## What it does
 
 - `.workflow/` or git-ignored `scratch/workflow/` directory holding one markdown card per unit of
@@ -24,6 +35,12 @@ adversarial review loops, integrated with sprint planning and superpowers.
   facts marked `[STALE]` after 90 days untouched; retirement to `retired/` (never deleted, supports
   `superseded_by` chains); corrupt facts quarantined to `knowledge/corrupt/`; `knowledge.md` index
   with active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
+- Agent-driven context stewardship (phase 5): a promoted orchestrator caps its
+  own context creep by resetting in-process via `/clear` at points it chooses,
+  resuming from a re-injected handover. Driven by a fail-safe `Stop` hook (auto,
+  under tmux) or the human (manual); configured per-repo via
+  `config set context.threshold|context.mode`; toggled with `context-guard
+  pause|resume`. See the phase-5 design spec.
 
 ## Skills
 
@@ -48,3 +65,4 @@ poetry run mypy scripts
 
 Design spec: `docs/superpowers/specs/2026-07-08-workflow-ledger-design.md`.
 Phase 2 design spec: `docs/superpowers/specs/2026-07-09-overseer-orchestration-design.md`.
+Phase 5 design spec: `docs/superpowers/specs/2026-07-10-overseer-context-limit-design.md`.
