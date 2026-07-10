@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -10,6 +11,7 @@ if __package__ in (None, ""):  # direct invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import context as ctx  # noqa: E402
+from scripts import snapshot as snap  # noqa: E402
 from scripts import state as st  # noqa: E402
 from scripts.config import (  # noqa: E402
     ConfigError,
@@ -67,6 +69,70 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def _assemble_handover(args: argparse.Namespace) -> str | None:
+    parts: list[str] = []
+    if not args.no_snapshot:
+        parts.append(snap.session_snapshot(args.root.resolve()))
+    if args.content_file:
+        raw = sys.stdin.read() if args.content_file == "-" else Path(args.content_file).read_text()
+        if raw.strip():
+            parts.append(raw.strip())
+    if args.notes:
+        parts.append(f"## Notes\n\n{args.notes.strip()}")
+    document = "\n\n".join(p.strip() for p in parts if p.strip())
+    return document or None
+
+
+def cmd_handover(args: argparse.Namespace) -> int:
+    document = _assemble_handover(args)
+    if document is None:
+        print("handover refused: nothing to hand over "
+              "(pass --notes/--content-file, or drop --no-snapshot)", file=sys.stderr)
+        return 1
+    result = st.request_clear(args.root, document)
+    if result == "armed":
+        print("handover armed — will /clear at end of this turn (auto) "
+              "or on your /clear (manual)")
+        return 0
+    reason = {
+        "inactive": "not watching here — run `vigil begin` first",
+        "paused": "auto-handover is paused (`vigil resume` to re-enable)",
+        "cooldown": "just cleared — cooldown active, nothing to do",
+    }[result]
+    print(f"handover refused: {reason}", file=sys.stderr)
+    return 1
+
+
+def _hook_root(args: argparse.Namespace) -> Path:
+    try:
+        payload = json.loads(sys.stdin.read())
+        cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    except (ValueError, OSError):
+        cwd = None
+    return Path(cwd) if cwd else args.root
+
+
+def cmd_stop_hook(args: argparse.Namespace) -> int:
+    if st.consume_clear_flag(_hook_root(args)):
+        print("DISPATCH_CLEAR")
+    return 0
+
+
+def cmd_session_start_hook(args: argparse.Namespace) -> int:
+    root = _hook_root(args)
+    if st.is_active(root):
+        handoff = st.consume_handoff(root)
+        if handoff:
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": handoff,
+                }
+            }))
+        st.arm_ready(root)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vigil", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -85,6 +151,15 @@ def build_parser() -> argparse.ArgumentParser:
     cset.add_argument("key")
     cset.add_argument("value")
     p.set_defaults(func=cmd_config)
+
+    p = sub.add_parser("handover")
+    p.add_argument("--notes")
+    p.add_argument("--content-file", dest="content_file")
+    p.add_argument("--no-snapshot", dest="no_snapshot", action="store_true")
+    p.set_defaults(func=cmd_handover)
+
+    sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)
+    sub.add_parser("session-start-hook").set_defaults(func=cmd_session_start_hook)
 
     return parser
 
