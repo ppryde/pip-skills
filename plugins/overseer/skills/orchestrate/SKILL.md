@@ -88,12 +88,13 @@ role `orchestrator`. Measurement only — it never feeds budgets or the tripwire
 Full rationale: `references/telemetry.md`.
 
 ## Context stewardship
-Reset your OWN context in place via `/clear` at points you choose, resuming from
-a re-injected handover — real and measured, not aspirational. Read the `ctx NN%`
-footer on `resume`/`handoff`; hand over when you are over threshold at a clean
-stop point, when a card completes, or on command — via `request-clear --notes
-"..."`. Full protocol (promote, auto vs manual, pause, defer):
-`references/context-stewardship.md`. Manual trigger: the `/handover` command.
+Context handover is provided by the **`vigil`** plugin (a soft dependency). Begin
+the watch with `vigil begin`; check `vigil context` at stage boundaries; hand
+over by piping your ledger rollup into vigil (`handoff | vigil handover
+--no-snapshot --content-file -`) when you are over threshold at a clean stop
+point, when a card completes, or on command. If `vigil` isn't installed, tell the
+user once that it enables `/clear` handover, and continue. Full protocol:
+`references/context-stewardship.md`. Manual trigger: the `/handover` command (vigil).
 
 ## Communication with the user
 Concise and factual, a dash of wit, no rambling. Lead with card id + stage.

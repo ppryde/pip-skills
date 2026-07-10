@@ -8,13 +8,9 @@ adversarial review loops, integrated with sprint planning and superpowers.
 ## Requirements
 
 - **Python 3.11+** with PyYAML.
-- **tmux** — required for automatic in-process context handover (the orchestrator
-  resets its own context via `/clear` at points it chooses). tmux owns the pty,
-  injects the `/clear` keystroke, and tears down cleanly. Install with
-  `brew install tmux` (macOS) or your package manager. Without tmux the
-  orchestrator still runs, but context handover is **manual** (it checkpoints and
-  asks you to type `/clear`). Apple's bundled `screen` (v4.00.03) cannot drive
-  the modern TUI and is not supported.
+- **Context handover** (optional) is provided by the separate **`vigil`** plugin
+  (which requires tmux for automatic `/clear`). Install it to enable in-session
+  context resets; overseer works without it.
 
 ## What it does
 
@@ -35,12 +31,10 @@ adversarial review loops, integrated with sprint planning and superpowers.
   facts marked `[STALE]` after 90 days untouched; retirement to `retired/` (never deleted, supports
   `superseded_by` chains); corrupt facts quarantined to `knowledge/corrupt/`; `knowledge.md` index
   with active/stale/retired sections; `{{knowledge}}` injection into orchestration templates.
-- Agent-driven context stewardship (phase 5): a promoted orchestrator caps its
-  own context creep by resetting in-process via `/clear` at points it chooses,
-  resuming from a re-injected handover. Driven by a fail-safe `Stop` hook (auto,
-  under tmux) or the human (manual); configured per-repo via
-  `config set context.threshold|context.mode`; toggled with `context-guard
-  pause|resume`. See the phase-5 design spec.
+- Context stewardship via the **`vigil`** plugin (a soft dependency): a promoted
+  orchestrator caps its own context creep by handing its ledger rollup to vigil,
+  which resets context in-process via `/clear` and re-injects the handover.
+  Install `vigil` to enable it; overseer nudges you if it's missing.
 
 ## Skills
 
@@ -58,9 +52,9 @@ adversarial review loops, integrated with sprint planning and superpowers.
 
 ## Commands
 
-- **/handover** — manually trigger a context handover: write an enriched
-  handover and reset the orchestrator's context (or advise `/clear`), per the
-  context-stewardship protocol. The manual counterpart to the agent-driven reset.
+- **/handover** (provided by the **`vigil`** plugin) — manually trigger a context
+  handover. Overseer's orchestrate composes vigil for the same reset while driving
+  a card.
 
 ## Development
 
