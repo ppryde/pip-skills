@@ -118,3 +118,19 @@ class TestSessionStartHook:
                       env, tmp_path)
         assert result.returncode == 0
         assert result.stdout.strip() == ""
+
+
+class TestManifest:
+    def test_plugin_version_bumped(self):
+        data = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())
+        assert data["version"] == "0.5.0"
+
+    def test_hooks_file_present_and_valid(self):
+        # The shipped hooks file must exist and parse (Claude Code auto-discovers it).
+        data = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())
+        assert set(data["hooks"]) == {"SessionStart", "Stop"}
+
+    def test_marketplace_version_bumped(self):
+        mkt = PLUGIN_ROOT.parent.parent / ".claude-plugin" / "marketplace.json"
+        data = json.loads(mkt.read_text())
+        assert data["version"] == "1.8.0"
