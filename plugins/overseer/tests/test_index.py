@@ -56,6 +56,49 @@ class TestGenerateIndex:
         assert "_Nothing in flight._" in out
 
 
+class TestEpicsAndParked:
+    def _gen(self, cards):
+        from scripts.index import generate_index
+        return generate_index("proj", cards, [], "2026-07-11T10:00")
+
+    def test_epic_section_with_rollup_and_children(self):
+        from tests.factories import make_card
+        cards = [
+            make_card("WF-010", status="in-flight", title="Auth"),
+            make_card("WF-011", parent="WF-010", status="done",
+                      budget_estimate=100_000, budget_actual=90_000),
+            make_card("WF-012", parent="WF-010", status="in-flight", stage="implementation",
+                      budget_estimate=300_000, budget_actual=120_000),
+        ]
+        out = self._gen(cards)
+        assert "## Epics" in out
+        assert "WF-010" in out and "1/2 done" in out          # rollup
+        assert "WF-011" in out and "WF-012" in out            # nested children
+
+    def test_children_not_in_status_sections(self):
+        from tests.factories import make_card
+        cards = [make_card("WF-010"), make_card("WF-011", parent="WF-010", status="in-flight")]
+        out = self._gen(cards)
+        # WF-011 appears under the epic, not as a standalone In-flight row
+        infl = out.split("## In flight")[1].split("##")[0]
+        assert "WF-011" not in infl
+
+    def test_readiness_shown(self):
+        from tests.factories import make_card
+        cards = [
+            make_card("WF-001", status="planned", depends_on=["WF-002"]),
+            make_card("WF-002", status="in-flight"),
+        ]
+        out = self._gen(cards)
+        assert "waiting on WF-002" in out
+
+    def test_parked_section(self):
+        from tests.factories import make_card
+        cards = [make_card("WF-005", status="parked", title="Legacy", updated="2026-07-09T10:00")]
+        out = self._gen(cards)
+        assert "## Parked" in out and "WF-005" in out and "shelved" in out
+
+
 class TestRebuildIndex:
     def test_writes_ledger_and_self_heals(self, tmp_path):
         root = init_workflow(tmp_path)
