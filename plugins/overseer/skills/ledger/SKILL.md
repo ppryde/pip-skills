@@ -46,6 +46,12 @@ python .../cli.py --root . resume
 1. `new-card --title "..." [--jira PROJ-142] [--complexity S|M|L] [--estimate 300k] [--goal "..."]`
    - Use the Jira key as the id when one exists; otherwise an id is minted.
    - Complexity bands for estimates: S ≈ 100–200k, M ≈ 300–500k, L ≈ 700k+.
+   - **Write a cold-pickup goal.** The goal must let a fresh session start cold —
+     name *what* changes, *why*, and *where* (when not obvious from the title).
+     If the user gave a goal, use it. If you have the context, draft a 1–3
+     sentence goal and **show it before saving** — never save `_(to be written)_`
+     or a vague goal silently. If you lack context, ask ≤3 questions (user-visible
+     outcome / area touched / constraints), then draft.
 2. `set-stage <id> bootstrap`, then: pull the repo's base branch (detect it, do not assume `main`), create a worktree and
    branch (branch name: `<type>/<id>-<slug>`), record them with
    `set-field <id> --branch ... --worktree ...`.
@@ -67,6 +73,9 @@ python .../cli.py --root . resume
 - **Decisions:** significant decisions and trade-offs go in the card's
   `## Decisions` section — append via Edit on the card file is the one
   exception to the no-direct-edits rule, since prose is not state.
+- **Amending a goal:** never silently rewrite a card's goal/description — confirm
+  the new wording with the user first. It is the one field edited by hand (the
+  prose exception), so it gets extra care.
 - **Index out of sync or corrupt cards suspected:** run `rebuild-index` —
   regenerates ledger.md from the card files (cards are the truth) and reports
   any quarantined cards.
