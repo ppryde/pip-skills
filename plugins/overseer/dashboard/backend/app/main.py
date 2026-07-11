@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.cli_client import CliError, _check_id, run_overseer, run_vigil
@@ -235,4 +237,26 @@ def create_app(root: Path) -> FastAPI:
 
         return _mutate(do)
 
+    _mount_frontend(app)
+
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """Serve the built frontend `dist/` if present; else a 200 placeholder.
+
+    Presence-checked BEFORE mounting — StaticFiles raises if the dir is
+    missing. API routes are registered above and always win over the
+    catch-all placeholder route.
+    """
+    # backend/app/main.py -> parents[0]=app [1]=backend [2]=dashboard
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="static")
+        return
+
+    placeholder = "Frontend not built — run `npm run build` in dashboard/frontend"
+
+    @app.get("/{full_path:path}")
+    def serve_placeholder(full_path: str) -> HTMLResponse:
+        return HTMLResponse(content=placeholder, status_code=200)
