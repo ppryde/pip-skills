@@ -69,6 +69,13 @@ export function locateDropTarget(
  * (before this drop is applied) — used only to find the dragged card's
  * source lane, so we can tell a pure reorder (same lane) apart from a
  * cross-lane move.
+ *
+ * `toIndex` is the target index in the FULL pre-drop `targetLane.cards` (the
+ * value `locateDropTarget` returns — the index of the card the drop landed
+ * on, or `cards.length` for a lane-background drop). It still INCLUDES the
+ * dragged card when the drop is a same-lane reorder, so we adjust for the
+ * dragged card's own removal before computing the neighbour midpoint (see
+ * the same-lane branch).
  */
 export function resolveDrop(
   dragged: BoardCard,
@@ -83,9 +90,26 @@ export function resolveDrop(
 
   if (sourceLane && sourceLane.key === targetLane.key) {
     // Pure reorder within the lane the card already lives in.
-    const order = orderForDrop(destCards, toIndex);
+    //
+    // `destCards` has the dragged card filtered out, but `toIndex` was
+    // measured against the full lane (which still contained it). On a
+    // FORWARD drag (dragged card originally sits BEFORE the drop target),
+    // removing it shifts every later index left by one — so we subtract one
+    // to keep forward and backward drags symmetric (without this the card
+    // lands one slot too far, e.g. [A,B,C] drag A onto C would land AFTER C
+    // instead of between B and C).
+    const sourceIdx = targetLane.cards.findIndex((c) => c.id === dragged.id);
+    const adjustedIndex =
+      sourceIdx !== -1 && sourceIdx < toIndex ? toIndex - 1 : toIndex;
+    const order = orderForDrop(destCards, adjustedIndex);
     return { calls: [{ kind: "setOrder", id: dragged.id, order }] };
   }
+
+  // Parked cards NEVER leave Parked via drag (binding rule: they reorder
+  // within Parked only — handled by the same-lane branch above — and leave
+  // via the /unpark menu in C6). Any cross-lane drop of a parked card is
+  // refused here before it can fire a move.
+  if (dragged.status === "parked") return NO_OP;
 
   switch (targetLane.kind) {
     case "stage": {
@@ -107,7 +131,6 @@ export function resolveDrop(
       // server-side, so this would just round-trip without changing anything.
       if (dragged.stage != null) return NO_OP;
       return { calls: [{ kind: "move", id: dragged.id, body: { status: "planned" } }] };
-    case "archive":
     default:
       // Archive is not a drag drop target (abandoned cards aren't dragged
       // into it by this UI — no documented flow drops a card there).

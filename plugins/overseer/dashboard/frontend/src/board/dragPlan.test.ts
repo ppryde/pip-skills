@@ -49,31 +49,47 @@ describe("isDragSource", () => {
 });
 
 describe("resolveDrop", () => {
-  it("(a) same-lane drop -> setOrder with the midpoint value", () => {
-    const a = card({ id: "WF-A", status: "planned", order: 10 });
-    const b = card({ id: "WF-B", status: "planned", order: 30 });
-    const lanes = groupIntoLanes([a, b]);
-    const backlog = laneByKey(lanes, "backlog"); // [A(10), B(30)]
-
-    // Drop A back into the backlog at index 1 (after B) -> midpoint of just B...
-    // dropping at the END (index 1 once A is excluded, since only B remains).
-    const plan = resolveDrop(a, backlog, 1, lanes);
-
-    expect(plan.calls).toEqual([
-      { kind: "setOrder", id: "WF-A", order: 40 }, // B.order(30) + 10
-    ]);
-  });
-
-  it("(a) same-lane interior midpoint reorder", () => {
+  it("(a) same-lane FORWARD drag (A onto C in [A,B,C]) lands A BETWEEN B and C — index derived via locateDropTarget, off-by-one guarded", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
     const lanes = groupIntoLanes([a, b, c]);
-    const backlog = laneByKey(lanes, "backlog"); // [A(10), B(20), C(30)]
 
-    // Drag C to land between A and B -> destCards excluding C = [A, B];
-    // toIndex 1 -> midpoint(A=10, B=20) = 15.
-    const plan = resolveDrop(c, backlog, 1, lanes);
+    // Derive toIndex the way Board.tsx does — from the card the drop landed
+    // on (C). Its full-lane index is 2; A sits BEFORE it (source index 0),
+    // so removing A shifts the target left by one -> destCards [B,C], index
+    // 1 -> midpoint(B=20, C=30) = 25 (between B and C), NOT after C.
+    const { lane, index } = locateDropTarget("WF-C", lanes);
+    const plan = resolveDrop(a, lane!, index, lanes);
+
+    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-A", order: 25 }]);
+  });
+
+  it("(a) same-lane BACKWARD drag (C onto A in [A,B,C]) lands C BEFORE A — index derived via locateDropTarget", () => {
+    const a = card({ id: "WF-A", status: "planned", order: 10 });
+    const b = card({ id: "WF-B", status: "planned", order: 20 });
+    const c = card({ id: "WF-C", status: "planned", order: 30 });
+    const lanes = groupIntoLanes([a, b, c]);
+
+    // C (source index 2) dropped onto A (full-lane index 0). Source is NOT
+    // before the target, so no shift -> destCards [A,B], index 0 -> before A
+    // = A.order(10) - 10 = 0.
+    const { lane, index } = locateDropTarget("WF-A", lanes);
+    const plan = resolveDrop(c, lane!, index, lanes);
+
+    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-C", order: 0 }]);
+  });
+
+  it("(a) same-lane interior reorder (drag C onto B) lands between A and B", () => {
+    const a = card({ id: "WF-A", status: "planned", order: 10 });
+    const b = card({ id: "WF-B", status: "planned", order: 20 });
+    const c = card({ id: "WF-C", status: "planned", order: 30 });
+    const lanes = groupIntoLanes([a, b, c]);
+
+    // C (source index 2) onto B (full-lane index 1). Source not before target
+    // -> destCards [A,B], index 1 -> midpoint(A=10, B=20) = 15.
+    const { lane, index } = locateDropTarget("WF-B", lanes);
+    const plan = resolveDrop(c, lane!, index, lanes);
 
     expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-C", order: 15 }]);
   });
@@ -126,16 +142,32 @@ describe("resolveDrop", () => {
     ]);
   });
 
-  it("(c) drop into Backlog (from Parked, unstaged) -> move({status:'planned'})", () => {
-    const parked = card({ id: "WF-PK", status: "parked" });
-    const lanes = groupIntoLanes([parked]);
-    const backlogLane = laneByKey(lanes, "backlog");
+  it("a parked card dragged CROSS-LANE is refused (NO_OP) — parked cards leave only via /unpark, never drag", () => {
+    // One parked card plus a decoy in each destination lane so the target
+    // lanes actually exist and are distinct from Parked.
+    const parked = card({ id: "WF-PK", status: "parked", order: 10 });
+    const stageOccupant = card({
+      id: "WF-STG",
+      status: "in-flight",
+      stage: "implementation",
+      order: 10,
+    });
+    const doneOccupant = card({ id: "WF-DN", status: "done", order: 10 });
+    const lanes = groupIntoLanes([parked, stageOccupant, doneOccupant]);
 
-    const plan = resolveDrop(parked, backlogLane, 0, lanes);
-
-    expect(plan.calls).toEqual([
-      { kind: "move", id: "WF-PK", body: { status: "planned" } },
-    ]);
+    // Backlog: previously (wrongly) fired move({status:'planned'}).
+    expect(
+      resolveDrop(parked, laneByKey(lanes, "backlog"), 0, lanes).calls
+    ).toEqual([]);
+    // Stage lane: previously (wrongly) fired move({stage}) + setOrder.
+    expect(
+      resolveDrop(parked, laneByKey(lanes, "stage:implementation"), 0, lanes)
+        .calls
+    ).toEqual([]);
+    // Done: previously (wrongly) fired move({status:'done'}).
+    expect(
+      resolveDrop(parked, laneByKey(lanes, "done"), 0, lanes).calls
+    ).toEqual([]);
   });
 
   it("(d) dropping a STAGED card into Backlog fires NO call (refused no-op)", () => {
@@ -166,15 +198,18 @@ describe("resolveDrop", () => {
     expect(plan.calls).toEqual([]);
   });
 
-  it("parked cards reorder WITHIN Parked via setOrder only (no move call)", () => {
+  it("parked cards STILL reorder WITHIN Parked via setOrder only (no move call)", () => {
     const p1 = card({ id: "WF-P1", status: "parked", order: 10 });
-    const p2 = card({ id: "WF-P2", status: "parked", order: 30 });
-    const lanes = groupIntoLanes([p1, p2]);
-    const parkedLane = laneByKey(lanes, "parked");
+    const p2 = card({ id: "WF-P2", status: "parked", order: 20 });
+    const p3 = card({ id: "WF-P3", status: "parked", order: 30 });
+    const lanes = groupIntoLanes([p1, p2, p3]);
 
-    const plan = resolveDrop(p1, parkedLane, 1, lanes);
+    // Backward drag P3 onto P1 within Parked -> destCards [P1,P2], index 0
+    // -> before P1 = P1.order(10) - 10 = 0. A setOrder, never a move.
+    const { lane, index } = locateDropTarget("WF-P1", lanes);
+    const plan = resolveDrop(p3, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-P1", order: 40 }]);
+    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-P3", order: 0 }]);
   });
 });
 
