@@ -34,7 +34,7 @@ python .../cli.py --root . resume
 ```
 
 - If cards are in flight, report them to the user and offer per card:
-  **resume / park as blocked / abandon**. Never silently start fresh.
+  **resume / park / block / abandon**. Never silently start fresh.
 - Resuming a card: read its file under the state root's `cards/`, re-enter at
   the recorded stage — never earlier, never assume later. If the report shows
   `(MISSING)` next to the worktree, recreate it from the recorded branch
@@ -61,8 +61,9 @@ python .../cli.py --root . resume
 - **Reviews:** after each review round:
   `log-review <id> --stage plan-review --reviewers 2 --verdict "approved"`.
   Verdicts are short and factual ("found wanting — 2 findings, 1 mortal").
-- **Blocked:** `block <id> --reason "user: <question>"` or
-  `--reason "card: WF-011"`. `unblock <id>` when cleared.
+- **Blocked:** `block <id> --reason "user: <question>"` for a human/agent
+  blocker; `unblock <id>` when cleared. For card→card ordering use `depends`
+  (see Relationships), not a `block` reason.
 - **Decisions:** significant decisions and trade-offs go in the card's
   `## Decisions` section — append via Edit on the card file is the one
   exception to the no-direct-edits rule, since prose is not state.
