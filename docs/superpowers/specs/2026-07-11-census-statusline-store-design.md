@@ -1,8 +1,8 @@
-# Beacon — Status-Line Session Store — Design Spec
+# Census — Status-Line Session Store — Design Spec
 
 **Date:** 2026-07-11
 **Status:** Approved design (pending spec review)
-**Supersedes framing of:** WF-007 (`vigil context/session measurement`) — the three issues WF-007 raised are resolved by consuming beacon rather than patching vigil's transcript guessing.
+**Supersedes framing of:** WF-007 (`vigil context/session measurement`) — the three issues WF-007 raised are resolved by consuming census rather than patching vigil's transcript guessing.
 
 ## Context
 
@@ -30,17 +30,19 @@ already renders these values and already stashes the *full* payload to a session
 `session_id`, with **no way to find "the payload for this worktree."** That missing worktree index is
 the whole gap.
 
-This project extracts a **standalone, reusable plugin — `beacon`** — that ingests the status-line
+This project extracts a **standalone, reusable plugin — `census`** — that ingests the status-line
 payload and persists it in a single worktree-indexed store, consumed by both agent-ui and the
 pip-skills tools (vigil, the overseer dashboard). One writer (the status line), many readers.
 
-The name: a **beacon** broadcasts a session's vitals so others can navigate by them.
+The name: a **census** is the recorded state of every soul, enumerated and indexed — the Book of
+Numbers counted the people tribe by tribe. This plugin enumerates every live session and sets down
+its vitals, indexed by worktree. It records; it does not broadcast.
 
 ### Not available from the status line (explicitly out of scope)
 
 - **Per-model limits** (e.g. a Fable-specific cap). `rate_limits` exposes exactly two windows —
   `five_hour` and `seven_day` — with no model dimension. A Fable/Opus availability cap is surfaced
-  only in the TUI footer, never in the payload. Beacon cannot persist what CC does not emit.
+  only in the TUI footer, never in the payload. Census cannot persist what CC does not emit.
 - **Ad-hoc / overage counters.** None exist beyond the two windows plus the fixed
   `exceeds_200k_tokens` boolean.
 
@@ -48,32 +50,32 @@ The name: a **beacon** broadcasts a session's vitals so others can navigate by t
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Ownership | A **new standalone plugin `beacon`**, not a vigil-internal fix | Reused by both agent-ui and pip-skills; single owner of status-line persistence |
-| Store shape | **One JSON file**, `~/.claude/beacon/status.json` | User's call; keeps the store trivially discoverable and greppable |
+| Ownership | A **new standalone plugin `census`**, not a vigil-internal fix | Reused by both agent-ui and pip-skills; single owner of status-line persistence |
+| Store shape | **One JSON file**, `~/.claude/census/status.json` | User's call; keeps the store trivially discoverable and greppable |
 | Top-level vs per-session | `limits` hoisted to top level; **full payload stored per session** | Rate limits are account-global (identical across sessions); context/token usage is per-session. "Pull it all" — store the whole payload verbatim so any future CC field is captured with no schema change |
 | Session key | Keyed by `session_id`, with resolved `worktree_cwd` as a field | `session_id` is unique (two sessions can share a worktree); a reader helper resolves the freshest entry **by worktree cwd** — the index the user asked for |
 | Concurrency | Read-modify-write under **`fcntl.flock`** in a Python ingest tool, atomic temp+mv | The status line fires per-turn in every session concurrently; a single shared file needs a lock. `fcntl.flock` works on macOS (shell `flock` does not) |
-| Injection | One guarded line piping `$input` into `beacon ingest` | Mirrors the existing agent-ui side-channel block; never blocks or breaks the render |
+| Injection | One guarded line piping `$input` into `census ingest` | Mirrors the existing agent-ui side-channel block; never blocks or breaks the render |
 | Stack | **Pure stdlib** Python, quarantine-safe | Matches vigil's ethos; ingest/merge/read unit-testable with no CC running |
-| Distribution | Lives in `plugins/beacon/`; agent-ui installs/vendors it | pip-skills is the canonical home; agent-ui consumes the same store file |
+| Distribution | Lives in `plugins/census/`; agent-ui installs/vendors it | pip-skills is the canonical home; agent-ui consumes the same store file |
 
-## 1. What beacon is
+## 1. What census is
 
-A standalone plugin with one job: **persist the Claude Code status-line payload to a single
+A standalone plugin with one job: **record the Claude Code status-line payload into a single
 worktree-indexed store, safely, on every turn — and let anything read it back.**
 
 Three surfaces:
 
-- `beacon ingest` — stdin → store (the writer; wired into the status line).
-- `beacon read` — store → stdout (the reader CLI).
-- `beacon.store` — importable module (the reader API for vigil / the dashboard).
+- `census ingest` — stdin → store (the writer; wired into the status line).
+- `census read` — store → stdout (the reader CLI).
+- `census.store` — importable module (the reader API for vigil / the dashboard).
 
 Everything is **quarantine-safe**: any read/parse/lock/write failure is swallowed and exits 0.
 A broken store can never break the status-line render or the CLI it piggybacks on.
 
 ## 2. The store
 
-Single file, `~/.claude/beacon/status.json` (override with `BEACON_STORE`):
+Single file, `~/.claude/census/status.json` (override with `CENSUS_STORE`):
 
 ```json
 {
@@ -114,10 +116,10 @@ The index key. Resolution order, first present wins:
 The raw value is normalised (`os.path.realpath`) so symlinked and trailing-slash variants collapse to
 one key.
 
-## 4. Ingest — `beacon ingest`
+## 4. Ingest — `census ingest`
 
 ```
-printf '%s' "$payload" | beacon ingest
+printf '%s' "$payload" | census ingest
 ```
 
 1. Read stdin; `json.loads`. On failure → exit 0 (write nothing).
@@ -138,14 +140,14 @@ printf '%s' "$payload" | beacon ingest
 
 Every step is guarded; the command's contract is "best-effort, never raises, always exits 0."
 
-## 5. Reader — `beacon read` / `beacon.store`
+## 5. Reader — `census read` / `census.store`
 
-- `beacon read --worktree <cwd>` → the freshest session entry whose `worktree_cwd` matches (by
+- `census read --worktree <cwd>` → the freshest session entry whose `worktree_cwd` matches (by
   normalised path), merged with top-level `limits`, as JSON. Missing → prints `{}`, exit 0.
-- `beacon read --session <id>` → that specific entry.
-- `beacon read --limits` → just the top-level `limits`.
-- Importable: `beacon.store.latest_for_worktree(cwd) -> dict | None`,
-  `beacon.store.limits() -> dict | None`. These are what vigil and the dashboard call.
+- `census read --session <id>` → that specific entry.
+- `census read --limits` → just the top-level `limits`.
+- Importable: `census.store.latest_for_worktree(cwd) -> dict | None`,
+  `census.store.limits() -> dict | None`. These are what vigil and the dashboard call.
 
 Readers apply a **staleness horizon**: an entry older than a configurable window (default 90s, ~1.5×
 the status line's 60s `refreshInterval`) is reported with a `stale: true` marker so a consumer can
@@ -153,33 +155,33 @@ show "ctx unknown (stale)" rather than a frozen number from a dead session.
 
 ## 6. Consumers
 
-- **vigil** — `cmd_context` reads `beacon.store.latest_for_worktree(root)` first; the token count and
+- **vigil** — `cmd_context` reads `census.store.latest_for_worktree(root)` first; the token count and
   percentage come from `context_window.used_percentage` + `context_window_size` (fixing the hardcoded
-  200k). The existing transcript-slug path remains as a **fallback** when beacon has no entry (beacon
+  200k). The existing transcript-slug path remains as a **fallback** when census has no entry (census
   not installed, or no status line configured), so vigil degrades to today's behaviour rather than
   regressing. This resolves WF-007 #1 and #2.
-- **overseer dashboard** — reads beacon per worktree to show live ctx%, model, PR status, and the
+- **overseer dashboard** — reads census per worktree to show live ctx%, model, PR status, and the
   shared 5h/7d limit gauges. Resolves WF-007 #3.
-- **agent-ui watcher** — points at the same `~/.claude/beacon/status.json` instead of the
+- **agent-ui watcher** — points at the same `~/.claude/census/status.json` instead of the
   session-keyed side-channel; gets worktree indexing for free.
 
 ## 7. Injection into the existing status line
 
 One guarded line added to `~/.claude/statusline-command.sh`, alongside the existing side-channel
-block (which may later be retired in favour of beacon):
+block (which may later be retired in favour of census):
 
 ```bash
-# --- beacon: persist this session's payload to the worktree-indexed store ---
-printf '%s' "$input" | beacon ingest 2>/dev/null || true
+# --- census: record this session's payload to the worktree-indexed store ---
+printf '%s' "$input" | census ingest 2>/dev/null || true
 ```
 
-`|| true` and `2>/dev/null` guarantee a missing/broken beacon can never fail the render. Beacon adds a
-one-line install/uninstall helper (`beacon install-statusline` / `--uninstall`) that idempotently adds
+`|| true` and `2>/dev/null` guarantee a missing/broken census can never fail the render. Census adds a
+one-line install/uninstall helper (`census install-statusline` / `--uninstall`) that idempotently adds
 or removes this block by a sentinel comment, so users don't hand-edit.
 
 ## 8. Bonus fields captured for free ("pull it all")
 
-Because the whole payload is stored, consumers get these with no further beacon work:
+Because the whole payload is stored, consumers get these with no further census work:
 
 | Field | Consumer use |
 |---|---|
@@ -194,11 +196,11 @@ Because the whole payload is stored, consumers get these with no further beacon 
 ## 9. Plugin layout
 
 ```
-plugins/beacon/
+plugins/census/
   .claude-plugin/plugin.json
   README.md
   pyproject.toml                 # pure stdlib; test/lint deps only
-  commands/                      # optional: /beacon-status inspector
+  commands/                      # optional: /census-status inspector
   scripts/
     __init__.py
     cli.py                       # ingest / read / install-statusline
@@ -222,6 +224,6 @@ marking, and the vigil-fallback path.
 ## 11. Out of scope
 
 - Any per-model or Fable-specific limit (not emitted by CC).
-- Rendering — beacon persists; the status line and dashboard render.
+- Rendering — census persists; the status line and dashboard render.
 - Rewriting the user's status-line script beyond adding the one guarded block.
 - Migrating/removing the existing agent-ui side-channel (left in place; can be retired later).
