@@ -11,8 +11,8 @@ export interface TopBarProps {
   refreshing: boolean;
 }
 
-function formatPct(value: number | undefined): string {
-  return value === undefined ? "—" : `${value}%`;
+function formatPct(value: number): string {
+  return `${value}%`;
 }
 
 /**

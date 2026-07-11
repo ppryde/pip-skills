@@ -1,6 +1,5 @@
 import type { BoardCard } from "../api/types";
-import BudgetMeter from "./BudgetMeter";
-import DependencyBadge from "./DependencyBadge";
+import TileShell from "./TileShell";
 
 export interface CardTileProps {
   card: BoardCard;
@@ -9,49 +8,11 @@ export interface CardTileProps {
 }
 
 /**
- * Read-only tile. The `.card-tile__handle` element is a placeholder for the
- * drag handle Chunk 4 wires up (@dnd-kit) — no handlers here. Tile body
- * click-to-open-drawer is Chunk 5's concern.
+ * Read-only tile — pure composition of the shared `TileShell` chrome (drag
+ * handle, header, footer). No epic-specific extras.
  */
 function CardTile({ card, dimmed = false, highlighted = false }: CardTileProps) {
-  const className = [
-    "card-tile",
-    card.status === "blocked" ? "card-tile--blocked" : "",
-    dimmed ? "card-tile--dimmed" : "",
-    highlighted ? "card-tile--highlighted" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    <div className={className} data-card-id={card.id}>
-      <div
-        className="card-tile__handle"
-        aria-hidden="true"
-        title="Drag handle (wired in a later chunk)"
-      >
-        ⠿
-      </div>
-      <div className="card-tile__body">
-        <div className="card-tile__header">
-          <span className="card-tile__id">{card.id}</span>
-          {card.priority && (
-            <span className={`priority-chip priority-chip--${card.priority}`}>
-              {card.priority}
-            </span>
-          )}
-          {card.status === "blocked" && (
-            <span className="badge badge--blocked">BLOCKED</span>
-          )}
-        </div>
-        <div className="card-tile__title">{card.title}</div>
-        <div className="card-tile__footer">
-          <BudgetMeter budget={card.budget} />
-          <DependencyBadge card={card} />
-        </div>
-      </div>
-    </div>
-  );
+  return <TileShell card={card} dimmed={dimmed} highlighted={highlighted} />;
 }
 
 export default CardTile;

@@ -75,14 +75,22 @@ export function useBoard(): UseBoardResult {
       setInFlight(true);
       try {
         const res = await fn();
-        if (id !== requestIdRef.current) return; // stale/out-of-order — drop it
-        applyResponse(res);
-        setError(null);
+        // Apply only if still the latest issued request (drop stale/out-of-order).
+        if (id === requestIdRef.current) {
+          applyResponse(res);
+          setError(null);
+        }
       } catch (e) {
-        if (id !== requestIdRef.current) return;
-        setError(e instanceof Error ? e.message : String(e));
+        if (id === requestIdRef.current) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
       } finally {
-        if (id === requestIdRef.current) setInFlight(false);
+        // Clear the lock UNCONDITIONALLY. `requestIdRef` is shared with
+        // load()/refresh(), which bump it without touching `inFlight`; gating
+        // the clear on `id === requestIdRef.current` would strand the lock
+        // (and disable drags forever) whenever a refresh races an in-flight
+        // mutation. Staleness only governs whether we APPLY the response.
+        setInFlight(false);
       }
     },
     [applyResponse]
