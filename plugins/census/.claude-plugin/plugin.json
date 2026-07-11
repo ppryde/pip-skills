@@ -1,0 +1,10 @@
+{
+  "name": "census",
+  "version": "0.1.0",
+  "description": "Records the Claude Code status-line payload into a single worktree-indexed store, so any tool can read a session's live context %, model, PR status, and 5h/7d rate-limit usage. One writer (the status line), many readers. Pure stdlib, quarantine-safe.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": ["statusline", "context", "rate-limits", "worktree", "session", "telemetry"]
+}
