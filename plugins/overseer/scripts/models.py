@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-STATUSES = {"planned", "in-flight", "blocked", "done", "abandoned"}
+STATUSES = {"planned", "in-flight", "blocked", "parked", "done", "abandoned"}
 STAGES = [
     "bootstrap",
     "planning",
@@ -92,10 +92,12 @@ class Card:
     jira: str | None = None
     linear: str | None = None
     sprint: str | None = None
+    parent: str | None = None
     branch: str | None = None
     worktree: str | None = None
     pr: str | None = None
     touches: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
     budget_estimate: int | None = None
     budget_actual: int = 0
     created: str = ""
@@ -125,6 +127,13 @@ class Card:
             touches = [str(touches_raw)]
         else:
             touches = []
+        depends_raw = meta.get("depends_on")
+        if isinstance(depends_raw, list):
+            depends_on = [str(d) for d in depends_raw]
+        elif depends_raw:
+            depends_on = [str(depends_raw)]
+        else:
+            depends_on = []
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
@@ -134,10 +143,12 @@ class Card:
             jira=meta.get("jira"),
             linear=meta.get("linear"),
             sprint=meta.get("sprint"),
+            parent=meta.get("parent"),
             branch=meta.get("branch"),
             worktree=meta.get("worktree"),
             pr=meta.get("pr"),
             touches=touches,
+            depends_on=depends_on,
             budget_estimate=parse_tokens(budget.get("estimate")),
             budget_actual=parse_tokens(budget.get("actual")) or 0,
             created=str(meta.get("created", "")),
@@ -156,10 +167,12 @@ class Card:
             "stage": self.stage,
             "complexity": self.complexity,
             "sprint": self.sprint,
+            "parent": self.parent,
             "branch": self.branch,
             "worktree": self.worktree,
             "pr": self.pr,
             "touches": self.touches or None,
+            "depends_on": self.depends_on or None,
             "budget": {
                 "estimate": format_tokens(self.budget_estimate),
                 "actual": format_tokens(self.budget_actual),
@@ -187,6 +200,14 @@ class Card:
     def unblock(self, now: str) -> None:
         self.status = "in-flight" if self.stage else "planned"
         self.blocked_on = None
+        self.updated = now
+
+    def park(self, now: str) -> None:
+        self.status = "parked"
+        self.updated = now
+
+    def unpark(self, now: str) -> None:
+        self.status = "in-flight" if self.stage else "planned"
         self.updated = now
 
     def complete(self, now: str) -> None:

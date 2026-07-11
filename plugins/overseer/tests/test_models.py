@@ -288,3 +288,67 @@ class TestTouches:
             "touches: src/a.py\n---\n\n## Goal\nx\n"
         )
         assert Card.from_text(text).touches == ["src/a.py"]
+
+
+class TestRelationsFields:
+    def _card_text(self, extra=""):
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{extra}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_parent_and_depends_parsed(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("parent: WF-010\ndepends_on:\n- WF-002\n- WF-003\n"))
+        assert c.parent == "WF-010"
+        assert c.depends_on == ["WF-002", "WF-003"]
+
+    def test_depends_scalar_coerced_to_list(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("depends_on: WF-002\n"))
+        assert c.depends_on == ["WF-002"]
+
+    def test_defaults_when_absent(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text())
+        assert c.parent is None and c.depends_on == []
+
+    def test_round_trip_preserves_relations(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("parent: WF-010\ndepends_on:\n- WF-002\n"))
+        c2 = Card.from_text(c.to_text())
+        assert c2.parent == "WF-010" and c2.depends_on == ["WF-002"]
+
+    def test_parked_status_accepted(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text().replace("status: planned", "status: parked"))
+        assert c.status == "parked"
+
+
+class TestParkUnpark:
+    def _card(self, **kw):
+        from scripts.models import Card
+        base = dict(id="WF-001", title="T", status="in-flight", stage="implementation")
+        base.update(kw)
+        return Card(**base)  # type: ignore[arg-type]
+
+    def test_park_sets_status_preserves_stage(self):
+        c = self._card(branch="feat/x", worktree="wt/WF-001")
+        c.park("2026-07-11T10:00")
+        assert c.status == "parked"
+        assert c.stage == "implementation" and c.branch == "feat/x" and c.worktree == "wt/WF-001"
+        assert c.updated == "2026-07-11T10:00"
+
+    def test_unpark_with_stage_returns_in_flight(self):
+        c = self._card(status="parked")
+        c.unpark("2026-07-11T11:00")
+        assert c.status == "in-flight"
+
+    def test_unpark_without_stage_returns_planned(self):
+        c = self._card(status="parked", stage=None)
+        c.unpark("2026-07-11T11:00")
+        assert c.status == "planned"
