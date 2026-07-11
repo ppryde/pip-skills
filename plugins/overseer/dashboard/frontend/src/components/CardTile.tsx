@@ -5,14 +5,27 @@ export interface CardTileProps {
   card: BoardCard;
   dimmed?: boolean;
   highlighted?: boolean;
+  dragDisabled?: boolean;
 }
 
 /**
- * Read-only tile — pure composition of the shared `TileShell` chrome (drag
- * handle, header, footer). No epic-specific extras.
+ * Pure composition of the shared `TileShell` chrome (drag handle, header,
+ * footer). No epic-specific extras.
  */
-function CardTile({ card, dimmed = false, highlighted = false }: CardTileProps) {
-  return <TileShell card={card} dimmed={dimmed} highlighted={highlighted} />;
+function CardTile({
+  card,
+  dimmed = false,
+  highlighted = false,
+  dragDisabled = false,
+}: CardTileProps) {
+  return (
+    <TileShell
+      card={card}
+      dimmed={dimmed}
+      highlighted={highlighted}
+      dragDisabled={dragDisabled}
+    />
+  );
 }
 
 export default CardTile;

@@ -139,6 +139,31 @@ body {
   min-width: max-content;
 }
 
+/* Drag drop-mismatch toast (see Board.tsx's reconciliation after a drop). */
+.board-toast {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: #7a2e2e;
+  color: #ffd9d9;
+  font-size: 0.8rem;
+}
+
+.board-toast__dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
 .lane {
   flex: 0 0 260px;
   display: flex;
@@ -234,7 +259,16 @@ body {
   color: #9ca3af;
   cursor: grab;
   user-select: none;
-  padding-top: 0.1rem;
+  padding: 0.1rem 0.2rem 0 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  touch-action: none;
+}
+
+.card-tile__handle:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .card-tile__body {

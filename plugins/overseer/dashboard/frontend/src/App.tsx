@@ -4,7 +4,8 @@ import Board from "./components/Board";
 import { useBoard } from "./board/useBoard";
 
 function App() {
-  const { board, context, limits, loading, error, refresh } = useBoard();
+  const { board, context, limits, loading, error, inFlight, mutate, refresh } =
+    useBoard();
   const [showArchive, setShowArchive] = useState(false);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
@@ -30,7 +31,14 @@ function App() {
           <p className="board-placeholder">Loading board…</p>
         )}
         {error && <p className="board-error">{error}</p>}
-        {board && <Board board={board} showArchive={showArchive} />}
+        {board && (
+          <Board
+            board={board}
+            showArchive={showArchive}
+            mutate={mutate}
+            inFlight={inFlight}
+          />
+        )}
       </main>
     </div>
   );

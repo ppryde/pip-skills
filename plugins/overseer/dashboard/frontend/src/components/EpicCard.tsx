@@ -7,6 +7,7 @@ export interface EpicCardProps {
   onToggleExpand: (id: string) => void;
   dimmed?: boolean;
   highlighted?: boolean;
+  dragDisabled?: boolean;
 }
 
 /**
@@ -23,6 +24,7 @@ function EpicCard({
   onToggleExpand,
   dimmed = false,
   highlighted = false,
+  dragDisabled = false,
 }: EpicCardProps) {
   const rollup = card.rollup;
 
@@ -32,6 +34,7 @@ function EpicCard({
       variantClassName="epic-card"
       dimmed={dimmed}
       highlighted={highlighted}
+      dragDisabled={dragDisabled}
       headerExtra={
         <button
           type="button"
