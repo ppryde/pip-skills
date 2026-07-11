@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from scripts.models import Card, format_tokens
+from scripts.relations import is_ready
 from scripts.store import load_live_cards, state_root
 
 
@@ -22,7 +23,7 @@ def _branch_exists(repo_root: Path, branch: str | None) -> bool:
     return result.returncode == 0
 
 
-def _entry(repo_root: Path, card: Card) -> dict:
+def _entry(repo_root: Path, card: Card, cards: list[Card]) -> dict:
     worktree_exists = card.worktree is not None and (repo_root / card.worktree).is_dir()
     branch_exists = _branch_exists(repo_root, card.branch)
     round_no = (
@@ -45,13 +46,16 @@ def _entry(repo_root: Path, card: Card) -> dict:
         "worktree_exists": worktree_exists,
         "blocked_on": card.blocked_on,
         "budget": f"{actual}/{estimate}",
+        "parent": card.parent,
+        "depends_on": card.depends_on,
+        "ready": is_ready(card, cards),
     }
 
 
 def resume_entries(repo_root: Path) -> list[dict]:
     cards, _ = load_live_cards(state_root(repo_root))
     return [
-        _entry(repo_root, c) for c in cards if c.status in ("in-flight", "blocked")
+        _entry(repo_root, c, cards) for c in cards if c.status in ("in-flight", "blocked")
     ]
 
 
@@ -71,6 +75,10 @@ def format_report(entries: list[dict]) -> str:
             line += " (branch MISSING)"
         if e["pr"]:
             line += f" | PR: {e['pr']}"
+        if e.get("depends_on"):
+            line += " | ready" if e.get("ready") else " | waiting on " + ", ".join(
+                d for d in e["depends_on"]
+            )
         lines.append(line)
     return "\n".join(lines)
 
@@ -79,7 +87,7 @@ def handoff_data(repo_root: Path) -> dict:
     """Everything a fresh session needs, derived in one scan."""
     root = state_root(repo_root)
     cards, quarantined = load_live_cards(root)
-    entries = [_entry(repo_root, c) for c in cards
+    entries = [_entry(repo_root, c, cards) for c in cards
                if c.status in ("in-flight", "blocked")]
     live_branches: dict[str, list[str]] = {}
     for c in cards:
@@ -93,6 +101,7 @@ def handoff_data(repo_root: Path) -> dict:
                     for c in cards if c.status == "planned"],
         "stacks": {b: ids for b, ids in live_branches.items() if len(ids) > 1},
         "quarantined": [str(p) for p in quarantined],
+        "parked": [{"id": c.id, "title": c.title} for c in cards if c.status == "parked"],
     }
 
 
@@ -114,6 +123,9 @@ def handoff_report(
                   for p in data["planned"]]
     else:
         lines.append("_Backlog empty._")
+    if data.get("parked"):
+        lines += ["", "## Parked"]
+        lines += [f"- {p['id']} — {p['title']} (shelved)" for p in data["parked"]]
     if data["stacks"]:
         lines += ["", "## Stacks"]
         lines += [f"- {branch}: {', '.join(ids)}"

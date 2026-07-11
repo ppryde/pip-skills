@@ -108,6 +108,38 @@ class TestEnrichedHandoff:
         assert report.index("## Orchestrator notes") < report.index("## In flight")
 
 
+class TestResumeRelations:
+    def test_entry_carries_relations_and_readiness(self, tmp_path):
+        from scripts.store import init_workflow, save_card
+        from scripts.resume import resume_entries
+        from tests.factories import make_card
+        root = init_workflow(tmp_path)
+        save_card(root, make_card("WF-002", status="in-flight"))
+        save_card(root, make_card("WF-001", status="in-flight",
+                                  parent="WF-000", depends_on=["WF-002"]))
+        entry = next(e for e in resume_entries(tmp_path) if e["id"] == "WF-001")
+        assert entry["parent"] == "WF-000"
+        assert entry["depends_on"] == ["WF-002"]
+        assert entry["ready"] is False  # WF-002 not done
+
+    def test_report_shows_waiting(self, tmp_path):
+        from scripts.store import init_workflow, save_card
+        from scripts.resume import resume_entries, format_report
+        from tests.factories import make_card
+        root = init_workflow(tmp_path)
+        save_card(root, make_card("WF-002", status="in-flight"))
+        save_card(root, make_card("WF-001", status="in-flight", depends_on=["WF-002"]))
+        assert "waiting on WF-002" in format_report(resume_entries(tmp_path))
+
+    def test_handoff_has_parked_section(self, tmp_path):
+        from scripts.store import init_workflow, save_card
+        from scripts.resume import handoff_report
+        from tests.factories import make_card
+        root = init_workflow(tmp_path)
+        save_card(root, make_card("WF-005", status="parked", title="Legacy"))
+        assert "## Parked" in handoff_report(tmp_path) and "WF-005" in handoff_report(tmp_path)
+
+
 class TestHandoff:
     def _populate(self, tmp_path):
         root = init_workflow(tmp_path)
