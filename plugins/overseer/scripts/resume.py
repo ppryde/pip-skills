@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.models import Card, format_tokens
 from scripts.relations import is_ready
-from scripts.store import load_live_cards, state_root
+from scripts.store import load_archived_cards, load_live_cards, state_root
 
 
 def _branch_exists(repo_root: Path, branch: str | None) -> bool:
@@ -54,8 +54,9 @@ def _entry(repo_root: Path, card: Card, cards: list[Card]) -> dict:
 
 def resume_entries(repo_root: Path) -> list[dict]:
     cards, _ = load_live_cards(state_root(repo_root))
+    pool = cards + load_archived_cards(state_root(repo_root))
     return [
-        _entry(repo_root, c, cards) for c in cards if c.status in ("in-flight", "blocked")
+        _entry(repo_root, c, pool) for c in cards if c.status in ("in-flight", "blocked")
     ]
 
 
@@ -77,7 +78,7 @@ def format_report(entries: list[dict]) -> str:
             line += f" | PR: {e['pr']}"
         if e.get("depends_on"):
             line += " | ready" if e.get("ready") else " | waiting on " + ", ".join(
-                d for d in e["depends_on"]
+                e["depends_on"]
             )
         lines.append(line)
     return "\n".join(lines)
@@ -87,7 +88,9 @@ def handoff_data(repo_root: Path) -> dict:
     """Everything a fresh session needs, derived in one scan."""
     root = state_root(repo_root)
     cards, quarantined = load_live_cards(root)
-    entries = [_entry(repo_root, c, cards) for c in cards
+    archived = load_archived_cards(root)
+    pool = cards + archived
+    entries = [_entry(repo_root, c, pool) for c in cards
                if c.status in ("in-flight", "blocked")]
     live_branches: dict[str, list[str]] = {}
     for c in cards:

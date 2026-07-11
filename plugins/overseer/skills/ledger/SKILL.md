@@ -81,7 +81,8 @@ python .../cli.py --root . resume
   every `depends_on` card is `done`; the index/resume show `ready` or
   `waiting on <id>`. Use `depends`, not `blocked_on`, for card ordering —
   `blocked_on` is for human/agent blocks only (`user:`/`agent:`). Cycles are
-  refused.
+  refused. `depends --on` targets must be live cards — you can't add a
+  dependency on an already-done (archived) card.
 - **Park to shelve.** `park <id>` sets a card aside without a blocker (distinct
   from `block`, which needs a reason, and `abandon`, which is terminal). It
   preserves stage/branch/worktree; `unpark <id>` resumes it (→ in-flight if it

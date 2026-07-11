@@ -574,3 +574,22 @@ class TestRelationsCommands:
         assert run(repo, "unpark", "WF-001") == 0
         c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
         assert c.status == "planned"
+
+
+class TestRelationsArchivedRollup:
+    def test_done_child_counts_in_rollup_and_readiness(self, repo):
+        run(repo, "new-card", "--title", "Epic")     # WF-001
+        run(repo, "new-card", "--title", "ChildA")    # WF-002
+        run(repo, "new-card", "--title", "ChildB")    # WF-003
+        run(repo, "set-field", "WF-002", "--parent", "WF-001")
+        run(repo, "set-field", "WF-003", "--parent", "WF-001")
+        run(repo, "depends", "WF-003", "--on", "WF-002")
+        # before: WF-003 waits on WF-002
+        from scripts.store import workflow_root
+        ledger = (workflow_root(repo) / "ledger.md").read_text()
+        assert "waiting on WF-002" in ledger
+        # complete WF-002 → archived out of live set
+        assert run(repo, "done", "WF-002") == 0
+        ledger = (workflow_root(repo) / "ledger.md").read_text()
+        assert "1/2 done" in ledger              # rollup counts the archived done child
+        assert "WF-003" in ledger and "waiting on WF-002" not in ledger  # dep satisfied → ready

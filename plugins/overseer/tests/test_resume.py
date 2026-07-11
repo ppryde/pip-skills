@@ -139,6 +139,16 @@ class TestResumeRelations:
         save_card(root, make_card("WF-005", status="parked", title="Legacy"))
         assert "## Parked" in handoff_report(tmp_path) and "WF-005" in handoff_report(tmp_path)
 
+    def test_ready_when_dep_is_archived_done(self, tmp_path):
+        from scripts.store import archive_card, init_workflow, save_card
+        from scripts.resume import resume_entries
+        from tests.factories import make_card
+        root = init_workflow(tmp_path)
+        archive_card(root, make_card("WF-002", status="done"))
+        save_card(root, make_card("WF-001", status="in-flight", depends_on=["WF-002"]))
+        entry = next(e for e in resume_entries(tmp_path) if e["id"] == "WF-001")
+        assert entry["ready"] is True
+
 
 class TestHandoff:
     def _populate(self, tmp_path):

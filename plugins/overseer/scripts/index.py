@@ -54,10 +54,15 @@ def _in_flight_row(card: Card, cards: list[Card]) -> str:
 
 
 def generate_index(
-    project: str, cards: list[Card], recently_done: list[Card], now: str
+    project: str,
+    cards: list[Card],
+    recently_done: list[Card],
+    now: str,
+    pool: list[Card] | None = None,
 ) -> str:
-    epics = sorted((c for c in cards if is_epic(cards, c.id)), key=lambda c: c.id)
-    standalone = [c for c in cards if c.parent is None and not is_epic(cards, c.id)]
+    pool = cards if pool is None else pool
+    epics = sorted((c for c in cards if is_epic(pool, c.id)), key=lambda c: c.id)
+    standalone = [c for c in cards if c.parent is None and not is_epic(pool, c.id)]
     in_flight = [c for c in standalone if c.status in ("in-flight", "blocked")]
     planned = [c for c in standalone if c.status == "planned"]
     parked = [c for c in standalone if c.status == "parked"]
@@ -67,14 +72,14 @@ def generate_index(
     if epics:
         lines.append("## Epics")
         for e in epics:
-            r = epic_rollup(cards, e.id)
+            r = epic_rollup(pool, e.id)
             est = format_tokens(r["estimate"]) or "0"
             act = format_tokens(r["actual"]) or "0"
             lines.append(
                 f"- {e.id} — {e.title}  ({r['done']}/{r['total']} done · {act}/{est})"
             )
-            for kid in sorted(children(cards, e.id), key=lambda c: c.id):
-                lines.append(_epic_child_line(kid, cards))
+            for kid in sorted(children(pool, e.id), key=lambda c: c.id):
+                lines.append(_epic_child_line(kid, pool))
         lines.append("")
 
     lines.append("## In flight")
@@ -83,7 +88,7 @@ def generate_index(
             "| Card | Title | Stage | Complexity | Budget (act/est) | Note |",
             "|---|---|---|---|---|---|",
         ]
-        lines += [_in_flight_row(c, cards) for c in in_flight]
+        lines += [_in_flight_row(c, pool) for c in in_flight]
     else:
         lines.append("_Nothing in flight._")
 
@@ -92,7 +97,7 @@ def generate_index(
         for c in planned:
             estimate = format_tokens(c.budget_estimate) or "?"
             sprint = f", sprint {c.sprint}" if c.sprint else ""
-            ready = _readiness(c, cards)
+            ready = _readiness(c, pool)
             suffix = f" · {ready}" if ready else ""
             lines.append(
                 f"- {c.id} — {c.title} ({c.complexity or '?'}, ~{estimate}{sprint}){suffix}"
@@ -120,6 +125,9 @@ def generate_index(
 def rebuild_index(repo_root: Path, project: str, now: str) -> list[Path]:
     root = state_root(repo_root)
     cards, quarantined = load_live_cards(root)
-    recently_done = load_archived_cards(root)[:RECENTLY_DONE_LIMIT]
-    (root / "ledger.md").write_text(generate_index(project, cards, recently_done, now))
+    archived = load_archived_cards(root)
+    recently_done = archived[:RECENTLY_DONE_LIMIT]
+    (root / "ledger.md").write_text(
+        generate_index(project, cards, recently_done, now, pool=cards + archived)
+    )
     return quarantined
