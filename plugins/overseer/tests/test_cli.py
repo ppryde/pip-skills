@@ -447,6 +447,38 @@ class TestKnowledgeVerifyRetire:
         assert "error:" in capsys.readouterr().err
 
 
+class TestContextFooter:
+    def test_footer_shows_real_pct(self, repo, capsys, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_vigil_context", lambda root: "ctx 42%")
+        run(repo, "resume")
+        assert "ctx 42%" in capsys.readouterr().out
+
+    def test_footer_omitted_when_unknown(self, repo, capsys, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_vigil_context", lambda root: "ctx unknown")
+        run(repo, "resume")
+        assert "ctx" not in capsys.readouterr().out
+
+    def test_footer_omitted_when_vigil_absent(self, repo, capsys, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_vigil_context", lambda root: None)
+        run(repo, "resume")
+        assert "ctx" not in capsys.readouterr().out
+
+    def test_vigil_cli_resolves_in_repo(self):
+        import scripts.cli as cli
+        found = cli._vigil_cli()
+        assert found is not None and found.name == "cli.py" and "vigil" in str(found)
+
+    def test_vigil_context_real_subprocess_degrades(self, repo, monkeypatch):
+        # Real subprocess to the actual vigil CLI with a throwaway HOME → "ctx unknown"
+        import scripts.cli as cli
+        monkeypatch.setenv("HOME", str(repo / "empty-home"))
+        out = cli._vigil_context(repo)
+        assert out is None or out.startswith("ctx")  # real call, no crash
+
+
 class TestKnowledgeFacts:
     def test_facts_lists_and_filters_by_tag(self, repo, capsys):
         run(repo, "add-fact", "--statement", "A", "--tags", "testing", "--source", "W1")

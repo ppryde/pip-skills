@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -93,6 +94,37 @@ def _today() -> str:
 def _report_quarantined(quarantined: list[Path]) -> None:
     for path in quarantined:
         print(f"QUARANTINED: {path}", file=sys.stderr)
+
+
+def _vigil_cli() -> Path | None:
+    """Best-effort locate the sibling vigil plugin's CLI (soft dependency)."""
+    here = Path(__file__).resolve()  # plugins/overseer/scripts/cli.py
+    candidate = here.parent.parent.parent / "vigil" / "scripts" / "cli.py"
+    return candidate if candidate.exists() else None
+
+
+def _vigil_context(repo_root: Path) -> str | None:
+    """Run `vigil context`; return its line, or None if vigil is absent/errors."""
+    cli = _vigil_cli()
+    if cli is None:
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable, str(cli), "--root", str(repo_root), "context"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    line = result.stdout.strip()
+    return line or None
+
+
+def _context_footer(repo_root: Path) -> str:
+    """`\\nctx NN%` when vigil is installed and reports a real percentage; else ''."""
+    line = _vigil_context(repo_root)
+    if line and line.startswith("ctx ") and line != "ctx unknown":
+        return "\n" + line
+    return ""
 
 
 def _sync(repo_root: Path, card: Card) -> None:
@@ -272,7 +304,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
     _, quarantined = load_live_cards(state_root(args.root))
     _report_quarantined(quarantined)
     entries = resume_entries(args.root)
-    print(json.dumps(entries, indent=2) if args.json else format_report(entries))
+    if args.json:
+        print(json.dumps(entries, indent=2))
+    else:
+        print(format_report(entries) + _context_footer(args.root))
     return 0
 
 
@@ -300,7 +335,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(data, indent=2))
     else:
-        print(handoff_report(args.root, data))
+        print(handoff_report(args.root, data) + _context_footer(args.root))
     return 0
 
 
