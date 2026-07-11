@@ -33,7 +33,15 @@ const frontendRoot = join(scriptDir, "..");
 const srcDir = join(frontendRoot, "src");
 const distDir = join(frontendRoot, "dist");
 
-/** Recursively list absolute file paths under `dir`. */
+/**
+ * Recursively list absolute file paths under `dir`.
+ *
+ * Assumes NO symlinks under `src/`: `readdirSync(..., {withFileTypes})`
+ * reports a symlink as neither a file nor a directory (isFile()/isDirectory()
+ * are false for a symlink Dirent), so it would be silently skipped here —
+ * whereas Python's `Path.rglob("*")` on the pytest side follows symlinks and
+ * would include the target. Keep `src/` symlink-free so the two sides agree.
+ */
 function listFiles(dir) {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

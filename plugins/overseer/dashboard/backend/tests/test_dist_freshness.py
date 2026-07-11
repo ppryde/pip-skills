@@ -32,6 +32,13 @@ def _compute_src_hash(src_dir: Path) -> str:
     path relative to `src_dir`: feed the hash the relative path (UTF-8) +
     NUL, then the file's raw bytes + NUL. The hex sha256 digest of that
     stream is the "srchash".
+
+    Sort-order caveat (mirrors the note in srchash.mjs): JS `Array.sort()`
+    sorts by UTF-16 code unit while Python sorts str by Unicode code point;
+    the two agree only for ASCII paths. Every path under `src/` is ASCII, so
+    the orderings match. Keep it that way (ASCII filenames only) or this
+    Python side and the Node side can hash the same files in a different
+    order and disagree.
     """
     rel_paths = sorted(
         p.relative_to(src_dir).as_posix() for p in src_dir.rglob("*") if p.is_file()

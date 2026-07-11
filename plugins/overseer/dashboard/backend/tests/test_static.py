@@ -33,3 +33,24 @@ def test_api_board_still_200_when_dist_absent(tmp_path: Path) -> None:
     resp = client.get("/api/board")
 
     assert resp.status_code == 200
+
+
+def test_root_serves_built_index_with_default_dist(tmp_path: Path) -> None:
+    """Core deliverable regression guard: the DEFAULT dist_dir (the real,
+    committed `frontend/dist/`) serves the built index at `/`, not the
+    placeholder.
+
+    This depends on `frontend/dist/` being committed (WF-005 C7) — which it
+    now is — so it is a valid permanent test. If `_mount_frontend`'s default
+    `__file__`-relative path resolution ever breaks, this fails.
+    """
+    client = _client(tmp_path)  # default dist_dir -> real committed dist
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    # Markers from the built Vite index (see frontend/dist/index.html).
+    assert "<title>overseer</title>" in resp.text
+    assert '<div id="root">' in resp.text
+    # And definitively NOT the "dist absent" placeholder.
+    assert "Frontend not built" not in resp.text
