@@ -19,6 +19,7 @@ from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
+from scripts.relations import would_cycle_depends, would_cycle_parent  # noqa: E402
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
 from scripts.sprints import (  # noqa: E402
     SPRINT_STATUSES,
@@ -226,9 +227,63 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.pr = args.pr
     if args.touches is not None:
         card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+    if args.parent is not None:
+        if args.parent == "":
+            card.parent = None
+        else:
+            cards, _ = load_live_cards(state_root(args.root))
+            if args.parent not in {c.id for c in cards}:
+                print(f"error: no live card {args.parent}", file=sys.stderr)
+                return 1
+            if would_cycle_parent(cards, args.card_id, args.parent):
+                print(f"error: parent {args.parent} would create a cycle",
+                      file=sys.stderr)
+                return 1
+            card.parent = args.parent
     card.updated = _now()
     _sync(args.root, card)
     print(f"{card.id} updated")
+    return 0
+
+
+def cmd_depends(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    cards, _ = load_live_cards(state_root(args.root))
+    ids = {c.id for c in cards}
+    if args.on:
+        if args.on == args.card_id:
+            print("error: a card cannot depend on itself", file=sys.stderr)
+            return 1
+        if args.on not in ids:
+            print(f"error: no live card {args.on}", file=sys.stderr)
+            return 1
+        if would_cycle_depends(cards, args.card_id, args.on):
+            print(f"error: depending on {args.on} would create a cycle",
+                  file=sys.stderr)
+            return 1
+        if args.on not in card.depends_on:
+            card.depends_on.append(args.on)
+    if args.off and args.off in card.depends_on:
+        card.depends_on.remove(args.off)
+    card.updated = _now()
+    _sync(args.root, card)
+    print(f"{card.id} depends_on: {', '.join(card.depends_on) or '(none)'}")
+    return 0
+
+
+def cmd_park(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    card.park(_now())
+    _sync(args.root, card)
+    print(f"{card.id} parked")
+    return 0
+
+
+def cmd_unpark(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    card.unpark(_now())
+    _sync(args.root, card)
+    print(f"{card.id} → {card.status}")
     return 0
 
 
@@ -524,7 +579,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree")
     p.add_argument("--pr")
     p.add_argument("--touches")
+    p.add_argument("--parent")
     p.set_defaults(func=cmd_set_field)
+
+    p = sub.add_parser("depends")
+    p.add_argument("card_id")
+    p.add_argument("--on")
+    p.add_argument("--off")
+    p.set_defaults(func=cmd_depends)
+
+    p = sub.add_parser("park")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_park)
+
+    p = sub.add_parser("unpark")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_unpark)
 
     p = sub.add_parser("log-progress")
     p.add_argument("card_id")

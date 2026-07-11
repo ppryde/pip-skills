@@ -514,3 +514,63 @@ class TestKnowledgeFacts:
     def test_facts_empty(self, repo, capsys):
         assert run(repo, "facts") == 0
         assert "No facts" in capsys.readouterr().out
+
+
+class TestRelationsCommands:
+    def _two_cards(self, repo):
+        run(repo, "new-card", "--title", "Parent")   # WF-001
+        run(repo, "new-card", "--title", "Child")     # WF-002
+
+    def test_set_parent_and_clear(self, repo, capsys):
+        self._two_cards(repo)
+        assert run(repo, "set-field", "WF-002", "--parent", "WF-001") == 0
+        from scripts.store import find_card_path, state_root
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
+        assert c.parent == "WF-001"
+        assert run(repo, "set-field", "WF-002", "--parent", "") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
+        assert c.parent is None
+
+    def test_set_parent_unknown_rejected(self, repo, capsys):
+        run(repo, "new-card", "--title", "Only")
+        assert run(repo, "set-field", "WF-001", "--parent", "WF-999") == 1
+        assert "WF-999" in capsys.readouterr().err
+
+    def test_set_parent_cycle_rejected(self, repo, capsys):
+        self._two_cards(repo)
+        run(repo, "set-field", "WF-002", "--parent", "WF-001")
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--parent", "WF-002") == 1
+        assert "cycle" in capsys.readouterr().err
+
+    def test_depends_on_and_off(self, repo, capsys):
+        self._two_cards(repo)
+        assert run(repo, "depends", "WF-002", "--on", "WF-001") == 0
+        from scripts.store import find_card_path, state_root
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
+        assert c.depends_on == ["WF-001"]
+        assert run(repo, "depends", "WF-002", "--off", "WF-001") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
+        assert c.depends_on == []
+
+    def test_depends_self_and_cycle_rejected(self, repo, capsys):
+        self._two_cards(repo)
+        assert run(repo, "depends", "WF-001", "--on", "WF-001") == 1
+        capsys.readouterr()
+        run(repo, "depends", "WF-002", "--on", "WF-001")
+        capsys.readouterr()
+        assert run(repo, "depends", "WF-001", "--on", "WF-002") == 1
+        assert "cycle" in capsys.readouterr().err
+
+    def test_park_unpark(self, repo, capsys):
+        run(repo, "new-card", "--title", "Shelve me")
+        assert run(repo, "park", "WF-001") == 0
+        from scripts.store import find_card_path, state_root
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.status == "parked"
+        assert run(repo, "unpark", "WF-001") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.status == "planned"
