@@ -1,13 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import type { BoardCard, BoardResponse } from "../api/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
 
 // Mock the SOLE api client module — no real fetch in this test.
 vi.mock("../api/client", () => ({
   getBoard: vi.fn(),
+  getCard: vi.fn(),
 }));
 
-import { getBoard } from "../api/client";
+import { getBoard, getCard } from "../api/client";
 import App from "../App";
 
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
@@ -25,6 +26,17 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    ...overrides,
+  };
+}
+
+function cardDetail(
+  overrides: Partial<CardDetail> & { id: string }
+): CardDetail {
+  return {
+    ...card(overrides),
+    sections: {},
+    body: "",
     ...overrides,
   };
 }
@@ -77,6 +89,10 @@ const fixture: BoardResponse = {
 };
 
 describe("<App/> board render (read-only, Chunk 3)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
   it("renders lanes, an epic rollup line, a waiting-on dependency badge, and a tripwire flag", async () => {
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);
 
@@ -104,5 +120,53 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
     // Quarantined banner from board.quarantined.
     expect(screen.getByText(/1 quarantined/)).toBeInTheDocument();
+  });
+
+  it("(Chunk 5) clicking a card BODY opens the drawer via the full App→Board→Lane→tile prop chain", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-WAITING",
+        title: "Blocked on the epic",
+        sections: { "## Goal": "Unblock the waiting card." },
+      })
+    );
+
+    const { container } = render(<App />);
+    await screen.findByText("Blocked on the epic");
+
+    // Click the tile BODY (not the drag handle). The body carries the onOpen
+    // wired all the way through the prop chain; a typo anywhere would break
+    // this. Scope to WF-WAITING's tile so we click the right card's body.
+    const body = container.querySelector<HTMLElement>(
+      '[data-card-id="WF-WAITING"] .card-tile__body'
+    );
+    expect(body).not.toBeNull();
+    fireEvent.click(body!);
+
+    // The whole chain fired: getCard called with the clicked id, and the
+    // drawer renders that card's fetched content.
+    expect(getCard).toHaveBeenCalledWith("WF-WAITING");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Unblock the waiting card.")
+    ).toBeInTheDocument();
+  });
+
+  it("(Chunk 5) clicking the drag HANDLE does not open the drawer", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Blocked on the epic");
+
+    const handle = container.querySelector<HTMLElement>(
+      '[data-card-id="WF-WAITING"] .card-tile__handle'
+    );
+    expect(handle).not.toBeNull();
+    fireEvent.click(handle!);
+
+    // The handle is OUTSIDE the body — its click must not reach onOpen.
+    expect(getCard).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

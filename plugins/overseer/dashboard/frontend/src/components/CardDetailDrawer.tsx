@@ -92,7 +92,7 @@ function CardDetailDrawer({ cardId, onClose }: CardDetailDrawerProps) {
   const sectionEntries = detail ? orderedSectionEntries(detail.sections) : [];
 
   return (
-    <div className="drawer-overlay" onClick={onClose}>
+    <div className="drawer-overlay" data-testid="drawer-overlay" onClick={onClose}>
       <aside
         className="card-drawer"
         role="dialog"

@@ -133,15 +133,38 @@ describe("<CardDetailDrawer/>", () => {
     render(<CardDetailDrawer cardId="WF-D" onClose={onClose} />);
     await screen.findByRole("dialog");
 
+    // Esc keydown.
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
     expect(onClose).toHaveBeenCalledTimes(1);
 
+    // Overlay (backdrop) click — the outer `.drawer-overlay` div.
+    await act(async () => {
+      screen.getByTestId("drawer-overlay").click();
+    });
+    expect(onClose).toHaveBeenCalledTimes(2);
+
+    // Close button.
     await act(async () => {
       screen.getByRole("button", { name: /close/i }).click();
     });
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT close when the click is inside the panel (stopPropagation on the inner aside)", async () => {
+    vi.mocked(getCard).mockResolvedValue(
+      cardDetail({ id: "WF-E", title: "Panel card" })
+    );
+    const onClose = vi.fn();
+    render(<CardDetailDrawer cardId="WF-E" onClose={onClose} />);
+    await screen.findByText("Panel card");
+
+    // Clicking the dialog panel itself must NOT bubble to the overlay handler.
+    await act(async () => {
+      screen.getByRole("dialog").click();
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("drops a stale getCard response: reopening a different card before the first resolves shows the LATER card's content, not the earlier one's", async () => {
