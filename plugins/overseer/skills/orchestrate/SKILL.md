@@ -45,8 +45,10 @@ stewardship).
   when dispatching the planner (template `planner.md`, tier per policy). Fill
   `{{knowledge}}` with the facts that intersect this card (`references/knowledge.md`).
   Plan lands in the card's `## Plan` (you write it via Edit on the card — prose
-  exception). L cards: attempt split first; if split, create the child cards and
-  abandon-or-shrink the parent, logging the decision. L keeps a second planning pass.
+  exception). L cards: attempt split first; if split, create the child cards
+  **with `set-field <child> --parent <this-card>`** and keep this card as the
+  epic (do not abandon it) — its rollup tracks the children. L keeps a second
+  planning pass.
 - **plan-review** — run the adversarial review loop over the plan text
   (`references/review-loop.md`).
 - **PLAN GATE** — present to the user: plan, estimate, trade-offs, and the PR
@@ -67,12 +69,17 @@ stewardship).
   abandonment follow `references/superpowers.md`.
 
 ## Watchdogs (yours, continuous)
+- **Readiness:** never bootstrap or plan a card that is not `ready` — if the
+  ledger shows `waiting on <id>`, work the dependency first or pick a ready card.
+  Record ordering with `depends`, not a `block` reason.
 - **Drift:** compare every progress report against the approved plan. Minor
   deviation → correct in-flight, note on card. Material deviation → STOP,
   escalate to the user before further spend (scope-creep gate).
 - **Unresponsive:** no report for 2× the card's cadence (policy table) → ping
   once → still nothing → `block <id> --reason "agent: unresponsive"`.
 - **Budget:** tripwire exit 2 is a hard stop, never absorbed silently.
+- **Park vs block vs abandon:** `park` to shelve without a blocker (resumable),
+  `block` for a real blocker with a reason, `abandon` for terminal.
 
 ## Comms
 - Subagent mode: hub-and-spoke only. Workers report to you; you relay.
