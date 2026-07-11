@@ -247,6 +247,52 @@ class TestHandoffCommand:
         assert data["in_flight"][0]["id"] == "WF-001"
 
 
+class TestBoardCommand:
+    def test_board_json_parses(self, repo, capsys):
+        run(repo, "new-card", "--title", "T", "--estimate", "100k")
+        run(repo, "set-stage", "WF-001", "implementation")
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["project"] == repo.name
+        assert len(data["cards"]) == 1
+        assert data["cards"][0]["id"] == "WF-001"
+
+    def test_board_json_card_fields(self, repo, capsys):
+        run(repo, "new-card", "--title", "Test Card", "--complexity", "M",
+            "--estimate", "400k")
+        run(repo, "set-stage", "WF-001", "implementation")
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        card = data["cards"][0]
+        assert card["id"] == "WF-001"
+        assert card["title"] == "Test Card"
+        assert card["status"] == "in-flight"
+        assert card["stage"] == "implementation"
+        assert card["complexity"] == "M"
+        assert card["budget"]["estimate"] == 400_000
+        assert "is_epic" in card
+        assert "ready" in card
+        assert "rollup" in card
+
+    def test_board_text_one_line_count(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "new-card", "--title", "T2")
+        capsys.readouterr()
+        assert run(repo, "board") == 0
+        out = capsys.readouterr().out
+        assert "2 cards" in out
+
+    def test_board_loud_quarantine(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        (workflow_root(repo) / "cards" / "WF-999-bad.md").write_text("garbage")
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        captured = capsys.readouterr()
+        assert "QUARANTINED" in captured.err
+
+
 class TestUsageTelemetry:
     def test_log_usage_appends_jsonl(self, repo):
         run(repo, "new-card", "--title", "T")

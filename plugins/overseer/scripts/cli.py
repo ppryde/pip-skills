@@ -406,6 +406,19 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_board(args: argparse.Namespace) -> int:
+    from scripts.board import board_data
+    data = board_data(args.root)
+    _report_quarantined([Path(p) for p in data["quarantined"]])
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        card_count = len(data["cards"])
+        sprint_count = len(data["sprints"])
+        print(f"{card_count} cards, {sprint_count} sprints")
+    return 0
+
+
 def cmd_log_usage(args: argparse.Namespace) -> int:
     entry = {
         "ts": _now(),
@@ -652,6 +665,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_handoff)
+
+    p = sub.add_parser("board")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_board)
 
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")

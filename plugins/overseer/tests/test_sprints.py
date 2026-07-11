@@ -97,3 +97,35 @@ class TestRetroRollup:
         assert "| WF-001 | 400k | 520k | 1.30× | done |" in rolled.body
         assert "WF-099" not in rolled.body
         assert "## Retro" in rolled.body
+
+
+class TestLoadSprints:
+    def test_empty(self, tmp_path):
+        from scripts.sprints import load_sprints
+        root = init_workflow(tmp_path)
+        sprints, quarantined = load_sprints(root)
+        assert sprints == []
+        assert quarantined == []
+
+    def test_multiple_sorted(self, tmp_path):
+        from scripts.sprints import load_sprints, save_sprint
+        root = init_workflow(tmp_path)
+        s1 = Sprint.from_text(SAMPLE_SPRINT)
+        s2 = Sprint.from_text(SAMPLE_SPRINT.replace("2026-07-S1", "2026-07-S2"))
+        save_sprint(root, s2)
+        save_sprint(root, s1)
+        sprints, quarantined = load_sprints(root)
+        assert len(sprints) == 2
+        assert quarantined == []
+        assert sprints[0].id == "2026-07-S1"
+        assert sprints[1].id == "2026-07-S2"
+
+    def test_corrupt_quarantined(self, tmp_path):
+        from scripts.sprints import load_sprints
+        root = init_workflow(tmp_path)
+        (root / "sprints" / "WF-777-bad.md").write_text("garbage")
+        sprints, quarantined = load_sprints(root)
+        assert sprints == []
+        assert len(quarantined) == 1
+        assert quarantined[0].name == "WF-777-bad.md"
+        assert (root / "archive" / "corrupt" / "WF-777-bad.md").exists()
