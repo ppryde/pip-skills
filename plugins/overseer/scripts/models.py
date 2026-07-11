@@ -16,6 +16,7 @@ STAGES = [
     "verification",
     "awaiting-merge",
 ]
+PRIORITIES = {"P0", "P1", "P2", "P3"}
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kM])?")
@@ -88,7 +89,9 @@ class Card:
     title: str
     status: str = "planned"
     stage: str | None = None
+    order: int = 0
     complexity: str | None = None
+    priority: str | None = None
     jira: str | None = None
     linear: str | None = None
     sprint: str | None = None
@@ -134,12 +137,29 @@ class Card:
             depends_on = [str(depends_raw)]
         else:
             depends_on = []
+        order_raw = meta.get("order")
+        if order_raw is not None:
+            try:
+                order = int(order_raw)
+            except (TypeError, ValueError):
+                raise CardParseError(f"unparseable order: {order_raw!r}")
+        else:
+            order = 0
+        priority_raw = meta.get("priority")
+        if priority_raw is not None:
+            priority = str(priority_raw)
+            if priority not in PRIORITIES:
+                raise CardParseError(f"unknown priority: {priority!r}")
+        else:
+            priority = None
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
             status=status,
             stage=stage,
+            order=order,
             complexity=meta.get("complexity"),
+            priority=priority,
             jira=meta.get("jira"),
             linear=meta.get("linear"),
             sprint=meta.get("sprint"),
@@ -165,7 +185,9 @@ class Card:
             "title": self.title,
             "status": self.status,
             "stage": self.stage,
+            "order": self.order,
             "complexity": self.complexity,
+            "priority": self.priority,
             "sprint": self.sprint,
             "parent": self.parent,
             "branch": self.branch,

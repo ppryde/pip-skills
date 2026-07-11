@@ -130,6 +130,14 @@ class TestCardParse:
             "---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx", "budget",
             id="non-mapping-budget",
         ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\npriority: P5\n---\nbody\n",
+            "priority", id="bad-priority",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\norder: notanumber\n---\nbody\n",
+            "order", id="bad-order",
+        ),
     ])
     def test_from_text_raises(self, text, match):
         with pytest.raises(CardParseError, match=match):
@@ -352,3 +360,35 @@ class TestParkUnpark:
         c = self._card(status="parked", stage=None)
         c.unpark("2026-07-11T11:00")
         assert c.status == "planned"
+
+
+class TestOrderAndPriority:
+    def test_order_defaults_to_zero(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.order == 0
+
+    def test_priority_defaults_to_none(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.priority is None
+
+    def test_order_and_priority_round_trip(self):
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\n"
+            "order: 5\npriority: P1\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        assert card.order == 5
+        assert card.priority == "P1"
+        again = Card.from_text(card.to_text())
+        assert again.order == 5
+        assert again.priority == "P1"
+
+    def test_order_zero_round_trip(self):
+        """Ensure order 0 (move to top) is preserved and not lost."""
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\norder: 3\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        card.order = 0
+        again = Card.from_text(card.to_text())
+        assert again.order == 0

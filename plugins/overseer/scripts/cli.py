@@ -18,7 +18,9 @@ if __package__ in (None, ""):  # direct script invocation: put plugin root on sy
 from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
-from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
+from scripts.models import (  # noqa: E402
+    Card, CardParseError, PRIORITIES, format_tokens, parse_tokens,
+)
 from scripts.relations import would_cycle_depends, would_cycle_parent  # noqa: E402
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
 from scripts.sprints import (  # noqa: E402
@@ -227,6 +229,16 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.pr = args.pr
     if args.touches is not None:
         card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+    if args.order is not None:
+        card.order = args.order
+    if args.priority is not None:
+        if args.priority == "":
+            card.priority = None
+        else:
+            if args.priority not in PRIORITIES:
+                print(f"error: unknown priority: {args.priority!r}", file=sys.stderr)
+                return 1
+            card.priority = args.priority
     if args.parent is not None:
         if args.parent == "":
             card.parent = None
@@ -580,6 +592,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pr")
     p.add_argument("--touches")
     p.add_argument("--parent")
+    p.add_argument("--order", type=int)
+    p.add_argument("--priority")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("depends")

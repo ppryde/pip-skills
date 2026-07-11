@@ -593,3 +593,54 @@ class TestRelationsArchivedRollup:
         ledger = (workflow_root(repo) / "ledger.md").read_text()
         assert "1/2 done" in ledger              # rollup counts the archived done child
         assert "WF-003" in ledger and "waiting on WF-002" not in ledger  # dep satisfied → ready
+
+
+class TestOrderAndPriorityField:
+    def test_set_order_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--order", "5") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.order == 5
+
+    def test_order_zero_persists_after_nonzero(self, repo):
+        """Critical test: --order 0 must work to 'move to top'."""
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--order", "3") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.order == 3
+        # Now set to 0 and verify it sticks
+        assert run(repo, "set-field", "WF-001", "--order", "0") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.order == 0
+
+    def test_set_priority_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--priority", "P2") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.priority == "P2"
+
+    def test_clear_priority_with_empty_string(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--priority", "P1")
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.priority == "P1"
+        # Clear with empty string
+        assert run(repo, "set-field", "WF-001", "--priority", "") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.priority is None
+
+    def test_invalid_priority_exits_1(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--priority", "P5") == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_order_not_a_number_exits_1(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--order", "notanumber") == 1
+        # argparse will handle this and exit with usage message
