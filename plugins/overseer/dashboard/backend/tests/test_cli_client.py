@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.cli_client import CliError, _check_id, run_overseer
+from app.cli_client import CliError, check_id, run_overseer
 
 
 @pytest.fixture()
@@ -41,16 +41,27 @@ def test_unknown_id_raises_cli_error_with_stderr(root: Path) -> None:
 
 
 def test_check_id_accepts_safe_ids() -> None:
-    _check_id("ABC-123")
-    _check_id("abc_123")
+    check_id("ABC-123")
+    check_id("abc_123")
 
 
 @pytest.mark.parametrize(
     "bad_id",
-    ["a; rm -rf /", "../etc/passwd", "a/b", "a\\b", "a*b", "a?b", "a[b]", "a b"],
+    [
+        "a; rm -rf /",
+        "../etc/passwd",
+        "a/b",
+        "a\\b",
+        "a*b",
+        "a?b",
+        "a[b]",
+        "a b",
+        "--json",
+        "-x",
+    ],
 )
 def test_check_id_rejects_metacharacters(bad_id: str) -> None:
     with pytest.raises(CliError) as exc_info:
-        _check_id(bad_id)
+        check_id(bad_id)
     assert exc_info.value.returncode == 2
     assert exc_info.value.stderr == "invalid card id"

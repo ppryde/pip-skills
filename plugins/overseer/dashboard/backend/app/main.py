@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.cli_client import CliError, _check_id, run_overseer, run_vigil
+from app.cli_client import CliError, check_id, run_overseer, run_vigil
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -95,10 +95,19 @@ def _board_response(root: Path) -> dict[str, Any]:
 
 
 def _show_error(exc: CliError) -> HTTPException:
-    """GET /api/card/{id} mapping: 1 (not found) -> 404, else -> 400/504."""
+    """GET /api/card/{id} mapping.
+
+    `cmd_show` exits 1 for three distinct reasons: genuine not-found, a
+    corrupt-but-present card (CardParseError), and argparse usage errors —
+    so returncode alone can't disambiguate. Only "no card with id" in
+    stderr is a real 404; everything else (incl. corrupt-card parse
+    errors) is a 400 that surfaces the real CLI message.
+    """
     if exc.returncode == 504:
         return HTTPException(status_code=504, detail=exc.stderr)
-    if exc.returncode == 1:
+    if exc.returncode == 2:
+        return HTTPException(status_code=400, detail=exc.stderr)
+    if "no card with id" in exc.stderr:
         return HTTPException(status_code=404, detail=exc.stderr)
     return HTTPException(status_code=400, detail=exc.stderr)
 
@@ -127,7 +136,7 @@ def create_app(root: Path) -> FastAPI:
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str) -> Any:
         try:
-            _check_id(card_id)
+            check_id(card_id)
             return run_overseer(root, "show", card_id, "--json", json_out=True)
         except CliError as exc:
             raise _show_error(exc) from exc
@@ -135,7 +144,7 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/card/{card_id}/order")
     def set_order(card_id: str, body: OrderBody) -> dict[str, Any]:
         def do() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             run_overseer(root, "set-field", card_id, "--order", str(body.order))
 
         return _mutate(do)
@@ -143,7 +152,7 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/card/{card_id}/priority")
     def set_priority(card_id: str, body: PriorityBody) -> dict[str, Any]:
         def do() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             value = body.priority if body.priority is not None else ""
             run_overseer(root, "set-field", card_id, "--priority", value)
 
@@ -152,8 +161,10 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/card/{card_id}/parent")
     def set_parent(card_id: str, body: ParentBody) -> dict[str, Any]:
         def do() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             value = body.parent if body.parent is not None else ""
+            if value:
+                check_id(value)
             run_overseer(root, "set-field", card_id, "--parent", value)
 
         return _mutate(do)
@@ -164,13 +175,13 @@ def create_app(root: Path) -> FastAPI:
             raise HTTPException(status_code=400, detail="on or off required")
 
         def do() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             args = ["depends", card_id]
             if body.on is not None:
-                _check_id(body.on)
+                check_id(body.on)
                 args += ["--on", body.on]
             if body.off is not None:
-                _check_id(body.off)
+                check_id(body.off)
                 args += ["--off", body.off]
             run_overseer(root, *args)
 
@@ -179,7 +190,7 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/card/{card_id}/park")
     def park_card(card_id: str) -> dict[str, Any]:
         def do() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             run_overseer(root, "park", card_id)
 
         return _mutate(do)
@@ -187,7 +198,7 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/card/{card_id}/unpark")
     def unpark_card(card_id: str) -> dict[str, Any]:
         def do() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             run_overseer(root, "unpark", card_id)
 
         return _mutate(do)
@@ -205,7 +216,7 @@ def create_app(root: Path) -> FastAPI:
         """
         if body.stage is not None:
             def do_stage() -> None:
-                _check_id(card_id)
+                check_id(card_id)
                 run_overseer(root, "set-stage", card_id, body.stage)  # type: ignore[arg-type]
 
             return _mutate(do_stage)
@@ -215,7 +226,7 @@ def create_app(root: Path) -> FastAPI:
                 raise HTTPException(status_code=400, detail="reason required to block")
 
             def do_block() -> None:
-                _check_id(card_id)
+                check_id(card_id)
                 run_overseer(root, "block", card_id, "--reason", body.reason)  # type: ignore[arg-type]
 
             return _mutate(do_block)
@@ -225,7 +236,7 @@ def create_app(root: Path) -> FastAPI:
             raise HTTPException(status_code=400, detail=f"unknown move status: {body.status!r}")
 
         def do_status() -> None:
-            _check_id(card_id)
+            check_id(card_id)
             run_overseer(root, *verbs, card_id)
 
         return _mutate(do_status)

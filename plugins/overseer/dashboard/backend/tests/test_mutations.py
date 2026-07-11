@@ -70,6 +70,7 @@ def test_depends_requires_on_or_off(client: TestClient, root: Path) -> None:
     resp = client.post(f"/api/card/{card_id}/depends", json={})
 
     assert resp.status_code == 400
+    assert "on or off" in resp.json()["detail"]
 
 
 def test_park_and_unpark(client: TestClient, root: Path) -> None:
@@ -143,4 +144,52 @@ def test_bad_move_is_400_with_detail(client: TestClient, root: Path) -> None:
     resp = client.post(f"/api/card/{card_id}/move", json={"status": "not-a-status"})
 
     assert resp.status_code == 400
-    assert "detail" in resp.json()
+    assert "not-a-status" in resp.json()["detail"]
+
+
+def test_move_unblock_is_stage_derived(client: TestClient, root: Path) -> None:
+    """Documented subtle edge: overseer has no unified set-status verb, so
+    `/move` with status in-flight/planned both dispatch to `unblock`, whose
+    resulting status is stage-derived — a staged card comes back in-flight
+    even when the client explicitly requested "planned"."""
+    card_id = _new_card(root)
+    run_overseer(root, "set-stage", card_id, "planning")
+    run_overseer(root, "block", card_id, "--reason", "waiting on X")
+
+    resp = client.post(f"/api/card/{card_id}/move", json={"status": "in-flight"})
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["status"] == "in-flight"
+    assert _show(root, card_id)["status"] == "in-flight"
+
+    # Re-block, then request "planned" — the card still has a stage, so the
+    # actual resulting status is STILL in-flight, not the requested "planned".
+    run_overseer(root, "block", card_id, "--reason", "waiting again")
+
+    resp = client.post(f"/api/card/{card_id}/move", json={"status": "planned"})
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["status"] == "in-flight"
+    assert _show(root, card_id)["status"] == "in-flight"
+
+
+def test_move_status_dispatch_parked_and_abandoned(client: TestClient, root: Path) -> None:
+    """Exercises the status->verb dispatch dict directly (not the dedicated
+    /park route) for the "parked" and "abandoned" entries."""
+    parked_id = _new_card(root, "Parked")
+
+    resp = client.post(f"/api/card/{parked_id}/move", json={"status": "parked"})
+
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[parked_id]["status"] == "parked"
+    assert _show(root, parked_id)["status"] == "parked"
+
+    abandoned_id = _new_card(root, "Abandoned")
+
+    resp = client.post(f"/api/card/{abandoned_id}/move", json={"status": "abandoned"})
+
+    assert resp.status_code == 200
+    # abandon archives the card; the board still lists it, now "abandoned".
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[abandoned_id]["status"] == "abandoned"

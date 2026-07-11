@@ -19,7 +19,7 @@ _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 # parents[4]=plugins
 _VIGIL_CLI = Path(__file__).resolve().parents[4] / "vigil" / "scripts" / "cli.py"
 
-_ID_RE = re.compile(r"\A[A-Za-z0-9_-]+\Z")
+_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
 
 class CliError(Exception):
@@ -31,7 +31,7 @@ class CliError(Exception):
         self.stderr = stderr
 
 
-def _check_id(card_id: str) -> None:
+def check_id(card_id: str) -> None:
     """Reject ids containing glob/path metacharacters before they reach the store's glob."""
     if not _ID_RE.match(card_id):
         raise CliError(2, "invalid card id")
@@ -46,6 +46,8 @@ def _run(cli_py: Path, cli_name: str, root: Path, args: tuple[str, ...],
         )
     except subprocess.TimeoutExpired:
         raise CliError(504, f"{cli_name} {' '.join(args)} timed out") from None
+    except OSError as exc:
+        raise CliError(500, f"cannot run {cli_py.name}: {exc}") from exc
     if result.returncode != 0:
         raise CliError(result.returncode, result.stderr.strip())
     if json_out:
