@@ -9,8 +9,8 @@ dev-only and not required at runtime.
 Binds to 127.0.0.1 by default: this is a local, single-user tool, never
 0.0.0.0, unless the caller explicitly opts into a different `--host`.
 
-Usage:
-    python dashboard/serve.py [--root PATH] [--host HOST] [--port PORT] [--no-browser]
+Usage (from the repo root):
+    python plugins/overseer/dashboard/serve.py [--root PATH] [--host HOST] [--port PORT] [--no-browser]
 """
 from __future__ import annotations
 

@@ -56,8 +56,10 @@ The backend's `test_dist_freshness.py` enforces this with a content hash of
 
 ## Launch
 
+Run from the repo root:
+
 ```bash
-.venv/bin/python dashboard/serve.py
+.venv/bin/python plugins/overseer/dashboard/serve.py
 ```
 
 (or, from a Claude Code session in this repo, run the `/dashboard` command —
@@ -79,10 +81,12 @@ Options:
 
 ## Tests
 
+Run from the repo root:
+
 ```bash
-.venv/bin/python -m pytest dashboard/backend/tests -q   # includes test_serve.py
-.venv/bin/python -m ruff check dashboard/serve.py
-.venv/bin/python -m mypy dashboard/serve.py --config-file dashboard/backend/pyproject.toml
+.venv/bin/python -m pytest plugins/overseer/dashboard/backend/tests -q   # includes test_serve.py
+.venv/bin/python -m ruff check plugins/overseer/dashboard/serve.py
+.venv/bin/python -m mypy plugins/overseer/dashboard/serve.py --config-file plugins/overseer/dashboard/backend/pyproject.toml
 ```
 
 `serve.py`'s own tests never bind a real port or open a real browser —
