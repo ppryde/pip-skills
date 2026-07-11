@@ -89,13 +89,13 @@ stewardship).
 
 ## Work tracking
 Every in-session todo (a TodoWrite item or an inline checklist entry) carries the
-`[WF-NNN]` prefix of the card it serves — traceability from live work to the
-ledger ("if it isn't in the ledger, it didn't happen," at the todo level).
-Multiple cards may be in flight (stacks/sprints), so tag per-card; a todo with no
-card is `[no-card]`. When work outgrows a card's scope, spin a **sibling card**
-under the same epic (`new-card`, then `set-field <child> --parent <card>`) rather
-than letting the card sprawl — the concrete companion to the drift watchdog's
-scope-creep gate.
+`[<id>]` prefix of the card it serves — traceability from live work to the ledger
+("if it isn't in the ledger, it didn't happen," at the todo level). Multiple cards
+may be in flight (stacks/sprints), so tag per-card; a todo with no card is
+`[no-card]`. When work outgrows a card's scope, spin a **child card** off it
+(`new-card`, then `set-field <child> --parent <card>`), which promotes the
+overflowing card to an epic — rather than letting it sprawl. The concrete
+companion to the drift watchdog's scope-creep gate.
 
 ## Telemetry
 After every dispatch returns, log its cost:

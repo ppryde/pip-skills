@@ -73,9 +73,9 @@ python .../cli.py --root . resume
 - **Decisions:** significant decisions and trade-offs go in the card's
   `## Decisions` section — append via Edit on the card file is the one
   exception to the no-direct-edits rule, since prose is not state.
-- **Amending a goal:** never silently rewrite a card's goal/description — confirm
-  the new wording with the user first. It is the one field edited by hand (the
-  prose exception), so it gets extra care.
+- **Amending a goal:** never silently rewrite a card's goal — confirm the new
+  wording with the user first. The goal is one of the by-hand fields under the
+  prose exception, so it gets extra care.
 - **Index out of sync or corrupt cards suspected:** run `rebuild-index` —
   regenerates ledger.md from the card files (cards are the truth) and reports
   any quarantined cards.
