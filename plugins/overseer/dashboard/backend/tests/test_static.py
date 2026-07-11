@@ -9,15 +9,17 @@ from app.cli_client import run_overseer
 from app.main import create_app
 
 
-def _client(tmp_path: Path) -> TestClient:
+def _client(tmp_path: Path, *, dist_dir: Path | None = None) -> TestClient:
     subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
     run_overseer(tmp_path, "init")
-    return TestClient(create_app(tmp_path))
+    return TestClient(create_app(tmp_path, dist_dir=dist_dir))
 
 
 def test_root_is_200_placeholder_when_dist_absent(tmp_path: Path) -> None:
-    # The real frontend/dist directory does not exist in this checkout yet.
-    client = _client(tmp_path)
+    # frontend/dist/ is committed (chunk 7) so the REAL path always exists
+    # now; point the mount at a controlled, guaranteed-absent dist dir
+    # instead to keep exercising the placeholder path.
+    client = _client(tmp_path, dist_dir=tmp_path / "no-such-dist")
 
     resp = client.get("/")
 
@@ -26,7 +28,7 @@ def test_root_is_200_placeholder_when_dist_absent(tmp_path: Path) -> None:
 
 
 def test_api_board_still_200_when_dist_absent(tmp_path: Path) -> None:
-    client = _client(tmp_path)
+    client = _client(tmp_path, dist_dir=tmp_path / "no-such-dist")
 
     resp = client.get("/api/board")
 

@@ -152,7 +152,7 @@ def _mutation_error(exc: CliError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
-def create_app(root: Path) -> FastAPI:
+def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
 
     def _mutate(fn: Callable[[], None]) -> dict[str, Any]:
@@ -281,20 +281,26 @@ def create_app(root: Path) -> FastAPI:
 
         return _mutate(do)
 
-    _mount_frontend(app)
+    _mount_frontend(app, dist_dir)
 
     return app
 
 
-def _mount_frontend(app: FastAPI) -> None:
+def _mount_frontend(app: FastAPI, dist_dir: Path | None = None) -> None:
     """Serve the built frontend `dist/` if present; else a 200 placeholder.
 
     Presence-checked BEFORE mounting — StaticFiles raises if the dir is
     missing. API routes are registered above and always win over the
     catch-all placeholder route.
+
+    `dist_dir` defaults to the real, committed `frontend/dist/` (resolved
+    relative to this file). Tests that need to exercise the dist-absent
+    placeholder path (chunk 7 reconciliation — dist is now committed, so
+    the real path always exists) pass an explicit dist_dir that is
+    guaranteed not to exist instead.
     """
     # backend/app/main.py -> parents[0]=app [1]=backend [2]=dashboard
-    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    dist = dist_dir if dist_dir is not None else Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if dist.is_dir():
         app.mount("/", StaticFiles(directory=dist, html=True), name="static")
         return
