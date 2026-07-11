@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.cli_client import CliError, check_id, run_overseer, run_vigil
+from app.cli_client import CliError, check_id, run_census, run_overseer, run_vigil
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -78,19 +78,52 @@ def _context_threshold(root: Path) -> int | None:
         return None
 
 
+def _census_extras(entry: dict[str, Any] | None) -> dict[str, Any]:
+    """Rich, worktree-indexed session facts from census (soft — {} when absent).
+
+    ``pct`` still comes from vigil (which reads census itself, with a transcript
+    fallback); these are the extras vigil's one-line gauge does not carry.
+    """
+    if not entry:
+        return {}
+    payload = entry.get("payload") or {}
+    out: dict[str, Any] = {"stale": bool(entry.get("stale"))}
+    model = payload.get("model") or {}
+    if model.get("display_name"):
+        out["model"] = model["display_name"]
+    if payload.get("session_name"):
+        out["session_name"] = payload["session_name"]
+    pr = payload.get("pr") or {}
+    if pr:
+        out["pr"] = {k: pr.get(k) for k in ("number", "url", "review_state") if pr.get(k) is not None}
+    return out
+
+
+def _limits_section(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Account-global 5h/7d rate-limit usage from census; None when unavailable."""
+    limits = (entry or {}).get("limits") or {}
+    windows = {k: limits[k] for k in ("five_hour", "seven_day") if limits.get(k)}
+    return windows or None
+
+
 def _board_response(root: Path) -> dict[str, Any]:
     """The payload every read AND every mutation returns.
 
-    Vigil calls are wrapped so a vigil CliError never 500s the board read —
-    it degrades to pct/threshold = None.
+    Vigil and census calls are wrapped so neither ever 500s the board read: a
+    vigil CliError degrades pct/threshold to None, and census is a soft
+    dependency that degrades to {} / None.
     """
     board = run_overseer(root, "board", "--json", json_out=True)
+    entry = run_census(root)
+    context: dict[str, Any] = {
+        "pct": _context_pct(root),
+        "threshold": _context_threshold(root),
+    }
+    context.update(_census_extras(entry))
     return {
         "board": board,
-        "context": {
-            "pct": _context_pct(root),
-            "threshold": _context_threshold(root),
-        },
+        "context": context,
+        "limits": _limits_section(entry),
     }
 
 

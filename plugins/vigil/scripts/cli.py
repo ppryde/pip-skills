@@ -10,6 +10,7 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts import census  # noqa: E402
 from scripts import context as ctx  # noqa: E402
 from scripts import snapshot as snap  # noqa: E402
 from scripts import state as st  # noqa: E402
@@ -37,13 +38,19 @@ def cmd_begin(args: argparse.Namespace) -> int:
 
 def cmd_context(args: argparse.Namespace) -> int:
     cfg = load_config(args.root)
-    transcript = ctx.find_transcript(args.root.resolve(), Path.home())
-    tokens = ctx.context_tokens(transcript) if transcript else None
-    pct = (
-        ctx.context_percent(tokens, cast(int, cfg["context.window"]))
-        if tokens is not None
-        else None
-    )
+    # census first: worktree-correct and windowed against the session's real
+    # context size. Falls back to transcript-slug measurement when census has no
+    # live entry (not installed, no status line, or stale) — preserving the old
+    # behaviour rather than regressing to "ctx unknown".
+    pct = census.context_percent(args.root)
+    if pct is None:
+        transcript = ctx.find_transcript(args.root.resolve(), Path.home())
+        tokens = ctx.context_tokens(transcript) if transcript else None
+        pct = (
+            ctx.context_percent(tokens, cast(int, cfg["context.window"]))
+            if tokens is not None
+            else None
+        )
     print(ctx.context_line(pct, cast(int, cfg["context.threshold"])))
     return 0
 

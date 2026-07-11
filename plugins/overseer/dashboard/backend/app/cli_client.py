@@ -18,6 +18,7 @@ from typing import Any
 _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 # parents[4]=plugins
 _VIGIL_CLI = Path(__file__).resolve().parents[4] / "vigil" / "scripts" / "cli.py"
+_CENSUS_CLI = Path(__file__).resolve().parents[4] / "census" / "scripts" / "cli.py"
 
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
@@ -61,3 +62,27 @@ def run_overseer(root: Path, *args: str, json_out: bool = False, timeout: int = 
 
 def run_vigil(root: Path, *args: str, json_out: bool = False, timeout: int = 15) -> Any:
     return _run(_VIGIL_CLI, "vigil", root, args, json_out, timeout)
+
+
+def run_census(root: Path, timeout: int = 10) -> dict[str, Any] | None:
+    """Read census's entry for ``root``'s worktree; None if census is unavailable.
+
+    census is a SOFT dependency: it does not take the ``--root`` convention (it is
+    ``census read --worktree <cwd>``), and a missing plugin, empty store, timeout,
+    or any failure yields None rather than raising — so the board read never
+    depends on census being installed.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_CENSUS_CLI), "read", "--worktree", str(root)],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data else None
