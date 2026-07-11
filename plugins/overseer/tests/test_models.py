@@ -11,33 +11,27 @@ from scripts.models import (
 
 
 class TestTokens:
-    def test_parse_plain_int(self):
-        assert parse_tokens(400000) == 400000
-
-    def test_parse_k_suffix(self):
-        assert parse_tokens("400k") == 400_000
-
-    def test_parse_decimal_m_suffix(self):
-        assert parse_tokens("2.1M") == 2_100_000
-
-    def test_parse_none(self):
-        assert parse_tokens(None) is None
+    @pytest.mark.parametrize("raw, expected", [
+        pytest.param(400000, 400000, id="plain-int"),
+        pytest.param("400k", 400_000, id="k-suffix"),
+        pytest.param("2.1M", 2_100_000, id="decimal-m-suffix"),
+        pytest.param(None, None, id="none"),
+    ])
+    def test_parse(self, raw, expected):
+        assert parse_tokens(raw) == expected
 
     def test_parse_garbage_raises(self):
         with pytest.raises(CardParseError):
             parse_tokens("lots")
 
-    def test_format_k(self):
-        assert format_tokens(310_000) == "310k"
-
-    def test_format_m(self):
-        assert format_tokens(2_100_000) == "2.1M"
-
-    def test_format_small(self):
-        assert format_tokens(950) == "950"
-
-    def test_format_none(self):
-        assert format_tokens(None) is None
+    @pytest.mark.parametrize("value, expected", [
+        pytest.param(310_000, "310k", id="k"),
+        pytest.param(2_100_000, "2.1M", id="m"),
+        pytest.param(950, "950", id="small"),
+        pytest.param(None, None, id="none"),
+    ])
+    def test_format(self, value, expected):
+        assert format_tokens(value) == expected
 
     def test_round_trip(self):
         for raw in ("150k", "2.1M", "999"):
@@ -50,17 +44,14 @@ class TestSplitFrontmatter:
         assert meta == {"id": "WF-001"}
         assert body.strip() == "## Goal\nHi"
 
-    def test_missing_frontmatter_raises(self):
+    @pytest.mark.parametrize("text", [
+        pytest.param("## Goal\nno frontmatter here\n", id="missing-frontmatter"),
+        pytest.param("---\n{ not: valid: yaml\n---\nbody\n", id="invalid-yaml"),
+        pytest.param("---\n- just\n- a list\n---\nbody\n", id="non-mapping"),
+    ])
+    def test_raises(self, text):
         with pytest.raises(CardParseError):
-            split_frontmatter("## Goal\nno frontmatter here\n")
-
-    def test_invalid_yaml_raises(self):
-        with pytest.raises(CardParseError):
-            split_frontmatter("---\n{ not: valid: yaml\n---\nbody\n")
-
-    def test_non_mapping_frontmatter_raises(self):
-        with pytest.raises(CardParseError):
-            split_frontmatter("---\n- just\n- a list\n---\nbody\n")
+            split_frontmatter(text)
 
 
 SAMPLE_CARD = """---
@@ -122,23 +113,27 @@ class TestCardParse:
         assert card.budget_estimate is None
         assert card.budget_actual == 0
 
-    def test_missing_required_field_raises(self):
-        with pytest.raises(CardParseError, match="title"):
-            Card.from_text("---\nid: WF-001\nstatus: planned\n---\nbody\n")
-
-    def test_bad_status_raises(self):
-        with pytest.raises(CardParseError, match="status"):
-            Card.from_text("---\nid: WF-001\ntitle: T\nstatus: doing\n---\nbody\n")
-
-    def test_bad_stage_raises(self):
-        with pytest.raises(CardParseError, match="stage"):
-            Card.from_text(
-                "---\nid: WF-001\ntitle: T\nstatus: in-flight\nstage: coding\n---\nbody\n"
-            )
-
-    def test_non_mapping_budget_raises(self):
-        with pytest.raises(CardParseError, match="budget"):
-            Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx")
+    @pytest.mark.parametrize("text, match", [
+        pytest.param(
+            "---\nid: WF-001\nstatus: planned\n---\nbody\n", "title",
+            id="missing-required-field",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: doing\n---\nbody\n", "status",
+            id="bad-status",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: in-flight\nstage: coding\n---\nbody\n",
+            "stage", id="bad-stage",
+        ),
+        pytest.param(
+            "---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx", "budget",
+            id="non-mapping-budget",
+        ),
+    ])
+    def test_from_text_raises(self, text, match):
+        with pytest.raises(CardParseError, match=match):
+            Card.from_text(text)
 
     def test_round_trip_is_lossless(self):
         card = Card.from_text(SAMPLE_CARD)
@@ -243,3 +238,117 @@ class TestMutations:
         card = Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\n---\nx")
         card.log_progress("work", 10_000_000, NOW)
         assert card.tripwire_breached is False
+
+
+class TestLinearAndPrFields:
+    def test_linear_round_trip(self):
+        card = Card.from_text(
+            "---\nid: ENG-42\nlinear: ENG-42\ntitle: T\nstatus: planned\n---\nx"
+        )
+        assert card.linear == "ENG-42"
+        assert Card.from_text(card.to_text()) == card
+        assert "linear: ENG-42" in card.to_text()
+
+    def test_pr_round_trip(self):
+        card = Card.from_text(SAMPLE_CARD)
+        card.pr = "https://github.com/ppryde/pip-skills/pull/22"
+        again = Card.from_text(card.to_text())
+        assert again.pr == card.pr
+
+    def test_both_default_none(self):
+        card = Card.from_text(SAMPLE_CARD)
+        assert card.linear is None
+        assert card.pr is None
+
+
+class TestTouches:
+    def test_touches_round_trip(self):
+        from scripts.models import Card
+        card = Card(
+            id="WF-001", title="T", status="planned",
+            created="2026-07-09", updated="2026-07-09T10:00",
+            touches=["src/auth/", "src/models.py"], body="## Goal\nx",
+        )
+        parsed = Card.from_text(card.to_text())
+        assert parsed.touches == ["src/auth/", "src/models.py"]
+
+    def test_touches_absent_defaults_empty(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-002\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).touches == []
+
+    def test_touches_scalar_not_exploded_to_characters(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-003\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n"
+            "touches: src/a.py\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).touches == ["src/a.py"]
+
+
+class TestRelationsFields:
+    def _card_text(self, extra=""):
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{extra}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_parent_and_depends_parsed(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("parent: WF-010\ndepends_on:\n- WF-002\n- WF-003\n"))
+        assert c.parent == "WF-010"
+        assert c.depends_on == ["WF-002", "WF-003"]
+
+    def test_depends_scalar_coerced_to_list(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("depends_on: WF-002\n"))
+        assert c.depends_on == ["WF-002"]
+
+    def test_defaults_when_absent(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text())
+        assert c.parent is None and c.depends_on == []
+
+    def test_round_trip_preserves_relations(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("parent: WF-010\ndepends_on:\n- WF-002\n"))
+        c2 = Card.from_text(c.to_text())
+        assert c2.parent == "WF-010" and c2.depends_on == ["WF-002"]
+
+    def test_parked_status_accepted(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text().replace("status: planned", "status: parked"))
+        assert c.status == "parked"
+
+
+class TestParkUnpark:
+    def _card(self, **kw):
+        from scripts.models import Card
+        base = dict(id="WF-001", title="T", status="in-flight", stage="implementation")
+        base.update(kw)
+        return Card(**base)  # type: ignore[arg-type]
+
+    def test_park_sets_status_preserves_stage(self):
+        c = self._card(branch="feat/x", worktree="wt/WF-001")
+        c.park("2026-07-11T10:00")
+        assert c.status == "parked"
+        assert c.stage == "implementation" and c.branch == "feat/x" and c.worktree == "wt/WF-001"
+        assert c.updated == "2026-07-11T10:00"
+
+    def test_unpark_with_stage_returns_in_flight(self):
+        c = self._card(status="parked")
+        c.unpark("2026-07-11T11:00")
+        assert c.status == "in-flight"
+
+    def test_unpark_without_stage_returns_planned(self):
+        c = self._card(status="parked", stage=None)
+        c.unpark("2026-07-11T11:00")
+        assert c.status == "planned"

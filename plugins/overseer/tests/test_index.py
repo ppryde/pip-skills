@@ -1,17 +1,16 @@
 from scripts.index import generate_index, rebuild_index
-from scripts.models import Card
 from scripts.store import init_workflow, save_card
+from tests.factories import make_card
 
 NOW = "2026-07-08T14:32"
 
 
-def card(card_id: str, **overrides: object) -> Card:
-    fields = dict(
-        id=card_id, title=f"Title {card_id}", status="planned",
-        created="2026-07-08", updated="2026-07-08T10:00", body="## Goal\nx",
-    )
-    fields.update(overrides)
-    return Card(**fields)  # type: ignore[arg-type]
+def card(card_id: str, **overrides: object):
+    overrides.setdefault("title", f"Title {card_id}")
+    overrides.setdefault("status", "planned")
+    overrides.setdefault("stage", None)
+    overrides.setdefault("body", "## Goal\nx")
+    return make_card(card_id, **overrides)
 
 
 class TestGenerateIndex:
@@ -55,6 +54,49 @@ class TestGenerateIndex:
     def test_empty_ledger(self):
         out = generate_index("p", [], [], NOW)
         assert "_Nothing in flight._" in out
+
+
+class TestEpicsAndParked:
+    def _gen(self, cards):
+        from scripts.index import generate_index
+        return generate_index("proj", cards, [], "2026-07-11T10:00")
+
+    def test_epic_section_with_rollup_and_children(self):
+        from tests.factories import make_card
+        cards = [
+            make_card("WF-010", status="in-flight", title="Auth"),
+            make_card("WF-011", parent="WF-010", status="done",
+                      budget_estimate=100_000, budget_actual=90_000),
+            make_card("WF-012", parent="WF-010", status="in-flight", stage="implementation",
+                      budget_estimate=300_000, budget_actual=120_000),
+        ]
+        out = self._gen(cards)
+        assert "## Epics" in out
+        assert "WF-010" in out and "1/2 done" in out          # rollup
+        assert "WF-011" in out and "WF-012" in out            # nested children
+
+    def test_children_not_in_status_sections(self):
+        from tests.factories import make_card
+        cards = [make_card("WF-010"), make_card("WF-011", parent="WF-010", status="in-flight")]
+        out = self._gen(cards)
+        # WF-011 appears under the epic, not as a standalone In-flight row
+        infl = out.split("## In flight")[1].split("##")[0]
+        assert "WF-011" not in infl
+
+    def test_readiness_shown(self):
+        from tests.factories import make_card
+        cards = [
+            make_card("WF-001", status="planned", depends_on=["WF-002"]),
+            make_card("WF-002", status="in-flight"),
+        ]
+        out = self._gen(cards)
+        assert "waiting on WF-002" in out
+
+    def test_parked_section(self):
+        from tests.factories import make_card
+        cards = [make_card("WF-005", status="parked", title="Legacy", updated="2026-07-09T10:00")]
+        out = self._gen(cards)
+        assert "## Parked" in out and "WF-005" in out and "shelved" in out
 
 
 class TestRebuildIndex:

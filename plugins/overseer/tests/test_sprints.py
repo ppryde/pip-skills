@@ -1,8 +1,9 @@
 import pytest
 
-from scripts.models import Card, CardParseError
+from scripts.models import CardParseError
 from scripts.sprints import Sprint, replace_section, rollup, save_sprint
 from scripts.store import init_workflow
+from tests.factories import make_card
 
 SAMPLE_SPRINT = """---
 id: 2026-07-S1
@@ -27,13 +28,10 @@ Ship the thing.
 """
 
 
-def card(card_id: str, **overrides: object) -> Card:
-    fields = dict(
-        id=card_id, title=f"T {card_id}", status="in-flight", stage="implementation",
-        sprint="2026-07-S1", created="2026-07-08", updated="2026-07-08T10:00", body="x",
-    )
-    fields.update(overrides)
-    return Card(**fields)  # type: ignore[arg-type]
+def card(card_id: str, **overrides: object):
+    overrides.setdefault("sprint", "2026-07-S1")
+    overrides.setdefault("body", "x")
+    return make_card(card_id, **overrides)
 
 
 class TestSprintParse:
@@ -84,3 +82,18 @@ class TestRollup:
         path = save_sprint(root, Sprint.from_text(SAMPLE_SPRINT))
         assert path == root / "sprints" / "2026-07-S1.md"
         assert path.exists()
+
+
+class TestRetroRollup:
+    def test_writes_est_vs_actual_table(self):
+        from scripts.sprints import retro_rollup
+        sprint = Sprint.from_text(SAMPLE_SPRINT)
+        cards = [
+            card("WF-001", complexity="M", status="done",
+                 budget_estimate=400_000, budget_actual=520_000),
+            card("WF-099", sprint="other", budget_actual=1),
+        ]
+        rolled = retro_rollup(sprint, cards)
+        assert "| WF-001 | 400k | 520k | 1.30× | done |" in rolled.body
+        assert "WF-099" not in rolled.body
+        assert "## Retro" in rolled.body

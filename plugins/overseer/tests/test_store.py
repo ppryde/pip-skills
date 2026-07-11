@@ -10,7 +10,9 @@ from scripts.store import (
     mint_id,
     save_card,
     slugify,
+    state_root,
 )
+from tests.factories import git_init as _git_init
 
 
 def make_card(card_id: str = "WF-001", **overrides: object) -> Card:
@@ -132,3 +134,47 @@ class TestArchive:
         archive_card(root, older)
         archive_card(root, newer)
         assert [c.id for c in load_archived_cards(root)] == ["WF-002", "WF-001"]
+
+
+class TestStateRoot:
+    def test_fresh_repo_no_scratch_uses_workflow(self, tmp_path):
+        assert state_root(tmp_path) == tmp_path / ".workflow"
+
+    def test_existing_workflow_with_content_wins(self, tmp_path):
+        _git_init(tmp_path)
+        (tmp_path / ".gitignore").write_text("scratch/\n")
+        (tmp_path / "scratch").mkdir()
+        (tmp_path / ".workflow" / "cards").mkdir(parents=True)
+        (tmp_path / ".workflow" / "cards" / "WF-001-x.md").write_text("x")
+        assert state_root(tmp_path) == tmp_path / ".workflow"
+
+    def test_gitignored_scratch_used_when_no_workflow(self, tmp_path):
+        _git_init(tmp_path)
+        (tmp_path / ".gitignore").write_text("scratch/\n")
+        (tmp_path / "scratch").mkdir()
+        assert state_root(tmp_path) == tmp_path / "scratch" / "workflow"
+
+    def test_scratch_not_gitignored_falls_back(self, tmp_path):
+        _git_init(tmp_path)
+        (tmp_path / "scratch").mkdir()
+        assert state_root(tmp_path) == tmp_path / ".workflow"
+
+    def test_scratch_without_git_falls_back(self, tmp_path):
+        (tmp_path / "scratch").mkdir()
+        assert state_root(tmp_path) == tmp_path / ".workflow"
+
+    def test_empty_workflow_dir_does_not_hijack(self, tmp_path):
+        _git_init(tmp_path)
+        (tmp_path / ".gitignore").write_text("scratch/\n")
+        (tmp_path / "scratch").mkdir()
+        (tmp_path / ".workflow").mkdir()  # exists but empty
+        assert state_root(tmp_path) == tmp_path / "scratch" / "workflow"
+
+    def test_init_under_scratch_skips_gitignore_edit(self, tmp_path):
+        _git_init(tmp_path)
+        (tmp_path / ".gitignore").write_text("scratch/\n")
+        (tmp_path / "scratch").mkdir()
+        root = init_workflow(tmp_path)
+        assert root == tmp_path / "scratch" / "workflow"
+        assert (root / "cards").is_dir()
+        assert ".workflow/" not in (tmp_path / ".gitignore").read_text()

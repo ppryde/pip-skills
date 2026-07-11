@@ -1,14 +1,31 @@
 """Session-start resume detection: what was in flight, and at what stage."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from scripts.models import Card, format_tokens
-from scripts.store import load_live_cards, workflow_root
+from scripts.relations import is_ready
+from scripts.store import load_archived_cards, load_live_cards, state_root
 
 
-def _entry(repo_root: Path, card: Card) -> dict:
+def _branch_exists(repo_root: Path, branch: str | None) -> bool:
+    if not branch:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def _entry(repo_root: Path, card: Card, cards: list[Card]) -> dict:
     worktree_exists = card.worktree is not None and (repo_root / card.worktree).is_dir()
+    branch_exists = _branch_exists(repo_root, card.branch)
     round_no = (
         card.review_rounds(card.stage)
         if card.stage and card.stage.endswith("review")
@@ -23,17 +40,23 @@ def _entry(repo_root: Path, card: Card) -> dict:
         "stage": card.stage,
         "round": round_no,
         "branch": card.branch,
+        "branch_exists": branch_exists,
+        "pr": card.pr,
         "worktree": card.worktree,
         "worktree_exists": worktree_exists,
         "blocked_on": card.blocked_on,
         "budget": f"{actual}/{estimate}",
+        "parent": card.parent,
+        "depends_on": card.depends_on,
+        "ready": is_ready(card, cards),
     }
 
 
 def resume_entries(repo_root: Path) -> list[dict]:
-    cards, _ = load_live_cards(workflow_root(repo_root))
+    cards, _ = load_live_cards(state_root(repo_root))
+    pool = cards + load_archived_cards(state_root(repo_root))
     return [
-        _entry(repo_root, c) for c in cards if c.status in ("in-flight", "blocked")
+        _entry(repo_root, c, pool) for c in cards if c.status in ("in-flight", "blocked")
     ]
 
 
@@ -48,5 +71,72 @@ def format_report(entries: list[dict]) -> str:
         worktree = e["worktree"] or "no worktree"
         if e["worktree"] and not e["worktree_exists"]:
             worktree += " (MISSING)"
-        lines.append(f"- {e['id']} — {e['title']}: {stage} | {worktree} | {e['budget']}")
+        line = f"- {e['id']} — {e['title']}: {stage} | {worktree} | {e['budget']}"
+        if e["branch"] and not e["branch_exists"]:
+            line += " (branch MISSING)"
+        if e["pr"]:
+            line += f" | PR: {e['pr']}"
+        if e.get("depends_on"):
+            line += " | ready" if e.get("ready") else " | waiting on " + ", ".join(
+                e["depends_on"]
+            )
+        lines.append(line)
     return "\n".join(lines)
+
+
+def handoff_data(repo_root: Path) -> dict:
+    """Everything a fresh session needs, derived in one scan."""
+    root = state_root(repo_root)
+    cards, quarantined = load_live_cards(root)
+    archived = load_archived_cards(root)
+    pool = cards + archived
+    entries = [_entry(repo_root, c, pool) for c in cards
+               if c.status in ("in-flight", "blocked")]
+    live_branches: dict[str, list[str]] = {}
+    for c in cards:
+        if c.status in ("in-flight", "blocked") and c.branch:
+            live_branches.setdefault(c.branch, []).append(c.id)
+    return {
+        "project": repo_root.resolve().name,
+        "in_flight": [e for e in entries if e["status"] == "in-flight"],
+        "blocked": [e for e in entries if e["status"] == "blocked"],
+        "planned": [{"id": c.id, "title": c.title, "complexity": c.complexity}
+                    for c in cards if c.status == "planned"],
+        "stacks": {b: ids for b, ids in live_branches.items() if len(ids) > 1},
+        "quarantined": [str(p) for p in quarantined],
+        "parked": [{"id": c.id, "title": c.title} for c in cards if c.status == "parked"],
+    }
+
+
+def handoff_report(
+    repo_root: Path, data: dict | None = None, notes: str | None = None
+) -> str:
+    data = data or handoff_data(repo_root)
+    lines = [f"# Handoff briefing — {data['project']}", ""]
+    if notes and notes.strip():
+        lines += ["## Orchestrator notes", "", notes.strip(), ""]
+    lines.append("## In flight")
+    lines.append(format_report(data["in_flight"]) if data["in_flight"]
+                 else "Nothing in flight — clean slate.")
+    lines += ["", "## Blocked"]
+    lines.append(format_report(data["blocked"]) if data["blocked"] else "_None._")
+    lines += ["", "## Planned"]
+    if data["planned"]:
+        lines += [f"- {p['id']} — {p['title']} ({p['complexity'] or '?'})"
+                  for p in data["planned"]]
+    else:
+        lines.append("_Backlog empty._")
+    if data.get("parked"):
+        lines += ["", "## Parked"]
+        lines += [f"- {p['id']} — {p['title']} (shelved)" for p in data["parked"]]
+    if data["stacks"]:
+        lines += ["", "## Stacks"]
+        lines += [f"- {branch}: {', '.join(ids)}"
+                  for branch, ids in sorted(data["stacks"].items())]
+    if data["quarantined"]:
+        lines += ["", "## Quarantined during this scan"]
+        lines += [f"- {p}" for p in data["quarantined"]]
+    lines += ["", "## Resume",
+              "In a fresh session, invoke the overseer ledger skill and run:",
+              f"    python plugins/overseer/scripts/cli.py --root {repo_root} resume"]
+    return "\n".join(lines) + "\n"

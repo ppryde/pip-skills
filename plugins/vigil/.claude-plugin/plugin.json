@@ -1,0 +1,10 @@
+{
+  "name": "vigil",
+  "version": "0.1.0",
+  "description": "Portable context handover: measure a session's context usage (ctx NN%) and hand over in-process via /clear at points you choose, resuming from a re-injected handover. Works in any repo; ships fail-safe Stop/SessionStart hooks and a /handover command.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": ["context", "handover", "session", "tmux", "portability", "hooks"]
+}
