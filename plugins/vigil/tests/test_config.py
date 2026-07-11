@@ -29,21 +29,21 @@ class TestSetAndGet:
         assert get_config(tmp_path, "context.threshold") == 40
         assert config_path(tmp_path).exists()
 
-    def test_set_mode_validates_choice(self, tmp_path):
+    def test_set_mode_remote_accepted(self, tmp_path):
         ensure_root(tmp_path)
         assert set_config(tmp_path, "context.mode", "remote") == "remote"
-        with pytest.raises(ConfigError):
-            set_config(tmp_path, "context.mode", "nonsense")
 
-    def test_unknown_key_rejected(self, tmp_path):
+    @pytest.mark.parametrize("key,value", [
+        pytest.param("context.mode", "nonsense", id="bad-mode"),
+        pytest.param("context.bogus", "1", id="unknown-key"),
+        pytest.param("context.threshold", "150", id="threshold-above-max"),
+        pytest.param("context.threshold", "0", id="threshold-below-min"),
+        pytest.param("context.window", "0", id="window-non-positive"),
+    ])
+    def test_invalid_set_rejected(self, tmp_path, key, value):
         ensure_root(tmp_path)
         with pytest.raises(ConfigError):
-            set_config(tmp_path, "context.bogus", "1")
-
-    def test_threshold_out_of_range_rejected(self, tmp_path):
-        ensure_root(tmp_path)
-        with pytest.raises(ConfigError):
-            set_config(tmp_path, "context.threshold", "150")
+            set_config(tmp_path, key, value)
 
 
 class TestCorruptFile:
