@@ -17,7 +17,9 @@ worktrees).
 
 ## Store
 
-One JSON file at `~/.claude/census/status.json` (override with `CENSUS_STORE`):
+One JSON file at `$CLAUDE_CONFIG_DIR/census/status.json` — i.e. `~/.claude/census/status.json` by
+default, or `~/.claude-personal/census/status.json` when that account sets `CLAUDE_CONFIG_DIR`
+(override the path entirely with `CENSUS_STORE`):
 
 ```json
 {
@@ -74,3 +76,6 @@ limits = store.limits()
   than reporting unknown.
 - **Staleness:** readers flag entries older than ~90s so a consumer can distinguish a live reading
   from one frozen by a dead session.
+- **Multi-account safe:** the store is rooted at `CLAUDE_CONFIG_DIR`, the same boundary Claude Code
+  uses to separate accounts. A personal (Max) account and a work (API) account each get their own
+  store file — sessions and rate limits never commingle, even when both share one status-line script.

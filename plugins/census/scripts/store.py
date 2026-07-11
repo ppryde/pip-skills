@@ -31,7 +31,8 @@ from typing import Any
 from scripts import resolve
 
 STORE_ENV = "CENSUS_STORE"
-DEFAULT_STORE = Path.home() / ".claude" / "census" / "status.json"
+CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+STORE_RELPATH = ("census", "status.json")
 SCHEMA_VERSION = 1
 
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
@@ -40,9 +41,24 @@ _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lo
 _LOCK_DELAY_SECONDS = 0.01
 
 
+def config_dir() -> Path:
+    """The active Claude config dir — the account isolation boundary.
+
+    Claude Code separates accounts by ``CLAUDE_CONFIG_DIR`` (e.g. a personal Max
+    account under ``~/.claude-personal`` vs a default / work account under
+    ``~/.claude``). The status line inherits this env var from the launching
+    account, so rooting the store here keeps each account's sessions and rate
+    limits in their own file — they never commingle across accounts.
+    """
+    override = os.environ.get(CONFIG_DIR_ENV)
+    return Path(override) if override else Path.home() / ".claude"
+
+
 def store_path() -> Path:
     override = os.environ.get(STORE_ENV)
-    return Path(override) if override else DEFAULT_STORE
+    if override:
+        return Path(override)
+    return config_dir().joinpath(*STORE_RELPATH)
 
 
 def _empty_store() -> dict[str, Any]:

@@ -75,7 +75,9 @@ A broken store can never break the status-line render or the CLI it piggybacks o
 
 ## 2. The store
 
-Single file, `~/.claude/census/status.json` (override with `CENSUS_STORE`):
+Single file, `$CLAUDE_CONFIG_DIR/census/status.json` (default `~/.claude/census/status.json`;
+override the whole path with `CENSUS_STORE`). Rooting at `CLAUDE_CONFIG_DIR` is what keeps **multiple
+accounts isolated** — see §11:
 
 ```json
 {
@@ -221,7 +223,24 @@ and assert the store shape. Concurrency test forks N processes writing distinct 
 and asserts no lost updates (the flock contract). Reader tests cover worktree resolution, staleness
 marking, and the vigil-fallback path.
 
-## 11. Out of scope
+## 11. Multi-account isolation
+
+A single laptop often runs multiple Claude accounts — e.g. a personal Max account and a work API
+account — separated by `CLAUDE_CONFIG_DIR` (personal → `~/.claude-personal`, work → default
+`~/.claude`). Both accounts may point their `statusLine` at the **same** script, so a hardcoded store
+path would commingle them — and worse, leak the Max account's top-level `rate_limits` onto the API
+account's worktrees (API sessions carry no `rate_limits`, so they never overwrite the leaked values).
+
+Census roots the store at `CLAUDE_CONFIG_DIR` (fallback `~/.claude`): personal writes to
+`~/.claude-personal/census/status.json`, work to `~/.claude/census/status.json`. The status line
+inherits the launching account's `CLAUDE_CONFIG_DIR`, so one shared script routes each write to the
+right store automatically; readers inside a session inherit the same env and read their own account's
+store. Separate files, separate locks, separate limits — no cross-account interference.
+
+(A consumer that deliberately wants a *unified* cross-account view — e.g. a dashboard showing both —
+can enumerate the known config dirs and read each store; the default is strict isolation.)
+
+## 12. Out of scope
 
 - Any per-model or Fable-specific limit (not emitted by CC).
 - Rendering — census persists; the status line and dashboard render.
