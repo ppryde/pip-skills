@@ -1,5 +1,3 @@
-import subprocess
-
 import pytest
 
 from scripts.models import Card
@@ -14,10 +12,7 @@ from scripts.store import (
     slugify,
     state_root,
 )
-
-
-def _git_init(path):
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+from tests.factories import git_init as _git_init
 
 
 def make_card(card_id: str = "WF-001", **overrides: object) -> Card:

@@ -1,17 +1,16 @@
 from scripts.index import generate_index, rebuild_index
-from scripts.models import Card
 from scripts.store import init_workflow, save_card
+from tests.factories import make_card
 
 NOW = "2026-07-08T14:32"
 
 
-def card(card_id: str, **overrides: object) -> Card:
-    fields = dict(
-        id=card_id, title=f"Title {card_id}", status="planned",
-        created="2026-07-08", updated="2026-07-08T10:00", body="## Goal\nx",
-    )
-    fields.update(overrides)
-    return Card(**fields)  # type: ignore[arg-type]
+def card(card_id: str, **overrides: object):
+    overrides.setdefault("title", f"Title {card_id}")
+    overrides.setdefault("status", "planned")
+    overrides.setdefault("stage", None)
+    overrides.setdefault("body", "## Goal\nx")
+    return make_card(card_id, **overrides)
 
 
 class TestGenerateIndex:

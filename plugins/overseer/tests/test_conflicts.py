@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.conflicts import find_conflicts, paths_overlap
 from scripts.models import Card
 
@@ -9,24 +11,26 @@ def card(cid, touches, status="planned", sprint=None):
 
 
 class TestPathsOverlap:
-    def test_equal(self):
-        assert paths_overlap("src/a.py", "src/a.py")
-
-    def test_dir_prefix_of_file(self):
-        assert paths_overlap("src/auth", "src/auth/views.py")
-        assert paths_overlap("src/auth/", "src/auth/views.py")
-
-    def test_leading_dot_slash_normalised(self):
-        assert paths_overlap("./src/auth", "src/auth/views.py")
-
-    def test_sibling_prefix_no_false_positive(self):
-        assert not paths_overlap("src/models.py", "src/models_helper.py")
-
-    def test_disjoint(self):
-        assert not paths_overlap("src/a", "src/b")
-
-    def test_empty(self):
-        assert not paths_overlap("", "src/a")
+    @pytest.mark.parametrize("a, b, expected", [
+        pytest.param("src/a.py", "src/a.py", True, id="equal"),
+        pytest.param("src/auth", "src/auth/views.py", True, id="dir-prefix-of-file"),
+        pytest.param(
+            "src/auth/", "src/auth/views.py", True,
+            id="dir-prefix-of-file-trailing-slash",
+        ),
+        pytest.param(
+            "./src/auth", "src/auth/views.py", True,
+            id="leading-dot-slash-normalised",
+        ),
+        pytest.param(
+            "src/models.py", "src/models_helper.py", False,
+            id="sibling-prefix-no-false-positive",
+        ),
+        pytest.param("src/a", "src/b", False, id="disjoint"),
+        pytest.param("", "src/a", False, id="empty"),
+    ])
+    def test_overlap(self, a, b, expected):
+        assert paths_overlap(a, b) == expected
 
 
 class TestFindConflicts:

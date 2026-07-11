@@ -11,33 +11,27 @@ from scripts.models import (
 
 
 class TestTokens:
-    def test_parse_plain_int(self):
-        assert parse_tokens(400000) == 400000
-
-    def test_parse_k_suffix(self):
-        assert parse_tokens("400k") == 400_000
-
-    def test_parse_decimal_m_suffix(self):
-        assert parse_tokens("2.1M") == 2_100_000
-
-    def test_parse_none(self):
-        assert parse_tokens(None) is None
+    @pytest.mark.parametrize("raw, expected", [
+        pytest.param(400000, 400000, id="plain-int"),
+        pytest.param("400k", 400_000, id="k-suffix"),
+        pytest.param("2.1M", 2_100_000, id="decimal-m-suffix"),
+        pytest.param(None, None, id="none"),
+    ])
+    def test_parse(self, raw, expected):
+        assert parse_tokens(raw) == expected
 
     def test_parse_garbage_raises(self):
         with pytest.raises(CardParseError):
             parse_tokens("lots")
 
-    def test_format_k(self):
-        assert format_tokens(310_000) == "310k"
-
-    def test_format_m(self):
-        assert format_tokens(2_100_000) == "2.1M"
-
-    def test_format_small(self):
-        assert format_tokens(950) == "950"
-
-    def test_format_none(self):
-        assert format_tokens(None) is None
+    @pytest.mark.parametrize("value, expected", [
+        pytest.param(310_000, "310k", id="k"),
+        pytest.param(2_100_000, "2.1M", id="m"),
+        pytest.param(950, "950", id="small"),
+        pytest.param(None, None, id="none"),
+    ])
+    def test_format(self, value, expected):
+        assert format_tokens(value) == expected
 
     def test_round_trip(self):
         for raw in ("150k", "2.1M", "999"):
@@ -50,17 +44,14 @@ class TestSplitFrontmatter:
         assert meta == {"id": "WF-001"}
         assert body.strip() == "## Goal\nHi"
 
-    def test_missing_frontmatter_raises(self):
+    @pytest.mark.parametrize("text", [
+        pytest.param("## Goal\nno frontmatter here\n", id="missing-frontmatter"),
+        pytest.param("---\n{ not: valid: yaml\n---\nbody\n", id="invalid-yaml"),
+        pytest.param("---\n- just\n- a list\n---\nbody\n", id="non-mapping"),
+    ])
+    def test_raises(self, text):
         with pytest.raises(CardParseError):
-            split_frontmatter("## Goal\nno frontmatter here\n")
-
-    def test_invalid_yaml_raises(self):
-        with pytest.raises(CardParseError):
-            split_frontmatter("---\n{ not: valid: yaml\n---\nbody\n")
-
-    def test_non_mapping_frontmatter_raises(self):
-        with pytest.raises(CardParseError):
-            split_frontmatter("---\n- just\n- a list\n---\nbody\n")
+            split_frontmatter(text)
 
 
 SAMPLE_CARD = """---
@@ -122,23 +113,27 @@ class TestCardParse:
         assert card.budget_estimate is None
         assert card.budget_actual == 0
 
-    def test_missing_required_field_raises(self):
-        with pytest.raises(CardParseError, match="title"):
-            Card.from_text("---\nid: WF-001\nstatus: planned\n---\nbody\n")
-
-    def test_bad_status_raises(self):
-        with pytest.raises(CardParseError, match="status"):
-            Card.from_text("---\nid: WF-001\ntitle: T\nstatus: doing\n---\nbody\n")
-
-    def test_bad_stage_raises(self):
-        with pytest.raises(CardParseError, match="stage"):
-            Card.from_text(
-                "---\nid: WF-001\ntitle: T\nstatus: in-flight\nstage: coding\n---\nbody\n"
-            )
-
-    def test_non_mapping_budget_raises(self):
-        with pytest.raises(CardParseError, match="budget"):
-            Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx")
+    @pytest.mark.parametrize("text, match", [
+        pytest.param(
+            "---\nid: WF-001\nstatus: planned\n---\nbody\n", "title",
+            id="missing-required-field",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: doing\n---\nbody\n", "status",
+            id="bad-status",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: in-flight\nstage: coding\n---\nbody\n",
+            "stage", id="bad-stage",
+        ),
+        pytest.param(
+            "---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx", "budget",
+            id="non-mapping-budget",
+        ),
+    ])
+    def test_from_text_raises(self, text, match):
+        with pytest.raises(CardParseError, match=match):
+            Card.from_text(text)
 
     def test_round_trip_is_lossless(self):
         card = Card.from_text(SAMPLE_CARD)

@@ -7,6 +7,7 @@ import pytest
 
 from scripts.cli import main
 from scripts.store import find_card_path, state_root, workflow_root
+from tests.factories import git_init
 
 
 @pytest.fixture
@@ -199,7 +200,7 @@ class TestSetSprintStatus:
 
 class TestStateRootWiring:
     def test_init_uses_scratch_when_gitignored(self, tmp_path):
-        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        git_init(tmp_path)
         (tmp_path / ".gitignore").write_text("scratch/\n")
         (tmp_path / "scratch").mkdir()
         assert main(["--root", str(tmp_path), "init"]) == 0
@@ -207,7 +208,7 @@ class TestStateRootWiring:
         assert not (tmp_path / ".workflow").exists()
 
     def test_new_card_lands_in_resolved_root(self, tmp_path):
-        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        git_init(tmp_path)
         (tmp_path / ".gitignore").write_text("scratch/\n")
         (tmp_path / "scratch").mkdir()
         main(["--root", str(tmp_path), "init"])

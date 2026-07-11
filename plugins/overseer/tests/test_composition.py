@@ -4,17 +4,9 @@ from pathlib import Path
 
 from scripts.resume import handoff_report
 from scripts.store import init_workflow, save_card
-from scripts.models import Card
+from tests.factories import make_card as _card
 
 VIGIL_CLI = Path(__file__).resolve().parents[2] / "vigil" / "scripts" / "cli.py"
-
-
-def _card(card_id):
-    return Card(
-        id=card_id, title=f"T {card_id}", status="in-flight", stage="implementation",
-        created="2026-07-10", updated="2026-07-10T10:00",
-        body="## Review log\n\n## Progress log",
-    )
 
 
 def test_overseer_rollup_feeds_vigil_handover(tmp_path):

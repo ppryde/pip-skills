@@ -1,8 +1,9 @@
 import pytest
 
-from scripts.models import Card, CardParseError
+from scripts.models import CardParseError
 from scripts.sprints import Sprint, replace_section, rollup, save_sprint
 from scripts.store import init_workflow
+from tests.factories import make_card
 
 SAMPLE_SPRINT = """---
 id: 2026-07-S1
@@ -27,13 +28,10 @@ Ship the thing.
 """
 
 
-def card(card_id: str, **overrides: object) -> Card:
-    fields = dict(
-        id=card_id, title=f"T {card_id}", status="in-flight", stage="implementation",
-        sprint="2026-07-S1", created="2026-07-08", updated="2026-07-08T10:00", body="x",
-    )
-    fields.update(overrides)
-    return Card(**fields)  # type: ignore[arg-type]
+def card(card_id: str, **overrides: object):
+    overrides.setdefault("sprint", "2026-07-S1")
+    overrides.setdefault("body", "x")
+    return make_card(card_id, **overrides)
 
 
 class TestSprintParse:

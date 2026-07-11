@@ -1,25 +1,16 @@
 import subprocess
 
-from scripts.models import Card
 from scripts.resume import _branch_exists, format_report, resume_entries
 from scripts.store import init_workflow, save_card
+from tests.factories import git_init
+from tests.factories import make_card as _make_card
 
 NOW = "2026-07-08T15:00"
 
 
-def card(card_id: str, **overrides: object) -> Card:
-    fields = dict(
-        id=card_id, title=f"T {card_id}", status="in-flight", stage="implementation",
-        created="2026-07-08", updated=NOW, body="## Review log\n\n## Progress log",
-    )
-    fields.update(overrides)
-    return Card(**fields)  # type: ignore[arg-type]
-
-
-def _git_init(path):
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+def card(card_id: str, **overrides: object):
+    overrides.setdefault("updated", NOW)
+    return _make_card(card_id, **overrides)
 
 
 class TestBranchExists:
@@ -27,11 +18,11 @@ class TestBranchExists:
         assert _branch_exists(tmp_path, None) is False
 
     def test_missing_branch_is_false(self, tmp_path):
-        _git_init(tmp_path)
+        git_init(tmp_path)
         assert _branch_exists(tmp_path, "feature/nope") is False
 
     def test_present_branch_is_true(self, tmp_path):
-        _git_init(tmp_path)
+        git_init(tmp_path)
         (tmp_path / "f").write_text("x")
         subprocess.run(["git", "add", "f"], cwd=tmp_path, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
