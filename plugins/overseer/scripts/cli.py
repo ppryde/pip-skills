@@ -419,6 +419,51 @@ def cmd_board(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_show(args: argparse.Namespace) -> int:
+    try:
+        card = _load(args.root, args.id)
+    except FileNotFoundError:
+        root = state_root(args.root)
+        matches = sorted((root / "archive" / "cards").glob(f"{args.id}-*.md"))
+        if not matches:
+            raise FileNotFoundError(f"no card with id {args.id}")
+        card = load_card(matches[0])
+    data = {
+        "id": card.id,
+        "title": card.title,
+        "status": card.status,
+        "stage": card.stage,
+        "order": card.order,
+        "complexity": card.complexity,
+        "priority": card.priority,
+        "jira": card.jira,
+        "linear": card.linear,
+        "sprint": card.sprint,
+        "parent": card.parent,
+        "branch": card.branch,
+        "worktree": card.worktree,
+        "pr": card.pr,
+        "touches": card.touches,
+        "depends_on": card.depends_on,
+        "budget": {
+            "estimate": card.budget_estimate,
+            "actual": card.budget_actual,
+        },
+        "created": card.created,
+        "updated": card.updated,
+        "blocked_on": card.blocked_on,
+        "sections": card.sections,
+        "body": card.body,
+    }
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    print(f"{card.id} — {card.title} [{card.status}/{card.stage or '-'}]")
+    for header in card.sections:
+        print(f"  {header or '(preamble)'}")
+    return 0
+
+
 def cmd_log_usage(args: argparse.Namespace) -> int:
     entry = {
         "ts": _now(),
@@ -669,6 +714,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("board")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_board)
+
+    p = sub.add_parser("show")
+    p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")

@@ -262,3 +262,29 @@ class Card:
         if self.budget_estimate is None:
             return False
         return self.budget_actual >= 2 * self.budget_estimate
+
+    @property
+    def sections(self) -> dict[str, str]:
+        """Split the body into an ordered {header: content} dict on `## ` headers.
+
+        `### ` sub-headers do not split — they stay in their parent section's
+        content. Any preamble before the first `## ` header is keyed `""`
+        (only included if non-empty). Empty body -> {}.
+        """
+        if not self.body:
+            return {}
+        lines = self.body.split("\n")
+        sections: dict[str, str] = {}
+        header = ""
+        start = 0
+        for i, line in enumerate(lines):
+            if line.startswith("## "):
+                content = "\n".join(lines[start:i]).strip()
+                if header or content:
+                    sections[header] = content
+                header = line
+                start = i + 1
+        content = "\n".join(lines[start:]).strip()
+        if header or content:
+            sections[header] = content
+        return sections
