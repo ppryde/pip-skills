@@ -6,6 +6,8 @@ export interface CardTileProps {
   dimmed?: boolean;
   highlighted?: boolean;
   dragDisabled?: boolean;
+  /** Chunk 5: clicking the tile body opens the detail drawer for this card. */
+  onOpen?: (id: string) => void;
 }
 
 /**
@@ -17,6 +19,7 @@ function CardTile({
   dimmed = false,
   highlighted = false,
   dragDisabled = false,
+  onOpen,
 }: CardTileProps) {
   return (
     <TileShell
@@ -24,6 +27,7 @@ function CardTile({
       dimmed={dimmed}
       highlighted={highlighted}
       dragDisabled={dragDisabled}
+      onOpen={onOpen}
     />
   );
 }

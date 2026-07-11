@@ -18,6 +18,8 @@ export interface BoardProps {
   showArchive: boolean;
   mutate: UseBoardResult["mutate"];
   inFlight: boolean;
+  /** Chunk 5: clicking a tile body opens the detail drawer for that card. */
+  onOpenCard: (id: string) => void;
 }
 
 /**
@@ -34,7 +36,7 @@ export interface BoardProps {
  * component never calls the api client or `setBoard` directly (see
  * wf005-context.md "Single mutation entrypoint").
  */
-function Board({ board, showArchive, mutate, inFlight }: BoardProps) {
+function Board({ board, showArchive, mutate, inFlight, onOpenCard }: BoardProps) {
   const lanes = useMemo(() => groupIntoLanes(board.cards), [board.cards]);
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
     null
@@ -122,6 +124,7 @@ function Board({ board, showArchive, mutate, inFlight }: BoardProps) {
             highlightedEpicId={highlightedEpicId}
             onToggleEpicHighlight={toggleEpicHighlight}
             dragDisabled={inFlight}
+            onOpenCard={onOpenCard}
           />
         ))}
       </div>

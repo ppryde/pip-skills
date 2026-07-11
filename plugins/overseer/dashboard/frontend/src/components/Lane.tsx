@@ -10,6 +10,8 @@ export interface LaneProps {
   onToggleEpicHighlight: (id: string) => void;
   /** True while a mutation is in flight — passed through to disable drag handles. */
   dragDisabled: boolean;
+  /** Chunk 5: clicking a tile body opens the detail drawer for that card. */
+  onOpenCard: (id: string) => void;
 }
 
 /**
@@ -28,6 +30,7 @@ function Lane({
   highlightedEpicId,
   onToggleEpicHighlight,
   dragDisabled,
+  onOpenCard,
 }: LaneProps) {
   const { setNodeRef } = useDroppable({ id: lane.key });
   const isEmpty = lane.cards.length === 0;
@@ -68,6 +71,7 @@ function Lane({
                   dimmed={dimmed}
                   highlighted={highlighted}
                   dragDisabled={dragDisabled}
+                  onOpen={onOpenCard}
                 />
               ) : (
                 <CardTile
@@ -76,6 +80,7 @@ function Lane({
                   dimmed={dimmed}
                   highlighted={highlighted}
                   dragDisabled={dragDisabled}
+                  onOpen={onOpenCard}
                 />
               );
             })}

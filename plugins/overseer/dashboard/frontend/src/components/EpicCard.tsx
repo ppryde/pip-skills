@@ -8,6 +8,8 @@ export interface EpicCardProps {
   dimmed?: boolean;
   highlighted?: boolean;
   dragDisabled?: boolean;
+  /** Chunk 5: clicking the tile body opens the detail drawer for this card. */
+  onOpen?: (id: string) => void;
 }
 
 /**
@@ -25,6 +27,7 @@ function EpicCard({
   dimmed = false,
   highlighted = false,
   dragDisabled = false,
+  onOpen,
 }: EpicCardProps) {
   const rollup = card.rollup;
 
@@ -35,11 +38,18 @@ function EpicCard({
       dimmed={dimmed}
       highlighted={highlighted}
       dragDisabled={dragDisabled}
+      onOpen={onOpen}
       headerExtra={
         <button
           type="button"
           className="epic-card__expand"
-          onClick={() => onToggleExpand(card.id)}
+          onClick={(e) => {
+            // Stop the click from bubbling to the body's onOpen — expanding
+            // the epic's highlight is a distinct action from opening the
+            // detail drawer, even though the button lives inside the body.
+            e.stopPropagation();
+            onToggleExpand(card.id);
+          }}
           aria-expanded={expanded}
         >
           {expanded ? "collapse" : "expand"}

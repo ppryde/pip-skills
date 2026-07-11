@@ -17,6 +17,8 @@ export interface TileShellProps {
   headerExtra?: ReactNode;
   /** Optional block rendered between the title and the footer (e.g. the epic rollup line). */
   children?: ReactNode;
+  /** Chunk 5: clicking the tile BODY (outside the drag handle) opens the detail drawer. */
+  onOpen?: (id: string) => void;
 }
 
 /**
@@ -24,11 +26,12 @@ export interface TileShellProps {
  * ONLY place @dnd-kit's `useSortable` is wired — see wf005-context.md "Drag
  * semantics"), the header (id + priority chip + BLOCKED badge + optional
  * `headerExtra`), the title, an optional middle slot, and the footer
- * (BudgetMeter + DependencyBadge). The tile body is where Chunk 5's
- * click-to-open-drawer will attach — again, ONE place, kept OUTSIDE the
- * handle's listeners so the drawer click and the drag sensor never fight.
- * Only `planned` / non-blocked `in-flight` / `parked` cards (`isDragSource`)
- * get real drag listeners; everything else renders a disabled, inert handle.
+ * (BudgetMeter + DependencyBadge). The tile body (`onOpen`, wired from
+ * Chunk 5) is the ONE place a click opens the detail drawer for this card,
+ * kept OUTSIDE the handle's listeners so the drawer click and the drag
+ * sensor never fight. Only `planned` / non-blocked `in-flight` / `parked`
+ * cards (`isDragSource`) get real drag listeners; everything else renders a
+ * disabled, inert handle.
  */
 function TileShell({
   card,
@@ -38,6 +41,7 @@ function TileShell({
   dragDisabled = false,
   headerExtra,
   children,
+  onOpen,
 }: TileShellProps) {
   const dragSource = isDragSource(card);
   const sortableDisabled = dragDisabled || !dragSource;
@@ -77,7 +81,22 @@ function TileShell({
       >
         ⠿
       </button>
-      <div className="card-tile__body">
+      <div
+        className="card-tile__body"
+        onClick={onOpen ? () => onOpen(card.id) : undefined}
+        role={onOpen ? "button" : undefined}
+        tabIndex={onOpen ? 0 : undefined}
+        onKeyDown={
+          onOpen
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpen(card.id);
+                }
+              }
+            : undefined
+        }
+      >
         <div className="card-tile__header">
           <span className="card-tile__id">{card.id}</span>
           {card.priority && (

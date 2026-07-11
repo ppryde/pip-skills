@@ -1,12 +1,14 @@
 import { useState } from "react";
 import TopBar from "./components/TopBar";
 import Board from "./components/Board";
+import CardDetailDrawer from "./components/CardDetailDrawer";
 import { useBoard } from "./board/useBoard";
 
 function App() {
   const { board, context, limits, loading, error, inFlight, mutate, refresh } =
     useBoard();
   const [showArchive, setShowArchive] = useState(false);
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -37,9 +39,14 @@ function App() {
             showArchive={showArchive}
             mutate={mutate}
             inFlight={inFlight}
+            onOpenCard={setOpenCardId}
           />
         )}
       </main>
+      <CardDetailDrawer
+        cardId={openCardId}
+        onClose={() => setOpenCardId(null)}
+      />
     </div>
   );
 }
