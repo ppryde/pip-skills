@@ -1,12 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCard } from "../api/client";
 import type { CardDetail } from "../api/types";
+import type { UseBoardResult } from "../board/useBoard";
 import BudgetMeter from "./BudgetMeter";
+import PrioritySelect from "./PrioritySelect";
+import LinkEditor from "./LinkEditor";
+import StatusMenu from "./StatusMenu";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
   cardId: string | null;
   onClose: () => void;
+  mutate: UseBoardResult["mutate"];
+  inFlight: boolean;
+  /** All card ids on the board — threaded down to LinkEditor for its
+   * parent/dependency option lists (see wf005-c6-brief.md). */
+  allCardIds: string[];
 }
 
 /**
@@ -47,8 +56,22 @@ function sectionLabel(heading: string): string {
  * user reopens a different card before the first resolves, or a later
  * refetch — added in C6 — resolves first) is dropped; only the latest
  * issued request's result is ever applied.
+ *
+ * C6 adds the mutation controls (PrioritySelect/LinkEditor/StatusMenu). Each
+ * routes its own call through `useBoard().mutate` (passed down from `App`)
+ * — this component never calls the api client + setState for a mutation
+ * itself. After any of those mutations settles, the control invokes
+ * `onMutated` (wired to `refetchDetail` below) so the drawer's OWN view
+ * re-fetches too, through the same counter guard — the board refresh from
+ * `mutate` and this card-detail refetch are separate concerns.
  */
-function CardDetailDrawer({ cardId, onClose }: CardDetailDrawerProps) {
+function CardDetailDrawer({
+  cardId,
+  onClose,
+  mutate,
+  inFlight,
+  allCardIds,
+}: CardDetailDrawerProps) {
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,26 +80,35 @@ function CardDetailDrawer({ cardId, onClose }: CardDetailDrawerProps) {
   // only applied if its id is still the latest issued when it resolves.
   const requestIdRef = useRef(0);
 
-  useEffect(() => {
-    if (cardId === null) return;
-
-    const id = ++requestIdRef.current;
+  const fetchDetail = useCallback((id: string) => {
+    const reqId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
 
-    getCard(cardId)
+    getCard(id)
       .then((res) => {
-        if (id !== requestIdRef.current) return; // stale — a newer open won
+        if (reqId !== requestIdRef.current) return; // stale — a newer open/refetch won
         setDetail(res);
       })
       .catch((e) => {
-        if (id !== requestIdRef.current) return;
+        if (reqId !== requestIdRef.current) return;
         setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
-        if (id === requestIdRef.current) setLoading(false);
+        if (reqId === requestIdRef.current) setLoading(false);
       });
-  }, [cardId]);
+  }, []);
+
+  useEffect(() => {
+    if (cardId === null) return;
+    fetchDetail(cardId);
+  }, [cardId, fetchDetail]);
+
+  // Re-fetch the currently-open card, through the same counter guard —
+  // passed to the mutation controls as `onMutated`.
+  const refetchDetail = useCallback(() => {
+    if (cardId !== null) fetchDetail(cardId);
+  }, [cardId, fetchDetail]);
 
   useEffect(() => {
     if (cardId === null) return;
@@ -125,16 +157,35 @@ function CardDetailDrawer({ cardId, onClose }: CardDetailDrawerProps) {
                   {detail.status}
                   {detail.stage ? ` · ${detail.stage}` : ""}
                 </span>
-                {detail.priority && (
-                  <span
-                    className={`priority-chip priority-chip--${detail.priority}`}
-                  >
-                    {detail.priority}
-                  </span>
-                )}
+                <PrioritySelect
+                  cardId={detail.id}
+                  value={detail.priority}
+                  mutate={mutate}
+                  inFlight={inFlight}
+                  onMutated={refetchDetail}
+                />
                 <BudgetMeter budget={detail.budget} />
               </div>
             </header>
+
+            <div className="card-drawer__controls">
+              <StatusMenu
+                cardId={detail.id}
+                status={detail.status}
+                mutate={mutate}
+                inFlight={inFlight}
+                onMutated={refetchDetail}
+              />
+              <LinkEditor
+                cardId={detail.id}
+                parent={detail.parent}
+                dependsOn={detail.depends_on}
+                allCardIds={allCardIds}
+                mutate={mutate}
+                inFlight={inFlight}
+                onMutated={refetchDetail}
+              />
+            </div>
 
             <div className="card-drawer__body">
               {sectionEntries.length > 0 ? (

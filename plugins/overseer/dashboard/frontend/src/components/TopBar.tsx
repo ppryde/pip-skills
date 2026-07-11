@@ -1,4 +1,6 @@
 import type { Context, Limits } from "../api/types";
+import type { UseBoardResult } from "../board/useBoard";
+import ThresholdControl from "./ThresholdControl";
 
 export interface TopBarProps {
   projectName: string;
@@ -9,6 +11,8 @@ export interface TopBarProps {
   onToggleArchive: () => void;
   onRefresh: () => void;
   refreshing: boolean;
+  mutate: UseBoardResult["mutate"];
+  inFlight: boolean;
 }
 
 function formatPct(value: number): string {
@@ -29,6 +33,8 @@ function TopBar({
   onToggleArchive,
   onRefresh,
   refreshing,
+  mutate,
+  inFlight,
 }: TopBarProps) {
   const pct = context?.pct ?? null;
   const threshold = context?.threshold ?? null;
@@ -42,9 +48,7 @@ function TopBar({
         <span className="topbar__ctx-value">
           {pct === null ? "— unknown" : `${pct}%`}
         </span>
-        {threshold !== null && (
-          <span className="topbar__threshold">threshold {threshold}%</span>
-        )}
+        <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
       </div>
 
       {context?.model && <span className="topbar__pill">{context.model}</span>}

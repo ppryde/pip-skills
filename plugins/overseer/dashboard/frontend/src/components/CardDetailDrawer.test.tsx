@@ -1,14 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
-import type { CardDetail } from "../api/types";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { BoardResponse, CardDetail } from "../api/types";
 
-// Mock the SOLE api client module — no real fetch in this test.
+// Mock the SOLE api client module — no real fetch in this test. Includes the
+// mutation wrappers the wired-in controls (PrioritySelect/LinkEditor/
+// StatusMenu) import, even though most tests here never trigger them.
 vi.mock("../api/client", () => ({
   getCard: vi.fn(),
+  setPriority: vi.fn(),
+  setParent: vi.fn(),
+  setDepends: vi.fn(),
+  park: vi.fn(),
+  unpark: vi.fn(),
+  move: vi.fn(),
 }));
 
-import { getCard } from "../api/client";
+import { getCard, setPriority } from "../api/client";
 import CardDetailDrawer from "./CardDetailDrawer";
+
+const BOARD_RESPONSE = {} as BoardResponse;
+
+/** No-op stub `mutate` for tests that never interact with a mutation
+ * control — none of these render calls exercise a write. */
+function noopMutate() {
+  return vi.fn(async (_fn: () => Promise<BoardResponse>) => {});
+}
+
+/** Mimics `useBoard().mutate`: invokes `fn`, awaiting it — used by the
+ * integration test below to verify the drawer refetches after a control's
+ * mutation settles. */
+function liveMutate() {
+  return vi.fn(async (fn: () => Promise<BoardResponse>) => {
+    await fn();
+  });
+}
 
 function cardDetail(
   overrides: Partial<CardDetail> & { id: string }
@@ -54,7 +79,15 @@ describe("<CardDetailDrawer/>", () => {
   });
 
   it("renders nothing when cardId is null", () => {
-    render(<CardDetailDrawer cardId={null} onClose={() => {}} />);
+    render(
+      <CardDetailDrawer
+        cardId={null}
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(getCard).not.toHaveBeenCalled();
   });
@@ -74,7 +107,15 @@ describe("<CardDetailDrawer/>", () => {
       })
     );
 
-    render(<CardDetailDrawer cardId="WF-A" onClose={() => {}} />);
+    render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
 
     expect(getCard).toHaveBeenCalledWith("WF-A");
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
@@ -97,7 +138,15 @@ describe("<CardDetailDrawer/>", () => {
       })
     );
 
-    render(<CardDetailDrawer cardId="WF-Z" onClose={() => {}} />);
+    render(
+      <CardDetailDrawer
+        cardId="WF-Z"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
 
     expect(await screen.findByText("Some New Heading")).toBeInTheDocument();
     expect(screen.getByText("Surprise content.")).toBeInTheDocument();
@@ -112,7 +161,15 @@ describe("<CardDetailDrawer/>", () => {
       })
     );
 
-    render(<CardDetailDrawer cardId="WF-B" onClose={() => {}} />);
+    render(
+      <CardDetailDrawer
+        cardId="WF-B"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
 
     expect(
       await screen.findByText("Just some raw markdown body.")
@@ -122,7 +179,15 @@ describe("<CardDetailDrawer/>", () => {
   it("shows an error state with the thrown detail message when the fetch rejects", async () => {
     vi.mocked(getCard).mockRejectedValueOnce(new Error("card not found"));
 
-    render(<CardDetailDrawer cardId="WF-C" onClose={() => {}} />);
+    render(
+      <CardDetailDrawer
+        cardId="WF-C"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
 
     expect(await screen.findByText("card not found")).toBeInTheDocument();
   });
@@ -130,7 +195,15 @@ describe("<CardDetailDrawer/>", () => {
   it("closes via Esc keydown, overlay click, and the close button", async () => {
     vi.mocked(getCard).mockResolvedValue(cardDetail({ id: "WF-D" }));
     const onClose = vi.fn();
-    render(<CardDetailDrawer cardId="WF-D" onClose={onClose} />);
+    render(
+      <CardDetailDrawer
+        cardId="WF-D"
+        onClose={onClose}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
     await screen.findByRole("dialog");
 
     // Esc keydown.
@@ -157,7 +230,15 @@ describe("<CardDetailDrawer/>", () => {
       cardDetail({ id: "WF-E", title: "Panel card" })
     );
     const onClose = vi.fn();
-    render(<CardDetailDrawer cardId="WF-E" onClose={onClose} />);
+    render(
+      <CardDetailDrawer
+        cardId="WF-E"
+        onClose={onClose}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
     await screen.findByText("Panel card");
 
     // Clicking the dialog panel itself must NOT bubble to the overlay handler.
@@ -175,13 +256,27 @@ describe("<CardDetailDrawer/>", () => {
       .mockReturnValueOnce(second.promise);
 
     const { rerender } = render(
-      <CardDetailDrawer cardId="WF-A" onClose={() => {}} />
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
     );
     expect(getCard).toHaveBeenNthCalledWith(1, "WF-A");
 
     // Reopen a DIFFERENT card before A's fetch resolves — B's request is now
     // the "latest issued".
-    rerender(<CardDetailDrawer cardId="WF-B" onClose={() => {}} />);
+    rerender(
+      <CardDetailDrawer
+        cardId="WF-B"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
     expect(getCard).toHaveBeenNthCalledWith(2, "WF-B");
 
     // B resolves first, then the STALE A resolves after.
@@ -209,5 +304,41 @@ describe("<CardDetailDrawer/>", () => {
     // Still showing B — the late-arriving A response must be dropped.
     expect(screen.getByText("Card B")).toBeInTheDocument();
     expect(screen.queryByText("Card A")).not.toBeInTheDocument();
+  });
+
+  it("re-fetches the open card (getCard) after a drawer control's mutation settles", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-F", title: "Refetch me", priority: null })
+    );
+    vi.mocked(setPriority).mockResolvedValueOnce(BOARD_RESPONSE);
+    // The refetch after the mutation returns updated content — proves it's
+    // a REAL second `getCard` call, not just a re-render of stale state.
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-F", title: "Refetch me", priority: "P2" })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-F"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={["WF-F"]}
+      />
+    );
+    await screen.findByText("Refetch me");
+    expect(getCard).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Priority"), {
+        target: { value: "P2" },
+      });
+    });
+
+    expect(setPriority).toHaveBeenCalledWith("WF-F", "P2");
+    // The drawer's OWN getCard refetch fires as a SEPARATE concern from the
+    // board refresh `mutate` performs — not just a re-render of the
+    // mutation's board-response (which has no `sections`/`body` shape).
+    await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
   });
 });

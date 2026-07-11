@@ -27,6 +27,8 @@ function App() {
         onToggleArchive={() => setShowArchive((v) => !v)}
         onRefresh={() => void refresh()}
         refreshing={loading}
+        mutate={mutate}
+        inFlight={inFlight}
       />
       <main className="board-region">
         {loading && !board && (
@@ -46,6 +48,9 @@ function App() {
       <CardDetailDrawer
         cardId={openCardId}
         onClose={() => setOpenCardId(null)}
+        mutate={mutate}
+        inFlight={inFlight}
+        allCardIds={board?.cards.map((c) => c.id) ?? []}
       />
     </div>
   );
