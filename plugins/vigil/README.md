@@ -29,6 +29,13 @@ other plugin.
   content, `--inline <path>` files, and your notes) and arms an in-process
   `/clear`; `SessionStart` re-injects it and clears the gate. `vigil
   pause`/`resume` suspend/re-arm auto-handover (and release the gate).
+- Injected `additionalContext` alone never starts a turn — the fresh session
+  just sits idle. So after an automatic `/clear` (`SessionStart` fired with
+  `source == "clear"`, tmux reachable, pane known), vigil also types a short
+  resume prompt into the session's own tmux pane, so unattended runs restart
+  themselves hands-free. A plain launch or manual `/clear` never gets kicked —
+  only the auto-handover path does. `VIGIL_KICK_DELAY` (default `2`s) sets the
+  pre-keystroke delay, same pattern as `VIGIL_CLEAR_DELAY`.
 - Fail-safe `Stop`/`SessionStart`/`UserPromptSubmit` hooks (`trap 'exit 0'`,
   always exit 0). Without tmux, the Stop hook is loud: it tells the user to
   type `/clear` rather than silently doing nothing.
