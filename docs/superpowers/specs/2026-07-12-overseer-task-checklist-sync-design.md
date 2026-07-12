@@ -91,9 +91,18 @@ Dashboard renders `checklist:` under each card tile — a live checklist with ze
 
 The orchestrate skill gains a **Tasks** section:
 
-- **Bootstrap (once per project):** ensure `.claude/settings.json` has
+- **Bootstrap (once per project):** ensure `.claude/settings.json` (or `.local`) has
   `env.CLAUDE_CODE_TASK_LIST_ID` (default: a slug of the project root). If newly written, announce:
   "restart this CLI once to adopt the shared task list — /clear is not sufficient."
+- **Adoption spawn (reinstated relaunch, install-only nicety):** rather than leaving the restart to
+  the user, orchestrate MAY programmatically spawn the replacement CLI and invite the user to move:
+  `tmux new-session -d -s <name> -c <worktree> -e CLAUDE_CODE_TASK_LIST_ID=... claude` — then print
+  "attach with `tmux attach -t <name>` and close this session." This resurrects the old
+  new-CLI-relaunch mechanism for exactly one purpose (env adoption at install); it is NOT a handover
+  path — vigil's in-place `/clear` owns handovers. Spawning under tmux also enables vigil's
+  hands-free clear dispatch in the new session by construction. During development, add
+  `--plugin-dir <repo>/plugins` so the spawned session loads the working-tree plugins (live hooks)
+  rather than the installed marketplace copies.
 - **Working rule (DRY):** when picking up a card, break it into tasks via `TaskCreate` with
   `metadata: {card: <id>}`; work the tasks (`in_progress` → `completed`); **never hand-edit the
   card's checklist** — the sync owns it. Card-level transitions (stages, done, block) remain CLI
