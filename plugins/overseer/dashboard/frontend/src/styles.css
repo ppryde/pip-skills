@@ -69,6 +69,12 @@ body {
   color: #fff;
 }
 
+.topbar__ctx-note {
+  color: #8b95a1;
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
 .topbar__threshold {
   color: #8b95a1;
   font-size: 0.75rem;

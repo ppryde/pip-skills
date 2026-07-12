@@ -43,11 +43,12 @@ function TopBar({
     <header className="topbar">
       <h1>{projectName}</h1>
 
-      <div className="topbar__ctx" title="as of last refresh">
+      <div className="topbar__ctx">
         <span className="topbar__ctx-label">ctx</span>
         <span className="topbar__ctx-value">
           {pct === null ? "— unknown" : `${pct}%`}
         </span>
+        <span className="topbar__ctx-note">as of last refresh</span>
         <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
       </div>
 
