@@ -66,10 +66,30 @@ def _make_tmux_shim(bindir: Path, marker: Path, has_session_rc: int = 0) -> Path
     return fake
 
 
-def _wait_for(marker: Path, timeout: float = 3.0) -> bool:
+def _kick_recorded(marker: Path) -> bool:
+    """True once the shim has recorded the COMPLETE kick: both the literal
+    prompt send AND the separate Enter send. The kick is two distinct shim
+    invocations, so polling for the marker's mere existence returns after the
+    first append — a subsequent read (or unlink) then races the second
+    invocation under load."""
+    if not marker.exists():
+        return False
+    lines = marker.read_text().splitlines()
+    prompt_sent = any(
+        line.startswith("send-keys") and "-l" in line and KICK_PROMPT in line
+        for line in lines
+    )
+    enter_sent = any(
+        line.startswith("send-keys") and line.rstrip().endswith("Enter")
+        for line in lines
+    )
+    return prompt_sent and enter_sent
+
+
+def _wait_for_kick(marker: Path, timeout: float = 3.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if marker.exists():
+        if _kick_recorded(marker):
             return True
         time.sleep(0.05)
     return False
@@ -92,7 +112,7 @@ class TestResumeKickUnit:
         assert "KICK TEST HANDOFF" in out
         assert "additionalContext" in out
 
-        assert _wait_for(marker)
+        assert _wait_for_kick(marker)  # predicate poll: BOTH sends recorded
         lines = marker.read_text().splitlines()
         assert any(
             line.startswith("send-keys -t %9 -l") and KICK_PROMPT in line for line in lines
@@ -194,7 +214,10 @@ class TestResumeKickUnit:
         _stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
         assert run(repo, "session-start-hook") == 0
         assert "KICK TEST HANDOFF" in capsys.readouterr().out
-        assert _wait_for(marker)  # first launch kicks
+        # Predicate poll matters doubly here: waiting on mere marker existence
+        # would let the unlink below race the shim's second (Enter) invocation,
+        # which would re-create the marker and false-fail the final assertion.
+        assert _wait_for_kick(marker)  # first launch kicks — BOTH sends done
 
         marker.unlink()  # reset the recorder for the second launch
         _stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
