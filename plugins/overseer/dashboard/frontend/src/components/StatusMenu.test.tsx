@@ -118,6 +118,7 @@ describe("<StatusMenu/>", () => {
     fireEvent.click(screen.getByRole("button", { name: /block/i }));
 
     expect(move).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
   });
 
   it("unblock (from blocked) calls move(id, {status:'planned'})", () => {
