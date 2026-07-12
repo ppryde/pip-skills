@@ -341,4 +341,50 @@ describe("<CardDetailDrawer/>", () => {
     // mutation's board-response (which has no `sections`/`body` shape).
     await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
   });
+
+  it("guards a stale onMutated closure: no getCard fires when a control's mutation settles after the drawer has already closed", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-G", title: "Close me first", priority: null })
+    );
+    const setPriorityDeferred = deferred<BoardResponse>();
+    vi.mocked(setPriority).mockReturnValueOnce(setPriorityDeferred.promise);
+
+    const { rerender } = render(
+      <CardDetailDrawer
+        cardId="WF-G"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={["WF-G"]}
+      />
+    );
+    await screen.findByText("Close me first");
+    expect(getCard).toHaveBeenCalledTimes(1);
+
+    // Kick off a mutation but don't let it settle yet.
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "P2" },
+    });
+    expect(setPriority).toHaveBeenCalledWith("WF-G", "P2");
+
+    // Close the drawer BEFORE the in-flight mutation settles.
+    rerender(
+      <CardDetailDrawer
+        cardId={null}
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={["WF-G"]}
+      />
+    );
+
+    // Now let the stale mutation resolve — its `onMutated` closure still
+    // references the now-closed card.
+    await act(async () => {
+      setPriorityDeferred.resolve(BOARD_RESPONSE);
+    });
+
+    // No extra getCard call should have fired for the closed card.
+    expect(getCard).toHaveBeenCalledTimes(1);
+  });
 });

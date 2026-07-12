@@ -80,6 +80,18 @@ function CardDetailDrawer({
   // only applied if its id is still the latest issued when it resolves.
   const requestIdRef = useRef(0);
 
+  // Tracks the ACTUAL currently-open card id, independent of any particular
+  // `refetchDetail` closure below. A mutation control (PrioritySelect/
+  // StatusMenu/LinkEditor) captures `onMutated` at click time and invokes it
+  // once its own async `mutate()` settles — if the drawer has since closed
+  // or switched to a different card, that captured closure is stale and
+  // must no-op rather than firing an unneeded `getCard` for a card that's
+  // no longer open (see wf005 review: "guard stale onMutated closure").
+  const activeCardIdRef = useRef<string | null>(cardId);
+  useEffect(() => {
+    activeCardIdRef.current = cardId;
+  }, [cardId]);
+
   const fetchDetail = useCallback((id: string) => {
     const reqId = ++requestIdRef.current;
     setLoading(true);
@@ -105,9 +117,14 @@ function CardDetailDrawer({
   }, [cardId, fetchDetail]);
 
   // Re-fetch the currently-open card, through the same counter guard —
-  // passed to the mutation controls as `onMutated`.
+  // passed to the mutation controls as `onMutated`. Guarded against a stale
+  // closure: only refetches if `cardId` (captured when this instance of the
+  // callback was created) still matches the drawer's actual open card at
+  // invocation time — a no-op once the drawer has closed or switched cards.
   const refetchDetail = useCallback(() => {
-    if (cardId !== null) fetchDetail(cardId);
+    if (cardId !== null && activeCardIdRef.current === cardId) {
+      fetchDetail(cardId);
+    }
   }, [cardId, fetchDetail]);
 
   useEffect(() => {
