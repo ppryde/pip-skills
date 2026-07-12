@@ -213,6 +213,8 @@ describe("api/client", () => {
       json: async () => ({}),
     } as Response);
 
-    await expect(client.getBoard()).rejects.toThrow("Internal Server Error");
+    // Anchored regex: the thrown message must EQUAL the statusText — a bare
+    // string arg to toThrow would only be a substring-containment check.
+    await expect(client.getBoard()).rejects.toThrow(/^Internal Server Error$/);
   });
 });
