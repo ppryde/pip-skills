@@ -16,6 +16,7 @@ STAGES = [
     "verification",
     "awaiting-merge",
 ]
+PRIORITIES = {"P0", "P1", "P2", "P3"}
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kM])?")
@@ -88,7 +89,9 @@ class Card:
     title: str
     status: str = "planned"
     stage: str | None = None
+    order: int = 0
     complexity: str | None = None
+    priority: str | None = None
     jira: str | None = None
     linear: str | None = None
     sprint: str | None = None
@@ -103,6 +106,7 @@ class Card:
     created: str = ""
     updated: str = ""
     blocked_on: str | None = None
+    checklist: list[dict] = field(default_factory=list)
     body: str = ""
 
     @classmethod
@@ -134,12 +138,42 @@ class Card:
             depends_on = [str(depends_raw)]
         else:
             depends_on = []
+        order_raw = meta.get("order")
+        if order_raw is not None:
+            try:
+                order = int(order_raw)
+            except (TypeError, ValueError):
+                raise CardParseError(f"unparseable order: {order_raw!r}")
+        else:
+            order = 0
+        priority_raw = meta.get("priority")
+        if priority_raw is not None:
+            priority = str(priority_raw)
+            if priority not in PRIORITIES:
+                raise CardParseError(f"unknown priority: {priority!r}")
+        else:
+            priority = None
+        checklist_raw = meta.get("checklist")
+        checklist: list[dict] = []
+        if isinstance(checklist_raw, list):
+            for entry in checklist_raw:
+                if not isinstance(entry, dict):
+                    continue
+                if not all(k in entry for k in ("task", "subject", "status")):
+                    continue
+                checklist.append({
+                    "task": str(entry["task"]),
+                    "subject": str(entry["subject"]),
+                    "status": str(entry["status"]),
+                })
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
             status=status,
             stage=stage,
+            order=order,
             complexity=meta.get("complexity"),
+            priority=priority,
             jira=meta.get("jira"),
             linear=meta.get("linear"),
             sprint=meta.get("sprint"),
@@ -154,18 +188,21 @@ class Card:
             created=str(meta.get("created", "")),
             updated=str(meta.get("updated", "")),
             blocked_on=meta.get("blocked_on"),
+            checklist=checklist,
             body=body.strip(),
         )
 
     def to_text(self) -> str:
-        meta = {
+        meta: dict[str, object] = {
             "id": self.id,
             "jira": self.jira,
             "linear": self.linear,
             "title": self.title,
             "status": self.status,
             "stage": self.stage,
+            "order": self.order,
             "complexity": self.complexity,
+            "priority": self.priority,
             "sprint": self.sprint,
             "parent": self.parent,
             "branch": self.branch,
@@ -181,6 +218,8 @@ class Card:
             "updated": self.updated,
             "blocked_on": self.blocked_on,
         }
+        if self.checklist:
+            meta["checklist"] = self.checklist
         front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
         return f"---\n{front}\n---\n\n{self.body.strip()}\n"
 
@@ -240,3 +279,29 @@ class Card:
         if self.budget_estimate is None:
             return False
         return self.budget_actual >= 2 * self.budget_estimate
+
+    @property
+    def sections(self) -> dict[str, str]:
+        """Split the body into an ordered {header: content} dict on `## ` headers.
+
+        `### ` sub-headers do not split — they stay in their parent section's
+        content. Any preamble before the first `## ` header is keyed `""`
+        (only included if non-empty). Empty body -> {}.
+        """
+        if not self.body:
+            return {}
+        lines = self.body.split("\n")
+        sections: dict[str, str] = {}
+        header = ""
+        start = 0
+        for i, line in enumerate(lines):
+            if line.startswith("## "):
+                content = "\n".join(lines[start:i]).strip()
+                if header or content:
+                    sections[header] = content
+                header = line
+                start = i + 1
+        content = "\n".join(lines[start:]).strip()
+        if header or content:
+            sections[header] = content
+        return sections

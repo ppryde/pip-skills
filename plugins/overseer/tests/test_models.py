@@ -130,6 +130,14 @@ class TestCardParse:
             "---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx", "budget",
             id="non-mapping-budget",
         ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\npriority: P5\n---\nbody\n",
+            "priority", id="bad-priority",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\norder: notanumber\n---\nbody\n",
+            "order", id="bad-order",
+        ),
     ])
     def test_from_text_raises(self, text, match):
         with pytest.raises(CardParseError, match=match):
@@ -139,6 +147,12 @@ class TestCardParse:
         card = Card.from_text(SAMPLE_CARD)
         again = Card.from_text(card.to_text())
         assert again == card
+
+    def test_checklist_less_card_stays_byte_stable(self):
+        """Cards without checklist frontmatter must not gain a `checklist:` key
+        on re-serialization — existing card files stay byte-stable."""
+        card = Card.from_text(SAMPLE_CARD)
+        assert "checklist" not in card.to_text()
 
     def test_to_text_formats_budget_as_strings(self):
         card = Card.from_text(SAMPLE_CARD)
@@ -352,3 +366,120 @@ class TestParkUnpark:
         c = self._card(status="parked", stage=None)
         c.unpark("2026-07-11T11:00")
         assert c.status == "planned"
+
+
+class TestOrderAndPriority:
+    def test_order_defaults_to_zero(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.order == 0
+
+    def test_priority_defaults_to_none(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.priority is None
+
+    def test_order_and_priority_round_trip(self):
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\n"
+            "order: 5\npriority: P1\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        assert card.order == 5
+        assert card.priority == "P1"
+        again = Card.from_text(card.to_text())
+        assert again.order == 5
+        assert again.priority == "P1"
+
+    def test_order_zero_round_trip(self):
+        """Ensure order 0 (move to top) is preserved and not lost."""
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\norder: 3\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        card.order = 0
+        again = Card.from_text(card.to_text())
+        assert again.order == 0
+
+
+class TestChecklist:
+    def _card_text(self, checklist_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{checklist_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_checklist_parses_and_round_trips(self):
+        text = self._card_text(
+            "checklist:\n"
+            "  - {task: '7', subject: write tests, status: in_progress}\n"
+            "  - {task: '8', subject: implement, status: pending}\n"
+        )
+        card = Card.from_text(text)
+        assert card.checklist == [
+            {"task": "7", "subject": "write tests", "status": "in_progress"},
+            {"task": "8", "subject": "implement", "status": "pending"},
+        ]
+        assert "checklist:" in card.to_text()  # survives re-serialization
+        again = Card.from_text(card.to_text())
+        assert again.checklist == card.checklist
+
+    def test_checklist_absent_defaults_empty(self):
+        card = Card.from_text(self._card_text())
+        assert card.checklist == []
+        assert "checklist:" not in card.to_text()
+
+    def test_checklist_non_list_becomes_empty(self):
+        card = Card.from_text(self._card_text("checklist: not-a-list\n"))
+        assert card.checklist == []
+
+    def test_checklist_non_dict_entries_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "checklist:\n"
+                "  - 'not a mapping'\n"
+                "  - {task: '1', subject: real entry, status: pending}\n"
+            )
+        )
+        assert card.checklist == [
+            {"task": "1", "subject": "real entry", "status": "pending"},
+        ]
+
+    def test_checklist_entries_missing_keys_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "checklist:\n"
+                "  - {task: '1', subject: missing status}\n"
+                "  - {task: '2', status: pending}\n"
+                "  - {subject: missing task, status: pending}\n"
+                "  - {task: '3', subject: complete entry, status: done}\n"
+            )
+        )
+        assert card.checklist == [
+            {"task": "3", "subject": "complete entry", "status": "done"},
+        ]
+
+    def test_checklist_status_values_pass_through_verbatim(self):
+        card = Card.from_text(
+            self._card_text(
+                "checklist:\n"
+                "  - {task: '1', subject: whatever, status: some-weird-status}\n"
+            )
+        )
+        assert card.checklist == [
+            {"task": "1", "subject": "whatever", "status": "some-weird-status"},
+        ]
+
+    def test_checklist_empty_omitted_from_serialized_text(self):
+        card = Card(id="WF-001", title="T", status="planned", body="## Goal\nx")
+        assert "checklist" not in card.to_text()
+
+    def test_checklist_non_empty_round_trips_via_dataclass(self):
+        card = Card(
+            id="WF-001", title="T", status="planned", body="## Goal\nx",
+            checklist=[{"task": "1", "subject": "s", "status": "pending"}],
+        )
+        again = Card.from_text(card.to_text())
+        assert again.checklist == card.checklist

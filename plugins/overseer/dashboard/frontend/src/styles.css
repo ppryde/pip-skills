@@ -1,0 +1,842 @@
+/* Minimal reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  color: #1b1f24;
+  background: #f5f6f8;
+}
+
+/* App shell skeleton: top bar strip + a horizontally scrollable board region. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  background: #1b1f24;
+  color: #fff;
+  flex-wrap: wrap;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+.topbar__ctx {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.topbar__ctx-label {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: #8b95a1;
+}
+
+.topbar__ctx-value {
+  font-weight: 600;
+  color: #fff;
+}
+
+.topbar__ctx-note {
+  color: #8b95a1;
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+.topbar__threshold {
+  color: #8b95a1;
+  font-size: 0.75rem;
+}
+
+.topbar__pill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #2a313b;
+  color: #cbd5e1;
+}
+
+.topbar__refresh {
+  margin-left: auto;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #3a4453;
+  background: #2a313b;
+  color: #fff;
+  cursor: pointer;
+}
+
+.topbar__refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.topbar__archive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.topbar__quarantine-banner {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  background: #7a2e2e;
+  color: #ffd9d9;
+}
+
+.board-region {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1rem;
+}
+
+.board-placeholder {
+  color: #6b7280;
+}
+
+.board-error {
+  color: #b3261e;
+}
+
+/* Board: a flex row of lanes, horizontally scrollable. */
+.board {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  height: 100%;
+  min-width: max-content;
+}
+
+/* Drag drop-mismatch toast (see Board.tsx's reconciliation after a drop). */
+.board-toast {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: #7a2e2e;
+  color: #ffd9d9;
+  font-size: 0.8rem;
+}
+
+.board-toast__dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.lane {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #e2e5e9;
+  border-radius: 6px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+/* Parked/Done/Archive are visually distinct and right-grouped in the row. */
+.lane--parked,
+.lane--done,
+.lane--archive {
+  background: #f0f1f4;
+  border-style: dashed;
+  margin-left: 0;
+}
+
+.lane--parked {
+  margin-left: 1.5rem;
+}
+
+.lane__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 1px solid #e2e5e9;
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+
+.lane__count {
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.lane__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+/* Empty stage lanes collapse to a thin labelled strip. */
+.lane--empty {
+  flex-basis: 44px;
+  min-width: 44px;
+}
+
+.lane--empty .lane__header {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  height: 100%;
+  border-bottom: none;
+}
+
+.card-tile {
+  display: flex;
+  gap: 0.4rem;
+  background: #fff;
+  border: 1px solid #e2e5e9;
+  border-radius: 5px;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.card-tile--blocked {
+  border-color: #d33d3d;
+  background: #fff5f5;
+}
+
+.card-tile--highlighted {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.card-tile--dimmed {
+  opacity: 0.35;
+}
+
+.card-tile__handle {
+  flex: 0 0 auto;
+  color: #9ca3af;
+  cursor: grab;
+  user-select: none;
+  padding: 0.1rem 0.2rem 0 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  touch-action: none;
+}
+
+.card-tile__handle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.card-tile__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.card-tile__header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.card-tile__id {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+/*
+  Shared by the plain-<div> title (read-only tiles) AND the <button> title
+  that is the keyboard-reachable "open drawer" control on openable tiles. The
+  button-reset properties (border/background/padding/text-align/font/width)
+  are inert for the <div> and make the <button> render identically to it, so
+  the visual layout is unchanged by the a11y restructure.
+*/
+.card-tile__title {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  color: #1b1f24;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+/*
+  Live task checklist (WF-008). `.checklist` is shared by the tile's
+  windowed focus window (`--windowed`, capped to a fixed height with an
+  edge-mask fade) and the drawer's full unwindowed list. Rows are plain
+  <li> — see ChecklistRows.tsx's doc comment on why: they render inside the
+  tile body's non-interactive div, and MUST NOT introduce any interactive
+  element there.
+*/
+.checklist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.1rem 0 0.35rem;
+  padding: 0;
+}
+
+/* Fixed-height focus window (5 rows) with a top/bottom fade so a partial
+   row at either edge reads as "there's more", not as a clipped row. */
+.checklist--windowed {
+  max-height: calc(5 * 1.15rem);
+  overflow: hidden;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 20%,
+    black 80%,
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 20%,
+    black 80%,
+    transparent
+  );
+}
+
+.checklist__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+  color: #4b5563;
+}
+
+.checklist__glyph {
+  flex: 0 0 auto;
+  width: 0.9em;
+  text-align: center;
+  color: #9ca3af;
+}
+
+.checklist__subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist__row--completed .checklist__glyph {
+  color: #15803d;
+}
+
+.checklist__row--completed .checklist__subject {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+
+.checklist__row--in_progress .checklist__glyph {
+  color: #16a34a;
+}
+
+.checklist__row--in_progress .checklist__subject {
+  color: #1b1f24;
+  font-weight: 500;
+}
+
+/* All motion below is opt-in: a user who has asked the OS to reduce motion
+   gets the end state instantly — no fade-in, no pulse. */
+@media (prefers-reduced-motion: no-preference) {
+  .checklist__row--appear {
+    animation: checklist-row-appear 200ms ease-out;
+  }
+
+  .checklist__row--in_progress .checklist__glyph {
+    animation: checklist-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes checklist-row-appear {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes checklist-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+.card-tile__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.priority-chip {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.badge--blocked {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  background: #d33d3d;
+  color: #fff;
+}
+
+.dep-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+}
+
+.dep-badge--ready {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.dep-badge--waiting {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.budget-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  color: #4b5563;
+}
+
+/* Tripwire (actual >= 2x estimate) is visually distinct. */
+.budget-meter--tripwire .budget-meter__value {
+  color: #b3261e;
+  font-weight: 700;
+}
+
+.budget-meter__flag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  background: #b3261e;
+  color: #fff;
+}
+
+.epic-card {
+  border-left: 3px solid #4338ca;
+}
+
+.epic-card__expand {
+  margin-left: auto;
+  font-size: 0.65rem;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 3px;
+  padding: 0.05rem 0.4rem;
+  cursor: pointer;
+}
+
+.epic-card__rollup {
+  font-size: 0.7rem;
+  color: #4338ca;
+  margin-bottom: 0.35rem;
+}
+
+/* Card detail drawer (Chunk 5): a right-hand panel over a dimming overlay. */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 31, 36, 0.4);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 20;
+}
+
+.card-drawer {
+  position: relative;
+  width: min(28rem, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: #fff;
+  padding: 1.25rem 1.5rem;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+}
+
+.card-drawer__close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  border: none;
+  background: transparent;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.card-drawer__status {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.card-drawer__status--error {
+  color: #b3261e;
+}
+
+.card-drawer__header {
+  padding-right: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.card-drawer__id {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.card-drawer__title {
+  margin: 0.15rem 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.card-drawer__facts {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: #374151;
+}
+
+.card-drawer__section {
+  margin-bottom: 1rem;
+}
+
+.card-drawer__section-heading {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #4338ca;
+}
+
+.card-drawer__section-text {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #1b1f24;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Rendered markdown inside a card section/body — headings are clamped down
+ * to card-scale type (a card body is not a document, so an author's `#`
+ * should not blow up to page-heading size). */
+.md-view {
+  color: #1b1f24;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.md-view h1,
+.md-view h2 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.md-view h3,
+.md-view h4,
+.md-view h5,
+.md-view h6 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.md-view p {
+  margin: 0 0 0.5rem;
+}
+
+.md-view p:last-child {
+  margin-bottom: 0;
+}
+
+.md-view ul,
+.md-view ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.md-view pre,
+.md-view code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.md-view pre {
+  overflow-x: auto;
+  padding: 0.5rem;
+  background: #f0f1f4;
+  border-radius: 4px;
+}
+
+.md-view code {
+  background: #f0f1f4;
+  border-radius: 3px;
+  padding: 0.05rem 0.25rem;
+}
+
+.md-view pre code {
+  background: none;
+  padding: 0;
+}
+
+/* Verbatim source view of a card body — a plain monospace block, distinct
+ * from the rendered `.md-view` above. */
+.card-drawer__source {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #1b1f24;
+  overflow-x: auto;
+}
+
+/* Drawer's "Tasks" section — the full, unwindowed `.checklist` (no
+ * `--windowed` edge-fade/max-height there; see ChecklistRows usage in
+ * CardDetailDrawer.tsx). Sits above the Rendered/Source toggle. */
+.card-drawer__checklist {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.card-drawer__checklist .checklist__row {
+  font-size: 0.85rem;
+  line-height: 1.4rem;
+}
+
+/* Rendered/Source segmented toggle above the drawer body. */
+.card-drawer__viewtoggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.card-drawer__viewtoggle button {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 3px;
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.card-drawer__viewtoggle button[aria-pressed="true"] {
+  background: #4338ca;
+  border-color: #4338ca;
+  color: #fff;
+}
+
+/* Mutation controls (Chunk 6). */
+.priority-select {
+  font-size: 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 3px;
+  padding: 0.1rem 0.3rem;
+  background: #fff;
+  color: #1b1f24;
+}
+
+.threshold-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.threshold-control__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: #8b95a1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.threshold-control input {
+  width: 3.5rem;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid #3a4453;
+  background: #1b1f24;
+  color: #fff;
+}
+
+.threshold-control button {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  border: 1px solid #3a4453;
+  background: #2a313b;
+  color: #fff;
+  cursor: pointer;
+}
+
+.card-drawer__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.status-menu {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.status-menu button {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #1b1f24;
+  cursor: pointer;
+}
+
+.link-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.link-editor__field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.link-editor__deps {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.link-editor__deps-label {
+  color: #6b7280;
+}
+
+.link-editor__deps-list {
+  list-style: none;
+  display: flex;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.link-editor__deps-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.75rem;
+}
+
+.link-editor__deps-list button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}

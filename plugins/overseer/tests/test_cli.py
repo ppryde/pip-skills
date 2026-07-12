@@ -247,6 +247,52 @@ class TestHandoffCommand:
         assert data["in_flight"][0]["id"] == "WF-001"
 
 
+class TestBoardCommand:
+    def test_board_json_parses(self, repo, capsys):
+        run(repo, "new-card", "--title", "T", "--estimate", "100k")
+        run(repo, "set-stage", "WF-001", "implementation")
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["project"] == repo.name
+        assert len(data["cards"]) == 1
+        assert data["cards"][0]["id"] == "WF-001"
+
+    def test_board_json_card_fields(self, repo, capsys):
+        run(repo, "new-card", "--title", "Test Card", "--complexity", "M",
+            "--estimate", "400k")
+        run(repo, "set-stage", "WF-001", "implementation")
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        card = data["cards"][0]
+        assert card["id"] == "WF-001"
+        assert card["title"] == "Test Card"
+        assert card["status"] == "in-flight"
+        assert card["stage"] == "implementation"
+        assert card["complexity"] == "M"
+        assert card["budget"]["estimate"] == 400_000
+        assert "is_epic" in card
+        assert "ready" in card
+        assert "rollup" in card
+
+    def test_board_text_one_line_count(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "new-card", "--title", "T2")
+        capsys.readouterr()
+        assert run(repo, "board") == 0
+        out = capsys.readouterr().out
+        assert "2 cards" in out
+
+    def test_board_loud_quarantine(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        (workflow_root(repo) / "cards" / "WF-999-bad.md").write_text("garbage")
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        captured = capsys.readouterr()
+        assert "QUARANTINED" in captured.err
+
+
 class TestUsageTelemetry:
     def test_log_usage_appends_jsonl(self, repo):
         run(repo, "new-card", "--title", "T")
@@ -593,3 +639,82 @@ class TestRelationsArchivedRollup:
         ledger = (workflow_root(repo) / "ledger.md").read_text()
         assert "1/2 done" in ledger              # rollup counts the archived done child
         assert "WF-003" in ledger and "waiting on WF-002" not in ledger  # dep satisfied → ready
+
+
+class TestOrderAndPriorityField:
+    def test_set_order_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--order", "5") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.order == 5
+
+    def test_order_zero_persists_after_nonzero(self, repo):
+        """Critical test: --order 0 must work to 'move to top'."""
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--order", "3") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.order == 3
+        # Now set to 0 and verify it sticks
+        assert run(repo, "set-field", "WF-001", "--order", "0") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.order == 0
+
+    def test_set_priority_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--priority", "P2") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.priority == "P2"
+
+    def test_clear_priority_with_empty_string(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--priority", "P1")
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.priority == "P1"
+        # Clear with empty string
+        assert run(repo, "set-field", "WF-001", "--priority", "") == 0
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.priority is None
+
+    def test_invalid_priority_exits_1(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--priority", "P5") == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_order_not_a_number_exits_1(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--order", "notanumber") == 1
+        # argparse will handle this and exit with usage message
+
+
+class TestChecklistFieldRegression:
+    def test_mutation_preserves_checklist(self, repo):
+        """CRITICAL: card writes serialize from the dataclass. Without the
+        checklist field, ANY CLI mutation would silently erase `checklist:`
+        frontmatter written by another tool (e.g. the dashboard sync)."""
+        run(repo, "new-card", "--title", "T")
+        card_path = find_card_path(state_root(repo), "WF-001")
+        text = card_path.read_text()
+        text = text.replace(
+            "status: planned\n",
+            "status: planned\n"
+            "checklist:\n"
+            "  - {task: '7', subject: write tests, status: in_progress}\n",
+            1,
+        )
+        card_path.write_text(text)
+
+        assert run(repo, "set-field", "WF-001", "--order", "5") == 0
+
+        from scripts.models import Card
+        reloaded = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert reloaded.order == 5
+        assert reloaded.checklist == [
+            {"task": "7", "subject": "write tests", "status": "in_progress"},
+        ]
+        assert "checklist:" in find_card_path(state_root(repo), "WF-001").read_text()

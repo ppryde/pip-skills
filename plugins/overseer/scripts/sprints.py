@@ -121,3 +121,22 @@ def save_sprint(root: Path, sprint: Sprint) -> Path:
     path = sprint_path(root, sprint.id)
     path.write_text(sprint.to_text())
     return path
+
+
+def load_sprints(root: Path) -> tuple[list[Sprint], list[Path]]:
+    """Load all sprint files from sprints/ directory.
+
+    Returns (sprints, quarantined_paths).
+    Corrupt sprints are quarantined via store.quarantine() and paths returned.
+    """
+    from scripts.store import quarantine
+
+    sprints: list[Sprint] = []
+    quarantined: list[Path] = []
+    for path in sorted((root / "sprints").glob("*.md")):
+        try:
+            sprints.append(load_sprint(path))
+        except CardParseError:
+            quarantined.append(quarantine(root, path))
+    sprints.sort(key=lambda s: s.id)
+    return sprints, quarantined

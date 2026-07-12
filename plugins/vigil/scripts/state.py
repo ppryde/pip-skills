@@ -3,6 +3,15 @@
 The vigil root is the per-session key: one root, one watch. Every function is
 quarantine-safe — it only touches its own marker files and never raises on a
 missing path.
+
+Single-writer assumption: these markers (`active`, `paused`, `cooldown`,
+`clear-requested`, `handover-gate`, `handoff.md`) live under one `.vigil/` per
+root and carry no session identity. If two live sessions share a single root
+they share — and race on — the same markers: one session's nudge gates the
+other, one session's `/clear` cooldown silences the other. Vigil therefore
+assumes exactly one session per root, which the intended per-worktree session
+model (one checkout, one watch) gives for free. Sharing a root across concurrent
+sessions is unsupported.
 """
 from __future__ import annotations
 
@@ -12,6 +21,7 @@ from pathlib import Path
 from scripts.store import _uniquify, ensure_root, vigil_root
 
 COOLDOWN_TTL_SECONDS = 300
+GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
 
 
 def active_marker(repo_root: Path) -> Path:
@@ -20,6 +30,10 @@ def active_marker(repo_root: Path) -> Path:
 
 def clear_flag(repo_root: Path) -> Path:
     return vigil_root(repo_root) / "clear-requested"
+
+
+def gate_marker(repo_root: Path) -> Path:
+    return vigil_root(repo_root) / "handover-gate"
 
 
 def paused_flag(repo_root: Path) -> Path:
@@ -58,20 +72,60 @@ def pause(repo_root: Path) -> None:
 
 def resume(repo_root: Path) -> None:
     paused_flag(repo_root).unlink(missing_ok=True)
+    # Do not clear the gate while a handover is queued: the gate is what stops
+    # the trigger re-nudging over an already-armed `clear-requested`. Clearing it
+    # here would fire a redundant nudge on top of the pending handover.
+    if not clear_flag(repo_root).exists():
+        clear_gate(repo_root)
 
 
-def _cooldown_active(repo_root: Path) -> bool:
-    marker = cooldown_marker(repo_root)
+def _marker_active(marker: Path, ttl_seconds: float) -> bool:
     if not marker.exists():
         return False
     try:
         age = time.time() - marker.stat().st_mtime
     except OSError:
         return False
-    if age >= COOLDOWN_TTL_SECONDS:
-        marker.unlink(missing_ok=True)  # expired dispatch — self-heal, allow re-arm
+    if age >= ttl_seconds:
+        marker.unlink(missing_ok=True)  # expired — self-heal, allow re-arm
         return False
     return True
+
+
+def _cooldown_active(repo_root: Path) -> bool:
+    return _marker_active(cooldown_marker(repo_root), COOLDOWN_TTL_SECONDS)
+
+
+def cooldown_active(repo_root: Path) -> bool:
+    """Public, read-only cooldown check for callers outside this module."""
+    return _cooldown_active(repo_root)
+
+
+def set_gate(repo_root: Path) -> None:
+    ensure_root(repo_root)
+    gate_marker(repo_root).touch()
+
+
+def gate_active(repo_root: Path) -> bool:
+    """TTL-aware: a stranded gate (crash between nudge and clear) self-heals."""
+    return _marker_active(gate_marker(repo_root), GATE_TTL_SECONDS)
+
+
+def clear_gate(repo_root: Path) -> None:
+    gate_marker(repo_root).unlink(missing_ok=True)
+
+
+def clear_requested(repo_root: Path) -> bool:
+    """Read-only check: would a Stop hook currently dispatch a clear?
+
+    Mirrors ``consume_clear_flag``'s conditions (active, not paused, flag
+    present) WITHOUT consuming the flag — the manual Stop hook needs to know
+    whether to print the loud instruction line without eating the flag the
+    human's own ``/clear`` (and the following SessionStart) still depends on.
+    """
+    if not is_active(repo_root) or is_paused(repo_root):
+        return False
+    return clear_flag(repo_root).exists()
 
 
 def request_clear(repo_root: Path, handoff_text: str) -> str:
@@ -98,9 +152,27 @@ def consume_clear_flag(repo_root: Path) -> bool:
     return True
 
 
-def arm_ready(repo_root: Path) -> None:
-    cooldown_marker(repo_root).unlink(missing_ok=True)
+def begin_cycle(repo_root: Path) -> None:
+    """Start a fresh handover cycle: any session start on an active root.
+
+    Every SessionStart on an active root — whether a handover just landed, a
+    bare `/clear` with nothing armed, or a plain relaunch — opens a new cycle:
+
+    - unlink any queued ``clear-requested`` (its dispatch is done or moot);
+    - clear the ``handover-gate`` so the trigger can re-arm this session;
+    - TOUCH a fresh ``cooldown`` marker.
+
+    The cooldown touch is the storm guard. Census's stale-horizon (~90s) means
+    a fresh session can still read the OLD session's high ctx% on its first
+    UserPromptSubmit; with the gate cleared and no cooldown, that would nudge →
+    an obedient agent re-hands-over → handover storm. The 5-minute cooldown
+    outlives census's lag window and suppresses both the nudge and
+    ``request_clear`` through the grace period.
+    """
+    ensure_root(repo_root)
     clear_flag(repo_root).unlink(missing_ok=True)
+    clear_gate(repo_root)
+    cooldown_marker(repo_root).touch()
 
 
 def read_handoff(repo_root: Path) -> str | None:

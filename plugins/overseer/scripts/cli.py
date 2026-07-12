@@ -18,7 +18,9 @@ if __package__ in (None, ""):  # direct script invocation: put plugin root on sy
 from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
-from scripts.models import Card, CardParseError, format_tokens, parse_tokens  # noqa: E402
+from scripts.models import (  # noqa: E402
+    Card, CardParseError, PRIORITIES, format_tokens, parse_tokens,
+)
 from scripts.relations import would_cycle_depends, would_cycle_parent  # noqa: E402
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
 from scripts.sprints import (  # noqa: E402
@@ -227,6 +229,16 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.pr = args.pr
     if args.touches is not None:
         card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+    if args.order is not None:
+        card.order = args.order
+    if args.priority is not None:
+        if args.priority == "":
+            card.priority = None
+        else:
+            if args.priority not in PRIORITIES:
+                print(f"error: unknown priority: {args.priority!r}", file=sys.stderr)
+                return 1
+            card.priority = args.priority
     if args.parent is not None:
         if args.parent == "":
             card.parent = None
@@ -391,6 +403,65 @@ def cmd_handoff(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
     else:
         print(handoff_report(args.root, data) + _context_footer(args.root))
+    return 0
+
+
+def cmd_board(args: argparse.Namespace) -> int:
+    from scripts.board import board_data
+    data = board_data(args.root)
+    _report_quarantined([Path(p) for p in data["quarantined"]])
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        card_count = len(data["cards"])
+        sprint_count = len(data["sprints"])
+        print(f"{card_count} cards, {sprint_count} sprints")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    try:
+        card = _load(args.root, args.id)
+    except FileNotFoundError:
+        root = state_root(args.root)
+        matches = sorted((root / "archive" / "cards").glob(f"{args.id}-*.md"))
+        if not matches:
+            raise FileNotFoundError(f"no card with id {args.id}")
+        card = load_card(matches[0])
+    data = {
+        "id": card.id,
+        "title": card.title,
+        "status": card.status,
+        "stage": card.stage,
+        "order": card.order,
+        "complexity": card.complexity,
+        "priority": card.priority,
+        "jira": card.jira,
+        "linear": card.linear,
+        "sprint": card.sprint,
+        "parent": card.parent,
+        "branch": card.branch,
+        "worktree": card.worktree,
+        "pr": card.pr,
+        "touches": card.touches,
+        "depends_on": card.depends_on,
+        "budget": {
+            "estimate": card.budget_estimate,
+            "actual": card.budget_actual,
+        },
+        "created": card.created,
+        "updated": card.updated,
+        "blocked_on": card.blocked_on,
+        "checklist": card.checklist,
+        "sections": card.sections,
+        "body": card.body,
+    }
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    print(f"{card.id} — {card.title} [{card.status}/{card.stage or '-'}]")
+    for header in card.sections:
+        print(f"  {header or '(preamble)'}")
     return 0
 
 
@@ -580,6 +651,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pr")
     p.add_argument("--touches")
     p.add_argument("--parent")
+    p.add_argument("--order", type=int)
+    p.add_argument("--priority")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("depends")
@@ -638,6 +711,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("handoff")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_handoff)
+
+    p = sub.add_parser("board")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_board)
+
+    p = sub.add_parser("show")
+    p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")
