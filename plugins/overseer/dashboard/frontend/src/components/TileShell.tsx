@@ -81,21 +81,18 @@ function TileShell({
       >
         ⠿
       </button>
+      {/*
+        The body is a PLAIN container (no `role="button"`, no tabIndex): a
+        `role="button"` here would nest the interactive `headerExtra` (the
+        epic expand button) and the title-open button inside another
+        interactive element — an ARIA anti-pattern. Mouse users still open the
+        drawer by clicking anywhere in the body via this onClick; keyboard /
+        screen-reader users open via the dedicated title `<button>` below,
+        which is a SIBLING of `headerExtra`, never its ancestor.
+      */}
       <div
         className="card-tile__body"
         onClick={onOpen ? () => onOpen(card.id) : undefined}
-        role={onOpen ? "button" : undefined}
-        tabIndex={onOpen ? 0 : undefined}
-        onKeyDown={
-          onOpen
-            ? (e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onOpen(card.id);
-                }
-              }
-            : undefined
-        }
       >
         <div className="card-tile__header">
           <span className="card-tile__id">{card.id}</span>
@@ -109,7 +106,22 @@ function TileShell({
           )}
           {headerExtra}
         </div>
-        <div className="card-tile__title">{card.title}</div>
+        {onOpen ? (
+          <button
+            type="button"
+            className="card-tile__title"
+            onClick={(e) => {
+              // Stop the click reaching the body's onClick so open fires once,
+              // and keep the button the single, keyboard-reachable open control.
+              e.stopPropagation();
+              onOpen(card.id);
+            }}
+          >
+            {card.title}
+          </button>
+        ) : (
+          <div className="card-tile__title">{card.title}</div>
+        )}
         {children}
         <div className="card-tile__footer">
           <BudgetMeter budget={card.budget} />

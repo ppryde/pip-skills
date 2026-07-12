@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { DndContext } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
 import type { BoardCard } from "../api/types";
@@ -87,5 +88,95 @@ describe("TileShell drag handle (Chunk 4)", () => {
     renderTile(card({ id: "WF-G", status: "planned" }), true);
     const handle = screen.getByRole("button", { name: /drag/i });
     expect(handle).toBeDisabled();
+  });
+});
+
+describe("TileShell tile-body opener (a11y: no nested interactive)", () => {
+  function renderOpenable(
+    opts: { onOpen?: (id: string) => void; headerExtra?: ReactNode } = {}
+  ) {
+    const c = card({ id: "WF-OPEN", title: "Open me" });
+    return render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell
+            card={c}
+            onOpen={opts.onOpen}
+            headerExtra={opts.headerExtra}
+          />
+        </SortableContext>
+      </DndContext>
+    );
+  }
+
+  it("exposes the tile title as a real, focusable button (keyboard-reachable open)", () => {
+    const onOpen = vi.fn();
+    renderOpenable({ onOpen });
+
+    // The open affordance is a genuine <button> — not a role=button div that
+    // relied on a manual tabIndex/onKeyDown handler — so it is natively
+    // keyboard-reachable and screen-reader-announced as one control.
+    const opener = screen.getByRole("button", { name: "Open me" });
+    opener.focus();
+    expect(opener).toHaveFocus();
+
+    fireEvent.click(opener);
+    expect(onOpen).toHaveBeenCalledWith("WF-OPEN");
+    // Single fire — the opener stops the click from also reaching the body.
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("the tile body container is NOT itself an interactive role", () => {
+    const { container } = renderOpenable({ onOpen: vi.fn() });
+    const body = container.querySelector(".card-tile__body");
+    expect(body).not.toBeNull();
+    expect(body!.getAttribute("role")).toBeNull();
+    expect(body!.getAttribute("tabindex")).toBeNull();
+  });
+
+  it("nests NO interactive element inside another (handle, opener, headerExtra)", () => {
+    const headerExtra = (
+      <button type="button" onClick={(e) => e.stopPropagation()}>
+        expand
+      </button>
+    );
+    const { container } = renderOpenable({ onOpen: vi.fn(), headerExtra });
+
+    const interactives = container.querySelectorAll(
+      'button, [role="button"], a[href]'
+    );
+    expect(interactives.length).toBeGreaterThan(0);
+    interactives.forEach((el) => {
+      expect(el.querySelector('button, [role="button"], a[href]')).toBeNull();
+    });
+  });
+
+  it("a headerExtra button that stops propagation does NOT trigger open", () => {
+    const onOpen = vi.fn();
+    const onExtra = vi.fn();
+    const headerExtra = (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onExtra();
+        }}
+      >
+        expand
+      </button>
+    );
+    renderOpenable({ onOpen, headerExtra });
+
+    fireEvent.click(screen.getByRole("button", { name: "expand" }));
+    expect(onExtra).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("clicking the body (outside the opener/headerExtra) opens via mouse", () => {
+    const onOpen = vi.fn();
+    const { container } = renderOpenable({ onOpen });
+    const body = container.querySelector<HTMLElement>(".card-tile__body")!;
+    fireEvent.click(body);
+    expect(onOpen).toHaveBeenCalledWith("WF-OPEN");
   });
 });

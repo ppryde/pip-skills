@@ -169,4 +169,71 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     expect(getCard).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("(a11y) no rendered tile nests an interactive control inside another", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    // Wait for the epic (the tile that carries the nested expand button) to render.
+    await screen.findByText("Ship the dashboard");
+
+    const interactives = container.querySelectorAll(
+      'button, [role="button"], a[href]'
+    );
+    expect(interactives.length).toBeGreaterThan(0);
+    interactives.forEach((el) => {
+      expect(el.querySelector('button, [role="button"], a[href]')).toBeNull();
+    });
+  });
+
+  it("(a11y) the card title is a button that opens the drawer (keyboard path)", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-WAITING",
+        title: "Blocked on the epic",
+        sections: { "## Goal": "Unblock the waiting card." },
+      })
+    );
+
+    render(<App />);
+    await screen.findByText("Blocked on the epic");
+
+    // The title is a real <button> (keyboard-activatable); activating it opens
+    // the same drawer the body click does.
+    const opener = screen.getByRole("button", { name: "Blocked on the epic" });
+    fireEvent.click(opener);
+
+    expect(getCard).toHaveBeenCalledWith("WF-WAITING");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("(a11y) the epic expand button toggles highlight WITHOUT opening the drawer", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Ship the dashboard");
+
+    const expand = container.querySelector<HTMLElement>(
+      '[data-card-id="WF-EPIC"] .epic-card__expand'
+    );
+    expect(expand).not.toBeNull();
+    expect(expand!.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(expand!);
+
+    // Toggled: aria-expanded flips and the epic tile becomes highlighted.
+    expect(
+      container
+        .querySelector('[data-card-id="WF-EPIC"] .epic-card__expand')!
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(
+      container.querySelector('[data-card-id="WF-EPIC"].card-tile--highlighted')
+    ).not.toBeNull();
+
+    // ...but the drawer stayed shut (expand is a distinct action from open).
+    expect(getCard).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });

@@ -296,11 +296,27 @@ body {
   color: #6b7280;
 }
 
+/*
+  Shared by the plain-<div> title (read-only tiles) AND the <button> title
+  that is the keyboard-reachable "open drawer" control on openable tiles. The
+  button-reset properties (border/background/padding/text-align/font/width)
+  are inert for the <div> and make the <button> render identically to it, so
+  the visual layout is unchanged by the a11y restructure.
+*/
 .card-tile__title {
+  display: block;
+  width: 100%;
   margin: 0.15rem 0 0.35rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
   font-weight: 500;
   color: #1b1f24;
   word-break: break-word;
+  cursor: pointer;
 }
 
 .card-tile__footer {
