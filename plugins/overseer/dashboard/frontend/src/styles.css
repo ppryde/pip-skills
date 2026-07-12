@@ -491,6 +491,104 @@ body {
   line-height: 1.5;
 }
 
+/* Rendered markdown inside a card section/body — headings are clamped down
+ * to card-scale type (a card body is not a document, so an author's `#`
+ * should not blow up to page-heading size). */
+.md-view {
+  color: #1b1f24;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.md-view h1,
+.md-view h2 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.md-view h3,
+.md-view h4,
+.md-view h5,
+.md-view h6 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.md-view p {
+  margin: 0 0 0.5rem;
+}
+
+.md-view p:last-child {
+  margin-bottom: 0;
+}
+
+.md-view ul,
+.md-view ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.md-view pre,
+.md-view code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.md-view pre {
+  overflow-x: auto;
+  padding: 0.5rem;
+  background: #f0f1f4;
+  border-radius: 4px;
+}
+
+.md-view code {
+  background: #f0f1f4;
+  border-radius: 3px;
+  padding: 0.05rem 0.25rem;
+}
+
+.md-view pre code {
+  background: none;
+  padding: 0;
+}
+
+/* Verbatim source view of a card body — a plain monospace block, distinct
+ * from the rendered `.md-view` above. */
+.card-drawer__source {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #1b1f24;
+  overflow-x: auto;
+}
+
+/* Rendered/Source segmented toggle above the drawer body. */
+.card-drawer__viewtoggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.card-drawer__viewtoggle button {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 3px;
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.card-drawer__viewtoggle button[aria-pressed="true"] {
+  background: #4338ca;
+  border-color: #4338ca;
+  color: #fff;
+}
+
 /* Mutation controls (Chunk 6). */
 .priority-select {
   font-size: 0.75rem;

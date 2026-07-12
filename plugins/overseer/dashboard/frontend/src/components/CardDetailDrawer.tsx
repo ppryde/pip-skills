@@ -6,6 +6,7 @@ import BudgetMeter from "./BudgetMeter";
 import PrioritySelect from "./PrioritySelect";
 import LinkEditor from "./LinkEditor";
 import StatusMenu from "./StatusMenu";
+import MarkdownView from "./MarkdownView";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -75,6 +76,10 @@ function CardDetailDrawer({
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rendered vs. verbatim-source view of the card body — local to the
+  // drawer, reset (below) whenever a card is opened, so switching cards
+  // never carries the previous card's "source" toggle forward.
+  const [view, setView] = useState<"rendered" | "source">("rendered");
 
   // Monotonic counter, same pattern as useBoard's requestIdRef: a response is
   // only applied if its id is still the latest issued when it resolves.
@@ -113,6 +118,7 @@ function CardDetailDrawer({
 
   useEffect(() => {
     if (cardId === null) return;
+    setView("rendered");
     fetchDetail(cardId);
   }, [cardId, fetchDetail]);
 
@@ -204,18 +210,40 @@ function CardDetailDrawer({
               />
             </div>
 
+            <div
+              className="card-drawer__viewtoggle"
+              role="group"
+              aria-label="Body view"
+            >
+              <button
+                type="button"
+                aria-pressed={view === "rendered"}
+                onClick={() => setView("rendered")}
+              >
+                Rendered
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "source"}
+                onClick={() => setView("source")}
+              >
+                Source
+              </button>
+            </div>
             <div className="card-drawer__body">
-              {sectionEntries.length > 0 ? (
+              {view === "source" ? (
+                <pre className="card-drawer__source" data-testid="card-source">{detail.body}</pre>
+              ) : sectionEntries.length > 0 ? (
                 sectionEntries.map(([heading, text]) => (
                   <section key={heading} className="card-drawer__section">
                     <h3 className="card-drawer__section-heading">
                       {sectionLabel(heading)}
                     </h3>
-                    <p className="card-drawer__section-text">{text}</p>
+                    <MarkdownView text={text} />
                   </section>
                 ))
               ) : (
-                <p className="card-drawer__section-text">{detail.body}</p>
+                <MarkdownView text={detail.body} />
               )}
             </div>
           </>

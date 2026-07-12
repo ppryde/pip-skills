@@ -387,4 +387,101 @@ describe("<CardDetailDrawer/>", () => {
     // No extra getCard call should have fired for the closed card.
     expect(getCard).toHaveBeenCalledTimes(1);
   });
+
+  it("defaults to rendered view and toggles to verbatim source", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-H",
+        title: "Toggle card",
+        sections: { "## Goal": "Do the *thing*" },
+        body: "# Goal\nDo the *thing*",
+      })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-H"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    await screen.findByText("Toggle card");
+
+    expect(screen.getByRole("button", { name: /rendered/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(screen.getByText("thing").tagName).toBe("EM"); // rendered markdown
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /source/i }));
+    });
+
+    const pre = screen.getByTestId("card-source");
+    expect(pre.tagName).toBe("PRE");
+    expect(pre).toHaveTextContent("# Goal"); // verbatim body incl. sigils
+    expect(screen.queryByText("thing")?.tagName).not.toBe("EM");
+  });
+
+  it("resets to rendered when the drawer reopens", async () => {
+    vi.mocked(getCard).mockResolvedValue(
+      cardDetail({
+        id: "WF-I",
+        title: "Reopen card",
+        sections: { "## Goal": "Do the *thing*" },
+        body: "# Goal\nDo the *thing*",
+      })
+    );
+
+    const { rerender } = render(
+      <CardDetailDrawer
+        cardId="WF-I"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    await screen.findByText("Reopen card");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /source/i }));
+    });
+    expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+
+    // Close the drawer.
+    rerender(
+      <CardDetailDrawer
+        cardId={null}
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    // Reopen the SAME card.
+    rerender(
+      <CardDetailDrawer
+        cardId="WF-I"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    await screen.findByText("Reopen card");
+    expect(screen.getByRole("button", { name: /rendered/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
 });
