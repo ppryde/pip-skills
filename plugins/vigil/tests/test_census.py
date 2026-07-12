@@ -153,6 +153,21 @@ class TestContextPercentBySessionId:
         _store(store, tmp_path, 37)
         assert census.context_percent(tmp_path) == 37
 
+    def test_malformed_updated_at_on_own_entry_is_none_not_raise(self, tmp_path, monkeypatch):
+        # Quarantine contract: a non-numeric updated_at must never raise.
+        # Malformed timestamp -> treated as 0 -> stale -> None (session-id branch).
+        store = tmp_path / "census" / "status.json"
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        _store(store, tmp_path, 37, updated="bad", sid="s-mine")
+        assert census.context_percent(tmp_path, session_id="s-mine") is None
+
+    def test_malformed_updated_at_in_worktree_scan_is_none_not_raise(self, tmp_path, monkeypatch):
+        # Same contract on the no-session-id worktree-scan branch.
+        store = tmp_path / "census" / "status.json"
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        _store(store, tmp_path, 37, updated="bad")
+        assert census.context_percent(tmp_path) is None
+
 
 class TestCmdContextIntegration:
     def test_uses_census_when_present(self, repo, monkeypatch, capsys):

@@ -42,6 +42,15 @@ def store_path() -> Path:
     return base / "census" / "status.json"
 
 
+def _entry_ts(entry: dict) -> float:
+    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0
+    (i.e. beyond any staleness horizon) — quarantine-safe, never raises."""
+    try:
+        return float(entry.get("updated_at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict | None:
     try:
         store = json.loads(store_path().read_text())
@@ -60,7 +69,7 @@ def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict 
             # and (crucially) no falling back to a sibling's entry if ours is
             # stale: that would resurrect the misattribution this guards
             # against. Stale own entry -> unavailable, full stop.
-            ts = float(own.get("updated_at", 0) or 0)
+            ts = _entry_ts(own)
             if now - ts <= STALE_HORIZON_SECONDS:
                 return own
             return None
@@ -72,7 +81,7 @@ def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict 
     for entry in sessions.values():
         if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
             continue
-        ts = float(entry.get("updated_at", 0) or 0)
+        ts = _entry_ts(entry)
         if ts > best_ts:
             best_ts, best = ts, entry
     if best is None or now - best_ts > STALE_HORIZON_SECONDS:
