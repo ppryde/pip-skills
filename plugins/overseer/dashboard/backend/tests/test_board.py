@@ -37,8 +37,9 @@ def test_board_surfaces_census(
     store.write_text(json.dumps({
         "version": 1,
         "limits": {
-            "five_hour": {"used_percentage": 20, "resets_at": 1},
-            "seven_day": {"used_percentage": 40, "resets_at": 2},
+            # resets_at must be in the future: census drops expired windows (22f0aa9)
+            "five_hour": {"used_percentage": 20, "resets_at": time.time() + 3600},
+            "seven_day": {"used_percentage": 40, "resets_at": time.time() + 86400},
         },
         "sessions": {"s1": {
             "worktree_cwd": os.path.realpath(str(root)),
