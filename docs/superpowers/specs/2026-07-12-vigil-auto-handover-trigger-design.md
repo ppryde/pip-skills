@@ -35,7 +35,7 @@ cheap and worktree-correct.
 | Gate lifetime | Cleared by SessionStart after injection; TTL self-heal; `vigil resume` clears manually | A crashed session must not mute vigil forever; mirrors the existing `cooldown` self-heal pattern |
 | tmux absence | **Loud**, not silent: armed-but-no-tmux prints an explicit user instruction | The silent `exit 0` is how the gap stayed hidden. tmux remains the programmatic-clear channel; absence is a message, not a mode |
 | `context.mode` | Repurposed: `remote` = **inline referenced documents** into the handover body; `local` = path references. Relaunch semantics deleted | `/clear` continues in place, so locale never changes; the only real remote/local difference left is whether file paths are readable |
-| Trigger hook event | `UserPromptSubmit` + `PostToolUse` | `UserPromptSubmit` is the natural cadence for "should this turn start with a handover?", but unattended (auto-handover) runs receive **no** user prompts at all — the whole point of auto-handover is a session with nobody typing. `PostToolUse` fires after every tool call inside the agentic loop, so it is the channel that actually reaches unattended sessions. Registering both together is safe because the `handover-gate` (below) makes the trigger non-chatty regardless of which event — or how many of them — fire after the gate is set: one nudge per over-threshold cycle, full stop. This mirrors how Stop-hook dispatch already works unattended today — the agent yields between subagent notifications, so the Stop hook still gets a turn even with nobody at the keyboard; PostToolUse is the equivalent yield point for the trigger side of the loop |
+| Trigger hook event | `UserPromptSubmit` + `PostToolUse` matched to `TaskCreate\|TaskUpdate` (task boundaries) | `UserPromptSubmit` is the natural cadence for "should this turn start with a handover?", but unattended (auto-handover) runs receive **no** user prompts at all — the whole point of auto-handover is a session with nobody typing. Rather than prodding on every tool call, the headless channel fires at **work boundaries**: orchestrated runs mark task transitions via `TaskCreate`/`TaskUpdate`, so a PostToolUse matcher on those tools nudges exactly between finishing one scoped piece of work and starting the next — the moment the agent can act on it. Deliberately lossy for workflows that never touch the task list (accepted); orchestrate doctrine additionally instructs a `vigil context` check at its own card transitions (which go through the overseer CLI, not TaskUpdate). The `handover-gate` keeps the trigger non-chatty regardless of which events fire after the gate is set: one nudge per cycle. Stop-hook dispatch already works unattended — the agent yields between subagent notifications |
 
 ## 1. The cycle (end to end)
 
@@ -100,13 +100,16 @@ New CLI verb `nudge-hook` (hook-only, like `stop-hook`):
 
 - `UserPromptSubmit` — the natural cadence for "should this turn start with a handover?"; fires once
   per human-submitted prompt.
-- `PostToolUse` (no matcher — all tools) — the channel that actually reaches **unattended** runs.
-  Auto-handover's entire premise is a session running with nobody at the keyboard, so it receives no
-  `UserPromptSubmit` events at all; `PostToolUse` fires after every tool call inside the agentic loop
-  instead, giving the trigger a way to reach the agent mid-turn without waiting on a human. This mirrors
-  how the Stop-hook dispatch path already works unattended today — the agent yields between subagent
-  notifications, so Stop still gets invoked even hands-free. `PostToolUse` is the equivalent yield point
-  on the trigger side.
+- `PostToolUse` with `"matcher": "TaskCreate|TaskUpdate"` — the channel that reaches **unattended**
+  runs, fired at **work boundaries** rather than on every tool call. Auto-handover's premise is a
+  session with nobody at the keyboard, so it receives no `UserPromptSubmit` events; orchestrated runs
+  do, however, mark task transitions through the task-list tools, and the moment a task is created or
+  marked complete is exactly when the agent can act on a nudge — between scoped pieces of work, not
+  mid-step. This mirrors how the Stop-hook dispatch path already works unattended (the agent yields
+  between subagent notifications). Deliberately lossy: a headless workflow that never touches the task
+  list gets no mid-turn nudge (accepted trade-off); orchestrate's doctrine additionally instructs an
+  explicit `vigil context` check at its own card transitions, which flow through the overseer CLI
+  rather than TaskUpdate.
 
 Both registrations point at the identical script and CLI verb; the gate (not the event) is the only
 thing standing between "one nudge per cycle" and a nag-loop, so adding the second registration

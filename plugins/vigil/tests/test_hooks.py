@@ -52,13 +52,15 @@ class TestStopHook:
         ups = data["hooks"]["UserPromptSubmit"][0]["hooks"][0]
         assert ups["command"].endswith("nudge-hook.sh")
 
-    def test_hooks_json_registers_nudge_hook_on_post_tool_use_too(self):
+    def test_hooks_json_registers_nudge_hook_on_task_boundaries(self):
         # Unattended (auto-handover) runs receive no UserPromptSubmit — the
-        # nudge must also fire on PostToolUse so the trigger works headless.
+        # nudge must also fire headless. Rather than prodding on EVERY tool
+        # call, it fires at work boundaries: the task-list transitions
+        # (TaskCreate/TaskUpdate) that orchestrated runs mark between tasks.
         data = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())
         assert "PostToolUse" in data["hooks"]
         ptu = data["hooks"]["PostToolUse"][0]
-        assert "matcher" not in ptu  # no matcher: fires after every tool call
+        assert ptu["matcher"] == "TaskCreate|TaskUpdate"
         assert ptu["hooks"][0]["command"].endswith("nudge-hook.sh")
 
     def test_manual_mode_exits_0_and_keeps_flag(self, tmp_path):
