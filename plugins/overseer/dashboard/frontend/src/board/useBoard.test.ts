@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { BoardResponse } from "../api/types";
 
@@ -74,5 +74,149 @@ describe("useBoard.mutate() in-flight lock", () => {
     });
     expect(result.current.inFlight).toBe(false);
     expect(result.current.context?.pct).toBe(55);
+  });
+});
+
+describe("useBoard background polling (5s, paused during drag/mutation)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("polls getBoard every 5s: one extra call at 5s, three extra by 15s", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    renderHook(() => useBoard());
+
+    // Mount fetch fires immediately (real useEffect, no timer involved).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(2); // +1 poll tick
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000); // total elapsed: 15s
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(4); // +3 poll ticks total
+  });
+
+  it("skips the poll tick while a mutation is in flight, resumes once it clears", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+
+    const mut = deferred<BoardResponse>();
+    act(() => {
+      void result.current.mutate(() => mut.promise);
+    });
+    expect(result.current.inFlight).toBe(true);
+
+    // A tick lands while the mutation is still in flight — gated, no call.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+
+    // Mutation resolves, lock clears.
+    await act(async () => {
+      mut.resolve(boardResponse(20));
+    });
+    expect(result.current.inFlight).toBe(false);
+
+    // Next tick polls normally again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the poll tick while a drag is active, resumes once setDragActive(false)", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.setDragActive(true);
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1); // gated — no poll call
+
+    act(() => {
+      result.current.setDragActive(false);
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(2); // resumed
+  });
+
+  it("clears the poll timer on unmount — no further calls after advancing", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { unmount } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    // Unmounted before any poll tick fired — still just the mount fetch.
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("a rejected poll leaves the last good board intact and surfaces nothing", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+    mockedGetBoard.mockRejectedValueOnce(new Error("network blip"));
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.context?.pct).toBe(10);
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // Last good board data is untouched, and the failure was NOT surfaced
+    // as a visible error (that's the manual-refresh path, not polling).
+    expect(result.current.context?.pct).toBe(10);
+    expect(result.current.error).toBeNull();
+    expect(consoleError).not.toHaveBeenCalled();
+
+    consoleError.mockRestore();
   });
 });

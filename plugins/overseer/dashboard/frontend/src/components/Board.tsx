@@ -20,6 +20,9 @@ export interface BoardProps {
   inFlight: boolean;
   /** Chunk 5: clicking a tile body opens the detail drawer for that card. */
   onOpenCard: (id: string) => void;
+  /** WF-008 C4: pauses useBoard's 5s background poll for the duration of a
+   *  drag — wired to dnd-kit's onDragStart/onDragEnd/onDragCancel below. */
+  setDragActive: UseBoardResult["setDragActive"];
 }
 
 /**
@@ -36,7 +39,14 @@ export interface BoardProps {
  * component never calls the api client or `setBoard` directly (see
  * wf005-context.md "Single mutation entrypoint").
  */
-function Board({ board, showArchive, mutate, inFlight, onOpenCard }: BoardProps) {
+function Board({
+  board,
+  showArchive,
+  mutate,
+  inFlight,
+  onOpenCard,
+  setDragActive,
+}: BoardProps) {
   const lanes = useMemo(() => groupIntoLanes(board.cards), [board.cards]);
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
     null
@@ -56,8 +66,19 @@ function Board({ board, showArchive, mutate, inFlight, onOpenCard }: BoardProps)
     (lane) => lane.kind !== "archive" || showArchive
   );
 
+  const handleDragStart = useCallback(() => {
+    setDragActive(true);
+  }, [setDragActive]);
+
+  // dnd-kit calls onDragCancel (not onDragEnd) when a drag is aborted (e.g.
+  // Escape) — without this the poll pause would never clear.
+  const handleDragCancel = useCallback(() => {
+    setDragActive(false);
+  }, [setDragActive]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      setDragActive(false);
       const { active, over } = event;
       if (!over) return;
 
@@ -99,11 +120,16 @@ function Board({ board, showArchive, mutate, inFlight, onOpenCard }: BoardProps)
         }
       });
     },
-    [board.cards, lanes, mutate]
+    [board.cards, lanes, mutate, setDragActive]
   );
 
   return (
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
       <div className="board">
         {dragToast && (
           <div className="board-toast" role="status">
