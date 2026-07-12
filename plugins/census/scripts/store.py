@@ -108,6 +108,34 @@ def _context_is_blank(payload: dict[str, Any]) -> bool:
     return window.get("current_usage") is None and window.get("used_percentage") is None
 
 
+_LIMIT_WINDOWS = ("five_hour", "seven_day")
+
+
+def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
+    """Keep only rate-limit windows whose reset time is still in the FUTURE.
+
+    A window whose ``resets_at`` is in the past belongs to an EXPIRED window — a
+    stale reading. The status line only refreshes ``rate_limits`` after an API
+    response, so a dormant session (open TUI, no recent API call) keeps writing
+    a fresh store entry whose ``rate_limits`` is frozen against a long-dead
+    window. Hoisting or serving that reading makes the account-global figure
+    flip-flop to whichever session wrote the file last. Gating on a future
+    ``resets_at`` keeps only genuinely-current windows; an expired one is dropped.
+    """
+    if not isinstance(limits, dict):
+        return None
+    live: dict[str, Any] = {}
+    for key in _LIMIT_WINDOWS:
+        window = limits.get(key)
+        if not isinstance(window, dict):
+            continue
+        resets = window.get("resets_at")
+        # bool is an int subclass — exclude it explicitly
+        if isinstance(resets, (int, float)) and not isinstance(resets, bool) and resets > now:
+            live[key] = window
+    return live or None
+
+
 def _prune(sessions: dict[str, Any], now: float) -> None:
     dead = [
         sid
@@ -129,7 +157,9 @@ def merge(
 
     - Upserts the session entry keyed by ``session_id`` (no-op without one).
     - Preserves the prior context window when the incoming one is blank.
-    - Hoists ``rate_limits`` to top-level ``limits`` only when present.
+    - Hoists ``rate_limits`` to top-level ``limits``, but only LIVE windows
+      (``resets_at`` in the future) — a stale reading from a dormant session
+      must not clobber the current account figure.
     - Prunes stale sessions.
     """
     sid = payload.get("session_id")
@@ -152,9 +182,12 @@ def merge(
         "payload": payload,
     }
 
-    limits = payload.get("rate_limits")
-    if isinstance(limits, dict) and limits:
-        store["limits"] = {**limits, "updated_at": now}
+    incoming = _live_limits(payload.get("rate_limits"), now)
+    if incoming:
+        # Merge live windows over any still-live stored windows; the just-written
+        # reading wins per-window. Expired stored windows are dropped here too.
+        existing = _live_limits(store.get("limits"), now) or {}
+        store["limits"] = {**existing, **incoming, "updated_at": now}
 
     _prune(sessions, now)
     return store
@@ -215,9 +248,15 @@ def read_all() -> dict[str, Any]:
     return _load(store_path())
 
 
-def limits() -> dict[str, Any] | None:
-    value = _load(store_path()).get("limits")
-    return value if isinstance(value, dict) else None
+def limits(now: float | None = None) -> dict[str, Any] | None:
+    """The account rate-limit windows that are still live (future ``resets_at``).
+
+    A window whose reset time has passed since it was written is dropped, so a
+    reader never sees a fossil reading even if no fresh write has replaced it yet.
+    """
+    if now is None:
+        now = time.time()
+    return _live_limits(_load(store_path()).get("limits"), now)
 
 
 def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | None:
@@ -243,7 +282,7 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
 
     if best is None:
         return None
-    return _with_meta(best, store.get("limits"), now)
+    return _with_meta(best, _live_limits(store.get("limits"), now), now)
 
 
 def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
@@ -253,4 +292,4 @@ def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
     entry = store.get("sessions", {}).get(sid)
     if not isinstance(entry, dict):
         return None
-    return _with_meta(entry, store.get("limits"), now)
+    return _with_meta(entry, _live_limits(store.get("limits"), now), now)

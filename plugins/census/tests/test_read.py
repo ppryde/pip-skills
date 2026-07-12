@@ -32,7 +32,8 @@ class TestLatestForWorktree:
         assert st.latest_for_worktree(str(tmp_path) + "/", now=1.0) is not None
 
     def test_includes_top_level_limits(self, store_file):
-        st.ingest(_payload("s1", "/wt/a", rate_limits={"five_hour": {"used_percentage": 30}}), now=1.0)
+        rate = {"five_hour": {"used_percentage": 30, "resets_at": 1000}}  # future vs now=1.0
+        st.ingest(_payload("s1", "/wt/a", rate_limits=rate), now=1.0)
         result = st.latest_for_worktree("/wt/a", now=1.0)
         assert result["limits"]["five_hour"]["used_percentage"] == 30
 

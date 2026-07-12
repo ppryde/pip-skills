@@ -97,10 +97,13 @@ accounts isolated** — see §11:
 }
 ```
 
-- **`limits`** — hoisted from the most recent writer's `rate_limits` (last-write-wins; every session
-  reports the same account numbers, so this self-freshens). Absent-safe: if an incoming payload has
-  no `rate_limits` (non-Pro/Max, or before the first API response), the existing `limits` block is
-  **left untouched**, never overwritten with nulls.
+- **`limits`** — the account-global rate-limit windows, hoisted from session `rate_limits` but gated on a
+  **future `resets_at`**. The status line only refreshes `rate_limits` after an API response, so a dormant
+  session (open TUI, no recent API call) keeps writing a fresh store entry whose `rate_limits` is frozen
+  against a long-dead window — a naive last-write-wins hoist lets that fossil clobber the current figure.
+  So only windows whose `resets_at` is in the future are hoisted (and merged per-window, newest write
+  winning), and readers likewise drop any window whose reset time has since passed. Absent-safe: a payload
+  with no `rate_limits` (non-Pro/Max, or pre-first-response) leaves the existing block untouched.
 - **`sessions[session_id].payload`** — the entire payload, stored verbatim ("pull it all").
 - **`worktree_cwd`** — resolved once at ingest (see §3) so readers index by worktree without
   re-deriving it.

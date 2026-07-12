@@ -28,11 +28,11 @@ class TestAccountIsolation:
         work = tmp_path / ".claude"
         monkeypatch.delenv("CENSUS_STORE", raising=False)
 
-        # personal (Max) session — carries rate_limits
+        # personal (Max) session — carries live rate_limits (future resets_at)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
         st.ingest(json.dumps({
             "session_id": "p1", "cwd": "/proj/personal",
-            "rate_limits": {"five_hour": {"used_percentage": 55}},
+            "rate_limits": {"five_hour": {"used_percentage": 55, "resets_at": 1000}},
         }), now=1.0)
 
         # work (API) session — no rate_limits
