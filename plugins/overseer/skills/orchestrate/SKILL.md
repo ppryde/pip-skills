@@ -97,6 +97,31 @@ may be in flight (stacks/sprints), so tag per-card; a todo with no card is
 overflowing card to an epic — rather than letting it sprawl. The concrete
 companion to the drift watchdog's scope-creep gate.
 
+## Tasks
+Claude Code's native task list (`TaskCreate`/`TaskUpdate`) is the agent's live
+checklist; a card's `checklist:` frontmatter is its durable projection,
+written ONLY by the `checklist-sync-hook` (overseer's `PostToolUse` hook on
+`TaskCreate|TaskUpdate`) — never hand-edit a card's checklist yourself.
+- **Bootstrap (once per project):** ensure `.claude/settings.json` (or
+  `.local`) has `env.CLAUDE_CODE_TASK_LIST_ID` (default: a slug of the
+  project root dir name). If you write it fresh, announce loudly: "restart
+  this CLI once to adopt the shared task list — /clear is not sufficient."
+  You may spawn the replacement session yourself: `tmux new-session -d -s
+  <name> -c <worktree> -e CLAUDE_CODE_TASK_LIST_ID=<id> claude` (append
+  `--plugin-dir <repo>/plugins` during development so the new session loads
+  the working-tree hooks) — then tell the user to `tmux attach -t <name>`
+  and close this one. This is an install-time relaunch only, not a handover
+  path; vigil's in-place `/clear` still owns handovers.
+- **Working rule:** picking up a card → break it into tasks via `TaskCreate`
+  with `metadata: {card: <id>}`; work tasks `in_progress` → `completed`.
+  Never hand-edit a card's checklist — the sync owns it. Card-level
+  transitions (`set-stage`, `done`, `block`, ...) stay CLI verbs as today.
+- **Boundary check:** completing tasks is exactly where vigil's threshold
+  nudge fires — before a card-level transition that bypasses the task list,
+  run `vigil context` per the vigil trigger spec.
+- **Sprint teardown:** tasks for done cards may be marked `deleted` (list
+  hygiene); the card's checklist remains — it is the durable record.
+
 ## Telemetry
 After every dispatch returns, log its cost:
 `log-usage <card> --role planner|worker|reviewer|fixer --stage <stage> --tier
