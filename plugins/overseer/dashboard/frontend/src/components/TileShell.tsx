@@ -2,8 +2,10 @@ import type { CSSProperties, ReactNode } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import type { BoardCard } from "../api/types";
 import { isDragSource } from "../board/dragPlan";
+import { checklistWindow } from "../board/checklistWindow";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
+import ChecklistRows from "./ChecklistRows";
 
 export interface TileShellProps {
   card: BoardCard;
@@ -121,6 +123,18 @@ function TileShell({
           </button>
         ) : (
           <div className="card-tile__title">{card.title}</div>
+        )}
+        {/*
+          Inert (no button/a/role) — see ChecklistRows's doc comment. It
+          lives inside the plain body div above, so it must never introduce
+          an interactive element that would nest inside the body's onClick
+          target or the title button.
+        */}
+        {card.checklist.length > 0 && (
+          <ChecklistRows
+            entries={checklistWindow(card.checklist).visible}
+            windowed
+          />
         )}
         {children}
         <div className="card-tile__footer">

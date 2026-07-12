@@ -4,6 +4,8 @@
  * only module that knows endpoint paths.
  */
 
+import type { ChecklistEntry } from "../board/checklistWindow";
+
 export type Status =
   | "planned"
   | "in-flight"
@@ -50,6 +52,9 @@ export interface BoardCard {
   is_epic: boolean;
   ready: boolean;
   rollup: Rollup | null;
+  /** Always present (possibly []) — see checklistWindow.ts's ChecklistEntry
+   * doc comment for the backend's string-coercion / status quirks. */
+  checklist: ChecklistEntry[];
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */

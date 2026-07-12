@@ -23,6 +23,7 @@ const cardDetail: CardDetail = {
   is_epic: false,
   ready: true,
   rollup: null,
+  checklist: [],
   sections: { "## Goal": "Ship it" },
   body: "full markdown body",
 };

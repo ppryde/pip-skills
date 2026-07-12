@@ -18,6 +18,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    checklist: [],
     ...overrides,
   };
 }

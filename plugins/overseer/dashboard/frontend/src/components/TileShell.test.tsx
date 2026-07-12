@@ -26,6 +26,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    checklist: [],
     ...overrides,
   };
 }
@@ -178,5 +179,95 @@ describe("TileShell tile-body opener (a11y: no nested interactive)", () => {
     const body = container.querySelector<HTMLElement>(".card-tile__body")!;
     fireEvent.click(body);
     expect(onOpen).toHaveBeenCalledWith("WF-OPEN");
+  });
+});
+
+describe("TileShell checklist focus window", () => {
+  function renderTileWith(checklist: BoardCard["checklist"]) {
+    const c = card({ id: "WF-CHK", title: "Has tasks", checklist });
+    return render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} />
+        </SortableContext>
+      </DndContext>
+    );
+  }
+
+  it("renders nothing (no reserved space) when the checklist is empty", () => {
+    const { container } = renderTileWith([]);
+    expect(container.querySelector(".checklist")).toBeNull();
+  });
+
+  it("renders the windowed subjects for a non-empty checklist", () => {
+    renderTileWith([
+      { task: "1", subject: "Write tests", status: "completed" },
+      { task: "2", subject: "Implement", status: "in_progress" },
+      { task: "3", subject: "Wire up", status: "pending" },
+    ]);
+    expect(screen.getByText("Write tests")).toBeInTheDocument();
+    expect(screen.getByText("Implement")).toBeInTheDocument();
+    expect(screen.getByText("Wire up")).toBeInTheDocument();
+  });
+
+  it("caps a long checklist to the 5-row focus window", () => {
+    const checklist = Array.from({ length: 8 }, (_, i) => ({
+      task: String(i + 1),
+      subject: `Task ${i + 1}`,
+      status: i === 0 ? "in_progress" : "completed",
+    }));
+    const { container } = renderTileWith(checklist);
+    expect(container.querySelectorAll(".checklist__row").length).toBe(5);
+  });
+
+  it("renders the checklist as inert content — no interactive element inside it", () => {
+    const { container } = renderTileWith([
+      { task: "1", subject: "Write tests", status: "in_progress" },
+    ]);
+    const list = container.querySelector(".checklist")!;
+    expect(list).not.toBeNull();
+    expect(
+      list.querySelectorAll('button, a, [role="button"]').length
+    ).toBe(0);
+  });
+
+  it("the checklist rows do NOT nest inside any interactive element (no-nested-interactive invariant)", () => {
+    const { container } = renderTileWith([
+      { task: "1", subject: "Write tests", status: "in_progress" },
+    ]);
+    const interactives = container.querySelectorAll(
+      'button, [role="button"], a[href]'
+    );
+    expect(interactives.length).toBeGreaterThan(0);
+    interactives.forEach((el) => {
+      expect(el.querySelector('button, [role="button"], a[href]')).toBeNull();
+    });
+  });
+
+  it("clicking a checklist row still opens the drawer — it's inert content inside the body", () => {
+    const onOpen = vi.fn();
+    const c = card({
+      id: "WF-CHK-OPEN",
+      title: "Has tasks",
+      checklist: [{ task: "1", subject: "Write tests", status: "in_progress" }],
+    });
+    render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} onOpen={onOpen} />
+        </SortableContext>
+      </DndContext>
+    );
+    fireEvent.click(screen.getByText("Write tests"));
+    expect(onOpen).toHaveBeenCalledWith("WF-CHK-OPEN");
+  });
+
+  it("windowed mode applies the edge-fade container class", () => {
+    const { container } = renderTileWith([
+      { task: "1", subject: "Write tests", status: "in_progress" },
+    ]);
+    expect(container.querySelector(".checklist")).toHaveClass(
+      "checklist--windowed"
+    );
   });
 });

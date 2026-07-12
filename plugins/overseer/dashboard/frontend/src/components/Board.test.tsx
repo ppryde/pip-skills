@@ -26,6 +26,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    checklist: [],
     ...overrides,
   };
 }
@@ -68,12 +69,17 @@ const fixture: BoardResponse = {
         status: "in-flight",
         stage: "implementation",
       }),
-      // A card waiting on a dependency.
+      // A card waiting on a dependency, with an in-progress checklist.
       card({
         id: "WF-WAITING",
         title: "Blocked on the epic",
         ready: false,
         depends_on: ["WF-EPIC"],
+        checklist: [
+          { task: "1", subject: "Write the design doc", status: "completed" },
+          { task: "2", subject: "Implement the thing", status: "in_progress" },
+          { task: "3", subject: "Ship it", status: "pending" },
+        ],
       }),
       // A parked card whose budget has blown the 2x tripwire.
       card({
@@ -235,5 +241,40 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     // ...but the drawer stayed shut (expand is a distinct action from open).
     expect(getCard).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("(checklist) a tile with tasks shows the windowed subjects, and clicking a row still opens the drawer", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-WAITING",
+        title: "Blocked on the epic",
+        sections: { "## Goal": "Unblock the waiting card." },
+      })
+    );
+
+    const { container } = render(<App />);
+    await screen.findByText("Blocked on the epic");
+
+    // Windowed subjects render on the tile itself.
+    expect(screen.getByText("Write the design doc")).toBeInTheDocument();
+    expect(screen.getByText("Implement the thing")).toBeInTheDocument();
+    expect(screen.getByText("Ship it")).toBeInTheDocument();
+
+    // The checklist is inert — clicking a row is just a click inside the
+    // tile body, which still opens the drawer via the body's onOpen.
+    fireEvent.click(screen.getByText("Implement the thing"));
+
+    expect(getCard).toHaveBeenCalledWith("WF-WAITING");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    // And the no-nested-interactive invariant still holds board-wide.
+    const interactives = container.querySelectorAll(
+      'button, [role="button"], a[href]'
+    );
+    expect(interactives.length).toBeGreaterThan(0);
+    interactives.forEach((el) => {
+      expect(el.querySelector('button, [role="button"], a[href]')).toBeNull();
+    });
   });
 });

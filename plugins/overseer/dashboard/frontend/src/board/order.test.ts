@@ -19,6 +19,7 @@ function card(id: string, order: number): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    checklist: [],
   };
 }
 

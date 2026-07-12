@@ -7,6 +7,7 @@ import PrioritySelect from "./PrioritySelect";
 import LinkEditor from "./LinkEditor";
 import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
+import ChecklistRows from "./ChecklistRows";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -209,6 +210,13 @@ function CardDetailDrawer({
                 onMutated={refetchDetail}
               />
             </div>
+
+            {detail.checklist.length > 0 && (
+              <section className="card-drawer__checklist">
+                <h3 className="card-drawer__section-heading">Tasks</h3>
+                <ChecklistRows entries={detail.checklist} />
+              </section>
+            )}
 
             <div
               className="card-drawer__viewtoggle"

@@ -52,6 +52,7 @@ function cardDetail(
     is_epic: false,
     ready: true,
     rollup: null,
+    checklist: [],
     sections: {},
     body: "",
     ...overrides,
@@ -483,5 +484,62 @@ describe("<CardDetailDrawer/>", () => {
       "aria-pressed",
       "true"
     );
+  });
+
+  it("renders a Tasks section with the FULL (unwindowed) checklist when non-empty", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-J",
+        title: "Task card",
+        checklist: [
+          { task: "1", subject: "Write the design doc", status: "completed" },
+          { task: "2", subject: "Implement", status: "in_progress" },
+          { task: "3", subject: "Test", status: "pending" },
+          { task: "4", subject: "Ship it", status: "pending" },
+          { task: "5", subject: "Announce", status: "pending" },
+          { task: "6", subject: "Clean up", status: "pending" },
+        ],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-J"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    expect(await screen.findByText("Tasks")).toBeInTheDocument();
+    // All six rows render — the drawer shows the full list, not the tile's
+    // 5-row focus window.
+    expect(screen.getByText("Write the design doc")).toBeInTheDocument();
+    expect(screen.getByText("Clean up")).toBeInTheDocument();
+    expect(container.querySelectorAll(".checklist__row").length).toBe(6);
+    // Drawer mode is unwindowed — no edge-fade class.
+    expect(container.querySelector(".checklist")).not.toHaveClass(
+      "checklist--windowed"
+    );
+  });
+
+  it("renders no Tasks section when the checklist is empty", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-K", title: "No tasks", checklist: [] })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-K"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    await screen.findByText("No tasks");
+    expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
   });
 });
