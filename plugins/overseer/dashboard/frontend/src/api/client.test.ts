@@ -206,10 +206,13 @@ describe("api/client", () => {
   });
 
   it("falls back to statusText when a non-2xx response has no detail", async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({}, 500) as unknown as Response
-    );
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      json: async () => ({}),
+    } as Response);
 
-    await expect(client.getBoard()).rejects.toThrow();
+    await expect(client.getBoard()).rejects.toThrow("Internal Server Error");
   });
 });
