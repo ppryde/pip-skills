@@ -37,6 +37,31 @@ class TestConfigAndContext:
         assert run(repo, "context") == 0
         assert "ctx unknown" in capsys.readouterr().out
 
+    def test_context_session_id_flag_wins_over_newest_write(self, repo, capsys, monkeypatch):
+        import os
+        import time
+        store = repo / "census" / "status.json"
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        store.parent.mkdir(parents=True, exist_ok=True)
+        key = os.path.realpath(str(repo))
+        now = time.time()
+        store.write_text(json.dumps({
+            "sessions": {
+                "s-mine": {
+                    "worktree_cwd": key,
+                    "updated_at": now - 5,
+                    "payload": {"context_window": {"used_percentage": 9}},
+                },
+                "s-sibling": {
+                    "worktree_cwd": key,
+                    "updated_at": now,
+                    "payload": {"context_window": {"used_percentage": 49}},
+                },
+            }
+        }))
+        assert main(["--root", str(repo), "--session-id", "s-mine", "context"]) == 0
+        assert "ctx 9%" in capsys.readouterr().out
+
 
 class TestPauseResume:
     def test_pause_then_resume(self, repo, capsys):

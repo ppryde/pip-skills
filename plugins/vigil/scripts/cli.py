@@ -36,12 +36,16 @@ def cmd_begin(args: argparse.Namespace) -> int:
     return 0
 
 
-def _current_context_percent(root: Path, cfg: dict[str, object]) -> int | None:
-    # census first: worktree-correct and windowed against the session's real
-    # context size. Falls back to transcript-slug measurement when census has no
-    # live entry (not installed, no status line, or stale) — preserving the old
-    # behaviour rather than regressing to "ctx unknown".
-    pct = census.context_percent(root)
+def _current_context_percent(
+    root: Path, cfg: dict[str, object], session_id: str | None = None
+) -> int | None:
+    # census first: keyed by session id when we have one (this session's own
+    # entry, never a sibling's — see census.context_percent), else the
+    # worktree-correct newest-write scan. Falls back to transcript-slug
+    # measurement when census has no live entry (not installed, no status
+    # line, or stale) — preserving the old behaviour rather than regressing
+    # to "ctx unknown".
+    pct = census.context_percent(root, session_id=session_id)
     if pct is None:
         transcript = ctx.find_transcript(root.resolve(), Path.home())
         tokens = ctx.context_tokens(transcript) if transcript else None
@@ -55,7 +59,7 @@ def _current_context_percent(root: Path, cfg: dict[str, object]) -> int | None:
 
 def cmd_context(args: argparse.Namespace) -> int:
     cfg = load_config(args.root)
-    pct = _current_context_percent(args.root, cfg)
+    pct = _current_context_percent(args.root, cfg, session_id=args.session_id)
     print(ctx.context_line(pct, cast(int, cfg["context.threshold"])))
     return 0
 
@@ -147,6 +151,17 @@ def _read_hook_payload() -> dict[str, object]:
 def _hook_root(payload: dict[str, object], args: argparse.Namespace) -> Path:
     cwd = payload.get("cwd")
     return Path(cast(str, cwd)) if isinstance(cwd, str) and cwd else args.root
+
+
+def _hook_session_id(payload: dict[str, object], args: argparse.Namespace) -> str | None:
+    """Session id for census keying: hook stdin's ``session_id`` field wins
+    (every Claude Code hook payload carries one); falls back to the CLI's
+    optional ``--session-id`` for scripted/manual invocations."""
+    session_id = payload.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    fallback: str | None = args.session_id
+    return fallback
 
 
 def cmd_stop_hook(args: argparse.Namespace) -> int:
@@ -245,7 +260,7 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
         return 0
     cfg = load_config(root)
     threshold = cast(int, cfg["context.threshold"])
-    pct = _current_context_percent(root, cfg)
+    pct = _current_context_percent(root, cfg, session_id=_hook_session_id(payload, args))
     if pct is None or pct < threshold:
         return 0
     st.set_gate(root)
@@ -265,6 +280,11 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vigil", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--session-id", dest="session_id", default=None,
+        help="census lookup key for this session (defaults to hook stdin's "
+             "session_id when invoked as a hook; None for scripted/manual calls)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("begin").set_defaults(func=cmd_begin)

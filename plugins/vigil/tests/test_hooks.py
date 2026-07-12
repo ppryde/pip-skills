@@ -235,6 +235,38 @@ class TestNudgeHookScript:
         assert result.returncode == 0
         assert result.stdout.strip() == ""
 
+    def test_uses_stdin_session_id_not_sibling_newest_write(self, tmp_path):
+        # Regression test for the observed misfire: two live sessions sharing
+        # a worktree, sibling's write is newer and over threshold too — the
+        # hook must nudge with THIS session's pct, sourced from stdin's
+        # session_id, not the sibling's.
+        from scripts import state as st
+        st.begin(tmp_path)
+        store = tmp_path / "census" / "status.json"
+        store.parent.mkdir(parents=True, exist_ok=True)
+        key = os.path.realpath(str(tmp_path))
+        now = time.time()
+        store.write_text(json.dumps({
+            "sessions": {
+                "s-mine": {
+                    "worktree_cwd": key,
+                    "updated_at": now - 5,
+                    "payload": {"context_window": {"used_percentage": 40}},
+                },
+                "s-sibling": {
+                    "worktree_cwd": key,
+                    "updated_at": now,  # newer write, would win pre-fix
+                    "payload": {"context_window": {"used_percentage": 90}},
+                },
+            }
+        }))
+        env = _base_env({"CENSUS_STORE": str(store)})
+        result = _run(NUDGE, {"cwd": str(tmp_path), "session_id": "s-mine"}, env, tmp_path)
+        assert result.returncode == 0
+        assert "additionalContext" in result.stdout
+        assert "40%" in result.stdout
+        assert "90%" not in result.stdout
+
 
 class TestPackaging:
     def test_plugin_manifest_valid(self):
