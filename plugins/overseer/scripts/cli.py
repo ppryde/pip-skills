@@ -258,6 +258,59 @@ def cmd_set_field(args: argparse.Namespace) -> int:
     return 0
 
 
+CHECKLIST_STATUSES = ("pending", "in_progress", "completed", "deleted")
+
+
+def cmd_checklist(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    checklist: list[dict] = card.checklist
+    existing_index = next(
+        (i for i, entry in enumerate(checklist) if entry["task"] == args.task), None
+    )
+
+    if args.status == "deleted":
+        if existing_index is None:
+            print(f"{card.id} checklist: task {args.task} removed")
+            return 0
+        card.checklist = [e for i, e in enumerate(checklist) if i != existing_index]
+        card.updated = _now()
+        _sync(args.root, card)
+        print(f"{card.id} checklist: task {args.task} removed")
+        return 0
+
+    if existing_index is None:
+        if not args.subject:
+            print(
+                f"error: new checklist entry for task {args.task} requires --subject",
+                file=sys.stderr,
+            )
+            return 1
+        checklist.append({
+            "task": args.task,
+            "subject": args.subject,
+            "status": args.status,
+        })
+        card.updated = _now()
+        _sync(args.root, card)
+        print(f"{card.id} checklist: task {args.task} → {args.status}")
+        return 0
+
+    entry = checklist[existing_index]
+    new_subject = args.subject if args.subject else entry["subject"]
+    if entry["subject"] == new_subject and entry["status"] == args.status:
+        print(f"{card.id} checklist: task {args.task} → {args.status}")
+        return 0
+    checklist[existing_index] = {
+        "task": args.task,
+        "subject": new_subject,
+        "status": args.status,
+    }
+    card.updated = _now()
+    _sync(args.root, card)
+    print(f"{card.id} checklist: task {args.task} → {args.status}")
+    return 0
+
+
 def cmd_depends(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     cards, _ = load_live_cards(state_root(args.root))
@@ -660,6 +713,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--on")
     p.add_argument("--off")
     p.set_defaults(func=cmd_depends)
+
+    p = sub.add_parser("checklist")
+    p.add_argument("card_id")
+    p.add_argument("--task", required=True)
+    p.add_argument("--subject")
+    p.add_argument("--status", required=True, choices=CHECKLIST_STATUSES)
+    p.set_defaults(func=cmd_checklist)
 
     p = sub.add_parser("park")
     p.add_argument("card_id")
