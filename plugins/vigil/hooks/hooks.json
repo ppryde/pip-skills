@@ -30,6 +30,16 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/nudge-hook.sh"
+          }
+        ]
+      }
     ]
   }
 }

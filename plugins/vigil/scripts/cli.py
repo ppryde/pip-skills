@@ -130,17 +130,28 @@ def cmd_handover(args: argparse.Namespace) -> int:
     return 1
 
 
-def _hook_root(args: argparse.Namespace) -> Path:
+def _read_hook_payload() -> dict[str, object]:
+    """Read and parse the hook's stdin JSON payload exactly once.
+
+    Every hook invocation is a fresh process reading its own stdin once, so
+    each ``cmd_*_hook`` calls this exactly once. Returns ``{}`` on unreadable
+    or non-object stdin — callers fall back to defaults rather than raising.
+    """
     try:
         payload = json.loads(sys.stdin.read())
-        cwd = payload.get("cwd") if isinstance(payload, dict) else None
     except (ValueError, OSError):
-        cwd = None
-    return Path(cwd) if cwd else args.root
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _hook_root(payload: dict[str, object], args: argparse.Namespace) -> Path:
+    cwd = payload.get("cwd")
+    return Path(cast(str, cwd)) if isinstance(cwd, str) and cwd else args.root
 
 
 def cmd_stop_hook(args: argparse.Namespace) -> int:
-    if st.consume_clear_flag(_hook_root(args)):
+    payload = _read_hook_payload()
+    if st.consume_clear_flag(_hook_root(payload, args)):
         print("DISPATCH_CLEAR")
     return 0
 
@@ -153,13 +164,15 @@ def cmd_clear_armed_hook(args: argparse.Namespace) -> int:
     without eating the flag the human's own /clear (and the SessionStart that
     follows it) still depends on.
     """
-    if st.clear_requested(_hook_root(args)):
+    payload = _read_hook_payload()
+    if st.clear_requested(_hook_root(payload, args)):
         print("ARMED")
     return 0
 
 
 def cmd_session_start_hook(args: argparse.Namespace) -> int:
-    root = _hook_root(args)
+    payload = _read_hook_payload()
+    root = _hook_root(payload, args)
     if st.is_active(root):
         handoff = st.consume_handoff(root)
         if handoff:
@@ -205,13 +218,23 @@ def _nudge_text(pct: int, threshold: int, mode: str) -> str:
 
 
 def cmd_nudge_hook(args: argparse.Namespace) -> int:
-    """UserPromptSubmit hook backend: nudge once per over-threshold cycle.
+    """UserPromptSubmit + PostToolUse hook backend: nudge once per
+    over-threshold cycle.
+
+    Registered on both events: UserPromptSubmit fires once per user turn, but
+    unattended (auto-handover) runs receive no user prompts at all, so
+    PostToolUse — which fires after every tool call inside the agentic loop —
+    is the channel that actually reaches unattended sessions. The
+    handover-gate (below) is what keeps the PostToolUse registration
+    non-chatty: it nudges once per cycle regardless of how many times, or via
+    which event, this hook is invoked afterward.
 
     All preconditions must hold: active, not paused, no cooldown, no live
     handover-gate, and a known ctx% at/over the configured threshold. Never
     raises — every check composes already quarantine-safe primitives.
     """
-    root = _hook_root(args)
+    payload = _read_hook_payload()
+    root = _hook_root(payload, args)
     if not st.is_active(root):
         return 0
     if st.is_paused(root):
@@ -227,9 +250,12 @@ def cmd_nudge_hook(args: argparse.Namespace) -> int:
         return 0
     st.set_gate(root)
     mode = str(cfg["context.mode"])
+    event_name = payload.get("hook_event_name")
+    if not isinstance(event_name, str) or not event_name:
+        event_name = "UserPromptSubmit"
     print(json.dumps({
         "hookSpecificOutput": {
-            "hookEventName": "UserPromptSubmit",
+            "hookEventName": event_name,
             "additionalContext": _nudge_text(pct, threshold, mode),
         }
     }))

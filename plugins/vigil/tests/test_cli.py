@@ -256,6 +256,70 @@ class TestNudgeHook:
         payload = json.loads(out)
         assert "--inline" not in payload["hookSpecificOutput"]["additionalContext"]
 
+    def test_nudges_from_post_tool_use_payload(self, repo, capsys, monkeypatch):
+        # Unattended runs receive no UserPromptSubmit — PostToolUse fires mid-turn
+        # inside the agentic loop instead, so the trigger must fire from it too.
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo), "hook_event_name": "PostToolUse"})
+        assert run(repo, "nudge-hook") == 0
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+        assert "40%" in payload["hookSpecificOutput"]["additionalContext"]
+        assert st.gate_active(repo) is True
+
+    def test_nudges_from_explicit_user_prompt_submit_payload(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo), "hook_event_name": "UserPromptSubmit"})
+        assert run(repo, "nudge-hook") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+
+    def test_garbage_hook_event_name_defaults_to_user_prompt_submit(
+        self, repo, capsys, monkeypatch,
+    ):
+        # A non-string (or otherwise unparseable) hook_event_name must not crash
+        # the hook and must still nudge — defaulting to the original event name.
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo), "hook_event_name": 12345})
+        assert run(repo, "nudge-hook") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        assert st.gate_active(repo) is True
+
+    def test_missing_hook_event_name_defaults_to_user_prompt_submit(
+        self, repo, capsys, monkeypatch,
+    ):
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+
+    def test_gate_suppresses_second_nudge_across_mixed_events(
+        self, repo, capsys, monkeypatch,
+    ):
+        # The gate must hold across a mixed sequence: a PostToolUse-triggered
+        # nudge must silence a subsequent UserPromptSubmit in the same cycle —
+        # this is what keeps PostToolUse registration non-chatty.
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo), "hook_event_name": "PostToolUse"})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() != ""
+        self._stdin(monkeypatch, {"cwd": str(repo), "hook_event_name": "UserPromptSubmit"})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
 
 class TestClearArmedHook:
     def _stdin(self, monkeypatch, payload):

@@ -35,7 +35,7 @@ cheap and worktree-correct.
 | Gate lifetime | Cleared by SessionStart after injection; TTL self-heal; `vigil resume` clears manually | A crashed session must not mute vigil forever; mirrors the existing `cooldown` self-heal pattern |
 | tmux absence | **Loud**, not silent: armed-but-no-tmux prints an explicit user instruction | The silent `exit 0` is how the gap stayed hidden. tmux remains the programmatic-clear channel; absence is a message, not a mode |
 | `context.mode` | Repurposed: `remote` = **inline referenced documents** into the handover body; `local` = path references. Relaunch semantics deleted | `/clear` continues in place, so locale never changes; the only real remote/local difference left is whether file paths are readable |
-| Trigger hook event | `UserPromptSubmit` (primary) | Fires once per user turn — the natural cadence for "should this turn start with a handover?" — and its stdout injects context. Avoids PostToolUse chattiness and the Stop-hook infinite-continuation hazard vigil's author explicitly designed around |
+| Trigger hook event | `UserPromptSubmit` + `PostToolUse` | `UserPromptSubmit` is the natural cadence for "should this turn start with a handover?", but unattended (auto-handover) runs receive **no** user prompts at all — the whole point of auto-handover is a session with nobody typing. `PostToolUse` fires after every tool call inside the agentic loop, so it is the channel that actually reaches unattended sessions. Registering both together is safe because the `handover-gate` (below) makes the trigger non-chatty regardless of which event — or how many of them — fire after the gate is set: one nudge per over-threshold cycle, full stop. This mirrors how Stop-hook dispatch already works unattended today — the agent yields between subagent notifications, so the Stop hook still gets a turn even with nobody at the keyboard; PostToolUse is the equivalent yield point for the trigger side of the loop |
 
 ## 1. The cycle (end to end)
 
@@ -70,14 +70,21 @@ ctx% >= threshold                                (census-backed, worktree-correc
 `state.py` gains `gate(repo_root)`, `set_gate`, `gate_active` (TTL-aware), `clear_gate`, and the
 SessionStart transition clears it. All quarantine-safe like the rest of the module.
 
-## 3. The trigger — `vigil nudge-hook` + a `UserPromptSubmit` hook
+## 3. The trigger — `vigil nudge-hook` + `UserPromptSubmit` + `PostToolUse` hooks
 
 New CLI verb `nudge-hook` (hook-only, like `stop-hook`):
 
-1. Resolve root from the hook payload's `cwd` (existing `_hook_root`).
+1. Read the hook payload from stdin **once** and resolve root from its `cwd` (existing `_hook_root`,
+   now taking the already-parsed payload rather than re-reading stdin — every `cmd_*_hook` reads stdin
+   exactly once per process).
 2. Preconditions, all required: `active` marker present · not `paused` · no `cooldown` · no live
-   `handover-gate` · `context_percent(root) is not None` and `>= context.threshold`.
-3. If met: write `handover-gate`, then print a JSON `hookSpecificOutput.additionalContext` nudge:
+   `handover-gate` · `context_percent(root) is not None` and `>= context.threshold`. Identical
+   regardless of which event triggered the hook — the gate is what keeps a `PostToolUse` registration
+   (which fires after *every* tool call) from becoming chatty: one nudge per over-threshold cycle, full
+   stop, no matter which event or how many of them arrive after the gate is set.
+3. If met: write `handover-gate`, then print a JSON `hookSpecificOutput.additionalContext` nudge, with
+   `hookEventName` set to the triggering event's own `hook_event_name` from the payload (every hook
+   stdin payload carries this field) — defaulting to `"UserPromptSubmit"` when absent or unparseable:
 
    > **vigil: context at NN% — over the MM% threshold.** At your next reasonable stopping point:
    > (1) wait for running subagents to finish, or ask them to stop and confirm;
@@ -88,8 +95,22 @@ New CLI verb `nudge-hook` (hook-only, like `stop-hook`):
 
 4. Else: print nothing, exit 0. Never raises (quarantine-safe).
 
-`hooks/hooks.json` registers `UserPromptSubmit` → `hooks/nudge-hook.sh` (same shell shape as
-`session-start.sh`; always exits 0).
+`hooks/hooks.json` registers the **same** `hooks/nudge-hook.sh` on two events (same shell shape as
+`session-start.sh`; always exits 0):
+
+- `UserPromptSubmit` — the natural cadence for "should this turn start with a handover?"; fires once
+  per human-submitted prompt.
+- `PostToolUse` (no matcher — all tools) — the channel that actually reaches **unattended** runs.
+  Auto-handover's entire premise is a session running with nobody at the keyboard, so it receives no
+  `UserPromptSubmit` events at all; `PostToolUse` fires after every tool call inside the agentic loop
+  instead, giving the trigger a way to reach the agent mid-turn without waiting on a human. This mirrors
+  how the Stop-hook dispatch path already works unattended today — the agent yields between subagent
+  notifications, so Stop still gets invoked even hands-free. `PostToolUse` is the equivalent yield point
+  on the trigger side.
+
+Both registrations point at the identical script and CLI verb; the gate (not the event) is the only
+thing standing between "one nudge per cycle" and a nag-loop, so adding the second registration
+introduces no new loop-prevention logic.
 
 ## 4. Loud dispatch — the Stop hook and `handover`
 
