@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.cli_client import run_overseer
+
 
 def test_board_shape(client: TestClient) -> None:
     resp = client.get("/api/board")
@@ -65,3 +67,30 @@ def test_board_surfaces_census(
     assert ctx["stale"] is False
     assert body["limits"]["five_hour"]["used_percentage"] == 20
     assert body["limits"]["seven_day"]["used_percentage"] == 40
+
+
+def test_board_carries_checklist_passthrough(client: TestClient, root: Path) -> None:
+    """`board_data` (overseer core) gained a `checklist` field on cards. The
+    dashboard backend shells `overseer board --json` and does no transform on
+    card dicts, so this must pass through verbatim with no backend code change."""
+    card_id = run_overseer(root, "new-card", "--title", "Checklist card").strip()
+
+    card_path = next((root / ".workflow" / "cards").glob(f"{card_id}-*.md"))
+    text = card_path.read_text().replace(
+        "status: planned\n",
+        "status: planned\n"
+        "checklist:\n"
+        "  - {task: '1', subject: write tests, status: in_progress}\n"
+        "  - {task: '2', subject: implement, status: pending}\n",
+        1,
+    )
+    card_path.write_text(text)
+
+    resp = client.get("/api/board")
+
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["checklist"] == [
+        {"task": "1", "subject": "write tests", "status": "in_progress"},
+        {"task": "2", "subject": "implement", "status": "pending"},
+    ]

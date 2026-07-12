@@ -452,6 +452,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         "created": card.created,
         "updated": card.updated,
         "blocked_on": card.blocked_on,
+        "checklist": card.checklist,
         "sections": card.sections,
         "body": card.body,
     }

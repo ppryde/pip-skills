@@ -30,6 +30,7 @@ def board_data(repo_root: Path) -> dict:
                     "is_epic": bool,
                     "ready": bool,
                     "rollup": dict | None,  # Only when is_epic=True
+                    "checklist": list[dict],  # [{"task", "subject", "status"}, ...]
                 },
                 ...
             ],
@@ -77,6 +78,7 @@ def board_data(repo_root: Path) -> dict:
                 "is_epic": epic,
                 "ready": is_ready(card, pool),
                 "rollup": rollup,
+                "checklist": card.checklist,
             }
         )
 

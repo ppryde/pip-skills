@@ -158,6 +158,21 @@ Test sprint."""
         assert c["is_epic"] is False
         assert c["ready"] is False
         assert c["rollup"] is None
+        assert c["checklist"] == []
+
+    def test_checklist_passed_through(self, repo):
+        from scripts.board import board_data
+        root = workflow_root(repo)
+        checklist = [
+            {"task": "1", "subject": "write tests", "status": "in_progress"},
+            {"task": "2", "subject": "implement", "status": "pending"},
+        ]
+        card = make_card("WF-001", checklist=checklist)
+        save_card(root, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["checklist"] == checklist
 
     def test_cards_sorted_by_id(self, repo):
         from scripts.board import board_data

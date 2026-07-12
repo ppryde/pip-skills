@@ -690,3 +690,31 @@ class TestOrderAndPriorityField:
         capsys.readouterr()
         assert run(repo, "set-field", "WF-001", "--order", "notanumber") == 1
         # argparse will handle this and exit with usage message
+
+
+class TestChecklistFieldRegression:
+    def test_mutation_preserves_checklist(self, repo):
+        """CRITICAL: card writes serialize from the dataclass. Without the
+        checklist field, ANY CLI mutation would silently erase `checklist:`
+        frontmatter written by another tool (e.g. the dashboard sync)."""
+        run(repo, "new-card", "--title", "T")
+        card_path = find_card_path(state_root(repo), "WF-001")
+        text = card_path.read_text()
+        text = text.replace(
+            "status: planned\n",
+            "status: planned\n"
+            "checklist:\n"
+            "  - {task: '7', subject: write tests, status: in_progress}\n",
+            1,
+        )
+        card_path.write_text(text)
+
+        assert run(repo, "set-field", "WF-001", "--order", "5") == 0
+
+        from scripts.models import Card
+        reloaded = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert reloaded.order == 5
+        assert reloaded.checklist == [
+            {"task": "7", "subject": "write tests", "status": "in_progress"},
+        ]
+        assert "checklist:" in find_card_path(state_root(repo), "WF-001").read_text()

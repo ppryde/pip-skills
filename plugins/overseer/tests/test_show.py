@@ -83,6 +83,33 @@ class TestShowCommand:
         assert data["budget"]["estimate"] == 400_000
         assert isinstance(data["budget"]["estimate"], int)
 
+    def test_show_json_carries_checklist(self, repo, capsys):
+        run(repo, "new-card", "--title", "Checklist card")
+        capsys.readouterr()
+        from scripts.store import find_card_path, state_root
+        card_path = find_card_path(state_root(repo), "WF-001")
+        text = card_path.read_text().replace(
+            "status: planned\n",
+            "status: planned\n"
+            "checklist:\n"
+            "  - {task: '1', subject: write tests, status: pending}\n",
+            1,
+        )
+        card_path.write_text(text)
+
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["checklist"] == [
+            {"task": "1", "subject": "write tests", "status": "pending"},
+        ]
+
+    def test_show_json_checklist_defaults_empty(self, repo, capsys):
+        run(repo, "new-card", "--title", "No checklist")
+        capsys.readouterr()
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["checklist"] == []
+
     def test_show_human_readable_lists_section_headers(self, repo, capsys):
         run(repo, "new-card", "--title", "Human view")
         capsys.readouterr()

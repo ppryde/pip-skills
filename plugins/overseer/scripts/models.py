@@ -106,6 +106,7 @@ class Card:
     created: str = ""
     updated: str = ""
     blocked_on: str | None = None
+    checklist: list[dict] = field(default_factory=list)
     body: str = ""
 
     @classmethod
@@ -152,6 +153,19 @@ class Card:
                 raise CardParseError(f"unknown priority: {priority!r}")
         else:
             priority = None
+        checklist_raw = meta.get("checklist")
+        checklist: list[dict] = []
+        if isinstance(checklist_raw, list):
+            for entry in checklist_raw:
+                if not isinstance(entry, dict):
+                    continue
+                if not all(k in entry for k in ("task", "subject", "status")):
+                    continue
+                checklist.append({
+                    "task": str(entry["task"]),
+                    "subject": str(entry["subject"]),
+                    "status": str(entry["status"]),
+                })
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
@@ -174,11 +188,12 @@ class Card:
             created=str(meta.get("created", "")),
             updated=str(meta.get("updated", "")),
             blocked_on=meta.get("blocked_on"),
+            checklist=checklist,
             body=body.strip(),
         )
 
     def to_text(self) -> str:
-        meta = {
+        meta: dict[str, object] = {
             "id": self.id,
             "jira": self.jira,
             "linear": self.linear,
@@ -203,6 +218,8 @@ class Card:
             "updated": self.updated,
             "blocked_on": self.blocked_on,
         }
+        if self.checklist:
+            meta["checklist"] = self.checklist
         front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
         return f"---\n{front}\n---\n\n{self.body.strip()}\n"
 
