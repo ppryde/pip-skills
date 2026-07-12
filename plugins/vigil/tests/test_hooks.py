@@ -66,9 +66,39 @@ class TestStopHook:
         env.pop("TMUX", None)
         result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
-        assert "tmux is unavailable" in result.stdout
-        assert "type /clear" in result.stdout
+        # Plain Stop stdout is swallowed to the debug log — the loud line MUST go
+        # out on the user-visible systemMessage channel as valid JSON.
+        payload = json.loads(result.stdout.strip())
+        assert "tmux is unavailable" in payload["systemMessage"]
+        assert "type /clear" in payload["systemMessage"]
+        assert "additionalContext" not in result.stdout  # never forces continuation
         assert st.clear_flag(tmp_path).exists()  # loud message never consumes the flag
+
+    def test_dead_tmux_server_falls_through_to_loud_manual(self, tmp_path):
+        # $TMUX is set but the server is dead: `tmux has-session` fails. The probe
+        # must catch this BEFORE the consuming stop-hook runs, so the flag is
+        # preserved and the user gets the same loud systemMessage as no-tmux.
+        st = _promote_and_arm(tmp_path)
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        fake = bindir / "tmux"
+        fake.write_text(
+            '#!/usr/bin/env bash\n'
+            'if [ "$1" = "has-session" ]; then exit 1; fi\n'
+            'exit 0\n'
+        )
+        fake.chmod(0o755)
+        env = _base_env({
+            "PATH": f"{bindir}:{os.environ['PATH']}",
+            "TMUX": "/tmp/fake,1,0",
+            "TMUX_PANE": "%9",
+            "VIGIL_CLEAR_DELAY": "0",
+        })
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        payload = json.loads(result.stdout.strip())
+        assert "tmux is unavailable" in payload["systemMessage"]
+        assert st.clear_flag(tmp_path).exists()  # NOT consumed — dispatch impossible
 
     def test_manual_mode_unarmed_is_silent(self, tmp_path):
         from scripts import state as st
@@ -88,12 +118,18 @@ class TestStopHook:
 
     def test_auto_mode_sends_keys_and_exits_0(self, tmp_path):
         st = _promote_and_arm(tmp_path)
-        # fake tmux on PATH records its argv to a marker file
+        # fake tmux on PATH: the has-session liveness probe succeeds silently;
+        # only send-keys records its argv to the marker (so the wait loop below
+        # cannot race on the probe having merely created the file).
         bindir = tmp_path / "bin"
         bindir.mkdir()
         marker = tmp_path / "tmux-called"
         fake = bindir / "tmux"
-        fake.write_text('#!/usr/bin/env bash\necho "$@" >> "%s"\n' % marker)
+        fake.write_text(
+            '#!/usr/bin/env bash\n'
+            'if [ "$1" = "has-session" ]; then exit 0; fi\n'
+            'echo "$@" >> "%s"\n' % marker
+        )
         fake.chmod(0o755)
         env = _base_env({
             "PATH": f"{bindir}:{os.environ['PATH']}",

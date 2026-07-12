@@ -192,6 +192,7 @@ class TestNudgeHook:
         self._stdin(monkeypatch, {"cwd": str(repo)})
         assert run(repo, "nudge-hook") == 0
         assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is True  # unchanged: existing gate held
 
     def test_silent_when_paused(self, repo, capsys, monkeypatch):
         from scripts import state as st
@@ -201,6 +202,7 @@ class TestNudgeHook:
         self._stdin(monkeypatch, {"cwd": str(repo)})
         assert run(repo, "nudge-hook") == 0
         assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is False  # no gate written when silent
 
     def test_silent_during_cooldown(self, repo, capsys, monkeypatch):
         from scripts import state as st
@@ -212,12 +214,15 @@ class TestNudgeHook:
         self._stdin(monkeypatch, {"cwd": str(repo)})
         assert run(repo, "nudge-hook") == 0
         assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is False  # no gate written when silent
 
     def test_silent_when_inactive(self, repo, capsys, monkeypatch):
+        from scripts import state as st
         self._set_census(monkeypatch, repo, 40)
         self._stdin(monkeypatch, {"cwd": str(repo)})
         assert run(repo, "nudge-hook") == 0
         assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is False  # no gate written when silent
 
     def test_silent_when_ctx_unknown(self, repo, capsys, monkeypatch):
         from scripts import state as st
@@ -306,7 +311,9 @@ class TestHookBackends:
         assert run(repo, "session-start-hook") == 0
         assert capsys.readouterr().out.strip() == ""
 
-    def test_session_start_clears_gate_after_injection(self, repo, capsys, monkeypatch):
+    def test_session_start_clears_gate_and_touches_cooldown_after_injection(
+        self, repo, capsys, monkeypatch,
+    ):
         from scripts import state as st
         st.begin(repo)
         st.request_clear(repo, "HANDOFF PAYLOAD")
@@ -316,13 +323,20 @@ class TestHookBackends:
         self._stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
         assert run(repo, "session-start-hook") == 0
         assert "HANDOFF PAYLOAD" in capsys.readouterr().out
-        assert st.gate_active(repo) is False  # cleared only on successful injection
+        assert st.gate_active(repo) is False  # new cycle: gate cleared
+        assert st.cooldown_active(repo) is True  # fresh cooldown grace (storm guard)
 
-    def test_session_start_leaves_gate_when_no_handoff_to_inject(self, repo, capsys, monkeypatch):
+    def test_session_start_clears_gate_and_touches_cooldown_with_no_handoff(
+        self, repo, capsys, monkeypatch,
+    ):
+        # IMPORTANT 4 + CRITICAL 2: a bare /clear (or plain relaunch) with nothing
+        # armed must NOT strand the gate — the new cycle clears it unconditionally
+        # and lays down the fresh cooldown that covers census's stale-horizon lag.
         from scripts import state as st
         st.begin(repo)
         st.set_gate(repo)
         self._stdin(monkeypatch, {"cwd": str(repo), "source": "startup"})
         assert run(repo, "session-start-hook") == 0
         assert capsys.readouterr().out.strip() == ""
-        assert st.gate_active(repo) is True  # nothing landed — gate must survive
+        assert st.gate_active(repo) is False  # gate cleared: no stranded gate
+        assert st.cooldown_active(repo) is True  # fresh cooldown present

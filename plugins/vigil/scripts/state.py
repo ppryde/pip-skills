@@ -3,6 +3,15 @@
 The vigil root is the per-session key: one root, one watch. Every function is
 quarantine-safe — it only touches its own marker files and never raises on a
 missing path.
+
+Single-writer assumption: these markers (`active`, `paused`, `cooldown`,
+`clear-requested`, `handover-gate`, `handoff.md`) live under one `.vigil/` per
+root and carry no session identity. If two live sessions share a single root
+they share — and race on — the same markers: one session's nudge gates the
+other, one session's `/clear` cooldown silences the other. Vigil therefore
+assumes exactly one session per root, which the intended per-worktree session
+model (one checkout, one watch) gives for free. Sharing a root across concurrent
+sessions is unsupported.
 """
 from __future__ import annotations
 
@@ -63,7 +72,11 @@ def pause(repo_root: Path) -> None:
 
 def resume(repo_root: Path) -> None:
     paused_flag(repo_root).unlink(missing_ok=True)
-    clear_gate(repo_root)
+    # Do not clear the gate while a handover is queued: the gate is what stops
+    # the trigger re-nudging over an already-armed `clear-requested`. Clearing it
+    # here would fire a redundant nudge on top of the pending handover.
+    if not clear_flag(repo_root).exists():
+        clear_gate(repo_root)
 
 
 def _marker_active(marker: Path, ttl_seconds: float) -> bool:
@@ -139,9 +152,27 @@ def consume_clear_flag(repo_root: Path) -> bool:
     return True
 
 
-def arm_ready(repo_root: Path) -> None:
-    cooldown_marker(repo_root).unlink(missing_ok=True)
+def begin_cycle(repo_root: Path) -> None:
+    """Start a fresh handover cycle: any session start on an active root.
+
+    Every SessionStart on an active root — whether a handover just landed, a
+    bare `/clear` with nothing armed, or a plain relaunch — opens a new cycle:
+
+    - unlink any queued ``clear-requested`` (its dispatch is done or moot);
+    - clear the ``handover-gate`` so the trigger can re-arm this session;
+    - TOUCH a fresh ``cooldown`` marker.
+
+    The cooldown touch is the storm guard. Census's stale-horizon (~90s) means
+    a fresh session can still read the OLD session's high ctx% on its first
+    UserPromptSubmit; with the gate cleared and no cooldown, that would nudge →
+    an obedient agent re-hands-over → handover storm. The 5-minute cooldown
+    outlives census's lag window and suppresses both the nudge and
+    ``request_clear`` through the grace period.
+    """
+    ensure_root(repo_root)
     clear_flag(repo_root).unlink(missing_ok=True)
+    clear_gate(repo_root)
+    cooldown_marker(repo_root).touch()
 
 
 def read_handoff(repo_root: Path) -> str | None:

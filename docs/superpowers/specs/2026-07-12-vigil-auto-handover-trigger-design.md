@@ -47,7 +47,7 @@ ctx% >= threshold                                (census-backed, worktree-correc
                  └─ Stop hook: tmux present → send /clear
                                tmux absent  → LOUD instruction to the user
                       └─ fresh session: SessionStart injects + archives handover,
-                                        clears handover-gate + cooldown → cycle re-armed
+                                        begins a new cycle (clears gate, touches fresh cooldown)
 ```
 
 ## 2. State — one new marker
@@ -56,9 +56,12 @@ ctx% >= threshold                                (census-backed, worktree-correc
 
 - **Written** by the trigger the moment the nudge is injected (before the agent responds).
 - **While present:** the trigger is silent regardless of ctx%. No re-nudge, no double-arm.
-- **Cleared** by the SessionStart hook immediately after a successful handover injection (the same
-  transition that runs `arm_ready`). Completion = the handover landed in a fresh session — not merely
-  "clear was requested".
+- **Cleared** by the SessionStart hook on **any** session start on an active root — whether a handover
+  just landed, a bare `/clear` fired with nothing armed, or the CLI simply relaunched. The single
+  `begin_cycle` transition unlinks any queued `clear-requested`, clears the gate, and touches a fresh
+  `cooldown`. Clearing the gate unconditionally re-arms the trigger for the new session and avoids
+  stranding a gate on a `/clear` that carried no handover; the fresh cooldown (see §6) is what stops
+  that re-armed gate from firing an instant re-nudge off census's stale, pre-clear ctx% reading.
 - **TTL self-heal** (e.g. 6h, constant in `state.py` like `COOLDOWN_TTL_SECONDS`): a stranded gate
   (session crashed between nudge and clear) expires rather than muting vigil.
 - **Manual release:** `vigil resume` also clears the gate (it already clears `paused`; the gate is the
@@ -90,11 +93,17 @@ New CLI verb `nudge-hook` (hook-only, like `stop-hook`):
 
 ## 4. Loud dispatch — the Stop hook and `handover`
 
-- `stop.sh`, manual case (no tmux): instead of the silent early `exit 0`, it still consumes nothing
-  and forces no continuation — but when `clear-requested` is armed it emits a plain-stdout line so the
-  transcript/user sees:
-  `vigil: handover armed but tmux is unavailable — type /clear to complete it (install/run inside tmux for hands-free handovers).`
-  It still ALWAYS exits 0 (the infinite-continuation guard is untouched; we inform, never block).
+- `stop.sh`, manual/unreachable case: instead of the silent early `exit 0`, it consumes nothing and
+  forces no continuation — but when `clear-requested` is armed it emits the loud instruction on the
+  **`systemMessage`** channel (a user-visible warning), NOT plain stdout. Plain Stop-hook stdout goes
+  only to the debug log, so an `echo` would be swallowed; and `additionalContext` on Stop is avoided
+  because it forces continuation. The emitted JSON is:
+  `{"systemMessage":"vigil: handover armed but tmux is unavailable — type /clear to complete it (run inside tmux for hands-free handovers)."}`
+- Two paths reach that loud fallback: (a) `$TMUX` unset, and (b) `$TMUX` set but the server is dead.
+  For (b) the hook **probes liveness with `tmux has-session` BEFORE invoking the consuming stop-hook** —
+  a dead server would otherwise let the flag be consumed and then fail silently at `send-keys`. On a
+  failed probe the flag is left intact and the loud manual path runs.
+- It still ALWAYS exits 0 (the infinite-continuation guard is untouched; we inform, never block).
 - `vigil handover` output states the resolved dispatch reality explicitly:
   `armed — auto (/clear via tmux at end of turn)` vs
   `armed — manual (no tmux): type /clear to complete`.
@@ -117,16 +126,19 @@ clear path at all.)
 | Scenario | Behaviour |
 |---|---|
 | Agent ignores the nudge | Gate holds — no nag-loop. Handover simply doesn't happen this cycle; TTL eventually re-arms |
-| User types /clear themselves (manual) | Identical SessionStart path; gate cleared on injection |
+| User types /clear themselves (manual) | Identical SessionStart path; the new cycle clears the gate + lays a fresh cooldown |
+| /clear with nothing armed (or plain relaunch) | SessionStart still begins a new cycle: gate cleared (never stranded) and a fresh cooldown laid down for the grace window |
 | Session crashes after nudge, before clear | Gate TTL expires; next over-threshold turn re-nudges |
-| tmux dies between arm and Stop | send-keys `|| true` swallows it; next Stop re-attempts is N/A (flag consumed) — the loud-manual message also prints when dispatch fails, telling the user to /clear |
+| tmux server dead between arm and Stop | The Stop hook probes `tmux has-session` first: the probe fails, so it falls through to the loud manual path and the flag is NOT consumed — the user is told to type /clear, and the next Stop can retry |
 | ctx unknown (census absent + no transcript) | Precondition fails silently — no nudge on unknown data |
-| Post-injection ctx already ≥ threshold | Gate was just cleared, so a nudge CAN fire again next turn — correct (genuinely over), and the agent judges whether an immediate second handover makes sense |
+| Post-injection ctx still ≥ threshold (census lag) | SessionStart begins a new cycle: the gate is cleared but a fresh 5-min cooldown is laid down. The cooldown outlives census's ~90s stale-horizon, so the fresh session's first turns cannot re-nudge off the old session's high ctx% — no handover storm. After the cooldown, a genuinely-over session can nudge again and the agent judges a second handover |
 
 ## 7. Testing
 
-- `state.py`: gate set/active/TTL-expiry/clear; `resume` clears gate; SessionStart transition clears
-  gate after injection (and not when there was no handover to inject).
+- `state.py`: gate set/active/TTL-expiry/clear; `resume` clears gate — but NOT while a `clear-requested`
+  is queued (no re-nudge over a pending handover); `begin_cycle` unlinks the flag, clears the gate, and
+  touches a fresh cooldown; SessionStart begins a cycle on ANY active start — gate cleared and cooldown
+  touched both when a handover injects and when none was armed.
 - `cli.py nudge-hook`: nudges when all preconditions met; silent when under threshold / gated /
   paused / cooldown / inactive / ctx unknown; writes the gate exactly once; output is valid
   `hookSpecificOutput` JSON.

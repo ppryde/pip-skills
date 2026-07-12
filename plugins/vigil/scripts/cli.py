@@ -169,10 +169,13 @@ def cmd_session_start_hook(args: argparse.Namespace) -> int:
                     "additionalContext": handoff,
                 }
             }))
-            # Completion = the handover actually landed in this fresh session —
-            # not merely "clear was requested" — so the gate only clears here.
-            st.clear_gate(root)
-        st.arm_ready(root)
+        # ANY session start on an active root begins a new cycle — clear the
+        # gate and touch a fresh cooldown unconditionally, whether or not a
+        # handover just landed. The cooldown covers census's stale-horizon lag
+        # (a fresh session can still read the old session's high ctx%), so the
+        # cleared gate cannot trigger an instant re-nudge → handover storm; and
+        # a bare `/clear` with nothing armed no longer strands the gate.
+        st.begin_cycle(root)
     return 0
 
 

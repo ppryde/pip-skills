@@ -137,15 +137,6 @@ class TestCooldown:
         st.consume_clear_flag(tmp_path)  # sets cooldown
         assert st.request_clear(tmp_path, "H2") == "cooldown"
 
-    def test_arm_ready_clears_cooldown_and_flag(self, tmp_path):
-        ensure_root(tmp_path)
-        st.begin(tmp_path)
-        st.request_clear(tmp_path, "H")
-        st.consume_clear_flag(tmp_path)
-        st.arm_ready(tmp_path)
-        assert not st.cooldown_marker(tmp_path).exists()
-        assert st.request_clear(tmp_path, "H3") == "armed"
-
     def test_expired_cooldown_allows_rearm(self, tmp_path):
         import os
         ensure_root(tmp_path)
@@ -167,10 +158,40 @@ class TestCooldown:
         assert st.cooldown_active(tmp_path) is True
 
 
+class TestBeginCycle:
+    def test_begin_cycle_clears_gate_flag_and_touches_cooldown(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        st.set_gate(tmp_path)
+        st.begin_cycle(tmp_path)
+        assert not st.clear_flag(tmp_path).exists()   # queued clear unlinked
+        assert st.gate_active(tmp_path) is False       # gate cleared → re-armed
+        assert st.cooldown_active(tmp_path) is True    # fresh cooldown grace
+
+    def test_begin_cycle_cooldown_suppresses_immediate_rearm(self, tmp_path):
+        # The storm guard: census lag can re-present a high ctx%, but the fresh
+        # cooldown makes request_clear refuse during the grace window.
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.begin_cycle(tmp_path)
+        assert st.request_clear(tmp_path, "H2") == "cooldown"
+
+    def test_begin_cycle_touches_cooldown_with_no_gate_or_flag(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.begin_cycle(tmp_path)
+        assert st.cooldown_active(tmp_path) is True
+        assert st.gate_active(tmp_path) is False
+
+
 class TestGate:
     def test_gate_inactive_by_default(self, tmp_path):
         ensure_root(tmp_path)
         assert st.gate_active(tmp_path) is False
+
+    def test_gate_ttl_is_six_hours(self):
+        assert st.GATE_TTL_SECONDS == 6 * 3600
 
     def test_set_gate_marks_active(self, tmp_path):
         ensure_root(tmp_path)
@@ -224,6 +245,20 @@ class TestGate:
         st.set_gate(tmp_path)
         st.resume(tmp_path)
         assert st.gate_active(tmp_path) is False
+
+    def test_resume_keeps_gate_when_clear_armed(self, tmp_path):
+        # A handover is queued: clearing the gate would re-nudge over the pending
+        # clear. resume unpauses but leaves the gate holding.
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.pause(tmp_path)
+        st.set_gate(tmp_path)
+        st.request_clear(tmp_path, "H")  # arms clear-requested... but paused
+        # request_clear refuses while paused, so arm the flag directly instead
+        st.clear_flag(tmp_path).touch()
+        st.resume(tmp_path)
+        assert st.is_paused(tmp_path) is False
+        assert st.gate_active(tmp_path) is True  # gate held over queued handover
 
 
 class TestClearRequested:
