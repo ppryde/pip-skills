@@ -12,6 +12,7 @@ from pathlib import Path
 from scripts.store import _uniquify, ensure_root, vigil_root
 
 COOLDOWN_TTL_SECONDS = 300
+GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
 
 
 def active_marker(repo_root: Path) -> Path:
@@ -20,6 +21,10 @@ def active_marker(repo_root: Path) -> Path:
 
 def clear_flag(repo_root: Path) -> Path:
     return vigil_root(repo_root) / "clear-requested"
+
+
+def gate_marker(repo_root: Path) -> Path:
+    return vigil_root(repo_root) / "handover-gate"
 
 
 def paused_flag(repo_root: Path) -> Path:
@@ -58,20 +63,56 @@ def pause(repo_root: Path) -> None:
 
 def resume(repo_root: Path) -> None:
     paused_flag(repo_root).unlink(missing_ok=True)
+    clear_gate(repo_root)
 
 
-def _cooldown_active(repo_root: Path) -> bool:
-    marker = cooldown_marker(repo_root)
+def _marker_active(marker: Path, ttl_seconds: float) -> bool:
     if not marker.exists():
         return False
     try:
         age = time.time() - marker.stat().st_mtime
     except OSError:
         return False
-    if age >= COOLDOWN_TTL_SECONDS:
-        marker.unlink(missing_ok=True)  # expired dispatch — self-heal, allow re-arm
+    if age >= ttl_seconds:
+        marker.unlink(missing_ok=True)  # expired — self-heal, allow re-arm
         return False
     return True
+
+
+def _cooldown_active(repo_root: Path) -> bool:
+    return _marker_active(cooldown_marker(repo_root), COOLDOWN_TTL_SECONDS)
+
+
+def cooldown_active(repo_root: Path) -> bool:
+    """Public, read-only cooldown check for callers outside this module."""
+    return _cooldown_active(repo_root)
+
+
+def set_gate(repo_root: Path) -> None:
+    ensure_root(repo_root)
+    gate_marker(repo_root).touch()
+
+
+def gate_active(repo_root: Path) -> bool:
+    """TTL-aware: a stranded gate (crash between nudge and clear) self-heals."""
+    return _marker_active(gate_marker(repo_root), GATE_TTL_SECONDS)
+
+
+def clear_gate(repo_root: Path) -> None:
+    gate_marker(repo_root).unlink(missing_ok=True)
+
+
+def clear_requested(repo_root: Path) -> bool:
+    """Read-only check: would a Stop hook currently dispatch a clear?
+
+    Mirrors ``consume_clear_flag``'s conditions (active, not paused, flag
+    present) WITHOUT consuming the flag — the manual Stop hook needs to know
+    whether to print the loud instruction line without eating the flag the
+    human's own ``/clear`` (and the following SessionStart) still depends on.
+    """
+    if not is_active(repo_root) or is_paused(repo_root):
+        return False
+    return clear_flag(repo_root).exists()
 
 
 def request_clear(repo_root: Path, handoff_text: str) -> str:

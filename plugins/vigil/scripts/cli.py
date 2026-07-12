@@ -36,21 +36,26 @@ def cmd_begin(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_context(args: argparse.Namespace) -> int:
-    cfg = load_config(args.root)
+def _current_context_percent(root: Path, cfg: dict[str, object]) -> int | None:
     # census first: worktree-correct and windowed against the session's real
     # context size. Falls back to transcript-slug measurement when census has no
     # live entry (not installed, no status line, or stale) — preserving the old
     # behaviour rather than regressing to "ctx unknown".
-    pct = census.context_percent(args.root)
+    pct = census.context_percent(root)
     if pct is None:
-        transcript = ctx.find_transcript(args.root.resolve(), Path.home())
+        transcript = ctx.find_transcript(root.resolve(), Path.home())
         tokens = ctx.context_tokens(transcript) if transcript else None
         pct = (
             ctx.context_percent(tokens, cast(int, cfg["context.window"]))
             if tokens is not None
             else None
         )
+    return pct
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    cfg = load_config(args.root)
+    pct = _current_context_percent(args.root, cfg)
     print(ctx.context_line(pct, cast(int, cfg["context.threshold"])))
     return 0
 
@@ -90,6 +95,13 @@ def _assemble_handover(args: argparse.Namespace) -> str | None:
                 raise ValueError(f"--content-file unreadable: {exc}") from exc
         if raw.strip():
             parts.append(raw.strip())
+    for inline_path in args.inline or []:
+        try:
+            raw = Path(inline_path).read_text()
+        except OSError as exc:
+            raise ValueError(f"--inline unreadable: {inline_path}: {exc}") from exc
+        if raw.strip():
+            parts.append(f"## Inlined: `{inline_path}`\n\n```\n{raw.strip()}\n```")
     if args.notes:
         parts.append(f"## Notes\n\n{args.notes.strip()}")
     document = "\n\n".join(p.strip() for p in parts if p.strip())
@@ -104,8 +116,10 @@ def cmd_handover(args: argparse.Namespace) -> int:
         return 1
     result = st.request_clear(args.root, document)
     if result == "armed":
-        print("handover armed — will /clear at end of this turn (auto) "
-              "or on your /clear (manual)")
+        if os.environ.get("TMUX"):
+            print("handover armed — auto (/clear via tmux at end of turn)")
+        else:
+            print("handover armed — manual (no tmux): type /clear to complete")
         return 0
     reason = {
         "inactive": "not watching here — run `vigil begin` first",
@@ -131,6 +145,19 @@ def cmd_stop_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_clear_armed_hook(args: argparse.Namespace) -> int:
+    """Read-only Stop-hook helper: is a handover currently armed?
+
+    Unlike ``stop-hook``, this never consumes ``clear-requested`` — the manual
+    (no-tmux) path needs to know whether to print the loud instruction line
+    without eating the flag the human's own /clear (and the SessionStart that
+    follows it) still depends on.
+    """
+    if st.clear_requested(_hook_root(args)):
+        print("ARMED")
+    return 0
+
+
 def cmd_session_start_hook(args: argparse.Namespace) -> int:
     root = _hook_root(args)
     if st.is_active(root):
@@ -142,7 +169,67 @@ def cmd_session_start_hook(args: argparse.Namespace) -> int:
                     "additionalContext": handoff,
                 }
             }))
+            # Completion = the handover actually landed in this fresh session —
+            # not merely "clear was requested" — so the gate only clears here.
+            st.clear_gate(root)
         st.arm_ready(root)
+    return 0
+
+
+_NUDGE_BODY = (
+    "**vigil: context at {pct}% — over the {threshold}% threshold.** "
+    "At your next reasonable stopping point:\n"
+    "(1) wait for running subagents to finish, or ask them to stop and confirm;\n"
+    "(2) judge whether this is a sane place to pause — if mid-critical-step, "
+    "finish that step first;\n"
+    "(3) write a rich handover (what you were doing, what's next, gotchas) and run "
+    "`vigil handover --content-file <doc>` / `--notes`. The clear will dispatch "
+    "automatically (or you'll be told to ask the user to type /clear)."
+)
+
+_NUDGE_REMOTE_SUFFIX = (
+    "\n\nThis session is remote — the next session cannot open referenced file "
+    "paths. Inline what it must read into the handover body with repeatable "
+    "`vigil handover --inline <path>` rather than leaving it as a reference."
+)
+
+
+def _nudge_text(pct: int, threshold: int, mode: str) -> str:
+    text = _NUDGE_BODY.format(pct=pct, threshold=threshold)
+    if mode == "remote":
+        text += _NUDGE_REMOTE_SUFFIX
+    return text
+
+
+def cmd_nudge_hook(args: argparse.Namespace) -> int:
+    """UserPromptSubmit hook backend: nudge once per over-threshold cycle.
+
+    All preconditions must hold: active, not paused, no cooldown, no live
+    handover-gate, and a known ctx% at/over the configured threshold. Never
+    raises — every check composes already quarantine-safe primitives.
+    """
+    root = _hook_root(args)
+    if not st.is_active(root):
+        return 0
+    if st.is_paused(root):
+        return 0
+    if st.cooldown_active(root):
+        return 0
+    if st.gate_active(root):
+        return 0
+    cfg = load_config(root)
+    threshold = cast(int, cfg["context.threshold"])
+    pct = _current_context_percent(root, cfg)
+    if pct is None or pct < threshold:
+        return 0
+    st.set_gate(root)
+    mode = str(cfg["context.mode"])
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": _nudge_text(pct, threshold, mode),
+        }
+    }))
     return 0
 
 
@@ -169,10 +256,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--notes")
     p.add_argument("--content-file", dest="content_file")
     p.add_argument("--no-snapshot", dest="no_snapshot", action="store_true")
+    p.add_argument("--inline", dest="inline", action="append", default=[])
     p.set_defaults(func=cmd_handover)
 
     sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)
+    sub.add_parser("clear-armed-hook").set_defaults(func=cmd_clear_armed_hook)
     sub.add_parser("session-start-hook").set_defaults(func=cmd_session_start_hook)
+    sub.add_parser("nudge-hook").set_defaults(func=cmd_nudge_hook)
 
     return parser
 

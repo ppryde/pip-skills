@@ -16,14 +16,22 @@ other plugin.
 ## What it does
 
 - `.vigil/` (git-ignored, per-repo) holds the watch state: an `active` marker,
-  the armed flag, a paused flag, a TTL cooldown, and the pending `handoff.md`
-  (archived to `.vigil/archive/` after it injects once).
+  the armed flag, a paused flag, a TTL cooldown, a TTL `handover-gate` (arms
+  the once-per-cycle trigger nudge), and the pending `handoff.md` (archived to
+  `.vigil/archive/` after it injects once).
 - `vigil begin` activates the watch (auto under tmux, else manual).
 - `vigil context` reports `ctx NN%` against a configured threshold.
+- A `UserPromptSubmit` hook (`vigil nudge-hook`) watches ctx% every turn
+  (census-backed) and nudges the agent once, at the threshold, to write a
+  handover — not a blind auto-handover; the agent still judges the stopping
+  point. The `handover-gate` prevents re-nagging until the cycle completes.
 - `vigil handover` assembles a handover (session snapshot + optional caller
-  content + your notes) and arms an in-process `/clear`; `SessionStart`
-  re-injects it. `vigil pause`/`resume` suspend/re-arm auto-handover.
-- Fail-safe `Stop`/`SessionStart` hooks (`trap 'exit 0'`, always exit 0).
+  content, `--inline <path>` files, and your notes) and arms an in-process
+  `/clear`; `SessionStart` re-injects it and clears the gate. `vigil
+  pause`/`resume` suspend/re-arm auto-handover (and release the gate).
+- Fail-safe `Stop`/`SessionStart`/`UserPromptSubmit` hooks (`trap 'exit 0'`,
+  always exit 0). Without tmux, the Stop hook is loud: it tells the user to
+  type `/clear` rather than silently doing nothing.
 - `/handover` command for a manual reset.
 
 ## Composability

@@ -5,15 +5,23 @@
 # every path; side-effects are `|| true`-tolerant.
 trap 'exit 0' EXIT
 
-# Manual mode (no tmux): inert. A present human types /clear; leave the flag for
-# the SessionStart re-inject. Exit before consuming anything.
-[ -z "${TMUX:-}" ] && exit 0
-
 input="$(cat)"
 
 py="python3"
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python" ]; then
   py="${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python"
+fi
+
+if [ -z "${TMUX:-}" ]; then
+  # Manual mode: consume nothing — a present human types /clear; leave the flag
+  # for the SessionStart re-inject. Loud, not silent: check (read-only, never
+  # consuming) whether a handover is armed and tell the human what to do.
+  armed="$(printf '%s' "$input" \
+    | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" clear-armed-hook 2>/dev/null || true)"
+  if [ "$armed" = "ARMED" ]; then
+    echo "vigil: handover armed but tmux is unavailable — type /clear to complete it (install/run inside tmux for hands-free handovers)."
+  fi
+  exit 0
 fi
 
 decision="$(printf '%s' "$input" \

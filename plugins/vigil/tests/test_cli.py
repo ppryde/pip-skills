@@ -87,6 +87,192 @@ class TestHandover:
         assert run(repo, "handover", "--no-snapshot", "--content-file", "/no/such/file") == 1
         assert "content-file" in capsys.readouterr().err
 
+    def test_armed_announces_auto_under_tmux(self, repo, capsys, monkeypatch):
+        monkeypatch.setenv("TMUX", "/tmp/x,1,0")
+        run(repo, "begin")
+        assert run(repo, "handover", "--notes", "x") == 0
+        out = capsys.readouterr().out
+        assert "armed — auto" in out
+        assert "/clear via tmux" in out
+
+    def test_armed_announces_manual_without_tmux(self, repo, capsys, monkeypatch):
+        monkeypatch.delenv("TMUX", raising=False)
+        run(repo, "begin")
+        assert run(repo, "handover", "--notes", "x") == 0
+        out = capsys.readouterr().out
+        assert "armed — manual" in out
+        assert "type /clear" in out
+
+    def test_inline_embeds_file_content(self, repo, tmp_path):
+        run(repo, "begin")
+        doc = tmp_path / "notes.md"
+        doc.write_text("REMOTE MUST-READ CONTENT")
+        assert run(repo, "handover", "--no-snapshot", "--inline", str(doc)) == 0
+        from scripts import state as st
+        handoff = st.read_handoff(repo)
+        assert "REMOTE MUST-READ CONTENT" in handoff
+        assert str(doc) in handoff
+
+    def test_inline_repeatable(self, repo, tmp_path):
+        run(repo, "begin")
+        a = tmp_path / "a.md"
+        b = tmp_path / "b.md"
+        a.write_text("FIRST DOC")
+        b.write_text("SECOND DOC")
+        assert run(repo, "handover", "--no-snapshot",
+                   "--inline", str(a), "--inline", str(b)) == 0
+        from scripts import state as st
+        handoff = st.read_handoff(repo)
+        assert "FIRST DOC" in handoff
+        assert "SECOND DOC" in handoff
+
+    def test_inline_missing_file_refused(self, repo):
+        run(repo, "begin")
+        assert run(repo, "handover", "--no-snapshot", "--inline", "/no/such/file") == 1
+
+
+class TestNudgeHook:
+    def _stdin(self, monkeypatch, payload):
+        import io
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    def _set_census(self, monkeypatch, repo, pct):
+        store = repo / "census" / "status.json"
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        store.parent.mkdir(parents=True, exist_ok=True)
+        import os
+        import time
+        store.write_text(json.dumps({
+            "sessions": {"s1": {
+                "worktree_cwd": os.path.realpath(str(repo)),
+                "updated_at": time.time(),
+                "payload": {"context_window": {"used_percentage": pct}},
+            }}
+        }))
+
+    def test_nudges_when_all_preconditions_met(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        assert "40%" in payload["hookSpecificOutput"]["additionalContext"]
+        assert "35%" in payload["hookSpecificOutput"]["additionalContext"]
+        assert st.gate_active(repo) is True
+
+    def test_writes_gate_exactly_once_per_cycle(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() != ""
+        # second turn, still over threshold: gate holds, no re-nudge
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_silent_under_threshold(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 10)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is False
+
+    def test_silent_when_gated(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.set_gate(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_silent_when_paused(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.pause(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_silent_during_cooldown(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.request_clear(repo, "H")
+        st.consume_clear_flag(repo)  # sets cooldown
+        assert st.cooldown_active(repo) is True
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_silent_when_inactive(self, repo, capsys, monkeypatch):
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_silent_when_ctx_unknown(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        monkeypatch.setenv("CENSUS_STORE", str(repo / "absent.json"))
+        monkeypatch.setenv("HOME", str(repo / "empty-home"))
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is False
+
+    def test_remote_mode_adds_inline_guidance(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        run(repo, "config", "set", "context.mode", "remote")
+        capsys.readouterr()
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert "--inline" in payload["hookSpecificOutput"]["additionalContext"]
+
+    def test_local_mode_omits_inline_guidance(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        self._set_census(monkeypatch, repo, 40)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "nudge-hook") == 0
+        out = capsys.readouterr().out
+        payload = json.loads(out)
+        assert "--inline" not in payload["hookSpecificOutput"]["additionalContext"]
+
+
+class TestClearArmedHook:
+    def _stdin(self, monkeypatch, payload):
+        import io
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    def test_prints_armed_when_armed(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.request_clear(repo, "H")
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "clear-armed-hook") == 0
+        assert capsys.readouterr().out.strip() == "ARMED"
+        assert st.clear_flag(repo).exists()  # not consumed
+
+    def test_silent_when_not_armed(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "clear-armed-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+
 
 class TestHookBackends:
     def _stdin(self, monkeypatch, payload):
@@ -119,3 +305,24 @@ class TestHookBackends:
         self._stdin(monkeypatch, {"cwd": str(repo), "source": "startup"})
         assert run(repo, "session-start-hook") == 0
         assert capsys.readouterr().out.strip() == ""
+
+    def test_session_start_clears_gate_after_injection(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.request_clear(repo, "HANDOFF PAYLOAD")
+        st.consume_clear_flag(repo)
+        st.set_gate(repo)
+        assert st.gate_active(repo) is True
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "clear"})
+        assert run(repo, "session-start-hook") == 0
+        assert "HANDOFF PAYLOAD" in capsys.readouterr().out
+        assert st.gate_active(repo) is False  # cleared only on successful injection
+
+    def test_session_start_leaves_gate_when_no_handoff_to_inject(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.set_gate(repo)
+        self._stdin(monkeypatch, {"cwd": str(repo), "source": "startup"})
+        assert run(repo, "session-start-hook") == 0
+        assert capsys.readouterr().out.strip() == ""
+        assert st.gate_active(repo) is True  # nothing landed — gate must survive

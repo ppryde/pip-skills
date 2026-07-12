@@ -8,6 +8,7 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 STOP = PLUGIN_ROOT / "hooks" / "stop.sh"
 SESSION_START = PLUGIN_ROOT / "hooks" / "session-start.sh"
+NUDGE = PLUGIN_ROOT / "hooks" / "nudge-hook.sh"
 # Resolved once, up front: a test that clobbers $PATH (to simulate a missing
 # `tmux`) would otherwise also make the `bash` interpreter itself unresolvable
 # via list-form subprocess.run (which looks up the program name in env["PATH"]),
@@ -41,12 +42,15 @@ def _promote_and_arm(repo):
 
 
 class TestStopHook:
-    def test_hooks_json_registers_both(self):
+    def test_hooks_json_registers_all_three(self):
         data = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())
         assert "Stop" in data["hooks"]
         assert "SessionStart" in data["hooks"]
+        assert "UserPromptSubmit" in data["hooks"]
         ss = data["hooks"]["SessionStart"][0]
         assert "startup" in ss["matcher"] and "clear" in ss["matcher"]
+        ups = data["hooks"]["UserPromptSubmit"][0]["hooks"][0]
+        assert ups["command"].endswith("nudge-hook.sh")
 
     def test_manual_mode_exits_0_and_keeps_flag(self, tmp_path):
         st = _promote_and_arm(tmp_path)
@@ -55,6 +59,32 @@ class TestStopHook:
         result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
         assert st.clear_flag(tmp_path).exists()  # not consumed in manual mode
+
+    def test_manual_mode_armed_emits_loud_line(self, tmp_path):
+        st = _promote_and_arm(tmp_path)
+        env = _base_env({"VIGIL_CLEAR_DELAY": "0"})
+        env.pop("TMUX", None)
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert "tmux is unavailable" in result.stdout
+        assert "type /clear" in result.stdout
+        assert st.clear_flag(tmp_path).exists()  # loud message never consumes the flag
+
+    def test_manual_mode_unarmed_is_silent(self, tmp_path):
+        from scripts import state as st
+        st.begin(tmp_path)  # active, but no handover armed
+        env = _base_env({"VIGIL_CLEAR_DELAY": "0"})
+        env.pop("TMUX", None)
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_manual_mode_silent_when_inactive(self, tmp_path):
+        env = _base_env({"VIGIL_CLEAR_DELAY": "0"})
+        env.pop("TMUX", None)
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
 
     def test_auto_mode_sends_keys_and_exits_0(self, tmp_path):
         st = _promote_and_arm(tmp_path)
@@ -112,6 +142,49 @@ class TestSessionStartHook:
         env = _base_env({})
         result = _run(SESSION_START, {"cwd": str(tmp_path), "source": "startup"},
                       env, tmp_path)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+
+class TestNudgeHookScript:
+    def _census(self, tmp_path, pct):
+        import os
+        import time
+        store = tmp_path / "census" / "status.json"
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text(json.dumps({
+            "sessions": {"s1": {
+                "worktree_cwd": os.path.realpath(str(tmp_path)),
+                "updated_at": time.time(),
+                "payload": {"context_window": {"used_percentage": pct}},
+            }}
+        }))
+        return store
+
+    def test_nudges_over_threshold(self, tmp_path):
+        from scripts import state as st
+        st.begin(tmp_path)
+        store = self._census(tmp_path, 40)
+        env = _base_env({"CENSUS_STORE": str(store)})
+        result = _run(NUDGE, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert "additionalContext" in result.stdout
+        assert "40%" in result.stdout
+        assert st.gate_active(tmp_path)
+
+    def test_silent_under_threshold(self, tmp_path):
+        from scripts import state as st
+        st.begin(tmp_path)
+        store = self._census(tmp_path, 10)
+        env = _base_env({"CENSUS_STORE": str(store)})
+        result = _run(NUDGE, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_silent_when_inactive(self, tmp_path):
+        store = self._census(tmp_path, 90)
+        env = _base_env({"CENSUS_STORE": str(store)})
+        result = _run(NUDGE, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
         assert result.stdout.strip() == ""
 
