@@ -17,13 +17,15 @@ function boardResponse(pct: number): BoardResponse {
   };
 }
 
-/** A promise whose resolve is exposed so the test drives ordering explicitly. */
+/** A promise whose resolve/reject are exposed so the test drives ordering explicitly. */
 function deferred<T>() {
   let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe("useBoard.mutate() in-flight lock", () => {
@@ -191,6 +193,109 @@ describe("useBoard background polling (5s, paused during drag/mutation)", () => 
     });
     // Unmounted before any poll tick fired — still just the mount fetch.
     expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("REGRESSION: a poll tick during a manual refresh must not strand loading — refresh settles loading=false and applies its data", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.loading).toBe(false);
+    const callsAfterMount = mockedGetBoard.mock.calls.length;
+
+    // Manual refresh whose response we hold open across a poll boundary.
+    const manual = deferred<BoardResponse>();
+    mockedGetBoard.mockReturnValueOnce(manual.promise);
+    let refreshDone: Promise<void>;
+    act(() => {
+      refreshDone = result.current.refresh();
+    });
+    expect(result.current.loading).toBe(true);
+
+    // 5s elapses mid-refresh — the tick must NOT fire a competing getBoard
+    // (which would bump the shared epoch and mark the manual response stale).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockedGetBoard.mock.calls.length).toBe(callsAfterMount + 1);
+
+    // Manual refresh resolves: loading MUST clear (the bug left it stuck
+    // true forever — disabled "Refreshing…" button with no recovery).
+    await act(async () => {
+      manual.resolve(boardResponse(33));
+      await refreshDone;
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.context?.pct).toBe(33);
+  });
+
+  it("REGRESSION: a manual refresh REJECTING across a poll boundary still surfaces its error and clears loading", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const manual = deferred<BoardResponse>();
+    mockedGetBoard.mockReturnValueOnce(manual.promise);
+    let refreshDone: Promise<void>;
+    act(() => {
+      refreshDone = result.current.refresh();
+    });
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // Manual failure MUST surface — polls swallow errors, manual never does.
+    await act(async () => {
+      manual.reject(new Error("board fetch failed"));
+      await refreshDone;
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe("board fetch failed");
+  });
+
+  it("a manual refresh made STALE by a racing mutation still clears loading and surfaces its rejection", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // Manual refresh in flight...
+    const manual = deferred<BoardResponse>();
+    mockedGetBoard.mockReturnValueOnce(manual.promise);
+    let refreshDone: Promise<void>;
+    act(() => {
+      refreshDone = result.current.refresh();
+    });
+    expect(result.current.loading).toBe(true);
+
+    // ...then a mutation completes, bumping the shared epoch past the
+    // refresh's id — the refresh's RESPONSE is now stale, but the flags it
+    // owns (loading/error) must still settle.
+    await act(async () => {
+      await result.current.mutate(() => Promise.resolve(boardResponse(20)));
+    });
+    expect(result.current.context?.pct).toBe(20);
+
+    await act(async () => {
+      manual.reject(new Error("late failure"));
+      await refreshDone;
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe("late failure");
+    // The mutation's fresher data was not clobbered (apply stays epoch-guarded).
+    expect(result.current.context?.pct).toBe(20);
   });
 
   it("a rejected poll leaves the last good board intact and surfaces nothing", async () => {

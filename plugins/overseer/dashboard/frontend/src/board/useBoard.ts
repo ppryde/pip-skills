@@ -51,6 +51,11 @@ export function useBoard(): UseBoardResult {
   // needing the effect that owns the interval to re-run every render.
   const inFlightRef = useRef(false);
   const dragActiveRef = useRef(false);
+  // Poll gate for MANUAL loads (mount fetch / refresh). A poll tick fired
+  // while a manual load is in flight would bump the shared epoch and mark
+  // the manual response stale — polling must never interfere with a manual
+  // request the user is watching, so ticks skip while this is set.
+  const loadingRef = useRef(false);
 
   const setDragActive = useCallback((active: boolean) => {
     dragActiveRef.current = active;
@@ -74,22 +79,33 @@ export function useBoard(): UseBoardResult {
       const silent = opts?.silent ?? false;
       const id = ++requestIdRef.current;
       if (!silent) {
+        loadingRef.current = true;
         setLoading(true);
         setError(null);
       }
       try {
         const res = await getBoard();
-        if (id !== requestIdRef.current) return; // stale — a newer load/refresh/mutate won
-        applyResponse(res);
+        // Only APPLYING the response is epoch-guarded — a newer
+        // load/refresh/mutate wins the data race.
+        if (id === requestIdRef.current) applyResponse(res);
       } catch (e) {
-        if (id !== requestIdRef.current) return;
+        // A manual load OWNS the error flag unconditionally: even if a
+        // newer request bumped the epoch mid-flight (mutation racing a
+        // refresh), the user asked for this refresh and its failure must
+        // surface. Silent polls swallow instead — no error state, no
+        // console noise; the last good board stays put.
         if (!silent) {
           setError(e instanceof Error ? e.message : String(e));
         }
-        // silent: swallow — no error state, no console noise, last good
-        // board data (already applied from a prior response) stays put.
       } finally {
-        if (id === requestIdRef.current && !silent) setLoading(false);
+        // Likewise unconditional for `loading`: gating this on the epoch
+        // strands loading=true (a permanently disabled "Refreshing…"
+        // button) whenever anything bumps the shared counter mid-flight —
+        // same rationale as mutate()'s unconditional inFlight clear below.
+        if (!silent) {
+          loadingRef.current = false;
+          setLoading(false);
+        }
       }
     },
     [applyResponse]
@@ -133,12 +149,15 @@ export function useBoard(): UseBoardResult {
     [applyResponse]
   );
 
-  // Background poll: every 5s, silently refresh unless a mutation or a drag
-  // is in flight. Both gates are read from refs at tick time so the interval
-  // itself never needs to be torn down/recreated when inFlight/drag toggle.
+  // Background poll: every 5s, silently refresh unless a mutation, a drag,
+  // or a MANUAL load is in flight (a tick during a manual load would bump
+  // the shared epoch and stale-out the response the user is waiting on).
+  // All gates are read from refs at tick time so the interval itself never
+  // needs to be torn down/recreated when they toggle.
   useEffect(() => {
     const intervalId = setInterval(() => {
-      if (inFlightRef.current || dragActiveRef.current) return;
+      if (inFlightRef.current || dragActiveRef.current || loadingRef.current)
+        return;
       void load({ silent: true });
     }, POLL_INTERVAL_MS);
     return () => clearInterval(intervalId);
