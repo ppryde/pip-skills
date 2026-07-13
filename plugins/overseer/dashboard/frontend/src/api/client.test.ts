@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "./client";
-import type { BoardResponse, CardDetail } from "./types";
+import type { BoardResponse, CardDetail, SessionsResponse } from "./types";
 
 const boardResponse: BoardResponse = {
   board: { project: {}, cards: [], sprints: [], quarantined: [] },
@@ -59,6 +59,32 @@ describe("api/client", () => {
     expect(url).toBe("/api/board");
     expect(init?.method ?? "GET").toBe("GET");
     expect(result).toEqual(boardResponse);
+  });
+
+  it("getSessions() GETs /api/sessions and returns the parsed response", async () => {
+    const sessionsResponse: SessionsResponse = {
+      sessions: [
+        {
+          id: "s1",
+          worktree_cwd: "/path/to/work",
+          updated_at: 1234567890,
+          stale: false,
+          session_name: "night-shift",
+          model: "Opus",
+          pct: 44,
+          pr: { number: 22, url: "http://pr/22", review_state: "pending" },
+        },
+      ],
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(sessionsResponse));
+
+    const result = await client.getSessions();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/sessions");
+    expect(init?.method ?? "GET").toBe("GET");
+    expect(result).toEqual(sessionsResponse);
   });
 
   it("getCard(id) GETs /api/card/{id} and returns the parsed response", async () => {
