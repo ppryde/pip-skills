@@ -108,6 +108,7 @@ function TileShell({
               {card.priority}
             </span>
           )}
+          {card.repo && <span className="repo-chip">{card.repo}</span>}
           {card.status === "blocked" && (
             <span className="badge badge--blocked">BLOCKED</span>
           )}

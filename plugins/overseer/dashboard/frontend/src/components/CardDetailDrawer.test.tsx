@@ -131,6 +131,41 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByText(/implementation/)).toBeInTheDocument();
   });
 
+  it("renders the repo chip in the facts row when the card carries a repo label", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-A", repo: "pip-skills" })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    expect(await screen.findByText("pip-skills")).toBeInTheDocument();
+  });
+
+  it("renders no repo chip when the card carries no repo label", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+
   it("renders unknown section headings too — no hardcoded fixed set", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({

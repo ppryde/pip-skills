@@ -29,6 +29,49 @@ def _is_gitignored(repo_root: Path, relpath: str) -> bool:
     return result.returncode == 0
 
 
+def derive_repo_label(repo_root: Path) -> str | None:
+    """The top-level repo name that owns ``repo_root``, even from a worktree.
+
+    Ledgers can live inside a linked worktree (e.g.
+    ``.claude/worktrees/some-branch``), so a naive ``repo_root.name`` would
+    record the worktree directory, not the repo. ``git rev-parse
+    --git-common-dir`` resolves to the MAIN repo's ``.git`` dir in every
+    case, worktree or not (unlike ``--git-dir``, which points at the
+    worktree's private gitdir under ``.git/worktrees/<name>``) — see
+    git-worktree(1). That dir's parent directory's basename is the repo
+    name (``.../pip-skills/.git`` -> ``"pip-skills"``); a bare-ish common
+    dir that doesn't end in ``.git`` uses its own basename instead.
+
+    Deliberately uses plain ``--git-common-dir`` plus manual path
+    resolution rather than git's ``--path-format=absolute`` flag (needs git
+    >= 2.31) for broader portability: the raw output is relative to
+    ``repo_root`` on some git versions and already absolute on others;
+    ``Path(repo_root, raw).resolve()`` handles both, since `Path` discards
+    the first component whenever the second is already absolute.
+
+    None on any failure — not a git repo, git missing, unreadable output —
+    this is a display label, not load-bearing state.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip()
+    if not raw:
+        return None
+    common_dir = Path(repo_root, raw).resolve()
+    label = common_dir.parent.name if common_dir.name == ".git" else common_dir.name
+    return label or None
+
+
 def state_root(repo_root: Path) -> Path:
     """Resolve the overseer state root. Existing .workflow/ always wins."""
     existing = workflow_root(repo_root)

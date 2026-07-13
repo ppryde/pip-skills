@@ -55,6 +55,9 @@ export interface BoardCard {
   /** Always present (possibly []) — see checklistWindow.ts's ChecklistEntry
    * doc comment for the backend's string-coercion / status quirks. */
   checklist: ChecklistEntry[];
+  /** Top-level repo name the card originated from (never the worktree
+   * directory name) — absent on cards minted before this label existed. */
+  repo?: string;
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */

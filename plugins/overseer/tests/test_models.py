@@ -154,6 +154,12 @@ class TestCardParse:
         card = Card.from_text(SAMPLE_CARD)
         assert "checklist" not in card.to_text()
 
+    def test_repo_less_card_stays_byte_stable(self):
+        """Cards without a `repo:` label must not gain one on re-serialization
+        — existing card files stay byte-stable."""
+        card = Card.from_text(SAMPLE_CARD)
+        assert "repo" not in card.to_text()
+
     def test_to_text_formats_budget_as_strings(self):
         card = Card.from_text(SAMPLE_CARD)
         assert "estimate: 400k" in card.to_text()
@@ -483,3 +489,43 @@ class TestChecklist:
         )
         again = Card.from_text(card.to_text())
         assert again.checklist == card.checklist
+
+
+class TestRepo:
+    def _card_text(self, repo_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{repo_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_repo_parses_and_round_trips(self):
+        card = Card.from_text(self._card_text("repo: pip-skills\n"))
+        assert card.repo == "pip-skills"
+        assert "repo: pip-skills" in card.to_text()  # survives re-serialization
+        again = Card.from_text(card.to_text())
+        assert again.repo == card.repo
+
+    def test_repo_absent_defaults_none(self):
+        card = Card.from_text(self._card_text())
+        assert card.repo is None
+        assert "repo:" not in card.to_text()
+
+    def test_repo_non_str_becomes_none(self):
+        card = Card.from_text(self._card_text("repo: 42\n"))
+        assert card.repo is None
+
+    def test_repo_empty_omitted_from_serialized_text(self):
+        card = Card(id="WF-001", title="T", status="planned", body="## Goal\nx")
+        assert "repo" not in card.to_text()
+
+    def test_repo_round_trips_via_dataclass(self):
+        card = Card(
+            id="WF-001", title="T", status="planned", body="## Goal\nx",
+            repo="pip-skills",
+        )
+        again = Card.from_text(card.to_text())
+        assert again.repo == card.repo

@@ -107,6 +107,7 @@ class Card:
     updated: str = ""
     blocked_on: str | None = None
     checklist: list[dict] = field(default_factory=list)
+    repo: str | None = None
     body: str = ""
 
     @classmethod
@@ -166,6 +167,8 @@ class Card:
                     "subject": str(entry["subject"]),
                     "status": str(entry["status"]),
                 })
+        repo_raw = meta.get("repo")
+        repo = repo_raw if isinstance(repo_raw, str) else None
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
@@ -189,6 +192,7 @@ class Card:
             updated=str(meta.get("updated", "")),
             blocked_on=meta.get("blocked_on"),
             checklist=checklist,
+            repo=repo,
             body=body.strip(),
         )
 
@@ -220,6 +224,8 @@ class Card:
         }
         if self.checklist:
             meta["checklist"] = self.checklist
+        if self.repo:
+            meta["repo"] = self.repo
         front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
         return f"---\n{front}\n---\n\n{self.body.strip()}\n"
 

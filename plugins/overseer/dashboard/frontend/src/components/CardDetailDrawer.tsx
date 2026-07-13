@@ -181,6 +181,7 @@ function CardDetailDrawer({
                   {detail.status}
                   {detail.stage ? ` · ${detail.stage}` : ""}
                 </span>
+                {detail.repo && <span className="repo-chip">{detail.repo}</span>}
                 <PrioritySelect
                   cardId={detail.id}
                   value={detail.priority}

@@ -94,3 +94,18 @@ def test_board_carries_checklist_passthrough(client: TestClient, root: Path) -> 
         {"task": "1", "subject": "write tests", "status": "in_progress"},
         {"task": "2", "subject": "implement", "status": "pending"},
     ]
+
+
+def test_board_carries_repo_passthrough(client: TestClient, root: Path) -> None:
+    """`board_data` (overseer core) gained a `repo` field on cards. The
+    dashboard backend shells `overseer board --json` and does no transform on
+    card dicts, so this must pass through verbatim with no backend code change."""
+    card_id = run_overseer(
+        root, "new-card", "--title", "Repo card", "--repo", "pip-skills"
+    ).strip()
+
+    resp = client.get("/api/board")
+
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["repo"] == "pip-skills"

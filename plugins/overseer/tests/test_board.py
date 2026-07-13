@@ -174,6 +174,24 @@ Test sprint."""
         c = data["cards"][0]
         assert c["checklist"] == checklist
 
+    def test_repo_passed_through(self, repo):
+        from scripts.board import board_data
+        root = workflow_root(repo)
+        card = make_card("WF-001", repo="pip-skills")
+        save_card(root, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["repo"] == "pip-skills"
+
+    def test_repo_defaults_none(self, repo):
+        from scripts.board import board_data
+        root = workflow_root(repo)
+        save_card(root, make_card("WF-001"))
+
+        data = board_data(repo)
+        assert data["cards"][0]["repo"] is None
+
     def test_cards_sorted_by_id(self, repo):
         from scripts.board import board_data
         root = workflow_root(repo)

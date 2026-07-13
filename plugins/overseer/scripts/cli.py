@@ -36,6 +36,7 @@ from scripts.sprints import (  # noqa: E402
 )
 from scripts.store import (  # noqa: E402
     archive_card,
+    derive_repo_label,
     find_card_path,
     init_workflow,
     load_archived_cards,
@@ -178,6 +179,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         budget_estimate=parse_tokens(args.estimate),
         created=_today(),
         updated=_now(),
+        repo=args.repo if args.repo else derive_repo_label(args.root),
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
     _sync(args.root, card)
@@ -237,6 +239,8 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.pr = args.pr
     if args.touches is not None:
         card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+    if args.repo is not None:
+        card.repo = args.repo if args.repo else None
     if args.order is not None:
         card.order = args.order
     if args.priority is not None:
@@ -722,6 +726,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         "updated": card.updated,
         "blocked_on": card.blocked_on,
         "checklist": card.checklist,
+        "repo": card.repo,
         "sections": card.sections,
         "body": card.body,
     }
@@ -897,6 +902,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sprint")
     p.add_argument("--estimate")
     p.add_argument("--goal")
+    p.add_argument(
+        "--repo",
+        help="override the derived top-level repo name (default: derived "
+             "from --root via `git rev-parse --git-common-dir`)",
+    )
     p.set_defaults(func=cmd_new_card)
 
     p = sub.add_parser("set-stage")
@@ -927,6 +937,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--parent")
     p.add_argument("--order", type=int)
     p.add_argument("--priority")
+    p.add_argument("--repo", help="empty string clears")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("depends")

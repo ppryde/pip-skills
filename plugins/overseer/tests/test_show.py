@@ -110,6 +110,20 @@ class TestShowCommand:
         data = json.loads(capsys.readouterr().out)
         assert data["checklist"] == []
 
+    def test_show_json_carries_repo(self, repo, capsys):
+        run(repo, "new-card", "--title", "Repo card", "--repo", "pip-skills")
+        capsys.readouterr()
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["repo"] == "pip-skills"
+
+    def test_show_json_repo_defaults_none(self, repo, capsys):
+        run(repo, "new-card", "--title", "No repo")
+        capsys.readouterr()
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["repo"] is None
+
     def test_show_human_readable_lists_section_headers(self, repo, capsys):
         run(repo, "new-card", "--title", "Human view")
         capsys.readouterr()

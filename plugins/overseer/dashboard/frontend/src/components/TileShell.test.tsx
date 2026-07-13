@@ -182,6 +182,22 @@ describe("TileShell tile-body opener (a11y: no nested interactive)", () => {
   });
 });
 
+describe("TileShell repo chip", () => {
+  it("renders the repo chip when the card carries a repo label", () => {
+    const { container } = renderTile(
+      card({ id: "WF-REPO", repo: "pip-skills" })
+    );
+    const chip = container.querySelector(".repo-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent("pip-skills");
+  });
+
+  it("renders no repo chip when the card carries no repo label", () => {
+    const { container } = renderTile(card({ id: "WF-NOREPO" }));
+    expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+});
+
 describe("TileShell checklist focus window", () => {
   function renderTileWith(checklist: BoardCard["checklist"]) {
     const c = card({ id: "WF-CHK", title: "Has tasks", checklist });

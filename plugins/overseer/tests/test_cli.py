@@ -829,3 +829,51 @@ class TestChecklistCommand:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--subject", "x", "--status", "bogus") == 1
+
+
+class TestRepoField:
+    def test_new_card_derives_repo_from_root(self, tmp_path):
+        git_init(tmp_path)
+        assert main(["--root", str(tmp_path), "init"]) == 0
+        assert run(tmp_path, "new-card", "--title", "T") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(tmp_path), "WF-001").read_text())
+        assert c.repo == tmp_path.name
+
+    def test_new_card_without_git_leaves_repo_unset(self, repo):
+        """`repo` fixture has no `.git` — derivation fails closed to None,
+        and the field is omitted entirely rather than written as null."""
+        run(repo, "new-card", "--title", "T")
+        from scripts.models import Card
+        card_path = find_card_path(state_root(repo), "WF-001")
+        c = Card.from_text(card_path.read_text())
+        assert c.repo is None
+        assert "repo:" not in card_path.read_text()
+
+    def test_new_card_repo_flag_overrides_derivation(self, tmp_path):
+        git_init(tmp_path)
+        assert main(["--root", str(tmp_path), "init"]) == 0
+        assert run(tmp_path, "new-card", "--title", "T", "--repo", "explicit-repo") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(tmp_path), "WF-001").read_text())
+        assert c.repo == "explicit-repo"
+
+    def test_new_card_repo_flag_works_without_git(self, repo):
+        run(repo, "new-card", "--title", "T", "--repo", "explicit-repo")
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.repo == "explicit-repo"
+
+    def test_set_field_repo_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--repo", "some-repo") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.repo == "some-repo"
+
+    def test_set_field_repo_clear_with_empty_string(self, repo):
+        run(repo, "new-card", "--title", "T", "--repo", "some-repo")
+        assert run(repo, "set-field", "WF-001", "--repo", "") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.repo is None

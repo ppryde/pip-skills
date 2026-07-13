@@ -661,6 +661,18 @@ body {
   color: #4338ca;
 }
 
+/* Quiet, muted label — the card's origin repo. Deliberately low-contrast
+   next to the priority chip: this is provenance metadata, not a signal that
+   should compete for attention on the tile. */
+.repo-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
 .badge--blocked {
   font-size: 0.65rem;
   font-weight: 700;
