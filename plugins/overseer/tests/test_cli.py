@@ -718,3 +718,114 @@ class TestChecklistFieldRegression:
             {"task": "7", "subject": "write tests", "status": "in_progress"},
         ]
         assert "checklist:" in find_card_path(state_root(repo), "WF-001").read_text()
+
+
+class TestChecklistCommand:
+    def test_create_new_entry_persists_through_reload(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "checklist", "WF-001", "--task", "7",
+                   "--subject", "write tests", "--status", "pending") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.checklist == [
+            {"task": "7", "subject": "write tests", "status": "pending"},
+        ]
+
+    def test_update_status_preserves_subject_and_order(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "checklist", "WF-001", "--task", "1",
+            "--subject", "first", "--status", "pending")
+        run(repo, "checklist", "WF-001", "--task", "2",
+            "--subject", "second", "--status", "pending")
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--status", "in_progress") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.checklist == [
+            {"task": "1", "subject": "first", "status": "in_progress"},
+            {"task": "2", "subject": "second", "status": "pending"},
+        ]
+
+    def test_update_subject_changes_existing_entry(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "checklist", "WF-001", "--task", "1",
+            "--subject", "first draft", "--status", "pending")
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--subject", "first draft, revised", "--status", "pending") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.checklist == [
+            {"task": "1", "subject": "first draft, revised", "status": "pending"},
+        ]
+
+    def test_delete_removes_entry_keeps_others(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "checklist", "WF-001", "--task", "1",
+            "--subject", "first", "--status", "pending")
+        run(repo, "checklist", "WF-001", "--task", "2",
+            "--subject", "second", "--status", "pending")
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--status", "deleted") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.checklist == [
+            {"task": "2", "subject": "second", "status": "pending"},
+        ]
+
+    def test_delete_absent_task_is_noop(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "checklist", "WF-001", "--task", "1",
+            "--subject", "first", "--status", "pending")
+        assert run(repo, "checklist", "WF-001", "--task", "99",
+                   "--status", "deleted") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.checklist == [
+            {"task": "1", "subject": "first", "status": "pending"},
+        ]
+
+    def test_delete_reports_removed_vs_already_absent(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "checklist", "WF-001", "--task", "1",
+            "--subject", "first", "--status", "pending")
+        capsys.readouterr()
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--status", "deleted") == 0
+        assert "WF-001 checklist: task 1 removed" in capsys.readouterr().out
+
+        assert run(repo, "checklist", "WF-001", "--task", "99",
+                   "--status", "deleted") == 0
+        assert "WF-001 checklist: task 99 already absent" in capsys.readouterr().out
+
+    def test_idempotent_replay_does_not_bump_updated(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--subject", "first", "--status", "pending") == 0
+        card_path = find_card_path(state_root(repo), "WF-001")
+        content_after_first = card_path.read_text()
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--subject", "first", "--status", "pending") == 0
+        content_after_second = card_path.read_text()
+        assert content_after_first == content_after_second
+
+    def test_new_entry_without_subject_exits_1(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        card_path = find_card_path(state_root(repo), "WF-001")
+        before = card_path.read_text()
+        capsys.readouterr()
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--status", "pending") == 1
+        err = capsys.readouterr().err
+        assert "--subject" in err
+        assert card_path.read_text() == before
+
+    def test_unknown_card_exits_1(self, repo, capsys):
+        capsys.readouterr()
+        assert run(repo, "checklist", "WF-999", "--task", "1",
+                   "--subject", "x", "--status", "pending") == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_invalid_status_exits_1(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--subject", "x", "--status", "bogus") == 1
