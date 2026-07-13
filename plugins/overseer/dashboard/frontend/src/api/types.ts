@@ -58,6 +58,13 @@ export interface BoardCard {
   /** Top-level repo name the card originated from (never the worktree
    * directory name) — absent on cards minted before this label existed. */
   repo?: string;
+  /** Claim fields (design spec §5) — census `session_id` holding the card,
+   * ISO-minute stamp, and whether a work verb has acked the claim since.
+   * Absent/null on never-claimed cards; board/card-detail JSON passthrough,
+   * no new backend model work. */
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  claim_acked?: boolean;
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */
@@ -127,6 +134,10 @@ export type MoveBody = { stage: Stage } | { status: Status; reason?: string };
 
 export interface ThresholdBody {
   value: number;
+}
+
+export interface ClaimBody {
+  session_id: string;
 }
 
 export interface SessionSummary {

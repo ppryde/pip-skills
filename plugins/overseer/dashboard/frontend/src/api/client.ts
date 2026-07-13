@@ -98,3 +98,13 @@ export function move(id: string, body: MoveBody): Promise<BoardResponse> {
 export function setThreshold(value: number): Promise<BoardResponse> {
   return request<BoardResponse>("POST", "/api/config/threshold", { value });
 }
+
+export function claimCard(id: string, sessionId: string): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", `/api/card/${id}/claim`, {
+    session_id: sessionId,
+  });
+}
+
+export function unclaimCard(id: string): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", `/api/card/${id}/unclaim`);
+}

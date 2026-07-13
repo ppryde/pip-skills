@@ -3,6 +3,7 @@ import { getCard } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import BudgetMeter from "./BudgetMeter";
+import ClaimControl from "./ClaimControl";
 import PrioritySelect from "./PrioritySelect";
 import LinkEditor from "./LinkEditor";
 import StatusMenu from "./StatusMenu";
@@ -206,6 +207,13 @@ function CardDetailDrawer({
                 parent={detail.parent}
                 dependsOn={detail.depends_on}
                 allCardIds={allCardIds}
+                mutate={mutate}
+                inFlight={inFlight}
+                onMutated={refetchDetail}
+              />
+              <ClaimControl
+                cardId={detail.id}
+                claimedBy={detail.claimed_by}
                 mutate={mutate}
                 inFlight={inFlight}
                 onMutated={refetchDetail}

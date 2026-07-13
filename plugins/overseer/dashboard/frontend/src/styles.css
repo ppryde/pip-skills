@@ -673,6 +673,17 @@ body {
   color: #6b7280;
 }
 
+/* Quiet, distinct from the repo-chip's grey — a faint indigo tint marks
+   "someone's on this" without competing with the priority/blocked badges. */
+.claim-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #eef4ff;
+  color: #3654a6;
+}
+
 .badge--blocked {
   font-size: 0.65rem;
   font-weight: 700;
@@ -1011,6 +1022,42 @@ body {
   background: #fff;
   color: #1b1f24;
   cursor: pointer;
+}
+
+.claim-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.claim-control select {
+  font-size: 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 3px;
+  padding: 0.15rem 0.3rem;
+  background: #fff;
+  color: #1b1f24;
+}
+
+.claim-control button {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #1b1f24;
+  cursor: pointer;
+}
+
+.claim-control__holder {
+  font-size: 0.75rem;
+  color: #3654a6;
+}
+
+.claim-control__holder--stale {
+  color: #9ca3af;
+  font-style: italic;
 }
 
 .link-editor {

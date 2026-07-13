@@ -198,6 +198,22 @@ describe("TileShell repo chip", () => {
   });
 });
 
+describe("TileShell claim badge", () => {
+  it("renders the claim badge when the card is claimed", () => {
+    const { container } = renderTile(
+      card({ id: "WF-CLAIMED", claimed_by: "sess-1" })
+    );
+    const badge = container.querySelector(".claim-badge");
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveAttribute("title", "sess-1");
+  });
+
+  it("renders no claim badge when the card carries no claimed_by", () => {
+    const { container } = renderTile(card({ id: "WF-UNCLAIMED" }));
+    expect(container.querySelector(".claim-badge")).toBeNull();
+  });
+});
+
 describe("TileShell checklist focus window", () => {
   function renderTileWith(checklist: BoardCard["checklist"]) {
     const c = card({ id: "WF-CHK", title: "Has tasks", checklist });
