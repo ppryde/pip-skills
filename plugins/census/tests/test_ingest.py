@@ -84,6 +84,38 @@ class TestContextPreservationGuard:
         assert window == {"used_percentage": None}
 
 
+class TestTmuxPane:
+    def test_records_tmux_pane_when_env_present(self, store_file, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%42")
+        st.ingest(_payload(sid="abc"), now=1.0)
+        entry = _read(store_file)["sessions"]["abc"]
+        assert entry["tmux_pane"] == "%42"
+
+    def test_omits_tmux_pane_key_when_env_absent(self, store_file, monkeypatch):
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        st.ingest(_payload(sid="abc"), now=1.0)
+        entry = _read(store_file)["sessions"]["abc"]
+        assert "tmux_pane" not in entry
+
+    def test_blank_env_var_treated_as_absent(self, store_file, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "")
+        st.ingest(_payload(sid="abc"), now=1.0)
+        entry = _read(store_file)["sessions"]["abc"]
+        assert "tmux_pane" not in entry
+
+    def test_reingest_without_env_drops_previously_recorded_pane(self, store_file, monkeypatch):
+        # Sibling fields (worktree_cwd, payload) are replaced wholesale on
+        # every ingest, not merged with the previous entry — tmux_pane follows
+        # the same rule, so a session that has moved out of tmux stops
+        # reporting a now-stale pane.
+        monkeypatch.setenv("TMUX_PANE", "%42")
+        st.ingest(_payload(sid="abc"), now=1.0)
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        st.ingest(_payload(sid="abc"), now=2.0)
+        entry = _read(store_file)["sessions"]["abc"]
+        assert "tmux_pane" not in entry
+
+
 class TestPrune:
     def test_stale_sessions_pruned_on_write(self, store_file):
         st.ingest(_payload(sid="old", cwd="/wt/a"), now=0.0)
