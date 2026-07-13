@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -197,6 +199,14 @@ def cmd_session_start_hook(args: argparse.Namespace) -> int:
                     "additionalContext": handoff,
                 }
             }))
+            # Injected additionalContext never starts a turn on its own — the
+            # fresh session sits idle until a human types something. On a
+            # `/clear`-triggered relaunch (never a plain `startup`/`resume`,
+            # where a human just launched the CLI and should read the
+            # handover first) type a resume prompt into the pane so unattended
+            # runs restart hands-free. Best-effort and wrapped so it can never
+            # raise or touch this hook's own stdout/stderr.
+            _maybe_kick_resume(payload)
         # ANY session start on an active root begins a new cycle — clear the
         # gate and touch a fresh cooldown unconditionally, whether or not a
         # handover just landed. The cooldown covers census's stale-horizon lag
@@ -205,6 +215,88 @@ def cmd_session_start_hook(args: argparse.Namespace) -> int:
         # a bare `/clear` with nothing armed no longer strands the gate.
         st.begin_cycle(root)
     return 0
+
+
+_KICK_PROMPT = (
+    "vigil: handover received — resume the work described in the injected handover now."
+)
+
+
+def _tmux_probe_reachable(tmux_bin: str) -> bool:
+    """`tmux has-session` liveness probe, mirroring stop.sh's dead-server
+    guard: `$TMUX` set only proves a client once existed, not that its server
+    is still up. Never raises — FileNotFoundError (binary missing), a
+    timeout, or any other subprocess failure all mean "not reachable"."""
+    try:
+        result = subprocess.run(
+            [tmux_bin, "has-session"],
+            timeout=5,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+def _dispatch_resume_kick(pane: str, tmux_bin: str, delay: str) -> None:
+    """Fire-and-forget: type the resume prompt into the pane that just ran
+    `/clear`, so an unattended session restarts itself hands-free. Spawned
+    fully detached (own session group, every stream to DEVNULL) so the hook
+    process returns immediately and the child can never corrupt the hook's
+    own JSON stdout."""
+    script = (
+        f"sleep {shlex.quote(delay)}; "
+        f"{shlex.quote(tmux_bin)} send-keys -t {shlex.quote(pane)} "
+        f"-l {shlex.quote(_KICK_PROMPT)}; "
+        f"{shlex.quote(tmux_bin)} send-keys -t {shlex.quote(pane)} Enter"
+    )
+    subprocess.Popen(
+        ["bash", "-c", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def _maybe_kick_resume(payload: dict[str, object]) -> None:
+    """Fire the detached resume kick iff every precondition holds, checked in
+    this order (cheapest/most-decisive first, so a non-qualifying session
+    never even probes tmux):
+
+    1. caller already confirmed a handoff was consumed this invocation
+       (enforced by the sole call site, inside `if handoff:`);
+    2. the hook payload's `source` is exactly `"clear"` — `startup`/`resume`/
+       `compact`/missing all mean a human just launched the CLI and should
+       read the handover, not have the session run off;
+    3. `TMUX` is set AND `tmux has-session` succeeds (dead-server guard);
+    4. `TMUX_PANE` is set and non-empty (needed to target the kick).
+
+    Wrapped so this can NEVER raise or write to stdout/stderr: any failure
+    silently degrades to today's manual-resume behaviour — the hook still
+    exits 0 and the handover injection above is unaffected either way.
+
+    `VIGIL_TMUX_BIN` (default `"tmux"`) is a test seam: E2E tests point it at
+    a wrapper pinned to a private `tmux -L <socket>`, so no test can ever
+    reach the developer's real tmux server.
+    """
+    try:
+        if payload.get("source") != "clear":
+            return
+        if not os.environ.get("TMUX"):
+            return
+        tmux_bin = os.environ.get("VIGIL_TMUX_BIN", "tmux")
+        if not _tmux_probe_reachable(tmux_bin):
+            return
+        pane = os.environ.get("TMUX_PANE")
+        if not pane:
+            return
+        delay = os.environ.get("VIGIL_KICK_DELAY", "2")
+        _dispatch_resume_kick(pane, tmux_bin, delay)
+    except Exception:
+        pass
 
 
 _NUDGE_BODY = (

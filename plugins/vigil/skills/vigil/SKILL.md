@@ -48,7 +48,10 @@ caller can pipe richer context via `-`), plus your `--notes`. `--no-snapshot`
 drops the generic capture when the caller supplies the whole payload. In auto
 mode the Stop hook sends `/clear` at turn end; in manual mode you tell the user
 to type `/clear`. Either way `SessionStart` re-injects the handover — once (it is
-archived to `.vigil/archive/` on inject) — and you resume lean.
+archived to `.vigil/archive/` on inject) — and you resume lean. After an auto
+`/clear`, injected context alone can't start a turn, so vigil also types a
+resume prompt into the pane so the fresh session picks the work back up
+hands-free — no human keystroke needed to get going again.
 
 ## Defer and pause
 Never clear a discussion out from under a live human. While a live exchange is
