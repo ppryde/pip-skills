@@ -8,6 +8,7 @@ import type {
   CardDetail,
   DependsBody,
   MoveBody,
+  SessionsResponse,
 } from "./types";
 
 /**
@@ -45,6 +46,10 @@ async function request<T>(
 
 export function getBoard(): Promise<BoardResponse> {
   return request<BoardResponse>("GET", "/api/board");
+}
+
+export function getSessions(): Promise<SessionsResponse> {
+  return request<SessionsResponse>("GET", "/api/sessions");
 }
 
 export function getCard(id: string): Promise<CardDetail> {

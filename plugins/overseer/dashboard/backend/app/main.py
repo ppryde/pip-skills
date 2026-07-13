@@ -9,6 +9,7 @@ touches `.workflow/` directly.
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,7 +18,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.cli_client import CliError, check_id, run_census, run_overseer, run_vigil
+from app.cli_client import CliError, check_id, run_census, run_census_all, run_overseer, run_vigil
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -106,6 +107,73 @@ def _limits_section(entry: dict[str, Any] | None) -> dict[str, Any] | None:
     return windows or None
 
 
+# Mirrored from census.store.STALE_HORIZON_SECONDS (90 seconds)
+_STALE_HORIZON_SECONDS = 90
+
+
+def _entry_ts(entry: dict[str, Any]) -> float:
+    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0.
+
+    Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
+    Malformed timestamps (None, non-numeric strings) are treated as 0, which
+    places them beyond any staleness horizon — quarantine-safe, never raises.
+    """
+    try:
+        return float(entry.get("updated_at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
+    """Convert a census session entry into a session summary response object.
+
+    Returns {id, session_name?, model?, worktree_cwd, pct?, pr?, updated_at, stale}.
+    Optional fields (model, pr, session_name, pct) are omitted when absent, mirroring
+    _census_extras's "forward what's there" style. Malformed updated_at values are
+    coerced to 0.0 (treating as stale) rather than raising.
+    """
+    payload = entry.get("payload") or {}
+    ts = _entry_ts(entry)
+    out: dict[str, Any] = {
+        "id": sid,
+        "worktree_cwd": entry.get("worktree_cwd"),
+        "updated_at": entry.get("updated_at"),
+        "stale": (now - ts) > _STALE_HORIZON_SECONDS,
+    }
+    model = payload.get("model") or {}
+    if model.get("display_name"):
+        out["model"] = model["display_name"]
+    if payload.get("session_name"):
+        out["session_name"] = payload["session_name"]
+    pr = payload.get("pr") or {}
+    if pr:
+        out["pr"] = {k: pr.get(k) for k in ("number", "url", "review_state") if pr.get(k) is not None}
+    context_window = payload.get("context_window") or {}
+    if context_window.get("used_percentage") is not None:
+        out["pct"] = context_window["used_percentage"]
+    return out
+
+
+def _sessions_list() -> list[dict[str, Any]]:
+    """Fetch all sessions from census and return sorted by updated_at descending.
+
+    Returns [] when census is unavailable (soft dependency, never 500s).
+    Handles malformed timestamps defensively (treated as 0, sort last).
+    """
+    data = run_census_all()
+    if not data:
+        return []
+    sessions_dict = data.get("sessions") or {}
+    now = time.time()
+    sessions = [
+        _session_summary(sid, entry, now)
+        for sid, entry in sessions_dict.items()
+    ]
+    # Sort by coerced updated_at descending (freshest first); malformed -> 0.0 -> sorts last
+    sessions.sort(key=lambda s: _entry_ts({"updated_at": s.get("updated_at")}), reverse=True)
+    return sessions
+
+
 def _board_response(root: Path) -> dict[str, Any]:
     """The payload every read AND every mutation returns.
 
@@ -165,6 +233,10 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
     @app.get("/api/board")
     def get_board() -> dict[str, Any]:
         return _board_response(root)
+
+    @app.get("/api/sessions")
+    def get_sessions() -> dict[str, Any]:
+        return {"sessions": _sessions_list()}
 
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str) -> Any:

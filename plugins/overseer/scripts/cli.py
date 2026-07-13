@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -131,7 +133,13 @@ def _context_footer(repo_root: Path) -> str:
 
 
 def _sync(repo_root: Path, card: Card) -> None:
-    """Write ordering per spec: card first, then the index view."""
+    """Write ordering per spec: card first, then the index view.
+
+    Known multi-session limitation (spec-accepted YAGNI, no locking):
+    ``save_card`` rewrites the whole card file, so a hook racing another
+    session's CLI verb against the same card is last-write-wins for the
+    *entire* card, not just checklist rows.
+    """
     root = state_root(repo_root)
     save_card(root, card)
     quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
@@ -261,54 +269,262 @@ def cmd_set_field(args: argparse.Namespace) -> int:
 CHECKLIST_STATUSES = ("pending", "in_progress", "completed", "deleted")
 
 
-def cmd_checklist(args: argparse.Namespace) -> int:
-    card = _load(args.root, args.card_id)
+def _apply_checklist(
+    repo_root: Path, card_id: str, task_id: str, subject: str | None, status: str
+) -> int:
+    """Upsert or delete one checklist entry (keyed by ``task_id``) on ``card_id``.
+
+    The single-writer path shared by ``cmd_checklist`` (CLI verb) and the
+    ``checklist-sync-hook`` verb — both call this, and only this, to touch a
+    card's checklist. Returns 0 on success, including an idempotent replay
+    (no write) and a delete of an already-absent entry. Returns 1 when a NEW
+    entry is being created with no ``subject`` given — the caller decides how
+    loudly to surface that (CLI: exit 1 with a message; hook: silent no-op,
+    the checklist simply lags). Propagates ``FileNotFoundError`` /
+    ``CardParseError`` from an unknown or corrupt card — the CLI surfaces
+    those via ``main``; the hook catches and swallows them.
+    """
+    card = _load(repo_root, card_id)
     checklist: list[dict] = card.checklist
     existing_index = next(
-        (i for i, entry in enumerate(checklist) if entry["task"] == args.task), None
+        (i for i, entry in enumerate(checklist) if entry["task"] == task_id), None
     )
 
-    if args.status == "deleted":
-        if existing_index is None:
-            print(f"{card.id} checklist: task {args.task} removed")
-            return 0
-        card.checklist = [e for i, e in enumerate(checklist) if i != existing_index]
-        card.updated = _now()
-        _sync(args.root, card)
-        print(f"{card.id} checklist: task {args.task} removed")
+    if status == "deleted":
+        if existing_index is not None:
+            card.checklist = [e for i, e in enumerate(checklist) if i != existing_index]
+            card.updated = _now()
+            _sync(repo_root, card)
         return 0
 
     if existing_index is None:
-        if not args.subject:
-            print(
-                f"error: new checklist entry for task {args.task} requires --subject",
-                file=sys.stderr,
-            )
+        if not subject:
             return 1
-        checklist.append({
-            "task": args.task,
-            "subject": args.subject,
-            "status": args.status,
-        })
+        checklist.append({"task": task_id, "subject": subject, "status": status})
         card.updated = _now()
-        _sync(args.root, card)
-        print(f"{card.id} checklist: task {args.task} → {args.status}")
+        _sync(repo_root, card)
         return 0
 
     entry = checklist[existing_index]
-    new_subject = args.subject if args.subject else entry["subject"]
-    if entry["subject"] == new_subject and entry["status"] == args.status:
-        print(f"{card.id} checklist: task {args.task} → {args.status}")
+    new_subject = subject if subject else entry["subject"]
+    if entry["subject"] == new_subject and entry["status"] == status:
         return 0
-    checklist[existing_index] = {
-        "task": args.task,
-        "subject": new_subject,
-        "status": args.status,
-    }
+    checklist[existing_index] = {"task": task_id, "subject": new_subject, "status": status}
     card.updated = _now()
-    _sync(args.root, card)
-    print(f"{card.id} checklist: task {args.task} → {args.status}")
+    _sync(repo_root, card)
     return 0
+
+
+def cmd_checklist(args: argparse.Namespace) -> int:
+    # Capture pre-image existence for reporting only — `_apply_checklist`'s
+    # behaviour and exit codes are unchanged; this just tells a real delete
+    # apart from a no-op delete of an already-absent entry.
+    existed = (
+        _existing_checklist_status(args.root, args.card_id, args.task) is not None
+        if args.status == "deleted"
+        else None
+    )
+    result = _apply_checklist(args.root, args.card_id, args.task, args.subject, args.status)
+    if result == 1:
+        print(
+            f"error: new checklist entry for task {args.task} requires --subject",
+            file=sys.stderr,
+        )
+        return 1
+    if args.status == "deleted":
+        if existed:
+            print(f"{args.card_id} checklist: task {args.task} removed")
+        else:
+            print(f"{args.card_id} checklist: task {args.task} already absent")
+    else:
+        print(f"{args.card_id} checklist: task {args.task} → {args.status}")
+    return 0
+
+
+# --- checklist-sync-hook: PostToolUse (TaskCreate|TaskUpdate) backend ----------
+#
+# Wires Claude Code's native task list into a card's `checklist:` frontmatter.
+# See docs/superpowers/specs/2026-07-12-overseer-task-checklist-sync-design.md
+# §3/§6 and docs/research/2026-07-12-claude-code-task-system.md. Follows
+# vigil's house pattern for hook backends (`_read_hook_payload`, `_hook_root`).
+
+TASK_LIST_ID_ENV = "CLAUDE_CODE_TASK_LIST_ID"
+TASK_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+
+
+def _read_hook_payload() -> dict[str, object]:
+    """Read and parse the hook's stdin JSON payload exactly once.
+
+    Every hook invocation is a fresh process reading its own stdin once.
+    Returns ``{}`` on unreadable or non-object stdin — callers fall back to
+    defaults rather than raising.
+    """
+    try:
+        payload = json.loads(sys.stdin.read())
+    except (ValueError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _hook_root(payload: dict[str, object], args: argparse.Namespace) -> Path:
+    cwd = payload.get("cwd")
+    return Path(cast(str, cwd)) if isinstance(cwd, str) and cwd else args.root
+
+
+def _hook_session_id(payload: dict[str, object], args: argparse.Namespace) -> str | None:
+    """Session id for task-list resolution: hook stdin's ``session_id`` field
+    wins (every Claude Code hook payload carries one); falls back to the CLI's
+    optional ``--session-id`` for scripted/manual invocations."""
+    session_id = payload.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    fallback: str | None = args.session_id
+    return fallback
+
+
+def _task_config_dir() -> Path:
+    """The active Claude config dir — same account-isolation boundary census
+    uses. ``$CLAUDE_CONFIG_DIR`` if set, else ``~/.claude``."""
+    override = os.environ.get(TASK_CONFIG_DIR_ENV)
+    return Path(override) if override else Path.home() / ".claude"
+
+
+def _task_list_dir(config_dir: Path, session_id: str | None) -> Path:
+    """Named list when ``$CLAUDE_CODE_TASK_LIST_ID`` is set; else this
+    session's scoped list (``session-<first 8 chars of session_id>``)."""
+    list_id = os.environ.get(TASK_LIST_ID_ENV)
+    if list_id:
+        return config_dir / "tasks" / list_id
+    return config_dir / "tasks" / f"session-{(session_id or '')[:8]}"
+
+
+def _task_file_card_id(task_id: str, session_id: str | None) -> str | None:
+    """Recover a task's card id from its on-disk task file.
+
+    None if the file is unreadable, absent (pruned, or a session-scoped task
+    that already completed — those files are deleted the instant they
+    complete), or malformed — callers fall back to the card-scan.
+    """
+    task_path = _task_list_dir(_task_config_dir(), session_id) / f"{task_id}.json"
+    try:
+        data = json.loads(task_path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    card_id = metadata.get("card")
+    return card_id if isinstance(card_id, str) and card_id else None
+
+
+def _scan_for_card_id(repo_root: Path, task_id: str) -> str | None:
+    """Fallback card-id recovery: scan live cards' existing checklists for an
+    entry keyed by ``task_id``. Used when the task file is already gone.
+
+    Accepted ambiguity: task ids are only unique per task list, so two
+    un-bootstrapped sessions (each on its own session-scoped list, see
+    ``_task_list_dir``) can mint the same id, and this scan returns whichever
+    live card's checklist has a matching entry first. Bootstrapping a named
+    ``CLAUDE_CODE_TASK_LIST_ID`` shares one list across sessions and
+    eliminates the collision.
+    """
+    cards, _ = load_live_cards(state_root(repo_root))
+    for card in cards:
+        if any(entry.get("task") == task_id for entry in card.checklist):
+            return card.id
+    return None
+
+
+def _existing_checklist_status(repo_root: Path, card_id: str, task_id: str) -> str | None:
+    """The current status of ``task_id``'s entry on ``card_id``, or None."""
+    try:
+        card = _load(repo_root, card_id)
+    except FileNotFoundError:
+        return None
+    for entry in card.checklist:
+        if entry.get("task") == task_id:
+            return str(entry.get("status", "pending"))
+    return None
+
+
+def cmd_checklist_sync_hook(args: argparse.Namespace) -> int:
+    """PostToolUse (TaskCreate|TaskUpdate) hook backend.
+
+    Projects task lifecycle events into the owning card's ``checklist:``
+    frontmatter via ``_apply_checklist`` — the same single-writer path as the
+    ``checklist`` CLI verb. Never raises; every failure path (malformed
+    stdin, missing fields, an orphan task, an unknown card, a store error) is
+    silent success — the checklist simply lags, the agent's own tasks are
+    never blocked (spec §6).
+    """
+    try:
+        payload = _read_hook_payload()
+        repo_root = _hook_root(payload, args)
+        if not state_root(repo_root).is_dir():
+            return 0
+
+        tool_name = payload.get("tool_name")
+        raw_input = payload.get("tool_input")
+        tool_input = raw_input if isinstance(raw_input, dict) else {}
+        raw_response = payload.get("tool_response")
+        tool_response = raw_response if isinstance(raw_response, dict) else {}
+
+        if tool_name == "TaskCreate":
+            raw_metadata = tool_input.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            card_id = metadata.get("card")
+            if not isinstance(card_id, str) or not card_id:
+                return 0  # orphan task — not card work
+            raw_task = tool_response.get("task")
+            task = raw_task if isinstance(raw_task, dict) else {}
+            task_id = task.get("id")
+            if not isinstance(task_id, str) or not task_id:
+                return 0
+            subject = tool_input.get("subject")
+            subject = subject if isinstance(subject, str) else None
+            _apply_checklist(repo_root, card_id, task_id, subject, "pending")
+            return 0
+
+        if tool_name == "TaskUpdate":
+            task_id = tool_input.get("taskId")
+            if not isinstance(task_id, str) or not task_id:
+                return 0
+
+            status: str | None = None
+            status_change = tool_response.get("statusChange")
+            if isinstance(status_change, dict):
+                to_status = status_change.get("to")
+                if isinstance(to_status, str) and to_status:
+                    status = to_status
+
+            raw_subject = tool_input.get("subject")
+            subject = raw_subject if isinstance(raw_subject, str) else None
+
+            if status is None and subject is None:
+                return 0  # neither a status transition nor a subject change
+            if status is not None and status not in CHECKLIST_STATUSES:
+                return 0  # not overseer's vocabulary
+
+            card_id = _task_file_card_id(task_id, _hook_session_id(payload, args))
+            if card_id is None:
+                card_id = _scan_for_card_id(repo_root, task_id)
+            if card_id is None:
+                return 0  # unresolved — lag, not breakage
+
+            if status is None:
+                # subject-only update: preserve the entry's existing status
+                status = _existing_checklist_status(repo_root, card_id, task_id)
+                if status is None:
+                    return 0  # no existing entry to preserve a status from
+
+            _apply_checklist(repo_root, card_id, task_id, subject, status)
+            return 0
+
+        return 0
+    except Exception:
+        return 0
 
 
 def cmd_depends(args: argparse.Namespace) -> int:
@@ -663,6 +879,11 @@ def cmd_facts(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--session-id", dest="session_id", default=None,
+        help="task-list lookup key for this session (hook stdin's session_id "
+             "wins when invoked as a hook; used for scripted/manual calls)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init").set_defaults(func=cmd_init)
@@ -720,6 +941,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--subject")
     p.add_argument("--status", required=True, choices=CHECKLIST_STATUSES)
     p.set_defaults(func=cmd_checklist)
+
+    sub.add_parser("checklist-sync-hook").set_defaults(func=cmd_checklist_sync_hook)
 
     p = sub.add_parser("park")
     p.add_argument("card_id")

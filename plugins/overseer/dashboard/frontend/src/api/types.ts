@@ -125,3 +125,18 @@ export type MoveBody = { stage: Stage } | { status: Status; reason?: string };
 export interface ThresholdBody {
   value: number;
 }
+
+export interface SessionSummary {
+  id: string;
+  worktree_cwd: string | null;
+  updated_at: number | null | string;
+  stale: boolean;
+  session_name?: string;
+  model?: string;
+  pr?: PrWindow;
+  pct?: number;
+}
+
+export interface SessionsResponse {
+  sessions: SessionSummary[];
+}
