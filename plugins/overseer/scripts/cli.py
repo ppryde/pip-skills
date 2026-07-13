@@ -133,6 +133,44 @@ def _context_footer(repo_root: Path) -> str:
     return ""
 
 
+def _census_cli() -> Path | None:
+    """Best-effort locate the sibling census plugin's CLI (soft dependency)."""
+    here = Path(__file__).resolve()  # plugins/overseer/scripts/cli.py
+    candidate = here.parent.parent.parent / "census" / "scripts" / "cli.py"
+    return candidate if candidate.exists() else None
+
+
+def _census_session_live(session_id: str) -> bool:
+    """Is ``session_id`` live in census (fresh within its 90s staleness horizon)?
+
+    census is a SOFT dependency, shelled via subprocess exactly like the
+    dashboard backend's ``cli_client.run_census`` — overseer must not import
+    census internals (design spec §3). Every failure path (plugin absent,
+    timeout, non-zero exit, unparsable output, empty/missing entry) returns
+    False, i.e. "treat the holder as stale": a claim must not wedge just
+    because census is down.
+    """
+    cli = _census_cli()
+    if cli is None:
+        return False
+    try:
+        result = subprocess.run(
+            [sys.executable, str(cli), "read", "--session", session_id],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        return False
+    if not isinstance(data, dict) or not data:
+        return False
+    return not data.get("stale", True)
+
+
 def _sync(repo_root: Path, card: Card) -> None:
     """Write ordering per spec: card first, then the index view.
 
@@ -190,6 +228,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
 def cmd_set_stage(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.set_stage(args.stage, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     print(f"{card.id} → {args.stage}")
     return 0
@@ -198,6 +237,7 @@ def cmd_set_stage(args: argparse.Namespace) -> int:
 def cmd_block(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.block(args.reason, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     print(f"{card.id} blocked: {args.reason}")
     return 0
@@ -572,10 +612,74 @@ def cmd_unpark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_claim(args: argparse.Namespace) -> int:
+    """`overseer claim <id> --session <sid> [--force]` — design spec §3.
+
+    A pure stamp, no delivery side effects. Unknown card -> propagates
+    FileNotFoundError to `main` (exit 1), same as every other verb. Refuses
+    (exit 1) only when the existing holder is a DIFFERENT, live session and
+    `--force` was not given; a stale/absent holder is displaced with a note,
+    and `--force` displaces a live holder too. Re-claiming by the same
+    session that already holds it is treated as an ordinary (re-)stamp — no
+    liveness check against itself.
+    """
+    card = _load(args.root, args.card_id)
+    note = None
+    if card.claimed_by and card.claimed_by != args.session:
+        live = _census_session_live(card.claimed_by)
+        if live and not args.force:
+            print(
+                f"error: {card.id} already claimed by {card.claimed_by} (live)"
+                " — use --force to override",
+                file=sys.stderr,
+            )
+            return 1
+        kind = "live" if live else "stale"
+        note = f"note: displaced {kind} claim held by {card.claimed_by}"
+    card.claim(args.session, _now())
+    _sync(args.root, card)
+    if note:
+        print(note)
+    print(f"{card.id} claimed by {args.session}")
+    return 0
+
+
+def cmd_unclaim(args: argparse.Namespace) -> int:
+    """`overseer unclaim <id>` — clears all claim fields, idempotent (exit 0
+    even when already unclaimed)."""
+    card = _load(args.root, args.card_id)
+    card.unclaim(_now())
+    _sync(args.root, card)
+    print(f"{card.id} unclaimed")
+    return 0
+
+
+def cmd_claim_nudged(args: argparse.Namespace) -> int:
+    """`overseer claim-nudged <id>` — for the WF-022 Stop hook to shell after
+    it has already blocked once for an unacked claim (design spec §4).
+
+    Quarantine-safe-caller contract: unknown or corrupt card, or a card that
+    is no longer claimed (a race with `unclaim`/a fresh `claim`), all exit 0
+    with no write — the hook must never be broken by this verb.
+    """
+    try:
+        card = _load(args.root, args.card_id)
+    except (FileNotFoundError, CardParseError):
+        return 0
+    if not card.claimed_by:
+        return 0
+    card.claim_nudged = True
+    card.updated = _now()
+    _sync(args.root, card)
+    print(f"{card.id} claim_nudged")
+    return 0
+
+
 def cmd_log_progress(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     tokens = parse_tokens(args.tokens) or 0
     card.log_progress(args.note, tokens, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     if card.tripwire_breached:
         actual = format_tokens(card.budget_actual)
@@ -592,6 +696,7 @@ def cmd_log_progress(args: argparse.Namespace) -> int:
 def cmd_log_review(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.log_review(args.stage, args.reviewers, args.verdict, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     print(f"{card.id} {args.stage} round {card.review_rounds(args.stage)} logged")
     return 0
@@ -643,11 +748,11 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     _, quarantined = load_live_cards(state_root(args.root))
     _report_quarantined(quarantined)
-    entries = resume_entries(args.root)
+    entries = resume_entries(args.root, session_id=args.session_id)
     if args.json:
         print(json.dumps(entries, indent=2))
     else:
-        print(format_report(entries) + _context_footer(args.root))
+        print(format_report(entries, session_id=args.session_id) + _context_footer(args.root))
     return 0
 
 
@@ -727,6 +832,9 @@ def cmd_show(args: argparse.Namespace) -> int:
         "blocked_on": card.blocked_on,
         "checklist": card.checklist,
         "repo": card.repo,
+        "claimed_by": card.claimed_by,
+        "claimed_at": card.claimed_at,
+        "claim_acked": card.claim_acked,
         "sections": card.sections,
         "body": card.body,
     }
@@ -962,6 +1070,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("unpark")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_unpark)
+
+    p = sub.add_parser("claim")
+    p.add_argument("card_id")
+    p.add_argument("--session", required=True)
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_claim)
+
+    p = sub.add_parser("unclaim")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_unclaim)
+
+    p = sub.add_parser("claim-nudged")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_claim_nudged)
 
     p = sub.add_parser("log-progress")
     p.add_argument("card_id")

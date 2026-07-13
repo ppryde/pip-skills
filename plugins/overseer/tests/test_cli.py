@@ -877,3 +877,259 @@ class TestRepoField:
         from scripts.models import Card
         c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
         assert c.repo is None
+
+
+class TestClaim:
+    """`claim`/`unclaim`/`claim-nudged` verbs — design spec §3.
+
+    Census liveness is stubbed via `cli._census_session_live`, mirroring the
+    `_vigil_context` stubbing precedent (TestContextFooter) — the CLI must
+    not import census internals, so tests replace the seam function rather
+    than the subprocess call underneath it.
+    """
+
+    def _card(self, repo):
+        from scripts.models import Card
+        return Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+
+    def test_claim_unknown_card_exits_1(self, repo, capsys):
+        assert run(repo, "claim", "WF-999", "--session", "sess-1") == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_claim_stamps_fields(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "claim", "WF-001", "--session", "sess-1") == 0
+        c = self._card(repo)
+        assert c.claimed_by == "sess-1"
+        assert c.claimed_at
+        assert c.claim_acked is False
+        assert c.claim_nudged is False
+
+    def test_claim_live_holder_refused_without_force(self, repo, capsys, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_census_session_live", lambda sid: True)
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "claim", "WF-001", "--session", "sess-2") == 1
+        err = capsys.readouterr().err
+        assert "sess-1" in err and "error:" in err
+        assert self._card(repo).claimed_by == "sess-1"  # unchanged
+
+    def test_claim_live_holder_displaced_with_force(self, repo, capsys, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_census_session_live", lambda sid: True)
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "claim", "WF-001", "--session", "sess-2", "--force") == 0
+        out = capsys.readouterr().out
+        assert "displaced" in out and "sess-1" in out
+        assert self._card(repo).claimed_by == "sess-2"
+
+    def test_claim_stale_holder_displaced_without_force(self, repo, capsys, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_census_session_live", lambda sid: False)
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "claim", "WF-001", "--session", "sess-2") == 0
+        out = capsys.readouterr().out
+        assert "displaced" in out and "stale" in out
+        assert self._card(repo).claimed_by == "sess-2"
+
+    def test_census_down_is_treated_as_stale(self, repo, capsys, monkeypatch):
+        """census unavailable/erroring must not wedge a claim (design spec §3:
+        "claims must not wedge when census is down")."""
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_census_cli", lambda: None)  # plugin "absent"
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "claim", "WF-001", "--session", "sess-2") == 0
+        assert self._card(repo).claimed_by == "sess-2"
+
+    def test_reclaim_by_same_session_is_a_plain_restamp(self, repo, monkeypatch):
+        import scripts.cli as cli
+        # Even a "live" holder must not block a session re-claiming its own card.
+        monkeypatch.setattr(cli, "_census_session_live", lambda sid: True)
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        assert run(repo, "claim", "WF-001", "--session", "sess-1") == 0
+        assert self._card(repo).claimed_by == "sess-1"
+
+    def test_claim_resets_acked_and_nudged(self, repo, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_census_session_live", lambda sid: False)
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        run(repo, "set-stage", "WF-001", "implementation")  # acks
+        run(repo, "claim-nudged", "WF-001")  # nudges
+        c = self._card(repo)
+        assert c.claim_acked is True and c.claim_nudged is True
+        run(repo, "claim", "WF-001", "--session", "sess-2")  # re-stamp / displacement
+        c = self._card(repo)
+        assert c.claim_acked is False and c.claim_nudged is False
+
+    def test_unclaim_clears_fields(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        assert run(repo, "unclaim", "WF-001") == 0
+        c = self._card(repo)
+        assert c.claimed_by is None and c.claimed_at is None
+        assert c.claim_acked is False and c.claim_nudged is False
+
+    def test_unclaim_is_idempotent(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "unclaim", "WF-001") == 0  # never claimed
+        assert run(repo, "unclaim", "WF-001") == 0  # again
+
+
+class TestClaimAck:
+    """Work verbs ack an open claim; routing verbs do not — design spec §3."""
+
+    def _claimed(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+
+    def _acked(self, repo) -> bool:
+        from scripts.models import Card
+        return Card.from_text(
+            find_card_path(state_root(repo), "WF-001").read_text()
+        ).claim_acked
+
+    @pytest.mark.parametrize("argv", [
+        pytest.param(("set-stage", "WF-001", "implementation"), id="set-stage"),
+        pytest.param(("log-progress", "WF-001", "--note", "x", "--tokens", "1k"),
+                     id="log-progress"),
+        pytest.param(("block", "WF-001", "--reason", "user: q"), id="block"),
+    ])
+    def test_work_verbs_ack(self, repo, argv):
+        self._claimed(repo)
+        run(repo, *argv)
+        assert self._acked(repo) is True
+
+    def test_log_review_acks(self, repo):
+        self._claimed(repo)
+        run(repo, "set-stage", "WF-001", "plan-review")
+        # set-stage already acked; unclaim+reclaim to isolate log-review's own effect
+        run(repo, "unclaim", "WF-001")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        assert self._acked(repo) is False
+        run(repo, "log-review", "WF-001", "--stage", "plan-review",
+            "--reviewers", "1", "--verdict", "approved")
+        assert self._acked(repo) is True
+
+    def test_set_field_does_not_ack(self, repo):
+        """The regression test the design review specifically called for: a
+        routine board reorder (`set-field --order`) after a claim must NOT
+        silently swallow the ack signal."""
+        self._claimed(repo)
+        run(repo, "set-field", "WF-001", "--order", "3")
+        assert self._acked(repo) is False
+
+    def test_park_does_not_ack(self, repo):
+        self._claimed(repo)
+        run(repo, "park", "WF-001")
+        assert self._acked(repo) is False
+
+    def test_depends_does_not_ack(self, repo):
+        self._claimed(repo)
+        run(repo, "new-card", "--title", "Other")  # WF-002
+        run(repo, "depends", "WF-001", "--on", "WF-002")
+        assert self._acked(repo) is False
+
+    def test_unclaimed_card_ack_is_a_noop(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-stage", "WF-001", "implementation")
+        assert self._acked(repo) is False  # never claimed — no crash, no bogus ack
+
+
+class TestClaimNudgedVerb:
+    def test_nudges_a_claimed_card(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        assert run(repo, "claim-nudged", "WF-001") == 0
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.claim_nudged is True
+
+    def test_unclaimed_card_is_a_noop_exit_0(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "claim-nudged", "WF-001") == 0
+        assert "claim_nudged" not in capsys.readouterr().out
+        from scripts.models import Card
+        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        assert c.claim_nudged is False
+
+    def test_unknown_card_is_a_noop_exit_0(self, repo):
+        assert run(repo, "claim-nudged", "WF-999") == 0
+
+    def test_corrupt_card_is_a_noop_exit_0(self, repo):
+        run(repo, "new-card", "--title", "T")
+        find_card_path(state_root(repo), "WF-001").write_text("garbage, no frontmatter")
+        assert run(repo, "claim-nudged", "WF-001") == 0
+
+
+class TestClaimCensusHelper:
+    def test_census_cli_resolves_in_repo(self):
+        import scripts.cli as cli
+        found = cli._census_cli()
+        assert found is not None and found.name == "cli.py" and "census" in str(found)
+
+    def test_census_session_live_absent_plugin_is_false(self, monkeypatch):
+        import scripts.cli as cli
+        monkeypatch.setattr(cli, "_census_cli", lambda: None)
+        assert cli._census_session_live("sess-1") is False
+
+    def test_census_session_live_real_subprocess_no_crash(self, repo, monkeypatch):
+        # Real subprocess to the actual census CLI with a throwaway config dir
+        # → no session on record → not live. Proves the seam works end to end,
+        # not just the stubbed unit tests above.
+        import scripts.cli as cli
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(repo / "empty-config"))
+        assert cli._census_session_live("no-such-session") is False
+
+
+class TestResumeClaimOrdering:
+    def test_claimed_for_this_session_sorts_first_and_is_marked(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")  # WF-001
+        run(repo, "set-stage", "WF-001", "implementation")
+        run(repo, "new-card", "--title", "B")  # WF-002
+        run(repo, "set-stage", "WF-002", "implementation")
+        run(repo, "claim", "WF-002", "--session", "sess-1")
+        capsys.readouterr()
+        assert main(["--root", str(repo), "--session-id", "sess-1", "resume"]) == 0
+        out = capsys.readouterr().out
+        assert out.index("WF-002") < out.index("WF-001")
+        assert "← claimed for this session" in out
+
+    def test_other_sessions_claim_labelled_by_holder(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        run(repo, "set-stage", "WF-001", "implementation")
+        run(repo, "claim", "WF-001", "--session", "sess-other")
+        capsys.readouterr()
+        assert main(["--root", str(repo), "--session-id", "sess-mine", "resume"]) == 0
+        out = capsys.readouterr().out
+        assert "claimed by sess-other" in out
+        assert "← claimed for this session" not in out
+
+    def test_without_session_id_just_labels_holder(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        run(repo, "set-stage", "WF-001", "implementation")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "resume") == 0
+        out = capsys.readouterr().out
+        assert "claimed by sess-1" in out
+        assert "← claimed for this session" not in out
+
+    def test_resume_json_carries_claimed_by(self, repo, capsys):
+        run(repo, "new-card", "--title", "A")
+        run(repo, "set-stage", "WF-001", "implementation")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "resume", "--json") == 0
+        entries = json.loads(capsys.readouterr().out)
+        assert entries[0]["claimed_by"] == "sess-1"

@@ -192,6 +192,32 @@ Test sprint."""
         data = board_data(repo)
         assert data["cards"][0]["repo"] is None
 
+    def test_claim_fields_passed_through(self, repo):
+        from scripts.board import board_data
+        root = workflow_root(repo)
+        card = make_card(
+            "WF-001", claimed_by="sess-1", claimed_at="2026-07-13T10:00",
+            claim_acked=True,
+        )
+        save_card(root, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["claimed_by"] == "sess-1"
+        assert c["claimed_at"] == "2026-07-13T10:00"
+        assert c["claim_acked"] is True
+
+    def test_claim_fields_default_unclaimed(self, repo):
+        from scripts.board import board_data
+        root = workflow_root(repo)
+        save_card(root, make_card("WF-001"))
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["claimed_by"] is None
+        assert c["claimed_at"] is None
+        assert c["claim_acked"] is False
+
     def test_cards_sorted_by_id(self, repo):
         from scripts.board import board_data
         root = workflow_root(repo)

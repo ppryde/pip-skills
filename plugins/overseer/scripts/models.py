@@ -108,6 +108,10 @@ class Card:
     blocked_on: str | None = None
     checklist: list[dict] = field(default_factory=list)
     repo: str | None = None
+    claimed_by: str | None = None
+    claimed_at: str | None = None
+    claim_acked: bool = False
+    claim_nudged: bool = False
     body: str = ""
 
     @classmethod
@@ -169,6 +173,10 @@ class Card:
                 })
         repo_raw = meta.get("repo")
         repo = repo_raw if isinstance(repo_raw, str) else None
+        claimed_by_raw = meta.get("claimed_by")
+        claimed_by = claimed_by_raw if isinstance(claimed_by_raw, str) and claimed_by_raw else None
+        claimed_at_raw = meta.get("claimed_at")
+        claimed_at = claimed_at_raw if isinstance(claimed_at_raw, str) and claimed_at_raw else None
         return cls(
             id=str(meta["id"]),
             title=str(meta["title"]),
@@ -193,6 +201,10 @@ class Card:
             blocked_on=meta.get("blocked_on"),
             checklist=checklist,
             repo=repo,
+            claimed_by=claimed_by,
+            claimed_at=claimed_at,
+            claim_acked=bool(meta.get("claim_acked", False)),
+            claim_nudged=bool(meta.get("claim_nudged", False)),
             body=body.strip(),
         )
 
@@ -226,6 +238,14 @@ class Card:
             meta["checklist"] = self.checklist
         if self.repo:
             meta["repo"] = self.repo
+        if self.claimed_by:
+            # Conditional serialisation, checklist/repo precedent: an unclaimed
+            # card must stay byte-stable, so claim keys appear only as a group,
+            # and only once claimed_by is set (design spec §3).
+            meta["claimed_by"] = self.claimed_by
+            meta["claimed_at"] = self.claimed_at
+            meta["claim_acked"] = self.claim_acked
+            meta["claim_nudged"] = self.claim_nudged
         front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
         return f"---\n{front}\n---\n\n{self.body.strip()}\n"
 
@@ -254,6 +274,34 @@ class Card:
     def unpark(self, now: str) -> None:
         self.status = "in-flight" if self.stage else "planned"
         self.updated = now
+
+    def claim(self, session_id: str, now: str) -> None:
+        """Stamp a claim. Routing metadata only — status/stage untouched
+        (design spec §3, "Claim ≠ stage"). Resets the ack/nudge bits so a
+        re-claim (including a displacement) starts its delivery cycle fresh.
+        """
+        self.claimed_by = session_id
+        self.claimed_at = now
+        self.claim_acked = False
+        self.claim_nudged = False
+        self.updated = now
+
+    def unclaim(self, now: str) -> None:
+        """Clear all four claim fields unconditionally — back to the
+        unclaimed, byte-stable shape."""
+        self.claimed_by = None
+        self.claimed_at = None
+        self.claim_acked = False
+        self.claim_nudged = False
+        self.updated = now
+
+    def ack_claim(self) -> None:
+        """Called by the work verbs (set-stage/log-progress/log-review/block)
+        as part of their ordinary write. No-op when unclaimed — a dedicated
+        flag, not the `claimed_at > updated` heuristic review rejected,
+        because every mutator already stamps `updated` (design spec §3)."""
+        if self.claimed_by:
+            self.claim_acked = True
 
     def complete(self, now: str) -> None:
         self.status = "done"

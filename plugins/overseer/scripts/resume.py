@@ -49,18 +49,29 @@ def _entry(repo_root: Path, card: Card, cards: list[Card]) -> dict:
         "parent": card.parent,
         "depends_on": card.depends_on,
         "ready": is_ready(card, cards),
+        "claimed_by": card.claimed_by,
     }
 
 
-def resume_entries(repo_root: Path) -> list[dict]:
+def resume_entries(repo_root: Path, session_id: str | None = None) -> list[dict]:
+    """In-flight/blocked cards. When ``session_id`` is given (the CLI's global
+    ``--session-id``), cards claimed by that session sort first — a stable
+    sort, so relative order within each group is unchanged (design spec §3).
+    No env-var self-discovery exists for a bare CLI call, so without
+    ``session_id`` the set is returned in its normal order and claim labelling
+    falls back to just naming the holder (see ``format_report``).
+    """
     cards, _ = load_live_cards(state_root(repo_root))
     pool = cards + load_archived_cards(state_root(repo_root))
-    return [
+    entries = [
         _entry(repo_root, c, pool) for c in cards if c.status in ("in-flight", "blocked")
     ]
+    if session_id:
+        entries.sort(key=lambda e: e["claimed_by"] != session_id)
+    return entries
 
 
-def format_report(entries: list[dict]) -> str:
+def format_report(entries: list[dict], session_id: str | None = None) -> str:
     if not entries:
         return "Nothing in flight — clean slate."
     lines = []
@@ -80,6 +91,12 @@ def format_report(entries: list[dict]) -> str:
             line += " | ready" if e.get("ready") else " | waiting on " + ", ".join(
                 e["depends_on"]
             )
+        claimed_by = e.get("claimed_by")
+        if claimed_by:
+            if session_id and claimed_by == session_id:
+                line += " ← claimed for this session"
+            else:
+                line += f" | claimed by {claimed_by}"
         lines.append(line)
     return "\n".join(lines)
 

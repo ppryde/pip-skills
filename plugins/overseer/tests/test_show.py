@@ -124,6 +124,25 @@ class TestShowCommand:
         data = json.loads(capsys.readouterr().out)
         assert data["repo"] is None
 
+    def test_show_json_carries_claim_fields(self, repo, capsys):
+        run(repo, "new-card", "--title", "Claimed card")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        capsys.readouterr()
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["claimed_by"] == "sess-1"
+        assert data["claimed_at"]
+        assert data["claim_acked"] is False
+
+    def test_show_json_claim_fields_default_none(self, repo, capsys):
+        run(repo, "new-card", "--title", "Unclaimed card")
+        capsys.readouterr()
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["claimed_by"] is None
+        assert data["claimed_at"] is None
+        assert data["claim_acked"] is False
+
     def test_show_human_readable_lists_section_headers(self, repo, capsys):
         run(repo, "new-card", "--title", "Human view")
         capsys.readouterr()
