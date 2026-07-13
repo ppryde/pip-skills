@@ -67,7 +67,6 @@
 :root {
   /* Legacy tokens — mechanical hoist of every hex/radius/shadow literal (WF-027 chunk 2). */
   --legacy-color-1b1f24: #1b1f24;
-  --legacy-color-f5f6f8: #f5f6f8;
   --legacy-color-fff: #fff;
   --legacy-color-cbd5e1: #cbd5e1;
   --legacy-color-8b95a1: #8b95a1;
@@ -107,6 +106,7 @@
   --legacy-radius-3px: 3px;
   --legacy-shadow-1: 0 8px 24px rgba(0, 0, 0, 0.45);
   --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
+  --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
 }
 
 /* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
@@ -1003,7 +1003,7 @@ body {
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(27, 31, 36, 0.4);
+  background: var(--legacy-overlay-1b1f24-40);
   display: flex;
   justify-content: flex-end;
   z-index: 20;
