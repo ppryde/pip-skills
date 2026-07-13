@@ -324,3 +324,26 @@ class TestHookScriptSmoke:
         env["PATH"] = str(tmp_path / "no-such-bin")
         result = self._run_script(payload, env, tmp_path)
         assert result.returncode == 0
+
+    def test_valid_taskcreate_payload_exits_0_and_lands_entry(self, tmp_path):
+        """Happy-path companion to `test_broken_python_still_exits_0`: the
+        real interpreter (repo's `.venv`, resolved via the real
+        `CLAUDE_PLUGIN_ROOT`), a real TaskCreate payload, and a tmp state
+        root supplied via the payload's `cwd` — end to end through the
+        actual shell script, not just `cmd_checklist_sync_hook` in-process.
+        """
+        assert main(["--root", str(tmp_path), "init"]) == 0
+        assert main(["--root", str(tmp_path), "new-card", "--title", "T"]) == 0
+        payload = {
+            "cwd": str(tmp_path),
+            "tool_name": "TaskCreate",
+            "tool_input": {"subject": "write tests", "metadata": {"card": "WF-001"}},
+            "tool_response": {"task": {"id": "7"}},
+        }
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        result = self._run_script(payload, env, tmp_path)
+        assert result.returncode == 0
+        assert _checklist(tmp_path) == [
+            {"task": "7", "subject": "write tests", "status": "pending"},
+        ]

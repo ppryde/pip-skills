@@ -133,7 +133,13 @@ def _context_footer(repo_root: Path) -> str:
 
 
 def _sync(repo_root: Path, card: Card) -> None:
-    """Write ordering per spec: card first, then the index view."""
+    """Write ordering per spec: card first, then the index view.
+
+    Known multi-session limitation (spec-accepted YAGNI, no locking):
+    ``save_card`` rewrites the whole card file, so a hook racing another
+    session's CLI verb against the same card is last-write-wins for the
+    *entire* card, not just checklist rows.
+    """
     root = state_root(repo_root)
     save_card(root, card)
     quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
@@ -310,6 +316,14 @@ def _apply_checklist(
 
 
 def cmd_checklist(args: argparse.Namespace) -> int:
+    # Capture pre-image existence for reporting only — `_apply_checklist`'s
+    # behaviour and exit codes are unchanged; this just tells a real delete
+    # apart from a no-op delete of an already-absent entry.
+    existed = (
+        _existing_checklist_status(args.root, args.card_id, args.task) is not None
+        if args.status == "deleted"
+        else None
+    )
     result = _apply_checklist(args.root, args.card_id, args.task, args.subject, args.status)
     if result == 1:
         print(
@@ -318,7 +332,10 @@ def cmd_checklist(args: argparse.Namespace) -> int:
         )
         return 1
     if args.status == "deleted":
-        print(f"{args.card_id} checklist: task {args.task} removed")
+        if existed:
+            print(f"{args.card_id} checklist: task {args.task} removed")
+        else:
+            print(f"{args.card_id} checklist: task {args.task} already absent")
     else:
         print(f"{args.card_id} checklist: task {args.task} → {args.status}")
     return 0
@@ -404,7 +421,15 @@ def _task_file_card_id(task_id: str, session_id: str | None) -> str | None:
 
 def _scan_for_card_id(repo_root: Path, task_id: str) -> str | None:
     """Fallback card-id recovery: scan live cards' existing checklists for an
-    entry keyed by ``task_id``. Used when the task file is already gone."""
+    entry keyed by ``task_id``. Used when the task file is already gone.
+
+    Accepted ambiguity: task ids are only unique per task list, so two
+    un-bootstrapped sessions (each on its own session-scoped list, see
+    ``_task_list_dir``) can mint the same id, and this scan returns whichever
+    live card's checklist has a matching entry first. Bootstrapping a named
+    ``CLAUDE_CODE_TASK_LIST_ID`` shares one list across sessions and
+    eliminates the collision.
+    """
     cards, _ = load_live_cards(state_root(repo_root))
     for card in cards:
         if any(entry.get("task") == task_id for entry in card.checklist):

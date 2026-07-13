@@ -95,7 +95,9 @@ may be in flight (stacks/sprints), so tag per-card; a todo with no card is
 `[no-card]`. When work outgrows a card's scope, spin a **child card** off it
 (`new-card`, then `set-field <child> --parent <card>`), which promotes the
 overflowing card to an epic — rather than letting it sprawl. The concrete
-companion to the drift watchdog's scope-creep gate.
+companion to the drift watchdog's scope-creep gate. For native tasks
+(TaskCreate), the `metadata: {card: <id>}` join replaces the `[<id>]` prefix
+(see Tasks below); the prefix rule remains for any non-task todo surface.
 
 ## Tasks
 Claude Code's native task list (`TaskCreate`/`TaskUpdate`) is the agent's live

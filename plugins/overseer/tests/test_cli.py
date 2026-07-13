@@ -784,6 +784,19 @@ class TestChecklistCommand:
             {"task": "1", "subject": "first", "status": "pending"},
         ]
 
+    def test_delete_reports_removed_vs_already_absent(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "checklist", "WF-001", "--task", "1",
+            "--subject", "first", "--status", "pending")
+        capsys.readouterr()
+        assert run(repo, "checklist", "WF-001", "--task", "1",
+                   "--status", "deleted") == 0
+        assert "WF-001 checklist: task 1 removed" in capsys.readouterr().out
+
+        assert run(repo, "checklist", "WF-001", "--task", "99",
+                   "--status", "deleted") == 0
+        assert "WF-001 checklist: task 99 already absent" in capsys.readouterr().out
+
     def test_idempotent_replay_does_not_bump_updated(self, repo):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "checklist", "WF-001", "--task", "1",
