@@ -254,14 +254,18 @@ body,
 
 body {
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
-  color: var(--legacy-color-1b1f24);
-  background: var(--legacy-color-f5f6f8);
+  font-family: var(--qb-font-body);
+  color: var(--qb-ink-700);
+  background:
+    radial-gradient(circle at top left, var(--qb-bg-page-highlight-tl), transparent 55%),
+    radial-gradient(circle at bottom right, var(--qb-bg-page-highlight-br), transparent 55%),
+    var(--qb-bg-page);
+}
+
+/* Guild base utility (WF-027 chunk 4) — unused by markup this card; a
+   restyled selector adopts it once a divider is themed. */
+.qb-divider {
+  border-bottom: 2px dashed var(--qb-line-dashed);
 }
 
 /* App shell skeleton: top bar strip + a horizontally scrollable board region. */
