@@ -121,6 +121,147 @@ body {
   color: #ffd9d9;
 }
 
+/* Sessions dropdown (WF-010/WF-018): the toggle and panel share a positioned
+   wrapper so the panel anchors under the button instead of joining the
+   topbar's flex flow (which made the whole bar reflow when opened). */
+.topbar__sessions {
+  position: relative;
+}
+
+.topbar__sessions-toggle {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #3a4453;
+  background: #2a313b;
+  color: #fff;
+  cursor: pointer;
+}
+
+.topbar__sessions-toggle[aria-expanded="true"] {
+  background: #3a4453;
+}
+
+.sessions-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  /* Above board content (toast is 10) but below the drawer overlay (20),
+     so an open drawer's modal dim still covers the panel. */
+  z-index: 15;
+  min-width: min(38rem, 90vw);
+  max-width: min(46rem, 90vw);
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.4rem;
+  border: 1px solid #3a4453;
+  border-radius: 6px;
+  background: #20262d;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.sessions-panel__empty {
+  padding: 0.6rem 0.75rem;
+  color: #8b95a1;
+  font-style: italic;
+}
+
+/* One shared column template per row keeps columns aligned across rows;
+   every cell always renders (empty spans when a datum is absent) so
+   conditional data never shifts its neighbours. */
+.sessions-panel__row {
+  display: grid;
+  grid-template-columns:
+    minmax(8rem, 1.2fr) minmax(0, auto) 4.5rem minmax(5rem, 1fr)
+    minmax(0, auto) 3.6rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+}
+
+.sessions-panel__row:hover {
+  background: #2a313b;
+}
+
+.sessions-panel__row--stale {
+  opacity: 0.55;
+}
+
+.sessions-panel__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #fff;
+}
+
+.sessions-panel__ctx {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sessions-panel__worktree {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.72rem;
+  color: #8b95a1;
+}
+
+/* Pill cells shrink below content width when space runs out (their grid
+   tracks are minmax(0, auto)), so the pill itself truncates rather than
+   forcing a horizontal scrollbar on the panel. */
+.sessions-panel__model,
+.sessions-panel__pr {
+  min-width: 0;
+}
+
+.sessions-panel__pill {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #2a313b;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.sessions-panel__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  justify-self: end;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b95a1;
+}
+
+/* Live: filled green dot (the checklist in-progress green). Stale: hollow
+   grey ring — the row is also dimmed via the --stale modifier above. */
+.sessions-panel__status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #16a34a;
+}
+
+.sessions-panel__row--stale .sessions-panel__status-dot {
+  background: transparent;
+  border: 1.5px solid #8b95a1;
+}
+
 .board-region {
   flex: 1 1 auto;
   overflow-x: auto;

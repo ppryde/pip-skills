@@ -97,15 +97,18 @@ function TopBar({
         </span>
       )}
 
-      <button
-        type="button"
-        className="topbar__sessions-toggle"
-        onClick={() => setShowSessions(!showSessions)}
-      >
-        Sessions
-      </button>
+      <div className="topbar__sessions">
+        <button
+          type="button"
+          className="topbar__sessions-toggle"
+          onClick={() => setShowSessions(!showSessions)}
+          aria-expanded={showSessions}
+        >
+          Sessions
+        </button>
 
-      {showSessions && <SessionsPanel />}
+        {showSessions && <SessionsPanel />}
+      </div>
     </header>
   );
 }
