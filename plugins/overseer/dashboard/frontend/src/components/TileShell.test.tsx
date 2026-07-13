@@ -210,14 +210,34 @@ describe("TileShell checklist focus window", () => {
     expect(screen.getByText("Wire up")).toBeInTheDocument();
   });
 
-  it("caps a long checklist to the 5-row focus window", () => {
+  it("caps a long checklist to the 3-row sliding-wheel window", () => {
     const checklist = Array.from({ length: 8 }, (_, i) => ({
       task: String(i + 1),
       subject: `Task ${i + 1}`,
       status: i === 0 ? "in_progress" : "completed",
     }));
     const { container } = renderTileWith(checklist);
-    expect(container.querySelectorAll(".checklist__row").length).toBe(5);
+    expect(container.querySelectorAll(".checklist__row").length).toBe(3);
+  });
+
+  it("marks the active row and fades its neighbours by distance", () => {
+    const checklist = Array.from({ length: 8 }, (_, i) => ({
+      task: String(i + 1),
+      subject: `Task ${i + 1}`,
+      status: i === 3 ? "in_progress" : "completed",
+    }));
+    const { container } = renderTileWith(checklist);
+    const rows = Array.from(container.querySelectorAll(".checklist__row"));
+    expect(rows.map((r) => r.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("Task 4")])
+    );
+    const active = rows.find((r) => r.textContent?.includes("Task 4"));
+    expect(active).toHaveClass("checklist__row--active");
+    rows
+      .filter((r) => r !== active)
+      .forEach((r) => {
+        expect(r.className).toMatch(/checklist__row--dist-[12]/);
+      });
   });
 
   it("renders the checklist as inert content — no interactive element inside it", () => {
