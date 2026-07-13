@@ -39,6 +39,9 @@ body {
   background: #1b1f24;
   color: #fff;
   flex-wrap: wrap;
+  /* Containing block for the sessions panel at narrow widths — see the
+     media query on .topbar__sessions below. */
+  position: relative;
 }
 
 .topbar h1 {
@@ -140,6 +143,37 @@ body {
 
 .topbar__sessions-toggle[aria-expanded="true"] {
   background: #3a4453;
+}
+
+/* Narrow viewports: the wrapped bar can strand the Sessions button at the
+   left edge, and a button-anchored right:0 panel then extends off-screen
+   left. Re-anchor the panel to the whole topbar (the wrapper goes static,
+   so .topbar becomes the containing block) and span the viewport width. */
+@media (max-width: 640px) {
+  /* The "as of last refresh" aside is the one topbar item that pushes the
+     first row past a phone viewport (its flex items can't shrink) — drop
+     it so the bar, and the panel anchored to it, stay inside the screen. */
+  .topbar__ctx-note {
+    display: none;
+  }
+
+  /* Let the ctx group's own items (value, threshold control) wrap — as a
+     single unwrappable flex row it forces the whole bar past the screen. */
+  .topbar__ctx {
+    flex-wrap: wrap;
+  }
+
+  .topbar__sessions {
+    position: static;
+  }
+
+  .sessions-panel {
+    left: 0.5rem;
+    right: 0.5rem;
+    top: calc(100% + 0.25rem);
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 .sessions-panel {
