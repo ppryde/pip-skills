@@ -79,6 +79,40 @@ Options:
 | `--port PORT` | `8770` | Bind port |
 | `--no-browser` | off | Don't auto-open a browser tab |
 
+## Updating a running dashboard (redeploy)
+
+A running server reads static files off disk per request, and each build
+emits content-hashed asset filenames — so **frontend changes never need a
+server restart**. To pick up a merged frontend change on the checkout the
+server serves from:
+
+```bash
+git pull        # in the worktree/checkout the server was launched from
+# then just refresh the browser tab
+```
+
+A restart (Ctrl-C, relaunch `serve.py`) is only needed when **backend
+Python** changes — `serve.py` runs uvicorn without `--reload`, and the app
+is built once at startup.
+
+## Hot reload (dev)
+
+For UI work, skip the rebuild-refresh loop entirely: `npm run dev` serves
+`frontend/src/` with Vite HMR and proxies `/api/*` to a running backend
+(default `http://127.0.0.1:8770`; override with `OVERSEER_API` for another
+port). Edits under `src/` appear in the browser instantly.
+
+```bash
+.venv/bin/python plugins/overseer/dashboard/serve.py --no-browser   # backend, once
+cd plugins/overseer/dashboard/frontend && npm run dev               # HMR at :5173
+# backend on a non-default port?
+OVERSEER_API=http://127.0.0.1:8771 npm run dev
+```
+
+Dev mode never touches the committed `dist/` — the committed-dist policy
+above still applies before committing. See `frontend/README.md` for the
+full dev setup.
+
 ## Tests
 
 Run from the repo root:

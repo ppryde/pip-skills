@@ -18,10 +18,17 @@ Then, from this directory (`plugins/overseer/dashboard/frontend/`):
 
 ```bash
 npm install
-npm run dev       # Vite dev server with HMR — proxies nothing; point it at a
-                   # backend serving /api/* on the same origin, or run the
-                   # FastAPI backend separately and adjust as needed.
+npm run dev       # Vite dev server with HMR — proxies /api/* to a running
+                   # FastAPI backend on http://127.0.0.1:8770 (serve.py's
+                   # default). Backend on another port? Set OVERSEER_API:
+                   #   OVERSEER_API=http://127.0.0.1:8771 npm run dev
 ```
+
+So the hot-reload loop is: start the backend once
+(`python plugins/overseer/dashboard/serve.py --no-browser`), run
+`npm run dev`, and edit `src/**` — changes appear in the browser without a
+rebuild or server restart. The committed `dist/` (below) is untouched by dev
+mode; remember to `npm run build` before committing.
 
 Other scripts:
 
