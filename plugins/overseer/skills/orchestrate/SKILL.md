@@ -88,6 +88,15 @@ undecided, per the policy.md table. Review gates never shrink at any size.
 - **Park vs block vs abandon:** `park` to shelve without a blocker (resumable),
   `block` for a real blocker with a reason, `abandon` for terminal.
 
+## Claims
+The dashboard can assign a card to your session (`claimed_by`), delivered at
+the next turn boundary: a Stop-hook nudge (block once, then a `systemMessage`
+if ignored) or a `UserPromptSubmit` notice for attended sessions. On any claim
+notice — either channel — run `resume --session-id <id>` and pick up the
+named card via the normal pickup flow; its first work verb (`set-stage`/
+`log-progress`) acks the claim automatically. Never ignore a claim silently:
+if you cannot take it right now, `unclaim <id>` and say why.
+
 ## Comms
 - Subagent mode: hub-and-spoke only. Workers report to you; you relay.
 - Team mode: peers may talk directly, but every peer message is CC'd to you

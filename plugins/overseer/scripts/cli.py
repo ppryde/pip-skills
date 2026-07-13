@@ -654,25 +654,133 @@ def cmd_unclaim(args: argparse.Namespace) -> int:
     return 0
 
 
+def _mark_claim_nudged(repo_root: Path, card_id: str) -> bool:
+    """Stamp `claim_nudged = true` on `card_id` — the single-writer path
+    shared by the `claim-nudged` CLI verb and `claim-stop-hook` (design spec
+    §4, WF-022). Returns False (no write) when the card is unknown, corrupt,
+    or no longer claimed (a race with `unclaim`/a fresh `claim`) — never
+    raises, so a hook calling this directly stays quarantine-safe.
+    """
+    try:
+        card = _load(repo_root, card_id)
+    except (FileNotFoundError, CardParseError):
+        return False
+    if not card.claimed_by:
+        return False
+    card.claim_nudged = True
+    card.updated = _now()
+    _sync(repo_root, card)
+    return True
+
+
 def cmd_claim_nudged(args: argparse.Namespace) -> int:
     """`overseer claim-nudged <id>` — for the WF-022 Stop hook to shell after
     it has already blocked once for an unacked claim (design spec §4).
+    """
+    if _mark_claim_nudged(args.root, args.card_id):
+        print(f"{args.card_id} claim_nudged")
+    return 0
 
-    Quarantine-safe-caller contract: unknown or corrupt card, or a card that
-    is no longer claimed (a race with `unclaim`/a fresh `claim`), all exit 0
-    with no write — the hook must never be broken by this verb.
+
+# --- claim-stop-hook / claim-prompt-hook: turn-boundary claim delivery --------
+#
+# Design spec §4 (docs/superpowers/specs/2026-07-13-overseer-card-claim-design.md).
+# Both hooks read `session_id` from their stdin payload, scan live cards for
+# `claimed_by == session_id && !claim_acked`, and follow the checklist-sync
+# quarantine-safe shape: every failure path exits 0 with no output.
+
+
+def _unacked_claims(repo_root: Path, session_id: str) -> list[Card]:
+    """Live cards claimed by `session_id` and not yet acked, in the store's
+    deterministic (id-sorted) order — the "first" claim for nudge purposes is
+    whichever sorts first."""
+    cards, _ = load_live_cards(state_root(repo_root))
+    return [c for c in cards if c.claimed_by == session_id and not c.claim_acked]
+
+
+def cmd_claim_stop_hook(args: argparse.Namespace) -> int:
+    """Stop hook backend (design spec §4). At the turn boundary: an unacked
+    claim addressed to this session means work was handed over while it was
+    busy.
+
+    - No unacked claims → silent, no output.
+    - First nudge this cycle (`!claim_nudged && !stop_hook_active`) →
+      `decision: block` with the pickup reason, and stamps `claim_nudged` via
+      `_mark_claim_nudged` (direct call, same single-writer path the CLI verb
+      uses) so the next Stop passes clean once the pickup acks. Multiple
+      unacked claims: only the first (id order) is nudged/blocked on; the
+      rest are named in the reason line.
+    - Already nudged, or `stop_hook_active` (a Stop hook already blocked this
+      cycle) → non-blocking `systemMessage`, stop stands.
+
+    Every failure path exits 0 with no output — never breaks the stop.
     """
     try:
-        card = _load(args.root, args.card_id)
-    except (FileNotFoundError, CardParseError):
+        payload = _read_hook_payload()
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return 0
+        repo_root = _hook_root(payload, args)
+        if not state_root(repo_root).is_dir():
+            return 0
+        unacked = _unacked_claims(repo_root, session_id)
+        if not unacked:
+            return 0
+        first, rest = unacked[0], unacked[1:]
+        stop_hook_active = bool(payload.get("stop_hook_active"))
+        if not first.claim_nudged and not stop_hook_active:
+            _mark_claim_nudged(repo_root, first.id)
+            reason = (
+                f"Claimed for you from the dashboard: pick up {first.id} — "
+                "run resume and work the card."
+            )
+            if rest:
+                reason += f" (also unacknowledged: {', '.join(c.id for c in rest)})"
+            print(json.dumps({"decision": "block", "reason": reason}))
+            return 0
+        print(json.dumps({
+            "systemMessage": f"overseer: {first.id} is claimed for this "
+                              "session and unacknowledged",
+        }))
         return 0
-    if not card.claimed_by:
+    except Exception:
         return 0
-    card.claim_nudged = True
-    card.updated = _now()
-    _sync(args.root, card)
-    print(f"{card.id} claim_nudged")
-    return 0
+
+
+def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
+    """UserPromptSubmit hook backend (design spec §4). Covers the attended
+    case: injects a one-line notice when unacked claims addressed to this
+    session exist, so a human mid-conversation doesn't need to wait for a
+    turn end. Never blocks; repeats every prompt until a work verb acks the
+    claim. Every failure path exits 0 with no output.
+    """
+    try:
+        payload = _read_hook_payload()
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return 0
+        repo_root = _hook_root(payload, args)
+        if not state_root(repo_root).is_dir():
+            return 0
+        unacked = _unacked_claims(repo_root, session_id)
+        if not unacked:
+            return 0
+        event_name = payload.get("hook_event_name")
+        if not isinstance(event_name, str) or not event_name:
+            event_name = "UserPromptSubmit"
+        notice = (
+            "Cards claimed for this session from the dashboard: "
+            f"{', '.join(c.id for c in unacked)} — run resume / pick up."
+        )
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": notice,
+            },
+        }))
+        return 0
+    except Exception:
+        return 0
 
 
 def cmd_log_progress(args: argparse.Namespace) -> int:
@@ -1084,6 +1192,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("claim-nudged")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_claim_nudged)
+
+    sub.add_parser("claim-stop-hook").set_defaults(func=cmd_claim_stop_hook)
+    sub.add_parser("claim-prompt-hook").set_defaults(func=cmd_claim_prompt_hook)
 
     p = sub.add_parser("log-progress")
     p.add_argument("card_id")
