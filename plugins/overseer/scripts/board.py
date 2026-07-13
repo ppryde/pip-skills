@@ -31,6 +31,10 @@ def board_data(repo_root: Path) -> dict:
                     "ready": bool,
                     "rollup": dict | None,  # Only when is_epic=True
                     "checklist": list[dict],  # [{"task", "subject", "status"}, ...]
+                    "repo": str | None,  # top-level repo name the card originated from
+                    "claimed_by": str | None,  # census session_id holding the claim
+                    "claimed_at": str | None,  # ISO minute, like "updated"
+                    "claim_acked": bool,  # meaningful only while claimed_by is set
                 },
                 ...
             ],
@@ -79,6 +83,10 @@ def board_data(repo_root: Path) -> dict:
                 "ready": is_ready(card, pool),
                 "rollup": rollup,
                 "checklist": card.checklist,
+                "repo": card.repo,
+                "claimed_by": card.claimed_by,
+                "claimed_at": card.claimed_at,
+                "claim_acked": card.claim_acked,
             }
         )
 

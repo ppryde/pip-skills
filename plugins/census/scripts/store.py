@@ -13,6 +13,7 @@ Layout of ``~/.claude/census/status.json`` (override with ``CENSUS_STORE``)::
         "<session_id>": {
           "worktree_cwd": "<abs path>",
           "updated_at": <epoch>,
+          "tmux_pane": "<%N, absent when the session isn't running inside tmux>",
           "payload": { ...full status-line payload verbatim... }
         }
       }
@@ -151,6 +152,7 @@ def merge(
     store: dict[str, Any],
     payload: dict[str, Any],
     worktree: str | None,
+    tmux_pane: str | None,
     now: float,
 ) -> dict[str, Any]:
     """Fold one status-line payload into ``store`` in place; return ``store``.
@@ -181,6 +183,14 @@ def merge(
         "updated_at": now,
         "payload": payload,
     }
+    # Sibling fields (worktree_cwd, payload) are replaced wholesale on every
+    # ingest, not merged with the previous entry — an untethered session (e.g.
+    # one that has moved out of tmux) must not go on reporting a stale pane.
+    # tmux_pane follows the same rule: present this ingest → stored; absent →
+    # the key is left out of the freshly-built dict, so a repeat ingest
+    # without TMUX_PANE drops any pane recorded by a prior ingest.
+    if tmux_pane is not None:
+        sessions[sid]["tmux_pane"] = tmux_pane
 
     incoming = _live_limits(payload.get("rate_limits"), now)
     if incoming:
@@ -216,7 +226,11 @@ def ingest(raw: str, now: float | None = None) -> None:
             if not _acquire(lock):
                 return
             store = _load(path)
-            merge(store, payload, resolve.worktree_cwd(payload), now)
+            # census-card-claim-design.md §2: ingest runs as a child of the
+            # session process (the status-line pipeline), so TMUX_PANE is
+            # already in its environment — no new plumbing needed to capture it.
+            tmux_pane = os.environ.get("TMUX_PANE") or None
+            merge(store, payload, resolve.worktree_cwd(payload), tmux_pane, now)
             _atomic_write(path, store)
     except OSError:
         return

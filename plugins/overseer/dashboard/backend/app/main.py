@@ -58,6 +58,10 @@ class ThresholdBody(BaseModel):
     value: int
 
 
+class ClaimBody(BaseModel):
+    session_id: str | None = None
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
@@ -305,6 +309,26 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
         def do() -> None:
             check_id(card_id)
             run_overseer(root, "unpark", card_id)
+
+        return _mutate(do)
+
+    @app.post("/api/card/{card_id}/claim")
+    def claim_card(card_id: str, body: ClaimBody) -> dict[str, Any]:
+        session_id = body.session_id
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id required")
+
+        def do() -> None:
+            check_id(card_id)
+            run_overseer(root, "claim", card_id, "--session", session_id)  # type: ignore[arg-type]
+
+        return _mutate(do)
+
+    @app.post("/api/card/{card_id}/unclaim")
+    def unclaim_card(card_id: str) -> dict[str, Any]:
+        def do() -> None:
+            check_id(card_id)
+            run_overseer(root, "unclaim", card_id)
 
         return _mutate(do)
 

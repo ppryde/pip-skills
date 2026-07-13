@@ -300,6 +300,191 @@ class TestHooksJson:
         assert ptu["matcher"] == "TaskCreate|TaskUpdate"
         assert ptu["hooks"][0]["command"].endswith("checklist-sync.sh")
 
+    def test_registers_stop_and_user_prompt_submit_hooks(self):
+        data = json.loads((PLUGIN_ROOT / "hooks" / "hooks.json").read_text())
+        assert data["hooks"]["Stop"][0]["hooks"][0]["command"].endswith("claim-stop.sh")
+        upsub = data["hooks"]["UserPromptSubmit"][0]
+        assert upsub["hooks"][0]["command"].endswith("claim-prompt.sh")
+
+
+def _card(repo, card_id: str = "WF-001") -> Card:
+    return Card.from_text(find_card_path(state_root(repo), card_id).read_text())
+
+
+class TestClaimStopHook:
+    def _claim(self, repo, card_id: str = "WF-001", session: str = "sess-1") -> None:
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", card_id, "--session", session)
+
+    def test_blocks_once_with_reason_naming_card_and_stamps_nudged(
+        self, repo, monkeypatch, capsys
+    ):
+        self._claim(repo)
+        capsys.readouterr()  # discard new-card/claim setup output
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out == {
+            "decision": "block",
+            "reason": "Claimed for you from the dashboard: pick up WF-001 — "
+                      "run resume and work the card.",
+        }
+        assert _card(repo).claim_nudged is True
+
+    def test_second_stop_is_system_message_not_block(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0  # first: blocks + nudges
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert "decision" not in out
+        assert out["systemMessage"] == (
+            "overseer: WF-001 is claimed for this session and unacknowledged"
+        )
+
+    def test_stop_hook_active_suppresses_block(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        capsys.readouterr()
+        _stdin(monkeypatch, {
+            "cwd": str(repo), "session_id": "sess-1", "stop_hook_active": True,
+        })
+        assert run(repo, "claim-stop-hook") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert "decision" not in out
+        assert "systemMessage" in out
+        assert _card(repo).claim_nudged is False  # never blocked, never nudged
+
+    def test_acked_claim_is_silent(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        run(repo, "set-stage", "WF-001", "implementation")  # work verb acks
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_no_claim_is_silent(self, repo, monkeypatch, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_claim_for_other_session_is_silent(self, repo, monkeypatch, capsys):
+        self._claim(repo, session="sess-other")
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_missing_session_id_is_silent(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "claim-stop-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_malformed_stdin_exits_0_silent(self, repo, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "stdin", io.StringIO("not json at all"))
+        assert run(repo, "claim-stop-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_no_overseer_state_dir_exits_0_silent(self, tmp_path, monkeypatch, capsys):
+        _stdin(monkeypatch, {"cwd": str(tmp_path), "session_id": "sess-1"})
+        assert main(["--root", str(tmp_path), "claim-stop-hook"]) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_multiple_unacked_claims_nudges_only_first_names_rest(
+        self, repo, monkeypatch, capsys
+    ):
+        run(repo, "new-card", "--title", "A")  # WF-001
+        run(repo, "new-card", "--title", "B")  # WF-002
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        run(repo, "claim", "WF-002", "--session", "sess-1")
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-stop-hook") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["decision"] == "block"
+        assert "WF-001" in out["reason"]
+        assert "WF-002" in out["reason"]
+        assert _card(repo, "WF-001").claim_nudged is True
+        assert _card(repo, "WF-002").claim_nudged is False
+
+
+class TestClaimPromptHook:
+    def _claim(self, repo, card_id: str = "WF-001", session: str = "sess-1") -> None:
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", card_id, "--session", session)
+
+    def test_notice_shape_and_text(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        capsys.readouterr()
+        _stdin(monkeypatch, {
+            "cwd": str(repo), "session_id": "sess-1",
+            "hook_event_name": "UserPromptSubmit",
+        })
+        assert run(repo, "claim-prompt-hook") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out == {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "Cards claimed for this session from the "
+                                      "dashboard: WF-001 — run resume / pick up.",
+            }
+        }
+
+    def test_falls_back_to_default_event_name(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-prompt-hook") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+
+    def test_repeats_every_prompt_until_acked(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-prompt-hook") == 0
+        assert capsys.readouterr().out != ""
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-prompt-hook") == 0
+        assert capsys.readouterr().out != ""  # still unacked — fires again
+
+    def test_acked_claim_never_blocks_and_is_silent(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        run(repo, "set-stage", "WF-001", "implementation")  # acks
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-prompt-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_no_claim_is_silent(self, repo, monkeypatch, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo), "session_id": "sess-1"})
+        assert run(repo, "claim-prompt-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_missing_session_id_is_silent(self, repo, monkeypatch, capsys):
+        self._claim(repo)
+        capsys.readouterr()
+        _stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "claim-prompt-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_malformed_stdin_exits_0_silent(self, repo, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "stdin", io.StringIO("garbage{{{"))
+        assert run(repo, "claim-prompt-hook") == 0
+        assert capsys.readouterr().out == ""
+
+    def test_no_overseer_state_dir_exits_0_silent(self, tmp_path, monkeypatch, capsys):
+        _stdin(monkeypatch, {"cwd": str(tmp_path), "session_id": "sess-1"})
+        assert main(["--root", str(tmp_path), "claim-prompt-hook"]) == 0
+        assert capsys.readouterr().out == ""
+
 
 class TestHookScriptSmoke:
     def _run_script(self, payload: dict, env: dict, cwd: Path):
@@ -347,3 +532,64 @@ class TestHookScriptSmoke:
         assert _checklist(tmp_path) == [
             {"task": "7", "subject": "write tests", "status": "pending"},
         ]
+
+
+class TestClaimStopScriptSmoke:
+    HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "claim-stop.sh"
+
+    def _run_script(self, payload: dict, env: dict, cwd: Path):
+        return subprocess.run(
+            [BASH, str(self.HOOK_SCRIPT)], input=json.dumps(payload),
+            env=env, cwd=cwd, capture_output=True, text=True,
+        )
+
+    def test_broken_python_still_exits_0(self, tmp_path):
+        fake_plugin_root = tmp_path / "fake-plugin-root"
+        fake_plugin_root.mkdir()
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(fake_plugin_root)
+        env["PATH"] = str(tmp_path / "no-such-bin")
+        result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
+        assert result.returncode == 0
+
+    def test_valid_payload_end_to_end_blocks_via_real_script(self, tmp_path):
+        assert main(["--root", str(tmp_path), "init"]) == 0
+        assert main(["--root", str(tmp_path), "new-card", "--title", "T"]) == 0
+        assert main(["--root", str(tmp_path), "claim", "WF-001", "--session", "sess-1"]) == 0
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
+        assert result.returncode == 0
+        out = json.loads(result.stdout)
+        assert out["decision"] == "block"
+        assert "WF-001" in out["reason"]
+
+
+class TestClaimPromptScriptSmoke:
+    HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "claim-prompt.sh"
+
+    def _run_script(self, payload: dict, env: dict, cwd: Path):
+        return subprocess.run(
+            [BASH, str(self.HOOK_SCRIPT)], input=json.dumps(payload),
+            env=env, cwd=cwd, capture_output=True, text=True,
+        )
+
+    def test_broken_python_still_exits_0(self, tmp_path):
+        fake_plugin_root = tmp_path / "fake-plugin-root"
+        fake_plugin_root.mkdir()
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(fake_plugin_root)
+        env["PATH"] = str(tmp_path / "no-such-bin")
+        result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
+        assert result.returncode == 0
+
+    def test_valid_payload_end_to_end_notices_via_real_script(self, tmp_path):
+        assert main(["--root", str(tmp_path), "init"]) == 0
+        assert main(["--root", str(tmp_path), "new-card", "--title", "T"]) == 0
+        assert main(["--root", str(tmp_path), "claim", "WF-001", "--session", "sess-1"]) == 0
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
+        assert result.returncode == 0
+        out = json.loads(result.stdout)
+        assert "WF-001" in out["hookSpecificOutput"]["additionalContext"]

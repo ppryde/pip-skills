@@ -214,6 +214,30 @@ describe("api/client", () => {
     expect(JSON.parse(init.body)).toEqual({ status: "blocked", reason: "x" });
   });
 
+  it("claimCard(id, sessionId) POSTs {session_id} to /api/card/{id}/claim", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    const result = await client.claimCard("WF-1", "sess-1");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1/claim");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ session_id: "sess-1" });
+    expect(result).toEqual(boardResponse);
+  });
+
+  it("unclaimCard(id) POSTs (no body) to /api/card/{id}/unclaim", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    const result = await client.unclaimCard("WF-1");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1/unclaim");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+    expect(result).toEqual(boardResponse);
+  });
+
   it("setThreshold(value) POSTs {value} to /api/config/threshold", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
 

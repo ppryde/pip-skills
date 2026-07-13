@@ -505,10 +505,10 @@ body {
 
 /*
   Live task checklist (WF-008). `.checklist` is shared by the tile's
-  windowed focus window (`--windowed`, capped to a fixed height with an
-  edge-mask fade) and the drawer's full unwindowed list. Rows are plain
-  <li> — see ChecklistRows.tsx's doc comment on why: they render inside the
-  tile body's non-interactive div, and MUST NOT introduce any interactive
+  sliding-wheel window (`--windowed`, capped to a fixed 3-row height) and
+  the drawer's full unwindowed list. Rows are plain <li> — see
+  ChecklistRows.tsx's doc comment on why: they render inside the tile
+  body's non-interactive div, and MUST NOT introduce any interactive
   element there.
 */
 .checklist {
@@ -520,25 +520,30 @@ body {
   padding: 0;
 }
 
-/* Fixed-height focus window (5 rows) with a top/bottom fade so a partial
-   row at either edge reads as "there's more", not as a clipped row. */
+/* Fixed-height sliding-wheel window (3 rows). The active row (marked
+   `--active` by ChecklistRows) is vertically centred when the window has
+   room, or sits off-centre when clamped at either end of the list (see
+   checklistWindow's clamping) — never padded with ghost rows. Neighbours
+   fade via the per-row `--dist-1`/`--dist-2` classes below rather than a
+   mask-image: fade strength must track logical distance from the active
+   row, which isn't always the same as raw pixel distance from the
+   window's edge once clamping kicks in. */
 .checklist--windowed {
-  max-height: calc(5 * 1.15rem);
+  max-height: calc(3 * 1.15rem);
   overflow: hidden;
-  mask-image: linear-gradient(
-    to bottom,
-    transparent,
-    black 20%,
-    black 80%,
-    transparent
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent,
-    black 20%,
-    black 80%,
-    transparent
-  );
+}
+
+/* Distance-from-active fade (windowed mode only — see ChecklistRows). */
+.checklist__row--dist-1 {
+  opacity: 0.55;
+}
+
+.checklist__row--dist-2 {
+  opacity: 0.25;
+}
+
+.checklist__row--active .checklist__subject {
+  font-weight: 500;
 }
 
 .checklist__row {
@@ -584,7 +589,7 @@ body {
 }
 
 /* All motion below is opt-in: a user who has asked the OS to reduce motion
-   gets the end state instantly — no fade-in, no pulse. */
+   gets the end state instantly — no fade-in, no pulse, no wheel slide. */
 @media (prefers-reduced-motion: no-preference) {
   .checklist__row--appear {
     animation: checklist-row-appear 200ms ease-out;
@@ -592,6 +597,21 @@ body {
 
   .checklist__row--in_progress .checklist__glyph {
     animation: checklist-pulse 2s ease-in-out infinite;
+  }
+
+  /* Smooths a row's own opacity when its `--dist-*` class changes without
+     the row unmounting (e.g. the active task advances but the window is
+     clamped at the list's start/end, so the same rows stay put and only
+     their distance-from-active shifts). */
+  .checklist--windowed .checklist__row {
+    transition: opacity 180ms ease;
+  }
+
+  /* Set for one render on the `<ul>` when the ACTIVE task changes (see
+     ChecklistRows's `didAdvance`) — the window settling into its new
+     position reads as the wheel advancing by one task. */
+  .checklist--shift {
+    animation: checklist-wheel-shift 220ms ease-out;
   }
 
   @keyframes checklist-row-appear {
@@ -614,6 +634,15 @@ body {
       opacity: 0.45;
     }
   }
+
+  @keyframes checklist-wheel-shift {
+    from {
+      transform: translateY(0.5rem);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
 }
 
 .card-tile__footer {
@@ -630,6 +659,29 @@ body {
   border-radius: 3px;
   background: #eef2ff;
   color: #4338ca;
+}
+
+/* Quiet, muted label — the card's origin repo. Deliberately low-contrast
+   next to the priority chip: this is provenance metadata, not a signal that
+   should compete for attention on the tile. */
+.repo-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+/* Quiet, distinct from the repo-chip's grey — a faint indigo tint marks
+   "someone's on this" without competing with the priority/blocked badges. */
+.claim-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: #eef4ff;
+  color: #3654a6;
 }
 
 .badge--blocked {
@@ -970,6 +1022,42 @@ body {
   background: #fff;
   color: #1b1f24;
   cursor: pointer;
+}
+
+.claim-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.claim-control select {
+  font-size: 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 3px;
+  padding: 0.15rem 0.3rem;
+  background: #fff;
+  color: #1b1f24;
+}
+
+.claim-control button {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #1b1f24;
+  cursor: pointer;
+}
+
+.claim-control__holder {
+  font-size: 0.75rem;
+  color: #3654a6;
+}
+
+.claim-control__holder--stale {
+  color: #9ca3af;
+  font-style: italic;
 }
 
 .link-editor {

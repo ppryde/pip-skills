@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Gaegu:wght@400;700&family=Baloo+2:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800;900&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  a, a:hover { color: #C25A3B; }
+  .qb-scroll::-webkit-scrollbar { height: 12px; }
+  .qb-scroll::-webkit-scrollbar-track { background: #E7D6B4; border-radius: 999px; }
+  .qb-scroll::-webkit-scrollbar-thumb { background: #C9A86A; border-radius: 999px; border: 2px solid #E7D6B4; }
+  @keyframes qb-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.8); } }
+</style>
+</helmet>
+
+<div style="min-height:100vh; background:#EFE3CC; background-image: radial-gradient(circle at 12% 8%, #F7EED8 0%, transparent 42%), radial-gradient(circle at 90% 92%, #EADCBD 0%, transparent 48%); font-family:'Patrick Hand', cursive; display:flex; flex-direction:column;">
+
+  <!-- ===================== TOP BAR ===================== -->
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; padding:18px 26px; background:#FBF4E1; border-bottom:2px dashed #D8C39A; box-shadow:0 6px 16px rgba(90,62,40,.08); position:sticky; top:0; z-index:20;">
+    <div style="display:flex; align-items:center; gap:14px;">
+      <div style="width:50px; height:50px; border:2px solid #5B4632; border-radius:50% 48% 52% 50%; display:flex; align-items:center; justify-content:center; background:#F3E1B8; color:#5B4632; font-family:'Baloo 2'; font-weight:800; font-size:26px;">⚑</div>
+      <div>
+        <div style="font-family:'Baloo 2',cursive; font-weight:800; font-size:26px; color:#4A3826; line-height:1;">Adventurers' Guild Board</div>
+        <div style="color:#9A8464; font-size:17px;">Season of the Amber Harvest · Day 14</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:7px; background:#F3E1B8; border:2px solid #D9A441; border-radius:14px 8px 14px 8px; padding:7px 14px;">
+        <svg width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="#B5851F" stroke-width="1.6"/></svg>
+        <span style="color:#7A5A1A; font-size:20px;">1,240</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:7px; background:#EAF0DE; border:2px solid #A9BE7E; border-radius:8px 14px 8px 14px; padding:7px 14px; color:#5A6E38; font-size:18px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5A6E38" stroke-width="2.6"><path d="M17 9l-6 6-3-3"/><circle cx="12" cy="12" r="10"/></svg>12 / 40 vanquished
+      </div>
+      <button onClick="{{ openParty }}" style="display:flex; align-items:center; gap:7px; background:#F3E1E7; border:2px solid #D9A0B4; border-radius:14px; padding:7px 14px; color:#A8506B; font-size:18px; font-family:'Patrick Hand',cursive; cursor:pointer;" style-hover="background:#EFD4DE;">
+        <span style="width:10px;height:10px;border-radius:50%;background:#7A8B45;display:inline-block;animation:qb-pulse 1.6s infinite;"></span>3 questing
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A8506B" stroke-width="2.4"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===================== BOARD ===================== -->
+  <div class="qb-scroll" style="flex:1; overflow-x:auto; overflow-y:hidden; padding:24px 26px 20px;">
+    <div style="display:flex; gap:18px; align-items:flex-start; min-height:100%; height:100%;">
+
+      <!-- COLUMN: Backlog -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#7A8B45; color:#fff; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #63722F;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Backlog</span>
+          <span style="background:rgba(255,255,255,.25); border-radius:9px; padding:1px 10px; font-size:16px;">6</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <!-- card -->
+          <div style="background:#fff; border:2px solid #C9A86A; border-radius:14px 20px 14px 20px; padding:14px; box-shadow:0 3px 0 #E4D2AB;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2481</span>
+              <span style="display:flex; gap:2px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="#D9A441"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg><svg width="13" height="13" viewBox="0 0 24 24" fill="#D9A441"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg></span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Refactor the auth guardrails</div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>Map old routes</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Add guard tests</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>320</span>
+              <span style="display:flex; align-items:center; gap:4px; background:#F3E1E7; color:#A8506B; border-radius:9px; padding:2px 8px; font-size:15px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A8506B" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>WF-2400</span>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #C9A86A; border-radius:20px 14px 20px 14px; padding:14px; box-shadow:0 3px 0 #E4D2AB;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2490</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="#B0A088"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Migrate the token ledger</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Draft the schema</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>180</span>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #C9A86A; border-radius:14px 20px 14px 20px; padding:14px; box-shadow:0 3px 0 #E4D2AB;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2503</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="#D9A441"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Draft the onboarding scrolls</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Outline 3 chapters</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>140</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMN: Bootstrap -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#B08948; color:#fff; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #977236;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Bootstrap</span>
+          <span style="background:rgba(255,255,255,.25); border-radius:9px; padding:1px 10px; font-size:16px;">2</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <div style="background:#fff; border:2px solid #DDBB7C; border-radius:16px 20px 16px 20px; padding:14px; box-shadow:0 3px 0 #EDD9AE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2495</span>
+              <span style="background:#F6E9CE; color:#96702F; border-radius:8px; padding:1px 7px; font-size:14px;">preparing</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Summon the dev environment</div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>Clone the repo relic</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Install dependencies</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>260</span>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #DDBB7C; border-radius:20px 14px 20px 14px; padding:14px; box-shadow:0 3px 0 #EDD9AE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2498</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Forge the CI pipeline</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Wire the test runner</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>300</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMN: Planning -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#5C86B0; color:#fff; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #47709A;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Planning</span>
+          <span style="background:rgba(255,255,255,.25); border-radius:9px; padding:1px 10px; font-size:16px;">2</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <div style="background:#fff; border:2px solid #A9C0DA; border-radius:14px 20px 14px 20px; padding:14px; box-shadow:0 3px 0 #D3E0EE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2487</span>
+              <span style="display:flex; gap:2px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="#D9A441"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg><svg width="13" height="13" viewBox="0 0 24 24" fill="#D9A441"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg><svg width="13" height="13" viewBox="0 0 24 24" fill="#D9A441"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg></span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Chart the API roads</div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>List endpoints</div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>Draw the schema map</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Review with the guild</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>420</span>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #A9C0DA; border-radius:20px 14px 20px 14px; padding:14px; box-shadow:0 3px 0 #D3E0EE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2492</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Map the data dungeon</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Sketch the ER map</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>360</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMN: Implementation -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#D98A3D; color:#fff; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #BC722C;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Implementation</span>
+          <span style="background:rgba(255,255,255,.25); border-radius:9px; padding:1px 10px; font-size:16px;">3</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <div style="background:#fff; border:2px solid #E0A24C; border-radius:16px 20px 16px 20px; padding:14px; box-shadow:0 3px 0 #F0DBAE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2477</span>
+              <span style="background:#FBE4C6; color:#C25A3B; border-radius:8px; padding:1px 7px; font-size:14px;">in progress</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Patch the merge cavern</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>Find the conflict</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px; margin-top:5px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Rebase the branch</div>
+            <div style="height:8px; background:#F0E3C4; border-radius:6px; margin-top:11px; overflow:hidden;"><div style="width:55%; height:100%; background:#D98A3D; border-radius:6px;"></div></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:9px;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>540</span>
+              <div style="display:flex; align-items:center; gap:5px;"><div style="width:22px;height:22px;border-radius:50%;background:#A8506B;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-size:12px;">A</div><span style="color:#9A8464; font-size:15px;">Aria</span></div>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #E0A24C; border-radius:20px 14px 20px 14px; padding:14px; box-shadow:0 3px 0 #F0DBAE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2480</span>
+              <span style="background:#FBE4C6; color:#C25A3B; border-radius:8px; padding:1px 7px; font-size:14px;">in progress</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Brew the caching potion</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>Pick the cache store</div>
+            <div style="height:8px; background:#F0E3C4; border-radius:6px; margin-top:11px; overflow:hidden;"><div style="width:30%; height:100%; background:#D98A3D; border-radius:6px;"></div></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:9px;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>480</span>
+              <div style="display:flex; align-items:center; gap:5px;"><div style="width:22px;height:22px;border-radius:50%;background:#D98A3D;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-size:12px;">B</div><span style="color:#9A8464; font-size:15px;">Bram</span></div>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #E0A24C; border-radius:14px 20px 14px 20px; padding:14px; box-shadow:0 3px 0 #F0DBAE;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2483</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Tame the rate limiter</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#B0A088; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;border:2px solid #D8C39A;display:inline-block;"></span>Choose a strategy</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>380</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMN: Awaiting Merge -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#A8506B; color:#fff; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #8C3E56;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Awaiting Merge</span>
+          <span style="background:rgba(255,255,255,.25); border-radius:9px; padding:1px 10px; font-size:16px;">2</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <div style="background:#fff; border:2px solid #D49AAD; border-radius:16px 20px 16px 20px; padding:14px; box-shadow:0 3px 0 #EBD1D9;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2470</span>
+              <span style="background:#EAF0DE; color:#5A6E38; border-radius:8px; padding:1px 7px; font-size:14px;">review ✓</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Guard the payment gate</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>All checks green</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>610</span>
+              <div style="display:flex; align-items:center; gap:5px;"><div style="width:22px;height:22px;border-radius:50%;background:#7A8B45;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-size:12px;">P</div><span style="color:#9A8464; font-size:15px;">Pip</span></div>
+            </div>
+          </div>
+          <div style="background:#fff; border:2px solid #D49AAD; border-radius:20px 14px 20px 14px; padding:14px; box-shadow:0 3px 0 #EBD1D9;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#9A8464;">WF-2472</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#4A3826; line-height:1.15; margin-bottom:10px;">Polish the search relic</div>
+            <div style="display:flex; align-items:center; gap:6px; color:#7A6A54; font-size:16px;"><span style="width:15px;height:15px;border-radius:5px;background:#7A8B45;display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4"><path d="M20 6L9 17l-5-5"/></svg></span>Awaiting a reviewer</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:11px; padding-top:9px; border-top:1px dashed #E0CEA5;">
+              <span style="display:flex; align-items:center; gap:4px; color:#7A5A1A; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>290</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMN: Done -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#5B4632; color:#F3E4C6; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #43331F;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Done</span>
+          <span style="background:rgba(255,255,255,.2); border-radius:9px; padding:1px 10px; font-size:16px;">12</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <div style="background:#F3EAD6; border:2px solid #C9B48C; border-radius:18px 16px 18px 16px; padding:14px; opacity:.94;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#A89A7C;">WF-2455</span>
+              <svg width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#E7EDD4"/><path d="M17 9l-6 6-3-3" fill="none" stroke="#7A8B45" stroke-width="2.6"/></svg>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#6E6250; line-height:1.15; text-decoration:line-through; text-decoration-color:#C0B392;">Seal the flaky specs</div>
+            <div style="display:flex; align-items:center; gap:5px; margin-top:11px; color:#8A7B5F; font-size:15px;">+220 <svg width="12" height="12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg> earned</div>
+          </div>
+          <div style="background:#F3EAD6; border:2px solid #C9B48C; border-radius:16px 18px 16px 18px; padding:14px; opacity:.94;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#A89A7C;">WF-2450</span>
+              <svg width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#E7EDD4"/><path d="M17 9l-6 6-3-3" fill="none" stroke="#7A8B45" stroke-width="2.6"/></svg>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#6E6250; line-height:1.15; text-decoration:line-through; text-decoration-color:#C0B392;">Light the beacon logs</div>
+            <div style="display:flex; align-items:center; gap:5px; margin-top:11px; color:#8A7B5F; font-size:15px;">+150 <svg width="12" height="12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg> earned</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMN: Parked -->
+      <div style="flex:0 0 268px; display:flex; flex-direction:column; height:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#9A8464; color:#fff; padding:7px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px; margin-bottom:14px; box-shadow:0 4px 0 #7F6B4E;">
+          <span style="font-family:'Gaegu',cursive; font-weight:700; font-size:20px;">Parked</span>
+          <span style="background:rgba(255,255,255,.25); border-radius:9px; padding:1px 10px; font-size:16px;">1</span>
+        </div>
+        <div class="qb-scroll" style="display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; padding-bottom:8px;">
+          <div style="background:#F1E9DA; border:2px dashed #C4B292; border-radius:18px; padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+              <span style="font-family:'Silkscreen',monospace; font-size:10px; color:#A89A7C;">WF-2440</span>
+              <span style="display:flex; align-items:center; gap:3px; color:#9A8464; font-size:14px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9A8464" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M10 8v8M14 8v8"/></svg>on hold</span>
+            </div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:18px; color:#7A6A54; line-height:1.15; margin-bottom:8px;">Rework the legacy crypt</div>
+            <div style="color:#9A8464; font-size:15px; line-height:1.3;">Parked until the data dungeon is mapped.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== PARTY PANEL ===================== -->
+      <div style="flex:0 0 288px; display:flex; flex-direction:column; height:100%;">
+        <div style="background:#3E2F22; color:#F3E4C6; padding:16px; border-radius:20px; box-shadow:0 6px 0 #2B2016; display:flex; flex-direction:column; gap:14px; overflow:hidden;">
+          <div style="font-family:'Baloo 2',cursive; font-weight:700; font-size:19px; display:flex; align-items:center; gap:8px;">⚔ Active Party <span style="margin-left:auto; font-family:'Silkscreen',monospace; font-size:11px; color:#C9AE84;">3 / 5</span></div>
+
+          <div style="display:flex; flex-direction:column; gap:11px; overflow-y:auto;" class="qb-scroll">
+            <!-- hero -->
+            <div style="background:#4A3524; border-radius:14px; padding:11px 12px;">
+              <div style="display:flex; align-items:center; gap:9px; margin-bottom:8px;">
+                <div style="width:34px;height:34px;border-radius:50%;background:#A8506B;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-weight:700;font-size:17px;position:relative;">A<span style="position:absolute;bottom:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:#7A8B45;border:2px solid #4A3524;animation:qb-pulse 1.6s infinite;"></span></div>
+                <div style="flex:1;">
+                  <div style="font-family:'Baloo 2'; font-weight:600; font-size:16px; color:#F6EAD2;">Aria</div>
+                  <div style="font-family:'Silkscreen',monospace; font-size:9px; color:#C9AE84;">SONNET · WF-2477</div>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:13px; color:#C9AE84; margin-bottom:3px;"><span>mana</span><span>72%</span></div>
+              <div style="height:8px; background:#33241788; border:1px solid #6E4A32; border-radius:6px; overflow:hidden;"><div style="width:72%; height:100%; background:linear-gradient(90deg,#5E86C7,#8FB6E0);"></div></div>
+            </div>
+            <div style="background:#4A3524; border-radius:14px; padding:11px 12px;">
+              <div style="display:flex; align-items:center; gap:9px; margin-bottom:8px;">
+                <div style="width:34px;height:34px;border-radius:50%;background:#D98A3D;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-weight:700;font-size:17px;position:relative;">B<span style="position:absolute;bottom:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:#7A8B45;border:2px solid #4A3524;animation:qb-pulse 1.6s infinite;"></span></div>
+                <div style="flex:1;">
+                  <div style="font-family:'Baloo 2'; font-weight:600; font-size:16px; color:#F6EAD2;">Bram</div>
+                  <div style="font-family:'Silkscreen',monospace; font-size:9px; color:#C9AE84;">OPUS · WF-2480</div>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:13px; color:#C9AE84; margin-bottom:3px;"><span>mana</span><span>34%</span></div>
+              <div style="height:8px; background:#33241788; border:1px solid #6E4A32; border-radius:6px; overflow:hidden;"><div style="width:34%; height:100%; background:linear-gradient(90deg,#C25A3B,#E08A3C);"></div></div>
+            </div>
+            <div style="background:#4A3524; border-radius:14px; padding:11px 12px;">
+              <div style="display:flex; align-items:center; gap:9px; margin-bottom:8px;">
+                <div style="width:34px;height:34px;border-radius:50%;background:#7A8B45;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-weight:700;font-size:17px;position:relative;">P<span style="position:absolute;bottom:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:#7A8B45;border:2px solid #4A3524;animation:qb-pulse 1.6s infinite;"></span></div>
+                <div style="flex:1;">
+                  <div style="font-family:'Baloo 2'; font-weight:600; font-size:16px; color:#F6EAD2;">Pip</div>
+                  <div style="font-family:'Silkscreen',monospace; font-size:9px; color:#C9AE84;">HAIKU · WF-2470</div>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:13px; color:#C9AE84; margin-bottom:3px;"><span>mana</span><span>88%</span></div>
+              <div style="height:8px; background:#33241788; border:1px solid #6E4A32; border-radius:6px; overflow:hidden;"><div style="width:88%; height:100%; background:linear-gradient(90deg,#5E86C7,#8FB6E0);"></div></div>
+            </div>
+            <div style="border:2px dashed #6E4A32; border-radius:14px; padding:12px; text-align:center; color:#C9AE84; font-size:15px;">+ Summon a hero</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ===================== CARD DETAIL OVERLAY ===================== -->
+<sc-if value="{{ detailOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeDetail }}" style="position:fixed; inset:0; z-index:60; background:rgba(52,36,22,.5); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:24px; font-family:'Patrick Hand',cursive;">
+  <div onClick="{{ stop }}" class="qb-scroll" style="width:640px; max-width:100%; max-height:90vh; overflow-y:auto; background:#FBF4E1; border:2px solid #C9A86A; border-radius:26px; box-shadow:0 24px 60px rgba(50,30,15,.4); padding:26px 28px;">
+    <!-- header -->
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+      <span style="background:{{ d.color }}; color:#fff; font-family:'Gaegu',cursive; font-weight:700; font-size:16px; padding:4px 14px; border-radius:255px 10px 225px 10px/10px 225px 10px 255px;">{{ d.col }}</span>
+      <span style="font-family:'Silkscreen',monospace; font-size:11px; color:#9A8464;">{{ d.code }}</span>
+      <span style="display:flex; gap:2px; margin-left:2px;">
+        <sc-for list="{{ d.stars }}" as="s" hint-placeholder-count="3"><svg width="15" height="15" viewBox="0 0 24 24" fill="{{ s.fill }}"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg></sc-for>
+      </span>
+      <button onClick="{{ closeDetail }}" style="margin-left:auto; width:38px; height:38px; border-radius:50%; border:2px solid #D8C39A; background:#F3EAD6; color:#7A6A54; font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center;" style-hover="background:#EADFC6;">✕</button>
+    </div>
+
+    <div style="font-family:'Baloo 2',cursive; font-weight:800; font-size:30px; color:#4A3826; line-height:1.1; margin-bottom:16px;">{{ d.title }}</div>
+
+    <!-- meta chips -->
+    <div style="display:flex; flex-wrap:wrap; gap:9px; margin-bottom:20px;">
+      <span style="display:flex; align-items:center; gap:6px; background:{{ d.tint }}; color:{{ d.tintText }}; border-radius:12px; padding:6px 12px; font-size:16px;">{{ d.status }}</span>
+      <span style="display:flex; align-items:center; gap:6px; background:#F3E1B8; border:2px solid #E7C97D; color:#7A5A1A; border-radius:12px; padding:5px 12px; font-size:16px;"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>{{ d.gold }} gold</span>
+      <sc-if value="{{ d.hasHero }}" hint-placeholder-val="{{ false }}">
+        <span style="display:flex; align-items:center; gap:7px; background:#fff; border:2px solid #E0CEA5; border-radius:12px; padding:4px 12px 4px 5px; font-size:16px; color:#5B4632;"><span style="width:26px;height:26px;border-radius:50%;background:{{ d.heroColor }};color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-weight:700;font-size:14px;">{{ d.heroInitial }}</span>{{ d.heroName }} · {{ d.heroCls }}</span>
+      </sc-if>
+    </div>
+
+    <!-- tabs -->
+    <div style="display:flex; gap:6px; background:#EDE0C2; border-radius:14px; padding:5px; margin-bottom:18px;">
+      <button onClick="{{ setQuestTab }}" style="flex:1; border:none; cursor:pointer; border-radius:10px; padding:9px 0; font-family:'Baloo 2',cursive; font-weight:700; font-size:16px; background:{{ d.questTabBg }}; color:{{ d.questTabColor }};">Quest</button>
+      <button onClick="{{ setScrollTab }}" style="flex:1; border:none; cursor:pointer; border-radius:10px; padding:9px 0; font-family:'Baloo 2',cursive; font-weight:700; font-size:16px; background:{{ d.scrollTabBg }}; color:{{ d.scrollTabColor }}; display:flex; align-items:center; justify-content:center; gap:6px;">Scroll <span style="font-family:'Silkscreen',monospace; font-size:9px; background:#7A8B45; color:#fff; border-radius:5px; padding:2px 4px;">MD</span></button>
+    </div>
+
+    <sc-if value="{{ d.isQuest }}" hint-placeholder-val="{{ true }}">
+    <!-- description -->
+    <div style="font-size:18px; color:#5B4632; line-height:1.5; margin-bottom:20px;">{{ d.desc }}</div>
+
+    <!-- progress -->
+    <sc-if value="{{ d.hasProgress }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; color:#7A6A54; font-size:16px; margin-bottom:5px;"><span>Journey progress</span><span>{{ d.progress }}</span></div>
+        <div style="height:12px; background:#EDE0C2; border-radius:8px; overflow:hidden;"><div style="width:{{ d.progress }}; height:100%; background:linear-gradient(90deg,#D98A3D,#E7B93D); border-radius:8px;"></div></div>
+      </div>
+    </sc-if>
+
+    <!-- sub-quests -->
+    <div style="background:#fff; border:2px solid #E0CEA5; border-radius:16px; padding:16px 18px; margin-bottom:18px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <span style="font-family:'Baloo 2',cursive; font-weight:700; font-size:19px; color:#4A3826;">Sub-quests</span>
+        <span style="font-family:'Silkscreen',monospace; font-size:11px; color:#9A8464;">{{ d.doneLabel }}</span>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:11px;">
+        <sc-for list="{{ d.subs }}" as="s" hint-placeholder-count="3">
+          <div style="display:flex; align-items:center; gap:10px; font-size:18px;">
+            <span style="width:22px; height:22px; border-radius:7px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:{{ s.boxBg }}; border:{{ s.boxBorder }};"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" style="opacity:{{ s.checkOpacity }}"><path d="M20 6L9 17l-5-5"/></svg></span>
+            <span style="color:{{ s.textColor }}; text-decoration:{{ s.strike }}; text-decoration-color:#C0B392;">{{ s.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- dependencies -->
+    <sc-if value="{{ d.hasDeps }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-bottom:18px;">
+        <div style="font-family:'Baloo 2',cursive; font-weight:700; font-size:17px; color:#4A3826; margin-bottom:9px;">Locked behind</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          <sc-for list="{{ d.deps }}" as="dep" hint-placeholder-count="1">
+            <span style="display:flex; align-items:center; gap:5px; background:#F3E1E7; color:#A8506B; border-radius:11px; padding:5px 12px; font-size:16px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#A8506B" stroke-width="2.4"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>{{ dep.code }}</span>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- activity log -->
+    <div>
+      <div style="font-family:'Baloo 2',cursive; font-weight:700; font-size:17px; color:#4A3826; margin-bottom:12px;">Quest log</div>
+      <div style="display:flex; flex-direction:column; gap:14px; border-left:2px dashed #D8C39A; padding-left:16px; margin-left:5px;">
+        <sc-for list="{{ d.log }}" as="e" hint-placeholder-count="2">
+          <div style="position:relative;">
+            <span style="position:absolute; left:-23px; top:4px; width:12px; height:12px; border-radius:50%; background:{{ e.dot }}; border:2px solid #FBF4E1;"></span>
+            <div style="font-size:17px; color:#5B4632; line-height:1.2;">{{ e.text }}</div>
+            <div style="font-family:'Silkscreen',monospace; font-size:10px; color:#A89A7C; margin-top:2px;">{{ e.time }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- scroll (markdown) tab -->
+    <sc-if value="{{ d.isScroll }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fff; border:2px solid #E0CEA5; border-radius:16px; padding:20px 24px;">{{ d.mdEl }}</div>
+    </sc-if>
+  </div>
+</div>
+</sc-if>
+
+<!-- ===================== PARTY PAGE OVERLAY ===================== -->
+<sc-if value="{{ partyOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeParty }}" style="position:fixed; inset:0; z-index:60; background:rgba(52,36,22,.55); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:24px; font-family:'Patrick Hand',cursive;">
+  <div onClick="{{ stop }}" class="qb-scroll" style="width:800px; max-width:100%; max-height:90vh; overflow-y:auto; background:#3E2F22; border-radius:26px; box-shadow:0 24px 60px rgba(50,30,15,.5); padding:26px 28px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:6px;">
+      <div style="font-family:'Baloo 2',cursive; font-weight:800; font-size:30px; color:#F6EAD2;">⚔ The Party</div>
+      <span style="font-family:'Silkscreen',monospace; font-size:12px; color:#C9AE84; margin-top:6px;">3 OF 5 HEROES</span>
+      <button onClick="{{ closeParty }}" style="margin-left:auto; width:38px; height:38px; border-radius:50%; border:2px solid #6E4A32; background:#4A3524; color:#E6CFA6; font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center;" style-hover="background:#5A4230;">✕</button>
+    </div>
+    <div style="color:#C9AE84; font-size:17px; margin-bottom:22px;">Heroes questing on your behalf — their mana is the context they have left.</div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px;">
+      <sc-for list="{{ party }}" as="h" hint-placeholder-count="3">
+        <div style="background:#F3E7CE; border-radius:20px; padding:18px; box-shadow:0 5px 0 rgba(0,0,0,.18);">
+          <div style="display:flex; align-items:center; gap:13px; margin-bottom:15px;">
+            <div style="width:52px;height:52px;border-radius:50%;background:{{ h.color }};color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Baloo 2';font-weight:800;font-size:26px;position:relative;">{{ h.initial }}<span style="position:absolute;bottom:0;right:0;width:13px;height:13px;border-radius:50%;background:#7A8B45;border:3px solid #F3E7CE;animation:qb-pulse 1.6s infinite;"></span></div>
+            <div style="flex:1;">
+              <div style="font-family:'Baloo 2',cursive; font-weight:700; font-size:22px; color:#4A2E1C; line-height:1;">{{ h.name }}</div>
+              <div style="font-family:'Silkscreen',monospace; font-size:10px; color:#A06A3C; margin-top:4px;">{{ h.cls }} · {{ h.level }}</div>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:15px; color:#7A6A54; margin-bottom:4px;"><span>Mana</span><span>{{ h.mana }}</span></div>
+          <div style="height:11px; background:#E4D2AB; border-radius:7px; overflow:hidden; margin-bottom:14px;"><div style="width:{{ h.manaW }}; height:100%; background:linear-gradient(90deg,{{ h.manaFrom }},{{ h.manaTo }}); border-radius:7px;"></div></div>
+          <div style="background:#fff; border:2px solid #E0CEA5; border-radius:12px; padding:9px 12px; margin-bottom:12px;">
+            <div style="font-family:'Silkscreen',monospace; font-size:9px; color:#A89A7C; margin-bottom:3px;">ON QUEST · {{ h.quest }}</div>
+            <div style="font-family:'Baloo 2',cursive; font-weight:600; font-size:17px; color:#4A3826; line-height:1.1;">{{ h.questTitle }}</div>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1; background:#EAF0DE; border-radius:11px; padding:8px 12px;"><div style="font-family:'Baloo 2';font-weight:800;font-size:21px;color:#5A6E38;line-height:1;">{{ h.cleared }}</div><div style="color:#7A8B45;font-size:14px;">cleared</div></div>
+            <div style="flex:1; background:#F3E1B8; border-radius:11px; padding:8px 12px;"><div style="display:flex;align-items:center;gap:4px;font-family:'Baloo 2';font-weight:800;font-size:21px;color:#7A5A1A;line-height:1;"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#E7B93D" stroke="#B5851F" stroke-width="2"/></svg>{{ h.earned }}</div><div style="color:#A98A3C;font-size:14px;">earned</div></div>
+          </div>
+        </div>
+      </sc-for>
+      <!-- empty slot -->
+      <div style="border:2px dashed #6E4A32; border-radius:20px; padding:18px; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:220px; color:#C9AE84; text-align:center;">
+        <div style="width:52px;height:52px;border-radius:50%;border:2px dashed #6E4A32;display:flex;align-items:center;justify-content:center;font-size:30px;margin-bottom:10px;">+</div>
+        <div style="font-size:18px;">Summon a hero</div>
+        <div style="font-family:'Silkscreen',monospace; font-size:9px; margin-top:6px; color:#9A7B54;">2 SLOTS OPEN</div>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if></x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { detailCode: null, partyOpen: false, detailTab: "quest" };
+
+  descs = {
+    "WF-2481": "The old auth guardrails leak permissions between realms. Rebuild them around the new role runes so every gate checks the bearer before the door swings.",
+    "WF-2490": "Move the token ledger off the dusty flat file and into the proper vault so balances survive a crash and can be audited by the guild.",
+    "WF-2503": "New adventurers arrive lost. Write the onboarding scrolls that walk them from first login to first cleared quest.",
+    "WF-2495": "Stand up a clean dev environment any hero can conjure in one command — repo, deps and a seeded database.",
+    "WF-2498": "Forge a CI pipeline that runs the trials on every push and refuses to let a broken build reach the merge gate.",
+    "WF-2487": "Chart every API road before we pave it: list the endpoints, draw the schema and get the guild's blessing.",
+    "WF-2492": "Map the data dungeon so no one wanders into an unindexed table. Sketch the relationships and mark the dangerous joins.",
+    "WF-2477": "A merge conflict blocks the caravan. Find the tangle, rebase the branch cleanly and re-run the trials until green.",
+    "WF-2480": "Responses are slow under load. Brew a caching potion — pick the store, add invalidation runes and measure the speed-up.",
+    "WF-2483": "Requests are stampeding the gate. Tame them with a rate limiter that's fair to honest callers and brutal to floods.",
+    "WF-2470": "Guard the payment gate: the specs pass and checks are green — it only awaits the guild's final seal before merge.",
+    "WF-2472": "Search results feel muddy. Polish the ranking relic so the right answer rises to the top, then hand it to a reviewer.",
+    "WF-2455": "The trial suite flaked at random and blocked merges. Quarantine the flakes and stabilise the whole suite. Vanquished.",
+    "WF-2450": "Add structured beacon logs so future heroes can see what happened in the dark. Vanquished.",
+    "WF-2440": "A rewrite of the legacy crypt — parked until the data dungeon is fully mapped, so we don't build on cursed ground."
+  };
+
+  md2html(s) {
+    const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const inline = (t) => esc(t)
+      .replace(/`([^`]+)`/g, '<code style="background:#EDE0C2;border-radius:5px;padding:1px 5px;font-family:monospace;font-size:.9em;color:#8A5A1A;">$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#4A3826;">$1</strong>');
+    const lines = s.split("\n");
+    let out = "", list = false;
+    const closeList = () => { if (list) { out += "</ul>"; list = false; } };
+    for (let raw of lines) {
+      const l = raw.trim();
+      if (!l) { closeList(); continue; }
+      if (l.startsWith("## ")) { closeList(); out += '<h3 style="font-family:Baloo 2,cursive;font-weight:800;font-size:18px;color:#4A3826;margin:16px 0 6px;">' + inline(l.slice(3)) + "</h3>"; }
+      else if (l.startsWith("- ")) { if (!list) { out += '<ul style="margin:4px 0;padding-left:20px;display:flex;flex-direction:column;gap:5px;">'; list = true; } out += '<li style="color:#5B4632;">' + inline(l.slice(2)) + "</li>"; }
+      else { closeList(); out += '<p style="margin:0 0 10px;color:#5B4632;line-height:1.5;">' + inline(l) + "</p>"; }
+    }
+    closeList();
+    return out;
+  }
+
+  quests = {
+    "WF-2481": { title: "Refactor the auth guardrails", col: "Backlog", color: "#7A8B45", gold: 320, rarity: 2, status: "Backlog", tint: "#EDE0C2", tintText: "#7A6A54", deps: ["WF-2400"], subs: [["Map old routes",1],["Add guard tests",0],["Retire the legacy shim",0]] },
+    "WF-2490": { title: "Migrate the token ledger", col: "Backlog", color: "#7A8B45", gold: 180, rarity: 1, status: "Backlog", tint: "#EDE0C2", tintText: "#7A6A54", subs: [["Draft the schema",0],["Write the migration",0]] },
+    "WF-2503": { title: "Draft the onboarding scrolls", col: "Backlog", color: "#7A8B45", gold: 140, rarity: 1, status: "Backlog", tint: "#EDE0C2", tintText: "#7A6A54", subs: [["Outline 3 chapters",0]] },
+    "WF-2495": { title: "Summon the dev environment", col: "Bootstrap", color: "#B08948", gold: 260, rarity: 1, status: "Preparing", tint: "#F6E9CE", tintText: "#96702F", subs: [["Clone the repo relic",1],["Install dependencies",0],["Seed the database",0]] },
+    "WF-2498": { title: "Forge the CI pipeline", col: "Bootstrap", color: "#B08948", gold: 300, rarity: 2, status: "Preparing", tint: "#F6E9CE", tintText: "#96702F", subs: [["Wire the test runner",0],["Add the deploy gate",0]] },
+    "WF-2487": { title: "Chart the API roads", col: "Planning", color: "#5C86B0", gold: 420, rarity: 3, status: "Planning", tint: "#DCE7F2", tintText: "#3F6087", subs: [["List endpoints",1],["Draw the schema map",1],["Review with the guild",0]] },
+    "WF-2492": { title: "Map the data dungeon", col: "Planning", color: "#5C86B0", gold: 360, rarity: 2, status: "Planning", tint: "#DCE7F2", tintText: "#3F6087", subs: [["Sketch the ER map",0],["Mark the danger tables",0]] },
+    "WF-2477": { title: "Patch the merge cavern", col: "Implementation", color: "#D98A3D", gold: 540, rarity: 2, status: "In progress", tint: "#FBE4C6", tintText: "#C25A3B", progress: 55, hero: "Aria", subs: [["Find the conflict",1],["Rebase the branch",0],["Re-run the trials",0]] },
+    "WF-2480": { title: "Brew the caching potion", col: "Implementation", color: "#D98A3D", gold: 480, rarity: 2, status: "In progress", tint: "#FBE4C6", tintText: "#C25A3B", progress: 30, hero: "Bram", subs: [["Pick the cache store",1],["Add invalidation runes",0]] },
+    "WF-2483": { title: "Tame the rate limiter", col: "Implementation", color: "#D98A3D", gold: 380, rarity: 1, status: "Queued", tint: "#FBE4C6", tintText: "#C25A3B", subs: [["Choose a strategy",0]] },
+    "WF-2470": { title: "Guard the payment gate", col: "Awaiting Merge", color: "#A8506B", gold: 610, rarity: 3, status: "Review ✓", tint: "#EAF0DE", tintText: "#5A6E38", hero: "Pip", subs: [["Write the specs",1],["All checks green",1],["Await the guild seal",0]] },
+    "WF-2472": { title: "Polish the search relic", col: "Awaiting Merge", color: "#A8506B", gold: 290, rarity: 2, status: "Review", tint: "#F3E1E7", tintText: "#A8506B", subs: [["Tune the ranking",1],["Awaiting a reviewer",0]] },
+    "WF-2455": { title: "Seal the flaky specs", col: "Done", color: "#5B4632", gold: 220, rarity: 2, status: "Vanquished", tint: "#E7EDD4", tintText: "#5A6E38", done: true, subs: [["Quarantine the flakes",1],["Stabilise the suite",1]] },
+    "WF-2450": { title: "Light the beacon logs", col: "Done", color: "#5B4632", gold: 150, rarity: 1, status: "Vanquished", tint: "#E7EDD4", tintText: "#5A6E38", done: true, subs: [["Add structured logs",1]] },
+    "WF-2440": { title: "Rework the legacy crypt", col: "Parked", color: "#9A8464", gold: 0, rarity: 1, status: "On hold", tint: "#EDE4D3", tintText: "#7A6A54", parked: true, subs: [["Blocked: data dungeon unmapped",0]] }
+  };
+
+  heroes = {
+    Aria: { color: "#A8506B", cls: "Sonnet", mana: 72, manaFrom: "#5E86C7", manaTo: "#8FB6E0", level: 12, quest: "WF-2477", cleared: 18, earned: 4820 },
+    Bram: { color: "#D98A3D", cls: "Opus", mana: 34, manaFrom: "#C25A3B", manaTo: "#E08A3C", level: 15, quest: "WF-2480", cleared: 24, earned: 7310 },
+    Pip:  { color: "#7A8B45", cls: "Haiku", mana: 88, manaFrom: "#5E86C7", manaTo: "#8FB6E0", level: 8, quest: "WF-2470", cleared: 11, earned: 2140 }
+  };
+
+  componentDidMount() {
+    const root = this.$el || document;
+    setTimeout(() => {
+      const spans = (this.$el || document).querySelectorAll("span");
+      spans.forEach((s) => {
+        const t = (s.textContent || "").trim();
+        if (/^WF-\d+$/.test(t) && parseFloat(getComputedStyle(s).fontSize) < 12) {
+          const card = s.parentElement && s.parentElement.parentElement;
+          if (!card || card.dataset.qbWired) return;
+          card.dataset.qbWired = "1";
+          card.style.cursor = "pointer";
+          card.style.transition = "transform .12s ease, box-shadow .12s ease";
+          card.addEventListener("mouseenter", () => { card.style.transform = "translateY(-3px)"; });
+          card.addEventListener("mouseleave", () => { card.style.transform = "translateY(0)"; });
+          card.addEventListener("click", () => this.setState({ detailCode: t, detailTab: "quest" }));
+        }
+      });
+    }, 60);
+  }
+
+  renderVals() {
+    const code = this.state.detailCode;
+    const q = code ? this.quests[code] : null;
+    let d = null;
+    if (q) {
+      const hero = q.hero ? this.heroes[q.hero] : null;
+      const total = q.subs.length;
+      const doneN = q.subs.filter((x) => x[1]).length;
+      const subs = q.subs.map((x, i) => ({
+        label: x[0],
+        boxBg: x[1] ? q.color : "transparent",
+        boxBorder: x[1] ? ("2px solid " + q.color) : "2px solid #D8C39A",
+        checkOpacity: x[1] ? 1 : 0,
+        textColor: x[1] ? "#5B4632" : "#9A8464",
+        strike: x[1] ? "line-through" : "none"
+      }));
+      const stars = [];
+      for (let i = 0; i < 3; i++) stars.push({ fill: i < q.rarity ? "#D9A441" : "#E0D3B4" });
+      const log = [];
+      log.push({ dot: q.color, text: "Quest posted to the " + q.col + " board", time: "Day 9" });
+      if (hero) log.push({ dot: hero.color, text: hero.name + " took up the quest", time: "Day 12" });
+      if (doneN > 0) log.push({ dot: "#7A8B45", text: doneN + " of " + total + " sub-quests cleared", time: "Day 13" });
+      if (q.done) log.push({ dot: "#7A8B45", text: "Quest vanquished — " + q.gold + " gold awarded", time: "Day 14" });
+      else if (q.parked) log.push({ dot: "#9A8464", text: "Parked by the guild master", time: "Day 13" });
+      const desc = this.descs[code] || "";
+      let mdSrc = desc + "\n\n## Acceptance\n";
+      q.subs.forEach((x) => { mdSrc += "- " + (x[1] ? "**[done]** " : "[ ] ") + x[0] + "\n"; });
+      if (q.deps && q.deps.length) mdSrc += "\n## Locked behind\n- " + q.deps.join("\n- ") + "\n";
+      mdSrc += "\n## Reward\n- `" + q.gold + "` gold on completion";
+      const mdEl = React.createElement("div", { style: { fontSize: "16px", fontFamily: "'Nunito',sans-serif" }, dangerouslySetInnerHTML: { __html: this.md2html(mdSrc) } });
+      const tab = this.state.detailTab;
+      d = {
+        code, title: q.title, col: q.col, color: q.color, gold: q.gold,
+        desc, mdEl, isQuest: tab === "quest", isScroll: tab === "scroll",
+        questTabBg: tab === "quest" ? "#fff" : "transparent", questTabColor: tab === "quest" ? "#4A3826" : "#9A8464",
+        scrollTabBg: tab === "scroll" ? "#fff" : "transparent", scrollTabColor: tab === "scroll" ? "#4A3826" : "#9A8464",
+        status: q.status, tint: q.tint, tintText: q.tintText,
+        hasProgress: q.progress != null, progress: (q.progress || 0) + "%",
+        hasHero: !!hero, heroName: q.hero, heroColor: hero ? hero.color : "#9A8464", heroInitial: q.hero ? q.hero[0] : "",
+        heroCls: hero ? hero.cls : "",
+        hasDeps: !!(q.deps && q.deps.length), deps: (q.deps || []).map((c) => ({ code: c })),
+        subs, stars, doneLabel: doneN + " / " + total, log
+      };
+    }
+
+    const party = Object.keys(this.heroes).map((name) => {
+      const h = this.heroes[name];
+      return {
+        name, initial: name[0], color: h.color, cls: h.cls,
+        mana: h.mana + "%", manaW: h.mana + "%", manaFrom: h.manaFrom, manaTo: h.manaTo,
+        level: "LV " + h.level, quest: h.quest,
+        questTitle: this.quests[h.quest] ? this.quests[h.quest].title : "",
+        cleared: h.cleared, earned: h.earned.toLocaleString()
+      };
+    });
+
+    return {
+      detailOpen: !!d, d,
+      partyOpen: this.state.partyOpen, party,
+      openParty: () => this.setState({ partyOpen: true }),
+      closeParty: () => this.setState({ partyOpen: false }),
+      closeDetail: () => this.setState({ detailCode: null }),
+      setQuestTab: () => this.setState({ detailTab: "quest" }),
+      setScrollTab: () => this.setState({ detailTab: "scroll" }),
+      stop: (e) => e.stopPropagation()
+    };
+  }
+}
+</script>
+</body>
+</html>

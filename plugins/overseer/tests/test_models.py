@@ -154,6 +154,22 @@ class TestCardParse:
         card = Card.from_text(SAMPLE_CARD)
         assert "checklist" not in card.to_text()
 
+    def test_repo_less_card_stays_byte_stable(self):
+        """Cards without a `repo:` label must not gain one on re-serialization
+        — existing card files stay byte-stable."""
+        card = Card.from_text(SAMPLE_CARD)
+        assert "repo" not in card.to_text()
+
+    def test_unclaimed_card_stays_byte_stable(self):
+        """An unclaimed card must not gain any of the four claim keys on
+        re-serialization (design spec §3, checklist/repo precedent)."""
+        card = Card.from_text(SAMPLE_CARD)
+        text = card.to_text()
+        assert "claimed_by" not in text
+        assert "claimed_at" not in text
+        assert "claim_acked" not in text
+        assert "claim_nudged" not in text
+
     def test_to_text_formats_budget_as_strings(self):
         card = Card.from_text(SAMPLE_CARD)
         assert "estimate: 400k" in card.to_text()
@@ -483,3 +499,133 @@ class TestChecklist:
         )
         again = Card.from_text(card.to_text())
         assert again.checklist == card.checklist
+
+
+class TestRepo:
+    def _card_text(self, repo_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{repo_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_repo_parses_and_round_trips(self):
+        card = Card.from_text(self._card_text("repo: pip-skills\n"))
+        assert card.repo == "pip-skills"
+        assert "repo: pip-skills" in card.to_text()  # survives re-serialization
+        again = Card.from_text(card.to_text())
+        assert again.repo == card.repo
+
+    def test_repo_absent_defaults_none(self):
+        card = Card.from_text(self._card_text())
+        assert card.repo is None
+        assert "repo:" not in card.to_text()
+
+    def test_repo_non_str_becomes_none(self):
+        card = Card.from_text(self._card_text("repo: 42\n"))
+        assert card.repo is None
+
+    def test_repo_empty_omitted_from_serialized_text(self):
+        card = Card(id="WF-001", title="T", status="planned", body="## Goal\nx")
+        assert "repo" not in card.to_text()
+
+    def test_repo_round_trips_via_dataclass(self):
+        card = Card(
+            id="WF-001", title="T", status="planned", body="## Goal\nx",
+            repo="pip-skills",
+        )
+        again = Card.from_text(card.to_text())
+        assert again.repo == card.repo
+
+
+class TestClaimFields:
+    def _card_text(self, claim_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{claim_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_claim_fields_parse_and_round_trip(self):
+        card = Card.from_text(self._card_text(
+            "claimed_by: sess-abc\n"
+            "claimed_at: '2026-07-13T10:00'\n"
+            "claim_acked: true\n"
+            "claim_nudged: false\n"
+        ))
+        assert card.claimed_by == "sess-abc"
+        assert card.claimed_at == "2026-07-13T10:00"
+        assert card.claim_acked is True
+        assert card.claim_nudged is False
+        text = card.to_text()
+        assert "claimed_by: sess-abc" in text
+        again = Card.from_text(text)
+        assert again == card
+
+    def test_claim_fields_absent_default_unclaimed(self):
+        card = Card.from_text(self._card_text())
+        assert card.claimed_by is None
+        assert card.claimed_at is None
+        assert card.claim_acked is False
+        assert card.claim_nudged is False
+
+    def test_claim_acked_and_nudged_omitted_while_unclaimed(self):
+        """Even a stray `claim_acked`/`claim_nudged` with no `claimed_by`
+        (hand-edited or corrupt) must not survive re-serialization — the
+        group only appears once `claimed_by` is set."""
+        card = Card.from_text(self._card_text("claim_acked: true\n"))
+        assert "claim_acked" not in card.to_text()
+
+    def test_claim_by_non_str_becomes_none(self):
+        card = Card.from_text(self._card_text("claimed_by: 42\n"))
+        assert card.claimed_by is None
+
+
+class TestClaimMethods:
+    def _card(self, **overrides: object) -> Card:
+        fields = dict(id="WF-001", title="T", status="in-flight", updated="2026-07-13T09:00")
+        fields.update(overrides)
+        return Card(**fields)  # type: ignore[arg-type]
+
+    def test_claim_stamps_all_fields_and_resets_acked_nudged(self):
+        card = self._card(claim_acked=True, claim_nudged=True)
+        card.claim("sess-1", "2026-07-13T10:00")
+        assert card.claimed_by == "sess-1"
+        assert card.claimed_at == "2026-07-13T10:00"
+        assert card.claim_acked is False
+        assert card.claim_nudged is False
+        assert card.updated == "2026-07-13T10:00"
+
+    def test_claim_does_not_touch_status_or_stage(self):
+        card = self._card(status="planned", stage=None)
+        card.claim("sess-1", "2026-07-13T10:00")
+        assert card.status == "planned"
+        assert card.stage is None
+
+    def test_unclaim_clears_all_four_fields(self):
+        card = self._card(
+            claimed_by="sess-1", claimed_at="2026-07-13T10:00",
+            claim_acked=True, claim_nudged=True,
+        )
+        card.unclaim("2026-07-13T11:00")
+        assert card.claimed_by is None
+        assert card.claimed_at is None
+        assert card.claim_acked is False
+        assert card.claim_nudged is False
+        assert card.updated == "2026-07-13T11:00"
+
+    def test_ack_claim_noop_when_unclaimed(self):
+        card = self._card()
+        card.ack_claim()
+        assert card.claim_acked is False
+
+    def test_ack_claim_sets_true_when_claimed(self):
+        card = self._card(claimed_by="sess-1")
+        card.ack_claim()
+        assert card.claim_acked is True

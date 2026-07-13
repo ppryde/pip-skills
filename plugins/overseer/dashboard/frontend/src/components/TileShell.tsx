@@ -51,6 +51,11 @@ function TileShell({
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: card.id, disabled: sortableDisabled });
 
+  // `max=3` drives the tile's sliding-wheel checklist display (active row
+  // centred, neighbours faded) — see checklistWindow's doc comment.
+  const { visible: checklistVisible, activeIndex: checklistActiveIndex } =
+    checklistWindow(card.checklist, 3);
+
   // No @dnd-kit/utilities per the frozen constraints — build the transform
   // string by hand instead of importing `CSS.Transform.toString`.
   const style: CSSProperties | undefined = transform
@@ -103,6 +108,22 @@ function TileShell({
               {card.priority}
             </span>
           )}
+          {card.repo && <span className="repo-chip">{card.repo}</span>}
+          {/*
+            Presence-only signal (design spec §5): the board payload carries
+            just the holder's bare census session_id, no session_name — so
+            the tile shows quiet "claimed" text rather than guessing at a
+            label, with the full id available via the title tooltip.
+            Staleness dimming needs the sessions poll (drawer-only data), so
+            it lives in the drawer's ClaimControl row instead of here — see
+            that component's doc comment (deviates from the spec's
+            "stale-dimmed tile badge" per the card brief's approved carve-out).
+          */}
+          {card.claimed_by && (
+            <span className="claim-badge" title={card.claimed_by}>
+              claimed
+            </span>
+          )}
           {card.status === "blocked" && (
             <span className="badge badge--blocked">BLOCKED</span>
           )}
@@ -128,11 +149,13 @@ function TileShell({
           Inert (no button/a/role) — see ChecklistRows's doc comment. It
           lives inside the plain body div above, so it must never introduce
           an interactive element that would nest inside the body's onClick
-          target or the title button.
+          target or the title button. `activeIndex` drives the sliding-
+          wheel display (active row centred, neighbours faded).
         */}
         {card.checklist.length > 0 && (
           <ChecklistRows
-            entries={checklistWindow(card.checklist).visible}
+            entries={checklistVisible}
+            activeIndex={checklistActiveIndex}
             windowed
           />
         )}

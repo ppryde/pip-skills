@@ -1,8 +1,11 @@
+import subprocess
+
 import pytest
 
 from scripts.models import Card
 from scripts.store import (
     archive_card,
+    derive_repo_label,
     find_card_path,
     init_workflow,
     load_archived_cards,
@@ -178,3 +181,40 @@ class TestStateRoot:
         assert root == tmp_path / "scratch" / "workflow"
         assert (root / "cards").is_dir()
         assert ".workflow/" not in (tmp_path / ".gitignore").read_text()
+
+
+class TestDeriveRepoLabel:
+    def test_main_repo_uses_top_level_name(self, tmp_path):
+        main_repo = tmp_path / "pip-skills"
+        main_repo.mkdir()
+        _git_init(main_repo)
+        assert derive_repo_label(main_repo) == "pip-skills"
+
+    def test_worktree_derives_main_repo_name_not_worktree_dirname(self, tmp_path):
+        """A ledger root living inside a linked worktree (e.g.
+        `.claude/worktrees/overseer-orchestration`) must still record the
+        MAIN repo's name — never the worktree directory's own basename."""
+        main_repo = tmp_path / "pip-skills"
+        main_repo.mkdir()
+        _git_init(main_repo)
+        (main_repo / "README.md").write_text("x")
+        subprocess.run(["git", "add", "."], cwd=main_repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=main_repo, check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "branch", "wt-branch"], cwd=main_repo, check=True)
+
+        worktree_dir = tmp_path / "totally-unrelated-worktree-name"
+        subprocess.run(
+            ["git", "worktree", "add", str(worktree_dir), "wt-branch"],
+            cwd=main_repo, check=True, capture_output=True,
+        )
+
+        assert derive_repo_label(worktree_dir) == "pip-skills"
+
+    def test_non_git_dir_returns_none(self, tmp_path):
+        assert derive_repo_label(tmp_path) is None
+
+    def test_missing_dir_returns_none(self, tmp_path):
+        assert derive_repo_label(tmp_path / "does-not-exist") is None

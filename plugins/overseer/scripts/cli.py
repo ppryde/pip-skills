@@ -36,6 +36,7 @@ from scripts.sprints import (  # noqa: E402
 )
 from scripts.store import (  # noqa: E402
     archive_card,
+    derive_repo_label,
     find_card_path,
     init_workflow,
     load_archived_cards,
@@ -132,6 +133,44 @@ def _context_footer(repo_root: Path) -> str:
     return ""
 
 
+def _census_cli() -> Path | None:
+    """Best-effort locate the sibling census plugin's CLI (soft dependency)."""
+    here = Path(__file__).resolve()  # plugins/overseer/scripts/cli.py
+    candidate = here.parent.parent.parent / "census" / "scripts" / "cli.py"
+    return candidate if candidate.exists() else None
+
+
+def _census_session_live(session_id: str) -> bool:
+    """Is ``session_id`` live in census (fresh within its 90s staleness horizon)?
+
+    census is a SOFT dependency, shelled via subprocess exactly like the
+    dashboard backend's ``cli_client.run_census`` — overseer must not import
+    census internals (design spec §3). Every failure path (plugin absent,
+    timeout, non-zero exit, unparsable output, empty/missing entry) returns
+    False, i.e. "treat the holder as stale": a claim must not wedge just
+    because census is down.
+    """
+    cli = _census_cli()
+    if cli is None:
+        return False
+    try:
+        result = subprocess.run(
+            [sys.executable, str(cli), "read", "--session", session_id],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        return False
+    if not isinstance(data, dict) or not data:
+        return False
+    return not data.get("stale", True)
+
+
 def _sync(repo_root: Path, card: Card) -> None:
     """Write ordering per spec: card first, then the index view.
 
@@ -178,6 +217,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         budget_estimate=parse_tokens(args.estimate),
         created=_today(),
         updated=_now(),
+        repo=args.repo if args.repo else derive_repo_label(args.root),
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
     _sync(args.root, card)
@@ -188,6 +228,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
 def cmd_set_stage(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.set_stage(args.stage, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     print(f"{card.id} → {args.stage}")
     return 0
@@ -196,6 +237,7 @@ def cmd_set_stage(args: argparse.Namespace) -> int:
 def cmd_block(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.block(args.reason, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     print(f"{card.id} blocked: {args.reason}")
     return 0
@@ -237,6 +279,8 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.pr = args.pr
     if args.touches is not None:
         card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+    if args.repo is not None:
+        card.repo = args.repo if args.repo else None
     if args.order is not None:
         card.order = args.order
     if args.priority is not None:
@@ -568,10 +612,182 @@ def cmd_unpark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_claim(args: argparse.Namespace) -> int:
+    """`overseer claim <id> --session <sid> [--force]` — design spec §3.
+
+    A pure stamp, no delivery side effects. Unknown card -> propagates
+    FileNotFoundError to `main` (exit 1), same as every other verb. Refuses
+    (exit 1) only when the existing holder is a DIFFERENT, live session and
+    `--force` was not given; a stale/absent holder is displaced with a note,
+    and `--force` displaces a live holder too. Re-claiming by the same
+    session that already holds it is treated as an ordinary (re-)stamp — no
+    liveness check against itself.
+    """
+    card = _load(args.root, args.card_id)
+    note = None
+    if card.claimed_by and card.claimed_by != args.session:
+        live = _census_session_live(card.claimed_by)
+        if live and not args.force:
+            print(
+                f"error: {card.id} already claimed by {card.claimed_by} (live)"
+                " — use --force to override",
+                file=sys.stderr,
+            )
+            return 1
+        kind = "live" if live else "stale"
+        note = f"note: displaced {kind} claim held by {card.claimed_by}"
+    card.claim(args.session, _now())
+    _sync(args.root, card)
+    if note:
+        print(note)
+    print(f"{card.id} claimed by {args.session}")
+    return 0
+
+
+def cmd_unclaim(args: argparse.Namespace) -> int:
+    """`overseer unclaim <id>` — clears all claim fields, idempotent (exit 0
+    even when already unclaimed)."""
+    card = _load(args.root, args.card_id)
+    card.unclaim(_now())
+    _sync(args.root, card)
+    print(f"{card.id} unclaimed")
+    return 0
+
+
+def _mark_claim_nudged(repo_root: Path, card_id: str) -> bool:
+    """Stamp `claim_nudged = true` on `card_id` — the single-writer path
+    shared by the `claim-nudged` CLI verb and `claim-stop-hook` (design spec
+    §4, WF-022). Returns False (no write) when the card is unknown, corrupt,
+    or no longer claimed (a race with `unclaim`/a fresh `claim`) — never
+    raises, so a hook calling this directly stays quarantine-safe.
+    """
+    try:
+        card = _load(repo_root, card_id)
+    except (FileNotFoundError, CardParseError):
+        return False
+    if not card.claimed_by:
+        return False
+    card.claim_nudged = True
+    card.updated = _now()
+    _sync(repo_root, card)
+    return True
+
+
+def cmd_claim_nudged(args: argparse.Namespace) -> int:
+    """`overseer claim-nudged <id>` — for the WF-022 Stop hook to shell after
+    it has already blocked once for an unacked claim (design spec §4).
+    """
+    if _mark_claim_nudged(args.root, args.card_id):
+        print(f"{args.card_id} claim_nudged")
+    return 0
+
+
+# --- claim-stop-hook / claim-prompt-hook: turn-boundary claim delivery --------
+#
+# Design spec §4 (docs/superpowers/specs/2026-07-13-overseer-card-claim-design.md).
+# Both hooks read `session_id` from their stdin payload, scan live cards for
+# `claimed_by == session_id && !claim_acked`, and follow the checklist-sync
+# quarantine-safe shape: every failure path exits 0 with no output.
+
+
+def _unacked_claims(repo_root: Path, session_id: str) -> list[Card]:
+    """Live cards claimed by `session_id` and not yet acked, in the store's
+    deterministic (id-sorted) order — the "first" claim for nudge purposes is
+    whichever sorts first."""
+    cards, _ = load_live_cards(state_root(repo_root))
+    return [c for c in cards if c.claimed_by == session_id and not c.claim_acked]
+
+
+def cmd_claim_stop_hook(args: argparse.Namespace) -> int:
+    """Stop hook backend (design spec §4). At the turn boundary: an unacked
+    claim addressed to this session means work was handed over while it was
+    busy.
+
+    - No unacked claims → silent, no output.
+    - First nudge this cycle (`!claim_nudged && !stop_hook_active`) →
+      `decision: block` with the pickup reason, and stamps `claim_nudged` via
+      `_mark_claim_nudged` (direct call, same single-writer path the CLI verb
+      uses) so the next Stop passes clean once the pickup acks. Multiple
+      unacked claims: only the first (id order) is nudged/blocked on; the
+      rest are named in the reason line.
+    - Already nudged, or `stop_hook_active` (a Stop hook already blocked this
+      cycle) → non-blocking `systemMessage`, stop stands.
+
+    Every failure path exits 0 with no output — never breaks the stop.
+    """
+    try:
+        payload = _read_hook_payload()
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return 0
+        repo_root = _hook_root(payload, args)
+        if not state_root(repo_root).is_dir():
+            return 0
+        unacked = _unacked_claims(repo_root, session_id)
+        if not unacked:
+            return 0
+        first, rest = unacked[0], unacked[1:]
+        stop_hook_active = bool(payload.get("stop_hook_active"))
+        if not first.claim_nudged and not stop_hook_active:
+            _mark_claim_nudged(repo_root, first.id)
+            reason = (
+                f"Claimed for you from the dashboard: pick up {first.id} — "
+                "run resume and work the card."
+            )
+            if rest:
+                reason += f" (also unacknowledged: {', '.join(c.id for c in rest)})"
+            print(json.dumps({"decision": "block", "reason": reason}))
+            return 0
+        print(json.dumps({
+            "systemMessage": f"overseer: {first.id} is claimed for this "
+                              "session and unacknowledged",
+        }))
+        return 0
+    except Exception:
+        return 0
+
+
+def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
+    """UserPromptSubmit hook backend (design spec §4). Covers the attended
+    case: injects a one-line notice when unacked claims addressed to this
+    session exist, so a human mid-conversation doesn't need to wait for a
+    turn end. Never blocks; repeats every prompt until a work verb acks the
+    claim. Every failure path exits 0 with no output.
+    """
+    try:
+        payload = _read_hook_payload()
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return 0
+        repo_root = _hook_root(payload, args)
+        if not state_root(repo_root).is_dir():
+            return 0
+        unacked = _unacked_claims(repo_root, session_id)
+        if not unacked:
+            return 0
+        event_name = payload.get("hook_event_name")
+        if not isinstance(event_name, str) or not event_name:
+            event_name = "UserPromptSubmit"
+        notice = (
+            "Cards claimed for this session from the dashboard: "
+            f"{', '.join(c.id for c in unacked)} — run resume / pick up."
+        )
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": notice,
+            },
+        }))
+        return 0
+    except Exception:
+        return 0
+
+
 def cmd_log_progress(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     tokens = parse_tokens(args.tokens) or 0
     card.log_progress(args.note, tokens, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     if card.tripwire_breached:
         actual = format_tokens(card.budget_actual)
@@ -588,6 +804,7 @@ def cmd_log_progress(args: argparse.Namespace) -> int:
 def cmd_log_review(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.log_review(args.stage, args.reviewers, args.verdict, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
     print(f"{card.id} {args.stage} round {card.review_rounds(args.stage)} logged")
     return 0
@@ -639,11 +856,11 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     _, quarantined = load_live_cards(state_root(args.root))
     _report_quarantined(quarantined)
-    entries = resume_entries(args.root)
+    entries = resume_entries(args.root, session_id=args.session_id)
     if args.json:
         print(json.dumps(entries, indent=2))
     else:
-        print(format_report(entries) + _context_footer(args.root))
+        print(format_report(entries, session_id=args.session_id) + _context_footer(args.root))
     return 0
 
 
@@ -722,6 +939,10 @@ def cmd_show(args: argparse.Namespace) -> int:
         "updated": card.updated,
         "blocked_on": card.blocked_on,
         "checklist": card.checklist,
+        "repo": card.repo,
+        "claimed_by": card.claimed_by,
+        "claimed_at": card.claimed_at,
+        "claim_acked": card.claim_acked,
         "sections": card.sections,
         "body": card.body,
     }
@@ -897,6 +1118,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sprint")
     p.add_argument("--estimate")
     p.add_argument("--goal")
+    p.add_argument(
+        "--repo",
+        help="override the derived top-level repo name (default: derived "
+             "from --root via `git rev-parse --git-common-dir`)",
+    )
     p.set_defaults(func=cmd_new_card)
 
     p = sub.add_parser("set-stage")
@@ -927,6 +1153,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--parent")
     p.add_argument("--order", type=int)
     p.add_argument("--priority")
+    p.add_argument("--repo", help="empty string clears")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("depends")
@@ -951,6 +1178,23 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("unpark")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_unpark)
+
+    p = sub.add_parser("claim")
+    p.add_argument("card_id")
+    p.add_argument("--session", required=True)
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_claim)
+
+    p = sub.add_parser("unclaim")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_unclaim)
+
+    p = sub.add_parser("claim-nudged")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_claim_nudged)
+
+    sub.add_parser("claim-stop-hook").set_defaults(func=cmd_claim_stop_hook)
+    sub.add_parser("claim-prompt-hook").set_defaults(func=cmd_claim_prompt_hook)
 
     p = sub.add_parser("log-progress")
     p.add_argument("card_id")

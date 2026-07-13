@@ -13,9 +13,12 @@ vi.mock("../api/client", () => ({
   park: vi.fn(),
   unpark: vi.fn(),
   move: vi.fn(),
+  getSessions: vi.fn(),
+  claimCard: vi.fn(),
+  unclaimCard: vi.fn(),
 }));
 
-import { getCard, setPriority } from "../api/client";
+import { getCard, getSessions, setPriority } from "../api/client";
 import CardDetailDrawer from "./CardDetailDrawer";
 
 const BOARD_RESPONSE = {} as BoardResponse;
@@ -77,6 +80,10 @@ describe("<CardDetailDrawer/>", () => {
   // can't leak into the next.
   beforeEach(() => {
     vi.resetAllMocks();
+    // ClaimControl (mounted whenever the drawer renders a card) fetches
+    // sessions on mount — an empty list keeps it inert for tests that don't
+    // exercise claim/assign behaviour themselves.
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
   });
 
   it("renders nothing when cardId is null", () => {
@@ -129,6 +136,41 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByText("P1")).toBeInTheDocument();
     expect(screen.getByText(/in-flight/)).toBeInTheDocument();
     expect(screen.getByText(/implementation/)).toBeInTheDocument();
+  });
+
+  it("renders the repo chip in the facts row when the card carries a repo label", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-A", repo: "pip-skills" })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    expect(await screen.findByText("pip-skills")).toBeInTheDocument();
+  });
+
+  it("renders no repo chip when the card carries no repo label", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(container.querySelector(".repo-chip")).toBeNull();
   });
 
   it("renders unknown section headings too — no hardcoded fixed set", async () => {
@@ -522,6 +564,43 @@ describe("<CardDetailDrawer/>", () => {
     expect(container.querySelector(".checklist")).not.toHaveClass(
       "checklist--windowed"
     );
+  });
+
+  it("renders the assign-to-session control when the card is unclaimed", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-L", title: "Unclaimed", claimed_by: null })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-L"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    expect(await screen.findByLabelText("Assign to session")).toBeInTheDocument();
+  });
+
+  it("renders the claim holder + Unassign button when the card is claimed", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-M", title: "Claimed", claimed_by: "sess-1" })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-M"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+      />
+    );
+
+    expect(await screen.findByText(/claimed by sess-1/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unassign" })).toBeInTheDocument();
   });
 
   it("renders no Tasks section when the checklist is empty", async () => {

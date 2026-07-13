@@ -18,7 +18,10 @@ export interface ChecklistWindowResult {
 }
 
 /**
- * Pure windowing logic (no React) for the tile's 5-row focus window.
+ * Pure windowing logic (no React) for a fixed-size focus window onto a
+ * checklist. The tile uses this with `max=3` to drive a sliding-wheel
+ * display (see ChecklistRows/TileShell) with the active entry centred;
+ * other consumers may pass a different `max`.
  * "Active" is the entry the user most likely cares about right now:
  *   1. the first `in_progress` entry, else
  *   2. the first entry that isn't `completed` (covers "pending"/unknown

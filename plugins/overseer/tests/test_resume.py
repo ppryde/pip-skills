@@ -150,6 +150,54 @@ class TestResumeRelations:
         assert entry["ready"] is True
 
 
+class TestResumeClaimOrdering:
+    """`resume_entries`/`format_report` claim-first ordering — design spec §3."""
+
+    def test_no_session_id_leaves_order_unchanged(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001"))
+        save_card(root, card("WF-002", claimed_by="sess-1"))
+        entries = resume_entries(tmp_path)
+        assert [e["id"] for e in entries] == ["WF-001", "WF-002"]
+
+    def test_session_id_sorts_own_claims_first_stably(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001"))
+        save_card(root, card("WF-002", claimed_by="sess-1"))
+        save_card(root, card("WF-003", claimed_by="sess-1"))
+        entries = resume_entries(tmp_path, session_id="sess-1")
+        assert [e["id"] for e in entries] == ["WF-002", "WF-003", "WF-001"]
+
+    def test_report_marks_own_claim(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001", claimed_by="sess-1"))
+        entries = resume_entries(tmp_path, session_id="sess-1")
+        assert "← claimed for this session" in format_report(entries, session_id="sess-1")
+
+    def test_report_labels_other_holder(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001", claimed_by="sess-other"))
+        entries = resume_entries(tmp_path, session_id="sess-mine")
+        report = format_report(entries, session_id="sess-mine")
+        assert "claimed by sess-other" in report
+        assert "← claimed for this session" not in report
+
+    def test_report_without_session_id_just_labels_holder(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001", claimed_by="sess-1"))
+        entries = resume_entries(tmp_path)
+        report = format_report(entries)
+        assert "claimed by sess-1" in report
+        assert "← claimed for this session" not in report
+
+    def test_unclaimed_card_has_no_claim_label(self, tmp_path):
+        root = init_workflow(tmp_path)
+        save_card(root, card("WF-001"))
+        entries = resume_entries(tmp_path, session_id="sess-1")
+        report = format_report(entries, session_id="sess-1")
+        assert "claimed" not in report
+
+
 class TestHandoff:
     def _populate(self, tmp_path):
         root = init_workflow(tmp_path)

@@ -34,6 +34,13 @@ stewardship).
    otherwise subagent mode. That is your comms mode for this session.
 
 ## Stage playbook
+Before the first dispatch, size the ceremony (`policy.md` — Right-sizing the
+ceremony): the bullets below are the maximum weight per stage, not the
+mandatory weight. An S, fully-specified card collapses planning into a task
+brief and skips the plan-review loop and PLAN GATE entirely; M/ambiguous and
+L cards traverse every stage, but only L (or novel/cross-plugin) runs each at
+full weight — an M card's planning is proportionate to what's actually
+undecided, per the policy.md table. Review gates never shrink at any size.
 - **bootstrap** — `new-card` (`--jira`/`--linear` key when one exists),
   `set-stage <id> bootstrap`, `log-progress <id> --note "comms: <mode>"
   --tokens 0` (so a crash mid-bootstrap leaves a resumable in-flight card),
@@ -80,6 +87,15 @@ stewardship).
 - **Budget:** tripwire exit 2 is a hard stop, never absorbed silently.
 - **Park vs block vs abandon:** `park` to shelve without a blocker (resumable),
   `block` for a real blocker with a reason, `abandon` for terminal.
+
+## Claims
+The dashboard can assign a card to your session (`claimed_by`), delivered at
+the next turn boundary: a Stop-hook nudge (block once, then a `systemMessage`
+if ignored) or a `UserPromptSubmit` notice for attended sessions. On any claim
+notice — either channel — run `resume --session-id <id>` and pick up the
+named card via the normal pickup flow; its first work verb (`set-stage`/
+`log-progress`) acks the claim automatically. Never ignore a claim silently:
+if you cannot take it right now, `unclaim <id>` and say why.
 
 ## Comms
 - Subagent mode: hub-and-spoke only. Workers report to you; you relay.

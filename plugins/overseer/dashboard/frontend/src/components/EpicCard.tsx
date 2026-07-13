@@ -1,4 +1,5 @@
 import type { BoardCard } from "../api/types";
+import { formatTokens } from "../board/formatTokens";
 import TileShell from "./TileShell";
 
 export interface EpicCardProps {
@@ -57,9 +58,12 @@ function EpicCard({
       }
     >
       {rollup && (
-        <div className="epic-card__rollup">
-          {rollup.done}/{rollup.total} done · {rollup.actual} vs{" "}
-          {rollup.estimate ?? "—"} est.
+        <div
+          className="epic-card__rollup"
+          title={`${rollup.actual} vs ${rollup.estimate ?? "—"} est.`}
+        >
+          {rollup.done}/{rollup.total} done · {formatTokens(rollup.actual)} vs{" "}
+          {rollup.estimate !== null ? formatTokens(rollup.estimate) : "—"} est.
         </div>
       )}
     </TileShell>

@@ -56,6 +56,23 @@ class TestForSession:
         assert st.for_session("nope", now=1.0) is None
 
 
+class TestTmuxPanePassthrough:
+    def test_for_session_includes_tmux_pane(self, store_file, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        st.ingest(_payload("s1", "/wt/a"), now=1.0)
+        assert st.for_session("s1", now=1.0)["tmux_pane"] == "%7"
+
+    def test_latest_for_worktree_includes_tmux_pane(self, store_file, monkeypatch):
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        st.ingest(_payload("s1", "/wt/a"), now=1.0)
+        assert st.latest_for_worktree("/wt/a", now=1.0)["tmux_pane"] == "%7"
+
+    def test_absent_pane_not_present_in_reads(self, store_file, monkeypatch):
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        st.ingest(_payload("s1", "/wt/a"), now=1.0)
+        assert "tmux_pane" not in st.for_session("s1", now=1.0)
+
+
 class TestLimitsAndReadAll:
     def test_limits_none_when_empty(self, store_file):
         assert st.limits() is None
