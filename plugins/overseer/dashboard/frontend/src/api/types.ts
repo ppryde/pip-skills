@@ -128,8 +128,8 @@ export interface ThresholdBody {
 
 export interface SessionSummary {
   id: string;
-  worktree_cwd: string;
-  updated_at: number;
+  worktree_cwd: string | null;
+  updated_at: number | null | string;
   stale: boolean;
   session_name?: string;
   model?: string;
