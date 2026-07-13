@@ -111,19 +111,34 @@ def _limits_section(entry: dict[str, Any] | None) -> dict[str, Any] | None:
 _STALE_HORIZON_SECONDS = 90
 
 
+def _entry_ts(entry: dict[str, Any]) -> float:
+    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0.
+
+    Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
+    Malformed timestamps (None, non-numeric strings) are treated as 0, which
+    places them beyond any staleness horizon — quarantine-safe, never raises.
+    """
+    try:
+        return float(entry.get("updated_at", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
     Returns {id, session_name?, model?, worktree_cwd, pct?, pr?, updated_at, stale}.
     Optional fields (model, pr, session_name, pct) are omitted when absent, mirroring
-    _census_extras's "forward what's there" style.
+    _census_extras's "forward what's there" style. Malformed updated_at values are
+    coerced to 0.0 (treating as stale) rather than raising.
     """
     payload = entry.get("payload") or {}
+    ts = _entry_ts(entry)
     out: dict[str, Any] = {
         "id": sid,
         "worktree_cwd": entry.get("worktree_cwd"),
         "updated_at": entry.get("updated_at"),
-        "stale": (now - entry.get("updated_at", 0)) > _STALE_HORIZON_SECONDS,
+        "stale": (now - ts) > _STALE_HORIZON_SECONDS,
     }
     model = payload.get("model") or {}
     if model.get("display_name"):
@@ -143,6 +158,7 @@ def _sessions_list() -> list[dict[str, Any]]:
     """Fetch all sessions from census and return sorted by updated_at descending.
 
     Returns [] when census is unavailable (soft dependency, never 500s).
+    Handles malformed timestamps defensively (treated as 0, sort last).
     """
     data = run_census_all()
     if not data:
@@ -153,8 +169,8 @@ def _sessions_list() -> list[dict[str, Any]]:
         _session_summary(sid, entry, now)
         for sid, entry in sessions_dict.items()
     ]
-    # Sort by updated_at descending (freshest first)
-    sessions.sort(key=lambda s: s.get("updated_at", 0), reverse=True)
+    # Sort by coerced updated_at descending (freshest first); malformed -> 0.0 -> sorts last
+    sessions.sort(key=lambda s: _entry_ts({"updated_at": s.get("updated_at")}), reverse=True)
     return sessions
 
 

@@ -168,3 +168,95 @@ def test_sessions_optional_fields(
     assert "session_name" not in session
     assert "pr" not in session
     assert "pct" not in session
+
+
+def test_sessions_malformed_updated_at_null(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed updated_at (null) does not raise; treated as stale."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {"s1": {
+            "worktree_cwd": os.path.realpath(str(root)),
+            "updated_at": None,
+            "payload": {"session_name": "test"},
+        }},
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["sessions"]) == 1
+    session = body["sessions"][0]
+    assert session["id"] == "s1"
+    assert session["updated_at"] is None
+    assert session["stale"] is True
+
+
+def test_sessions_malformed_updated_at_string(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed updated_at (non-numeric string) does not raise; treated as stale."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {"s1": {
+            "worktree_cwd": os.path.realpath(str(root)),
+            "updated_at": "bad",
+            "payload": {"session_name": "test"},
+        }},
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["sessions"]) == 1
+    session = body["sessions"][0]
+    assert session["id"] == "s1"
+    assert session["updated_at"] == "bad"
+    assert session["stale"] is True
+
+
+def test_sessions_malformed_updated_at_sorts_last(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed timestamps sort last (treated as 0), behind fresh entries."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {
+            "fresh": {
+                "worktree_cwd": os.path.realpath(str(root)),
+                "updated_at": now - 10,
+                "payload": {},
+            },
+            "malformed": {
+                "worktree_cwd": os.path.realpath(str(root)),
+                "updated_at": "bad",
+                "payload": {},
+            },
+        },
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["sessions"]) == 2
+    # Fresh entry comes first
+    assert body["sessions"][0]["id"] == "fresh"
+    # Malformed (sorted as 0) comes last
+    assert body["sessions"][1]["id"] == "malformed"
