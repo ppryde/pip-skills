@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { Context, Limits } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import ThresholdControl from "./ThresholdControl";
+import SessionsPanel from "./SessionsPanel";
 
 export interface TopBarProps {
   projectName: string;
@@ -36,6 +38,7 @@ function TopBar({
   mutate,
   inFlight,
 }: TopBarProps) {
+  const [showSessions, setShowSessions] = useState(false);
   const pct = context?.pct ?? null;
   const threshold = context?.threshold ?? null;
 
@@ -93,6 +96,16 @@ function TopBar({
           {quarantinedCount} quarantined — see archive/corrupt
         </span>
       )}
+
+      <button
+        type="button"
+        className="topbar__sessions-toggle"
+        onClick={() => setShowSessions(!showSessions)}
+      >
+        Sessions
+      </button>
+
+      {showSessions && <SessionsPanel />}
     </header>
   );
 }
