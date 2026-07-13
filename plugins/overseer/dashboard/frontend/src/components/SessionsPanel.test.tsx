@@ -70,6 +70,43 @@ describe("<SessionsPanel />", () => {
     expect(screen.queryByText(/PR/)).not.toBeInTheDocument();
   });
 
+  it("orders sessions most recently active first", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    mockGetSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          id: "oldest",
+          worktree_cwd: "/w/a",
+          updated_at: 100,
+          stale: true,
+        },
+        {
+          id: "newest",
+          worktree_cwd: "/w/b",
+          updated_at: 300,
+          stale: false,
+        },
+        {
+          id: "middle",
+          worktree_cwd: "/w/c",
+          updated_at: 200,
+          stale: false,
+        },
+      ],
+    });
+
+    const { container } = render(<SessionsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText("newest")).toBeInTheDocument();
+    });
+
+    const names = Array.from(
+      container.querySelectorAll(".sessions-panel__name")
+    ).map((el) => el.textContent);
+    expect(names).toEqual(["newest", "middle", "oldest"]);
+  });
+
   it("shows stale marker for stale sessions", async () => {
     const mockGetSessions = vi.mocked(client.getSessions);
     mockGetSessions.mockResolvedValueOnce({
