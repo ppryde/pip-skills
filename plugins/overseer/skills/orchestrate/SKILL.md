@@ -34,6 +34,13 @@ stewardship).
    otherwise subagent mode. That is your comms mode for this session.
 
 ## Stage playbook
+Before the first dispatch, size the ceremony (`policy.md` — Right-sizing the
+ceremony): the bullets below are the maximum weight per stage, not the
+mandatory weight. An S, fully-specified card collapses planning into a task
+brief and skips the plan-review loop and PLAN GATE entirely; M/ambiguous and
+L cards traverse every stage, but only L (or novel/cross-plugin) runs each at
+full weight — an M card's planning is proportionate to what's actually
+undecided, per the policy.md table. Review gates never shrink at any size.
 - **bootstrap** — `new-card` (`--jira`/`--linear` key when one exists),
   `set-stage <id> bootstrap`, `log-progress <id> --note "comms: <mode>"
   --tokens 0` (so a crash mid-bootstrap leaves a resumable in-flight card),
