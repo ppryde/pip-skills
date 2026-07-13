@@ -109,6 +109,136 @@
   --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
 }
 
+/* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
+   Additive and still unconsumed — nothing reads these yet, so this block has
+   no visual effect on its own. Chunk 4 onward wires components to them. */
+:root {
+  /* Base */
+  --qb-bg-page: #efe3cc;
+  --qb-bg-page-highlight-tl: #f7eed8;
+  --qb-bg-page-highlight-br: #eadcbd;
+  --qb-panel: #fbf4e1;
+  --qb-parchment-muted: #f3ead6;
+  --qb-parchment-muted-2: #f1e9da;
+  --qb-line-dashed: #d8c39a;
+  --qb-line-dashed-2: #e0cea5;
+  --qb-card-border: #c9a86a;
+
+  /* Ink scale (5-tone) */
+  --qb-ink-900: #4a3826; /* headings */
+  --qb-ink-700: #5b4632; /* body */
+  --qb-ink-500: #7a6a54; /* muted */
+  --qb-ink-400: #9a8464; /* muted */
+  --qb-ink-300: #b0a088; /* todo/disabled */
+
+  /* Column accent groups: fill (banner) / shadow (banner) / border (card) /
+     cardshadow (card's soft sticker shadow). Where HANDOFF gives no distinct
+     cardshadow tint for a group, cardshadow aliases to that group's own
+     border colour (documented per group below) rather than inventing a hex
+     HANDOFF doesn't specify. */
+  --qb-accent-forest-fill: #7a8b45; /* Backlog */
+  --qb-accent-forest-shadow: #63722f;
+  --qb-accent-forest-border: #c9a86a; /* HANDOFF: Backlog reuses the base card border */
+  --qb-accent-forest-cardshadow: var(--qb-accent-forest-border); /* no distinct tint given */
+
+  --qb-accent-amber-fill: #b08948; /* Bootstrap */
+  --qb-accent-amber-shadow: #977236;
+  --qb-accent-amber-border: #ddbb7c;
+  --qb-accent-amber-cardshadow: #edd9ae;
+
+  --qb-accent-sky-fill: #5c86b0; /* Planning / Plan Review / Verification */
+  --qb-accent-sky-shadow: #47709a;
+  --qb-accent-sky-border: #a9c0da;
+  --qb-accent-sky-cardshadow: #d3e0ee;
+
+  --qb-accent-orange-fill: #d98a3d; /* Implementation / Impl Review */
+  --qb-accent-orange-shadow: #bc722c;
+  --qb-accent-orange-border: #e0a24c;
+  --qb-accent-orange-cardshadow: #f0dbae;
+
+  --qb-accent-rose-fill: #a8506b; /* Awaiting Merge */
+  --qb-accent-rose-shadow: #8c3e56;
+  --qb-accent-rose-border: #d49aad;
+  --qb-accent-rose-cardshadow: #ebd1d9;
+
+  --qb-accent-umber-fill: #5b4632; /* Done */
+  --qb-accent-umber-shadow: #43331f;
+  --qb-accent-umber-border: #c9b48c; /* HANDOFF: Done's muted-card border */
+  --qb-accent-umber-cardshadow: var(--qb-accent-umber-border); /* no distinct tint given */
+
+  --qb-accent-taupe-fill: #9a8464; /* Parked */
+  --qb-accent-taupe-shadow: #7f6b4e;
+  --qb-accent-taupe-border: #c4b292; /* HANDOFF: Parked card's dashed border */
+  --qb-accent-taupe-cardshadow: var(--qb-accent-taupe-border); /* no distinct tint given */
+
+  /* Column-keyed aliases — original column names kept verbatim, only the
+     styling is themed (HANDOFF terminology table). */
+  --qb-col-backlog: var(--qb-accent-forest-fill);
+  --qb-col-bootstrap: var(--qb-accent-amber-fill);
+  --qb-col-planning: var(--qb-accent-sky-fill);
+  --qb-col-plan-review: var(--qb-accent-sky-fill);
+  --qb-col-implementation: var(--qb-accent-orange-fill);
+  --qb-col-impl-review: var(--qb-accent-orange-fill);
+  --qb-col-verification: var(--qb-accent-sky-fill);
+  --qb-col-awaiting-merge: var(--qb-accent-rose-fill);
+  --qb-col-done: var(--qb-accent-umber-fill);
+  --qb-col-parked: var(--qb-accent-taupe-fill);
+
+  /* Accent utilities */
+  --qb-gold-coin-fill: #e7b93d;
+  --qb-gold-coin-stroke: #b5851f;
+  --qb-gold-chip-bg: #f3e1b8;
+  --qb-gold-chip-border: #d9a441;
+  --qb-gold-chip-text: #7a5a1a;
+
+  --qb-success-fill: #7a8b45;
+  --qb-success-chip-bg: #eaf0de;
+  --qb-success-chip-text: #5a6e38;
+
+  --qb-locked-chip-bg: #f3e1e7;
+  --qb-locked-chip-text: #a8506b;
+
+  --qb-mana-high: linear-gradient(90deg, #5e86c7, #8fb6e0);
+  --qb-mana-low: linear-gradient(90deg, #c25a3b, #e08a3c);
+
+  --qb-party-panel-bg: #3e2f22;
+  --qb-party-row-bg: #4a3524;
+  --qb-party-border: #6e4a32;
+  --qb-party-text: #f6ead2;
+  --qb-party-text-muted: #c9ae84;
+
+  /* Font stacks */
+  --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
+  --qb-font-body: "Patrick Hand", Gaegu, "Comic Neue", cursive;
+  --qb-font-banner: "Gaegu", "Patrick Hand", cursive;
+  --qb-font-mono: "Silkscreen", ui-monospace, Menlo, monospace;
+  --qb-font-prose: "Nunito", sans-serif;
+
+  /* Radii scale */
+  --qb-radius-card-a: 14px 20px 14px 20px;
+  --qb-radius-card-b: 20px 14px 20px 14px;
+  --qb-radius-modal: 26px;
+  --qb-radius-chip-sm: 10px;
+  --qb-radius-chip-lg: 14px;
+  --qb-radius-checkbox-sm: 5px;
+  --qb-radius-checkbox-lg: 7px;
+  --qb-radius-pennant: 255px 10px 225px 10px / 10px 225px 10px 255px;
+  --qb-radius-pill: 999px;
+  --qb-radius-circle: 50%;
+
+  /* Shadow recipes — offset/blur/spread only; the colour is supplied at the
+     consuming rule (it varies per accent group / surface), e.g.
+     `box-shadow: var(--qb-shadow-card) var(--qb-accent-forest-cardshadow);` */
+  --qb-shadow-card: 0 3px 0;
+  --qb-shadow-banner: 0 4px 0;
+  --qb-shadow-hero: 0 5px 0;
+  --qb-shadow-modal: 0 24px 60px rgba(50, 30, 15, 0.4);
+
+  /* Motion durations */
+  --qb-motion-pulse: 1.6s;
+  --qb-motion-hover: 0.12s;
+}
+
 /* Minimal reset */
 *,
 *::before,
