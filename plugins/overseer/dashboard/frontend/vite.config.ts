@@ -6,6 +6,15 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   base: "./",
+  server: {
+    // Hot-reload dev flow: `npm run dev` serves src/ with HMR and proxies
+    // API calls to a separately running FastAPI backend (serve.py, default
+    // port 8770). Override with OVERSEER_API for a non-default port, e.g.
+    //   OVERSEER_API=http://127.0.0.1:8771 npm run dev
+    proxy: {
+      "/api": process.env.OVERSEER_API ?? "http://127.0.0.1:8770",
+    },
+  },
   build: {
     outDir: "dist",
   },
