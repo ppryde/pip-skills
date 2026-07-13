@@ -86,3 +86,25 @@ def run_census(root: Path, timeout: int = 10) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) and data else None
+
+
+def run_census_all(timeout: int = 10) -> dict[str, Any] | None:
+    """Read all sessions from census across all worktrees; None if census is unavailable.
+
+    census is a SOFT dependency: like run_census, a missing plugin, empty store,
+    timeout, or any failure yields None rather than raising.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_CENSUS_CLI), "read"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data else None
