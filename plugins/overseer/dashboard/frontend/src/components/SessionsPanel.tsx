@@ -47,43 +47,70 @@ function SessionsPanel() {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Every cell renders even when its datum is absent (empty spans) so the
-  // shared row grid keeps columns aligned across rows — see styles.css.
+  // updated_at arrives as an epoch number, an ISO string, or null —
+  // normalise to a comparable epoch (null/unparseable sort last).
+  const activity = (value: SessionSummary["updated_at"]): number => {
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  };
+
+  // Most recently active first — sorted at render so the polled state stays
+  // exactly what the API returned.
+  const ordered = [...sessions].sort(
+    (a, b) => activity(b.updated_at) - activity(a.updated_at)
+  );
+
+  // Two-line rows: line 1 gives the name the full panel width (plus the
+  // live/stale status at the right edge); line 2 carries the labels.
   return (
     <div className="sessions-panel" role="region" aria-label="Active sessions">
-      {sessions.length === 0 && (
+      {ordered.length === 0 && (
         <div className="sessions-panel__empty">No active sessions</div>
       )}
 
-      {sessions.map((session) => (
+      {ordered.map((session) => (
         <div
           key={session.id}
           className={`sessions-panel__row${
             session.stale ? " sessions-panel__row--stale" : ""
           }`}
         >
-          <span className="sessions-panel__name" title={session.session_name || session.id}>
-            {session.session_name || session.id}
-          </span>
+          <div className="sessions-panel__header">
+            <span
+              className="sessions-panel__name"
+              title={session.session_name || session.id}
+            >
+              {session.session_name || session.id}
+            </span>
 
-          <span className="sessions-panel__model">
+            <span className="sessions-panel__status">
+              <span className="sessions-panel__status-dot" aria-hidden="true" />
+              {session.stale ? "stale" : "live"}
+            </span>
+          </div>
+
+          <div className="sessions-panel__meta">
             {session.model && (
               <span className="sessions-panel__pill">{session.model}</span>
             )}
-          </span>
 
-          <span className="sessions-panel__ctx">
-            {session.pct === undefined ? "— unknown" : `${session.pct}%`}
-          </span>
+            <span className="sessions-panel__ctx">
+              {session.pct === undefined ? "— unknown" : `${session.pct}%`}
+            </span>
 
-          <span
-            className="sessions-panel__worktree"
-            title={session.worktree_cwd || undefined}
-          >
-            {session.worktree_cwd && session.worktree_cwd.split("/").pop()}
-          </span>
+            {session.worktree_cwd && (
+              <span
+                className="sessions-panel__worktree"
+                title={session.worktree_cwd}
+              >
+                {session.worktree_cwd.split("/").pop()}
+              </span>
+            )}
 
-          <span className="sessions-panel__pr">
             {session.pr && (
               <span className="sessions-panel__pill">
                 PR
@@ -91,12 +118,7 @@ function SessionsPanel() {
                 {session.pr.review_state ? ` · ${session.pr.review_state}` : ""}
               </span>
             )}
-          </span>
-
-          <span className="sessions-panel__status">
-            <span className="sessions-panel__status-dot" aria-hidden="true" />
-            {session.stale ? "stale" : "live"}
-          </span>
+          </div>
         </div>
       ))}
     </div>
