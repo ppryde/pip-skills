@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCard } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+import type { PartyMember } from "../board/party";
+import { accentKeyForCard, bannerLabelForCard } from "../board/cardAccent";
+import { rarityStars } from "../board/rarityStars";
 import BudgetMeter from "./BudgetMeter";
 import ClaimControl from "./ClaimControl";
 import PrioritySelect from "./PrioritySelect";
@@ -9,6 +12,8 @@ import LinkEditor from "./LinkEditor";
 import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
 import ChecklistRows from "./ChecklistRows";
+import PartyAvatar from "./PartyAvatar";
+import { StarIcon } from "./icons";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -19,6 +24,11 @@ export interface CardDetailDrawerProps {
   /** All card ids on the board — threaded down to LinkEditor for its
    * parent/dependency option lists (see wf005-c6-brief.md). */
   allCardIds: string[];
+  /** The shared session<->card join (App.tsx) — the drawer is a fourth
+   * CONSUMER of this one array, never its own poll (WF-030 Decisions).
+   * Resolved against `detail.claimed_by` to render the hero chip's
+   * PartyAvatar + class; ClaimControl's independent poll is unrelated. */
+  party: PartyMember[];
 }
 
 /**
@@ -74,6 +84,7 @@ function CardDetailDrawer({
   mutate,
   inFlight,
   allCardIds,
+  party,
 }: CardDetailDrawerProps) {
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -147,6 +158,12 @@ function CardDetailDrawer({
   if (cardId === null) return null;
 
   const sectionEntries = detail ? orderedSectionEntries(detail.sections) : [];
+  const accentKey = detail ? accentKeyForCard(detail) : "";
+  const bannerLabel = detail ? bannerLabelForCard(detail) : "";
+  const stars = detail ? rarityStars(detail.complexity) : 0;
+  const heroSession = detail?.claimed_by
+    ? party.find((p) => p.session.id === detail.claimed_by)?.session
+    : undefined;
 
   return (
     <div className="drawer-overlay" data-testid="drawer-overlay" onClick={onClose}>
@@ -175,10 +192,35 @@ function CardDetailDrawer({
         {!loading && !error && detail && (
           <>
             <header className="card-drawer__header">
-              <span className="card-drawer__id">{detail.id}</span>
+              <div className="card-drawer__banner-row">
+                <span
+                  className={`card-drawer__banner card-drawer__banner--${accentKey}`}
+                >
+                  {bannerLabel}
+                </span>
+                <span className="card-drawer__id">{detail.id}</span>
+                {stars > 0 && (
+                  <span className="card-drawer__stars" aria-hidden="true">
+                    {[0, 1, 2].map((i) => (
+                      <StarIcon
+                        key={i}
+                        filled={i < stars}
+                        className={
+                          "card-drawer__star " +
+                          (i < stars
+                            ? "card-drawer__star--filled"
+                            : "card-drawer__star--empty")
+                        }
+                      />
+                    ))}
+                  </span>
+                )}
+              </div>
               <h2 className="card-drawer__title">{detail.title}</h2>
               <div className="card-drawer__facts">
-                <span className="card-drawer__status-fact">
+                <span
+                  className={`card-drawer__status-fact card-drawer__status-fact--${accentKey}`}
+                >
                   {detail.status}
                   {detail.stage ? ` · ${detail.stage}` : ""}
                 </span>
@@ -191,6 +233,27 @@ function CardDetailDrawer({
                   onMutated={refetchDetail}
                 />
                 <BudgetMeter budget={detail.budget} />
+                {detail.claimed_by && (
+                  <span
+                    className="card-drawer__hero-chip"
+                    title={detail.claimed_by}
+                  >
+                    {/* Stale-evicted edge (Decisions): claimed_by can outlive
+                        the session's presence in the shared party poll — the
+                        chip still renders, just without an avatar/class. */}
+                    {heroSession && (
+                      <PartyAvatar session={heroSession} size={20} />
+                    )}
+                    <span className="card-drawer__hero-name">
+                      {heroSession?.session_name || detail.claimed_by}
+                    </span>
+                    {heroSession?.model && (
+                      <span className="card-drawer__hero-class">
+                        {heroSession.model}
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
             </header>
 

@@ -1231,15 +1231,50 @@ body {
   margin-bottom: 1rem;
 }
 
+/* Header row: banner pill + WF-id + rarity stars (HANDOFF: "Header row:
+   column banner pill + WF-id + rarity stars"). */
+.card-drawer__banner-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.card-drawer__banner {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--qb-radius-chip-sm);
+  color: var(--legacy-color-fff);
+}
+
 .card-drawer__id {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.75rem;
-  color: var(--legacy-color-6b7280);
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  color: var(--qb-ink-400);
+}
+
+.card-drawer__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  margin-left: auto;
+}
+
+.card-drawer__star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.card-drawer__star--empty {
+  color: var(--qb-star-empty);
 }
 
 .card-drawer__title {
   margin: 0.15rem 0 0.5rem;
-  font-size: 1.1rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--qb-ink-900);
 }
 
 .card-drawer__facts {
@@ -1248,7 +1283,102 @@ body {
   gap: 0.5rem;
   flex-wrap: wrap;
   font-size: 0.8rem;
-  color: var(--legacy-color-374151);
+  color: var(--qb-ink-500);
+}
+
+/* Status chip: pale accent-tinted background, saturated accent text — a
+   lighter "tinted" chip distinct from the banner pill's solid fill so the
+   two don't compete for attention right next to each other. */
+.card-drawer__status-fact {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-chip-sm);
+  font-weight: 600;
+}
+
+.card-drawer__banner--backlog {
+  background: var(--qb-accent-forest-fill);
+}
+.card-drawer__status-fact--backlog {
+  background: var(--qb-accent-forest-cardshadow);
+  color: var(--qb-accent-forest-fill);
+}
+
+.card-drawer__banner--bootstrap {
+  background: var(--qb-accent-amber-fill);
+}
+.card-drawer__status-fact--bootstrap {
+  background: var(--qb-accent-amber-cardshadow);
+  color: var(--qb-accent-amber-fill);
+}
+
+.card-drawer__banner--planning,
+.card-drawer__banner--plan-review,
+.card-drawer__banner--verification {
+  background: var(--qb-accent-sky-fill);
+}
+.card-drawer__status-fact--planning,
+.card-drawer__status-fact--plan-review,
+.card-drawer__status-fact--verification {
+  background: var(--qb-accent-sky-cardshadow);
+  color: var(--qb-accent-sky-fill);
+}
+
+.card-drawer__banner--implementation,
+.card-drawer__banner--impl-review {
+  background: var(--qb-accent-orange-fill);
+}
+.card-drawer__status-fact--implementation,
+.card-drawer__status-fact--impl-review {
+  background: var(--qb-accent-orange-cardshadow);
+  color: var(--qb-accent-orange-fill);
+}
+
+.card-drawer__banner--awaiting-merge {
+  background: var(--qb-accent-rose-fill);
+}
+.card-drawer__status-fact--awaiting-merge {
+  background: var(--qb-accent-rose-cardshadow);
+  color: var(--qb-accent-rose-fill);
+}
+
+.card-drawer__banner--done {
+  background: var(--qb-accent-umber-fill);
+}
+.card-drawer__status-fact--done {
+  background: var(--qb-accent-umber-cardshadow);
+  color: var(--qb-accent-umber-fill);
+}
+
+.card-drawer__banner--parked {
+  background: var(--qb-accent-taupe-fill);
+}
+.card-drawer__status-fact--parked {
+  background: var(--qb-accent-taupe-cardshadow);
+  color: var(--qb-accent-taupe-fill);
+}
+
+/* Hero chip: PartyAvatar + name + class (HANDOFF: "assigned-hero chip
+   (avatar + name + class)"). No avatar when the session has fallen out of
+   the shared party poll (stale-evicted edge, Decisions) — text-only then. */
+.card-drawer__hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.15rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-700);
+}
+
+.card-drawer__hero-name {
+  font-weight: 600;
+}
+
+.card-drawer__hero-class {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  color: var(--qb-ink-400);
 }
 
 .card-drawer__section {

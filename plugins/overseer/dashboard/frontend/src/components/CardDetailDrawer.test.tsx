@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { BoardResponse, CardDetail } from "../api/types";
+import type { BoardResponse, CardDetail, SessionSummary } from "../api/types";
+import type { PartyMember } from "../board/party";
 
 // Mock the SOLE api client module — no real fetch in this test. Includes the
 // mutation wrappers the wired-in controls (PrioritySelect/LinkEditor/
@@ -62,6 +63,21 @@ function cardDetail(
   };
 }
 
+function partyMember(
+  overrides: Partial<SessionSummary> & { id: string }
+): PartyMember {
+  return {
+    session: {
+      worktree_cwd: "/w",
+      updated_at: 1,
+      stale: false,
+      ...overrides,
+    },
+    questCardId: null,
+    questTitle: null,
+  };
+}
+
 /** A promise whose resolve/reject are exposed so tests drive ordering explicitly. */
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -94,6 +110,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -122,6 +139,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -150,6 +168,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -166,6 +185,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -188,6 +208,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -211,6 +232,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -229,6 +251,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -245,6 +268,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     await screen.findByRole("dialog");
@@ -280,6 +304,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     await screen.findByText("Panel card");
@@ -305,6 +330,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     expect(getCard).toHaveBeenNthCalledWith(1, "WF-A");
@@ -318,6 +344,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     expect(getCard).toHaveBeenNthCalledWith(2, "WF-B");
@@ -367,6 +394,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={liveMutate()}
         inFlight={false}
         allCardIds={["WF-F"]}
+        party={[]}
       />
     );
     await screen.findByText("Refetch me");
@@ -399,6 +427,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={liveMutate()}
         inFlight={false}
         allCardIds={["WF-G"]}
+        party={[]}
       />
     );
     await screen.findByText("Close me first");
@@ -418,6 +447,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={liveMutate()}
         inFlight={false}
         allCardIds={["WF-G"]}
+        party={[]}
       />
     );
 
@@ -448,6 +478,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -486,6 +517,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -507,6 +539,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -518,6 +551,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -551,6 +585,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -578,6 +613,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -596,6 +632,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -615,10 +652,145 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
     await screen.findByText("No tasks");
     expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
+  });
+
+  it("renders the banner pill with the card's own stage label (WF-030 chunk 2)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-N", status: "in-flight", stage: "implementation" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-N"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-N`);
+    const banner = container.querySelector(".card-drawer__banner");
+    expect(banner).toHaveTextContent("Implementation");
+    expect(banner).toHaveClass("card-drawer__banner--implementation");
+  });
+
+  it("renders rarity stars when the card has a complexity", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-O", complexity: "M" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-O"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-O`);
+    expect(container.querySelectorAll(".card-drawer__star").length).toBe(3);
+    expect(
+      container.querySelectorAll(".card-drawer__star--filled").length
+    ).toBe(2);
+  });
+
+  it("renders no stars row when the card has no complexity", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-P", complexity: null })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-P"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-P`);
+    expect(container.querySelector(".card-drawer__stars")).toBeNull();
+  });
+
+  it("renders the hero chip WITH a PartyAvatar + class when the session is present in the shared party array", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-Q", claimed_by: "sess-1" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-Q"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[
+          partyMember({ id: "sess-1", session_name: "forge-master", model: "Opus" }),
+        ]}
+      />
+    );
+
+    await screen.findByText(`Title WF-Q`);
+    const chip = container.querySelector(".card-drawer__hero-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.querySelector(".party-avatar")).not.toBeNull();
+    expect(screen.getByText("forge-master")).toBeInTheDocument();
+    expect(screen.getByText("Opus")).toBeInTheDocument();
+  });
+
+  it("renders the hero chip WITHOUT an avatar when claimed_by has no matching session in party (stale-evicted edge)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-R", claimed_by: "sess-ghost" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-R"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-R`);
+    const chip = container.querySelector(".card-drawer__hero-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.querySelector(".party-avatar")).toBeNull();
+    expect(screen.getByText("sess-ghost")).toBeInTheDocument();
+  });
+
+  it("renders no hero chip when the card is unclaimed", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-S", claimed_by: null })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-S"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-S`);
+    expect(container.querySelector(".card-drawer__hero-chip")).toBeNull();
   });
 });

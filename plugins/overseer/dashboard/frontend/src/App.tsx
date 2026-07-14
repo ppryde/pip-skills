@@ -84,6 +84,7 @@ function App() {
         mutate={mutate}
         inFlight={inFlight}
         allCardIds={board?.cards.map((c) => c.id) ?? []}
+        party={party}
       />
       {partyOpen && (
         <PartyOverlay party={party} onClose={() => setPartyOpen(false)} />
