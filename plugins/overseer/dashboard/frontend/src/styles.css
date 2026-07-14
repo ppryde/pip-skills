@@ -1653,3 +1653,182 @@ body {
   margin: 0;
   padding: 0;
 }
+
+/* Party column (WF-029 chunk 4) — dark panel at the board scroll-row's
+   tail (HANDOFF §Board). */
+.party-column {
+  flex: 0 0 288px;
+  display: flex;
+  flex-direction: column;
+  background: var(--qb-party-panel-bg);
+  border-radius: var(--legacy-radius-6px);
+  max-height: 100%;
+  overflow-y: auto;
+  color: var(--qb-party-text);
+}
+
+.party-column__header {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--qb-party-border);
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+
+.party-column__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.party-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-party-row-bg);
+}
+
+/* Dimmed hollow-ring ghost row for a stale session — the avatar's own dot
+   (below) additionally swaps to a hollow ring. */
+.party-row--stale {
+  opacity: 0.55;
+}
+
+.party-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.party-row__name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--qb-party-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.party-row__class {
+  font-size: 0.7rem;
+  color: var(--qb-party-text-muted);
+}
+
+.party-row__mana {
+  height: 6px;
+  border-radius: var(--legacy-radius-999px);
+  background: var(--qb-party-border);
+  overflow: hidden;
+}
+
+.party-row__mana-fill {
+  height: 100%;
+}
+
+.party-row__mana-fill--high {
+  background: var(--qb-mana-high);
+}
+
+.party-row__mana-fill--low {
+  background: var(--qb-mana-low);
+}
+
+.party-row__mana--unknown {
+  height: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.party-row__mana-label {
+  font-size: 0.65rem;
+  color: var(--qb-party-text-muted);
+  font-style: italic;
+}
+
+.party-row__quest {
+  font-size: 0.65rem;
+  color: var(--qb-party-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Party avatar (WF-029 chunk 4) — shared by PartyColumn and PartyOverlay
+   (chunk 6). Accent fill is a deterministic presentational hash rotation
+   across the 7 guild accent groups (board/avatarAccent.ts), not data. */
+.party-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: var(--qb-radius-circle);
+  color: var(--legacy-color-fff);
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+}
+
+.party-avatar--forest {
+  background: var(--qb-accent-forest-fill);
+}
+
+.party-avatar--amber {
+  background: var(--qb-accent-amber-fill);
+}
+
+.party-avatar--sky {
+  background: var(--qb-accent-sky-fill);
+}
+
+.party-avatar--orange {
+  background: var(--qb-accent-orange-fill);
+}
+
+.party-avatar--rose {
+  background: var(--qb-accent-rose-fill);
+}
+
+.party-avatar--umber {
+  background: var(--qb-accent-umber-fill);
+}
+
+.party-avatar--taupe {
+  background: var(--qb-accent-taupe-fill);
+}
+
+.party-avatar__initial {
+  pointer-events: none;
+}
+
+/* Live/stale status dot, corner-anchored (HANDOFF: "live green dot
+   bottom-right that pulses"). The pulse keyframe (qb-pulse) is declared in
+   chunk 8 and shared by both this dot and the overlay's — referencing it
+   here ahead of its declaration is valid CSS (an animation naming an
+   undefined keyframe is simply inert until the keyframe exists). */
+.party-avatar__dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: var(--qb-radius-circle);
+  background: var(--legacy-color-16a34a);
+}
+
+.party-avatar__dot--stale {
+  background: transparent;
+  border: 1.5px solid var(--qb-party-text-muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .party-avatar__dot:not(.party-avatar__dot--stale) {
+    animation: qb-pulse var(--qb-motion-pulse) ease-in-out infinite;
+  }
+}
