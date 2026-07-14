@@ -31,7 +31,7 @@ export const STAGES: Stage[] = [
   "awaiting-merge",
 ];
 
-const STAGE_LABELS: Record<Stage, string> = {
+export const STAGE_LABELS: Record<Stage, string> = {
   bootstrap: "Bootstrap",
   planning: "Planning",
   "plan-review": "Plan Review",
