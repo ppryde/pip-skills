@@ -780,7 +780,7 @@ body {
   display: flex;
   gap: 0.4rem;
   background: var(--legacy-color-fff);
-  border: 2px solid var(--card-accent-border, var(--legacy-color-e2e5e9));
+  border: 2px solid var(--card-accent-border);
   border-radius: var(--qb-radius-card-a);
   box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
   padding: 0.5rem;
@@ -869,7 +869,7 @@ body {
 
 .card-tile__progress-fill {
   height: 100%;
-  background: var(--card-accent-fill, var(--legacy-color-4338ca));
+  background: var(--card-accent-fill);
 }
 
 .card-tile__handle {
@@ -1231,7 +1231,7 @@ body {
 }
 
 .epic-card {
-  border-left: 3px solid var(--card-accent-fill, var(--legacy-color-4338ca));
+  border-left: 3px solid var(--card-accent-fill);
 }
 
 .epic-card__expand {
