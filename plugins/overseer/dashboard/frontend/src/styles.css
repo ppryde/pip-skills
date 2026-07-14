@@ -194,6 +194,11 @@
   --qb-gold-chip-border: #d9a441;
   --qb-gold-chip-text: #7a5a1a;
 
+  /* Rarity-star empty pip (WF-028 Decisions: adjudicated ASK 2 — HANDOFF-
+     sourced from the quest-card prose, not §Design Tokens; card 1's
+     vocabulary sweep missed it). Filled stars reuse --qb-gold-chip-border. */
+  --qb-star-empty: #e0d3b4;
+
   --qb-success-fill: #7a8b45;
   --qb-success-chip-bg: #eaf0de;
   --qb-success-chip-text: #5a6e38;
@@ -1019,6 +1024,22 @@ body {
   flex-wrap: wrap;
 }
 
+/* Rarity stars (WF-028 chunk 4) — filled pips use the gold chip border
+   tone, empty pips the dedicated --qb-star-empty token. */
+.card-tile__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+}
+
+.card-tile__star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.card-tile__star--empty {
+  color: var(--qb-star-empty);
+}
+
 .priority-chip {
   font-size: 0.65rem;
   font-weight: 700;
@@ -1040,15 +1061,19 @@ body {
   color: var(--legacy-color-6b7280);
 }
 
-/* Quiet, distinct from the repo-chip's grey — a faint indigo tint marks
-   "someone's on this" without competing with the priority/blocked badges. */
+/* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
+   without competing with the priority/blocked badges. CSS-only restyle
+   (WF-028 chunk 4): HANDOFF specs an avatar-chip visual with no colour of
+   its own, so this reuses neutral base parchment/ink tokens rather than
+   inventing or misappropriating a semantically distinct chip's colours. */
 .claim-badge {
   font-size: 0.65rem;
   font-weight: 500;
   padding: 0.05rem 0.35rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-eef4ff);
-  color: var(--legacy-color-3654a6);
+  background: var(--qb-parchment-muted-2);
+  color: var(--qb-ink-500);
+  border: 1px solid var(--qb-line-dashed);
 }
 
 .badge--blocked {
@@ -1061,19 +1086,23 @@ body {
 }
 
 .dep-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.7rem;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
 }
 
 .dep-badge--ready {
-  background: var(--legacy-color-dcfce7);
-  color: var(--legacy-color-15803d);
+  background: var(--qb-success-chip-bg);
+  color: var(--qb-success-chip-text);
 }
 
+/* Locked-behind pill (HANDOFF's "Locked/dep" accent utility). */
 .dep-badge--waiting {
-  background: var(--legacy-color-fef3c7);
-  color: var(--legacy-color-92400e);
+  background: var(--qb-locked-chip-bg);
+  color: var(--qb-locked-chip-text);
 }
 
 .budget-meter {
@@ -1082,7 +1111,12 @@ body {
   gap: 0.3rem;
   font-family: ui-monospace, Menlo, monospace;
   font-size: 0.7rem;
-  color: var(--legacy-color-4b5563);
+  color: var(--qb-gold-chip-text);
+}
+
+.budget-meter__coin {
+  flex: 0 0 auto;
+  color: var(--qb-gold-coin-fill);
 }
 
 /* Tripwire (actual >= 2x estimate) is visually distinct. */

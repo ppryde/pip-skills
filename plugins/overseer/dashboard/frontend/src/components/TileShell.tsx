@@ -3,9 +3,11 @@ import { useSortable } from "@dnd-kit/sortable";
 import type { BoardCard } from "../api/types";
 import { isDragSource } from "../board/dragPlan";
 import { checklistWindow } from "../board/checklistWindow";
+import { rarityStars } from "../board/rarityStars";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ChecklistRows from "./ChecklistRows";
+import { StarIcon } from "./icons";
 
 export interface TileShellProps {
   card: BoardCard;
@@ -52,6 +54,7 @@ function TileShell({
 }: TileShellProps) {
   const dragSource = isDragSource(card);
   const sortableDisabled = dragDisabled || !dragSource;
+  const stars = rarityStars(card.complexity);
 
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: card.id, disabled: sortableDisabled });
@@ -109,6 +112,22 @@ function TileShell({
       >
         <div className="card-tile__header">
           <span className="card-tile__id">{card.id}</span>
+          {/* Rarity stars (HANDOFF): complexity S/M/L -> 1-3 filled pips.
+              Reserves no space at all when 0 (no complexity set). */}
+          {stars > 0 && (
+            <span className="card-tile__stars" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <StarIcon
+                  key={i}
+                  filled={i < stars}
+                  className={
+                    "card-tile__star " +
+                    (i < stars ? "card-tile__star--filled" : "card-tile__star--empty")
+                  }
+                />
+              ))}
+            </span>
+          )}
           {card.priority && (
             <span className={`priority-chip priority-chip--${card.priority}`}>
               {card.priority}
