@@ -127,6 +127,14 @@
      fresh HANDOFF value (WF-028 chunk 2), not old-theme debt, so it lives
      in the guild vocabulary rather than under --legacy-*. */
   --qb-chip-translucent: rgba(255, 255, 255, 0.25);
+  /* WF-030 chunk 3: the Quest|Scroll segmented tab bar's track (HANDOFF
+     §Card detail line 76). */
+  --qb-tab-track: #ede0c2;
+  /* WF-030 chunk 4: the sub-quests panel's border radius (HANDOFF §Card
+     detail line 77). */
+  --qb-radius-panel: 16px;
+  /* WF-030 chunk 7: the card-detail overlay backdrop (HANDOFF line 70). */
+  --qb-overlay: rgba(52, 36, 22, 0.5);
 
   /* Ink scale (5-tone) */
   --qb-ink-900: #4a3826; /* headings */
@@ -1491,25 +1499,45 @@ body {
 }
 
 /* Rendered/Source segmented toggle above the drawer body. */
+/* Segmented Quest | Scroll (MD) tab bar (HANDOFF: "segmented, in a
+   #EDE0C2 track, border-radius:14px, padding:5px"). */
 .card-drawer__viewtoggle {
   display: inline-flex;
   gap: 0.25rem;
   margin-bottom: 0.5rem;
+  padding: 5px;
+  background: var(--qb-tab-track);
+  border-radius: 14px;
 }
 
 .card-drawer__viewtoggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.75rem;
-  padding: 0.15rem 0.6rem;
-  border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--legacy-color-d0d5dd);
-  background: var(--legacy-color-fff);
-  color: var(--legacy-color-374151);
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--qb-radius-chip-sm);
+  border: none;
+  background: transparent;
+  color: var(--qb-ink-400);
   cursor: pointer;
 }
 
 .card-drawer__viewtoggle button[aria-pressed="true"] {
-  background: var(--legacy-color-4338ca);
-  border-color: var(--legacy-color-4338ca);
+  background: var(--legacy-color-fff);
+  color: var(--qb-ink-900);
+}
+
+/* Tiny Silkscreen "MD" tag on the Scroll tab (HANDOFF: "#7A8B45 bg,
+   white"). --qb-success-fill is the exact HANDOFF hex for this tag. */
+.card-drawer__md-badge {
+  font-family: var(--qb-font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--qb-radius-chip-sm);
+  background: var(--qb-success-fill);
   color: var(--legacy-color-fff);
 }
 

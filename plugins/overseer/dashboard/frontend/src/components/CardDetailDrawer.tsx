@@ -290,6 +290,9 @@ function CardDetailDrawer({
               </section>
             )}
 
+            {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
+                view state stays "rendered"/"source" (aria-pressed/state
+                mechanics byte-identical); only the VISIBLE labels changed. */}
             <div
               className="card-drawer__viewtoggle"
               role="group"
@@ -300,14 +303,14 @@ function CardDetailDrawer({
                 aria-pressed={view === "rendered"}
                 onClick={() => setView("rendered")}
               >
-                Rendered
+                Quest
               </button>
               <button
                 type="button"
                 aria-pressed={view === "source"}
                 onClick={() => setView("source")}
               >
-                Source
+                Scroll <span className="card-drawer__md-badge">MD</span>
               </button>
             </div>
             <div className="card-drawer__body">

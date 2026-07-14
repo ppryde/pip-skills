@@ -484,14 +484,14 @@ describe("<CardDetailDrawer/>", () => {
 
     await screen.findByText("Toggle card");
 
-    expect(screen.getByRole("button", { name: /rendered/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /quest/i })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
     expect(screen.getByText("thing").tagName).toBe("EM"); // rendered markdown
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /source/i }));
+      fireEvent.click(screen.getByRole("button", { name: /scroll/i }));
     });
 
     const pre = screen.getByTestId("card-source");
@@ -524,9 +524,9 @@ describe("<CardDetailDrawer/>", () => {
     await screen.findByText("Reopen card");
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /source/i }));
+      fireEvent.click(screen.getByRole("button", { name: /scroll/i }));
     });
-    expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /scroll/i })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
@@ -556,7 +556,7 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText("Reopen card");
-    expect(screen.getByRole("button", { name: /rendered/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /quest/i })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
