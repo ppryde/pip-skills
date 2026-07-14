@@ -980,14 +980,28 @@ body {
   gap: 0.35rem;
   font-size: 0.72rem;
   line-height: 1.15rem;
-  color: var(--legacy-color-4b5563);
+  color: var(--qb-ink-300);
 }
 
+/* Sub-quest checkbox (WF-028 chunk 6, HANDOFF's rounded-checkbox spec) —
+   CSS-only re-skin of the EXISTING glyph span; ChecklistRows.tsx's markup
+   (including the literal ✓/●/○ characters ChecklistRows.test.tsx asserts)
+   is untouched. Default/pending: a ~15px dashed empty box, the glyph
+   character coloured to blend into its own border rather than read as a
+   visible mark. Completed/in-progress fill the box solid and flip the
+   glyph to white — see the two modifiers below. */
 .checklist__glyph {
   flex: 0 0 auto;
-  width: 0.9em;
-  text-align: center;
-  color: var(--legacy-color-9ca3af);
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  line-height: 1;
+  border-radius: var(--qb-radius-checkbox-sm);
+  border: 2px dashed var(--qb-line-dashed);
+  color: var(--qb-line-dashed);
 }
 
 .checklist__subject {
@@ -998,21 +1012,34 @@ body {
   white-space: nowrap;
 }
 
+/* Done = filled lane-accent box + white check (HANDOFF: "filled
+   column-color w/ white check"). */
 .checklist__row--completed .checklist__glyph {
-  color: var(--legacy-color-15803d);
+  border-style: solid;
+  border-color: var(--card-accent-fill);
+  background: var(--card-accent-fill);
+  color: var(--legacy-color-fff);
 }
 
 .checklist__row--completed .checklist__subject {
-  color: var(--legacy-color-9ca3af);
+  color: var(--qb-ink-500);
   text-decoration: line-through;
 }
 
+/* In-progress isn't in HANDOFF's binary done/todo checkbox model (this is
+   the live three-state wheel, a system of its own — see Decisions). Reuses
+   the same lane-accent fill as done rather than a separate invented "live"
+   colour; the pulsing glyph (kept below, unchanged) and the distinct ●
+   character are what carry the in-progress signal, not a unique hue. */
 .checklist__row--in_progress .checklist__glyph {
-  color: var(--legacy-color-16a34a);
+  border-style: solid;
+  border-color: var(--card-accent-fill);
+  background: var(--card-accent-fill);
+  color: var(--legacy-color-fff);
 }
 
 .checklist__row--in_progress .checklist__subject {
-  color: var(--legacy-color-1b1f24);
+  color: var(--qb-ink-700);
   font-weight: 500;
 }
 
