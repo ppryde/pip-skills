@@ -9,6 +9,10 @@ import ChecklistRows from "./ChecklistRows";
 
 export interface TileShellProps {
   card: BoardCard;
+  /** Lane-computed guild accent key (WF-028) — e.g. "backlog",
+   * "plan-review", "parked". Declared here in chunk 2's plumbing pass;
+   * chunk 3 wires it into the tile's `card-tile--accent-${key}` class. */
+  accentKey?: string;
   /** Extra class(es) on the outer tile (e.g. "epic-card"). */
   variantClassName?: string;
   dimmed?: boolean;

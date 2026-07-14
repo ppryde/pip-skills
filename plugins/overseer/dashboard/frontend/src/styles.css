@@ -107,6 +107,9 @@
   --legacy-shadow-1: 0 8px 24px rgba(0, 0, 0, 0.45);
   --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
   --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
+  /* HANDOFF's translucent banner count chip (rgba(255,255,255,.25)) —
+     hoisted rather than left raw (WF-028 chunk 2). */
+  --legacy-chip-fff-25: rgba(255, 255, 255, 0.25);
 }
 
 /* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
@@ -603,8 +606,8 @@ body {
   flex: 0 0 260px;
   display: flex;
   flex-direction: column;
-  background: var(--legacy-color-fff);
-  border: 1px solid var(--legacy-color-e2e5e9);
+  background: var(--qb-panel);
+  border: 1px solid var(--qb-card-border);
   border-radius: var(--legacy-radius-6px);
   max-height: 100%;
   overflow-y: auto;
@@ -614,7 +617,7 @@ body {
 .lane--parked,
 .lane--done,
 .lane--archive {
-  background: var(--legacy-color-f0f1f4);
+  background: var(--qb-parchment-muted);
   border-style: dashed;
   margin-left: 0;
 }
@@ -623,24 +626,73 @@ body {
   margin-left: 1.5rem;
 }
 
+/* Pennant banner header (WF-028 chunk 2) — HANDOFF's column banner: an
+   asymmetric-radius pennant shape, white text, hard offset shadow. Fill
+   colour is per accent key (`.lane__header--<key>` below); the header
+   itself only owns shape/spacing/text-colour, not colour. */
 .lane__header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.75rem;
+  padding: 7px 14px;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--legacy-color-374151);
-  border-bottom: 1px solid var(--legacy-color-e2e5e9);
+  color: var(--legacy-color-fff);
+  border-radius: var(--qb-radius-pennant);
   position: sticky;
   top: 0;
-  background: inherit;
 }
 
 .lane__count {
   font-weight: 400;
-  color: var(--legacy-color-9ca3af);
+  color: inherit;
+  background: var(--legacy-chip-fff-25);
+  border-radius: var(--qb-radius-chip-sm);
+  padding: 0.05rem 0.4rem;
+}
+
+/* Per-column accent fills (HANDOFF §Design Tokens "Column accents") — the
+   three sky lanes (Planning/Plan Review/Verification) and the two orange
+   lanes (Implementation/Impl Review) share one accent group each; Archive
+   is mapped onto "parked" upstream in Lane.tsx (taupe reuse, no HANDOFF
+   row of its own), so no separate `--archive` selector exists here. */
+.lane__header--backlog {
+  background: var(--qb-accent-forest-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-forest-shadow);
+}
+
+.lane__header--bootstrap {
+  background: var(--qb-accent-amber-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+}
+
+.lane__header--planning,
+.lane__header--plan-review,
+.lane__header--verification {
+  background: var(--qb-accent-sky-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-sky-shadow);
+}
+
+.lane__header--implementation,
+.lane__header--impl-review {
+  background: var(--qb-accent-orange-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-orange-shadow);
+}
+
+.lane__header--awaiting-merge {
+  background: var(--qb-accent-rose-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-rose-shadow);
+}
+
+.lane__header--done {
+  background: var(--qb-accent-umber-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-umber-shadow);
+}
+
+.lane__header--parked {
+  background: var(--qb-accent-taupe-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-taupe-shadow);
 }
 
 .lane__cards {

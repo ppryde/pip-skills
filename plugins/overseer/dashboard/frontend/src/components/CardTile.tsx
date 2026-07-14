@@ -3,6 +3,9 @@ import TileShell from "./TileShell";
 
 export interface CardTileProps {
   card: BoardCard;
+  /** Lane-computed guild accent key (WF-028) — e.g. "backlog",
+   * "plan-review", "parked" — threaded through to `TileShell`'s chrome. */
+  accentKey?: string;
   dimmed?: boolean;
   highlighted?: boolean;
   dragDisabled?: boolean;
@@ -16,6 +19,7 @@ export interface CardTileProps {
  */
 function CardTile({
   card,
+  accentKey,
   dimmed = false,
   highlighted = false,
   dragDisabled = false,
@@ -24,6 +28,7 @@ function CardTile({
   return (
     <TileShell
       card={card}
+      accentKey={accentKey}
       dimmed={dimmed}
       highlighted={highlighted}
       dragDisabled={dragDisabled}

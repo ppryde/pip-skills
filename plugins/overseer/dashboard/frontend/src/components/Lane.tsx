@@ -42,9 +42,22 @@ function Lane({
     .filter(Boolean)
     .join(" ");
 
+  // Guild banner/card accent key (WF-028): mirrors HANDOFF's per-column
+  // accent table. Archive maps explicitly onto "parked" — there are 11
+  // lanes but only 10 `--qb-col-*` tokens (Archive reuses the taupe/Parked
+  // accent group, an adjudicated off-board/shelved semantic — no HANDOFF
+  // row exists for Archive). A literal "archive" key would resolve a
+  // phantom token and silently drop the banner fill.
+  const accentKey =
+    lane.kind === "archive"
+      ? "parked"
+      : lane.kind === "stage"
+        ? lane.stage!
+        : lane.kind;
+
   return (
     <div className={className} data-lane-key={lane.key} ref={setNodeRef}>
-      <div className="lane__header">
+      <div className={`lane__header lane__header--${accentKey}`}>
         <span className="lane__label">{lane.label}</span>
         <span className="lane__count">{lane.cards.length}</span>
       </div>
@@ -66,6 +79,7 @@ function Lane({
                 <EpicCard
                   key={card.id}
                   card={card}
+                  accentKey={accentKey}
                   expanded={highlightedEpicId === card.id}
                   onToggleExpand={onToggleEpicHighlight}
                   dimmed={dimmed}
@@ -77,6 +91,7 @@ function Lane({
                 <CardTile
                   key={card.id}
                   card={card}
+                  accentKey={accentKey}
                   dimmed={dimmed}
                   highlighted={highlighted}
                   dragDisabled={dragDisabled}
