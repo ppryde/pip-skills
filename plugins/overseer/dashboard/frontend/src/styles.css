@@ -717,14 +717,71 @@ body {
   border-bottom: none;
 }
 
+/* Per-accent custom properties (WF-028 chunk 3) — each `.card-tile--accent-*`
+   modifier sets these three, which `.card-tile`/`.epic-card` below read with
+   a legacy fallback for accent-less renders (e.g. isolated component tests
+   that mount TileShell without a Lane-computed accentKey). Mirrors the
+   lane__header accent grouping one chunk up. */
+.card-tile--accent-backlog {
+  --card-accent-fill: var(--qb-accent-forest-fill);
+  --card-accent-border: var(--qb-accent-forest-border);
+  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
+}
+
+.card-tile--accent-bootstrap {
+  --card-accent-fill: var(--qb-accent-amber-fill);
+  --card-accent-border: var(--qb-accent-amber-border);
+  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
+}
+
+.card-tile--accent-planning,
+.card-tile--accent-plan-review,
+.card-tile--accent-verification {
+  --card-accent-fill: var(--qb-accent-sky-fill);
+  --card-accent-border: var(--qb-accent-sky-border);
+  --card-accent-shadow: var(--qb-accent-sky-cardshadow);
+}
+
+.card-tile--accent-implementation,
+.card-tile--accent-impl-review {
+  --card-accent-fill: var(--qb-accent-orange-fill);
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
+}
+
+.card-tile--accent-awaiting-merge {
+  --card-accent-fill: var(--qb-accent-rose-fill);
+  --card-accent-border: var(--qb-accent-rose-border);
+  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
+}
+
+.card-tile--accent-done {
+  --card-accent-fill: var(--qb-accent-umber-fill);
+  --card-accent-border: var(--qb-accent-umber-border);
+  --card-accent-shadow: var(--qb-accent-umber-cardshadow);
+}
+
+.card-tile--accent-parked {
+  --card-accent-fill: var(--qb-accent-taupe-fill);
+  --card-accent-border: var(--qb-accent-taupe-border);
+  --card-accent-shadow: var(--qb-accent-taupe-cardshadow);
+}
+
 .card-tile {
   display: flex;
   gap: 0.4rem;
   background: var(--legacy-color-fff);
-  border: 1px solid var(--legacy-color-e2e5e9);
-  border-radius: var(--legacy-radius-5px);
+  border: 2px solid var(--card-accent-border, var(--legacy-color-e2e5e9));
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
   padding: 0.5rem;
   font-size: 0.8rem;
+}
+
+/* Alternating asymmetric radii (HANDOFF's "sticker" card shapes) — CSS-only,
+   no JS index prop (Decisions). */
+.lane__cards > .card-tile:nth-child(even) {
+  border-radius: var(--qb-radius-card-b);
 }
 
 .card-tile--blocked {
@@ -911,6 +968,19 @@ body {
     animation: checklist-wheel-shift 220ms ease-out;
   }
 
+  /* Quest-card hover lift (WF-028 chunk 3, HANDOFF's card interaction spec)
+     — the whole effect, including the transform itself, is opt-in: reduced-
+     motion users get no lift at all, not an instant jump. */
+  .card-tile {
+    transition:
+      transform var(--qb-motion-hover) ease,
+      box-shadow var(--qb-motion-hover) ease;
+  }
+
+  .card-tile:hover {
+    transform: translateY(-3px);
+  }
+
   @keyframes checklist-row-appear {
     from {
       opacity: 0;
@@ -1031,7 +1101,7 @@ body {
 }
 
 .epic-card {
-  border-left: 3px solid var(--legacy-color-4338ca);
+  border-left: 3px solid var(--card-accent-fill, var(--legacy-color-4338ca));
 }
 
 .epic-card__expand {

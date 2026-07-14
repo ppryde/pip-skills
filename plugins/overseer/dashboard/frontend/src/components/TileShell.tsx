@@ -41,6 +41,7 @@ export interface TileShellProps {
  */
 function TileShell({
   card,
+  accentKey,
   variantClassName,
   dimmed = false,
   highlighted = false,
@@ -74,6 +75,7 @@ function TileShell({
   const className = [
     "card-tile",
     variantClassName ?? "",
+    accentKey ? `card-tile--accent-${accentKey}` : "",
     card.status === "blocked" ? "card-tile--blocked" : "",
     dimmed ? "card-tile--dimmed" : "",
     highlighted ? "card-tile--highlighted" : "",
