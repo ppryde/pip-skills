@@ -1645,11 +1645,11 @@ body {
 /* Mutation controls (Chunk 6). */
 .priority-select {
   font-size: 0.75rem;
-  border: 1px solid var(--legacy-color-d0d5dd);
-  border-radius: var(--legacy-radius-3px);
-  padding: 0.1rem 0.3rem;
-  background: var(--legacy-color-fff);
-  color: var(--legacy-color-1b1f24);
+  border: 1px solid var(--qb-card-border);
+  border-radius: var(--qb-radius-chip-sm);
+  padding: 0.15rem 0.4rem;
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
 }
 
 .threshold-control {
@@ -1695,7 +1695,7 @@ body {
   align-items: flex-start;
   margin-bottom: 1rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid var(--legacy-color-e5e7eb);
+  border-bottom: 2px dashed var(--qb-line-dashed);
 }
 
 .status-menu {
@@ -1706,11 +1706,11 @@ body {
 
 .status-menu button {
   font-size: 0.75rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--legacy-color-d0d5dd);
-  background: var(--legacy-color-fff);
-  color: var(--legacy-color-1b1f24);
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--qb-radius-pill);
+  border: 1px solid var(--qb-card-border);
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
   cursor: pointer;
 }
 
@@ -1723,30 +1723,30 @@ body {
 
 .claim-control select {
   font-size: 0.75rem;
-  border: 1px solid var(--legacy-color-d0d5dd);
-  border-radius: var(--legacy-radius-3px);
+  border: 1px solid var(--qb-card-border);
+  border-radius: var(--qb-radius-chip-sm);
   padding: 0.15rem 0.3rem;
-  background: var(--legacy-color-fff);
-  color: var(--legacy-color-1b1f24);
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
 }
 
 .claim-control button {
   font-size: 0.75rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--legacy-color-d0d5dd);
-  background: var(--legacy-color-fff);
-  color: var(--legacy-color-1b1f24);
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--qb-radius-pill);
+  border: 1px solid var(--qb-card-border);
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
   cursor: pointer;
 }
 
 .claim-control__holder {
   font-size: 0.75rem;
-  color: var(--legacy-color-3654a6);
+  color: var(--qb-ink-500);
 }
 
 .claim-control__holder--stale {
-  color: var(--legacy-color-9ca3af);
+  color: var(--qb-ink-300);
   font-style: italic;
 }
 
@@ -1771,7 +1771,7 @@ body {
 }
 
 .link-editor__deps-label {
-  color: var(--legacy-color-6b7280);
+  color: var(--qb-ink-400);
 }
 
 .link-editor__deps-list {
@@ -1787,10 +1787,10 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  background: var(--legacy-color-eef2ff);
-  color: var(--legacy-color-4338ca);
-  border-radius: var(--legacy-radius-3px);
-  padding: 0.05rem 0.3rem;
+  background: var(--qb-locked-chip-bg);
+  color: var(--qb-locked-chip-text);
+  border-radius: var(--qb-radius-pill);
+  padding: 0.1rem 0.5rem;
   font-size: 0.75rem;
 }
 
