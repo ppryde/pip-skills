@@ -1618,6 +1618,69 @@ body {
   margin-bottom: 0.75rem;
 }
 
+/* Quest log timeline (WF-030 chunk 9, stretch — HANDOFF: "vertical
+   timeline, 2px dashed #D8C39A left rule, colored dots, entry text +
+   Silkscreen day stamp"). Dot colour rotates through the 7 guild accent
+   groups by entry index (board/avatarAccent.ts's ACCENT_GROUPS) —
+   presentational variety, not data, same convention as the party
+   avatars' accent rotation. */
+.card-drawer__quest-log {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border-left: 2px dashed var(--qb-line-dashed);
+}
+
+.card-drawer__quest-log-entry {
+  position: relative;
+  padding: 0 0 0.75rem 1rem;
+}
+
+.card-drawer__quest-log-dot {
+  position: absolute;
+  left: -5px;
+  top: 0.3rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: var(--qb-radius-circle);
+}
+
+.card-drawer__quest-log-entry--forest .card-drawer__quest-log-dot {
+  background: var(--qb-accent-forest-fill);
+}
+.card-drawer__quest-log-entry--amber .card-drawer__quest-log-dot {
+  background: var(--qb-accent-amber-fill);
+}
+.card-drawer__quest-log-entry--sky .card-drawer__quest-log-dot {
+  background: var(--qb-accent-sky-fill);
+}
+.card-drawer__quest-log-entry--orange .card-drawer__quest-log-dot {
+  background: var(--qb-accent-orange-fill);
+}
+.card-drawer__quest-log-entry--rose .card-drawer__quest-log-dot {
+  background: var(--qb-accent-rose-fill);
+}
+.card-drawer__quest-log-entry--umber .card-drawer__quest-log-dot {
+  background: var(--qb-accent-umber-fill);
+}
+.card-drawer__quest-log-entry--taupe .card-drawer__quest-log-dot {
+  background: var(--qb-accent-taupe-fill);
+}
+
+.card-drawer__quest-log-text {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--qb-ink-700);
+}
+
+.card-drawer__quest-log-stamp {
+  display: block;
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  color: var(--qb-ink-400);
+  margin-top: 0.15rem;
+}
+
 /* Segmented Quest | Scroll (MD) tab bar (HANDOFF: "segmented, in a
    #EDE0C2 track, border-radius:14px, padding:5px"). */
 .card-drawer__viewtoggle {

@@ -926,4 +926,69 @@ describe("<CardDetailDrawer/>", () => {
     await screen.findByText(`Title WF-X`);
     expect(container.querySelector(".dep-badge")).toBeNull();
   });
+
+  it("renders a well-formed Progress log section as a quest-log timeline (WF-030 chunk 9, stretch)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-Y",
+        sections: {
+          "## Progress log":
+            "- 2026-07-14T08:19 — comms: subagent mode (~0 tokens)\n" +
+            "- 2026-07-14T08:37 — plan-review passed (~165k tokens)",
+        },
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-Y"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-Y`);
+    expect(container.querySelector(".card-drawer__quest-log")).not.toBeNull();
+    expect(
+      container.querySelectorAll(".card-drawer__quest-log-entry").length
+    ).toBe(2);
+    expect(screen.getByText("comms: subagent mode")).toBeInTheDocument();
+    expect(screen.getByText("2026-07-14T08:37")).toBeInTheDocument();
+  });
+
+  it("falls back to plain MarkdownView rendering when the Progress log section doesn't parse cleanly", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-Z2",
+        sections: {
+          "## Progress log":
+            "- 2026-07-14T08:19 — comms: subagent mode (~0 tokens)\n" +
+            "not a parseable line",
+        },
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-Z2"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-Z2`);
+    expect(container.querySelector(".card-drawer__quest-log")).toBeNull();
+    // The raw section text still renders — full plain-section fallback,
+    // never a partial timeline mixed with a partial dump.
+    expect(
+      screen.getByText(/comms: subagent mode/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/not a parseable line/)).toBeInTheDocument();
+  });
 });

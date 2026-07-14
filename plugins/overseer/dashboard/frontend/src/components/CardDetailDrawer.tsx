@@ -5,6 +5,8 @@ import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
 import { accentKeyForCard, bannerLabelForCard } from "../board/cardAccent";
 import { rarityStars } from "../board/rarityStars";
+import { parseProgressLog } from "../board/progressLog";
+import { ACCENT_GROUPS } from "../board/avatarAccent";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ClaimControl from "./ClaimControl";
@@ -363,14 +365,52 @@ function CardDetailDrawer({
               {view === "source" ? (
                 <pre className="card-drawer__source" data-testid="card-source">{detail.body}</pre>
               ) : sectionEntries.length > 0 ? (
-                sectionEntries.map(([heading, text]) => (
-                  <section key={heading} className="card-drawer__section">
-                    <h3 className="card-drawer__section-heading">
-                      {sectionLabel(heading)}
-                    </h3>
-                    <MarkdownView text={text} />
-                  </section>
-                ))
+                sectionEntries.map(([heading, text]) => {
+                  // Quest-log timeline (WF-030 chunk 9, stretch) — "##
+                  // Progress log" only, and only when it parses cleanly
+                  // (parseProgressLog returns null rather than a partial
+                  // list on any malformed line — see its doc comment).
+                  // Every other section, and a Progress log that doesn't
+                  // parse, renders through the existing MarkdownView path
+                  // unchanged.
+                  const progressEntries =
+                    heading === "## Progress log"
+                      ? parseProgressLog(text)
+                      : null;
+                  return (
+                    <section key={heading} className="card-drawer__section">
+                      <h3 className="card-drawer__section-heading">
+                        {sectionLabel(heading)}
+                      </h3>
+                      {progressEntries ? (
+                        <ol className="card-drawer__quest-log">
+                          {progressEntries.map((entry, i) => (
+                            <li
+                              key={i}
+                              className={
+                                "card-drawer__quest-log-entry card-drawer__quest-log-entry--" +
+                                ACCENT_GROUPS[i % ACCENT_GROUPS.length]
+                              }
+                            >
+                              <span
+                                className="card-drawer__quest-log-dot"
+                                aria-hidden="true"
+                              />
+                              <span className="card-drawer__quest-log-text">
+                                {entry.note}
+                              </span>
+                              <span className="card-drawer__quest-log-stamp">
+                                {entry.timestamp}
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <MarkdownView text={text} />
+                      )}
+                    </section>
+                  );
+                })
               ) : (
                 <MarkdownView text={detail.body} />
               )}
