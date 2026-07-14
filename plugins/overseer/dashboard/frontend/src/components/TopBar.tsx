@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { Context, Limits } from "../api/types";
+import type { BoardCard, Context, Limits } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+import type { PartyMember } from "../board/party";
 import ThresholdControl from "./ThresholdControl";
 import SessionsPanel from "./SessionsPanel";
 
@@ -15,6 +16,13 @@ export interface TopBarProps {
   refreshing: boolean;
   mutate: UseBoardResult["mutate"];
   inFlight: boolean;
+  /** WF-029 chunk 3 plumbing — consumed by chunk 5's gold-total/vanquished/
+   * questing pills and the parchment subtitle. Optional so TopBar.test.tsx's
+   * existing baseProps() (pre-chunk-5 rewrite) still compiles. */
+  cards?: BoardCard[];
+  party?: PartyMember[];
+  lastRefreshedAt?: Date | null;
+  onOpenParty?: () => void;
 }
 
 function formatPct(value: number): string {

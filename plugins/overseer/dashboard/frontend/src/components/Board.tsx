@@ -7,6 +7,7 @@ import {
 } from "@dnd-kit/core";
 import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+import type { PartyMember } from "../board/party";
 import { groupIntoLanes } from "../board/layout";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
 import { locateDropTarget, resolveDrop } from "../board/dragPlan";
@@ -23,6 +24,9 @@ export interface BoardProps {
   /** WF-008 C4: pauses useBoard's 5s background poll for the duration of a
    *  drag — wired to dnd-kit's onDragStart/onDragEnd/onDragCancel below. */
   setDragActive: UseBoardResult["setDragActive"];
+  /** WF-029 chunk 3 plumbing — chunk 4's PartyColumn (last child of the
+   * scroll row) consumes this; unused here until then. */
+  party: PartyMember[];
 }
 
 /**

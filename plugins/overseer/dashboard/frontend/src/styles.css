@@ -1611,3 +1611,45 @@ body {
   font-size: 0.85rem;
   line-height: 1;
 }
+
+/* Party overlay shell (WF-029 chunk 3) — structural positioning only, the
+   drawer-overlay's backdrop convention re-used. Chunk 6 replaces the sheet's
+   flat legacy styling with HANDOFF's dark 800px hero-card grid sheet. */
+.party-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--legacy-overlay-1b1f24-40);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.party-sheet {
+  position: relative;
+  width: min(50rem, 90vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--legacy-color-fff);
+  border-radius: var(--legacy-radius-6px);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--legacy-shadow-1);
+}
+
+.party-sheet__close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  border: none;
+  background: transparent;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--legacy-color-6b7280);
+  cursor: pointer;
+}
+
+.party-sheet__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

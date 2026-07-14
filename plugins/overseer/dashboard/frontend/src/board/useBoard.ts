@@ -32,6 +32,10 @@ export interface UseBoardResult {
    *  state) so the setInterval tick always reads the latest value without
    *  needing to be re-created every render. */
   setDragActive: (active: boolean) => void;
+  /** WF-029: when the last successful `applyResponse` landed (manual load,
+   *  refresh, silent poll, or mutate — any of them count as "fresh data").
+   *  Feeds TopBar's subtitle timestamp; null until the first load resolves. */
+  lastRefreshedAt: Date | null;
 }
 
 export function useBoard(): UseBoardResult {
@@ -41,6 +45,7 @@ export function useBoard(): UseBoardResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   // Monotonic counter: each request gets an issued id; a response is only
   // applied if its id is still the latest issued when it resolves.
@@ -65,6 +70,7 @@ export function useBoard(): UseBoardResult {
     setBoard(res.board);
     setContext(res.context);
     setLimits(res.limits);
+    setLastRefreshedAt(new Date());
   }, []);
 
   // `silent` is for the background poll: it still goes through the SAME
@@ -173,5 +179,6 @@ export function useBoard(): UseBoardResult {
     refresh,
     mutate,
     setDragActive,
+    lastRefreshedAt,
   };
 }
