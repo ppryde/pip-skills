@@ -1,13 +1,13 @@
 /**
- * Shared census-session poll (WF-029 chunk 1). Lifted out of the old
- * SessionsPanel (retiring — chunk 7) so TopBar's "N questing" pill and the
- * new PartyColumn/PartyOverlay all read the SAME poll at the same instant
+ * Shared census-session poll (WF-029 chunk 1). Lifted out of the retired
+ * dark sessions dropdown (chunk 7) so TopBar's "N questing" pill and the
+ * PartyColumn/PartyOverlay all read the SAME poll at the same instant
  * (see the card's Decisions: "PartyColumn and TopBar's pill must agree at
  * every instant"). ClaimControl keeps its own independent poll — untouched,
  * out of scope.
  *
- * Behaviour mirrors the old panel exactly: fetch on mount, poll every 5s,
- * swallow errors silently (leaving the last good state on screen), and
+ * Behaviour mirrors the old dropdown exactly: fetch on mount, poll every
+ * 5s, swallow errors silently (leaving the last good state on screen), and
  * guard against setState after unmount. Sessions are recency-sorted here
  * (most recently active first) so every consumer gets the same order for
  * free.

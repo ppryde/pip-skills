@@ -161,7 +161,7 @@ describe("<TopBar/>", () => {
     expect(onOpenParty).toHaveBeenCalledTimes(1);
   });
 
-  it("renders no Sessions toggle — SessionsPanel retired, the questing pill replaces it", () => {
+  it("renders no Sessions toggle — the old sessions dropdown retired, the questing pill replaces it", () => {
     render(<TopBar {...baseProps()} />);
     expect(
       screen.queryByRole("button", { name: /^sessions$/i })

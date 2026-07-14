@@ -15,7 +15,7 @@ export interface PartyColumnProps {
  * Mana bar guards `pct === undefined` explicitly: SessionSummary.pct is
  * optional (census-derived, may be absent), and `100 - undefined` is NaN,
  * not a sensible width. The undefined case renders the same neutral
- * "— unknown" treatment SessionsPanel already used for ctx display.
+ * "— unknown" treatment the topbar's own ctx display already used.
  */
 function PartyColumn({ party }: PartyColumnProps) {
   return (
