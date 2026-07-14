@@ -109,6 +109,9 @@
   --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
   /* HANDOFF's top bar shadow (WF-029 chunk 5) — hoisted, not left raw. */
   --legacy-topbar-shadow: 0 6px 16px rgba(90, 62, 40, 0.08);
+  /* HANDOFF's hero-card shadow colour (WF-029 chunk 6) — combines with the
+     already-declared --qb-shadow-hero (0 5px 0) offset recipe. */
+  --legacy-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
 }
 
 /* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
@@ -224,6 +227,17 @@
   --qb-party-border: #6e4a32;
   --qb-party-text: #f6ead2;
   --qb-party-text-muted: #c9ae84;
+
+  /* WF-029 chunk 6: HANDOFF §Party page's hero-card tokens (line 84-89) —
+     missing from card 1's vocabulary sweep, declared here per Decisions
+     ("missing HANDOFF-sourced values: declare + cite + report"). These are
+     light-card tones distinct from the dark --qb-party-* group above:
+     hero cards sit on #F3E7CE inside the dark sheet, not on the panel/row
+     dark backgrounds PartyColumn uses. */
+  --qb-hero-card-bg: #f3e7ce;
+  --qb-hero-name: #4a2e1c;
+  --qb-hero-class: #a06a3c;
+  --qb-hero-mana-track: #e4d2ab;
 
   /* Font stacks */
   --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
@@ -1652,9 +1666,8 @@ body {
   line-height: 1;
 }
 
-/* Party overlay shell (WF-029 chunk 3) — structural positioning only, the
-   drawer-overlay's backdrop convention re-used. Chunk 6 replaces the sheet's
-   flat legacy styling with HANDOFF's dark 800px hero-card grid sheet. */
+/* Party overlay (WF-029 chunk 6, HANDOFF §Party page) — backdrop/
+   stopPropagation convention shared with .drawer-overlay/.card-drawer. */
 .party-overlay {
   position: fixed;
   inset: 0;
@@ -1670,10 +1683,11 @@ body {
   width: min(50rem, 90vw);
   max-height: 90vh;
   overflow-y: auto;
-  background: var(--legacy-color-fff);
-  border-radius: var(--legacy-radius-6px);
-  padding: 1.25rem 1.5rem;
-  box-shadow: var(--legacy-shadow-1);
+  background: var(--qb-party-panel-bg);
+  color: var(--qb-party-text);
+  border-radius: var(--qb-radius-modal);
+  padding: 26px 28px;
+  box-shadow: var(--qb-shadow-modal);
 }
 
 .party-sheet__close {
@@ -1684,14 +1698,132 @@ body {
   background: transparent;
   font-size: 1.25rem;
   line-height: 1;
-  color: var(--legacy-color-6b7280);
+  color: var(--qb-party-text-muted);
   cursor: pointer;
 }
 
-.party-sheet__list {
-  list-style: none;
+.party-sheet__header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.party-sheet__title {
   margin: 0;
-  padding: 0;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--qb-party-text);
+}
+
+.party-sheet__count {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-party-text-muted);
+}
+
+.party-sheet__helper {
+  margin: 0.4rem 0 1.25rem;
+  color: var(--qb-party-text-muted);
+  font-family: var(--qb-font-body);
+  font-size: 0.9rem;
+}
+
+.party-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+/* Hero card (HANDOFF: light card floating inside the dark sheet). */
+.hero-card {
+  background: var(--qb-hero-card-bg);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: var(--qb-shadow-hero) var(--legacy-hero-card-shadow-color);
+}
+
+.hero-card__name {
+  margin-top: 0.5rem;
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--qb-hero-name);
+}
+
+.hero-card__class {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  color: var(--qb-hero-class);
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__mana {
+  height: 11px;
+  border-radius: var(--legacy-radius-999px);
+  background: var(--qb-hero-mana-track);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__mana-fill {
+  height: 100%;
+}
+
+.hero-card__mana-fill--high {
+  background: var(--qb-mana-high);
+}
+
+.hero-card__mana-fill--low {
+  background: var(--qb-mana-low);
+}
+
+.hero-card__mana--unknown {
+  height: 11px;
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__mana-label {
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--qb-hero-class);
+}
+
+.hero-card__quest {
+  border-top: 1px dashed var(--qb-hero-mana-track);
+  padding-top: 0.5rem;
+}
+
+.hero-card__quest-label {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  color: var(--qb-hero-class);
+}
+
+.hero-card__quest-title {
+  font-size: 0.85rem;
+  color: var(--qb-hero-name);
+}
+
+/* Static, non-interactive summon slot (Decisions) — a dashed empty tile,
+   no invented party-size limit. */
+.hero-card--summon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  background: transparent;
+  border: 2px dashed var(--qb-party-border);
+  box-shadow: none;
+  color: var(--qb-party-text-muted);
+  font-family: var(--qb-font-body);
+  font-size: 0.95rem;
 }
 
 /* Party column (WF-029 chunk 4) — dark panel at the board scroll-row's
