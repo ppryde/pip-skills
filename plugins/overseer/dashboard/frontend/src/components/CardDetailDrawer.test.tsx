@@ -991,4 +991,60 @@ describe("<CardDetailDrawer/>", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/not a parseable line/)).toBeInTheDocument();
   });
+
+  it("gates Journey progress + Sub-quests panel + locked pill to the Quest view — absent under Scroll (impl-review round 1)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-AA",
+        ready: false,
+        depends_on: ["WF-001"],
+        checklist: [
+          { task: "1", subject: "Write the design doc", status: "completed" },
+          { task: "2", subject: "Implement", status: "pending" },
+        ],
+        body: "# Goal\nRaw body text.",
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-AA"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-AA`);
+
+    // Quest view (default): all three present.
+    expect(container.querySelector(".card-drawer__journey")).not.toBeNull();
+    expect(screen.getByText("Sub-quests")).toBeInTheDocument();
+    expect(screen.getByText(/waiting on WF-001/)).toBeInTheDocument();
+
+    // Switch to Scroll — all three gone, only the markdown card remains.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /scroll/i }));
+    });
+
+    expect(container.querySelector(".card-drawer__journey")).toBeNull();
+    expect(screen.queryByText("Sub-quests")).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting on WF-001/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("card-source")).toBeInTheDocument();
+
+    // The tab bar itself survives the swap (stays outside the gated block).
+    expect(
+      screen.getByRole("group", { name: /body view/i })
+    ).toBeInTheDocument();
+
+    // Switch back to Quest — all three return.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /quest/i }));
+    });
+    expect(container.querySelector(".card-drawer__journey")).not.toBeNull();
+    expect(screen.getByText("Sub-quests")).toBeInTheDocument();
+    expect(screen.getByText(/waiting on WF-001/)).toBeInTheDocument();
+  });
 });

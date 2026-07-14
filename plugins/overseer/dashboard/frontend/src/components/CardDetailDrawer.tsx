@@ -295,48 +295,59 @@ function CardDetailDrawer({
               />
             </div>
 
-            {detail.checklist.length > 0 && (
+            {/* Journey progress + Sub-quests panel + Locked-behind pill:
+                Quest view ONLY (HANDOFF's two-mutually-exclusive-panels
+                model — Scroll shows the markdown card alone; the checklist
+                is display-only, so there's no interactivity reason to keep
+                it mounted under Scroll). The tab bar itself stays outside
+                this swap, below. */}
+            {view === "rendered" && (
               <>
-                {/* Journey progress (HANDOFF: Quest tab, above the
-                    sub-quests panel; hidden with the whole block when
-                    there's no checklist). */}
-                <div className="card-drawer__journey">
-                  <div className="card-drawer__journey-label">
-                    Journey progress
-                  </div>
-                  <div
-                    className="card-drawer__journey-track"
-                    data-progress-pct={journeyPct}
-                  >
-                    <div
-                      className={`card-drawer__journey-fill card-drawer__journey-fill--${accentKey}`}
-                      style={{ width: `${journeyPct}%` }}
-                    />
-                  </div>
+                {detail.checklist.length > 0 && (
+                  <>
+                    {/* Journey progress (HANDOFF: Quest tab, above the
+                        sub-quests panel; hidden with the whole block when
+                        there's no checklist). */}
+                    <div className="card-drawer__journey">
+                      <div className="card-drawer__journey-label">
+                        Journey progress
+                      </div>
+                      <div
+                        className="card-drawer__journey-track"
+                        data-progress-pct={journeyPct}
+                      >
+                        <div
+                          className={`card-drawer__journey-fill card-drawer__journey-fill--${accentKey}`}
+                          style={{ width: `${journeyPct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <section className="card-drawer__checklist">
+                      <div className="card-drawer__checklist-header">
+                        <h3 className="card-drawer__section-heading">
+                          Sub-quests
+                        </h3>
+                        <span className="card-drawer__checklist-count">
+                          {checklistDone} / {checklistTotal}
+                        </span>
+                      </div>
+                      <ChecklistRows entries={detail.checklist} />
+                    </section>
+                  </>
+                )}
+
+                {/* Locked-behind pill (HANDOFF: Quest tab, after the
+                    sub-quests panel — NOT the header meta row, see chunk
+                    2's Decisions). Independent of the checklist's own
+                    presence: a card can be blocked on a dependency with
+                    zero sub-quests. DependencyBadge self-gates (renders
+                    nothing when ready or dep-less), same unconditional-
+                    render usage as TileShell's board-tile footer. */}
+                <div className="card-drawer__locked">
+                  <DependencyBadge card={detail} />
                 </div>
-                <section className="card-drawer__checklist">
-                  <div className="card-drawer__checklist-header">
-                    <h3 className="card-drawer__section-heading">
-                      Sub-quests
-                    </h3>
-                    <span className="card-drawer__checklist-count">
-                      {checklistDone} / {checklistTotal}
-                    </span>
-                  </div>
-                  <ChecklistRows entries={detail.checklist} />
-                </section>
               </>
             )}
-
-            {/* Locked-behind pill (HANDOFF: Quest tab, after the sub-quests
-                panel — NOT the header meta row, see chunk 2's Decisions).
-                Independent of the checklist's own presence: a card can be
-                blocked on a dependency with zero sub-quests. DependencyBadge
-                self-gates (renders nothing when ready or dep-less), same
-                unconditional-render usage as TileShell's board-tile footer. */}
-            <div className="card-drawer__locked">
-              <DependencyBadge card={detail} />
-            </div>
 
             {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
                 view state stays "rendered"/"source" (aria-pressed/state

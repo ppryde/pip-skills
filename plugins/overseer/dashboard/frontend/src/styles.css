@@ -1217,7 +1217,7 @@ body {
   overflow-y: auto;
   background: var(--qb-panel);
   border-left: 2px solid var(--qb-card-border);
-  padding: 1.25rem 1.5rem;
+  padding: 26px 28px;
   box-shadow: var(--qb-shadow-modal);
 }
 
