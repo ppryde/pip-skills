@@ -245,6 +245,10 @@
   /* Motion durations */
   --qb-motion-pulse: 1.6s;
   --qb-motion-hover: 0.12s;
+
+  /* Board-tile progress bar track (WF-028 Decisions: declared if missing —
+     HANDOFF-sourced, §Design Tokens line 64). */
+  --qb-progress-track: #f0e3c4;
 }
 
 /* Minimal reset */
@@ -801,6 +805,71 @@ body {
 
 .card-tile--dimmed {
   opacity: 0.35;
+}
+
+/* Done treatment (WF-028 chunk 5, HANDOFF's quest-card prose): muted
+   parchment card, strikethrough title. The strikethrough tone (#6E6250 in
+   HANDOFF) has no declared --qb-* token and isn't one of the two approved
+   new additions (Decisions) — reusing the closest existing ink tone
+   (--qb-ink-500, #7A6A54) rather than inventing one. */
+.card-tile--done {
+  background: var(--qb-parchment-muted);
+  opacity: 0.94;
+}
+
+.card-tile__title--done {
+  text-decoration: line-through;
+  color: var(--qb-ink-500);
+}
+
+.card-tile__done-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: var(--qb-radius-circle);
+  background: var(--qb-success-fill);
+  color: var(--legacy-color-fff);
+}
+
+.card-tile__gold-earned {
+  font-size: 0.7rem;
+  color: var(--qb-gold-chip-text);
+}
+
+/* Parked treatment: dashed muted card, "on hold" chip replaces the meters.
+   Neither HANDOFF nor the accent utilities give this chip its own colour
+   (same reasoning as .claim-badge above) — neutral base tokens. */
+.card-tile--parked {
+  background: var(--qb-parchment-muted-2);
+  border-style: dashed;
+}
+
+.card-tile__hold-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+  border: 1px dashed var(--qb-line-dashed);
+}
+
+/* Board-tile progress bar (HANDOFF): fill is the lane accent, same custom
+   property the card border/shadow read (chunk 3). */
+.card-tile__progress {
+  height: 8px;
+  margin: 0.15rem 0 0.35rem;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-progress-track);
+  overflow: hidden;
+}
+
+.card-tile__progress-fill {
+  height: 100%;
+  background: var(--card-accent-fill, var(--legacy-color-4338ca));
 }
 
 .card-tile__handle {
