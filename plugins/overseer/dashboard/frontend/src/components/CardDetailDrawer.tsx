@@ -6,6 +6,7 @@ import type { PartyMember } from "../board/party";
 import { accentKeyForCard, bannerLabelForCard } from "../board/cardAccent";
 import { rarityStars } from "../board/rarityStars";
 import BudgetMeter from "./BudgetMeter";
+import DependencyBadge from "./DependencyBadge";
 import ClaimControl from "./ClaimControl";
 import PrioritySelect from "./PrioritySelect";
 import LinkEditor from "./LinkEditor";
@@ -324,6 +325,16 @@ function CardDetailDrawer({
                 </section>
               </>
             )}
+
+            {/* Locked-behind pill (HANDOFF: Quest tab, after the sub-quests
+                panel — NOT the header meta row, see chunk 2's Decisions).
+                Independent of the checklist's own presence: a card can be
+                blocked on a dependency with zero sub-quests. DependencyBadge
+                self-gates (renders nothing when ready or dep-less), same
+                unconditional-render usage as TileShell's board-tile footer. */}
+            <div className="card-drawer__locked">
+              <DependencyBadge card={detail} />
+            </div>
 
             {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
                 view state stays "rendered"/"source" (aria-pressed/state

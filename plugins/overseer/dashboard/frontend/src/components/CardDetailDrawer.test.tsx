@@ -873,4 +873,57 @@ describe("<CardDetailDrawer/>", () => {
       c100.querySelector(".card-drawer__journey-track")
     ).toHaveAttribute("data-progress-pct", "100");
   });
+
+  it("renders the locked-behind pill in the Quest-tab body (after the sub-quests panel), not the header", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-W",
+        ready: false,
+        depends_on: ["WF-001", "WF-002"],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-W"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-W`);
+    const badge = screen.getByText(/waiting on WF-001, WF-002/);
+    expect(badge).toBeInTheDocument();
+    // Lives in .card-drawer__locked, NOT .card-drawer__facts (the header
+    // meta row) — see chunk 2's Decisions on placement.
+    expect(
+      container.querySelector(".card-drawer__locked .dep-badge")
+    ).not.toBeNull();
+    expect(
+      container.querySelector(".card-drawer__facts .dep-badge")
+    ).toBeNull();
+  });
+
+  it("renders no locked-behind pill when the card has no dependencies", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-X", ready: true, depends_on: [] })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-X"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-X`);
+    expect(container.querySelector(".dep-badge")).toBeNull();
+  });
 });

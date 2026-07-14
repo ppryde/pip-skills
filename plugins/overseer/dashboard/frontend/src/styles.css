@@ -1580,6 +1580,17 @@ body {
   border-radius: var(--qb-radius-checkbox-lg);
 }
 
+/* Locked-behind pill wrapper — just spacing; .dep-badge itself is already
+   themed (WF-028). Empty (zero margin impact) when DependencyBadge
+   self-gates to null. */
+.card-drawer__locked:empty {
+  display: none;
+}
+
+.card-drawer__locked {
+  margin-bottom: 0.75rem;
+}
+
 /* Segmented Quest | Scroll (MD) tab bar (HANDOFF: "segmented, in a
    #EDE0C2 track, border-radius:14px, padding:5px"). */
 .card-drawer__viewtoggle {
