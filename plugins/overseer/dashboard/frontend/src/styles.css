@@ -1398,23 +1398,26 @@ body {
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--legacy-color-4338ca);
+  color: var(--qb-ink-500);
 }
 
 .card-drawer__section-text {
   margin: 0;
   white-space: pre-wrap;
-  color: var(--legacy-color-1b1f24);
-  font-size: 0.9rem;
+  color: var(--qb-ink-700);
+  font-family: var(--qb-font-prose);
+  font-size: 18px;
   line-height: 1.5;
 }
 
 /* Rendered markdown inside a card section/body — headings are clamped down
  * to card-scale type (a card body is not a document, so an author's `#`
- * should not blow up to page-heading size). */
+ * should not blow up to page-heading size). HANDOFF: description prose is
+ * 18px/#5B4632/line-height 1.5 -- --qb-ink-700 is that exact hex. */
 .md-view {
-  color: var(--legacy-color-1b1f24);
-  font-size: 0.9rem;
+  color: var(--qb-ink-700);
+  font-family: var(--qb-font-prose);
+  font-size: 18px;
   line-height: 1.5;
 }
 
@@ -1457,12 +1460,12 @@ body {
 .md-view pre {
   overflow-x: auto;
   padding: 0.5rem;
-  background: var(--legacy-color-f0f1f4);
+  background: var(--qb-parchment-muted);
   border-radius: var(--legacy-radius-4px);
 }
 
 .md-view code {
-  background: var(--legacy-color-f0f1f4);
+  background: var(--qb-parchment-muted);
   border-radius: var(--legacy-radius-3px);
   padding: 0.05rem 0.25rem;
 }
@@ -1473,14 +1476,20 @@ body {
 }
 
 /* Verbatim source view of a card body — a plain monospace block, distinct
- * from the rendered `.md-view` above. */
+ * from the rendered `.md-view` above. Sits inside a white sub-quests-style
+ * card so raw markdown reads as its own panel (HANDOFF's Scroll tab: "the
+ * quest rendered as Markdown inside a white card"). */
 .card-drawer__source {
   margin: 0;
   white-space: pre-wrap;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--qb-font-mono);
   font-size: 0.8rem;
   line-height: 1.5;
-  color: var(--legacy-color-1b1f24);
+  color: var(--qb-ink-700);
+  background: var(--legacy-color-fff);
+  border: 2px solid var(--qb-line-dashed-2);
+  border-radius: var(--qb-radius-panel);
+  padding: 1rem;
   overflow-x: auto;
 }
 
