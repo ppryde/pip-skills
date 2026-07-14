@@ -1194,34 +1194,50 @@ body {
 }
 
 /* Card detail drawer (Chunk 5): a right-hand panel over a dimming overlay. */
+/* Backdrop (HANDOFF line 70: both halves — the tint AND the blur, the
+   blur had been silently dropped from an earlier draft). */
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  background: var(--legacy-overlay-1b1f24-40);
+  background: var(--qb-overlay);
+  backdrop-filter: blur(3px);
   display: flex;
   justify-content: flex-end;
   z-index: 20;
 }
 
+/* Parchment sheet — keeps the right-anchored slide-in geometry (the spec's
+   own binding decision: a drawer, not HANDOFF's centered 640px modal), so
+   only the board-facing left edge gets a border rather than HANDOFF's
+   all-around 2px. */
 .card-drawer {
   position: relative;
   width: min(28rem, 100%);
   height: 100%;
   overflow-y: auto;
-  background: var(--legacy-color-fff);
+  background: var(--qb-panel);
+  border-left: 2px solid var(--qb-card-border);
   padding: 1.25rem 1.5rem;
-  box-shadow: var(--legacy-shadow-2);
+  box-shadow: var(--qb-shadow-modal);
 }
 
+/* Round close button (HANDOFF: "✕, 38px, #F3EAD6/2px solid #D8C39A" —
+   --qb-parchment-muted/--qb-line-dashed are those exact hexes). */
 .card-drawer__close {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  border: none;
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--qb-radius-circle);
+  border: 2px solid var(--qb-line-dashed);
+  background: var(--qb-parchment-muted);
   font-size: 1.25rem;
   line-height: 1;
-  color: var(--legacy-color-6b7280);
+  color: var(--qb-ink-500);
   cursor: pointer;
 }
 
