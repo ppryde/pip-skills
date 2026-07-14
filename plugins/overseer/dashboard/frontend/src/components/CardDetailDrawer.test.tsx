@@ -562,7 +562,7 @@ describe("<CardDetailDrawer/>", () => {
     );
   });
 
-  it("renders a Tasks section with the FULL (unwindowed) checklist when non-empty", async () => {
+  it("renders a Sub-quests section with the FULL (unwindowed) checklist when non-empty", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({
         id: "WF-J",
@@ -589,7 +589,8 @@ describe("<CardDetailDrawer/>", () => {
       />
     );
 
-    expect(await screen.findByText("Tasks")).toBeInTheDocument();
+    expect(await screen.findByText("Sub-quests")).toBeInTheDocument();
+    expect(screen.getByText("1 / 6")).toBeInTheDocument(); // done/total count
     // All six rows render — the drawer shows the full list, not the tile's
     // 5-row focus window.
     expect(screen.getByText("Write the design doc")).toBeInTheDocument();
@@ -640,12 +641,12 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByRole("button", { name: "Unassign" })).toBeInTheDocument();
   });
 
-  it("renders no Tasks section when the checklist is empty", async () => {
+  it("renders no Sub-quests section (or Journey progress bar) when the checklist is empty", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({ id: "WF-K", title: "No tasks", checklist: [] })
     );
 
-    render(
+    const { container } = render(
       <CardDetailDrawer
         cardId="WF-K"
         onClose={() => {}}
@@ -657,7 +658,8 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText("No tasks");
-    expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sub-quests")).not.toBeInTheDocument();
+    expect(container.querySelector(".card-drawer__journey")).toBeNull();
   });
 
   it("renders the banner pill with the card's own stage label (WF-030 chunk 2)", async () => {
@@ -792,5 +794,83 @@ describe("<CardDetailDrawer/>", () => {
 
     await screen.findByText(`Title WF-S`);
     expect(container.querySelector(".card-drawer__hero-chip")).toBeNull();
+  });
+
+  it("Journey progress bar reflects done/total over the FULL checklist (WF-030 chunk 4)", async () => {
+    const checklist = Array.from({ length: 8 }, (_, i) => ({
+      task: String(i + 1),
+      subject: `Task ${i + 1}`,
+      status: i < 2 ? "completed" : "pending",
+    }));
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-T", checklist })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-T"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-T`);
+    expect(screen.getByText("Journey progress")).toBeInTheDocument();
+    const track = container.querySelector(".card-drawer__journey-track");
+    expect(track).toHaveAttribute("data-progress-pct", "25"); // 2/8
+    expect(screen.getByText("2 / 8")).toBeInTheDocument(); // Sub-quests count
+  });
+
+  it("Journey progress shows 0% for an all-pending checklist and 100% for an all-completed one", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-U",
+        checklist: [
+          { task: "1", subject: "A", status: "pending" },
+          { task: "2", subject: "B", status: "pending" },
+        ],
+      })
+    );
+    const { container: c0 } = render(
+      <CardDetailDrawer
+        cardId="WF-U"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText(`Title WF-U`);
+    expect(
+      c0.querySelector(".card-drawer__journey-track")
+    ).toHaveAttribute("data-progress-pct", "0");
+
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-V",
+        checklist: [
+          { task: "1", subject: "A", status: "completed" },
+          { task: "2", subject: "B", status: "completed" },
+        ],
+      })
+    );
+    const { container: c100 } = render(
+      <CardDetailDrawer
+        cardId="WF-V"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText(`Title WF-V`);
+    expect(
+      c100.querySelector(".card-drawer__journey-track")
+    ).toHaveAttribute("data-progress-pct", "100");
   });
 });

@@ -1487,10 +1487,82 @@ body {
 /* Drawer's "Tasks" section — the full, unwindowed `.checklist` (no
  * `--windowed` edge-fade/max-height there; see ChecklistRows usage in
  * CardDetailDrawer.tsx). Sits above the Rendered/Source toggle. */
+/* Journey progress (HANDOFF: Quest tab, above the sub-quests panel). Reuses
+   the board-tile progress bar's track token (--qb-progress-track). */
+.card-drawer__journey {
+  margin-bottom: 0.75rem;
+}
+
+.card-drawer__journey-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--qb-ink-500);
+  margin-bottom: 0.25rem;
+}
+
+.card-drawer__journey-track {
+  height: 8px;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-progress-track);
+  overflow: hidden;
+}
+
+.card-drawer__journey-fill {
+  height: 100%;
+}
+
+/* Fill colour is the card's own column accent (HANDOFF's board-tile
+   progress bar says "fill column-color" — same convention here). */
+.card-drawer__journey-fill--backlog {
+  background: var(--qb-accent-forest-fill);
+}
+.card-drawer__journey-fill--bootstrap {
+  background: var(--qb-accent-amber-fill);
+}
+.card-drawer__journey-fill--planning,
+.card-drawer__journey-fill--plan-review,
+.card-drawer__journey-fill--verification {
+  background: var(--qb-accent-sky-fill);
+}
+.card-drawer__journey-fill--implementation,
+.card-drawer__journey-fill--impl-review {
+  background: var(--qb-accent-orange-fill);
+}
+.card-drawer__journey-fill--awaiting-merge {
+  background: var(--qb-accent-rose-fill);
+}
+.card-drawer__journey-fill--done {
+  background: var(--qb-accent-umber-fill);
+}
+.card-drawer__journey-fill--parked {
+  background: var(--qb-accent-taupe-fill);
+}
+
+/* Sub-quests panel (HANDOFF: "white card, 2px solid #E0CEA5,
+   border-radius:16px; header 'Sub-quests' + 'done / total' count; 22px
+   rounded checkboxes"). */
 .card-drawer__checklist {
   margin-bottom: 1rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--legacy-color-e5e7eb);
+  padding: 0.75rem 1rem 1rem;
+  border: 2px solid var(--qb-line-dashed-2);
+  border-radius: var(--qb-radius-panel);
+  background: var(--legacy-color-fff);
+}
+
+.card-drawer__checklist-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.card-drawer__checklist-header .card-drawer__section-heading {
+  margin: 0;
+}
+
+.card-drawer__checklist-count {
+  font-size: 0.75rem;
+  color: var(--qb-ink-400);
 }
 
 .card-drawer__checklist .checklist__row {
@@ -1498,7 +1570,16 @@ body {
   line-height: 1.4rem;
 }
 
-/* Rendered/Source segmented toggle above the drawer body. */
+/* Drawer checkboxes are HANDOFF's 22px for this context — the board tile
+   keeps its own 15px (chunk 6 of the board card). Scoped so nothing else
+   sharing .checklist__glyph is affected. */
+.card-drawer__checklist .checklist__glyph {
+  width: 22px;
+  height: 22px;
+  font-size: 0.8rem;
+  border-radius: var(--qb-radius-checkbox-lg);
+}
+
 /* Segmented Quest | Scroll (MD) tab bar (HANDOFF: "segmented, in a
    #EDE0C2 track, border-radius:14px, padding:5px"). */
 .card-drawer__viewtoggle {

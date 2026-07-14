@@ -164,6 +164,15 @@ function CardDetailDrawer({
   const heroSession = detail?.claimed_by
     ? party.find((p) => p.session.id === detail.claimed_by)?.session
     : undefined;
+  // Journey progress (HANDOFF): % over the FULL checklist, same derivation
+  // as WF-028's board-tile progress bar — the drawer never windows its
+  // checklist to begin with, so there's no wrong-source slice to guard
+  // against here, just the same done/total math.
+  const checklistTotal = detail?.checklist.length ?? 0;
+  const checklistDone =
+    detail?.checklist.filter((e) => e.status === "completed").length ?? 0;
+  const journeyPct =
+    checklistTotal > 0 ? Math.round((checklistDone / checklistTotal) * 100) : 0;
 
   return (
     <div className="drawer-overlay" data-testid="drawer-overlay" onClick={onClose}>
@@ -284,10 +293,36 @@ function CardDetailDrawer({
             </div>
 
             {detail.checklist.length > 0 && (
-              <section className="card-drawer__checklist">
-                <h3 className="card-drawer__section-heading">Tasks</h3>
-                <ChecklistRows entries={detail.checklist} />
-              </section>
+              <>
+                {/* Journey progress (HANDOFF: Quest tab, above the
+                    sub-quests panel; hidden with the whole block when
+                    there's no checklist). */}
+                <div className="card-drawer__journey">
+                  <div className="card-drawer__journey-label">
+                    Journey progress
+                  </div>
+                  <div
+                    className="card-drawer__journey-track"
+                    data-progress-pct={journeyPct}
+                  >
+                    <div
+                      className={`card-drawer__journey-fill card-drawer__journey-fill--${accentKey}`}
+                      style={{ width: `${journeyPct}%` }}
+                    />
+                  </div>
+                </div>
+                <section className="card-drawer__checklist">
+                  <div className="card-drawer__checklist-header">
+                    <h3 className="card-drawer__section-heading">
+                      Sub-quests
+                    </h3>
+                    <span className="card-drawer__checklist-count">
+                      {checklistDone} / {checklistTotal}
+                    </span>
+                  </div>
+                  <ChecklistRows entries={detail.checklist} />
+                </section>
+              </>
             )}
 
             {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
