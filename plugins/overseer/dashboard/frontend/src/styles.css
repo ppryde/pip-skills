@@ -583,6 +583,7 @@ body {
   border-radius: var(--qb-radius-pennant);
   position: sticky;
   top: 0;
+  z-index: 1;
 }
 
 .lane__count {
