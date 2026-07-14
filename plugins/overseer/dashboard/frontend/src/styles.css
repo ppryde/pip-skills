@@ -107,6 +107,8 @@
   --legacy-shadow-1: 0 8px 24px rgba(0, 0, 0, 0.45);
   --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
   --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
+  /* HANDOFF's top bar shadow (WF-029 chunk 5) — hoisted, not left raw. */
+  --legacy-topbar-shadow: 0 6px 16px rgba(90, 62, 40, 0.08);
 }
 
 /* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
@@ -203,9 +205,16 @@
   --qb-success-fill: #7a8b45;
   --qb-success-chip-bg: #eaf0de;
   --qb-success-chip-text: #5a6e38;
+  /* WF-029 chunk 5: HANDOFF §Board "Top bar" gives the vanquished pill a
+     border card 1's vocabulary sweep missed (HANDOFF line 53). */
+  --qb-success-chip-border: #a9be7e;
 
   --qb-locked-chip-bg: #f3e1e7;
   --qb-locked-chip-text: #a8506b;
+  /* WF-029 chunk 5: the "N questing" pill shares locked-chip's fill/text
+     (HANDOFF line 53 gives both the identical #F3E1E7/#A8506B) but has its
+     own border, missing from card 1's vocabulary. */
+  --qb-questing-chip-border: #d9a0b4;
 
   --qb-mana-high: linear-gradient(90deg, #5e86c7, #8fb6e0);
   --qb-mana-low: linear-gradient(90deg, #c25a3b, #e08a3c);
@@ -288,26 +297,59 @@ body {
   height: 100%;
 }
 
+/* Parchment sticky top bar (WF-029 chunk 5, HANDOFF §Board "Top bar"). */
 .topbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1.25rem;
-  background: var(--legacy-color-1b1f24);
-  color: var(--legacy-color-fff);
+  padding: 18px 26px;
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
+  border-bottom: 2px dashed var(--qb-line-dashed);
+  box-shadow: var(--legacy-topbar-shadow);
   flex-wrap: wrap;
-  /* Containing block for the sessions panel at narrow widths — see the
-     media query on .topbar__sessions below. */
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.topbar__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Irregular-radius crest (HANDOFF: "50px circular crest, irregular radius
+   50% 48% 52% 50%"). Purely decorative — no image asset. */
+.topbar__crest {
+  flex: 0 0 auto;
+  width: 50px;
+  height: 50px;
+  border-radius: 50% 48% 52% 50%;
+  border: 2px solid var(--qb-ink-700);
+  background: var(--qb-gold-chip-bg);
+}
+
+.topbar__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
 }
 
 .topbar h1 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: lowercase;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 26px;
+  color: var(--qb-ink-900);
+}
+
+.topbar__subtitle {
+  margin: 0;
+  font-family: var(--qb-font-body);
+  font-size: 17px;
+  color: var(--qb-ink-400);
 }
 
 .topbar__ctx {
@@ -315,29 +357,29 @@ body {
   align-items: baseline;
   gap: 0.4rem;
   font-size: 0.85rem;
-  color: var(--legacy-color-cbd5e1);
+  color: var(--qb-ink-500);
 }
 
 .topbar__ctx-label {
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
-  color: var(--legacy-color-8b95a1);
+  color: var(--qb-ink-400);
 }
 
 .topbar__ctx-value {
   font-weight: 600;
-  color: var(--legacy-color-fff);
+  color: var(--qb-ink-900);
 }
 
 .topbar__ctx-note {
-  color: var(--legacy-color-8b95a1);
+  color: var(--qb-ink-400);
   font-size: 0.7rem;
   font-style: italic;
 }
 
 .topbar__threshold {
-  color: var(--legacy-color-8b95a1);
+  color: var(--qb-ink-400);
   font-size: 0.75rem;
 }
 
@@ -345,8 +387,8 @@ body {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: var(--legacy-radius-999px);
-  background: var(--legacy-color-2a313b);
-  color: var(--legacy-color-cbd5e1);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
 }
 
 .topbar__refresh {
@@ -354,9 +396,9 @@ body {
   font-size: 0.8rem;
   padding: 0.35rem 0.75rem;
   border-radius: var(--legacy-radius-4px);
-  border: 1px solid var(--legacy-color-3a4453);
-  background: var(--legacy-color-2a313b);
-  color: var(--legacy-color-fff);
+  border: 1px solid var(--qb-card-border);
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
   cursor: pointer;
 }
 
@@ -370,7 +412,7 @@ body {
   align-items: center;
   gap: 0.3rem;
   font-size: 0.8rem;
-  color: var(--legacy-color-cbd5e1);
+  color: var(--qb-ink-500);
   cursor: pointer;
 }
 
@@ -382,55 +424,53 @@ body {
   color: var(--legacy-color-ffd9d9);
 }
 
-/* Sessions dropdown (WF-010/WF-018): the toggle and panel share a positioned
-   wrapper so the panel anchors under the button instead of joining the
-   topbar's flex flow (which made the whole bar reflow when opened). */
-.topbar__sessions {
-  position: relative;
+/* Guild pills (HANDOFF: Gold total / vanquished / questing). Gold and
+   vanquished are informational spans; questing is the one clickable pill
+   — the Sessions dropdown's structural replacement (Decisions). */
+.topbar__gold-pill,
+.topbar__vanquished-pill,
+.topbar__questing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--legacy-radius-999px);
 }
 
-.topbar__sessions-toggle {
-  font-size: 0.8rem;
-  padding: 0.35rem 0.75rem;
-  border-radius: var(--legacy-radius-4px);
-  border: 1px solid var(--legacy-color-3a4453);
-  background: var(--legacy-color-2a313b);
-  color: var(--legacy-color-fff);
+.topbar__gold-pill {
+  background: var(--qb-gold-chip-bg);
+  border: 2px solid var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+}
+
+.topbar__vanquished-pill {
+  background: var(--qb-success-chip-bg);
+  border: 2px solid var(--qb-success-chip-border);
+  color: var(--qb-success-chip-text);
+}
+
+.topbar__questing-pill {
+  background: var(--qb-locked-chip-bg);
+  border: 2px solid var(--qb-questing-chip-border);
+  color: var(--qb-locked-chip-text);
   cursor: pointer;
 }
 
-.topbar__sessions-toggle[aria-expanded="true"] {
-  background: var(--legacy-color-3a4453);
-}
-
-/* Narrow viewports: the wrapped bar can strand the Sessions button at the
-   left edge, and a button-anchored right:0 panel then extends off-screen
-   left. Re-anchor the panel to the whole topbar (the wrapper goes static,
-   so .topbar becomes the containing block) and span the viewport width. */
+/* Narrow viewports: the wrapped bar can strand later pills off-screen right
+   without room to wrap — let the ctx group's own items wrap instead of
+   forcing the whole row past the screen. */
 @media (max-width: 640px) {
   /* The "as of last refresh" aside is the one topbar item that pushes the
      first row past a phone viewport (its flex items can't shrink) — drop
-     it so the bar, and the panel anchored to it, stay inside the screen. */
+     it so the bar stays inside the screen. */
   .topbar__ctx-note {
     display: none;
   }
 
-  /* Let the ctx group's own items (value, threshold control) wrap — as a
-     single unwrappable flex row it forces the whole bar past the screen. */
   .topbar__ctx {
     flex-wrap: wrap;
-  }
-
-  .topbar__sessions {
-    position: static;
-  }
-
-  .sessions-panel {
-    left: 0.5rem;
-    right: 0.5rem;
-    top: calc(100% + 0.25rem);
-    min-width: 0;
-    max-width: none;
   }
 }
 
@@ -1472,7 +1512,7 @@ body {
   align-items: center;
   gap: 0.3rem;
   font-size: 0.7rem;
-  color: var(--legacy-color-8b95a1);
+  color: var(--qb-ink-400);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -1482,18 +1522,18 @@ body {
   font-size: 0.8rem;
   padding: 0.1rem 0.3rem;
   border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--legacy-color-3a4453);
-  background: var(--legacy-color-1b1f24);
-  color: var(--legacy-color-fff);
+  border: 1px solid var(--qb-card-border);
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
 }
 
 .threshold-control button {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--legacy-color-3a4453);
-  background: var(--legacy-color-2a313b);
-  color: var(--legacy-color-fff);
+  border: 1px solid var(--qb-card-border);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-700);
   cursor: pointer;
 }
 
