@@ -107,11 +107,6 @@
   --legacy-shadow-1: 0 8px 24px rgba(0, 0, 0, 0.45);
   --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
   --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
-  /* HANDOFF's top bar shadow (WF-029 chunk 5) — hoisted, not left raw. */
-  --legacy-topbar-shadow: 0 6px 16px rgba(90, 62, 40, 0.08);
-  /* HANDOFF's hero-card shadow colour (WF-029 chunk 6) — combines with the
-     already-declared --qb-shadow-hero (0 5px 0) offset recipe. */
-  --legacy-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
 }
 
 /* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
@@ -238,6 +233,7 @@
   --qb-hero-name: #4a2e1c;
   --qb-hero-class: #a06a3c;
   --qb-hero-mana-track: #e4d2ab;
+  --qb-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
 
   /* Font stacks */
   --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
@@ -265,6 +261,7 @@
   --qb-shadow-banner: 0 4px 0;
   --qb-shadow-hero: 0 5px 0;
   --qb-shadow-modal: 0 24px 60px rgba(50, 30, 15, 0.4);
+  --qb-topbar-shadow: 0 6px 16px rgba(90, 62, 40, 0.08);
 
   /* Motion durations */
   --qb-motion-pulse: 1.6s;
@@ -321,7 +318,7 @@ body {
   background: var(--qb-panel);
   color: var(--qb-ink-700);
   border-bottom: 2px dashed var(--qb-line-dashed);
-  box-shadow: var(--legacy-topbar-shadow);
+  box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
   position: sticky;
   top: 0;
@@ -493,135 +490,6 @@ body {
   .topbar__ctx {
     flex-wrap: wrap;
   }
-}
-
-.sessions-panel {
-  position: absolute;
-  top: calc(100% + 0.5rem);
-  right: 0;
-  /* Above board content (toast is 10) but below the drawer overlay (20),
-     so an open drawer's modal dim still covers the panel. */
-  z-index: 15;
-  min-width: min(26rem, 90vw);
-  max-width: min(34rem, 90vw);
-  max-height: 20rem;
-  overflow-y: auto;
-  padding: 0.4rem;
-  border: 1px solid var(--legacy-color-3a4453);
-  border-radius: var(--legacy-radius-6px);
-  background: var(--legacy-color-20262d);
-  box-shadow: var(--legacy-shadow-1);
-  font-size: 0.8rem;
-  color: var(--legacy-color-cbd5e1);
-}
-
-.sessions-panel__empty {
-  padding: 0.6rem 0.75rem;
-  color: var(--legacy-color-8b95a1);
-  font-style: italic;
-}
-
-/* Two-line rows (WF-019): line 1 = full-width name + status at the right
-   edge, line 2 = the labels (model, ctx, worktree, PR). */
-.sessions-panel__row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: var(--legacy-radius-4px);
-}
-
-.sessions-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-}
-
-.sessions-panel__meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.6rem;
-  min-width: 0;
-}
-
-.sessions-panel__row:hover {
-  background: var(--legacy-color-2a313b);
-}
-
-.sessions-panel__row--stale {
-  opacity: 0.55;
-}
-
-/* The name owns line 1: it takes all width the status doesn't need, and
-   only ellipsizes past the panel's own max-width. */
-.sessions-panel__name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-  color: var(--legacy-color-fff);
-}
-
-.sessions-panel__ctx {
-  flex: 0 0 auto;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-/* The worktree is the only shrinkable label on line 2 — it truncates so
-   pills and ctx never force a horizontal scrollbar. */
-.sessions-panel__worktree {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.72rem;
-  color: var(--legacy-color-8b95a1);
-}
-
-.sessions-panel__pill {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: var(--legacy-radius-999px);
-  background: var(--legacy-color-2a313b);
-  color: var(--legacy-color-cbd5e1);
-  white-space: nowrap;
-}
-
-.sessions-panel__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  flex: 0 0 auto;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--legacy-color-8b95a1);
-}
-
-/* Live: filled green dot (the checklist in-progress green). Stale: hollow
-   grey ring — the row is also dimmed via the --stale modifier above. */
-.sessions-panel__status-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: var(--legacy-radius-50pct);
-  background: var(--legacy-color-16a34a);
-}
-
-.sessions-panel__row--stale .sessions-panel__status-dot {
-  background: transparent;
-  border: 1.5px solid var(--legacy-color-8b95a1);
 }
 
 .board-region {
@@ -1699,12 +1567,21 @@ body {
   box-shadow: var(--qb-shadow-modal);
 }
 
+/* Round close button (HANDOFF's card-detail close: 38px circle, filled bg,
+   2px border — adapted here to the dark sheet's own tokens rather than the
+   light parchment #F3EAD6/#D8C39A pair the card-detail modal uses). */
 .party-sheet__close {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  border: none;
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--qb-radius-circle);
+  border: 2px solid var(--qb-party-border);
+  background: var(--qb-party-row-bg);
   font-size: 1.25rem;
   line-height: 1;
   color: var(--qb-party-text-muted);
@@ -1751,7 +1628,7 @@ body {
   background: var(--qb-hero-card-bg);
   border-radius: 20px;
   padding: 18px;
-  box-shadow: var(--qb-shadow-hero) var(--legacy-hero-card-shadow-color);
+  box-shadow: var(--qb-shadow-hero) var(--qb-hero-card-shadow-color);
 }
 
 .hero-card__name {
