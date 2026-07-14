@@ -107,9 +107,6 @@
   --legacy-shadow-1: 0 8px 24px rgba(0, 0, 0, 0.45);
   --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
   --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
-  /* HANDOFF's translucent banner count chip (rgba(255,255,255,.25)) —
-     hoisted rather than left raw (WF-028 chunk 2). */
-  --legacy-chip-fff-25: rgba(255, 255, 255, 0.25);
 }
 
 /* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
@@ -126,6 +123,10 @@
   --qb-line-dashed: #d8c39a;
   --qb-line-dashed-2: #e0cea5;
   --qb-card-border: #c9a86a;
+  /* HANDOFF's translucent banner count chip (rgba(255,255,255,.25)) — a
+     fresh HANDOFF value (WF-028 chunk 2), not old-theme debt, so it lives
+     in the guild vocabulary rather than under --legacy-*. */
+  --qb-chip-translucent: rgba(255, 255, 255, 0.25);
 
   /* Ink scale (5-tone) */
   --qb-ink-900: #4a3826; /* headings */
@@ -656,7 +657,7 @@ body {
 .lane__count {
   font-weight: 400;
   color: inherit;
-  background: var(--legacy-chip-fff-25);
+  background: var(--qb-chip-translucent);
   border-radius: var(--qb-radius-chip-sm);
   padding: 0.05rem 0.4rem;
 }
@@ -783,7 +784,7 @@ body {
   border: 2px solid var(--card-accent-border);
   border-radius: var(--qb-radius-card-a);
   box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
-  padding: 0.5rem;
+  padding: 14px;
   font-size: 0.8rem;
 }
 
@@ -986,10 +987,11 @@ body {
 /* Sub-quest checkbox (WF-028 chunk 6, HANDOFF's rounded-checkbox spec) —
    CSS-only re-skin of the EXISTING glyph span; ChecklistRows.tsx's markup
    (including the literal ✓/●/○ characters ChecklistRows.test.tsx asserts)
-   is untouched. Default/pending: a ~15px dashed empty box, the glyph
-   character coloured to blend into its own border rather than read as a
-   visible mark. Completed/in-progress fill the box solid and flip the
-   glyph to white — see the two modifiers below. */
+   is untouched. Default/pending: a ~15px solid-outline empty box (HANDOFF:
+   "todo = 2px solid #D8C39A" — authoritative over the plan's own "dashed
+   outline" paraphrase), the glyph character coloured to blend into its own
+   border rather than read as a visible mark. Completed/in-progress fill
+   the box solid and flip the glyph to white — see the two modifiers below. */
 .checklist__glyph {
   flex: 0 0 auto;
   width: 15px;
@@ -1000,7 +1002,7 @@ body {
   font-size: 0.55rem;
   line-height: 1;
   border-radius: var(--qb-radius-checkbox-sm);
-  border: 2px dashed var(--qb-line-dashed);
+  border: 2px solid var(--qb-line-dashed);
   color: var(--qb-line-dashed);
 }
 
