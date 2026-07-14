@@ -1242,10 +1242,12 @@ body {
 }
 
 .card-drawer__status {
-  color: var(--legacy-color-6b7280);
+  color: var(--qb-ink-400);
   font-size: 0.9rem;
 }
 
+/* Same danger-red exception as .board-error/.topbar__quarantine-banner
+   elsewhere in the epic — no HANDOFF-sourced alert colour to convert to. */
 .card-drawer__status--error {
   color: var(--legacy-color-b3261e);
 }
