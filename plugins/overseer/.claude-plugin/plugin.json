@@ -1,6 +1,6 @@
 {
   "name": "overseer",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Workflow orchestration: a persistent per-repo ledger of cards, sprints and token budgets, plus an orchestrator skill that drives cards end-to-end with delegated agents and adversarial review loops. Composes the vigil plugin for in-process context handover.",
   "author": {
     "name": "Pip",
