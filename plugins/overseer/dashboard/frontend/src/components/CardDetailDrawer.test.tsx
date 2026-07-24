@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { BoardResponse, CardDetail } from "../api/types";
+import type { BoardResponse, CardDetail, SessionSummary } from "../api/types";
+import type { PartyMember } from "../board/party";
 
 // Mock the SOLE api client module — no real fetch in this test. Includes the
 // mutation wrappers the wired-in controls (PrioritySelect/LinkEditor/
@@ -62,6 +63,21 @@ function cardDetail(
   };
 }
 
+function partyMember(
+  overrides: Partial<SessionSummary> & { id: string }
+): PartyMember {
+  return {
+    session: {
+      worktree_cwd: "/w",
+      updated_at: 1,
+      stale: false,
+      ...overrides,
+    },
+    questCardId: null,
+    questTitle: null,
+  };
+}
+
 /** A promise whose resolve/reject are exposed so tests drive ordering explicitly. */
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -94,6 +110,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -122,6 +139,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -150,6 +168,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -166,6 +185,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -188,6 +208,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -211,6 +232,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -229,6 +251,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -245,6 +268,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     await screen.findByRole("dialog");
@@ -280,6 +304,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     await screen.findByText("Panel card");
@@ -305,6 +330,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     expect(getCard).toHaveBeenNthCalledWith(1, "WF-A");
@@ -318,6 +344,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
     expect(getCard).toHaveBeenNthCalledWith(2, "WF-B");
@@ -367,6 +394,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={liveMutate()}
         inFlight={false}
         allCardIds={["WF-F"]}
+        party={[]}
       />
     );
     await screen.findByText("Refetch me");
@@ -399,6 +427,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={liveMutate()}
         inFlight={false}
         allCardIds={["WF-G"]}
+        party={[]}
       />
     );
     await screen.findByText("Close me first");
@@ -418,6 +447,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={liveMutate()}
         inFlight={false}
         allCardIds={["WF-G"]}
+        party={[]}
       />
     );
 
@@ -448,19 +478,20 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
     await screen.findByText("Toggle card");
 
-    expect(screen.getByRole("button", { name: /rendered/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /quest/i })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
     expect(screen.getByText("thing").tagName).toBe("EM"); // rendered markdown
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /source/i }));
+      fireEvent.click(screen.getByRole("button", { name: /scroll/i }));
     });
 
     const pre = screen.getByTestId("card-source");
@@ -486,15 +517,16 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
     await screen.findByText("Reopen card");
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /source/i }));
+      fireEvent.click(screen.getByRole("button", { name: /scroll/i }));
     });
-    expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /scroll/i })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
@@ -507,6 +539,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -518,17 +551,18 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
     await screen.findByText("Reopen card");
-    expect(screen.getByRole("button", { name: /rendered/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /quest/i })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
   });
 
-  it("renders a Tasks section with the FULL (unwindowed) checklist when non-empty", async () => {
+  it("renders a Sub-quests section with the FULL (unwindowed) checklist when non-empty", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({
         id: "WF-J",
@@ -551,10 +585,12 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
-    expect(await screen.findByText("Tasks")).toBeInTheDocument();
+    expect(await screen.findByText("Sub-quests")).toBeInTheDocument();
+    expect(screen.getByText("1 / 6")).toBeInTheDocument(); // done/total count
     // All six rows render — the drawer shows the full list, not the tile's
     // 5-row focus window.
     expect(screen.getByText("Write the design doc")).toBeInTheDocument();
@@ -578,6 +614,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -596,6 +633,7 @@ describe("<CardDetailDrawer/>", () => {
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
@@ -603,22 +641,410 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByRole("button", { name: "Unassign" })).toBeInTheDocument();
   });
 
-  it("renders no Tasks section when the checklist is empty", async () => {
+  it("renders no Sub-quests section (or Journey progress bar) when the checklist is empty", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({ id: "WF-K", title: "No tasks", checklist: [] })
     );
 
-    render(
+    const { container } = render(
       <CardDetailDrawer
         cardId="WF-K"
         onClose={() => {}}
         mutate={noopMutate()}
         inFlight={false}
         allCardIds={[]}
+        party={[]}
       />
     );
 
     await screen.findByText("No tasks");
-    expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sub-quests")).not.toBeInTheDocument();
+    expect(container.querySelector(".card-drawer__journey")).toBeNull();
+  });
+
+  it("renders the banner pill with the card's own stage label (WF-030 chunk 2)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-N", status: "in-flight", stage: "implementation" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-N"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-N`);
+    const banner = container.querySelector(".card-drawer__banner");
+    expect(banner).toHaveTextContent("Implementation");
+    expect(banner).toHaveClass("card-drawer__banner--implementation");
+  });
+
+  it("renders rarity stars when the card has a complexity", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-O", complexity: "M" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-O"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-O`);
+    expect(container.querySelectorAll(".card-drawer__star").length).toBe(3);
+    expect(
+      container.querySelectorAll(".card-drawer__star--filled").length
+    ).toBe(2);
+  });
+
+  it("renders no stars row when the card has no complexity", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-P", complexity: null })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-P"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-P`);
+    expect(container.querySelector(".card-drawer__stars")).toBeNull();
+  });
+
+  it("renders the hero chip WITH a PartyAvatar + class when the session is present in the shared party array", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-Q", claimed_by: "sess-1" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-Q"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[
+          partyMember({ id: "sess-1", session_name: "forge-master", model: "Opus" }),
+        ]}
+      />
+    );
+
+    await screen.findByText(`Title WF-Q`);
+    const chip = container.querySelector(".card-drawer__hero-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.querySelector(".party-avatar")).not.toBeNull();
+    expect(screen.getByText("forge-master")).toBeInTheDocument();
+    expect(screen.getByText("Opus")).toBeInTheDocument();
+  });
+
+  it("renders the hero chip WITHOUT an avatar when claimed_by has no matching session in party (stale-evicted edge)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-R", claimed_by: "sess-ghost" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-R"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-R`);
+    const chip = container.querySelector(".card-drawer__hero-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.querySelector(".party-avatar")).toBeNull();
+    expect(screen.getByText("sess-ghost")).toBeInTheDocument();
+  });
+
+  it("renders no hero chip when the card is unclaimed", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-S", claimed_by: null })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-S"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-S`);
+    expect(container.querySelector(".card-drawer__hero-chip")).toBeNull();
+  });
+
+  it("Journey progress bar reflects done/total over the FULL checklist (WF-030 chunk 4)", async () => {
+    const checklist = Array.from({ length: 8 }, (_, i) => ({
+      task: String(i + 1),
+      subject: `Task ${i + 1}`,
+      status: i < 2 ? "completed" : "pending",
+    }));
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-T", checklist })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-T"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-T`);
+    expect(screen.getByText("Journey progress")).toBeInTheDocument();
+    const track = container.querySelector(".card-drawer__journey-track");
+    expect(track).toHaveAttribute("data-progress-pct", "25"); // 2/8
+    expect(screen.getByText("2 / 8")).toBeInTheDocument(); // Sub-quests count
+  });
+
+  it("Journey progress shows 0% for an all-pending checklist and 100% for an all-completed one", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-U",
+        checklist: [
+          { task: "1", subject: "A", status: "pending" },
+          { task: "2", subject: "B", status: "pending" },
+        ],
+      })
+    );
+    const { container: c0 } = render(
+      <CardDetailDrawer
+        cardId="WF-U"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText(`Title WF-U`);
+    expect(
+      c0.querySelector(".card-drawer__journey-track")
+    ).toHaveAttribute("data-progress-pct", "0");
+
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-V",
+        checklist: [
+          { task: "1", subject: "A", status: "completed" },
+          { task: "2", subject: "B", status: "completed" },
+        ],
+      })
+    );
+    const { container: c100 } = render(
+      <CardDetailDrawer
+        cardId="WF-V"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText(`Title WF-V`);
+    expect(
+      c100.querySelector(".card-drawer__journey-track")
+    ).toHaveAttribute("data-progress-pct", "100");
+  });
+
+  it("renders the locked-behind pill in the Quest-tab body (after the sub-quests panel), not the header", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-W",
+        ready: false,
+        depends_on: ["WF-001", "WF-002"],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-W"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-W`);
+    const badge = screen.getByText(/waiting on WF-001, WF-002/);
+    expect(badge).toBeInTheDocument();
+    // Lives in .card-drawer__locked, NOT .card-drawer__facts (the header
+    // meta row) — see chunk 2's Decisions on placement.
+    expect(
+      container.querySelector(".card-drawer__locked .dep-badge")
+    ).not.toBeNull();
+    expect(
+      container.querySelector(".card-drawer__facts .dep-badge")
+    ).toBeNull();
+  });
+
+  it("renders no locked-behind pill when the card has no dependencies", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-X", ready: true, depends_on: [] })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-X"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-X`);
+    expect(container.querySelector(".dep-badge")).toBeNull();
+  });
+
+  it("renders a well-formed Progress log section as a quest-log timeline (WF-030 chunk 9, stretch)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-Y",
+        sections: {
+          "## Progress log":
+            "- 2026-07-14T08:19 — comms: subagent mode (~0 tokens)\n" +
+            "- 2026-07-14T08:37 — plan-review passed (~165k tokens)",
+        },
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-Y"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-Y`);
+    expect(container.querySelector(".card-drawer__quest-log")).not.toBeNull();
+    expect(
+      container.querySelectorAll(".card-drawer__quest-log-entry").length
+    ).toBe(2);
+    expect(screen.getByText("comms: subagent mode")).toBeInTheDocument();
+    expect(screen.getByText("2026-07-14T08:37")).toBeInTheDocument();
+  });
+
+  it("falls back to plain MarkdownView rendering when the Progress log section doesn't parse cleanly", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-Z2",
+        sections: {
+          "## Progress log":
+            "- 2026-07-14T08:19 — comms: subagent mode (~0 tokens)\n" +
+            "not a parseable line",
+        },
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-Z2"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-Z2`);
+    expect(container.querySelector(".card-drawer__quest-log")).toBeNull();
+    // The raw section text still renders — full plain-section fallback,
+    // never a partial timeline mixed with a partial dump.
+    expect(
+      screen.getByText(/comms: subagent mode/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/not a parseable line/)).toBeInTheDocument();
+  });
+
+  it("gates Journey progress + Sub-quests panel + locked pill to the Quest view — absent under Scroll (impl-review round 1)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-AA",
+        ready: false,
+        depends_on: ["WF-001"],
+        checklist: [
+          { task: "1", subject: "Write the design doc", status: "completed" },
+          { task: "2", subject: "Implement", status: "pending" },
+        ],
+        body: "# Goal\nRaw body text.",
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-AA"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-AA`);
+
+    // Quest view (default): all three present.
+    expect(container.querySelector(".card-drawer__journey")).not.toBeNull();
+    expect(screen.getByText("Sub-quests")).toBeInTheDocument();
+    expect(screen.getByText(/waiting on WF-001/)).toBeInTheDocument();
+
+    // Switch to Scroll — all three gone, only the markdown card remains.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /scroll/i }));
+    });
+
+    expect(container.querySelector(".card-drawer__journey")).toBeNull();
+    expect(screen.queryByText("Sub-quests")).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting on WF-001/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("card-source")).toBeInTheDocument();
+
+    // The tab bar itself survives the swap (stays outside the gated block).
+    expect(
+      screen.getByRole("group", { name: /body view/i })
+    ).toBeInTheDocument();
+
+    // Switch back to Quest — all three return.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /quest/i }));
+    });
+    expect(container.querySelector(".card-drawer__journey")).not.toBeNull();
+    expect(screen.getByText("Sub-quests")).toBeInTheDocument();
+    expect(screen.getByText(/waiting on WF-001/)).toBeInTheDocument();
   });
 });

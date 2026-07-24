@@ -1,4 +1,5 @@
 import type { BoardCard } from "../api/types";
+import { PadlockIcon } from "./icons";
 
 export interface DependencyBadgeProps {
   card: Pick<BoardCard, "ready" | "depends_on">;
@@ -18,6 +19,7 @@ function DependencyBadge({ card }: DependencyBadgeProps) {
         className="dep-badge dep-badge--waiting"
         title={`Waiting on ${depends_on.join(", ")}`}
       >
+        <PadlockIcon aria-hidden="true" />
         waiting on {depends_on.join(", ")}
       </span>
     );

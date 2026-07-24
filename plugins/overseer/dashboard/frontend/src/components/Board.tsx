@@ -7,11 +7,13 @@ import {
 } from "@dnd-kit/core";
 import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+import type { PartyMember } from "../board/party";
 import { groupIntoLanes } from "../board/layout";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
 import { locateDropTarget, resolveDrop } from "../board/dragPlan";
 import { runDropPlan } from "../board/runDropPlan";
 import Lane from "./Lane";
+import PartyColumn from "./PartyColumn";
 
 export interface BoardProps {
   board: BoardModel;
@@ -23,6 +25,8 @@ export interface BoardProps {
   /** WF-008 C4: pauses useBoard's 5s background poll for the duration of a
    *  drag — wired to dnd-kit's onDragStart/onDragEnd/onDragCancel below. */
   setDragActive: UseBoardResult["setDragActive"];
+  /** WF-029: rendered by PartyColumn, the scroll row's rightmost item. */
+  party: PartyMember[];
 }
 
 /**
@@ -46,6 +50,7 @@ function Board({
   inFlight,
   onOpenCard,
   setDragActive,
+  party,
 }: BoardProps) {
   const lanes = useMemo(() => groupIntoLanes(board.cards), [board.cards]);
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
@@ -153,6 +158,9 @@ function Board({
             onOpenCard={onOpenCard}
           />
         ))}
+        {/* Rightmost item in the scroll row (HANDOFF §Board) — the flex row
+            puts it at the tail for free, no extra positioning needed. */}
+        <PartyColumn party={party} />
       </div>
     </DndContext>
   );

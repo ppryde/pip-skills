@@ -2,13 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
 
-// Mock the SOLE api client module — no real fetch in this test.
+// Mock the SOLE api client module — no real fetch in this test. getSessions
+// is required even though this file doesn't exercise Party behaviour — a
+// full <App/> render now mounts useSessions() unconditionally (WF-029), and
+// an unmocked import throws "getSessions is not a function".
 vi.mock("../api/client", () => ({
   getBoard: vi.fn(),
   getCard: vi.fn(),
+  getSessions: vi.fn(),
 }));
 
-import { getBoard, getCard } from "../api/client";
+import { getBoard, getCard, getSessions } from "../api/client";
 import App from "../App";
 
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
@@ -97,6 +101,9 @@ const fixture: BoardResponse = {
 describe("<App/> board render (read-only, Chunk 3)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Default: no active sessions. resetAllMocks() clears implementations
+    // too, so this is re-armed before every test in this describe block.
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
   });
 
   it("renders lanes, an epic rollup line, a waiting-on dependency badge, and a tripwire flag", async () => {
