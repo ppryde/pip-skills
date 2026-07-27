@@ -1,6 +1,7 @@
 from __future__ import annotations
 import pytest
 from scripts import db
+from scripts.models import Card
 from tests.factories import git_init
 
 @pytest.fixture
@@ -33,3 +34,26 @@ def test_connect_is_idempotent(repo):
     db.connect(repo, migrate=False).close()
     conn = db.connect(repo, migrate=False)  # must not raise on existing schema
     assert db.get_meta(conn, "schema_version") == str(db.SCHEMA_VERSION)
+
+def _sample_card():
+    return Card(
+        id="WF-007", title="thing", status="in-flight", stage="implementation",
+        order=3, priority="P1", sprint="2026-07-S3", parent="WF-001",
+        touches=["a.py", "b.py"], depends_on=["WF-002"],
+        budget_estimate=400_000, budget_actual=120_000,
+        created="2026-07-01T09:00", updated="2026-07-02T10:00",
+        checklist=[{"task": "t1", "subject": "s", "status": "done"}],
+        repo="pip-skills", claimed_by="sess-1", claimed_at="2026-07-02T10:00",
+        claim_acked=True, claim_nudged=False, body="## Progress log\n\n- did x",
+    )
+
+def test_card_roundtrips_through_row(repo):
+    conn = db.connect(repo, migrate=False)
+    card = _sample_card()
+    params = db.card_to_params(card)
+    cols = ", ".join(f'"{k}"' for k in params)
+    ph = ", ".join(f":{k}" for k in params)
+    conn.execute(f"INSERT INTO cards ({cols}) VALUES ({ph})", params)
+    row = conn.execute("SELECT * FROM cards WHERE id='WF-007'").fetchone()
+    restored = db.row_to_card(row)
+    assert restored == card

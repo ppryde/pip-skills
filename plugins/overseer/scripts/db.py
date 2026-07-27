@@ -3,10 +3,12 @@ its worktrees. Owns schema, card CRUD, atomic claiming, and the one-time
 .workflow/ import. Sprints/usage/knowledge remain file-based this phase."""
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
 
+from scripts.models import Card
 from scripts.store import derive_repo_label, slugify
 
 SCHEMA_VERSION = 1
@@ -104,3 +106,78 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
 def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
     """Filled in by Task 6. Stub keeps connect() working until then."""
     return None
+
+
+_CARD_COLUMNS = (
+    "id", "title", "status", "stage", "order", "complexity", "priority",
+    "jira", "linear", "sprint", "parent", "branch", "worktree", "pr",
+    "touches", "depends_on", "budget_estimate", "budget_actual",
+    "created", "updated", "blocked_on", "checklist", "repo",
+    "claimed_by", "claimed_at", "claim_acked", "claim_nudged", "body",
+)
+
+
+def card_to_params(card: Card) -> dict:
+    return {
+        "id": card.id,
+        "title": card.title,
+        "status": card.status,
+        "stage": card.stage,
+        "order": card.order,
+        "complexity": card.complexity,
+        "priority": card.priority,
+        "jira": card.jira,
+        "linear": card.linear,
+        "sprint": card.sprint,
+        "parent": card.parent,
+        "branch": card.branch,
+        "worktree": card.worktree,
+        "pr": card.pr,
+        "touches": json.dumps(card.touches or []),
+        "depends_on": json.dumps(card.depends_on or []),
+        "budget_estimate": card.budget_estimate,
+        "budget_actual": card.budget_actual,
+        "created": card.created,
+        "updated": card.updated,
+        "blocked_on": card.blocked_on,
+        "checklist": json.dumps(card.checklist or []),
+        "repo": card.repo,
+        "claimed_by": card.claimed_by,
+        "claimed_at": card.claimed_at,
+        "claim_acked": 1 if card.claim_acked else 0,
+        "claim_nudged": 1 if card.claim_nudged else 0,
+        "body": card.body,
+    }
+
+
+def row_to_card(row: sqlite3.Row) -> Card:
+    return Card(
+        id=row["id"],
+        title=row["title"],
+        status=row["status"],
+        stage=row["stage"],
+        order=row["order"],
+        complexity=row["complexity"],
+        priority=row["priority"],
+        jira=row["jira"],
+        linear=row["linear"],
+        sprint=row["sprint"],
+        parent=row["parent"],
+        branch=row["branch"],
+        worktree=row["worktree"],
+        pr=row["pr"],
+        touches=json.loads(row["touches"] or "[]"),
+        depends_on=json.loads(row["depends_on"] or "[]"),
+        budget_estimate=row["budget_estimate"],
+        budget_actual=row["budget_actual"] or 0,
+        created=row["created"] or "",
+        updated=row["updated"] or "",
+        blocked_on=row["blocked_on"],
+        checklist=json.loads(row["checklist"] or "[]"),
+        repo=row["repo"],
+        claimed_by=row["claimed_by"],
+        claimed_at=row["claimed_at"],
+        claim_acked=bool(row["claim_acked"]),
+        claim_nudged=bool(row["claim_nudged"]),
+        body=row["body"] or "",
+    )
