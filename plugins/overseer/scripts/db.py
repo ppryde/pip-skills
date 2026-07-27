@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from scripts.models import Card, CardParseError
-from scripts.store import derive_repo_label, slugify
+from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 SCHEMA_VERSION = 1
 DB_ENV = "OVERSEER_DB"
@@ -101,6 +101,16 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_schema(conn)
+    # Set-if-absent: record the repo's main root so the dashboard's `repos`
+    # verb can enumerate one board per repo. Never overwrites an existing
+    # value (stable identity even if this repo_root is ever unreachable on a
+    # later connect), and only writes when `derive_repo_root` succeeds — a
+    # no-op, no extra commit, on every connect that isn't the very first one.
+    if get_meta(conn, "repo_root") is None:
+        root = derive_repo_root(repo_root)
+        if root is not None:
+            set_meta(conn, "repo_root", str(root))
+            conn.commit()
     if migrate:
         _maybe_import(conn, repo_root)  # defined in Task 6; no-op stub until then
     return conn

@@ -178,6 +178,43 @@ def _sessions_list() -> list[dict[str, Any]]:
     return sessions
 
 
+def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
+    """The `repos` CLI verb's discovery list — every board.db the CLI can
+    find, each `{"label": ..., "root": ...}`. `[]` if the CLI errors (soft
+    degrade, same spirit as every other CLI call this module treats as
+    optional); never raises."""
+    try:
+        data = run_overseer(launch_root, "repos", "--json", json_out=True)
+    except CliError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _resolve_root(launch_root: Path, requested: str | None) -> Path:
+    """Resolve the effective repo root for a request, VALIDATING a
+    client-supplied ``root`` against the ``repos`` discovery allowlist
+    before it is ever used to shell the CLI.
+
+    Security-critical: this server can bind 0.0.0.0 with no auth (see
+    module docstring), so an unvalidated ``root`` would let any LAN client
+    point the overseer CLI at an arbitrary filesystem path. ``requested``
+    must match — after resolution — one of the roots ``repos`` discovery
+    ACTUALLY returned, not merely "look like a path". Raises HTTP 400
+    (never shells anything with the rejected value) when it doesn't.
+    """
+    if requested is None:
+        return launch_root
+    candidate = Path(requested).resolve()
+    allowed = {
+        Path(entry["root"]).resolve()
+        for entry in _discover_roots(launch_root)
+        if isinstance(entry, dict) and entry.get("root")
+    }
+    if candidate not in allowed:
+        raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
+    return candidate
+
+
 def _board_response(root: Path) -> dict[str, Any]:
     """The payload every read AND every mutation returns.
 
@@ -226,62 +263,84 @@ def _mutation_error(exc: CliError) -> HTTPException:
 
 def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
+    launch_root = root
 
-    def _mutate(fn: Callable[[], None]) -> dict[str, Any]:
+    def _mutate(fn: Callable[[], None], effective_root: Path) -> dict[str, Any]:
         try:
             fn()
         except CliError as exc:
             raise _mutation_error(exc) from exc
-        return _board_response(root)
+        return _board_response(effective_root)
 
     @app.get("/api/board")
-    def get_board() -> dict[str, Any]:
-        return _board_response(root)
+    def get_board(root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+        return _board_response(effective)
+
+    @app.get("/api/repos")
+    def get_repos() -> dict[str, Any]:
+        resolved_launch = launch_root.resolve()
+        repos_list: list[dict[str, Any]] = []
+        for entry in _discover_roots(launch_root):
+            if not isinstance(entry, dict) or not entry.get("root"):
+                continue
+            item = dict(entry)
+            item["current"] = Path(entry["root"]).resolve() == resolved_launch
+            repos_list.append(item)
+        return {"repos": repos_list}
 
     @app.get("/api/sessions")
     def get_sessions() -> dict[str, Any]:
         return {"sessions": _sessions_list()}
 
     @app.get("/api/card/{card_id}")
-    def get_card(card_id: str) -> Any:
+    def get_card(card_id: str, root: str | None = None) -> Any:
+        effective = _resolve_root(launch_root, root)
         try:
             check_id(card_id)
-            return run_overseer(root, "show", card_id, "--json", json_out=True)
+            return run_overseer(effective, "show", card_id, "--json", json_out=True)
         except CliError as exc:
             raise _show_error(exc) from exc
 
     @app.post("/api/card/{card_id}/order")
-    def set_order(card_id: str, body: OrderBody) -> dict[str, Any]:
+    def set_order(card_id: str, body: OrderBody, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+
         def do() -> None:
             check_id(card_id)
-            run_overseer(root, "set-field", card_id, "--order", str(body.order))
+            run_overseer(effective, "set-field", card_id, "--order", str(body.order))
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/priority")
-    def set_priority(card_id: str, body: PriorityBody) -> dict[str, Any]:
+    def set_priority(card_id: str, body: PriorityBody, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+
         def do() -> None:
             check_id(card_id)
             value = body.priority if body.priority is not None else ""
-            run_overseer(root, "set-field", card_id, "--priority", value)
+            run_overseer(effective, "set-field", card_id, "--priority", value)
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/parent")
-    def set_parent(card_id: str, body: ParentBody) -> dict[str, Any]:
+    def set_parent(card_id: str, body: ParentBody, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+
         def do() -> None:
             check_id(card_id)
             value = body.parent if body.parent is not None else ""
             if value:
                 check_id(value)
-            run_overseer(root, "set-field", card_id, "--parent", value)
+            run_overseer(effective, "set-field", card_id, "--parent", value)
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/depends")
-    def set_depends(card_id: str, body: DependsBody) -> dict[str, Any]:
+    def set_depends(card_id: str, body: DependsBody, root: str | None = None) -> dict[str, Any]:
         if body.on is None and body.off is None:
             raise HTTPException(status_code=400, detail="on or off required")
+        effective = _resolve_root(launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -292,48 +351,55 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
             if body.off is not None:
                 check_id(body.off)
                 args += ["--off", body.off]
-            run_overseer(root, *args)
+            run_overseer(effective, *args)
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/park")
-    def park_card(card_id: str) -> dict[str, Any]:
+    def park_card(card_id: str, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+
         def do() -> None:
             check_id(card_id)
-            run_overseer(root, "park", card_id)
+            run_overseer(effective, "park", card_id)
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/unpark")
-    def unpark_card(card_id: str) -> dict[str, Any]:
+    def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+
         def do() -> None:
             check_id(card_id)
-            run_overseer(root, "unpark", card_id)
+            run_overseer(effective, "unpark", card_id)
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/claim")
-    def claim_card(card_id: str, body: ClaimBody) -> dict[str, Any]:
+    def claim_card(card_id: str, body: ClaimBody, root: str | None = None) -> dict[str, Any]:
         session_id = body.session_id
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id required")
+        effective = _resolve_root(launch_root, root)
 
         def do() -> None:
             check_id(card_id)
-            run_overseer(root, "claim", card_id, "--session", session_id)  # type: ignore[arg-type]
+            run_overseer(effective, "claim", card_id, "--session", session_id)  # type: ignore[arg-type]
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/unclaim")
-    def unclaim_card(card_id: str) -> dict[str, Any]:
+    def unclaim_card(card_id: str, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
+
         def do() -> None:
             check_id(card_id)
-            run_overseer(root, "unclaim", card_id)
+            run_overseer(effective, "unclaim", card_id)
 
-        return _mutate(do)
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/move")
-    def move_card(card_id: str, body: MoveBody) -> dict[str, Any]:
+    def move_card(card_id: str, body: MoveBody, root: str | None = None) -> dict[str, Any]:
         """Dispatch table — overseer has no unified set-status verb.
 
         `stage` wins if present (`set-stage id <stage>`); else `status` maps to
@@ -343,12 +409,14 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
         ACTUAL resulting status; it does not fake-honor a requested
         planned-vs-in-flight distinction.
         """
+        effective = _resolve_root(launch_root, root)
+
         if body.stage is not None:
             def do_stage() -> None:
                 check_id(card_id)
-                run_overseer(root, "set-stage", card_id, body.stage)  # type: ignore[arg-type]
+                run_overseer(effective, "set-stage", card_id, body.stage)  # type: ignore[arg-type]
 
-            return _mutate(do_stage)
+            return _mutate(do_stage, effective)
 
         if body.status == "blocked":
             if not body.reason:
@@ -356,9 +424,9 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
             def do_block() -> None:
                 check_id(card_id)
-                run_overseer(root, "block", card_id, "--reason", body.reason)  # type: ignore[arg-type]
+                run_overseer(effective, "block", card_id, "--reason", body.reason)  # type: ignore[arg-type]
 
-            return _mutate(do_block)
+            return _mutate(do_block, effective)
 
         verbs = _MOVE_STATUS_VERBS.get(body.status or "")
         if verbs is None:
@@ -366,16 +434,18 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
         def do_status() -> None:
             check_id(card_id)
-            run_overseer(root, *verbs, card_id)
+            run_overseer(effective, *verbs, card_id)
 
-        return _mutate(do_status)
+        return _mutate(do_status, effective)
 
     @app.post("/api/config/threshold")
-    def set_threshold(body: ThresholdBody) -> dict[str, Any]:
-        def do() -> None:
-            run_vigil(root, "config", "set", "context.threshold", str(body.value))
+    def set_threshold(body: ThresholdBody, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, root)
 
-        return _mutate(do)
+        def do() -> None:
+            run_vigil(effective, "config", "set", "context.threshold", str(body.value))
+
+        return _mutate(do, effective)
 
     _mount_frontend(app, dist_dir)
 

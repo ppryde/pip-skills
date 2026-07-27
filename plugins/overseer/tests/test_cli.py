@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -1104,3 +1105,75 @@ class TestResumeClaimOrdering:
         assert run(repo, "resume", "--json") == 0
         entries = json.loads(capsys.readouterr().out)
         assert entries[0]["claimed_by"] == "sess-1"
+
+
+class TestReposCommand:
+    """`overseer repos --json` — enumerates every discoverable board under
+    `$CLAUDE_CONFIG_DIR/overseer/*/board.db`. Unlike every other test in this
+    file, these tests must NOT pin a single-file `OVERSEER_DB` (the autouse
+    `_no_ambient_task_env` fixture does that for every test) — discovery is
+    keyed on the config-dir-style `overseer/<label>/board.db` layout, so each
+    test here explicitly clears it and points `CLAUDE_CONFIG_DIR` at a fresh
+    tmp directory instead.
+    """
+
+    def _seed(self, tmp_path, monkeypatch, name: str, *, with_git: bool = True) -> Path:
+        repo_dir = tmp_path / name
+        repo_dir.mkdir()
+        if with_git:
+            git_init(repo_dir)
+        db.connect(repo_dir, migrate=False).close()
+        return repo_dir
+
+    def test_discovers_boards_with_repo_root(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+        repo_a = self._seed(tmp_path, monkeypatch, "repo-a")
+        repo_b = self._seed(tmp_path, monkeypatch, "repo-b")
+        capsys.readouterr()
+
+        assert main(["--root", str(tmp_path), "repos", "--json"]) == 0
+        data = json.loads(capsys.readouterr().out)
+
+        assert data == sorted(data, key=lambda r: r["label"])
+        by_label = {r["label"]: r["root"] for r in data}
+        assert set(by_label) == {"repo-a", "repo-b"}
+        assert Path(by_label["repo-a"]) == repo_a.resolve()
+        assert Path(by_label["repo-b"]) == repo_b.resolve()
+
+    def test_skips_board_without_git_derived_repo_root(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+        self._seed(tmp_path, monkeypatch, "no-git-repo", with_git=False)
+        capsys.readouterr()
+
+        assert main(["--root", str(tmp_path), "repos", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out) == []
+
+    def test_skips_board_whose_repo_root_no_longer_exists(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+        gone = self._seed(tmp_path, monkeypatch, "repo-gone")
+        shutil.rmtree(gone)
+        capsys.readouterr()
+
+        assert main(["--root", str(tmp_path), "repos", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out) == []
+
+    def test_no_overseer_dir_yields_empty_list(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+        capsys.readouterr()
+
+        assert main(["--root", str(tmp_path), "repos", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out) == []
+
+    def test_text_output_lists_label_and_root(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+        repo_a = self._seed(tmp_path, monkeypatch, "repo-a")
+        capsys.readouterr()
+
+        assert main(["--root", str(tmp_path), "repos"]) == 0
+        out = capsys.readouterr().out
+        assert "repo-a" in out and str(repo_a.resolve()) in out

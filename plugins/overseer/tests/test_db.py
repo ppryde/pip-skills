@@ -235,6 +235,30 @@ def test_claim_visible_across_connections(repo):
     assert seen.claimed_by == "A"
     assert seen.claimed_at == "2026-07-02T10:00"
 
+class TestRepoRootMeta:
+    def test_connect_sets_repo_root_when_derivable(self, tmp_path, monkeypatch):
+        git_init(tmp_path)
+        monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+        conn = db.connect(tmp_path, migrate=False)
+        assert db.get_meta(conn, "repo_root") == str(tmp_path.resolve())
+
+    def test_connect_leaves_repo_root_unset_without_git(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+        conn = db.connect(tmp_path, migrate=False)
+        assert db.get_meta(conn, "repo_root") is None
+
+    def test_connect_does_not_overwrite_existing_repo_root(self, tmp_path, monkeypatch):
+        git_init(tmp_path)
+        monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+        conn = db.connect(tmp_path, migrate=False)
+        db.set_meta(conn, "repo_root", "/some/other/recorded/path")
+        conn.commit()
+        conn.close()
+
+        conn2 = db.connect(tmp_path, migrate=False)
+        assert db.get_meta(conn2, "repo_root") == "/some/other/recorded/path"
+
+
 def test_migrate_is_atomic_on_failure(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))

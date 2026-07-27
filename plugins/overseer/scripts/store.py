@@ -29,28 +29,13 @@ def _is_gitignored(repo_root: Path, relpath: str) -> bool:
     return result.returncode == 0
 
 
-def derive_repo_label(repo_root: Path) -> str | None:
-    """The top-level repo name that owns ``repo_root``, even from a worktree.
+def _git_common_dir(repo_root: Path) -> Path | None:
+    """Resolve ``git rev-parse --git-common-dir`` for ``repo_root`` to an
+    absolute path; shared resolution step behind ``derive_repo_label`` and
+    ``derive_repo_root`` — see ``derive_repo_label``'s docstring for the
+    git-common-dir rationale and portability notes.
 
-    Ledgers can live inside a linked worktree (e.g.
-    ``.claude/worktrees/some-branch``), so a naive ``repo_root.name`` would
-    record the worktree directory, not the repo. ``git rev-parse
-    --git-common-dir`` resolves to the MAIN repo's ``.git`` dir in every
-    case, worktree or not (unlike ``--git-dir``, which points at the
-    worktree's private gitdir under ``.git/worktrees/<name>``) — see
-    git-worktree(1). That dir's parent directory's basename is the repo
-    name (``.../pip-skills/.git`` -> ``"pip-skills"``); a bare-ish common
-    dir that doesn't end in ``.git`` uses its own basename instead.
-
-    Deliberately uses plain ``--git-common-dir`` plus manual path
-    resolution rather than git's ``--path-format=absolute`` flag (needs git
-    >= 2.31) for broader portability: the raw output is relative to
-    ``repo_root`` on some git versions and already absolute on others;
-    ``Path(repo_root, raw).resolve()`` handles both, since `Path` discards
-    the first component whenever the second is already absolute.
-
-    None on any failure — not a git repo, git missing, unreadable output —
-    this is a display label, not load-bearing state.
+    None on any failure — not a git repo, git missing, unreadable output.
     """
     try:
         result = subprocess.run(
@@ -67,9 +52,56 @@ def derive_repo_label(repo_root: Path) -> str | None:
     raw = result.stdout.strip()
     if not raw:
         return None
-    common_dir = Path(repo_root, raw).resolve()
+    # Deliberately uses plain ``--git-common-dir`` plus manual path
+    # resolution rather than git's ``--path-format=absolute`` flag (needs
+    # git >= 2.31) for broader portability: the raw output is relative to
+    # ``repo_root`` on some git versions and already absolute on others;
+    # ``Path(repo_root, raw).resolve()`` handles both, since `Path` discards
+    # the first component whenever the second is already absolute.
+    return Path(repo_root, raw).resolve()
+
+
+def derive_repo_label(repo_root: Path) -> str | None:
+    """The top-level repo name that owns ``repo_root``, even from a worktree.
+
+    Ledgers can live inside a linked worktree (e.g.
+    ``.claude/worktrees/some-branch``), so a naive ``repo_root.name`` would
+    record the worktree directory, not the repo. ``git rev-parse
+    --git-common-dir`` resolves to the MAIN repo's ``.git`` dir in every
+    case, worktree or not (unlike ``--git-dir``, which points at the
+    worktree's private gitdir under ``.git/worktrees/<name>``) — see
+    git-worktree(1). That dir's parent directory's basename is the repo
+    name (``.../pip-skills/.git`` -> ``"pip-skills"``); a bare-ish common
+    dir that doesn't end in ``.git`` uses its own basename instead.
+
+    None on any failure — not a git repo, git missing, unreadable output —
+    this is a display label, not load-bearing state.
+    """
+    common_dir = _git_common_dir(repo_root)
+    if common_dir is None:
+        return None
     label = common_dir.parent.name if common_dir.name == ".git" else common_dir.name
     return label or None
+
+
+def derive_repo_root(repo_root: Path) -> Path | None:
+    """The MAIN repo's root PATH that owns ``repo_root``, even from a worktree.
+
+    Mirrors ``derive_repo_label``'s git-common-dir resolution (see its
+    docstring for the rationale/portability notes), but returns the actual
+    root PATH rather than a display name — stable across worktrees, so
+    every worktree of the same repo resolves to this same absolute path.
+    ``db.connect`` records this as ``meta['repo_root']`` so the dashboard's
+    ``repos`` verb can enumerate one board per repo regardless of which
+    worktree wrote to it.
+
+    None on any failure — not a git repo, git missing, unreadable output —
+    same as ``derive_repo_label``.
+    """
+    common_dir = _git_common_dir(repo_root)
+    if common_dir is None:
+        return None
+    return common_dir.parent if common_dir.name == ".git" else common_dir
 
 
 def state_root(repo_root: Path) -> Path:

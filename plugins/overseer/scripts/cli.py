@@ -952,6 +952,62 @@ def cmd_board(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_repo_root_meta(db_path: Path) -> "str | None":
+    """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
+    the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
+    discovery never creates, locks, or schema-touches a board it's merely
+    listing. Never raises — a corrupt, mid-write, or otherwise unreadable
+    board.db is simply skipped, same quarantine-safe spirit as the rest of
+    this module's report-building verbs.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        return None
+    try:
+        return db.get_meta(conn, "repo_root")
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def cmd_repos(args: argparse.Namespace) -> int:
+    """`overseer repos --json` — enumerate every discoverable board at
+    `$CLAUDE_CONFIG_DIR/overseer/*/board.db` (one per repo, per the
+    per-repo board.db migration). Powers the dashboard's repo switcher.
+
+    A board is skipped when its `meta['repo_root']` is missing/None (an
+    older board, or one whose repo_root was never derivable — e.g. no git)
+    or when that recorded root no longer exists on disk (repo deleted or
+    moved since the board was written). Output is a JSON list of
+    `{"label": ..., "root": ...}`, sorted by label.
+    """
+    config_dir = db._config_dir()
+    overseer_dir = config_dir / "overseer"
+    results: list[dict[str, str]] = []
+    if overseer_dir.is_dir():
+        for label_dir in overseer_dir.iterdir():
+            if not label_dir.is_dir():
+                continue
+            db_path = label_dir / "board.db"
+            if not db_path.is_file():
+                continue
+            root_str = _read_repo_root_meta(db_path)
+            if not root_str:
+                continue
+            if not Path(root_str).exists():
+                continue
+            results.append({"label": label_dir.name, "root": root_str})
+    results.sort(key=lambda r: r["label"])
+    if args.json:
+        print(json.dumps(results))
+    else:
+        for r in results:
+            print(f"{r['label']}: {r['root']}")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     # db.load_card already spans both live and archived rows, so a single
     # `_load` covers what used to be a live lookup plus an archive-dir glob.
@@ -1289,6 +1345,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("repos")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_repos)
 
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")
