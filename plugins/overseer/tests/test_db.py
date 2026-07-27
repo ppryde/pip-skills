@@ -45,6 +45,8 @@ def _sample_card():
         checklist=[{"task": "t1", "subject": "s", "status": "done"}],
         repo="pip-skills", claimed_by="sess-1", claimed_at="2026-07-02T10:00",
         claim_acked=True, claim_nudged=False, body="## Progress log\n\n- did x",
+        complexity="M", jira="OPS-1", linear="LIN-1", branch="wf-007",
+        worktree="/tmp/wt", pr="42", blocked_on="WF-003",
     )
 
 def test_card_roundtrips_through_row(repo):
