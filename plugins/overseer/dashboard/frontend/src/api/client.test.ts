@@ -47,6 +47,9 @@ describe("api/client", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    // `activeRoot` is module-level state (the repo selector's single choke
+    // point) — reset it so a root set by one test never leaks into the next.
+    client.setActiveRoot(null);
   });
 
   it("getBoard() GETs /api/board and returns the parsed response", async () => {
@@ -59,6 +62,67 @@ describe("api/client", () => {
     expect(url).toBe("/api/board");
     expect(init?.method ?? "GET").toBe("GET");
     expect(result).toEqual(boardResponse);
+  });
+
+  it("getRepos() GETs /api/repos and returns the parsed response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        repos: [
+          { label: "repo-a", root: "/a", current: true },
+          { label: "repo-b", root: "/b", current: false },
+        ],
+      })
+    );
+
+    const result = await client.getRepos();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/repos");
+    expect(init?.method ?? "GET").toBe("GET");
+    expect(result.repos).toHaveLength(2);
+  });
+
+  it("getRepos() never carries a root query param, even when one is active", async () => {
+    client.setActiveRoot("/some/repo");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await client.getRepos();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/repos");
+  });
+
+  it("setActiveRoot(root) threads ?root=... into getBoard()", async () => {
+    client.setActiveRoot("/path/to/repo");
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.getBoard();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/board?root=%2Fpath%2Fto%2Frepo");
+  });
+
+  it("setActiveRoot(null) omits the root query param entirely", async () => {
+    client.setActiveRoot("/path/to/repo");
+    client.setActiveRoot(null);
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.getBoard();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/board");
+  });
+
+  it("threads the active root into a mutation call too", async () => {
+    client.setActiveRoot("/repo-b");
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.setOrder("WF-1", 3);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1/order?root=%2Frepo-b");
+    expect(JSON.parse(init.body)).toEqual({ order: 3 });
   });
 
   it("getSessions() GETs /api/sessions and returns the parsed response", async () => {

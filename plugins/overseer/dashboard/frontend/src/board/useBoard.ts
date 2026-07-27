@@ -12,7 +12,7 @@
  * scaffold for later chunks to call.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getBoard } from "../api/client";
+import { getBoard, setActiveRoot } from "../api/client";
 import type { Board, BoardResponse, Context, Limits } from "../api/types";
 
 /** Background poll cadence — paused while a drag or mutation is in flight. */
@@ -38,7 +38,17 @@ export interface UseBoardResult {
   lastRefreshedAt: Date | null;
 }
 
-export function useBoard(): UseBoardResult {
+/**
+ * `root` (WF-030 repo selector) is the currently-selected repo's root path,
+ * or `null` to use the dashboard's own launch root (the pre-selector
+ * default). Passing it here — rather than threading it through every
+ * mutate() call site across the tree — keeps the repo selection a single
+ * App-level concern: `setActiveRoot` is called synchronously at the START
+ * of the SAME effect that fires the mount/root-change fetch, so by the time
+ * that fetch's `getBoard()` call builds its URL, `api/client`'s module-level
+ * root is already correct — no cross-effect race.
+ */
+export function useBoard(root: string | null = null): UseBoardResult {
   const [board, setBoard] = useState<Board | null>(null);
   const [context, setContext] = useState<Context | null>(null);
   const [limits, setLimits] = useState<Limits>(null);
@@ -117,10 +127,15 @@ export function useBoard(): UseBoardResult {
     [applyResponse]
   );
 
+  // Re-fires on mount AND whenever the selected repo root changes — setting
+  // the module-level active root FIRST (synchronously, before `load()`) so
+  // this fetch (and every one after it, until the next change) targets the
+  // newly-selected repo.
   useEffect(() => {
+    setActiveRoot(root);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [root]);
 
   const refresh = useCallback(async () => {
     await load();

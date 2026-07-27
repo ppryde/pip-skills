@@ -154,3 +154,17 @@ export interface SessionSummary {
 export interface SessionsResponse {
   sessions: SessionSummary[];
 }
+
+/** One discoverable board (WF-030 repo selector) — `root` is the MAIN repo
+ * root path (stable across worktrees), used verbatim as the `root` query
+ * param on every subsequent API call once selected. `current` marks
+ * whichever entry matches the dashboard's own launch root. */
+export interface RepoEntry {
+  label: string;
+  root: string;
+  current: boolean;
+}
+
+export interface ReposResponse {
+  repos: RepoEntry[];
+}

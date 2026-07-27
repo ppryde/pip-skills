@@ -10,9 +10,11 @@ vi.mock("../api/client", () => ({
   getBoard: vi.fn(),
   getCard: vi.fn(),
   getSessions: vi.fn(),
+  getRepos: vi.fn(),
+  setActiveRoot: vi.fn(),
 }));
 
-import { getBoard, getCard, getSessions } from "../api/client";
+import { getBoard, getCard, getSessions, getRepos } from "../api/client";
 import App from "../App";
 
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
@@ -101,9 +103,11 @@ const fixture: BoardResponse = {
 describe("<App/> board render (read-only, Chunk 3)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Default: no active sessions. resetAllMocks() clears implementations
-    // too, so this is re-armed before every test in this describe block.
+    // Default: no active sessions, no discoverable repos. resetAllMocks()
+    // clears implementations too, so these are re-armed before every test
+    // in this describe block.
     vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(getRepos).mockResolvedValue({ repos: [] });
   });
 
   it("renders lanes, an epic rollup line, a waiting-on dependency badge, and a tripwire flag", async () => {

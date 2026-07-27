@@ -1,4 +1,4 @@
-import type { BoardCard, Context, Limits } from "../api/types";
+import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
 import { goldTotal } from "../board/goldTotal";
@@ -6,6 +6,7 @@ import { vanquishedStats } from "../board/vanquished";
 import { formatTokens } from "../board/formatTokens";
 import { CoinIcon, CheckIcon } from "./icons";
 import ThresholdControl from "./ThresholdControl";
+import RepoSelector from "./RepoSelector";
 
 export interface TopBarProps {
   projectName: string;
@@ -28,6 +29,12 @@ export interface TopBarProps {
   /** Opens the Party overlay (App.tsx owns partyOpen — HANDOFF §State
    * Management). */
   onOpenParty: () => void;
+  /** WF-030 repo selector — every discoverable board (`useRepos`), the
+   * currently-selected root (App.tsx state, null = launch root default),
+   * and the handler that commits a new selection. */
+  repos: RepoEntry[];
+  activeRoot: string | null;
+  onSelectRepo: (root: string) => void;
 }
 
 function formatPct(value: number): string {
@@ -71,6 +78,9 @@ function TopBar({
   party,
   lastRefreshedAt,
   onOpenParty,
+  repos,
+  activeRoot,
+  onSelectRepo,
 }: TopBarProps) {
   const pct = context?.pct ?? null;
   const threshold = context?.threshold ?? null;
@@ -92,6 +102,8 @@ function TopBar({
           </p>
         </div>
       </div>
+
+      <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
 
       <div className="topbar__ctx">
         <span className="topbar__ctx-label">ctx</span>

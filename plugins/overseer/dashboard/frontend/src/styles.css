@@ -385,6 +385,42 @@ body {
   color: var(--qb-ink-400);
 }
 
+/* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
+   after the identity block so it wraps into the mobile chip shelf with
+   everything else in this flex row; no bespoke breakpoint rules needed. */
+.topbar__repo-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+}
+
+.topbar__repo-select-label {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+.topbar__repo-select select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--qb-ink-900);
+  background: transparent;
+  border: none;
+  padding: 0;
+  max-width: 40vw;
+}
+
+.topbar__repo-select select:focus-visible {
+  outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
+}
+
 .topbar__ctx {
   display: flex;
   align-items: baseline;
@@ -2416,6 +2452,7 @@ body {
   .topbar__refresh,
   .topbar__questing-pill,
   .topbar__archive-toggle,
+  .topbar__repo-select select,
   .threshold-control button,
   .status-menu button,
   .claim-control button,

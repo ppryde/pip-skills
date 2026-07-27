@@ -4,9 +4,10 @@ import type { BoardResponse } from "../api/types";
 
 vi.mock("../api/client", () => ({
   getBoard: vi.fn(),
+  setActiveRoot: vi.fn(),
 }));
 
-import { getBoard } from "../api/client";
+import { getBoard, setActiveRoot } from "../api/client";
 import { useBoard } from "./useBoard";
 
 function boardResponse(pct: number): BoardResponse {
@@ -323,5 +324,55 @@ describe("useBoard background polling (5s, paused during drag/mutation)", () => 
     expect(consoleError).not.toHaveBeenCalled();
 
     consoleError.mockRestore();
+  });
+});
+
+describe("useBoard(root) — WF-030 repo selector threading", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("defaults to root=null (setActiveRoot(null)) when no root arg is given", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+    const mockedSetActiveRoot = vi.mocked(setActiveRoot);
+
+    renderHook(() => useBoard());
+    await waitFor(() => expect(mockedGetBoard).toHaveBeenCalledTimes(1));
+
+    expect(mockedSetActiveRoot).toHaveBeenCalledWith(null);
+  });
+
+  it("calls setActiveRoot(root) BEFORE fetching, on mount", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    const mockedSetActiveRoot = vi.mocked(setActiveRoot);
+    const calls: string[] = [];
+    mockedSetActiveRoot.mockImplementation(() => calls.push("setActiveRoot"));
+    mockedGetBoard.mockImplementationOnce(async () => {
+      calls.push("getBoard");
+      return boardResponse(10);
+    });
+
+    renderHook(() => useBoard("/repo-a"));
+    await waitFor(() => expect(calls).toContain("getBoard"));
+
+    expect(calls).toEqual(["setActiveRoot", "getBoard"]);
+    expect(mockedSetActiveRoot).toHaveBeenCalledWith("/repo-a");
+  });
+
+  it("re-fetches and re-applies setActiveRoot when the root prop changes", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+    const mockedSetActiveRoot = vi.mocked(setActiveRoot);
+
+    const { rerender } = renderHook(({ root }) => useBoard(root), {
+      initialProps: { root: "/repo-a" as string | null },
+    });
+    await waitFor(() => expect(mockedGetBoard).toHaveBeenCalledTimes(1));
+    expect(mockedSetActiveRoot).toHaveBeenLastCalledWith("/repo-a");
+
+    rerender({ root: "/repo-b" });
+    await waitFor(() => expect(mockedGetBoard).toHaveBeenCalledTimes(2));
+    expect(mockedSetActiveRoot).toHaveBeenLastCalledWith("/repo-b");
   });
 });

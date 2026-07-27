@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { BoardCard, BoardResponse, Context, Limits } from "../api/types";
+import type {
+  BoardCard,
+  BoardResponse,
+  Context,
+  Limits,
+  RepoEntry,
+} from "../api/types";
 import type { PartyMember } from "../board/party";
 import TopBar from "./TopBar";
 
@@ -63,6 +69,9 @@ function baseProps() {
     party: [] as PartyMember[],
     lastRefreshedAt: null as Date | null,
     onOpenParty: () => {},
+    repos: [] as RepoEntry[],
+    activeRoot: null as string | null,
+    onSelectRepo: () => {},
   };
 }
 
@@ -166,5 +175,50 @@ describe("<TopBar/>", () => {
     expect(
       screen.queryByRole("button", { name: /^sessions$/i })
     ).not.toBeInTheDocument();
+  });
+
+  it("renders no repo selector when no boards are discoverable", () => {
+    render(<TopBar {...baseProps()} repos={[]} />);
+    expect(screen.queryByLabelText("Repo")).not.toBeInTheDocument();
+  });
+
+  it("renders the repo selector with every discovered repo as an option", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        repos={[
+          { label: "repo-a", root: "/a", current: true },
+          { label: "repo-b", root: "/b", current: false },
+        ]}
+        activeRoot="/a"
+      />
+    );
+
+    const select = screen.getByLabelText("Repo") as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select.value).toBe("/a");
+    expect(screen.getByRole("option", { name: "repo-a" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "repo-b" })).toBeInTheDocument();
+  });
+
+  it("selecting a different repo calls onSelectRepo with its root", () => {
+    const onSelectRepo = vi.fn();
+    render(
+      <TopBar
+        {...baseProps()}
+        repos={[
+          { label: "repo-a", root: "/a", current: true },
+          { label: "repo-b", root: "/b", current: false },
+        ]}
+        activeRoot="/a"
+        onSelectRepo={onSelectRepo}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Repo"), {
+      target: { value: "/b" },
+    });
+
+    expect(onSelectRepo).toHaveBeenCalledWith("/b");
   });
 });
