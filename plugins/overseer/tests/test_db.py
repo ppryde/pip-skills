@@ -207,3 +207,25 @@ def test_migrate_is_idempotent(tmp_path, monkeypatch):
     db.connect(tmp_path, migrate=True).close()
     conn = db.connect(tmp_path, migrate=True)  # second connect re-imports?
     assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1
+
+def test_migrate_is_atomic_on_failure(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = init_workflow(tmp_path)
+    file_save_card(root, Card(id="WF-001", title="one", status="planned"))
+    file_save_card(root, Card(id="WF-002", title="two", status="planned"))
+    conn = db.connect(tmp_path, migrate=False)  # no import yet
+    # Force a failure partway through the import.
+    calls = {"n": 0}
+    real_upsert = db._upsert
+    def boom(c, card, archived, commit=True):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("simulated crash mid-import")
+        return real_upsert(c, card, archived, commit=commit)
+    monkeypatch.setattr(db, "_upsert", boom)
+    with pytest.raises(RuntimeError):
+        db.migrate_from_workflow(conn, tmp_path)
+    # Rolled back: no cards, no marker.
+    assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 0
+    assert db.get_meta(conn, "migrated_from_workflow") is None

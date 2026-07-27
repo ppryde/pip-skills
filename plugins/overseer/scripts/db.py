@@ -113,6 +113,14 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
     archived cards from <state_root>/archive/cards/*.md (archived=1).
     Skips CardParseError. Sets meta migrated_from_workflow=1.
 
+    The whole import (all card writes + the marker) happens in a single
+    transaction: intermediate rows are staged but never committed until
+    every file has been processed. If anything goes wrong partway through
+    (a crash, or a non-CardParseError exception such as UnicodeDecodeError
+    or OSError while reading a file), the transaction is rolled back so the
+    DB is left exactly as it was before the import — no partial cards, no
+    marker — and the next connect() will retry the import from scratch.
+
     Returns count of successfully imported cards.
     """
     from scripts.store import state_root  # local import: avoid cycle
@@ -120,22 +128,26 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
     imported = 0
     live_dir = root / "cards"
     arch_dir = root / "archive" / "cards"
-    if live_dir.is_dir():
-        for path in sorted(live_dir.glob("*.md")):
-            try:
-                save_card(conn, Card.from_text(path.read_text()))
-                imported += 1
-            except CardParseError:
-                continue
-    if arch_dir.is_dir():
-        for path in sorted(arch_dir.glob("*.md")):
-            try:
-                archive_card(conn, Card.from_text(path.read_text()))
-                imported += 1
-            except CardParseError:
-                continue
-    set_meta(conn, "migrated_from_workflow", "1")
-    conn.commit()
+    try:
+        if live_dir.is_dir():
+            for path in sorted(live_dir.glob("*.md")):
+                try:
+                    _upsert(conn, Card.from_text(path.read_text()), 0, commit=False)
+                    imported += 1
+                except CardParseError:
+                    continue
+        if arch_dir.is_dir():
+            for path in sorted(arch_dir.glob("*.md")):
+                try:
+                    _upsert(conn, Card.from_text(path.read_text()), 1, commit=False)
+                    imported += 1
+                except CardParseError:
+                    continue
+        set_meta(conn, "migrated_from_workflow", "1")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return imported
 
 
@@ -231,7 +243,7 @@ def row_to_card(row: sqlite3.Row) -> Card:
     )
 
 
-def _upsert(conn: sqlite3.Connection, card: Card, archived: int) -> None:
+def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool = True) -> None:
     params = card_to_params(card)
     params["archived"] = archived
     cols = ", ".join(f'"{c}"' for c in params)
@@ -242,7 +254,8 @@ def _upsert(conn: sqlite3.Connection, card: Card, archived: int) -> None:
         f"ON CONFLICT(id) DO UPDATE SET {updates}",
         params,
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def save_card(conn: sqlite3.Connection, card: Card) -> None:
