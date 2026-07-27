@@ -3,12 +3,10 @@ its worktrees. Owns schema, card CRUD, atomic claiming, and the one-time
 .workflow/ import. Sprints/usage/knowledge remain file-based this phase."""
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 from pathlib import Path
 
-from scripts.models import Card, format_tokens, parse_tokens
 from scripts.store import derive_repo_label, slugify
 
 SCHEMA_VERSION = 1

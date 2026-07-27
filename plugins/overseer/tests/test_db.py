@@ -1,6 +1,4 @@
 from __future__ import annotations
-import sqlite3
-from pathlib import Path
 import pytest
 from scripts import db
 from tests.factories import git_init
@@ -26,6 +24,7 @@ def test_board_db_path_falls_back_to_config_dir(tmp_path, monkeypatch):
 def test_connect_sets_wal_and_schema(repo):
     conn = db.connect(repo, migrate=False)
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"cards", "meta"} <= tables
     assert db.get_meta(conn, "schema_version") == str(db.SCHEMA_VERSION)
