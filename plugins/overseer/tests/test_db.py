@@ -164,3 +164,22 @@ def test_reclaim_none_when_all_live(repo):
     conn = db.connect(repo, migrate=False)
     _claimed(conn, "WF-001", "a", "2026-07-02T10:00")
     assert db.reclaim_stale(conn, {"a"}, ttl_minutes=30, now="2026-07-02T10:05") == []
+
+def test_reclaim_stale_when_claimed_at_unparseable(repo):
+    conn = db.connect(repo, migrate=False)
+    db.save_card(conn, Card(id="WF-001", title="t", status="in-flight"))
+    # Corrupt the claim timestamp directly, bypassing claim_card.
+    conn.execute(
+        "UPDATE cards SET claimed_by='ghost', claimed_at='not-a-date' WHERE id='WF-001'"
+    )
+    conn.commit()
+    reclaimed = db.reclaim_stale(conn, None, ttl_minutes=30, now="2026-07-02T12:00")
+    assert reclaimed == ["WF-001"]
+    assert db.load_card(conn, "WF-001").claimed_by is None
+
+def test_reclaim_empty_live_set_frees_all(repo):
+    conn = db.connect(repo, migrate=False)
+    _claimed(conn, "WF-001", "a", "2026-07-02T10:00")
+    _claimed(conn, "WF-002", "b", "2026-07-02T10:00")
+    reclaimed = db.reclaim_stale(conn, set(), ttl_minutes=30, now="2026-07-02T10:05")
+    assert sorted(reclaimed) == ["WF-001", "WF-002"]
