@@ -7,6 +7,7 @@ import json
 import os
 import re as _re
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from scripts.models import Card
@@ -245,3 +246,40 @@ def claim_card(conn: sqlite3.Connection, card_id: str, session_id: str, now: str
     cur = conn.execute(sql, args)
     conn.commit()
     return cur.rowcount == 1
+
+
+def _parse_iso(value: "str | None") -> "datetime | None":
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def reclaim_stale(conn, live_session_ids, ttl_minutes: int, now: str) -> "list[str]":
+    rows = conn.execute(
+        "SELECT id, claimed_by, claimed_at FROM cards "
+        "WHERE claimed_by IS NOT NULL AND archived = 0"
+    ).fetchall()
+    now_dt = _parse_iso(now)
+    stale: list[str] = []
+    for row in rows:
+        if live_session_ids is not None:
+            if row["claimed_by"] not in live_session_ids:
+                stale.append(row["id"])
+            continue
+        # TTL fallback
+        claimed_dt = _parse_iso(row["claimed_at"])
+        if claimed_dt is None or now_dt is None:
+            stale.append(row["id"])  # can't verify freshness -> reclaim
+        elif now_dt - claimed_dt > timedelta(minutes=ttl_minutes):
+            stale.append(row["id"])
+    for cid in stale:
+        conn.execute(
+            "UPDATE cards SET claimed_by=NULL, claimed_at=NULL, claim_acked=0, "
+            "claim_nudged=0, updated=? WHERE id=?",
+            (now, cid),
+        )
+    conn.commit()
+    return stale

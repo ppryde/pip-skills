@@ -138,3 +138,29 @@ def test_force_displaces(repo):
 def test_claim_missing_card_returns_false(repo):
     conn = db.connect(repo, migrate=False)
     assert db.claim_card(conn, "WF-404", "sess-A", "2026-07-02T10:00") is False
+
+def _claimed(conn, cid, sess, at):
+    db.save_card(conn, Card(id=cid, title="t", status="in-flight"))
+    db.claim_card(conn, cid, sess, at)
+
+def test_reclaim_frees_dead_sessions(repo):
+    conn = db.connect(repo, migrate=False)
+    _claimed(conn, "WF-001", "dead", "2026-07-02T10:00")
+    _claimed(conn, "WF-002", "alive", "2026-07-02T10:00")
+    reclaimed = db.reclaim_stale(conn, {"alive"}, ttl_minutes=30, now="2026-07-02T10:05")
+    assert reclaimed == ["WF-001"]
+    assert db.load_card(conn, "WF-001").claimed_by is None
+    assert db.load_card(conn, "WF-002").claimed_by == "alive"
+
+def test_reclaim_ttl_fallback_when_census_absent(repo):
+    conn = db.connect(repo, migrate=False)
+    _claimed(conn, "WF-001", "old", "2026-07-02T10:00")
+    _claimed(conn, "WF-002", "fresh", "2026-07-02T11:50")
+    reclaimed = db.reclaim_stale(conn, None, ttl_minutes=30, now="2026-07-02T12:00")
+    assert reclaimed == ["WF-001"]
+    assert db.load_card(conn, "WF-002").claimed_by == "fresh"
+
+def test_reclaim_none_when_all_live(repo):
+    conn = db.connect(repo, migrate=False)
+    _claimed(conn, "WF-001", "a", "2026-07-02T10:00")
+    assert db.reclaim_stale(conn, {"a"}, ttl_minutes=30, now="2026-07-02T10:05") == []
