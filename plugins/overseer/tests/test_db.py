@@ -208,6 +208,33 @@ def test_migrate_is_idempotent(tmp_path, monkeypatch):
     conn = db.connect(tmp_path, migrate=True)  # second connect re-imports?
     assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1
 
+def test_two_connections_one_winner(repo):
+    # Two independent connections to the SAME board.db (repo fixture pins
+    # OVERSEER_DB to one file). Proves the atomic-claim guard holds across
+    # connections, not just within a single one.
+    conn_a = db.connect(repo, migrate=False)
+    conn_b = db.connect(repo, migrate=False)
+    db.save_card(conn_a, Card(id="WF-001", title="t", status="planned"))
+
+    won_a = db.claim_card(conn_a, "WF-001", "A", "2026-07-02T10:00")
+    won_b = db.claim_card(conn_b, "WF-001", "B", "2026-07-02T10:01")
+
+    assert {won_a, won_b} == {True, False}
+    winner = "A" if won_a else "B"
+    assert db.load_card(conn_a, "WF-001").claimed_by == winner
+
+def test_claim_visible_across_connections(repo):
+    conn_a = db.connect(repo, migrate=False)
+    conn_b = db.connect(repo, migrate=False)
+    db.save_card(conn_a, Card(id="WF-001", title="t", status="planned"))
+
+    assert db.claim_card(conn_a, "WF-001", "A", "2026-07-02T10:00") is True
+    # claim_card commits internally; connection B, reading afterward, must
+    # see the claim (WAL cross-connection visibility).
+    seen = db.load_card(conn_b, "WF-001")
+    assert seen.claimed_by == "A"
+    assert seen.claimed_at == "2026-07-02T10:00"
+
 def test_migrate_is_atomic_on_failure(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
