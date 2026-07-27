@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts import db
 from scripts.cli import main
-from scripts.store import find_card_path, state_root, workflow_root
+from scripts.store import state_root, workflow_root
 from tests.factories import git_init
 
 
@@ -20,6 +21,12 @@ def run(repo, *argv: str) -> int:
     return main(["--root", str(repo), *argv])
 
 
+def _card(repo, cid: str = "WF-001"):
+    """Load a card straight from board.db — the migration replaces reading
+    ``.workflow/cards/*.md`` as the way tests observe card state."""
+    return db.load_card(db.connect(repo, migrate=False), cid)
+
+
 class TestInitAndNewCard:
     def test_init_creates_tree_and_index(self, repo):
         root = workflow_root(repo)
@@ -30,9 +37,9 @@ class TestInitAndNewCard:
         assert run(repo, "new-card", "--title", "Fix the thing",
                    "--complexity", "M", "--estimate", "400k") == 0
         assert "WF-001" in capsys.readouterr().out
-        card_file = find_card_path(workflow_root(repo), "WF-001")
-        content = card_file.read_text()
-        assert "estimate: 400k" in content and "## Goal" in content
+        card = _card(repo)
+        assert card.budget_estimate == 400_000
+        assert "## Goal" in card.body
 
     def test_new_card_jira_id(self, repo, capsys):
         run(repo, "new-card", "--title", "Webhooks", "--jira", "PROJ-142")
@@ -47,8 +54,7 @@ class TestInitAndNewCard:
         capsys.readouterr()
         assert run(repo, "new-card", "--title", "B", "--jira", "PROJ-142") == 1
         assert "already exists" in capsys.readouterr().err
-        matches = list((workflow_root(repo) / "cards").glob("PROJ-142-*.md"))
-        assert len(matches) == 1
+        assert _card(repo, "PROJ-142").title == "A"  # rejected write never landed
 
 
 class TestLifecycle:
@@ -63,22 +69,15 @@ class TestLifecycle:
     def test_done_archives(self, repo):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "done", "WF-001") == 0
-        root = workflow_root(repo)
-        assert not list((root / "cards").glob("WF-001-*"))
-        assert list((root / "archive" / "cards").glob("WF-001-*"))
-        assert "Recently done" in (root / "ledger.md").read_text()
+        conn = db.connect(repo, migrate=False)
+        assert db.load_card(conn, "WF-001").status == "done"
+        live, _ = db.load_live_cards(conn)
+        assert live == []  # archiving removes it from the live set
+        assert "Recently done" in (workflow_root(repo) / "ledger.md").read_text()
 
     def test_unknown_card_errors(self, repo, capsys):
         assert run(repo, "set-stage", "WF-999", "planning") == 1
         assert "error:" in capsys.readouterr().err
-
-    def test_set_stage_reports_quarantined_cards_loudly(self, repo, capsys):
-        run(repo, "new-card", "--title", "T")
-        bad = workflow_root(repo) / "cards" / "WF-999-broken.md"
-        bad.write_text("no frontmatter at all")
-        capsys.readouterr()
-        assert run(repo, "set-stage", "WF-001", "planning") == 0
-        assert "QUARANTINED" in capsys.readouterr().err
 
 
 class TestProgressAndReview:
@@ -86,8 +85,9 @@ class TestProgressAndReview:
         run(repo, "new-card", "--title", "T", "--estimate", "400k")
         assert run(repo, "log-progress", "WF-001", "--note", "step 1",
                    "--tokens", "120k") == 0
-        content = find_card_path(workflow_root(repo), "WF-001").read_text()
-        assert "step 1 (~120k tokens)" in content and "actual: 120k" in content
+        card = _card(repo)
+        assert "step 1 (~120k tokens)" in card.body
+        assert card.budget_actual == 120_000
 
     def test_tripwire_exit_code(self, repo, capsys):
         run(repo, "new-card", "--title", "T", "--estimate", "100k")
@@ -100,8 +100,7 @@ class TestProgressAndReview:
         run(repo, "set-stage", "WF-001", "plan-review")
         assert run(repo, "log-review", "WF-001", "--stage", "plan-review",
                    "--reviewers", "2", "--verdict", "approved") == 0
-        content = find_card_path(workflow_root(repo), "WF-001").read_text()
-        assert "### plan-review — round 1 (2 reviewers)" in content
+        assert "### plan-review — round 1 (2 reviewers)" in _card(repo).body
 
 
 class TestUsageErrors:
@@ -150,8 +149,7 @@ class TestLinearAndPr:
     def test_new_card_linear_id(self, repo, capsys):
         assert run(repo, "new-card", "--title", "Webhooks", "--linear", "ENG-42") == 0
         assert "ENG-42" in capsys.readouterr().out
-        content = find_card_path(workflow_root(repo), "ENG-42").read_text()
-        assert "linear: ENG-42" in content
+        assert _card(repo, "ENG-42").linear == "ENG-42"
 
     def test_jira_linear_mutually_exclusive(self, repo):
         assert run(repo, "new-card", "--title", "T",
@@ -167,8 +165,7 @@ class TestLinearAndPr:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001",
                    "--pr", "https://github.com/x/y/pull/9") == 0
-        content = find_card_path(workflow_root(repo), "WF-001").read_text()
-        assert "pr: https://github.com/x/y/pull/9" in content
+        assert _card(repo).pr == "https://github.com/x/y/pull/9"
 
 
 class TestSetSprintStatus:
@@ -213,8 +210,7 @@ class TestStateRootWiring:
         (tmp_path / "scratch").mkdir()
         main(["--root", str(tmp_path), "init"])
         assert main(["--root", str(tmp_path), "new-card", "--title", "T"]) == 0
-        root = state_root(tmp_path)
-        assert list((root / "cards").glob("WF-001-*.md"))
+        assert _card(tmp_path).title == "T"
 
 
 def test_direct_script_invocation(tmp_path):
@@ -228,15 +224,12 @@ def test_direct_script_invocation(tmp_path):
 
 
 class TestHandoffCommand:
-    def test_handoff_text_and_loud_quarantine(self, repo, capsys):
+    def test_handoff_text(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
         run(repo, "set-stage", "WF-001", "implementation")
-        (workflow_root(repo) / "cards" / "WF-777-bad.md").write_text("garbage")
         capsys.readouterr()
         assert run(repo, "handoff") == 0
-        captured = capsys.readouterr()
-        assert "# Handoff briefing" in captured.out
-        assert "QUARANTINED" in captured.err
+        assert "# Handoff briefing" in capsys.readouterr().out
 
     def test_handoff_json(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
@@ -283,14 +276,6 @@ class TestBoardCommand:
         assert run(repo, "board") == 0
         out = capsys.readouterr().out
         assert "2 cards" in out
-
-    def test_board_loud_quarantine(self, repo, capsys):
-        run(repo, "new-card", "--title", "T")
-        (workflow_root(repo) / "cards" / "WF-999-bad.md").write_text("garbage")
-        capsys.readouterr()
-        assert run(repo, "board", "--json") == 0
-        captured = capsys.readouterr()
-        assert "QUARANTINED" in captured.err
 
 
 class TestUsageTelemetry:
@@ -360,8 +345,7 @@ class TestTouchesField:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001",
                    "--touches", "src/auth/, src/models.py") == 0
-        content = find_card_path(state_root(repo), "WF-001").read_text()
-        assert "- src/auth/" in content and "- src/models.py" in content
+        assert _card(repo).touches == ["src/auth/", "src/models.py"]
 
 
 class TestConflictsCommand:
@@ -570,13 +554,9 @@ class TestRelationsCommands:
     def test_set_parent_and_clear(self, repo, capsys):
         self._two_cards(repo)
         assert run(repo, "set-field", "WF-002", "--parent", "WF-001") == 0
-        from scripts.store import find_card_path, state_root
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
-        assert c.parent == "WF-001"
+        assert _card(repo, "WF-002").parent == "WF-001"
         assert run(repo, "set-field", "WF-002", "--parent", "") == 0
-        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
-        assert c.parent is None
+        assert _card(repo, "WF-002").parent is None
 
     def test_set_parent_unknown_rejected(self, repo, capsys):
         run(repo, "new-card", "--title", "Only")
@@ -593,13 +573,9 @@ class TestRelationsCommands:
     def test_depends_on_and_off(self, repo, capsys):
         self._two_cards(repo)
         assert run(repo, "depends", "WF-002", "--on", "WF-001") == 0
-        from scripts.store import find_card_path, state_root
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
-        assert c.depends_on == ["WF-001"]
+        assert _card(repo, "WF-002").depends_on == ["WF-001"]
         assert run(repo, "depends", "WF-002", "--off", "WF-001") == 0
-        c = Card.from_text(find_card_path(state_root(repo), "WF-002").read_text())
-        assert c.depends_on == []
+        assert _card(repo, "WF-002").depends_on == []
 
     def test_depends_self_and_cycle_rejected(self, repo, capsys):
         self._two_cards(repo)
@@ -613,13 +589,9 @@ class TestRelationsCommands:
     def test_park_unpark(self, repo, capsys):
         run(repo, "new-card", "--title", "Shelve me")
         assert run(repo, "park", "WF-001") == 0
-        from scripts.store import find_card_path, state_root
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.status == "parked"
+        assert _card(repo).status == "parked"
         assert run(repo, "unpark", "WF-001") == 0
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.status == "planned"
+        assert _card(repo).status == "planned"
 
 
 class TestRelationsArchivedRollup:
@@ -645,39 +617,29 @@ class TestOrderAndPriorityField:
     def test_set_order_round_trip(self, repo):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001", "--order", "5") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.order == 5
+        assert _card(repo).order == 5
 
     def test_order_zero_persists_after_nonzero(self, repo):
         """Critical test: --order 0 must work to 'move to top'."""
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001", "--order", "3") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.order == 3
+        assert _card(repo).order == 3
         # Now set to 0 and verify it sticks
         assert run(repo, "set-field", "WF-001", "--order", "0") == 0
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.order == 0
+        assert _card(repo).order == 0
 
     def test_set_priority_round_trip(self, repo):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001", "--priority", "P2") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.priority == "P2"
+        assert _card(repo).priority == "P2"
 
     def test_clear_priority_with_empty_string(self, repo):
         run(repo, "new-card", "--title", "T")
         run(repo, "set-field", "WF-001", "--priority", "P1")
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.priority == "P1"
+        assert _card(repo).priority == "P1"
         # Clear with empty string
         assert run(repo, "set-field", "WF-001", "--priority", "") == 0
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.priority is None
+        assert _card(repo).priority is None
 
     def test_invalid_priority_exits_1(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
@@ -695,29 +657,22 @@ class TestOrderAndPriorityField:
 class TestChecklistFieldRegression:
     def test_mutation_preserves_checklist(self, repo):
         """CRITICAL: card writes serialize from the dataclass. Without the
-        checklist field, ANY CLI mutation would silently erase `checklist:`
-        frontmatter written by another tool (e.g. the dashboard sync)."""
+        checklist field, ANY CLI mutation would silently erase a checklist
+        written by another tool (e.g. the dashboard sync writing straight to
+        board.db)."""
         run(repo, "new-card", "--title", "T")
-        card_path = find_card_path(state_root(repo), "WF-001")
-        text = card_path.read_text()
-        text = text.replace(
-            "status: planned\n",
-            "status: planned\n"
-            "checklist:\n"
-            "  - {task: '7', subject: write tests, status: in_progress}\n",
-            1,
-        )
-        card_path.write_text(text)
+        conn = db.connect(repo, migrate=False)
+        card = db.load_card(conn, "WF-001")
+        card.checklist = [{"task": "7", "subject": "write tests", "status": "in_progress"}]
+        db.save_card(conn, card)
 
         assert run(repo, "set-field", "WF-001", "--order", "5") == 0
 
-        from scripts.models import Card
-        reloaded = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        reloaded = _card(repo)
         assert reloaded.order == 5
         assert reloaded.checklist == [
             {"task": "7", "subject": "write tests", "status": "in_progress"},
         ]
-        assert "checklist:" in find_card_path(state_root(repo), "WF-001").read_text()
 
 
 class TestChecklistCommand:
@@ -725,9 +680,7 @@ class TestChecklistCommand:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "checklist", "WF-001", "--task", "7",
                    "--subject", "write tests", "--status", "pending") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.checklist == [
+        assert _card(repo).checklist == [
             {"task": "7", "subject": "write tests", "status": "pending"},
         ]
 
@@ -739,9 +692,7 @@ class TestChecklistCommand:
             "--subject", "second", "--status", "pending")
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--status", "in_progress") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.checklist == [
+        assert _card(repo).checklist == [
             {"task": "1", "subject": "first", "status": "in_progress"},
             {"task": "2", "subject": "second", "status": "pending"},
         ]
@@ -752,9 +703,7 @@ class TestChecklistCommand:
             "--subject", "first draft", "--status", "pending")
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--subject", "first draft, revised", "--status", "pending") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.checklist == [
+        assert _card(repo).checklist == [
             {"task": "1", "subject": "first draft, revised", "status": "pending"},
         ]
 
@@ -766,9 +715,7 @@ class TestChecklistCommand:
             "--subject", "second", "--status", "pending")
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--status", "deleted") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.checklist == [
+        assert _card(repo).checklist == [
             {"task": "2", "subject": "second", "status": "pending"},
         ]
 
@@ -778,9 +725,7 @@ class TestChecklistCommand:
             "--subject", "first", "--status", "pending")
         assert run(repo, "checklist", "WF-001", "--task", "99",
                    "--status", "deleted") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.checklist == [
+        assert _card(repo).checklist == [
             {"task": "1", "subject": "first", "status": "pending"},
         ]
 
@@ -801,23 +746,21 @@ class TestChecklistCommand:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--subject", "first", "--status", "pending") == 0
-        card_path = find_card_path(state_root(repo), "WF-001")
-        content_after_first = card_path.read_text()
+        after_first = _card(repo)
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--subject", "first", "--status", "pending") == 0
-        content_after_second = card_path.read_text()
-        assert content_after_first == content_after_second
+        after_second = _card(repo)
+        assert after_first == after_second
 
     def test_new_entry_without_subject_exits_1(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
-        card_path = find_card_path(state_root(repo), "WF-001")
-        before = card_path.read_text()
+        before = _card(repo)
         capsys.readouterr()
         assert run(repo, "checklist", "WF-001", "--task", "1",
                    "--status", "pending") == 1
         err = capsys.readouterr().err
         assert "--subject" in err
-        assert card_path.read_text() == before
+        assert _card(repo) == before
 
     def test_unknown_card_exits_1(self, repo, capsys):
         capsys.readouterr()
@@ -836,47 +779,32 @@ class TestRepoField:
         git_init(tmp_path)
         assert main(["--root", str(tmp_path), "init"]) == 0
         assert run(tmp_path, "new-card", "--title", "T") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(tmp_path), "WF-001").read_text())
-        assert c.repo == tmp_path.name
+        assert _card(tmp_path).repo == tmp_path.name
 
     def test_new_card_without_git_leaves_repo_unset(self, repo):
-        """`repo` fixture has no `.git` — derivation fails closed to None,
-        and the field is omitted entirely rather than written as null."""
+        """`repo` fixture has no `.git` — derivation fails closed to None."""
         run(repo, "new-card", "--title", "T")
-        from scripts.models import Card
-        card_path = find_card_path(state_root(repo), "WF-001")
-        c = Card.from_text(card_path.read_text())
-        assert c.repo is None
-        assert "repo:" not in card_path.read_text()
+        assert _card(repo).repo is None
 
     def test_new_card_repo_flag_overrides_derivation(self, tmp_path):
         git_init(tmp_path)
         assert main(["--root", str(tmp_path), "init"]) == 0
         assert run(tmp_path, "new-card", "--title", "T", "--repo", "explicit-repo") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(tmp_path), "WF-001").read_text())
-        assert c.repo == "explicit-repo"
+        assert _card(tmp_path).repo == "explicit-repo"
 
     def test_new_card_repo_flag_works_without_git(self, repo):
         run(repo, "new-card", "--title", "T", "--repo", "explicit-repo")
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.repo == "explicit-repo"
+        assert _card(repo).repo == "explicit-repo"
 
     def test_set_field_repo_round_trip(self, repo):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001", "--repo", "some-repo") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.repo == "some-repo"
+        assert _card(repo).repo == "some-repo"
 
     def test_set_field_repo_clear_with_empty_string(self, repo):
         run(repo, "new-card", "--title", "T", "--repo", "some-repo")
         assert run(repo, "set-field", "WF-001", "--repo", "") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.repo is None
+        assert _card(repo).repo is None
 
 
 class TestClaim:
@@ -889,8 +817,7 @@ class TestClaim:
     """
 
     def _card(self, repo):
-        from scripts.models import Card
-        return Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
+        return _card(repo)
 
     def test_claim_unknown_card_exits_1(self, repo, capsys):
         assert run(repo, "claim", "WF-999", "--session", "sess-1") == 1
@@ -993,10 +920,7 @@ class TestClaimAck:
         run(repo, "claim", "WF-001", "--session", "sess-1")
 
     def _acked(self, repo) -> bool:
-        from scripts.models import Card
-        return Card.from_text(
-            find_card_path(state_root(repo), "WF-001").read_text()
-        ).claim_acked
+        return _card(repo).claim_acked
 
     @pytest.mark.parametrize("argv", [
         pytest.param(("set-stage", "WF-001", "implementation"), id="set-stage"),
@@ -1050,26 +974,17 @@ class TestClaimNudgedVerb:
         run(repo, "new-card", "--title", "T")
         run(repo, "claim", "WF-001", "--session", "sess-1")
         assert run(repo, "claim-nudged", "WF-001") == 0
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.claim_nudged is True
+        assert _card(repo).claim_nudged is True
 
     def test_unclaimed_card_is_a_noop_exit_0(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
         capsys.readouterr()
         assert run(repo, "claim-nudged", "WF-001") == 0
         assert "claim_nudged" not in capsys.readouterr().out
-        from scripts.models import Card
-        c = Card.from_text(find_card_path(state_root(repo), "WF-001").read_text())
-        assert c.claim_nudged is False
+        assert _card(repo).claim_nudged is False
 
     def test_unknown_card_is_a_noop_exit_0(self, repo):
         assert run(repo, "claim-nudged", "WF-999") == 0
-
-    def test_corrupt_card_is_a_noop_exit_0(self, repo):
-        run(repo, "new-card", "--title", "T")
-        find_card_path(state_root(repo), "WF-001").write_text("garbage, no frontmatter")
-        assert run(repo, "claim-nudged", "WF-001") == 0
 
 
 class TestClaimCensusHelper:

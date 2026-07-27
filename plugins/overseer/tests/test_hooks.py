@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from scripts import db
 from scripts.cli import main
 from scripts.models import Card
-from scripts.store import find_card_path, state_root
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "checklist-sync.sh"
@@ -32,7 +32,7 @@ def _stdin(monkeypatch, payload: dict) -> None:
 
 
 def _checklist(repo, card_id: str = "WF-001") -> list[dict]:
-    return Card.from_text(find_card_path(state_root(repo), card_id).read_text()).checklist
+    return db.load_card(db.connect(repo, migrate=False), card_id).checklist
 
 
 def _write_task_file(config_dir: Path, list_dir_name: str, task_id: str, metadata: dict) -> None:
@@ -308,7 +308,7 @@ class TestHooksJson:
 
 
 def _card(repo, card_id: str = "WF-001") -> Card:
-    return Card.from_text(find_card_path(state_root(repo), card_id).read_text())
+    return db.load_card(db.connect(repo, migrate=False), card_id)
 
 
 class TestClaimStopHook:

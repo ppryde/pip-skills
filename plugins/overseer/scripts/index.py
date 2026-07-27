@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scripts import db
 from scripts.models import Card, format_tokens
 from scripts.relations import children, epic_rollup, is_epic, unmet_deps
-from scripts.store import load_archived_cards, load_live_cards, state_root
+from scripts.store import state_root
 
 RECENTLY_DONE_LIMIT = 5
 
@@ -124,8 +125,9 @@ def generate_index(
 
 def rebuild_index(repo_root: Path, project: str, now: str) -> list[Path]:
     root = state_root(repo_root)
-    cards, quarantined = load_live_cards(root)
-    archived = load_archived_cards(root)
+    conn = db.connect(repo_root)
+    cards, quarantined = db.load_live_cards(conn)
+    archived = db.load_archived_cards(conn)
     recently_done = archived[:RECENTLY_DONE_LIMIT]
     (root / "ledger.md").write_text(
         generate_index(project, cards, recently_done, now, pool=cards + archived)

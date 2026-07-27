@@ -1,5 +1,6 @@
+from scripts import db
 from scripts.index import generate_index, rebuild_index
-from scripts.store import init_workflow, save_card
+from scripts.store import init_workflow
 from tests.factories import make_card
 
 NOW = "2026-07-08T14:32"
@@ -102,10 +103,12 @@ class TestEpicsAndParked:
 class TestRebuildIndex:
     def test_writes_ledger_and_self_heals(self, tmp_path):
         root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", status="in-flight", stage="planning"))
-        (root / "cards" / "WF-002-bad.md").write_text("garbage")
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", status="in-flight", stage="planning"))
         (root / "ledger.md").write_text("stale nonsense")
         quarantined = rebuild_index(tmp_path, "proj", NOW)
         content = (root / "ledger.md").read_text()
         assert "WF-001" in content and "stale nonsense" not in content
-        assert len(quarantined) == 1
+        # Cards no longer quarantine at this layer — board.db rows are
+        # always structurally valid (see db.load_live_cards's signature).
+        assert quarantined == []

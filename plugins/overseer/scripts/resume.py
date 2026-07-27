@@ -4,9 +4,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from scripts import db
 from scripts.models import Card, format_tokens
 from scripts.relations import is_ready
-from scripts.store import load_archived_cards, load_live_cards, state_root
 
 
 def _branch_exists(repo_root: Path, branch: str | None) -> bool:
@@ -61,8 +61,9 @@ def resume_entries(repo_root: Path, session_id: str | None = None) -> list[dict]
     ``session_id`` the set is returned in its normal order and claim labelling
     falls back to just naming the holder (see ``format_report``).
     """
-    cards, _ = load_live_cards(state_root(repo_root))
-    pool = cards + load_archived_cards(state_root(repo_root))
+    conn = db.connect(repo_root)
+    cards, _ = db.load_live_cards(conn)
+    pool = cards + db.load_archived_cards(conn)
     entries = [
         _entry(repo_root, c, pool) for c in cards if c.status in ("in-flight", "blocked")
     ]
@@ -103,9 +104,9 @@ def format_report(entries: list[dict], session_id: str | None = None) -> str:
 
 def handoff_data(repo_root: Path) -> dict:
     """Everything a fresh session needs, derived in one scan."""
-    root = state_root(repo_root)
-    cards, quarantined = load_live_cards(root)
-    archived = load_archived_cards(root)
+    conn = db.connect(repo_root)
+    cards, quarantined = db.load_live_cards(conn)
+    archived = db.load_archived_cards(conn)
     pool = cards + archived
     entries = [_entry(repo_root, c, pool) for c in cards
                if c.status in ("in-flight", "blocked")]
