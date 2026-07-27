@@ -96,3 +96,19 @@ def test_load_card_finds_archived(repo):
     conn = db.connect(repo, migrate=False)
     db.archive_card(conn, Card(id="WF-005", title="gone", status="done"))
     assert db.load_card(conn, "WF-005").status == "done"
+
+def test_archive_after_save_upserts_single_row(repo):
+    conn = db.connect(repo, migrate=False)
+    card = Card(id="WF-011", title="x", status="in-flight")
+    db.save_card(conn, card)
+    db.archive_card(conn, card)
+    assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1
+    live, _ = db.load_live_cards(conn)
+    assert live == []
+    assert [c.id for c in db.load_archived_cards(conn)] == ["WF-011"]
+
+def test_load_archived_sorted_by_updated_desc(repo):
+    conn = db.connect(repo, migrate=False)
+    db.archive_card(conn, Card(id="WF-020", title="older", status="done", updated="2026-07-01T09:00"))
+    db.archive_card(conn, Card(id="WF-021", title="newer", status="done", updated="2026-07-05T09:00"))
+    assert [c.id for c in db.load_archived_cards(conn)] == ["WF-021", "WF-020"]
