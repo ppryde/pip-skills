@@ -104,6 +104,23 @@ def test_board_with_unknown_root_is_rejected(repo_a: Path, tmp_path: Path) -> No
     assert "unknown root" in resp.json()["detail"]
 
 
+def test_traversal_root_is_rejected(repo_a: Path) -> None:
+    """Path-traversal strings that resolve to non-allowlisted locations must
+    be rejected, even when textually similar to allowed roots. This guards
+    against an attacker using ../ escapes to point the CLI at arbitrary
+    filesystem paths (security regression guard).
+    """
+    client = TestClient(create_app(repo_a))
+    # Construct a traversal path that escapes the allowed root to a sibling
+    # that is not in the discovery allowlist (only repo_a and repo_b exist).
+    traversal_path = f"{repo_a}/../outside-allowlist"
+
+    resp = client.get("/api/board", params={"root": traversal_path})
+
+    assert resp.status_code == 400
+    assert "unknown root" in resp.json()["detail"]
+
+
 def test_mutation_with_unknown_root_is_rejected_and_does_not_shell(
     repo_a: Path, tmp_path: Path
 ) -> None:
