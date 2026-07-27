@@ -75,16 +75,9 @@ def test_board_carries_checklist_passthrough(client: TestClient, root: Path) -> 
     card dicts, so this must pass through verbatim with no backend code change."""
     card_id = run_overseer(root, "new-card", "--title", "Checklist card").strip()
 
-    card_path = next((root / ".workflow" / "cards").glob(f"{card_id}-*.md"))
-    text = card_path.read_text().replace(
-        "status: planned\n",
-        "status: planned\n"
-        "checklist:\n"
-        "  - {task: '1', subject: write tests, status: in_progress}\n"
-        "  - {task: '2', subject: implement, status: pending}\n",
-        1,
-    )
-    card_path.write_text(text)
+    # Add checklist entries via CLI (cards now live in board.db, not files)
+    run_overseer(root, "checklist", card_id, "--task", "1", "--subject", "write tests", "--status", "in_progress")
+    run_overseer(root, "checklist", card_id, "--task", "2", "--subject", "implement", "--status", "pending")
 
     resp = client.get("/api/board")
 
