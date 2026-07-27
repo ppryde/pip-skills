@@ -301,6 +301,18 @@ body {
     radial-gradient(circle at top left, var(--qb-bg-page-highlight-tl), transparent 55%),
     radial-gradient(circle at bottom right, var(--qb-bg-page-highlight-br), transparent 55%),
     var(--qb-bg-page);
+  /* The board-region is the app's ONE horizontal scroller — the page body
+     itself must never scroll sideways at any width (mobile pass). */
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keyboard focus stays visible everywhere — themed to the guild sky accent
+   rather than the UA default so it reads as part of the board, not a bolt-on.
+   :focus-visible only: mouse/touch presses don't flash rings. */
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 3px solid var(--qb-accent-sky-fill);
+  outline-offset: 2px;
 }
 
 /* Guild base utility (WF-027 chunk 4) — unused by markup this card; a
@@ -360,14 +372,16 @@ body {
   margin: 0;
   font-family: var(--qb-font-display);
   font-weight: 800;
-  font-size: 26px;
+  /* Fluid: 26px on desktop, easing down to 20px on a phone — no breakpoint
+     jump in the guild wordmark. */
+  font-size: clamp(20px, 4.5vw, 26px);
   color: var(--qb-ink-900);
 }
 
 .topbar__subtitle {
   margin: 0;
   font-family: var(--qb-font-body);
-  font-size: 17px;
+  font-size: clamp(14px, 3.6vw, 17px);
   color: var(--qb-ink-400);
 }
 
@@ -484,21 +498,9 @@ body {
   cursor: pointer;
 }
 
-/* Narrow viewports: the wrapped bar can strand later pills off-screen right
-   without room to wrap — let the ctx group's own items wrap instead of
-   forcing the whole row past the screen. */
-@media (max-width: 640px) {
-  /* The "as of last refresh" aside is the one topbar item that pushes the
-     first row past a phone viewport (its flex items can't shrink) — drop
-     it so the bar stays inside the screen. */
-  .topbar__ctx-note {
-    display: none;
-  }
-
-  .topbar__ctx {
-    flex-wrap: wrap;
-  }
-}
+/* Narrow-viewport topbar/board/drawer rules live in the consolidated
+   "Mobile layout layer" at the END of this file — placed last so its
+   overrides win the cascade over every base rule above. */
 
 .board-region {
   flex: 1 1 auto;
@@ -1215,6 +1217,9 @@ body {
   width: min(28rem, 100%);
   height: 100%;
   overflow-y: auto;
+  /* Reaching the sheet's end must not chain the scroll to the board behind
+     it (touch scroll-through). */
+  overscroll-behavior: contain;
   background: var(--qb-panel);
   border-left: 2px solid var(--qb-card-border);
   padding: 26px 28px;
@@ -1422,6 +1427,7 @@ body {
 .card-drawer__section-text {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
   color: var(--qb-ink-700);
   font-family: var(--qb-font-prose);
   font-size: 18px;
@@ -1437,6 +1443,21 @@ body {
   font-family: var(--qb-font-prose);
   font-size: 18px;
   line-height: 1.5;
+  /* Long unbroken tokens (URLs, file paths, WF-ids) must wrap inside the
+     drawer, never widen it into a horizontal page scroll. */
+  overflow-wrap: break-word;
+}
+
+/* Wide markdown media/tables scroll inside their own box, not the page. */
+.md-view img {
+  max-width: 100%;
+  height: auto;
+}
+
+.md-view table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .md-view h1,
@@ -1901,6 +1922,7 @@ body {
   width: min(50rem, 90vw);
   max-height: 90vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--qb-party-panel-bg);
   color: var(--qb-party-text);
   border-radius: var(--qb-radius-modal);
@@ -1960,7 +1982,10 @@ body {
 
 .party-sheet__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  /* min(340px, 100%) — a hard 340px minimum overflows the sheet on phones
+     narrower than the column; capping at 100% lets hero cards shrink to a
+     single full-width column instead of pushing a horizontal scroll. */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -2245,5 +2270,187 @@ body {
       transform: scale(0.8);
       opacity: 0.4;
     }
+  }
+}
+
+/* ==========================================================================
+   Mobile layout layer (≤720px) — "the guild ledger, one page at a time".
+   On a phone the corkboard becomes a ledger you leaf through: each lane is a
+   near-full-width parchment page with scroll-snap, a sliver of the next
+   pennant peeking in from the right as the "there's more" affordance. All
+   rules here are overrides of base rules above — this block sits LAST in
+   the file so equal-specificity overrides win the cascade. Desktop (>720px)
+   is untouched by everything below.
+   ========================================================================== */
+@media (max-width: 720px) {
+  /* --- Top bar: crest row, then a wrapping chip shelf ------------------- */
+  .topbar {
+    padding: 12px 14px 10px;
+    gap: 0.4rem 0.5rem;
+  }
+
+  /* The identity takes the full first row; every control below it wraps
+     into a chip shelf instead of stranding off-screen right. */
+  .topbar__identity {
+    flex-basis: 100%;
+  }
+
+  .topbar__crest {
+    width: 38px;
+    height: 38px;
+  }
+
+  /* ctx + threshold get their own "scribe's line" under the crest. The
+     "as of last refresh" aside is the one item that can't shrink and
+     pushes the row past a phone viewport — dropped here, the subtitle's
+     "updated HH:MM" already carries that information. */
+  .topbar__ctx {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    row-gap: 0.3rem;
+  }
+
+  .topbar__ctx-note {
+    display: none;
+  }
+
+  /* No right edge to hug once the bar is a wrapping shelf. */
+  .topbar__refresh {
+    margin-left: 0;
+  }
+
+  /* --- Board: lane-pager with scroll-snap ------------------------------- */
+  .board-region {
+    padding: 0.75rem 0.75rem 1rem;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.75rem;
+  }
+
+  /* A lane is a ledger page: ~84vw leaves the next lane's pennant peeking
+     in as the swipe affordance; capped so small tablets don't get comically
+     wide pages. */
+  .lane {
+    flex-basis: min(84vw, 340px);
+    scroll-snap-align: start;
+  }
+
+  /* Empty lanes stay thin vertical spines — and are NOT snap stops, so
+     swiping never pins the viewport to a 44px strip. */
+  .lane--empty {
+    flex-basis: 44px;
+    scroll-snap-align: none;
+  }
+
+  .lane--parked {
+    margin-left: 0.5rem;
+  }
+
+  .party-column {
+    flex-basis: min(84vw, 340px);
+    scroll-snap-align: start;
+  }
+
+  /* --- Drag-mismatch toast: full-width strip, not an off-screen pin ----- */
+  .board-toast {
+    left: 0.75rem;
+    right: 0.75rem;
+    justify-content: space-between;
+  }
+
+  /* --- Card detail: full-width parchment sheet -------------------------- */
+  .card-drawer {
+    width: 100%;
+    border-left: none;
+    padding: 20px 18px 30px;
+  }
+
+  /* Clear the floating ✕ so the banner row never runs under it. */
+  .card-drawer__header {
+    padding-right: 2.75rem;
+  }
+
+  .card-drawer__title {
+    font-size: 24px;
+  }
+
+  .card-drawer__section-text,
+  .md-view {
+    font-size: 17px;
+  }
+
+  /* --- Party overlay: near-full sheet, still visibly floating ----------- */
+  .party-sheet {
+    width: calc(100% - 1.25rem);
+    max-height: calc(100% - 1.25rem);
+    padding: 22px 18px;
+  }
+
+  .party-sheet__title {
+    font-size: 24px;
+  }
+}
+
+/* ==========================================================================
+   Touch-target layer (coarse pointers, any width) — fingers get bigger
+   targets without changing the mouse/desktop experience. Sizing only; no
+   colour or layout re-theming.
+   ========================================================================== */
+@media (pointer: coarse) {
+  /* The drag handle is the touch user's way to move a card — grow its hit
+     area to ~44px, pulling it back into the tile's own padding with
+     negative margins so the visual card doesn't balloon. `touch-action:
+     none` (base rule) plus the TouchSensor's long-press activation means
+     press-and-hold here drags; swiping anywhere else scrolls. */
+  .card-tile__handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    margin: -8px 0 -8px -10px;
+    font-size: 1rem;
+  }
+
+  /* Primary tappables meet ~44px. */
+  .topbar__refresh,
+  .topbar__questing-pill,
+  .topbar__archive-toggle,
+  .threshold-control button,
+  .status-menu button,
+  .claim-control button,
+  .card-drawer__viewtoggle button {
+    min-height: 44px;
+  }
+
+  .card-drawer__close,
+  .party-sheet__close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .topbar__archive-toggle input {
+    width: 18px;
+    height: 18px;
+  }
+
+  .link-editor__deps-list button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .epic-card__expand {
+    min-height: 32px;
+  }
+
+  /* 16px minimum stops iOS Safari's auto-zoom on focused form fields —
+     which would otherwise leave the page zoomed-in mid-board. */
+  .threshold-control input,
+  .priority-select,
+  .claim-control select,
+  .link-editor select,
+  .link-editor input {
+    font-size: 16px;
+    min-height: 38px;
   }
 }

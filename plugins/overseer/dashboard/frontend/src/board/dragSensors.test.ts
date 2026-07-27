@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeyboardSensor, PointerSensor } from "@dnd-kit/core";
+import { KeyboardSensor, PointerSensor, TouchSensor } from "@dnd-kit/core";
 import { DRAG_SENSOR_DESCRIPTORS } from "./dragSensors";
 
 describe("DRAG_SENSOR_DESCRIPTORS", () => {
@@ -16,6 +16,19 @@ describe("DRAG_SENSOR_DESCRIPTORS", () => {
     expect(pointerDescriptor).toBeDefined();
     expect(
       pointerDescriptor?.options.activationConstraint?.distance
+    ).toBeGreaterThan(0);
+  });
+
+  it("registers a TouchSensor with a long-press delay + tolerance (so touch drag works without hijacking scroll)", () => {
+    const touchDescriptor = DRAG_SENSOR_DESCRIPTORS.find(
+      (d) => d.sensor === TouchSensor
+    );
+    expect(touchDescriptor).toBeDefined();
+    expect(
+      touchDescriptor?.options.activationConstraint?.delay
+    ).toBeGreaterThan(0);
+    expect(
+      touchDescriptor?.options.activationConstraint?.tolerance
     ).toBeGreaterThan(0);
   });
 });

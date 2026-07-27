@@ -60,7 +60,8 @@ function Board({
 
   const sensors = useSensors(
     useSensor(DRAG_SENSOR_DESCRIPTORS[0].sensor, DRAG_SENSOR_DESCRIPTORS[0].options),
-    useSensor(DRAG_SENSOR_DESCRIPTORS[1].sensor, DRAG_SENSOR_DESCRIPTORS[1].options)
+    useSensor(DRAG_SENSOR_DESCRIPTORS[1].sensor, DRAG_SENSOR_DESCRIPTORS[1].options),
+    useSensor(DRAG_SENSOR_DESCRIPTORS[2].sensor, DRAG_SENSOR_DESCRIPTORS[2].options)
   );
 
   const toggleEpicHighlight = (id: string) => {
