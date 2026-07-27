@@ -210,6 +210,20 @@ def card_to_params(card: Card) -> dict:
     }
 
 
+def _json_loads_column(row: sqlite3.Row, column: str) -> list:
+    """``json.loads`` a card row's JSON-text column, quarantining a corrupt
+    value as ``CardParseError`` instead of letting ``json.JSONDecodeError``
+    escape — matches the file store's graceful-quarantine behaviour for a
+    malformed row. ``cli.main`` catches ``CardParseError`` and exits 1 with
+    a message; it does not catch ``json.JSONDecodeError``."""
+    try:
+        return json.loads(row[column] or "[]")
+    except json.JSONDecodeError as exc:
+        raise CardParseError(
+            f"card {row['id']!r}: malformed JSON in column {column!r}: {exc}"
+        ) from exc
+
+
 def row_to_card(row: sqlite3.Row) -> Card:
     return Card(
         id=row["id"],
@@ -226,14 +240,14 @@ def row_to_card(row: sqlite3.Row) -> Card:
         branch=row["branch"],
         worktree=row["worktree"],
         pr=row["pr"],
-        touches=json.loads(row["touches"] or "[]"),
-        depends_on=json.loads(row["depends_on"] or "[]"),
+        touches=_json_loads_column(row, "touches"),
+        depends_on=_json_loads_column(row, "depends_on"),
         budget_estimate=row["budget_estimate"],
         budget_actual=row["budget_actual"] or 0,
         created=row["created"] or "",
         updated=row["updated"] or "",
         blocked_on=row["blocked_on"],
-        checklist=json.loads(row["checklist"] or "[]"),
+        checklist=_json_loads_column(row, "checklist"),
         repo=row["repo"],
         claimed_by=row["claimed_by"],
         claimed_at=row["claimed_at"],

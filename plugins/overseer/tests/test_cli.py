@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,19 @@ class TestInitAndNewCard:
         assert run(repo, "new-card", "--title", "B", "--jira", "PROJ-142") == 1
         assert "already exists" in capsys.readouterr().err
         assert _card(repo, "PROJ-142").title == "A"  # rejected write never landed
+
+    def test_new_card_colliding_with_archived_id_rejected(self, repo, capsys):
+        # `id` is now a single PRIMARY KEY spanning BOTH live and archived
+        # rows (board.db has one `cards` table with an `archived` flag,
+        # unlike the old file store's separate archive/ directory). So a new
+        # card whose id/jira/linear collides with an ARCHIVED card now errors
+        # (exit 1) instead of silently creating a duplicate — a deliberate,
+        # safer behaviour change from the pre-migration file-store world.
+        assert run(repo, "new-card", "--title", "A", "--jira", "PROJ-9") == 0
+        assert run(repo, "done", "PROJ-9") == 0  # archives it; id stays occupied
+        capsys.readouterr()
+        assert run(repo, "new-card", "--title", "B", "--jira", "PROJ-9") == 1
+        assert "already exists" in capsys.readouterr().err
 
 
 class TestLifecycle:
@@ -910,6 +924,48 @@ class TestClaim:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "unclaim", "WF-001") == 0  # never claimed
         assert run(repo, "unclaim", "WF-001") == 0  # again
+
+
+class TestReclaimOnClaimEndToEnd:
+    """`claim`'s reclaim-stale sweep (via a real ``CENSUS_STORE`` file, not
+    the ``_census_session_live`` stub used elsewhere in ``TestClaim``) — no
+    prior cli-level coverage existed for the sweep itself, only for the
+    separate post-sweep live/stale note logic. The autouse conftest fixture
+    (`_no_ambient_task_env`) deletes ``CENSUS_STORE`` for every test, so each
+    test here must set it explicitly via ``monkeypatch.setenv``.
+    """
+
+    def _write_census(self, path: Path, live_session_ids: list[str]) -> None:
+        now = time.time()
+        sessions = {sid: {"updated_at": now} for sid in live_session_ids}
+        path.write_text(json.dumps({"sessions": sessions}))
+
+    def test_claim_sweeps_a_dead_holder_and_succeeds(self, repo, monkeypatch):
+        census_store = repo / "census-status.json"
+        self._write_census(census_store, ["sess-live"])  # sess-dead is NOT listed
+        monkeypatch.setenv("CENSUS_STORE", str(census_store))
+
+        run(repo, "new-card", "--title", "T")  # WF-001
+        run(repo, "claim", "WF-001", "--session", "sess-dead")
+
+        assert run(repo, "claim", "WF-001", "--session", "sess-live") == 0
+        assert _card(repo).claimed_by == "sess-live"
+
+    def test_claim_does_not_sweep_a_still_live_holder(self, repo, monkeypatch):
+        census_store = repo / "census-status.json"
+        self._write_census(census_store, ["sess-live-1", "sess-live-2"])
+        monkeypatch.setenv("CENSUS_STORE", str(census_store))
+
+        run(repo, "new-card", "--title", "A")  # WF-001
+        run(repo, "new-card", "--title", "B")  # WF-002
+        run(repo, "claim", "WF-001", "--session", "sess-live-1")
+        run(repo, "claim", "WF-002", "--session", "sess-dead")
+
+        # Claiming WF-002 runs the board-wide sweep; WF-001's holder is in
+        # the live set and must survive it untouched.
+        assert run(repo, "claim", "WF-002", "--session", "sess-live-2") == 0
+        assert _card(repo, "WF-001").claimed_by == "sess-live-1"
+        assert _card(repo, "WF-002").claimed_by == "sess-live-2"
 
 
 class TestClaimAck:

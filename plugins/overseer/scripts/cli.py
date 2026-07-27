@@ -64,11 +64,19 @@ _CONN_CACHE: dict[str, sqlite3.Connection] = {}
 
 
 def _conn(repo_root: Path) -> sqlite3.Connection:
-    """One cached ``board.db`` connection per resolved repo root, per process.
+    """One cached ``board.db`` connection per resolved repo root, per process,
+    for this module's own card operations (every ``_load``/``_sync`` call
+    site, plus the direct ``db.*`` calls verbs make against a loaded card).
 
-    ``main()`` closes every cached connection in its ``finally`` — a single
-    CLI invocation opens at most one connection per distinct repo root it
-    touches, instead of one per card-verb call site.
+    ``main()`` closes every cached connection in its ``finally``. This cache
+    does NOT cover the whole CLI invocation, though: the view modules
+    (``scripts.board``, ``scripts.index``, ``scripts.resume``) each open
+    their own short-lived ``db.connect(repo_root)`` connection by design —
+    they're read-mostly report builders, not part of the single-writer card
+    path this cache exists for. Those connections are plain locals with no
+    explicit ``close()``; CPython's refcounting closes them (via
+    ``sqlite3.Connection.__del__``) as soon as the enclosing function
+    returns and the reference drops.
     """
     key = str(repo_root.resolve())
     conn = _CONN_CACHE.get(key)
@@ -646,20 +654,31 @@ def cmd_claim(args: argparse.Namespace) -> int:
     """
     conn = _conn(args.root)
     now = _now()
-    db.reclaim_stale(conn, liveness.live_session_ids(), DEFAULT_TTL, now)
+    # Load the target FIRST: an unknown id must fail fast with
+    # "no card with id ..." without paying for the board-wide reclaim sweep
+    # below. Capture the prior holder before the sweep runs, since the sweep
+    # may itself clear this very card's stale claim — reading claimed_by
+    # afterwards would silently hide that a displacement happened.
     card = _load(args.root, args.card_id)
+    prior_holder = card.claimed_by
+    reclaimed = db.reclaim_stale(conn, liveness.live_session_ids(), DEFAULT_TTL, now)
     note = None
-    if card.claimed_by and card.claimed_by != args.session:
-        live = _census_session_live(card.claimed_by)
-        if live and not args.force:
-            print(
-                f"error: {card.id} already claimed by {card.claimed_by} (live)"
-                " — use --force to override",
-                file=sys.stderr,
-            )
-            return 1
+    if prior_holder and prior_holder != args.session:
+        if card.id in reclaimed:
+            # The sweep already cleared this claim as stale — no live check,
+            # no --force gate needed, just report the displacement.
+            live = False
+        else:
+            live = _census_session_live(prior_holder)
+            if live and not args.force:
+                print(
+                    f"error: {card.id} already claimed by {prior_holder} (live)"
+                    " — use --force to override",
+                    file=sys.stderr,
+                )
+                return 1
         kind = "live" if live else "stale"
-        note = f"note: displaced {kind} claim held by {card.claimed_by}"
+        note = f"note: displaced {kind} claim held by {prior_holder}"
     # The CLI-level checks above have already authorised this claim (unclaimed,
     # stale holder, or an explicit --force) — force=True here is just the
     # unconditional stamp; `claim_card`'s own compare-and-swap guard is for
