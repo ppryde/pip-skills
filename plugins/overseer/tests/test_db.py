@@ -59,3 +59,40 @@ def test_card_roundtrips_through_row(repo):
     row = conn.execute("SELECT * FROM cards WHERE id='WF-007'").fetchone()
     restored = db.row_to_card(row)
     assert restored == card
+
+def test_save_and_load_card(repo):
+    conn = db.connect(repo, migrate=False)
+    card = _sample_card()
+    db.save_card(conn, card)
+    assert db.load_card(conn, "WF-007") == card
+
+def test_save_card_upserts(repo):
+    conn = db.connect(repo, migrate=False)
+    card = _sample_card()
+    db.save_card(conn, card)
+    card.status = "blocked"
+    db.save_card(conn, card)
+    assert db.load_card(conn, "WF-007").status == "blocked"
+    assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1
+
+def test_load_live_excludes_archived(repo):
+    conn = db.connect(repo, migrate=False)
+    live = Card(id="WF-001", title="live", status="in-flight")
+    done = Card(id="WF-002", title="done", status="done")
+    db.save_card(conn, live)
+    db.archive_card(conn, done)
+    cards, quarantined = db.load_live_cards(conn)
+    assert [c.id for c in cards] == ["WF-001"]
+    assert quarantined == []
+    assert [c.id for c in db.load_archived_cards(conn)] == ["WF-002"]
+
+def test_mint_id_spans_live_and_archived(repo):
+    conn = db.connect(repo, migrate=False)
+    db.save_card(conn, Card(id="WF-003", title="a", status="planned"))
+    db.archive_card(conn, Card(id="WF-009", title="b", status="done"))
+    assert db.mint_id(conn) == "WF-010"
+
+def test_load_card_finds_archived(repo):
+    conn = db.connect(repo, migrate=False)
+    db.archive_card(conn, Card(id="WF-005", title="gone", status="done"))
+    assert db.load_card(conn, "WF-005").status == "done"

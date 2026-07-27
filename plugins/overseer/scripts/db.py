@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re as _re
 import sqlite3
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from scripts.store import derive_repo_label, slugify
 SCHEMA_VERSION = 1
 DB_ENV = "OVERSEER_DB"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+_ID_RE = _re.compile(r"\AWF-(\d+)\Z")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -181,3 +183,51 @@ def row_to_card(row: sqlite3.Row) -> Card:
         claim_nudged=bool(row["claim_nudged"]),
         body=row["body"] or "",
     )
+
+
+def _upsert(conn: sqlite3.Connection, card: Card, archived: int) -> None:
+    params = card_to_params(card)
+    params["archived"] = archived
+    cols = ", ".join(f'"{c}"' for c in params)
+    ph = ", ".join(f":{c}" for c in params)
+    updates = ", ".join(f'"{c}" = excluded."{c}"' for c in params if c != "id")
+    conn.execute(
+        f"INSERT INTO cards ({cols}) VALUES ({ph}) "
+        f"ON CONFLICT(id) DO UPDATE SET {updates}",
+        params,
+    )
+    conn.commit()
+
+
+def save_card(conn: sqlite3.Connection, card: Card) -> None:
+    _upsert(conn, card, archived=0)
+
+
+def archive_card(conn: sqlite3.Connection, card: Card) -> None:
+    _upsert(conn, card, archived=1)
+
+
+def load_card(conn: sqlite3.Connection, card_id: str) -> "Card | None":
+    row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+    return row_to_card(row) if row else None
+
+
+def load_live_cards(conn: sqlite3.Connection) -> "tuple[list[Card], list[Path]]":
+    rows = conn.execute("SELECT * FROM cards WHERE archived = 0 ORDER BY id").fetchall()
+    return [row_to_card(r) for r in rows], []
+
+
+def load_archived_cards(conn: sqlite3.Connection) -> "list[Card]":
+    rows = conn.execute(
+        "SELECT * FROM cards WHERE archived = 1 ORDER BY updated DESC"
+    ).fetchall()
+    return [row_to_card(r) for r in rows]
+
+
+def mint_id(conn: sqlite3.Connection) -> str:
+    highest = 0
+    for (cid,) in conn.execute("SELECT id FROM cards"):
+        m = _ID_RE.match(cid or "")
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"WF-{highest + 1:03d}"
