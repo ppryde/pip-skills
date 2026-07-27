@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from scripts.models import Card
+from scripts.models import Card, CardParseError
 from scripts.store import derive_repo_label, slugify
 
 SCHEMA_VERSION = 1
@@ -106,9 +106,54 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     return conn
 
 
+def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
+    """Import live and archived cards from .workflow/ directory tree.
+
+    Reads live cards from <state_root>/cards/*.md (archived=0) and
+    archived cards from <state_root>/archive/cards/*.md (archived=1).
+    Skips CardParseError. Sets meta migrated_from_workflow=1.
+
+    Returns count of successfully imported cards.
+    """
+    from scripts.store import state_root  # local import: avoid cycle
+    root = state_root(repo_root)
+    imported = 0
+    live_dir = root / "cards"
+    arch_dir = root / "archive" / "cards"
+    if live_dir.is_dir():
+        for path in sorted(live_dir.glob("*.md")):
+            try:
+                save_card(conn, Card.from_text(path.read_text()))
+                imported += 1
+            except CardParseError:
+                continue
+    if arch_dir.is_dir():
+        for path in sorted(arch_dir.glob("*.md")):
+            try:
+                archive_card(conn, Card.from_text(path.read_text()))
+                imported += 1
+            except CardParseError:
+                continue
+    set_meta(conn, "migrated_from_workflow", "1")
+    conn.commit()
+    return imported
+
+
 def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
-    """Filled in by Task 6. Stub keeps connect() working until then."""
-    return None
+    """Idempotent guard for one-time .workflow/ import.
+
+    If already migrated (meta migrated_from_workflow == "1"), return.
+    If DB already has cards, mark as migrated (pre-seeded) and return.
+    Otherwise, run migrate_from_workflow.
+    """
+    if get_meta(conn, "migrated_from_workflow") == "1":
+        return
+    already = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+    if already:
+        set_meta(conn, "migrated_from_workflow", "1")  # DB pre-seeded; don't double-import
+        conn.commit()
+        return
+    migrate_from_workflow(conn, repo_root)
 
 
 _CARD_COLUMNS = (

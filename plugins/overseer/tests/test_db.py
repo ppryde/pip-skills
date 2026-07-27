@@ -2,6 +2,7 @@ from __future__ import annotations
 import pytest
 from scripts import db
 from scripts.models import Card
+from scripts.store import init_workflow, save_card as file_save_card
 from tests.factories import git_init
 
 @pytest.fixture
@@ -183,3 +184,26 @@ def test_reclaim_empty_live_set_frees_all(repo):
     _claimed(conn, "WF-002", "b", "2026-07-02T10:00")
     reclaimed = db.reclaim_stale(conn, set(), ttl_minutes=30, now="2026-07-02T10:05")
     assert sorted(reclaimed) == ["WF-001", "WF-002"]
+
+def test_migrate_imports_live_and_archived(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = init_workflow(tmp_path)
+    file_save_card(root, Card(id="WF-001", title="live one", status="in-flight"))
+    # archived card written straight into archive/cards
+    (root / "archive" / "cards" / "WF-002-done.md").write_text(
+        Card(id="WF-002", title="done one", status="done").to_text()
+    )
+    conn = db.connect(tmp_path, migrate=True)
+    assert db.load_card(conn, "WF-001").title == "live one"
+    assert [c.id for c in db.load_archived_cards(conn)] == ["WF-002"]
+    assert db.get_meta(conn, "migrated_from_workflow") == "1"
+
+def test_migrate_is_idempotent(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = init_workflow(tmp_path)
+    file_save_card(root, Card(id="WF-001", title="one", status="planned"))
+    db.connect(tmp_path, migrate=True).close()
+    conn = db.connect(tmp_path, migrate=True)  # second connect re-imports?
+    assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1
