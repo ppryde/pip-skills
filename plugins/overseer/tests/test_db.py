@@ -112,3 +112,29 @@ def test_load_archived_sorted_by_updated_desc(repo):
     db.archive_card(conn, Card(id="WF-020", title="older", status="done", updated="2026-07-01T09:00"))
     db.archive_card(conn, Card(id="WF-021", title="newer", status="done", updated="2026-07-05T09:00"))
     assert [c.id for c in db.load_archived_cards(conn)] == ["WF-021", "WF-020"]
+
+def test_claim_unclaimed_wins(repo):
+    conn = db.connect(repo, migrate=False)
+    db.save_card(conn, Card(id="WF-001", title="t", status="planned"))
+    assert db.claim_card(conn, "WF-001", "sess-A", "2026-07-02T10:00") is True
+    got = db.load_card(conn, "WF-001")
+    assert got.claimed_by == "sess-A" and got.claimed_at == "2026-07-02T10:00"
+    assert got.claim_acked is False and got.claim_nudged is False
+
+def test_second_claimer_loses(repo):
+    conn = db.connect(repo, migrate=False)
+    db.save_card(conn, Card(id="WF-001", title="t", status="planned"))
+    assert db.claim_card(conn, "WF-001", "sess-A", "2026-07-02T10:00") is True
+    assert db.claim_card(conn, "WF-001", "sess-B", "2026-07-02T10:01") is False
+    assert db.load_card(conn, "WF-001").claimed_by == "sess-A"
+
+def test_force_displaces(repo):
+    conn = db.connect(repo, migrate=False)
+    db.save_card(conn, Card(id="WF-001", title="t", status="planned"))
+    db.claim_card(conn, "WF-001", "sess-A", "2026-07-02T10:00")
+    assert db.claim_card(conn, "WF-001", "sess-B", "2026-07-02T10:02", force=True) is True
+    assert db.load_card(conn, "WF-001").claimed_by == "sess-B"
+
+def test_claim_missing_card_returns_false(repo):
+    conn = db.connect(repo, migrate=False)
+    assert db.claim_card(conn, "WF-404", "sess-A", "2026-07-02T10:00") is False

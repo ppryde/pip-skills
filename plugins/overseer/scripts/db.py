@@ -231,3 +231,17 @@ def mint_id(conn: sqlite3.Connection) -> str:
         if m:
             highest = max(highest, int(m.group(1)))
     return f"WF-{highest + 1:03d}"
+
+
+def claim_card(conn: sqlite3.Connection, card_id: str, session_id: str, now: str, *, force: bool = False) -> bool:
+    if force:
+        sql = ("UPDATE cards SET claimed_by=?, claimed_at=?, claim_acked=0, "
+               "claim_nudged=0, updated=? WHERE id=?")
+        args = (session_id, now, now, card_id)
+    else:
+        sql = ("UPDATE cards SET claimed_by=?, claimed_at=?, claim_acked=0, "
+               "claim_nudged=0, updated=? WHERE id=? AND claimed_by IS NULL")
+        args = (session_id, now, now, card_id)
+    cur = conn.execute(sql, args)
+    conn.commit()
+    return cur.rowcount == 1
