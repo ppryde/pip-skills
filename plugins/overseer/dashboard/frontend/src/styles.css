@@ -522,36 +522,22 @@ body {
   box-shadow: none;
 }
 
-/* Archive toggle is styled as a role-A button chrome around the existing
-   checkbox + label (HANDOFF markup unchanged — CSS-only). */
+/* Archive is an on/off TOGGLE (checkbox + label), not an action button —
+   task-12 reverts the stray role-A button chrome 3951828 wrapped this in.
+   It keeps light on-theme colouring but must read as a checked/unchecked
+   state, never identical to the Refresh/Set/Claim action buttons. */
 .topbar__archive-toggle {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   font-size: 0.8rem;
-  font-weight: 700;
-  padding: 0.35rem 0.75rem;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
+  color: var(--qb-ink-500);
   cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
-.topbar__archive-toggle:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.topbar__archive-toggle:active {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
+.topbar__archive-toggle input {
+  accent-color: var(--qb-btn-ink);
+  cursor: pointer;
 }
 
 /* Quarantine alert keeps a strong danger red rather than a guild accent —

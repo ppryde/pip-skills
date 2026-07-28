@@ -4,11 +4,15 @@
 (see `app.cli_client`) against `root`, plus a static mount / placeholder for
 the (separately built) frontend `dist/` (chunk 4). This module is a CLIENT
 of the CLIs only — it never imports overseer/vigil internals and never
-touches `.workflow/` directly.
+touches `.workflow/` directly, with one narrow exception: `derive_repo_root`
+(a pure `git rev-parse` path helper, no filesystem/board access) is imported
+directly below to compute the launch root's OWN main-repo root, matching how
+`board.db`'s `meta['repo_root']` was derived when the CLI wrote it.
 """
 from __future__ import annotations
 
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -19,6 +23,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.cli_client import CliError, check_id, run_census, run_census_all, run_overseer, run_vigil
+
+# backend/app/main.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
+# `scripts` (the overseer CLI's package) isn't on sys.path by default when
+# this app is imported/served from `dashboard/backend` — add the overseer
+# root so `derive_repo_root` resolves the same way the CLI does.
+_OVERSEER_ROOT = Path(__file__).resolve().parents[3]
+if str(_OVERSEER_ROOT) not in sys.path:
+    sys.path.insert(0, str(_OVERSEER_ROOT))
+
+from scripts.store import derive_repo_root  # noqa: E402  (must follow sys.path setup above)
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -264,6 +278,15 @@ def _mutation_error(exc: CliError) -> HTTPException:
 def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
+    # The dashboard is normally launched from inside a worktree (e.g.
+    # `.claude/worktrees/<name>`), whose path differs from the main-repo
+    # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
+    # root the launch root belongs to — same resolution the CLI used when
+    # it wrote that meta — so `/api/repos`'s `current` flag matches the
+    # repo actually being served, not the raw (possibly worktree) launch
+    # path. Falls back to the launch root itself when derivation fails (not
+    # a git repo, git missing) — same as a launch root with no worktree.
+    _derived_launch_root = (derive_repo_root(launch_root) or launch_root).resolve()
 
     def _mutate(fn: Callable[[], None], effective_root: Path) -> dict[str, Any]:
         try:
@@ -279,13 +302,12 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.get("/api/repos")
     def get_repos() -> dict[str, Any]:
-        resolved_launch = launch_root.resolve()
         repos_list: list[dict[str, Any]] = []
         for entry in _discover_roots(launch_root):
             if not isinstance(entry, dict) or not entry.get("root"):
                 continue
             item = dict(entry)
-            item["current"] = Path(entry["root"]).resolve() == resolved_launch
+            item["current"] = Path(entry["root"]).resolve() == _derived_launch_root
             repos_list.append(item)
         return {"repos": repos_list}
 

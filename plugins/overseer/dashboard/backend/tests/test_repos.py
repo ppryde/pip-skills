@@ -51,6 +51,22 @@ def repo_b(tmp_path: Path, isolated_config_dir: Path) -> Path:
     return _make_repo(tmp_path, isolated_config_dir, "repo-b")
 
 
+@pytest.fixture()
+def repo_a_worktree(tmp_path: Path, repo_a: Path) -> Path:
+    """A linked worktree of `repo_a` — mirrors how the dashboard is normally
+    launched (from `.claude/worktrees/<name>`), whose path differs from the
+    main-repo root that `board.db` records as `meta['repo_root']`.
+    `derive_repo_root` (via `git rev-parse --git-common-dir`) must resolve
+    this worktree path back to `repo_a`, same as it does for a real
+    worktree."""
+    worktree_path = tmp_path / "repo-a-worktree"
+    subprocess.run(
+        ["git", "worktree", "add", str(worktree_path), "-b", "repo-a-wt-branch"],
+        cwd=repo_a, capture_output=True, check=True,
+    )
+    return worktree_path.resolve()
+
+
 def test_get_repos_lists_all_discovered_boards(repo_a: Path, repo_b: Path) -> None:
     client = TestClient(create_app(repo_a))
 
@@ -63,6 +79,23 @@ def test_get_repos_lists_all_discovered_boards(repo_a: Path, repo_b: Path) -> No
 
 def test_get_repos_marks_the_launch_root_current(repo_a: Path, repo_b: Path) -> None:
     client = TestClient(create_app(repo_a))
+
+    resp = client.get("/api/repos")
+
+    current = {r["root"]: r["current"] for r in resp.json()["repos"]}
+    assert current[str(repo_a)] is True
+    assert current[str(repo_b)] is False
+
+
+def test_get_repos_marks_served_worktree_repo_current(
+    repo_a: Path, repo_b: Path, repo_a_worktree: Path
+) -> None:
+    """Serving the dashboard from inside a worktree of `repo_a` must still
+    mark `repo_a` `current: true`. `board.db` records the MAIN repo root
+    (`repo_a`), never the worktree's own path, so a naive `launch_root ==
+    discovered root` comparison always reads `current: false` here — the bug
+    this test guards against (task-12)."""
+    client = TestClient(create_app(repo_a_worktree))
 
     resp = client.get("/api/repos")
 
