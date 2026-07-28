@@ -54,7 +54,10 @@ export interface TopBarProps {
 }
 
 function formatPct(value: number): string {
-  return `${value}%`;
+  // Round to a whole percent — census `used_percentage` arrives as a float
+  // that can carry FP noise (e.g. 28.000000000000004); ctx% is already int,
+  // so Math.round is a no-op there.
+  return `${Math.round(value)}%`;
 }
 
 function formatSubtitle(projectName: string, lastRefreshedAt: Date | null): string {
