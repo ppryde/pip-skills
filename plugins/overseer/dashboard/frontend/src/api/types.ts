@@ -52,6 +52,16 @@ export interface BoardCard {
   is_epic: boolean;
   ready: boolean;
   rollup: Rollup | null;
+  /** "%Y-%m-%d", stamped at new-card time — never blank in the real
+   * backend contract, but board.ts's `sortLane` tolerates "" defensively
+   * (recency parses to epoch 0, sorting last) for hand-built test fixtures
+   * and any pre-this-field card the store might still hold. */
+  created: string;
+  /** ISO minute ("%Y-%m-%dT%H:%M"), stamped by every card mutator — same
+   * blank-tolerant contract as `created` above. Drives lane ORDER
+   * (recency-first, see board/layout.ts); `order` remains the drag-reorder
+   * field but no longer drives display order. */
+  updated: string;
   /** Always present (possibly []) — see checklistWindow.ts's ChecklistEntry
    * doc comment for the backend's string-coercion / status quirks. */
   checklist: ChecklistEntry[];

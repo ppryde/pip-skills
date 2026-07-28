@@ -18,6 +18,8 @@ function card(actual: number): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    created: "",
+    updated: "",
     checklist: [],
   };
 }

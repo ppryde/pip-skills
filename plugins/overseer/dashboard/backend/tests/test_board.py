@@ -102,3 +102,17 @@ def test_board_carries_repo_passthrough(client: TestClient, root: Path) -> None:
     assert resp.status_code == 200
     cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
     assert cards[card_id]["repo"] == "pip-skills"
+
+
+def test_board_carries_created_updated_passthrough(client: TestClient, root: Path) -> None:
+    """`board_data` (overseer core) gained `created`/`updated` fields on cards
+    (recency-first lane ordering, dashboard frontend). Same passthrough
+    contract as `repo`/`checklist` above: no dashboard backend transform."""
+    card_id = run_overseer(root, "new-card", "--title", "Timestamped card").strip()
+
+    resp = client.get("/api/board")
+
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["created"]
+    assert cards[card_id]["updated"]

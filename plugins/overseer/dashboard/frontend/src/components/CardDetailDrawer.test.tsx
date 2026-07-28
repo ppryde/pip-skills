@@ -56,6 +56,8 @@ function cardDetail(
     is_epic: false,
     ready: true,
     rollup: null,
+    created: "",
+    updated: "",
     checklist: [],
     sections: {},
     body: "",

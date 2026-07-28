@@ -18,6 +18,8 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    created: "",
+    updated: "",
     checklist: [],
     ...overrides,
   };
@@ -73,15 +75,138 @@ describe("groupIntoLanes", () => {
     }
   });
 
-  it("sorts by order ascending, tiebreaking on id ascending", () => {
-    const a = card({ id: "WF-B", order: 10 });
-    const b = card({ id: "WF-A", order: 10 }); // same order as `a`, id sorts first
-    const c = card({ id: "WF-C", order: 5 });
+  it("sorts by updated recency descending (newest first), ignoring order", () => {
+    const oldest = card({ id: "WF-OLDEST", order: 5, updated: "2026-07-01T09:00" });
+    const newest = card({ id: "WF-NEWEST", order: 999, updated: "2026-07-20T09:00" });
+    const middle = card({ id: "WF-MIDDLE", order: 10, updated: "2026-07-10T09:00" });
 
-    const lanes = groupIntoLanes([a, b, c]);
+    const lanes = groupIntoLanes([oldest, newest, middle]);
     const backlog = laneByKey(lanes, "backlog");
 
-    expect(backlog.cards.map((x) => x.id)).toEqual(["WF-C", "WF-A", "WF-B"]);
+    expect(backlog.cards.map((x) => x.id)).toEqual([
+      "WF-NEWEST",
+      "WF-MIDDLE",
+      "WF-OLDEST",
+    ]);
+  });
+
+  it("tiebreaks equal `updated` on `created` descending, then on `id` ascending", () => {
+    const sameUpdatedNewerCreated = card({
+      id: "WF-B",
+      updated: "2026-07-10T09:00",
+      created: "2026-07-05",
+    });
+    const sameUpdatedOlderCreated = card({
+      id: "WF-A",
+      updated: "2026-07-10T09:00",
+      created: "2026-07-01",
+    });
+    const fullTie1 = card({
+      id: "WF-Z",
+      updated: "2026-07-10T09:00",
+      created: "2026-07-05",
+    });
+    const fullTie2 = card({
+      id: "WF-Y",
+      updated: "2026-07-10T09:00",
+      created: "2026-07-05",
+    });
+
+    const lanes = groupIntoLanes([
+      sameUpdatedOlderCreated,
+      sameUpdatedNewerCreated,
+      fullTie1,
+      fullTie2,
+    ]);
+    const backlog = laneByKey(lanes, "backlog");
+
+    // WF-B (created 07-05) outranks WF-A (created 07-01) despite equal
+    // `updated`; WF-B/WF-Z share both timestamps so `id` breaks the tie
+    // (WF-B < WF-Y < WF-Z alphabetically), then WF-A trails last.
+    expect(backlog.cards.map((x) => x.id)).toEqual(["WF-B", "WF-Y", "WF-Z", "WF-A"]);
+  });
+
+  it("treats blank/missing `updated`/`created` as epoch 0, sorting them last", () => {
+    const timestamped = card({ id: "WF-FRESH", updated: "2026-07-01T09:00" });
+    const blank = card({ id: "WF-BLANK", updated: "", created: "" });
+
+    const lanes = groupIntoLanes([blank, timestamped]);
+    const backlog = laneByKey(lanes, "backlog");
+
+    expect(backlog.cards.map((x) => x.id)).toEqual(["WF-FRESH", "WF-BLANK"]);
+  });
+
+  it("keeps an epic and its same-lane children contiguous, children ordered by recency desc, group ranked by its most-recently-updated member", () => {
+    const epic = card({
+      id: "WF-EPIC",
+      is_epic: true,
+      status: "planned",
+      updated: "2026-07-01T09:00", // epic itself is stale...
+    });
+    const staleChild = card({
+      id: "WF-CHILD-OLD",
+      parent: "WF-EPIC",
+      status: "planned",
+      updated: "2026-07-02T09:00",
+    });
+    const freshChild = card({
+      id: "WF-CHILD-NEW",
+      parent: "WF-EPIC",
+      status: "planned",
+      updated: "2026-07-15T09:00", // ...but this child was touched recently
+    });
+    // A lone top-level card, fresher than the epic itself but staler than
+    // the epic's freshest child — should rank BETWEEN the group and nothing,
+    // proving the group's rank comes from its freshest member, not the epic.
+    const loneCard = card({
+      id: "WF-LONE",
+      status: "planned",
+      updated: "2026-07-10T09:00",
+    });
+
+    const lanes = groupIntoLanes([epic, staleChild, freshChild, loneCard]);
+    const backlog = laneByKey(lanes, "backlog");
+
+    // The epic group (ranked by freshChild's 07-15) outranks WF-LONE
+    // (07-10); within the group, epic renders first, then children by
+    // recency desc (freshChild before staleChild).
+    expect(backlog.cards.map((x) => x.id)).toEqual([
+      "WF-EPIC",
+      "WF-CHILD-NEW",
+      "WF-CHILD-OLD",
+      "WF-LONE",
+    ]);
+  });
+
+  it("orders a child whose epic lives in a DIFFERENT lane by the child's own recency (no grouping across lanes)", () => {
+    const epic = card({
+      id: "WF-EPIC",
+      is_epic: true,
+      status: "in-flight",
+      stage: "implementation",
+      updated: "2026-07-20T09:00",
+    });
+    // This child is DONE (different lane from its in-flight epic) — it must
+    // stand alone in Done, ordered by its own recency, never hidden/grouped
+    // away from its lane's normal cards.
+    const doneChild = card({
+      id: "WF-CHILD",
+      parent: "WF-EPIC",
+      status: "done",
+      updated: "2026-07-25T09:00",
+    });
+    const otherDoneCard = card({
+      id: "WF-OTHER-DONE",
+      status: "done",
+      updated: "2026-07-05T09:00",
+    });
+
+    const lanes = groupIntoLanes([epic, doneChild, otherDoneCard]);
+    const done = laneByKey(lanes, "done");
+
+    // doneChild (07-25) outranks otherDoneCard (07-05) purely on its own
+    // recency — the epic's own timestamp/lane never enters into it.
+    expect(done.cards.map((x) => x.id)).toEqual(["WF-CHILD", "WF-OTHER-DONE"]);
   });
 
   it("populates every lane bucket, including archive, with one card each", () => {
