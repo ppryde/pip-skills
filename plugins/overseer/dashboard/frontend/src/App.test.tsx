@@ -81,6 +81,7 @@ describe("<App/> — WF-032 unbegun-repo holding page wiring", () => {
     await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     const callsBeforeSwitch = vi.mocked(client.getBoard).mock.calls.length;
+    const sessionCallsBeforeSwitch = vi.mocked(client.getSessions).mock.calls.length;
 
     fireEvent.change(screen.getByLabelText("Repo"), {
       target: { value: "/sandbox" },
@@ -95,10 +96,20 @@ describe("<App/> — WF-032 unbegun-repo holding page wiring", () => {
     expect(screen.getByText(/6 adventurers already roam/i)).toBeInTheDocument();
 
     // The board fetch must NEVER have fired again for the unbegun repo —
-    // an unbegun root 400s /api/board on the backend. (`setActiveRoot` is
-    // NOT asserted here: `useSessions` legitimately calls it too, to scope
-    // the independent census-session poll to the newly-selected repo —
-    // WF-031 — regardless of whether that repo has a board yet.)
+    // an unbegun root 400s /api/board on the backend.
     expect(vi.mocked(client.getBoard).mock.calls.length).toBe(callsBeforeSwitch);
+
+    // Task 10: `useSessions` is now gated off (`enabled: !isUnbegun`) exactly
+    // like `useBoard` — an unbegun root 400s `/api/sessions` too, so no new
+    // call fires for it, and `setActiveRoot` isn't re-scoped to it either.
+    expect(vi.mocked(client.getSessions).mock.calls.length).toBe(
+      sessionCallsBeforeSwitch
+    );
+    expect(client.setActiveRoot).not.toHaveBeenCalledWith("/sandbox");
+
+    // The questing pill must not show a contradictory "0 questing" next to
+    // the holding page's own "6 adventurers already roam these lands" — it
+    // sources its count from the same `live_sessions` figure instead.
+    expect(screen.getByText("6 questing")).toBeInTheDocument();
   });
 });

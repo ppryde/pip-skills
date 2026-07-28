@@ -82,8 +82,11 @@ function App() {
   } = useBoard(activeRoot, !isUnbegun);
   // Threaded through the SAME `activeRoot` choke point the board uses (WF-031)
   // — switching repos re-scopes the Party the same instant it re-scopes the
-  // board, no separate state or client-side filtering needed.
-  const { sessions } = useSessions(activeRoot);
+  // board, no separate state or client-side filtering needed. `!isUnbegun`
+  // (task 10) mirrors `useBoard`'s own gate directly above: an unbegun root
+  // 400s `/api/sessions` exactly like it 400s `/api/board`, so this fetch
+  // (mount AND poll) must be hard-skipped for it too.
+  const { sessions } = useSessions(activeRoot, !isUnbegun);
   const [showArchive, setShowArchive] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   // HANDOFF §State Management assigns this App-level, alongside the
@@ -140,6 +143,14 @@ function App() {
         branches={branches}
         activeBranch={activeBranch}
         onSelectBranch={setActiveBranch}
+        // Task 10: an unbegun repo never populates `party` (sessions are
+        // hard-gated off above), so source the questing pill from the SAME
+        // `live_sessions` count `<UnbegunHolding/>` already shows below —
+        // otherwise the pill would contradict the holding page with a false
+        // "0 questing".
+        questingCountOverride={
+          isUnbegun ? (selectedRepo?.live_sessions ?? 0) : undefined
+        }
       />
       <main className="board-region">
         {isUnbegun && selectedRepo ? (

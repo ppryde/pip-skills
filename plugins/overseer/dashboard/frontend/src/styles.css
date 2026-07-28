@@ -1287,6 +1287,25 @@ body {
   max-width: 9rem;
 }
 
+/* "Awaiting a hero" chip (task 10): a todo/backlog card carries no `branch`
+   until the orchestrator actually starts it — this flags "no adventurer has
+   claimed this quest yet" for exactly that window. Deliberately muted/
+   dashed rather than the branch-chip's solid slate-blue: echoes
+   `.repo-option--unbegun`'s italic "not yet begun" treatment and
+   `.card-tile__hold-chip`'s dashed "inactive" border, so it reads as a
+   quiet placeholder, never mistaken for the branch chip it stands in for. */
+.awaiting-hero-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  font-style: italic;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-400);
+  border: 1px dashed var(--qb-line-dashed);
+  white-space: nowrap;
+}
+
 /* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
    without competing with the priority/blocked badges. CSS-only restyle
    (WF-028 chunk 4): HANDOFF specs an avatar-chip visual with no colour of

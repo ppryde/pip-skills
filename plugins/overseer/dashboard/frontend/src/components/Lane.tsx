@@ -13,9 +13,10 @@ export interface LaneProps {
   /** Chunk 5: clicking a tile body opens the detail drawer for that card. */
   onOpenCard: (id: string) => void;
   /** WF-031 branch filter: `null` clears it (no dim/spotlight anywhere);
-   * otherwise every card whose `branch` doesn't match gets dimmed and every
-   * matching card gets spotlit — independent of the epic-highlight state
-   * above. */
+   * otherwise every card that HAS a `branch` differing from it gets dimmed
+   * and every matching card gets spotlit — independent of the epic-highlight
+   * state above. A card with NO branch (never started) stays neutral: it's
+   * not "on another branch", it just hasn't got one yet (task 10). */
   activeBranch: string | null;
 }
 
@@ -81,8 +82,16 @@ function Lane({
               const highlighted = isChildOfHighlighted || isHighlightedEpic;
               const dimmed = highlightedEpicId !== null && !highlighted;
 
+              // Task 10: a card with NO branch (todo/backlog, never started)
+              // is neither "this branch" nor "some other branch" — it stays
+              // neutral under a branch filter rather than dimming alongside
+              // cards that actively belong to a DIFFERENT branch. Only a
+              // card that HAS a branch that differs from the active one
+              // gets dimmed.
               const branchDimmed =
-                activeBranch !== null && card.branch !== activeBranch;
+                activeBranch !== null &&
+                card.branch != null &&
+                card.branch !== activeBranch;
               const branchSpotlight =
                 activeBranch !== null && card.branch === activeBranch;
 

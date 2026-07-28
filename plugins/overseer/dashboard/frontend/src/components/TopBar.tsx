@@ -41,6 +41,14 @@ export interface TopBarProps {
   branches: string[];
   activeBranch: string | null;
   onSelectBranch: (branch: string | null) => void;
+  /** Task 10: for an "unbegun" repo (WF-032, `has_board: false`) `useSessions`
+   * is hard-gated off (see App.tsx), so `party` is never populated for it —
+   * computing the questing pill from `party` would show a contradictory "0
+   * questing" next to `<UnbegunHolding/>`'s own "N adventurers already roam
+   * these lands" (sourced from `repo.live_sessions`). When set, this
+   * OVERRIDES the party-derived count so both readouts agree; `undefined`
+   * (every other repo) keeps the normal live-party-member count below. */
+  questingCountOverride?: number;
 }
 
 function formatPct(value: number): string {
@@ -90,6 +98,7 @@ function TopBar({
   branches,
   activeBranch,
   onSelectBranch,
+  questingCountOverride,
 }: TopBarProps) {
   const pct = context?.pct ?? null;
   const threshold = context?.threshold ?? null;
@@ -98,7 +107,9 @@ function TopBar({
   // "N questing" = live party members only — a stale session isn't
   // currently out on a quest, it's just a ghost still shown in the Party
   // column/overlay (Decisions: honest data, no invented capacity).
-  const questingCount = party.filter((m) => !m.session.stale).length;
+  // `questingCountOverride` (task 10) wins when set — see its doc comment.
+  const questingCount =
+    questingCountOverride ?? party.filter((m) => !m.session.stale).length;
 
   return (
     <header className="topbar">

@@ -170,11 +170,27 @@ function TileShell({
           {/* Branch chip (WF-031): distinct from the repo-chip's quiet grey
               provenance label — this one flags WHICH branch the card's
               work lives on, feeding the same glance as the Party's branch
-              labels. Absent entirely when the card carries no branch. */}
-          {card.branch && (
+              labels. Absent entirely when the card carries no branch.
+              Task 10 "Awaiting a hero": a card only ever GETS a `branch`
+              once the orchestrator has actually started it — a branchless
+              todo/backlog card hasn't been claimed by any adventurer yet.
+              That's worth flagging too, but a `done`/`abandoned` card with
+              no branch is just old/never-tracked, not "unclaimed" — no chip
+              either way there. */}
+          {card.branch ? (
             <span className="branch-chip" title={card.branch}>
               ⑃ {card.branch}
             </span>
+          ) : (
+            card.status !== "done" &&
+            card.status !== "abandoned" && (
+              <span
+                className="awaiting-hero-chip"
+                title="No adventurer has claimed this quest yet"
+              >
+                ⚑ Awaiting a hero
+              </span>
+            )
           )}
           {/*
             Presence-only signal (design spec §5): the board payload carries

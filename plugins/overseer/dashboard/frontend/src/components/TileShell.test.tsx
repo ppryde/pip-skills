@@ -227,6 +227,44 @@ describe("TileShell branch chip (WF-031)", () => {
   });
 });
 
+describe('TileShell "Awaiting a hero" badge (task 10)', () => {
+  it("shows the badge for a branchless, non-done/abandoned card", () => {
+    const { container } = renderTile(card({ id: "WF-TODO", status: "planned" }));
+    const chip = container.querySelector(".awaiting-hero-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent(/awaiting a hero/i);
+    // The branch chip never renders alongside it.
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("shows the branch chip, not the badge, once the card has a branch", () => {
+    const { container } = renderTile(
+      card({ id: "WF-STARTED", status: "in-flight", stage: "implementation", branch: "feat/quest" })
+    );
+    expect(container.querySelector(".branch-chip")).not.toBeNull();
+    expect(container.querySelector(".awaiting-hero-chip")).toBeNull();
+  });
+
+  it("shows neither chip for a done card with no branch", () => {
+    const { container } = renderTile(card({ id: "WF-DONE-NOBRANCH", status: "done" }));
+    expect(container.querySelector(".awaiting-hero-chip")).toBeNull();
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("shows neither chip for an abandoned card with no branch", () => {
+    const { container } = renderTile(
+      card({ id: "WF-ABANDONED-NOBRANCH", status: "abandoned" })
+    );
+    expect(container.querySelector(".awaiting-hero-chip")).toBeNull();
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("still shows the badge for a parked card with no branch", () => {
+    const { container } = renderTile(card({ id: "WF-PARKED-NOBRANCH", status: "parked" }));
+    expect(container.querySelector(".awaiting-hero-chip")).not.toBeNull();
+  });
+});
+
 describe("TileShell branch filter dim/spotlight (WF-031)", () => {
   it("applies is-dimmed when branchDimmed is true", () => {
     const c = card({ id: "WF-DIM" });

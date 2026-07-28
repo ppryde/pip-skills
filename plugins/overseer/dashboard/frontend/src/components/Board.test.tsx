@@ -311,7 +311,7 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
     vi.mocked(getRepos).mockResolvedValue({ repos: [] });
   });
 
-  it("selecting a branch dims non-matching cards and spotlights the matching one", async () => {
+  it("selecting a branch dims non-matching cards and spotlights the matching one, leaving branchless cards neutral (task 10)", async () => {
     vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
     vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
 
@@ -328,12 +328,18 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
     expect(
       container.querySelector('[data-card-id="WF-A"]')
     ).not.toHaveClass("is-dimmed");
+    // WF-B is ON a different branch — dimmed.
     expect(
       container.querySelector('[data-card-id="WF-B"]')
     ).toHaveClass("is-dimmed");
+    // WF-C has NO branch at all (unclaimed backlog) — stays neutral, never
+    // dimmed alongside cards that are actively on another branch.
     expect(
       container.querySelector('[data-card-id="WF-C"]')
-    ).toHaveClass("is-dimmed");
+    ).not.toHaveClass("is-dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-C"]')
+    ).not.toHaveClass("is-spotlight");
   });
 
   it("selecting a branch spotlights the Party agent on it", async () => {
