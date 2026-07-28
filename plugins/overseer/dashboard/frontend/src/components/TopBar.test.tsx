@@ -5,6 +5,7 @@ import type {
   BoardResponse,
   Context,
   Limits,
+  RateWindow,
   RepoEntry,
 } from "../api/types";
 import type { PartyMember } from "../board/party";
@@ -313,5 +314,42 @@ describe("<TopBar/>", () => {
     });
 
     expect(onSelectBranch).toHaveBeenCalledWith("feat/b");
+  });
+
+  it("renders the Short Rest pill with the rounded 5h usage and a '5h window' tooltip", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        limits={{
+          five_hour: { used_percentage: 28.000000000000004 } as RateWindow,
+        }}
+      />
+    );
+
+    const pill = screen.getByText(/Short Rest/);
+    expect(pill).toHaveTextContent("Short Rest 28%");
+    expect(pill).toHaveAttribute("title", "5h window");
+  });
+
+  it("renders the Long Rest pill with the rounded 7d usage and a '7d window' tooltip", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        limits={{
+          seven_day: { used_percentage: 63.4 } as RateWindow,
+        }}
+      />
+    );
+
+    const pill = screen.getByText(/Long Rest/);
+    expect(pill).toHaveTextContent("Long Rest 63%");
+    expect(pill).toHaveAttribute("title", "7d window");
+  });
+
+  it("omits the Short Rest / Long Rest pills when their window is absent from limits", () => {
+    render(<TopBar {...baseProps()} limits={{}} />);
+
+    expect(screen.queryByText(/Short Rest/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Long Rest/)).not.toBeInTheDocument();
   });
 });

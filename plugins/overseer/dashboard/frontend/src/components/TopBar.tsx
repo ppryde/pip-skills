@@ -152,13 +152,13 @@ function TopBar({
       </div>
 
       {limits?.five_hour?.used_percentage !== undefined && (
-        <span className="topbar__pill">
-          5h {formatPct(limits.five_hour.used_percentage)}
+        <span className="topbar__pill" title="5h window">
+          ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
         </span>
       )}
       {limits?.seven_day?.used_percentage !== undefined && (
-        <span className="topbar__pill">
-          7d {formatPct(limits.seven_day.used_percentage)}
+        <span className="topbar__pill" title="7d window">
+          ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
         </span>
       )}
 
