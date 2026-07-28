@@ -7,6 +7,7 @@ import { formatTokens } from "../board/formatTokens";
 import { CoinIcon, CheckIcon } from "./icons";
 import ThresholdControl from "./ThresholdControl";
 import RepoSelector from "./RepoSelector";
+import BranchFilter from "./BranchFilter";
 
 export interface TopBarProps {
   projectName: string;
@@ -35,6 +36,11 @@ export interface TopBarProps {
   repos: RepoEntry[];
   activeRoot: string | null;
   onSelectRepo: (root: string) => void;
+  /** WF-031 branch filter — the distinct-branch union (`distinctBranches`),
+   * the session-local active selection, and its setter. `null` = "All". */
+  branches: string[];
+  activeBranch: string | null;
+  onSelectBranch: (branch: string | null) => void;
 }
 
 function formatPct(value: number): string {
@@ -81,6 +87,9 @@ function TopBar({
   repos,
   activeRoot,
   onSelectRepo,
+  branches,
+  activeBranch,
+  onSelectBranch,
 }: TopBarProps) {
   const pct = context?.pct ?? null;
   const threshold = context?.threshold ?? null;
@@ -104,6 +113,11 @@ function TopBar({
       </div>
 
       <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
+      <BranchFilter
+        branches={branches}
+        activeBranch={activeBranch}
+        onSelect={onSelectBranch}
+      />
 
       <div className="topbar__ctx">
         <span className="topbar__ctx-label">ctx</span>

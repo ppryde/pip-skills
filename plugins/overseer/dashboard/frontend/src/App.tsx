@@ -7,6 +7,7 @@ import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
 import { buildParty } from "./board/party";
+import { distinctBranches } from "./board/branches";
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
@@ -69,7 +70,10 @@ function App() {
     setDragActive,
     lastRefreshedAt,
   } = useBoard(activeRoot);
-  const { sessions } = useSessions();
+  // Threaded through the SAME `activeRoot` choke point the board uses (WF-031)
+  // — switching repos re-scopes the Party the same instant it re-scopes the
+  // board, no separate state or client-side filtering needed.
+  const { sessions } = useSessions(activeRoot);
   const [showArchive, setShowArchive] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   // HANDOFF §State Management assigns this App-level, alongside the
@@ -77,6 +81,9 @@ function App() {
   // TopBar/main below, exactly like CardDetailDrawer, never as TopBar-local
   // state (Decisions).
   const [partyOpen, setPartyOpen] = useState(false);
+  // WF-031 branch filter: session-local only (no localStorage, unlike the
+  // repo selector) — `null` means "All", clearing every dim/spotlight.
+  const [activeBranch, setActiveBranch] = useState<string | null>(null);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -90,6 +97,14 @@ function App() {
   const party = useMemo(
     () => buildParty(sessions, board?.cards ?? []),
     [sessions, board?.cards]
+  );
+
+  // Distinct-branch union across cards + sessions (WF-031) — feeds the
+  // topbar's BranchFilter <select> options. Recomputed alongside `party`
+  // whenever either source changes.
+  const branches = useMemo(
+    () => distinctBranches(board?.cards ?? [], sessions),
+    [board?.cards, sessions]
   );
 
   return (
@@ -112,6 +127,9 @@ function App() {
         repos={repos}
         activeRoot={activeRoot}
         onSelectRepo={handleSelectRepo}
+        branches={branches}
+        activeBranch={activeBranch}
+        onSelectBranch={setActiveBranch}
       />
       <main className="board-region">
         {loading && !board && (
@@ -127,6 +145,7 @@ function App() {
             onOpenCard={setOpenCardId}
             setDragActive={setDragActive}
             party={party}
+            activeBranch={activeBranch}
           />
         )}
       </main>
@@ -139,7 +158,11 @@ function App() {
         party={party}
       />
       {partyOpen && (
-        <PartyOverlay party={party} onClose={() => setPartyOpen(false)} />
+        <PartyOverlay
+          party={party}
+          onClose={() => setPartyOpen(false)}
+          activeBranch={activeBranch}
+        />
       )}
     </div>
   );

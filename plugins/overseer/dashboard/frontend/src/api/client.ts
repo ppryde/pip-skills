@@ -23,8 +23,10 @@ let activeRoot: string | null = null;
 
 /**
  * Sets the root every subsequent API call threads through as `?root=...`.
- * The repo selector (App.tsx) is the SOLE caller — no other module needs to
- * know a multi-repo selection even exists, matching this module's existing
+ * Called by the repo-scoped data hooks (`useBoard`, `useSessions`) at the
+ * start of the same effect that fires their fetch, always with the SAME
+ * App-level `activeRoot` state — no other module needs to know a
+ * multi-repo selection even exists, matching this module's existing
  * charter as the sole holder of endpoint URLs/shapes.
  */
 export function setActiveRoot(root: string | null): void {
@@ -82,8 +84,11 @@ export function getRepos(): Promise<ReposResponse> {
   return request<ReposResponse>("GET", "/api/repos");
 }
 
+/** Census sessions, scoped to the active root (WF-031) — same `withRoot`
+ * choke point `getBoard` uses, so switching repos re-scopes the Party the
+ * same instant it re-scopes the board. */
 export function getSessions(): Promise<SessionsResponse> {
-  return request<SessionsResponse>("GET", "/api/sessions");
+  return request<SessionsResponse>("GET", withRoot("/api/sessions"));
 }
 
 export function getCard(id: string): Promise<CardDetail> {

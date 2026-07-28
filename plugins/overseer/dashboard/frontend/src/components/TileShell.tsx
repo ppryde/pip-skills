@@ -20,6 +20,13 @@ export interface TileShellProps {
   variantClassName?: string;
   dimmed?: boolean;
   highlighted?: boolean;
+  /** WF-031 branch filter: true when a branch is active and this card's
+   * `branch` doesn't match it — faded but still in place (`is-dimmed`),
+   * independent of the epic-highlight `dimmed` above. */
+  branchDimmed?: boolean;
+  /** WF-031 branch filter: true when a branch is active and this card's
+   * `branch` matches it — a subtle emphasis ring (`is-spotlight`). */
+  branchSpotlight?: boolean;
   /** True while a mutation is in flight — disables the drag handle. */
   dragDisabled?: boolean;
   /** Optional extra header controls (e.g. the epic expand button), right-aligned. */
@@ -48,6 +55,8 @@ function TileShell({
   variantClassName,
   dimmed = false,
   highlighted = false,
+  branchDimmed = false,
+  branchSpotlight = false,
   dragDisabled = false,
   headerExtra,
   children,
@@ -104,6 +113,8 @@ function TileShell({
     card.status === "parked" ? "card-tile--parked" : "",
     dimmed ? "card-tile--dimmed" : "",
     highlighted ? "card-tile--highlighted" : "",
+    branchDimmed ? "is-dimmed" : "",
+    branchSpotlight ? "is-spotlight" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -156,6 +167,15 @@ function TileShell({
             </span>
           )}
           {card.repo && <span className="repo-chip">{card.repo}</span>}
+          {/* Branch chip (WF-031): distinct from the repo-chip's quiet grey
+              provenance label — this one flags WHICH branch the card's
+              work lives on, feeding the same glance as the Party's branch
+              labels. Absent entirely when the card carries no branch. */}
+          {card.branch && (
+            <span className="branch-chip" title={card.branch}>
+              ⑃ {card.branch}
+            </span>
+          )}
           {/*
             Presence-only signal (design spec §5): the board payload carries
             just the holder's bare census session_id, no session_name — so

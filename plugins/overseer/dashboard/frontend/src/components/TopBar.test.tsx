@@ -72,6 +72,9 @@ function baseProps() {
     repos: [] as RepoEntry[],
     activeRoot: null as string | null,
     onSelectRepo: () => {},
+    branches: [] as string[],
+    activeBranch: null as string | null,
+    onSelectBranch: () => {},
   };
 }
 
@@ -220,5 +223,40 @@ describe("<TopBar/>", () => {
     });
 
     expect(onSelectRepo).toHaveBeenCalledWith("/b");
+  });
+
+  it("renders no branch filter when there are no distinct branches", () => {
+    render(<TopBar {...baseProps()} branches={[]} />);
+    expect(screen.queryByLabelText("Branch")).not.toBeInTheDocument();
+  });
+
+  it("renders the branch filter with every distinct branch as an option", () => {
+    render(
+      <TopBar {...baseProps()} branches={["feat/a", "feat/b"]} activeBranch="feat/a" />
+    );
+
+    const select = screen.getByLabelText("Branch") as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select.value).toBe("feat/a");
+    expect(screen.getByRole("option", { name: "feat/a" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "feat/b" })).toBeInTheDocument();
+  });
+
+  it("selecting a different branch calls onSelectBranch with its name", () => {
+    const onSelectBranch = vi.fn();
+    render(
+      <TopBar
+        {...baseProps()}
+        branches={["feat/a", "feat/b"]}
+        activeBranch="feat/a"
+        onSelectBranch={onSelectBranch}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Branch"), {
+      target: { value: "feat/b" },
+    });
+
+    expect(onSelectBranch).toHaveBeenCalledWith("feat/b");
   });
 });

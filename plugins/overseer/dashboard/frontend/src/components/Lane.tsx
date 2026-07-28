@@ -12,6 +12,11 @@ export interface LaneProps {
   dragDisabled: boolean;
   /** Chunk 5: clicking a tile body opens the detail drawer for that card. */
   onOpenCard: (id: string) => void;
+  /** WF-031 branch filter: `null` clears it (no dim/spotlight anywhere);
+   * otherwise every card whose `branch` doesn't match gets dimmed and every
+   * matching card gets spotlit — independent of the epic-highlight state
+   * above. */
+  activeBranch: string | null;
 }
 
 /**
@@ -31,6 +36,7 @@ function Lane({
   onToggleEpicHighlight,
   dragDisabled,
   onOpenCard,
+  activeBranch,
 }: LaneProps) {
   const { setNodeRef } = useDroppable({ id: lane.key });
   const isEmpty = lane.cards.length === 0;
@@ -75,6 +81,11 @@ function Lane({
               const highlighted = isChildOfHighlighted || isHighlightedEpic;
               const dimmed = highlightedEpicId !== null && !highlighted;
 
+              const branchDimmed =
+                activeBranch !== null && card.branch !== activeBranch;
+              const branchSpotlight =
+                activeBranch !== null && card.branch === activeBranch;
+
               return card.is_epic ? (
                 <EpicCard
                   key={card.id}
@@ -84,6 +95,8 @@ function Lane({
                   onToggleExpand={onToggleEpicHighlight}
                   dimmed={dimmed}
                   highlighted={highlighted}
+                  branchDimmed={branchDimmed}
+                  branchSpotlight={branchSpotlight}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                 />
@@ -94,6 +107,8 @@ function Lane({
                   accentKey={accentKey}
                   dimmed={dimmed}
                   highlighted={highlighted}
+                  branchDimmed={branchDimmed}
+                  branchSpotlight={branchSpotlight}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                 />

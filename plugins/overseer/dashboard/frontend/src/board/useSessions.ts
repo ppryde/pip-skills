@@ -11,9 +11,17 @@
  * guard against setState after unmount. Sessions are recency-sorted here
  * (most recently active first) so every consumer gets the same order for
  * free.
+ *
+ * `root` (WF-031) mirrors `useBoard`'s own `root` param exactly: the
+ * currently-selected repo's root path, or `null` for the dashboard's own
+ * launch root. `setActiveRoot(root)` fires synchronously at the start of
+ * the same effect that issues the mount/root-change fetch — by the time
+ * `getSessions()` builds its URL, `api/client`'s module-level root is
+ * already correct, so Party re-scopes to the newly-selected repo exactly
+ * when the board does (no cross-effect race).
  */
 import { useEffect, useRef, useState } from "react";
-import { getSessions } from "../api/client";
+import { getSessions, setActiveRoot } from "../api/client";
 import type { SessionSummary } from "../api/types";
 
 const POLL_INTERVAL_MS = 5000;
@@ -33,7 +41,7 @@ function activity(value: SessionSummary["updated_at"]): number {
   return 0;
 }
 
-export function useSessions(): UseSessionsResult {
+export function useSessions(root: string | null = null): UseSessionsResult {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const isMountedRef = useRef(true);
 
@@ -48,17 +56,22 @@ export function useSessions(): UseSessionsResult {
     }
   };
 
-  // Mount fetch. The ref is re-armed on every effect run — under
-  // StrictMode's dev double-mount the first cleanup would otherwise leave
-  // it permanently false and consumers stuck on the empty state.
+  // Mount fetch, AND re-fires whenever the selected repo root changes —
+  // setting the module-level active root FIRST (synchronously, before
+  // `loadSessions()`) so this fetch targets the newly-selected repo. The
+  // ref is re-armed on every effect run — under StrictMode's dev
+  // double-mount the first cleanup would otherwise leave it permanently
+  // false and consumers stuck on the empty state.
   useEffect(() => {
     isMountedRef.current = true;
+    setActiveRoot(root);
     void loadSessions();
 
     return () => {
       isMountedRef.current = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root]);
 
   // Poll every 5 seconds.
   useEffect(() => {

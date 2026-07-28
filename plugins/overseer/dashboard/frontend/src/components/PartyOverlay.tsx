@@ -5,6 +5,11 @@ import PartyAvatar from "./PartyAvatar";
 export interface PartyOverlayProps {
   party: PartyMember[];
   onClose: () => void;
+  /** WF-031 branch filter: `null`/absent clears it; otherwise every hero
+   * card whose session `branch` matches gets the `is-spotlight` treatment
+   * (see PartyColumn's doc comment — no dimming of non-matching heroes
+   * here). */
+  activeBranch?: string | null;
 }
 
 /**
@@ -20,7 +25,7 @@ export interface PartyOverlayProps {
  * metric (spec's honest-data cut) — mana, name, class, and ON QUEST are
  * all real data, so they stay.
  */
-function PartyOverlay({ party, onClose }: PartyOverlayProps) {
+function PartyOverlay({ party, onClose, activeBranch = null }: PartyOverlayProps) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -63,14 +68,22 @@ function PartyOverlay({ party, onClose }: PartyOverlayProps) {
           {party.map((member) => {
             const { session } = member;
             const mana = session.pct === undefined ? null : 100 - session.pct;
+            const spotlight =
+              activeBranch !== null && session.branch === activeBranch;
             return (
-              <div key={session.id} className="hero-card">
+              <div
+                key={session.id}
+                className={"hero-card" + (spotlight ? " is-spotlight" : "")}
+              >
                 <PartyAvatar session={session} size={52} />
                 <div className="hero-card__name">
                   {session.session_name || session.id}
                 </div>
                 {session.model && (
                   <div className="hero-card__class">{session.model}</div>
+                )}
+                {session.branch && (
+                  <div className="hero-card__branch">⑃ {session.branch}</div>
                 )}
                 {mana === null ? (
                   <div className="hero-card__mana hero-card__mana--unknown">

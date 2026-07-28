@@ -101,4 +101,57 @@ describe("useSessions", () => {
       unmount();
     }).not.toThrow();
   });
+
+  it("defaults to root=null (setActiveRoot(null)) when no root arg is given", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+    mockGetSessions.mockResolvedValueOnce({ sessions: [] });
+
+    renderHook(() => useSessions());
+
+    await waitFor(() => {
+      expect(mockGetSessions).toHaveBeenCalled();
+    });
+    expect(mockSetActiveRoot).toHaveBeenCalledWith(null);
+  });
+
+  it("calls setActiveRoot(root) BEFORE fetching, threading the active root into the request", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+    const calls: string[] = [];
+    mockSetActiveRoot.mockImplementation(() => calls.push("setActiveRoot"));
+    mockGetSessions.mockImplementationOnce(async () => {
+      calls.push("getSessions");
+      return { sessions: [] };
+    });
+
+    renderHook(() => useSessions("/repo/a"));
+
+    await waitFor(() => {
+      expect(mockGetSessions).toHaveBeenCalled();
+    });
+    expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo/a");
+    expect(calls).toEqual(["setActiveRoot", "getSessions"]);
+  });
+
+  it("re-fetches and re-applies setActiveRoot when the root arg changes", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+    mockGetSessions.mockResolvedValue({ sessions: [] });
+
+    const { rerender } = renderHook(({ root }) => useSessions(root), {
+      initialProps: { root: "/repo/a" as string | null },
+    });
+
+    await waitFor(() => {
+      expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo/a");
+    });
+
+    rerender({ root: "/repo/b" });
+
+    await waitFor(() => {
+      expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo/b");
+    });
+    expect(mockGetSessions.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
 });

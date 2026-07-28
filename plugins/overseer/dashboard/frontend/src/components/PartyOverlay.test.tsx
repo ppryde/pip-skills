@@ -132,6 +132,57 @@ describe("<PartyOverlay/>", () => {
     expect(container.textContent).not.toContain("NaN");
   });
 
+  it("renders the session's branch alongside its class line", () => {
+    render(
+      <PartyOverlay
+        party={[
+          member({ session: session({ id: "s1", branch: "feat/night-shift" }) }),
+        ]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByText("⑃ feat/night-shift")).toBeInTheDocument();
+  });
+
+  it("renders no branch line when the session carries no branch", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1" }) })]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(container.querySelector(".hero-card__branch")).toBeNull();
+  });
+
+  it("spotlights a hero card whose session is on the active branch (WF-031)", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[
+          member({ session: session({ id: "s1", branch: "feat/a" }) }),
+          member({ session: session({ id: "s2", branch: "feat/b" }) }),
+        ]}
+        onClose={vi.fn()}
+        activeBranch="feat/a"
+      />
+    );
+    const heroCards = container.querySelectorAll(".hero-card:not(.hero-card--summon)");
+    expect(heroCards[0]).toHaveClass("is-spotlight");
+    expect(heroCards[1]).not.toHaveClass("is-spotlight");
+  });
+
+  it("spotlights nothing when activeBranch is null", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", branch: "feat/a" }) })]}
+        onClose={vi.fn()}
+        activeBranch={null}
+      />
+    );
+    expect(
+      container.querySelector(".hero-card:not(.hero-card--summon).is-spotlight")
+    ).toBeNull();
+  });
+
   it("always renders exactly one static, non-interactive summon slot at the end", () => {
     const { container } = render(
       <PartyOverlay

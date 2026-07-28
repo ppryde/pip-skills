@@ -243,6 +243,18 @@
   --qb-hero-mana-track: #e4d2ab;
   --qb-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
 
+  /* WF-031 branch chip/filter/spotlight — a fresh addition, no HANDOFF row
+     exists for it yet (declared + cited per Decisions' "missing
+     HANDOFF-sourced values" precedent). A cool slate-blue distinguishes it
+     from the repo-chip's neutral grey and the claim-badge's dashed
+     parchment, while the spotlight ring reuses the existing gold-chip
+     border so it reads as "this is the one" without inventing a third
+     accent hue. */
+  --qb-branch-chip-bg: #e2e9f2;
+  --qb-branch-chip-text: #3d5875;
+  --qb-branch-chip-border: #b7c9dc;
+  --qb-spotlight-ring: var(--qb-gold-chip-border);
+
   /* Font stacks */
   --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
   --qb-font-body: "Patrick Hand", Gaegu, "Comic Neue", cursive;
@@ -443,6 +455,41 @@ body {
 
 .topbar__repo-select select:focus-visible {
   outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
+}
+
+/* WF-031 branch filter — same topbar-chip shape as `.topbar__repo-select`,
+   sitting right after it so both wrap into the mobile chip shelf together. */
+.topbar__branch-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-branch-chip-bg);
+  color: var(--qb-branch-chip-text);
+}
+
+.topbar__branch-select-label {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-branch-chip-text);
+}
+
+.topbar__branch-select select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--qb-ink-900);
+  background: transparent;
+  border: none;
+  padding: 0;
+  max-width: 40vw;
+}
+
+.topbar__branch-select select:focus-visible {
+  outline: 2px solid var(--qb-branch-chip-border);
   outline-offset: 2px;
 }
 
@@ -841,6 +888,24 @@ body {
   opacity: 0.35;
 }
 
+/* WF-031 branch filter — independent of the epic-highlight `--dimmed`/
+   `--highlighted` pair above: these fire from the topbar's BranchFilter
+   select, not the epic expand toggle, and both can be active on the same
+   tile at once (their opacity/outline effects simply stack). `.is-dimmed`
+   fades a non-matching card in place (never removes it from the lane);
+   `.is-spotlight` rings the matching card/hero with the same gold tone the
+   rarity stars/gold pill already use, so "this is the one" reads as an
+   emphasis, not a new colour language. Shared by card tiles AND Party rows
+   (party-row/hero-card) — see PartyColumn/PartyOverlay. */
+.is-dimmed {
+  opacity: 0.4;
+}
+
+.is-spotlight {
+  outline: 2px solid var(--qb-spotlight-ring);
+  outline-offset: 1px;
+}
+
 /* Done treatment (WF-028 chunk 5, HANDOFF's quest-card prose): muted
    parchment card, strikethrough title. The strikethrough tone (#6E6250 in
    HANDOFF) has no declared --qb-* token and isn't one of the two approved
@@ -1190,6 +1255,24 @@ body {
   border-radius: var(--legacy-radius-3px);
   background: var(--legacy-color-f3f4f6);
   color: var(--legacy-color-6b7280);
+}
+
+/* Branch chip (WF-031): visually distinct from the repo-chip's grey
+   provenance label AND the priority/claim/blocked chips — its own
+   slate-blue tone flags which branch the card's work lives on, at a
+   glance, without competing with the higher-priority signals. */
+.branch-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-branch-chip-bg);
+  color: var(--qb-branch-chip-text);
+  border: 1px solid var(--qb-branch-chip-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 9rem;
 }
 
 /* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
@@ -2236,6 +2319,17 @@ body {
   margin-bottom: 0.5rem;
 }
 
+/* WF-031: the hero's branch, sitting under the class line — reuses the
+   branch chip's own slate-blue tone so the same "which branch" signal
+   reads consistently between the board tiles and the Party. */
+.hero-card__branch {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-branch-chip-text);
+  margin-bottom: 0.5rem;
+}
+
 .hero-card__mana {
   height: 11px;
   border-radius: var(--legacy-radius-999px);
@@ -2365,6 +2459,17 @@ body {
 
 .party-row__class {
   font-size: 0.7rem;
+  color: var(--qb-party-text-muted);
+}
+
+/* WF-031: the session's branch, sitting under the class line. The dark
+   panel here (unlike the light hero-card) reuses the row's own muted
+   text tone rather than the branch chip's slate-blue, which would lose
+   contrast against `--qb-party-row-bg`. */
+.party-row__branch {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
   color: var(--qb-party-text-muted);
 }
 
@@ -2640,6 +2745,7 @@ body {
   .topbar__questing-pill,
   .topbar__archive-toggle,
   .topbar__repo-select select,
+  .topbar__branch-select select,
   .threshold-control button,
   .status-menu button,
   .claim-control button,

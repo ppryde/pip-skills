@@ -58,6 +58,10 @@ export interface BoardCard {
   /** Top-level repo name the card originated from (never the worktree
    * directory name) — absent on cards minted before this label existed. */
   repo?: string;
+  /** Git branch the card's work happens on (WF-031 worktree/branch
+   * distinction) — absent on cards minted before this label existed, or
+   * when the originating worktree carries no resolvable branch. */
+  branch?: string;
   /** Claim fields (design spec §5) — census `session_id` holding the card,
    * ISO-minute stamp, and whether a work verb has acked the claim since.
    * Absent/null on never-claimed cards; board/card-detail JSON passthrough,
@@ -147,6 +151,9 @@ export interface SessionSummary {
   stale: boolean;
   session_name?: string;
   model?: string;
+  /** Git branch the session's worktree is on (WF-031) — omitted when
+   * census/derive_repo_root couldn't resolve one. */
+  branch?: string;
   pr?: PrWindow;
   pct?: number;
 }

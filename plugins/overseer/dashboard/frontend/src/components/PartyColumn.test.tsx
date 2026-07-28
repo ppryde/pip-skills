@@ -98,7 +98,51 @@ describe("<PartyColumn/>", () => {
   });
 
   it("renders nothing (no rows) for an empty party", () => {
-    const { container } = render(<PartyColumn party={[]} />);
+    const { container } = render(<PartyColumn party={[]} activeBranch={null} />);
     expect(container.querySelectorAll(".party-row")).toHaveLength(0);
+  });
+
+  it("renders the session's branch alongside its class line", () => {
+    render(
+      <PartyColumn
+        party={[
+          member({ session: session({ id: "s1", branch: "feat/night-shift" }) }),
+        ]}
+        activeBranch={null}
+      />
+    );
+    expect(screen.getByText("⑃ feat/night-shift")).toBeInTheDocument();
+  });
+
+  it("renders no branch line when the session carries no branch", () => {
+    const { container } = render(
+      <PartyColumn party={[member({ session: session({ id: "s1" }) })]} activeBranch={null} />
+    );
+    expect(container.querySelector(".party-row__branch")).toBeNull();
+  });
+
+  it("spotlights a row whose session is on the active branch (WF-031)", () => {
+    const { container } = render(
+      <PartyColumn
+        party={[
+          member({ session: session({ id: "s1", branch: "feat/a" }) }),
+          member({ session: session({ id: "s2", branch: "feat/b" }) }),
+        ]}
+        activeBranch="feat/a"
+      />
+    );
+    const rows = container.querySelectorAll(".party-row");
+    expect(rows[0]).toHaveClass("is-spotlight");
+    expect(rows[1]).not.toHaveClass("is-spotlight");
+  });
+
+  it("spotlights nothing when activeBranch is null", () => {
+    const { container } = render(
+      <PartyColumn
+        party={[member({ session: session({ id: "s1", branch: "feat/a" }) })]}
+        activeBranch={null}
+      />
+    );
+    expect(container.querySelector(".is-spotlight")).toBeNull();
   });
 });

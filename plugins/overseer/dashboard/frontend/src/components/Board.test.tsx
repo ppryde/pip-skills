@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
 
 // Mock the SOLE api client module — no real fetch in this test. getSessions
@@ -287,5 +287,99 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     interactives.forEach((el) => {
       expect(el.querySelector('button, [role="button"], a[href]')).toBeNull();
     });
+  });
+});
+
+describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
+  const branchFixture: BoardResponse = {
+    board: {
+      project: "overseer-dashboard",
+      sprints: [],
+      quarantined: [],
+      cards: [
+        card({ id: "WF-A", title: "On branch a", branch: "feat/a" }),
+        card({ id: "WF-B", title: "On branch b", branch: "feat/b" }),
+        card({ id: "WF-C", title: "No branch at all" }),
+      ],
+    },
+    context: { pct: 10, threshold: 80 },
+    limits: null,
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getRepos).mockResolvedValue({ repos: [] });
+  });
+
+  it("selecting a branch dims non-matching cards and spotlights the matching one", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+
+    const { container } = render(<App />);
+    await screen.findByText("On branch a");
+
+    fireEvent.change(screen.getByLabelText("Branch"), {
+      target: { value: "feat/a" },
+    });
+
+    expect(
+      container.querySelector('[data-card-id="WF-A"]')
+    ).toHaveClass("is-spotlight");
+    expect(
+      container.querySelector('[data-card-id="WF-A"]')
+    ).not.toHaveClass("is-dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-B"]')
+    ).toHaveClass("is-dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-C"]')
+    ).toHaveClass("is-dimmed");
+  });
+
+  it("selecting a branch spotlights the Party agent on it", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
+    vi.mocked(getSessions).mockResolvedValue({
+      sessions: [
+        { id: "s1", worktree_cwd: "/w/a", updated_at: 1, stale: false, branch: "feat/a" },
+        { id: "s2", worktree_cwd: "/w/b", updated_at: 1, stale: false, branch: "feat/b" },
+      ],
+    });
+
+    const { container } = render(<App />);
+    await screen.findByText("On branch a");
+    await waitFor(() => {
+      expect(container.querySelectorAll(".party-row__branch").length).toBe(2);
+    });
+
+    fireEvent.change(screen.getByLabelText("Branch"), {
+      target: { value: "feat/a" },
+    });
+
+    const rows = container.querySelectorAll(".party-row");
+    const rowForA = Array.from(rows).find((r) =>
+      r.textContent?.includes("feat/a")
+    );
+    const rowForB = Array.from(rows).find((r) =>
+      r.textContent?.includes("feat/b")
+    );
+    expect(rowForA).toHaveClass("is-spotlight");
+    expect(rowForB).not.toHaveClass("is-spotlight");
+  });
+
+  it("choosing 'All' clears every dim/spotlight", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+
+    const { container } = render(<App />);
+    await screen.findByText("On branch a");
+
+    const select = screen.getByLabelText("Branch");
+    fireEvent.change(select, { target: { value: "feat/a" } });
+    expect(container.querySelector(".is-dimmed")).not.toBeNull();
+
+    fireEvent.change(select, { target: { value: "" } });
+
+    expect(container.querySelector(".is-dimmed")).toBeNull();
+    expect(container.querySelector(".is-spotlight")).toBeNull();
   });
 });
