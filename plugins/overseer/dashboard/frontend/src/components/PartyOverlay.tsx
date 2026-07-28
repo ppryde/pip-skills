@@ -28,15 +28,17 @@ export interface PartyOverlayProps {
  * sessions including stale ghosts — both real census data, no invented
  * party capacity (Decisions). LV and the cleared/earned stat tiles are
  * omitted: the app has no level concept and no per-hero cleared/earned
- * metric (spec's honest-data cut) — mana, name, class, and ON QUEST are
- * all real data, so they stay.
+ * metric (spec's honest-data cut) — exhaustion, name, class, and ON QUEST
+ * are all real data, so they stay.
  *
- * WF-042: each hero card also surfaces its own explicit ctx% (`session.pct`
- * — the raw number the mana bar's `100 - pct` fill is derived from), its PR
- * (`session.pr`, linked when `pr.url` is present), and an `is-near-
- * threshold` cue when that ctx% is at/over the fleet's global default
- * threshold. All three mirror the "forward what's there" style already
- * used for model/branch below — absent fields simply render nothing.
+ * Each hero card also surfaces a single "Exhaustion" bar (`session.pct`,
+ * fills UP as context is used — 0% fresh, 100% spent — replacing the old
+ * inverse `mana` bar and the separate WF-042 ctx% line, which were two
+ * representations of the same number pulling in opposite directions), its
+ * PR (`session.pr`, linked when `pr.url` is present), and an `is-near-
+ * threshold` cue when that pct is at/over the fleet's global default
+ * threshold. All mirror the "forward what's there" style already used for
+ * model/branch below — absent fields simply render nothing.
  */
 function PartyOverlay({
   party,
@@ -79,13 +81,12 @@ function PartyOverlay({
           </span>
         </div>
         <p className="party-sheet__helper">
-          …their mana is the context they have left.
+          …their exhaustion is the context they've spent.
         </p>
 
         <div className="party-sheet__grid">
           {party.map((member) => {
             const { session } = member;
-            const mana = session.pct === undefined ? null : 100 - session.pct;
             const spotlight =
               activeBranch !== null && session.branch === activeBranch;
             const isNearThreshold =
@@ -112,21 +113,24 @@ function PartyOverlay({
                   <div className="hero-card__branch">⑃ {session.branch}</div>
                 )}
                 {session.pct !== undefined && (
-                  <div className="hero-card__ctx">ctx {session.pct}%</div>
-                )}
-                {mana === null ? (
-                  <div className="hero-card__mana hero-card__mana--unknown">
-                    <span className="hero-card__mana-label">— unknown</span>
-                  </div>
-                ) : (
-                  <div className="hero-card__mana">
-                    <div
-                      className={
-                        "hero-card__mana-fill hero-card__mana-fill--" +
-                        (mana >= 50 ? "high" : "low")
-                      }
-                      style={{ width: `${mana}%` }}
-                    />
+                  <div className="hero-card__exhaustion">
+                    <div className="hero-card__exhaustion-row">
+                      <span className="hero-card__exhaustion-label">
+                        Exhaustion
+                      </span>
+                      <span className="hero-card__exhaustion-value">
+                        {session.pct}%
+                      </span>
+                    </div>
+                    <div className="hero-card__exhaustion-bar">
+                      <div
+                        className={
+                          "hero-card__exhaustion-fill hero-card__exhaustion-fill--" +
+                          (session.pct >= 50 ? "high" : "low")
+                        }
+                        style={{ width: `${session.pct}%` }}
+                      />
+                    </div>
                   </div>
                 )}
                 {session.pr && (

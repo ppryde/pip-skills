@@ -35,7 +35,7 @@ describe("<PartyOverlay/>", () => {
 
     expect(screen.getByText("⚔ The Party")).toBeInTheDocument();
     expect(
-      screen.getByText("…their mana is the context they have left.")
+      screen.getByText("…their exhaustion is the context they've spent.")
     ).toBeInTheDocument();
     expect(screen.getByText("aria")).toBeInTheDocument();
     expect(screen.getByText("bram")).toBeInTheDocument();
@@ -120,15 +120,15 @@ describe("<PartyOverlay/>", () => {
     expect(screen.getByText("Forge the blades")).toBeInTheDocument();
   });
 
-  it("guards pct === undefined with the neutral unknown treatment, never NaN%", () => {
+  it("omits the exhaustion bar entirely when pct is undefined, never NaN%", () => {
     const { container } = render(
       <PartyOverlay
         party={[member({ session: session({ id: "s1", pct: undefined }) })]}
         onClose={vi.fn()}
       />
     );
-    expect(screen.getByText("— unknown")).toBeInTheDocument();
-    expect(container.querySelector(".hero-card__mana-fill")).toBeNull();
+    expect(container.querySelector(".hero-card__exhaustion")).toBeNull();
+    expect(container.querySelector(".hero-card__exhaustion-fill")).toBeNull();
     expect(container.textContent).not.toContain("NaN");
   });
 
@@ -183,24 +183,47 @@ describe("<PartyOverlay/>", () => {
     ).toBeNull();
   });
 
-  it("renders the session's explicit ctx% alongside the mana bar (WF-042)", () => {
-    render(
+  it("renders a single Exhaustion bar labelled with its own pct%", () => {
+    const { container } = render(
       <PartyOverlay
         party={[member({ session: session({ id: "s1", pct: 42 }) })]}
         onClose={vi.fn()}
       />
     );
-    expect(screen.getByText("ctx 42%")).toBeInTheDocument();
+    expect(screen.getByText("Exhaustion")).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(container.querySelectorAll(".hero-card__exhaustion")).toHaveLength(1);
+    expect(container.querySelector(".hero-card__ctx")).toBeNull();
+    expect(container.querySelector(".hero-card__mana")).toBeNull();
   });
 
-  it("renders no ctx% line when the session carries no pct", () => {
+  it("fills the exhaustion bar UP with pct (higher pct → fuller), not the inverse", () => {
     const { container } = render(
       <PartyOverlay
-        party={[member({ session: session({ id: "s1", pct: undefined }) })]}
+        party={[member({ session: session({ id: "s1", pct: 30 }) })]}
         onClose={vi.fn()}
       />
     );
-    expect(container.querySelector(".hero-card__ctx")).toBeNull();
+    const fill = container.querySelector<HTMLElement>(
+      ".hero-card__exhaustion-fill"
+    );
+    expect(fill).not.toBeNull();
+    expect(fill!.style.width).toBe("30%");
+    expect(fill).toHaveClass("hero-card__exhaustion-fill--low");
+  });
+
+  it("uses the high-exhaustion gradient once pct crosses 50", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: 80 }) })]}
+        onClose={vi.fn()}
+      />
+    );
+    const fill = container.querySelector<HTMLElement>(
+      ".hero-card__exhaustion-fill"
+    );
+    expect(fill!.style.width).toBe("80%");
+    expect(fill).toHaveClass("hero-card__exhaustion-fill--high");
   });
 
   it("renders the session's PR, number and review_state, when present", () => {

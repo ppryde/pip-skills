@@ -22,16 +22,18 @@ export interface PartyColumnProps {
  * dimmed ghost rows rather than disappearing, so a hero who just went
  * quiet isn't erased from view mid-glance.
  *
- * Mana bar guards `pct === undefined` explicitly: SessionSummary.pct is
- * optional (census-derived, may be absent), and `100 - undefined` is NaN,
- * not a sensible width. The undefined case renders the same neutral
- * "— unknown" treatment the topbar's own ctx display already used.
+ * Each row surfaces a single "Exhaustion" bar (`session.pct`, fills UP as
+ * context is used — 0% fresh, 100% spent — replacing the old inverse
+ * `mana` bar and the separate WF-042 ctx% line, which were two
+ * representations of the same number pulling in opposite directions).
+ * `pct === undefined` (SessionSummary.pct is optional, census-derived) is
+ * guarded explicitly: the bar is simply omitted rather than rendered with
+ * a NaN width.
  *
- * WF-042: each row also surfaces the raw ctx% (`session.pct`), the
- * session's PR (`session.pr`, linked when `pr.url` is present), and gets
- * the `is-near-threshold` cue when that ctx% is at/over the fleet's global
- * default threshold — same fields/cue as PartyOverlay's hero cards, just in
- * the compact row layout.
+ * Each row also surfaces the session's PR (`session.pr`, linked when
+ * `pr.url` is present) and gets the `is-near-threshold` cue when that pct
+ * is at/over the fleet's global default threshold — same fields/cue as
+ * PartyOverlay's hero cards, just in the compact row layout.
  */
 function PartyColumn({
   party,
@@ -44,7 +46,6 @@ function PartyColumn({
       <div className="party-column__rows">
         {party.map((member) => {
           const { session } = member;
-          const mana = session.pct === undefined ? null : 100 - session.pct;
           const spotlight =
             activeBranch !== null && session.branch === activeBranch;
           const isNearThreshold =
@@ -73,21 +74,24 @@ function PartyColumn({
                   <div className="party-row__branch">⑃ {session.branch}</div>
                 )}
                 {session.pct !== undefined && (
-                  <div className="party-row__ctx">ctx {session.pct}%</div>
-                )}
-                {mana === null ? (
-                  <div className="party-row__mana party-row__mana--unknown">
-                    <span className="party-row__mana-label">— unknown</span>
-                  </div>
-                ) : (
-                  <div className="party-row__mana">
-                    <div
-                      className={
-                        "party-row__mana-fill party-row__mana-fill--" +
-                        (mana >= 50 ? "high" : "low")
-                      }
-                      style={{ width: `${mana}%` }}
-                    />
+                  <div className="party-row__exhaustion">
+                    <div className="party-row__exhaustion-row">
+                      <span className="party-row__exhaustion-label">
+                        Exhaustion
+                      </span>
+                      <span className="party-row__exhaustion-value">
+                        {session.pct}%
+                      </span>
+                    </div>
+                    <div className="party-row__exhaustion-bar">
+                      <div
+                        className={
+                          "party-row__exhaustion-fill party-row__exhaustion-fill--" +
+                          (session.pct >= 50 ? "high" : "low")
+                        }
+                        style={{ width: `${session.pct}%` }}
+                      />
+                    </div>
                   </div>
                 )}
                 {session.pr && (

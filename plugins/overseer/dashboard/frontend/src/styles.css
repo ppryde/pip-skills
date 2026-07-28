@@ -222,8 +222,13 @@
      own border, missing from card 1's vocabulary. */
   --qb-questing-chip-border: #d9a0b4;
 
-  --qb-mana-high: linear-gradient(90deg, #5e86c7, #8fb6e0);
-  --qb-mana-low: linear-gradient(90deg, #c25a3b, #e08a3c);
+  /* Exhaustion bar fill — fills UP with context used, so "low" (little
+     spent, safe) keeps the old mana-high calm blue and "high" (lots spent,
+     getting dangerous) keeps the old mana-low warning orange. Same two
+     gradients as the retired inverse mana bar, re-labelled to match the
+     new direct (not inverse) fill direction. */
+  --qb-exhaustion-low: linear-gradient(90deg, #5e86c7, #8fb6e0);
+  --qb-exhaustion-high: linear-gradient(90deg, #c25a3b, #e08a3c);
 
   --qb-party-panel-bg: #3e2f22;
   --qb-party-row-bg: #4a3524;
@@ -240,7 +245,7 @@
   --qb-hero-card-bg: #f3e7ce;
   --qb-hero-name: #4a2e1c;
   --qb-hero-class: #a06a3c;
-  --qb-hero-mana-track: #e4d2ab;
+  --qb-hero-track: #e4d2ab;
   --qb-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
 
   /* WF-031 branch chip/filter/spotlight — a fresh addition, no HANDOFF row
@@ -2383,47 +2388,40 @@ body {
   margin-bottom: 0.5rem;
 }
 
-/* WF-042: the raw ctx% the mana bar's `100 - pct` fill below is derived
-   from — explicit, not just implied by the mana bar's width. */
-.hero-card__ctx {
+/* Exhaustion bar — replaces the old inverse `mana` bar and the separate
+   WF-042 ctx% line with one meter that fills UP as context is spent (0%
+   fresh, 100% spent), the percentage surfaced right on its label row. */
+.hero-card__exhaustion {
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__exhaustion-row {
+  display: flex;
+  justify-content: space-between;
   font-family: var(--qb-font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.02em;
   color: var(--qb-hero-class);
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.2rem;
 }
 
-.hero-card__mana {
+.hero-card__exhaustion-bar {
   height: 11px;
   border-radius: var(--legacy-radius-999px);
-  background: var(--qb-hero-mana-track);
+  background: var(--qb-hero-track);
   overflow: hidden;
-  margin-bottom: 0.5rem;
 }
 
-.hero-card__mana-fill {
+.hero-card__exhaustion-fill {
   height: 100%;
 }
 
-.hero-card__mana-fill--high {
-  background: var(--qb-mana-high);
+.hero-card__exhaustion-fill--low {
+  background: var(--qb-exhaustion-low);
 }
 
-.hero-card__mana-fill--low {
-  background: var(--qb-mana-low);
-}
-
-.hero-card__mana--unknown {
-  height: 11px;
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.hero-card__mana-label {
-  font-size: 0.7rem;
-  font-style: italic;
-  color: var(--qb-hero-class);
+.hero-card__exhaustion-fill--high {
+  background: var(--qb-exhaustion-high);
 }
 
 /* WF-042: the hero's PR, `PR #N · review_state` — plain text when there's
@@ -2440,7 +2438,7 @@ body {
 }
 
 .hero-card__quest {
-  border-top: 1px dashed var(--qb-hero-mana-track);
+  border-top: 1px dashed var(--qb-hero-track);
   padding-top: 0.5rem;
 }
 
@@ -2549,44 +2547,40 @@ body {
   color: var(--qb-party-text-muted);
 }
 
-/* WF-042: the raw ctx% the mana bar's `100 - pct` fill below is derived
-   from — explicit, not just implied by the mana bar's width. */
-.party-row__ctx {
+/* Exhaustion bar (compact row) — same fill-up-with-usage meter as the hero
+   card's, replacing the old inverse `mana` bar + the separate WF-042 ctx%
+   line. */
+.party-row__exhaustion {
+  margin-top: 0.15rem;
+}
+
+.party-row__exhaustion-row {
+  display: flex;
+  justify-content: space-between;
   font-family: var(--qb-font-mono);
   font-size: 0.65rem;
   letter-spacing: 0.02em;
   color: var(--qb-party-text-muted);
+  margin-bottom: 0.15rem;
 }
 
-.party-row__mana {
+.party-row__exhaustion-bar {
   height: 6px;
   border-radius: var(--legacy-radius-999px);
   background: var(--qb-party-border);
   overflow: hidden;
 }
 
-.party-row__mana-fill {
+.party-row__exhaustion-fill {
   height: 100%;
 }
 
-.party-row__mana-fill--high {
-  background: var(--qb-mana-high);
+.party-row__exhaustion-fill--low {
+  background: var(--qb-exhaustion-low);
 }
 
-.party-row__mana-fill--low {
-  background: var(--qb-mana-low);
-}
-
-.party-row__mana--unknown {
-  height: 6px;
-  display: flex;
-  align-items: center;
-}
-
-.party-row__mana-label {
-  font-size: 0.65rem;
-  color: var(--qb-party-text-muted);
-  font-style: italic;
+.party-row__exhaustion-fill--high {
+  background: var(--qb-exhaustion-high);
 }
 
 /* WF-042: the session's PR, `PR #N · review_state` — plain text when
