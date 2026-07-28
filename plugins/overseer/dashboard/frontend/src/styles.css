@@ -458,6 +458,18 @@ body {
   outline-offset: 2px;
 }
 
+/* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
+   but-un-init'd root (has_board:false). Native <option> styling is limited
+   to a small CSS subset (colour/background/font-style, no border/shape),
+   so "faded" is expressed with those; the "⚔ N" live-agent hint lives in
+   the option's own text (see RepoSelector.tsx's `optionLabel`), since an
+   <option> can't host a nested badge element. Still a fully selectable
+   entry — this is a visual distinction only. */
+.repo-option--unbegun {
+  font-style: italic;
+  color: var(--qb-ink-400);
+}
+
 /* WF-031 branch filter — same topbar-chip shape as `.topbar__repo-select`,
    sitting right after it so both wrap into the mobile chip shelf together. */
 .topbar__branch-select {
@@ -2599,6 +2611,75 @@ body {
       opacity: 0.4;
     }
   }
+}
+
+/* Quest holding page (WF-032) — App.tsx renders this INSTEAD OF <Board/>
+   when the selected repo has no board.db yet (`has_board:false`) but
+   census sees live agents there. A centred parchment panel with a dashed
+   border — the same "on hold" read as the Parked/Archive lanes (muted
+   parchment + dashed edge) rather than an error/danger treatment, since
+   nothing here is actually wrong. */
+.unbegun-holding {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 2rem 1rem;
+}
+
+.unbegun-holding__panel {
+  max-width: 32rem;
+  text-align: center;
+  padding: 2rem 2.25rem;
+  background: var(--qb-panel);
+  border: 2px dashed var(--qb-line-dashed);
+  border-radius: var(--qb-radius-panel);
+  box-shadow: var(--qb-shadow-modal);
+}
+
+.unbegun-holding__glyph {
+  margin: 0 0 0.5rem;
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.unbegun-holding__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: clamp(18px, 3vw, 22px);
+  color: var(--qb-ink-900);
+}
+
+/* The repo name reads as emphasis via colour, not italics — `em` is used
+   for its semantic "this is the subject" meaning, not its default slant,
+   which would clash with the unbegun *option*'s own italic (faded) use of
+   font-style above. */
+.unbegun-holding__title em {
+  font-style: normal;
+  color: var(--qb-accent-sky-fill);
+}
+
+.unbegun-holding__body {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--qb-ink-700);
+}
+
+.unbegun-holding__body:last-child {
+  margin-bottom: 0;
+}
+
+.unbegun-holding__command {
+  font-family: var(--qb-font-mono);
+  font-size: 0.85rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-900);
+  word-break: break-word;
 }
 
 /* ==========================================================================

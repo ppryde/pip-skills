@@ -165,11 +165,22 @@ export interface SessionsResponse {
 /** One discoverable board (WF-030 repo selector) — `root` is the MAIN repo
  * root path (stable across worktrees), used verbatim as the `root` query
  * param on every subsequent API call once selected. `current` marks
- * whichever entry matches the dashboard's own launch root. */
+ * whichever entry matches the dashboard's own launch root.
+ *
+ * `has_board`/`live_sessions` (WF-032 "unbegun repo" holding page): a repo
+ * can be discoverable purely because census sessions are live in it, even
+ * though `overseer init` has never been run there — no board.db exists.
+ * `has_board: false` marks exactly that case; `live_sessions` is the count
+ * of live agents census currently sees under this root, used for the
+ * selector's agent-count hint and the holding page's copy. A `has_board:
+ * false` root 400s the backend's `/api/board` — callers must never fetch
+ * the board for one (see `useBoard`'s `enabled` gate). */
 export interface RepoEntry {
   label: string;
   root: string;
   current: boolean;
+  has_board: boolean;
+  live_sessions: number;
 }
 
 export interface ReposResponse {

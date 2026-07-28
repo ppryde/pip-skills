@@ -3,6 +3,7 @@ import TopBar from "./components/TopBar";
 import Board from "./components/Board";
 import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
+import UnbegunHolding from "./components/UnbegunHolding";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
@@ -58,6 +59,15 @@ function App() {
     writeStoredRoot(root);
   }
 
+  // WF-032 "unbegun repo" holding page: a repo `/api/repos` discovered
+  // purely from live census sessions, never `overseer init`-ed, so it has
+  // no board.db (`has_board: false`). `undefined` (repos not yet loaded, or
+  // activeRoot not among them) deliberately falls through to `false` here —
+  // the pre-repos-load default stays "fetch the board", matching prior
+  // behaviour before this feature existed.
+  const selectedRepo = repos.find((r) => r.root === activeRoot) ?? null;
+  const isUnbegun = selectedRepo?.has_board === false;
+
   const {
     board,
     context,
@@ -69,7 +79,7 @@ function App() {
     refresh,
     setDragActive,
     lastRefreshedAt,
-  } = useBoard(activeRoot);
+  } = useBoard(activeRoot, !isUnbegun);
   // Threaded through the SAME `activeRoot` choke point the board uses (WF-031)
   // — switching repos re-scopes the Party the same instant it re-scopes the
   // board, no separate state or client-side filtering needed.
@@ -132,21 +142,30 @@ function App() {
         onSelectBranch={setActiveBranch}
       />
       <main className="board-region">
-        {loading && !board && (
-          <p className="board-placeholder">Loading board…</p>
-        )}
-        {error && <p className="board-error">{error}</p>}
-        {board && (
-          <Board
-            board={board}
-            showArchive={showArchive}
-            mutate={mutate}
-            inFlight={inFlight}
-            onOpenCard={setOpenCardId}
-            setDragActive={setDragActive}
-            party={party}
-            activeBranch={activeBranch}
+        {isUnbegun && selectedRepo ? (
+          <UnbegunHolding
+            repo={selectedRepo}
+            liveSessions={selectedRepo.live_sessions}
           />
+        ) : (
+          <>
+            {loading && !board && (
+              <p className="board-placeholder">Loading board…</p>
+            )}
+            {error && <p className="board-error">{error}</p>}
+            {board && (
+              <Board
+                board={board}
+                showArchive={showArchive}
+                mutate={mutate}
+                inFlight={inFlight}
+                onOpenCard={setOpenCardId}
+                setDragActive={setDragActive}
+                party={party}
+                activeBranch={activeBranch}
+              />
+            )}
+          </>
         )}
       </main>
       <CardDetailDrawer

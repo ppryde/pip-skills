@@ -190,8 +190,8 @@ describe("<TopBar/>", () => {
       <TopBar
         {...baseProps()}
         repos={[
-          { label: "repo-a", root: "/a", current: true },
-          { label: "repo-b", root: "/b", current: false },
+          { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
+          { label: "repo-b", root: "/b", current: false, has_board: true, live_sessions: 0 },
         ]}
         activeRoot="/a"
       />
@@ -210,8 +210,8 @@ describe("<TopBar/>", () => {
       <TopBar
         {...baseProps()}
         repos={[
-          { label: "repo-a", root: "/a", current: true },
-          { label: "repo-b", root: "/b", current: false },
+          { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
+          { label: "repo-b", root: "/b", current: false, has_board: true, live_sessions: 0 },
         ]}
         activeRoot="/a"
         onSelectRepo={onSelectRepo}

@@ -4,7 +4,7 @@ import type { RepoEntry } from "../api/types";
 import RepoSelector from "./RepoSelector";
 
 function repo(overrides: Partial<RepoEntry> & { label: string; root: string }): RepoEntry {
-  return { current: false, ...overrides };
+  return { current: false, has_board: true, live_sessions: 0, ...overrides };
 }
 
 describe("<RepoSelector/>", () => {
@@ -83,5 +83,56 @@ describe("<RepoSelector/>", () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("/b");
+  });
+
+  describe("unbegun repos (has_board: false — WF-032)", () => {
+    it("renders an unbegun repo's option with the distinct class and its live-agent count hint", () => {
+      render(
+        <RepoSelector
+          repos={[
+            repo({ label: "acme", root: "/acme", current: true }),
+            repo({ label: "sandbox", root: "/sandbox", has_board: false, live_sessions: 6 }),
+          ]}
+          activeRoot="/acme"
+          onSelect={() => {}}
+        />
+      );
+
+      const option = screen.getByRole("option", { name: /sandbox/i });
+      expect(option).toHaveTextContent("⚔ 6");
+      expect(option).toHaveClass("repo-option--unbegun");
+    });
+
+    it("does not mark a has_board:true repo's option as unbegun", () => {
+      render(
+        <RepoSelector
+          repos={[repo({ label: "acme", root: "/acme", current: true })]}
+          activeRoot="/acme"
+          onSelect={() => {}}
+        />
+      );
+
+      const option = screen.getByRole("option", { name: "acme" });
+      expect(option).not.toHaveClass("repo-option--unbegun");
+      expect(option).not.toHaveTextContent("⚔");
+    });
+
+    it("an unbegun repo's option is still selectable", () => {
+      const onSelect = vi.fn();
+      render(
+        <RepoSelector
+          repos={[
+            repo({ label: "acme", root: "/acme", current: true }),
+            repo({ label: "sandbox", root: "/sandbox", has_board: false, live_sessions: 6 }),
+          ]}
+          activeRoot="/acme"
+          onSelect={onSelect}
+        />
+      );
+
+      fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "/sandbox" } });
+
+      expect(onSelect).toHaveBeenCalledWith("/sandbox");
+    });
   });
 });

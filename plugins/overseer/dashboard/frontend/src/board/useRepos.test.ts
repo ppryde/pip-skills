@@ -13,7 +13,9 @@ describe("useRepos", () => {
   it("fetches on mount and returns the discovered repos", async () => {
     const mockGetRepos = vi.mocked(client.getRepos);
     mockGetRepos.mockResolvedValueOnce({
-      repos: [{ label: "repo-a", root: "/a", current: true }],
+      repos: [
+        { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
+      ],
     });
 
     const { result } = renderHook(() => useRepos());
@@ -39,7 +41,9 @@ describe("useRepos", () => {
   it("does not throw on unmount while a fetch may still be in flight", async () => {
     const mockGetRepos = vi.mocked(client.getRepos);
     mockGetRepos.mockResolvedValue({
-      repos: [{ label: "repo-a", root: "/a", current: true }],
+      repos: [
+        { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
+      ],
     });
 
     const { unmount } = renderHook(() => useRepos());

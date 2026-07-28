@@ -7,6 +7,16 @@ export interface RepoSelectorProps {
 }
 
 /**
+ * An "unbegun" repo (WF-032) has live census sessions but no board.db yet
+ * (`has_board: false`) — `<option>` can't host markup, so the live-agent
+ * count hint is appended straight into the label text (e.g. "⚔ 6") rather
+ * than as a separate child element.
+ */
+function optionLabel(r: RepoEntry): string {
+  return r.has_board === false ? `${r.label} · ⚔ ${r.live_sessions}` : r.label;
+}
+
+/**
  * Repo switcher (WF-030) — a `<select>` styled as a topbar chip so it fits
  * the existing crest-row/chip-shelf responsive layout for free: it wraps
  * into the mobile chip shelf exactly like the ctx block and pills around
@@ -17,6 +27,11 @@ export interface RepoSelectorProps {
  * board.db yet, or a failed `/api/repos` fetch) — never crashes on an empty
  * list. Still renders for a single discovered repo (one `<option>`) so
  * "which repo am I looking at" stays visible even before a second exists.
+ *
+ * Unbegun entries (`has_board: false` — WF-032) render with a distinct
+ * class and an appended agent-count hint (`optionLabel` above) but remain
+ * fully selectable `<option>`s: choosing one is what routes App.tsx to the
+ * `<UnbegunHolding/>` empty state instead of `<Board/>`.
  */
 function RepoSelector({ repos, activeRoot, onSelect }: RepoSelectorProps) {
   if (repos.length === 0) return null;
@@ -38,8 +53,19 @@ function RepoSelector({ repos, activeRoot, onSelect }: RepoSelectorProps) {
         onChange={(e) => onSelect(e.target.value)}
       >
         {repos.map((r) => (
-          <option key={r.root} value={r.root}>
-            {r.label}
+          <option
+            key={r.root}
+            value={r.root}
+            className={
+              r.has_board === false ? "repo-option repo-option--unbegun" : "repo-option"
+            }
+            title={
+              r.has_board === false
+                ? `Quest not yet begun — ${r.live_sessions} adventurer(s) present, no Guild Board raised`
+                : undefined
+            }
+          >
+            {optionLabel(r)}
           </option>
         ))}
       </select>
