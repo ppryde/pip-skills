@@ -13,6 +13,7 @@ Layout of ``~/.claude/census/status.json`` (override with ``CENSUS_STORE``)::
         "<session_id>": {
           "worktree_cwd": "<abs path>",
           "updated_at": <epoch>,
+          "branch": "<current git branch, null when unresolvable/detached>",
           "tmux_pane": "<%N, absent when the session isn't running inside tmux>",
           "payload": { ...full status-line payload verbatim... }
         }
@@ -24,6 +25,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -40,6 +42,7 @@ SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
 STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
 _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
 _LOCK_DELAY_SECONDS = 0.01
+_GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
 
 
 def config_dir() -> Path:
@@ -148,6 +151,33 @@ def _prune(sessions: dict[str, Any], now: float) -> None:
         sessions.pop(sid, None)
 
 
+def _git_branch(worktree_cwd: str | None) -> str | None:
+    """The current branch name at ``worktree_cwd``, or None on ANY failure.
+
+    Quarantine-safe by construction: a missing git binary, a non-repo cwd, a
+    detached HEAD, or a slow/hanging git process must never raise or block —
+    census's whole contract is to never break the status line. Bounded by a
+    short timeout so a stalled git process cannot hang the caller.
+    """
+    if not worktree_cwd:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", worktree_cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_BRANCH_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    branch = result.stdout.strip()
+    if not branch or branch == "HEAD":  # blank, or detached HEAD
+        return None
+    return branch
+
+
 def merge(
     store: dict[str, Any],
     payload: dict[str, Any],
@@ -181,6 +211,7 @@ def merge(
     sessions[sid] = {
         "worktree_cwd": worktree,
         "updated_at": now,
+        "branch": _git_branch(worktree),
         "payload": payload,
     }
     # Sibling fields (worktree_cwd, payload) are replaced wholesale on every
