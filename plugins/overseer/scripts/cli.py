@@ -233,9 +233,6 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_new_card(args: argparse.Namespace) -> int:
     conn = _conn(args.root)
     card_id = args.jira or args.linear or db.mint_id(conn)
-    if db.load_card(conn, card_id) is not None:
-        print(f"error: card {card_id} already exists", file=sys.stderr)
-        return 1
     card = Card(
         id=card_id,
         title=args.title,
@@ -250,7 +247,16 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         repo=args.repo if args.repo else derive_repo_label(args.root),
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
-    _sync(args.root, card)
+    # Insert-only (not `_sync`'s upsert path): a plain existence check here
+    # would leave a TOCTOU window where two concurrent `new-card` calls that
+    # mint/target the same id both pass the check and one silently
+    # overwrites the other. `create_card` raises on the PK collision instead.
+    try:
+        db.create_card(conn, card)
+    except sqlite3.IntegrityError:
+        print(f"error: card {card_id} already exists", file=sys.stderr)
+        return 1
+    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
     print(card.id)
     return 0
 
@@ -651,6 +657,19 @@ def cmd_claim(args: argparse.Namespace) -> int:
     and `--force` displaces a live holder too. Re-claiming by the same
     session that already holds it is treated as an ordinary (re-)stamp — no
     liveness check against itself.
+
+    The genuinely-unclaimed path (no prior holder at all) is the one case
+    where two sessions can race each other for the very same card: both may
+    observe `prior_holder is None` before either has written. That path uses
+    `db.claim_card(..., force=args.force)` — an atomic `UPDATE ... WHERE
+    claimed_by IS NULL` compare-and-swap when `--force` is not given — so
+    only one writer's UPDATE can land; the loser is told the card was
+    already claimed rather than silently overwriting the winner. Every other
+    branch below (self-restamp, live-displace, stale-displace) targets a
+    card this CLI invocation has already determined has a specific existing
+    `claimed_by` value it means to overwrite, so those keep the unconditional
+    `force=True` stamp — a `WHERE claimed_by IS NULL` guard would never match
+    and would wrongly report those as lost races.
     """
     conn = _conn(args.root)
     now = _now()
@@ -679,11 +698,28 @@ def cmd_claim(args: argparse.Namespace) -> int:
                 return 1
         kind = "live" if live else "stale"
         note = f"note: displaced {kind} claim held by {prior_holder}"
-    # The CLI-level checks above have already authorised this claim (unclaimed,
-    # stale holder, or an explicit --force) — force=True here is just the
-    # unconditional stamp; `claim_card`'s own compare-and-swap guard is for
-    # the atomic single-writer case, not a second gate.
-    db.claim_card(conn, card.id, args.session, now, force=True)
+        # A specific existing holder is being intentionally overwritten
+        # (displacement, already authorised above) — unconditional stamp.
+        db.claim_card(conn, card.id, args.session, now, force=True)
+    elif prior_holder == args.session:
+        # Idempotent re-stamp by the session that already holds it — also
+        # targets a non-NULL claimed_by, so this must stay unconditional too.
+        db.claim_card(conn, card.id, args.session, now, force=True)
+    else:
+        # Genuinely unclaimed (post-sweep): close the race window with an
+        # atomic compare-and-swap. `--force` always wins outright (matches
+        # its displace-a-live-holder semantics elsewhere); otherwise only one
+        # concurrent claimer's UPDATE can match `WHERE claimed_by IS NULL`.
+        won = db.claim_card(conn, card.id, args.session, now, force=args.force)
+        if not won:
+            current = db.load_card(conn, card.id)
+            holder = current.claimed_by if current else None
+            print(
+                f"error: {card.id} already claimed by {holder}"
+                " — use --force to override",
+                file=sys.stderr,
+            )
+            return 1
     _report_quarantined(rebuild_index(args.root, args.root.resolve().name, now))
     if note:
         print(note)

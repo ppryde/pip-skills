@@ -204,7 +204,7 @@ def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
-def _resolve_root(launch_root: Path, requested: str | None) -> Path:
+def _resolve_root(launch_root: Path, default_root: Path, requested: str | None) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
     client-supplied ``root`` against the ``repos`` discovery allowlist
     before it is ever used to shell the CLI.
@@ -215,9 +215,14 @@ def _resolve_root(launch_root: Path, requested: str | None) -> Path:
     must match — after resolution — one of the roots ``repos`` discovery
     ACTUALLY returned, not merely "look like a path". Raises HTTP 400
     (never shells anything with the rejected value) when it doesn't.
+
+    ``default_root`` (used only when ``requested`` is None) is the SERVER's
+    own derived main-repo root, not client input — trusted, so it bypasses
+    the allowlist check entirely. Client-supplied roots always go through
+    validation above; only the omitted-root default changes here.
     """
     if requested is None:
-        return launch_root
+        return default_root
     candidate = Path(requested).resolve()
     allowed = {
         Path(entry["root"]).resolve()
@@ -297,7 +302,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.get("/api/board")
     def get_board(root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
         return _board_response(effective)
 
     @app.get("/api/repos")
@@ -317,7 +322,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str, root: str | None = None) -> Any:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
         try:
             check_id(card_id)
             return run_overseer(effective, "show", card_id, "--json", json_out=True)
@@ -326,7 +331,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/card/{card_id}/order")
     def set_order(card_id: str, body: OrderBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -336,7 +341,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/card/{card_id}/priority")
     def set_priority(card_id: str, body: PriorityBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -347,7 +352,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/card/{card_id}/parent")
     def set_parent(card_id: str, body: ParentBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -362,7 +367,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
     def set_depends(card_id: str, body: DependsBody, root: str | None = None) -> dict[str, Any]:
         if body.on is None and body.off is None:
             raise HTTPException(status_code=400, detail="on or off required")
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -379,7 +384,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/card/{card_id}/park")
     def park_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -389,7 +394,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/card/{card_id}/unpark")
     def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -402,7 +407,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
         session_id = body.session_id
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id required")
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -412,7 +417,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/card/{card_id}/unclaim")
     def unclaim_card(card_id: str, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             check_id(card_id)
@@ -431,7 +436,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
         ACTUAL resulting status; it does not fake-honor a requested
         planned-vs-in-flight distinction.
         """
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         if body.stage is not None:
             def do_stage() -> None:
@@ -462,7 +467,7 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.post("/api/config/threshold")
     def set_threshold(body: ThresholdBody, root: str | None = None) -> dict[str, Any]:
-        effective = _resolve_root(launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             run_vigil(effective, "config", "set", "context.threshold", str(body.value))

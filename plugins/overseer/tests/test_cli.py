@@ -913,6 +913,42 @@ class TestClaim:
         c = self._card(repo)
         assert c.claim_acked is False and c.claim_nudged is False
 
+    def test_concurrent_claims_of_unclaimed_card_yield_one_winner(self, repo, capsys, monkeypatch):
+        """Fix 3 regression: `cmd_claim` used to stamp with `force=True`
+        unconditionally, so two sessions racing to claim the same
+        currently-unclaimed card could BOTH pass the (unclaimed) check and
+        both force-write, both printing "claimed". The genuinely-unclaimed
+        path now goes through `db.claim_card`'s atomic `UPDATE ... WHERE
+        claimed_by IS NULL` compare-and-swap, so only one writer can win.
+
+        True inter-process interleaving can't be produced by two sequential
+        top-level `run()` calls (the second call's own `_load()` would
+        simply observe the first call's already-committed claim, exercising
+        the pre-existing displacement branch, not the race-closing one).
+        Instead, `db.claim_card` is wrapped to inject a rival session's real
+        claim on the very card under test at the exact moment `cmd_claim`
+        makes its own compare-and-swap attempt — simulating the interleaving
+        a second concurrent CLI process would produce, while exercising the
+        real sqlite CAS semantics end to end.
+        """
+        real_claim_card = db.claim_card
+
+        def racing_claim_card(conn, card_id, session_id, now, *, force=False):
+            if not force:
+                # A rival session's claim lands first, in the exact window
+                # between cmd_claim's read of prior_holder=None and its own
+                # compare-and-swap attempt.
+                real_claim_card(conn, card_id, "sess-rival", now, force=True)
+            return real_claim_card(conn, card_id, session_id, now, force=force)
+
+        run(repo, "new-card", "--title", "T")  # WF-001, unclaimed
+        monkeypatch.setattr(db, "claim_card", racing_claim_card)
+
+        assert run(repo, "claim", "WF-001", "--session", "sess-2") == 1
+        err = capsys.readouterr().err
+        assert "already claimed by sess-rival" in err
+        assert self._card(repo).claimed_by == "sess-rival"  # rival's claim stands, untouched
+
     def test_unclaim_clears_fields(self, repo):
         run(repo, "new-card", "--title", "T")
         run(repo, "claim", "WF-001", "--session", "sess-1")

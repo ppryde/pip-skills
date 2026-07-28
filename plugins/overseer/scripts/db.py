@@ -123,6 +123,18 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
     archived cards from <state_root>/archive/cards/*.md (archived=1).
     Skips CardParseError. Sets meta migrated_from_workflow=1.
 
+    The source root is the DB's OWN repo identity — ``derive_repo_root(repo_root)``
+    (falling back to ``repo_root`` itself when derivation fails, e.g. no git) —
+    not the raw connecting ``repo_root``. ``board_db_path`` keys one shared
+    board.db per MAIN repo, but a worktree can be the FIRST caller to connect
+    (and thus the first to trigger this one-time import). Reading straight
+    from ``state_root(repo_root)`` in that case finds the worktree's own
+    (typically empty) `.workflow/`, imports 0 cards, and permanently stamps
+    ``migrated_from_workflow=1`` — stranding the main repo's cards forever
+    since the import never retries. Resolving to the main root first makes
+    the import read the MAIN repo's `.workflow/` no matter which worktree
+    connects first.
+
     The whole import (all card writes + the marker) happens in a single
     transaction: intermediate rows are staged but never committed until
     every file has been processed. If anything goes wrong partway through
@@ -134,7 +146,8 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
     Returns count of successfully imported cards.
     """
     from scripts.store import state_root  # local import: avoid cycle
-    root = state_root(repo_root)
+    source_root = derive_repo_root(repo_root) or repo_root
+    root = state_root(source_root)
     imported = 0
     live_dir = root / "cards"
     arch_dir = root / "archive" / "cards"
@@ -167,6 +180,13 @@ def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
     If already migrated (meta migrated_from_workflow == "1"), return.
     If DB already has cards, mark as migrated (pre-seeded) and return.
     Otherwise, run migrate_from_workflow.
+
+    The "already has cards?" check queries the DB itself (shared by every
+    repo_root that connects to it), so it's inherently consistent regardless
+    of which worktree is calling — no separate main-root resolution needed
+    here. The actual import fan-out to the MAIN repo's `.workflow/` happens
+    inside `migrate_from_workflow`, which `repo_root` is simply passed
+    through to unchanged.
     """
     if get_meta(conn, "migrated_from_workflow") == "1":
         return
@@ -176,15 +196,6 @@ def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
         conn.commit()
         return
     migrate_from_workflow(conn, repo_root)
-
-
-_CARD_COLUMNS = (
-    "id", "title", "status", "stage", "order", "complexity", "priority",
-    "jira", "linear", "sprint", "parent", "branch", "worktree", "pr",
-    "touches", "depends_on", "budget_estimate", "budget_actual",
-    "created", "updated", "blocked_on", "checklist", "repo",
-    "claimed_by", "claimed_at", "claim_acked", "claim_nudged", "body",
-)
 
 
 def card_to_params(card: Card) -> dict:
@@ -284,6 +295,24 @@ def _upsert(conn: sqlite3.Connection, card: Card, archived: int, *, commit: bool
 
 def save_card(conn: sqlite3.Connection, card: Card) -> None:
     _upsert(conn, card, archived=0)
+
+
+def create_card(conn: sqlite3.Connection, card: Card) -> None:
+    """Insert-only create for a brand-new card id.
+
+    Unlike ``save_card``'s ``INSERT ... ON CONFLICT(id) DO UPDATE`` (needed
+    for its shared use editing existing cards), this is a plain ``INSERT``
+    with no conflict clause: it raises ``sqlite3.IntegrityError`` if ``id``
+    already exists in the table. Used by `new-card` so two concurrent mints
+    of the same freshly-generated id can't silently overwrite one another —
+    the loser gets a PK-violation error instead of a clobbered card.
+    """
+    params = card_to_params(card)
+    params["archived"] = 0
+    cols = ", ".join(f'"{c}"' for c in params)
+    ph = ", ".join(f":{c}" for c in params)
+    conn.execute(f"INSERT INTO cards ({cols}) VALUES ({ph})", params)
+    conn.commit()
 
 
 def archive_card(conn: sqlite3.Connection, card: Card) -> None:

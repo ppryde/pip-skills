@@ -280,3 +280,37 @@ def test_migrate_is_atomic_on_failure(tmp_path, monkeypatch):
     # Rolled back: no cards, no marker.
     assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 0
     assert db.get_meta(conn, "migrated_from_workflow") is None
+
+
+def test_import_reads_from_derived_main_root_not_connecting_root(tmp_path, monkeypatch):
+    """Guards against permanent card loss (Fix 1): `board_db_path` keys one
+    shared board.db per MAIN repo, but the one-time import used to read
+    straight from `state_root(repo_root)` — the raw connecting root. If a
+    worktree (with no `.workflow/` of its own) happened to be the FIRST
+    caller to connect, the import would read the worktree's empty tree,
+    import 0 cards, and permanently stamp migrated_from_workflow=1 —
+    stranding the main repo's cards forever, since the import never retries.
+
+    `derive_repo_root` is stubbed here (rather than using a real `git
+    worktree`) to isolate the exact behaviour under test: the import must
+    resolve its source from the DB's OWN repo identity
+    (`derive_repo_root(repo_root)`), not from whichever root happens to
+    make the first connection.
+    """
+    main_root = tmp_path / "main"
+    connecting_root = tmp_path / "not-the-main-root"
+    main_root.mkdir()
+    connecting_root.mkdir()
+    git_init(main_root)
+
+    wf_root = init_workflow(main_root)
+    file_save_card(wf_root, Card(id="WF-001", title="one", status="planned"))
+
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "shared-board.db"))
+    monkeypatch.setattr(db, "derive_repo_root", lambda p: main_root)
+
+    conn = db.connect(connecting_root)  # migrate=True (default) — first connect
+    cards, _ = db.load_live_cards(conn)
+
+    assert [c.id for c in cards] == ["WF-001"]
+    assert db.get_meta(conn, "migrated_from_workflow") == "1"
