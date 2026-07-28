@@ -42,6 +42,10 @@ adversarial review loops, integrated with sprint planning and superpowers.
   worktree of that repo, so claims are atomic across worktrees instead of
   racing on separate `.workflow/` file trees. Sprints, usage and knowledge
   remain file-based under `.workflow/` pending a follow-on migration.
+- Dashboard Party/sessions are scoped to the served repo (worktrees of the
+  same repo share one Party); agents and cards carry per-branch tags with a
+  Party branch filter; a repo with live census sessions but no board yet
+  shows an unbegun-repo holding page instead of an empty board.
 
 ## Skills
 
