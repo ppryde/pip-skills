@@ -145,10 +145,10 @@ def _entry_ts(entry: dict[str, Any]) -> float:
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
-    Returns {id, session_name?, model?, worktree_cwd, pct?, pr?, updated_at, stale}.
-    Optional fields (model, pr, session_name, pct) are omitted when absent, mirroring
-    _census_extras's "forward what's there" style. Malformed updated_at values are
-    coerced to 0.0 (treating as stale) rather than raising.
+    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at, stale}.
+    Optional fields (model, pr, session_name, branch, pct) are omitted when absent,
+    mirroring _census_extras's "forward what's there" style. Malformed updated_at
+    values are coerced to 0.0 (treating as stale) rather than raising.
     """
     payload = entry.get("payload") or {}
     ts = _entry_ts(entry)
@@ -158,6 +158,8 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
         "updated_at": entry.get("updated_at"),
         "stale": (now - ts) > _STALE_HORIZON_SECONDS,
     }
+    if entry.get("branch"):
+        out["branch"] = entry["branch"]
     model = payload.get("model") or {}
     if model.get("display_name"):
         out["model"] = model["display_name"]
@@ -172,8 +174,18 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
     return out
 
 
-def _sessions_list() -> list[dict[str, Any]]:
-    """Fetch all sessions from census and return sorted by updated_at descending.
+def _sessions_list(repo_root: Path) -> list[dict[str, Any]]:
+    """Fetch all sessions from census, scoped to ``repo_root``, sorted by
+    updated_at descending.
+
+    Census tracks sessions across every repo on the machine (it has no
+    per-repo scoping of its own), so this filters to only those sessions
+    whose `worktree_cwd` derives — via `derive_repo_root` — to the repo this
+    dashboard instance is serving. A session whose `worktree_cwd` no longer
+    resolves to a repo at all (e.g. a removed worktree) is a ghost and is
+    dropped rather than surfaced against the wrong repo. `derive_repo_root`
+    shells `git rev-parse` per session; memoized by cwd within this call
+    since census may report the same cwd for multiple sessions.
 
     Returns [] when census is unavailable (soft dependency, never 500s).
     Handles malformed timestamps defensively (treated as 0, sort last).
@@ -183,9 +195,17 @@ def _sessions_list() -> list[dict[str, Any]]:
         return []
     sessions_dict = data.get("sessions") or {}
     now = time.time()
+    root_cache: dict[str, Path | None] = {}
+
+    def _derived_root(cwd: str) -> Path | None:
+        if cwd not in root_cache:
+            root_cache[cwd] = derive_repo_root(Path(cwd))
+        return root_cache[cwd]
+
     sessions = [
         _session_summary(sid, entry, now)
         for sid, entry in sessions_dict.items()
+        if entry.get("worktree_cwd") and _derived_root(entry["worktree_cwd"]) == repo_root
     ]
     # Sort by coerced updated_at descending (freshest first); malformed -> 0.0 -> sorts last
     sessions.sort(key=lambda s: _entry_ts({"updated_at": s.get("updated_at")}), reverse=True)
@@ -317,8 +337,9 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
         return {"repos": repos_list}
 
     @app.get("/api/sessions")
-    def get_sessions() -> dict[str, Any]:
-        return {"sessions": _sessions_list()}
+    def get_sessions(root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        return {"sessions": _sessions_list(effective)}
 
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str, root: str | None = None) -> Any:
