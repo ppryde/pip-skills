@@ -8,8 +8,36 @@ import type {
   CardDetail,
   DependsBody,
   MoveBody,
+  ReposResponse,
   SessionsResponse,
 } from "./types";
+
+/**
+ * The repo root threaded into every board/card/mutation call below (the
+ * repo selector's single choke point — see `setActiveRoot`). `null` means
+ * "no selection yet" / "use the dashboard's own launch root", which is
+ * exactly the pre-selector default behaviour: every wrapper below omits
+ * the `root` query param entirely in that case.
+ */
+let activeRoot: string | null = null;
+
+/**
+ * Sets the root every subsequent API call threads through as `?root=...`.
+ * The repo selector (App.tsx) is the SOLE caller — no other module needs to
+ * know a multi-repo selection even exists, matching this module's existing
+ * charter as the sole holder of endpoint URLs/shapes.
+ */
+export function setActiveRoot(root: string | null): void {
+  activeRoot = root;
+}
+
+/** Appends `?root=...` (or `&root=...` if the url already has a query
+ * string) when a root is active; otherwise returns `url` unchanged. */
+function withRoot(url: string): string {
+  if (activeRoot === null) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}root=${encodeURIComponent(activeRoot)}`;
+}
 
 /**
  * Shared fetch wrapper: sends JSON when a body is given, parses the JSON
@@ -45,7 +73,13 @@ async function request<T>(
 }
 
 export function getBoard(): Promise<BoardResponse> {
-  return request<BoardResponse>("GET", "/api/board");
+  return request<BoardResponse>("GET", withRoot("/api/board"));
+}
+
+/** Repo discovery — always global (never itself root-scoped); the backend
+ * marks whichever entry is its own launch root with `current: true`. */
+export function getRepos(): Promise<ReposResponse> {
+  return request<ReposResponse>("GET", "/api/repos");
 }
 
 export function getSessions(): Promise<SessionsResponse> {
@@ -53,18 +87,20 @@ export function getSessions(): Promise<SessionsResponse> {
 }
 
 export function getCard(id: string): Promise<CardDetail> {
-  return request<CardDetail>("GET", `/api/card/${id}`);
+  return request<CardDetail>("GET", withRoot(`/api/card/${id}`));
 }
 
 export function setOrder(id: string, order: number): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/order`, { order });
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/order`), {
+    order,
+  });
 }
 
 export function setPriority(
   id: string,
   priority: string | null
 ): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/priority`, {
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/priority`), {
     priority,
   });
 }
@@ -73,38 +109,46 @@ export function setParent(
   id: string,
   parent: string | null
 ): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/parent`, { parent });
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/parent`), {
+    parent,
+  });
 }
 
 export function setDepends(
   id: string,
   body: DependsBody
 ): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/depends`, body);
+  return request<BoardResponse>(
+    "POST",
+    withRoot(`/api/card/${id}/depends`),
+    body
+  );
 }
 
 export function park(id: string): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/park`);
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/park`));
 }
 
 export function unpark(id: string): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/unpark`);
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/unpark`));
 }
 
 export function move(id: string, body: MoveBody): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/move`, body);
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/move`), body);
 }
 
 export function setThreshold(value: number): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", "/api/config/threshold", { value });
+  return request<BoardResponse>("POST", withRoot("/api/config/threshold"), {
+    value,
+  });
 }
 
 export function claimCard(id: string, sessionId: string): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/claim`, {
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/claim`), {
     session_id: sessionId,
   });
 }
 
 export function unclaimCard(id: string): Promise<BoardResponse> {
-  return request<BoardResponse>("POST", `/api/card/${id}/unclaim`);
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/unclaim`));
 }

@@ -4,6 +4,9 @@ import TileShell from "./TileShell";
 
 export interface EpicCardProps {
   card: BoardCard;
+  /** Lane-computed guild accent key (WF-028) — e.g. "backlog",
+   * "plan-review", "parked" — threaded through to `TileShell`'s chrome. */
+  accentKey?: string;
   expanded: boolean;
   onToggleExpand: (id: string) => void;
   dimmed?: boolean;
@@ -23,6 +26,7 @@ export interface EpicCardProps {
  */
 function EpicCard({
   card,
+  accentKey,
   expanded,
   onToggleExpand,
   dimmed = false,
@@ -35,6 +39,7 @@ function EpicCard({
   return (
     <TileShell
       card={card}
+      accentKey={accentKey}
       variantClassName="epic-card"
       dimmed={dimmed}
       highlighted={highlighted}

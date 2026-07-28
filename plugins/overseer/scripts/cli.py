@@ -1,13 +1,16 @@
 """Overseer ledger CLI — the interface the ledger skill drives.
 
 Single-writer by convention: only the orchestrating session calls this.
-Every mutation writes the card file first, then regenerates the index.
+Cards live in ``board.db`` (see ``scripts/db.py``); every mutation writes the
+card row first, then regenerates the ``ledger.md`` index view. Sprints,
+usage, and knowledge remain file-based under the ``.workflow/`` state root.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime
@@ -17,6 +20,7 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts import db, liveness  # noqa: E402
 from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
@@ -35,15 +39,8 @@ from scripts.sprints import (  # noqa: E402
     sprint_path,
 )
 from scripts.store import (  # noqa: E402
-    archive_card,
     derive_repo_label,
-    find_card_path,
     init_workflow,
-    load_archived_cards,
-    load_card,
-    load_live_cards,
-    mint_id,
-    save_card,
     state_root,
 )
 from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
@@ -60,6 +57,40 @@ from scripts.knowledge import (  # noqa: E402
     retire_fact_file,
     save_fact,
 )
+
+DEFAULT_TTL = 30  # minutes — TTL fallback for reclaim_stale when census is down
+
+_CONN_CACHE: dict[str, sqlite3.Connection] = {}
+
+
+def _conn(repo_root: Path) -> sqlite3.Connection:
+    """One cached ``board.db`` connection per resolved repo root, per process,
+    for this module's own card operations (every ``_load``/``_sync`` call
+    site, plus the direct ``db.*`` calls verbs make against a loaded card).
+
+    ``main()`` closes every cached connection in its ``finally``. This cache
+    does NOT cover the whole CLI invocation, though: the view modules
+    (``scripts.board``, ``scripts.index``, ``scripts.resume``) each open
+    their own short-lived ``db.connect(repo_root)`` connection by design —
+    they're read-mostly report builders, not part of the single-writer card
+    path this cache exists for. Those connections are plain locals with no
+    explicit ``close()``; CPython's refcounting closes them (via
+    ``sqlite3.Connection.__del__``) as soon as the enclosing function
+    returns and the reference drops.
+    """
+    key = str(repo_root.resolve())
+    conn = _CONN_CACHE.get(key)
+    if conn is None:
+        conn = db.connect(repo_root)
+        _CONN_CACHE[key] = conn
+    return conn
+
+
+def _close_conns() -> None:
+    for conn in _CONN_CACHE.values():
+        conn.close()
+    _CONN_CACHE.clear()
+
 
 CARD_BODY_TEMPLATE = """## Goal
 {goal}
@@ -175,37 +206,33 @@ def _sync(repo_root: Path, card: Card) -> None:
     """Write ordering per spec: card first, then the index view.
 
     Known multi-session limitation (spec-accepted YAGNI, no locking):
-    ``save_card`` rewrites the whole card file, so a hook racing another
+    ``save_card`` upserts the whole card row, so a hook racing another
     session's CLI verb against the same card is last-write-wins for the
     *entire* card, not just checklist rows.
     """
-    root = state_root(repo_root)
-    save_card(root, card)
+    db.save_card(_conn(repo_root), card)
     quarantined = rebuild_index(repo_root, repo_root.resolve().name, _now())
     _report_quarantined(quarantined)
 
 
 def _load(repo_root: Path, card_id: str) -> Card:
-    return load_card(find_card_path(state_root(repo_root), card_id))
+    card = db.load_card(_conn(repo_root), card_id)
+    if card is None:
+        raise FileNotFoundError(f"no card with id {card_id}")
+    return card
 
 
 def cmd_init(args: argparse.Namespace) -> int:
     init_workflow(args.root)
+    _conn(args.root)  # creates + one-time-imports the board.db
     rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"initialised {state_root(args.root)}")
     return 0
 
 
 def cmd_new_card(args: argparse.Namespace) -> int:
-    root = state_root(args.root)
-    card_id = args.jira or args.linear or mint_id(root)
-    try:
-        find_card_path(root, card_id)
-    except FileNotFoundError:
-        pass
-    else:
-        print(f"error: card {card_id} already exists", file=sys.stderr)
-        return 1
+    conn = _conn(args.root)
+    card_id = args.jira or args.linear or db.mint_id(conn)
     card = Card(
         id=card_id,
         title=args.title,
@@ -220,7 +247,16 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         repo=args.repo if args.repo else derive_repo_label(args.root),
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
-    _sync(args.root, card)
+    # Insert-only (not `_sync`'s upsert path): a plain existence check here
+    # would leave a TOCTOU window where two concurrent `new-card` calls that
+    # mint/target the same id both pass the check and one silently
+    # overwrites the other. `create_card` raises on the PK collision instead.
+    try:
+        db.create_card(conn, card)
+    except sqlite3.IntegrityError:
+        print(f"error: card {card_id} already exists", file=sys.stderr)
+        return 1
+    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
     print(card.id)
     return 0
 
@@ -254,8 +290,7 @@ def cmd_unblock(args: argparse.Namespace) -> int:
 def _close(args: argparse.Namespace, verb: str) -> int:
     card = _load(args.root, args.card_id)
     card.complete(_now()) if verb == "done" else card.abandon(_now())
-    root = state_root(args.root)
-    archive_card(root, card)
+    db.archive_card(_conn(args.root), card)
     rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"{card.id} {card.status}, archived")
     return 0
@@ -295,7 +330,7 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         if args.parent == "":
             card.parent = None
         else:
-            cards, _ = load_live_cards(state_root(args.root))
+            cards, _ = db.load_live_cards(_conn(args.root))
             if args.parent not in {c.id for c in cards}:
                 print(f"error: no live card {args.parent}", file=sys.stderr)
                 return 1
@@ -474,7 +509,7 @@ def _scan_for_card_id(repo_root: Path, task_id: str) -> str | None:
     ``CLAUDE_CODE_TASK_LIST_ID`` shares one list across sessions and
     eliminates the collision.
     """
-    cards, _ = load_live_cards(state_root(repo_root))
+    cards, _ = db.load_live_cards(_conn(repo_root))
     for card in cards:
         if any(entry.get("task") == task_id for entry in card.checklist):
             return card.id
@@ -573,7 +608,7 @@ def cmd_checklist_sync_hook(args: argparse.Namespace) -> int:
 
 def cmd_depends(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
-    cards, _ = load_live_cards(state_root(args.root))
+    cards, _ = db.load_live_cards(_conn(args.root))
     ids = {c.id for c in cards}
     if args.on:
         if args.on == args.card_id:
@@ -622,22 +657,70 @@ def cmd_claim(args: argparse.Namespace) -> int:
     and `--force` displaces a live holder too. Re-claiming by the same
     session that already holds it is treated as an ordinary (re-)stamp — no
     liveness check against itself.
+
+    The genuinely-unclaimed path (no prior holder at all) is the one case
+    where two sessions can race each other for the very same card: both may
+    observe `prior_holder is None` before either has written. That path uses
+    `db.claim_card(..., force=args.force)` — an atomic `UPDATE ... WHERE
+    claimed_by IS NULL` compare-and-swap when `--force` is not given — so
+    only one writer's UPDATE can land; the loser is told the card was
+    already claimed rather than silently overwriting the winner. Every other
+    branch below (self-restamp, live-displace, stale-displace) targets a
+    card this CLI invocation has already determined has a specific existing
+    `claimed_by` value it means to overwrite, so those keep the unconditional
+    `force=True` stamp — a `WHERE claimed_by IS NULL` guard would never match
+    and would wrongly report those as lost races.
     """
+    conn = _conn(args.root)
+    now = _now()
+    # Load the target FIRST: an unknown id must fail fast with
+    # "no card with id ..." without paying for the board-wide reclaim sweep
+    # below. Capture the prior holder before the sweep runs, since the sweep
+    # may itself clear this very card's stale claim — reading claimed_by
+    # afterwards would silently hide that a displacement happened.
     card = _load(args.root, args.card_id)
+    prior_holder = card.claimed_by
+    reclaimed = db.reclaim_stale(conn, liveness.live_session_ids(), DEFAULT_TTL, now)
     note = None
-    if card.claimed_by and card.claimed_by != args.session:
-        live = _census_session_live(card.claimed_by)
-        if live and not args.force:
+    if prior_holder and prior_holder != args.session:
+        if card.id in reclaimed:
+            # The sweep already cleared this claim as stale — no live check,
+            # no --force gate needed, just report the displacement.
+            live = False
+        else:
+            live = _census_session_live(prior_holder)
+            if live and not args.force:
+                print(
+                    f"error: {card.id} already claimed by {prior_holder} (live)"
+                    " — use --force to override",
+                    file=sys.stderr,
+                )
+                return 1
+        kind = "live" if live else "stale"
+        note = f"note: displaced {kind} claim held by {prior_holder}"
+        # A specific existing holder is being intentionally overwritten
+        # (displacement, already authorised above) — unconditional stamp.
+        db.claim_card(conn, card.id, args.session, now, force=True)
+    elif prior_holder == args.session:
+        # Idempotent re-stamp by the session that already holds it — also
+        # targets a non-NULL claimed_by, so this must stay unconditional too.
+        db.claim_card(conn, card.id, args.session, now, force=True)
+    else:
+        # Genuinely unclaimed (post-sweep): close the race window with an
+        # atomic compare-and-swap. `--force` always wins outright (matches
+        # its displace-a-live-holder semantics elsewhere); otherwise only one
+        # concurrent claimer's UPDATE can match `WHERE claimed_by IS NULL`.
+        won = db.claim_card(conn, card.id, args.session, now, force=args.force)
+        if not won:
+            current = db.load_card(conn, card.id)
+            holder = current.claimed_by if current else None
             print(
-                f"error: {card.id} already claimed by {card.claimed_by} (live)"
+                f"error: {card.id} already claimed by {holder}"
                 " — use --force to override",
                 file=sys.stderr,
             )
             return 1
-        kind = "live" if live else "stale"
-        note = f"note: displaced {kind} claim held by {card.claimed_by}"
-    card.claim(args.session, _now())
-    _sync(args.root, card)
+    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, now))
     if note:
         print(note)
     print(f"{card.id} claimed by {args.session}")
@@ -694,7 +777,7 @@ def _unacked_claims(repo_root: Path, session_id: str) -> list[Card]:
     """Live cards claimed by `session_id` and not yet acked, in the store's
     deterministic (id-sorted) order — the "first" claim for nudge purposes is
     whichever sorts first."""
-    cards, _ = load_live_cards(state_root(repo_root))
+    cards, _ = db.load_live_cards(_conn(repo_root))
     return [c for c in cards if c.claimed_by == session_id and not c.claim_acked]
 
 
@@ -826,7 +909,7 @@ def cmd_new_sprint(args: argparse.Namespace) -> int:
 def cmd_rollup_sprint(args: argparse.Namespace) -> int:
     root = state_root(args.root)
     sprint = load_sprint(sprint_path(root, args.sprint_id))
-    cards, quarantined = load_live_cards(root)
+    cards, quarantined = db.load_live_cards(_conn(args.root))
     _report_quarantined(quarantined)
     save_sprint(root, rollup(sprint, cards))
     print(f"{args.sprint_id} rolled up")
@@ -838,9 +921,9 @@ def cmd_set_sprint_status(args: argparse.Namespace) -> int:
     sprint = load_sprint(sprint_path(root, args.sprint_id))
     sprint.status = args.status
     if args.status == "closed":
-        live, quarantined = load_live_cards(root)
+        live, quarantined = db.load_live_cards(_conn(args.root))
         _report_quarantined(quarantined)
-        sprint = retro_rollup(sprint, live + load_archived_cards(root))
+        sprint = retro_rollup(sprint, live + db.load_archived_cards(_conn(args.root)))
     save_sprint(root, sprint)
     print(f"{sprint.id} → {args.status}")
     return 0
@@ -854,7 +937,7 @@ def cmd_rebuild_index(args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
-    _, quarantined = load_live_cards(state_root(args.root))
+    _, quarantined = db.load_live_cards(_conn(args.root))
     _report_quarantined(quarantined)
     entries = resume_entries(args.root, session_id=args.session_id)
     if args.json:
@@ -865,7 +948,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
 
 def cmd_conflicts(args: argparse.Namespace) -> int:
-    cards, quarantined = load_live_cards(state_root(args.root))
+    cards, quarantined = db.load_live_cards(_conn(args.root))
     _report_quarantined(quarantined)
     if args.sprint:
         cards = [c for c in cards if c.sprint == args.sprint]
@@ -905,15 +988,66 @@ def cmd_board(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_show(args: argparse.Namespace) -> int:
+def _read_repo_root_meta(db_path: Path) -> "str | None":
+    """Best-effort read-only peek at a board.db's ``meta['repo_root']`` for
+    the ``repos`` discovery verb. Opened read-only (``mode=ro``) so
+    discovery never creates, locks, or schema-touches a board it's merely
+    listing. Never raises — a corrupt, mid-write, or otherwise unreadable
+    board.db is simply skipped, same quarantine-safe spirit as the rest of
+    this module's report-building verbs.
+    """
     try:
-        card = _load(args.root, args.id)
-    except FileNotFoundError:
-        root = state_root(args.root)
-        matches = sorted((root / "archive" / "cards").glob(f"{args.id}-*.md"))
-        if not matches:
-            raise FileNotFoundError(f"no card with id {args.id}")
-        card = load_card(matches[0])
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        return None
+    try:
+        return db.get_meta(conn, "repo_root")
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def cmd_repos(args: argparse.Namespace) -> int:
+    """`overseer repos --json` — enumerate every discoverable board at
+    `$CLAUDE_CONFIG_DIR/overseer/*/board.db` (one per repo, per the
+    per-repo board.db migration). Powers the dashboard's repo switcher.
+
+    A board is skipped when its `meta['repo_root']` is missing/None (an
+    older board, or one whose repo_root was never derivable — e.g. no git)
+    or when that recorded root no longer exists on disk (repo deleted or
+    moved since the board was written). Output is a JSON list of
+    `{"label": ..., "root": ...}`, sorted by label.
+    """
+    config_dir = db._config_dir()
+    overseer_dir = config_dir / "overseer"
+    results: list[dict[str, str]] = []
+    if overseer_dir.is_dir():
+        for label_dir in overseer_dir.iterdir():
+            if not label_dir.is_dir():
+                continue
+            db_path = label_dir / "board.db"
+            if not db_path.is_file():
+                continue
+            root_str = _read_repo_root_meta(db_path)
+            if not root_str:
+                continue
+            if not Path(root_str).exists():
+                continue
+            results.append({"label": label_dir.name, "root": root_str})
+    results.sort(key=lambda r: r["label"])
+    if args.json:
+        print(json.dumps(results))
+    else:
+        for r in results:
+            print(f"{r['label']}: {r['root']}")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    # db.load_card already spans both live and archived rows, so a single
+    # `_load` covers what used to be a live lookup plus an archive-dir glob.
+    card = _load(args.root, args.id)
     data = {
         "id": card.id,
         "title": card.title,
@@ -990,7 +1124,7 @@ def cmd_usage(args: argparse.Namespace) -> int:
 
 
 def cmd_calibration(args: argparse.Namespace) -> int:
-    cards = load_archived_cards(state_root(args.root))
+    cards = db.load_archived_cards(_conn(args.root))
     report = calibrate(cards)
     if args.json:
         print(json.dumps(report, indent=2))
@@ -1248,6 +1382,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_show)
 
+    p = sub.add_parser("repos")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_repos)
+
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")
     p.add_argument(
@@ -1307,6 +1445,8 @@ def main(argv: list[str] | None = None) -> int:
     except (CardParseError, FactParseError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        _close_conns()
 
 
 if __name__ == "__main__":

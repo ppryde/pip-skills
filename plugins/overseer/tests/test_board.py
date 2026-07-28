@@ -1,7 +1,8 @@
 
 import pytest
 
-from scripts.store import init_workflow, save_card, archive_card, workflow_root
+from scripts import db
+from scripts.store import init_workflow, workflow_root
 from tests.factories import make_card, git_init
 
 
@@ -13,6 +14,11 @@ def repo(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def conn(repo):
+    return db.connect(repo)
+
+
 class TestBoardData:
     def test_empty(self, repo):
         from scripts.board import board_data
@@ -22,19 +28,18 @@ class TestBoardData:
         assert data["sprints"] == []
         assert data["quarantined"] == []
 
-    def test_archived_done_child_counts_in_rollup(self, repo):
+    def test_archived_done_child_counts_in_rollup(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         # Create parent
         parent = make_card("WF-001", title="Epic", status="in-flight", parent=None)
         # Create children
         child1 = make_card("WF-002", title="Child 1", status="in-flight", parent="WF-001")
         child2 = make_card("WF-003", title="Child 2", status="done", parent="WF-001")
-        save_card(root, parent)
-        save_card(root, child1)
-        save_card(root, child2)
+        db.save_card(conn, parent)
+        db.save_card(conn, child1)
+        db.save_card(conn, child2)
         # Archive child2 (mark as done)
-        archive_card(root, child2)
+        db.archive_card(conn, child2)
 
         data = board_data(repo)
         cards_by_id = {c["id"]: c for c in data["cards"]}
@@ -45,36 +50,33 @@ class TestBoardData:
         assert rollup["total"] == 2
         assert rollup["done"] == 1
 
-    def test_non_epic_has_no_rollup(self, repo):
+    def test_non_epic_has_no_rollup(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         card = make_card("WF-001", title="Standalone", parent=None)
-        save_card(root, card)
+        db.save_card(conn, card)
 
         data = board_data(repo)
         cards_by_id = {c["id"]: c for c in data["cards"]}
         assert cards_by_id["WF-001"]["is_epic"] is False
         assert cards_by_id["WF-001"]["rollup"] is None
 
-    def test_dependent_ready_when_dep_done(self, repo):
+    def test_dependent_ready_when_dep_done(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         dep = make_card("WF-001", title="Dependency", status="done")
         dependent = make_card("WF-002", title="Dependent", depends_on=["WF-001"])
-        save_card(root, dep)
-        save_card(root, dependent)
+        db.save_card(conn, dep)
+        db.save_card(conn, dependent)
 
         data = board_data(repo)
         cards_by_id = {c["id"]: c for c in data["cards"]}
         assert cards_by_id["WF-002"]["ready"] is True
 
-    def test_dependent_not_ready_when_dep_not_done(self, repo):
+    def test_dependent_not_ready_when_dep_not_done(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         dep = make_card("WF-001", title="Dependency", status="in-flight")
         dependent = make_card("WF-002", title="Dependent", depends_on=["WF-001"])
-        save_card(root, dep)
-        save_card(root, dependent)
+        db.save_card(conn, dep)
+        db.save_card(conn, dependent)
 
         data = board_data(repo)
         cards_by_id = {c["id"]: c for c in data["cards"]}
@@ -107,23 +109,22 @@ Test sprint."""
         assert s["budget"]["estimate"] == 100_000
         assert s["budget"]["actual"] == 50_000
 
-    def test_quarantined_cards_and_sprints(self, repo):
+    def test_quarantined_sprints(self, repo):
+        """Cards no longer quarantine at this layer — board.db rows are
+        always structurally valid, so ``board_data``'s ``quarantined`` list
+        can only ever carry corrupt SPRINT files now (sprints stay
+        file-based)."""
         from scripts.board import board_data
         root = workflow_root(repo)
-        # Create a corrupt card file
-        (root / "cards" / "WF-999-bad.md").write_text("garbage")
-        # Create a corrupt sprint file
         (root / "sprints" / "corrupt-sprint.md").write_text("garbage")
 
         data = board_data(repo)
-        assert len(data["quarantined"]) == 2
+        assert len(data["quarantined"]) == 1
         quarantined_names = {p.split("/")[-1] for p in data["quarantined"]}
-        assert "WF-999-bad.md" in quarantined_names
         assert "corrupt-sprint.md" in quarantined_names
 
-    def test_card_fields_in_json(self, repo):
+    def test_card_fields_in_json(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         card = make_card(
             "WF-001",
             title="Test Card",
@@ -138,7 +139,7 @@ Test sprint."""
             budget_estimate=100_000,
             budget_actual=50_000,
         )
-        save_card(root, card)
+        db.save_card(conn, card)
 
         data = board_data(repo)
         assert len(data["cards"]) == 1
@@ -160,46 +161,42 @@ Test sprint."""
         assert c["rollup"] is None
         assert c["checklist"] == []
 
-    def test_checklist_passed_through(self, repo):
+    def test_checklist_passed_through(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         checklist = [
             {"task": "1", "subject": "write tests", "status": "in_progress"},
             {"task": "2", "subject": "implement", "status": "pending"},
         ]
         card = make_card("WF-001", checklist=checklist)
-        save_card(root, card)
+        db.save_card(conn, card)
 
         data = board_data(repo)
         c = data["cards"][0]
         assert c["checklist"] == checklist
 
-    def test_repo_passed_through(self, repo):
+    def test_repo_passed_through(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         card = make_card("WF-001", repo="pip-skills")
-        save_card(root, card)
+        db.save_card(conn, card)
 
         data = board_data(repo)
         c = data["cards"][0]
         assert c["repo"] == "pip-skills"
 
-    def test_repo_defaults_none(self, repo):
+    def test_repo_defaults_none(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
-        save_card(root, make_card("WF-001"))
+        db.save_card(conn, make_card("WF-001"))
 
         data = board_data(repo)
         assert data["cards"][0]["repo"] is None
 
-    def test_claim_fields_passed_through(self, repo):
+    def test_claim_fields_passed_through(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         card = make_card(
             "WF-001", claimed_by="sess-1", claimed_at="2026-07-13T10:00",
             claim_acked=True,
         )
-        save_card(root, card)
+        db.save_card(conn, card)
 
         data = board_data(repo)
         c = data["cards"][0]
@@ -207,10 +204,9 @@ Test sprint."""
         assert c["claimed_at"] == "2026-07-13T10:00"
         assert c["claim_acked"] is True
 
-    def test_claim_fields_default_unclaimed(self, repo):
+    def test_claim_fields_default_unclaimed(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
-        save_card(root, make_card("WF-001"))
+        db.save_card(conn, make_card("WF-001"))
 
         data = board_data(repo)
         c = data["cards"][0]
@@ -218,26 +214,24 @@ Test sprint."""
         assert c["claimed_at"] is None
         assert c["claim_acked"] is False
 
-    def test_cards_sorted_by_id(self, repo):
+    def test_cards_sorted_by_id(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         for i in [3, 1, 2]:
             card = make_card(f"WF-{i:03d}", title=f"Card {i}")
-            save_card(root, card)
+            db.save_card(conn, card)
 
         data = board_data(repo)
         ids = [c["id"] for c in data["cards"]]
         assert ids == ["WF-001", "WF-002", "WF-003"]
 
-    def test_budget_raw_ints_not_formatted(self, repo):
+    def test_budget_raw_ints_not_formatted(self, repo, conn):
         from scripts.board import board_data
-        root = workflow_root(repo)
         card = make_card(
             "WF-001",
             budget_estimate=2_100_000,
             budget_actual=840_000,
         )
-        save_card(root, card)
+        db.save_card(conn, card)
 
         data = board_data(repo)
         c = data["cards"][0]

@@ -2,6 +2,7 @@
 import subprocess
 from pathlib import Path
 
+from scripts import db
 from scripts.models import Card
 
 
@@ -19,3 +20,9 @@ def git_init(path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+
+
+def db_repo(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    return tmp_path, db.connect(tmp_path, migrate=False)

@@ -2,13 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCard } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+import type { PartyMember } from "../board/party";
+import { accentKeyForCard, bannerLabelForCard } from "../board/cardAccent";
+import { rarityStars } from "../board/rarityStars";
+import { parseProgressLog } from "../board/progressLog";
+import { ACCENT_GROUPS } from "../board/avatarAccent";
 import BudgetMeter from "./BudgetMeter";
+import DependencyBadge from "./DependencyBadge";
 import ClaimControl from "./ClaimControl";
 import PrioritySelect from "./PrioritySelect";
 import LinkEditor from "./LinkEditor";
 import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
 import ChecklistRows from "./ChecklistRows";
+import PartyAvatar from "./PartyAvatar";
+import { StarIcon } from "./icons";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -19,6 +27,11 @@ export interface CardDetailDrawerProps {
   /** All card ids on the board — threaded down to LinkEditor for its
    * parent/dependency option lists (see wf005-c6-brief.md). */
   allCardIds: string[];
+  /** The shared session<->card join (App.tsx) — the drawer is a fourth
+   * CONSUMER of this one array, never its own poll (WF-030 Decisions).
+   * Resolved against `detail.claimed_by` to render the hero chip's
+   * PartyAvatar + class; ClaimControl's independent poll is unrelated. */
+  party: PartyMember[];
 }
 
 /**
@@ -74,6 +87,7 @@ function CardDetailDrawer({
   mutate,
   inFlight,
   allCardIds,
+  party,
 }: CardDetailDrawerProps) {
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -147,6 +161,21 @@ function CardDetailDrawer({
   if (cardId === null) return null;
 
   const sectionEntries = detail ? orderedSectionEntries(detail.sections) : [];
+  const accentKey = detail ? accentKeyForCard(detail) : "";
+  const bannerLabel = detail ? bannerLabelForCard(detail) : "";
+  const stars = detail ? rarityStars(detail.complexity) : 0;
+  const heroSession = detail?.claimed_by
+    ? party.find((p) => p.session.id === detail.claimed_by)?.session
+    : undefined;
+  // Journey progress (HANDOFF): % over the FULL checklist, same derivation
+  // as WF-028's board-tile progress bar — the drawer never windows its
+  // checklist to begin with, so there's no wrong-source slice to guard
+  // against here, just the same done/total math.
+  const checklistTotal = detail?.checklist.length ?? 0;
+  const checklistDone =
+    detail?.checklist.filter((e) => e.status === "completed").length ?? 0;
+  const journeyPct =
+    checklistTotal > 0 ? Math.round((checklistDone / checklistTotal) * 100) : 0;
 
   return (
     <div className="drawer-overlay" data-testid="drawer-overlay" onClick={onClose}>
@@ -175,10 +204,35 @@ function CardDetailDrawer({
         {!loading && !error && detail && (
           <>
             <header className="card-drawer__header">
-              <span className="card-drawer__id">{detail.id}</span>
+              <div className="card-drawer__banner-row">
+                <span
+                  className={`card-drawer__banner card-drawer__banner--${accentKey}`}
+                >
+                  {bannerLabel}
+                </span>
+                <span className="card-drawer__id">{detail.id}</span>
+                {stars > 0 && (
+                  <span className="card-drawer__stars" aria-hidden="true">
+                    {[0, 1, 2].map((i) => (
+                      <StarIcon
+                        key={i}
+                        filled={i < stars}
+                        className={
+                          "card-drawer__star " +
+                          (i < stars
+                            ? "card-drawer__star--filled"
+                            : "card-drawer__star--empty")
+                        }
+                      />
+                    ))}
+                  </span>
+                )}
+              </div>
               <h2 className="card-drawer__title">{detail.title}</h2>
               <div className="card-drawer__facts">
-                <span className="card-drawer__status-fact">
+                <span
+                  className={`card-drawer__status-fact card-drawer__status-fact--${accentKey}`}
+                >
                   {detail.status}
                   {detail.stage ? ` · ${detail.stage}` : ""}
                 </span>
@@ -191,6 +245,27 @@ function CardDetailDrawer({
                   onMutated={refetchDetail}
                 />
                 <BudgetMeter budget={detail.budget} />
+                {detail.claimed_by && (
+                  <span
+                    className="card-drawer__hero-chip"
+                    title={detail.claimed_by}
+                  >
+                    {/* Stale-evicted edge (Decisions): claimed_by can outlive
+                        the session's presence in the shared party poll — the
+                        chip still renders, just without an avatar/class. */}
+                    {heroSession && (
+                      <PartyAvatar session={heroSession} size={20} />
+                    )}
+                    <span className="card-drawer__hero-name">
+                      {heroSession?.session_name || detail.claimed_by}
+                    </span>
+                    {heroSession?.model && (
+                      <span className="card-drawer__hero-class">
+                        {heroSession.model}
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
             </header>
 
@@ -220,13 +295,63 @@ function CardDetailDrawer({
               />
             </div>
 
-            {detail.checklist.length > 0 && (
-              <section className="card-drawer__checklist">
-                <h3 className="card-drawer__section-heading">Tasks</h3>
-                <ChecklistRows entries={detail.checklist} />
-              </section>
+            {/* Journey progress + Sub-quests panel + Locked-behind pill:
+                Quest view ONLY (HANDOFF's two-mutually-exclusive-panels
+                model — Scroll shows the markdown card alone; the checklist
+                is display-only, so there's no interactivity reason to keep
+                it mounted under Scroll). The tab bar itself stays outside
+                this swap, below. */}
+            {view === "rendered" && (
+              <>
+                {detail.checklist.length > 0 && (
+                  <>
+                    {/* Journey progress (HANDOFF: Quest tab, above the
+                        sub-quests panel; hidden with the whole block when
+                        there's no checklist). */}
+                    <div className="card-drawer__journey">
+                      <div className="card-drawer__journey-label">
+                        Journey progress
+                      </div>
+                      <div
+                        className="card-drawer__journey-track"
+                        data-progress-pct={journeyPct}
+                      >
+                        <div
+                          className={`card-drawer__journey-fill card-drawer__journey-fill--${accentKey}`}
+                          style={{ width: `${journeyPct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <section className="card-drawer__checklist">
+                      <div className="card-drawer__checklist-header">
+                        <h3 className="card-drawer__section-heading">
+                          Sub-quests
+                        </h3>
+                        <span className="card-drawer__checklist-count">
+                          {checklistDone} / {checklistTotal}
+                        </span>
+                      </div>
+                      <ChecklistRows entries={detail.checklist} />
+                    </section>
+                  </>
+                )}
+
+                {/* Locked-behind pill (HANDOFF: Quest tab, after the
+                    sub-quests panel — NOT the header meta row, see chunk
+                    2's Decisions). Independent of the checklist's own
+                    presence: a card can be blocked on a dependency with
+                    zero sub-quests. DependencyBadge self-gates (renders
+                    nothing when ready or dep-less), same unconditional-
+                    render usage as TileShell's board-tile footer. */}
+                <div className="card-drawer__locked">
+                  <DependencyBadge card={detail} />
+                </div>
+              </>
             )}
 
+            {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
+                view state stays "rendered"/"source" (aria-pressed/state
+                mechanics byte-identical); only the VISIBLE labels changed. */}
             <div
               className="card-drawer__viewtoggle"
               role="group"
@@ -237,28 +362,66 @@ function CardDetailDrawer({
                 aria-pressed={view === "rendered"}
                 onClick={() => setView("rendered")}
               >
-                Rendered
+                Quest
               </button>
               <button
                 type="button"
                 aria-pressed={view === "source"}
                 onClick={() => setView("source")}
               >
-                Source
+                Scroll <span className="card-drawer__md-badge">MD</span>
               </button>
             </div>
             <div className="card-drawer__body">
               {view === "source" ? (
                 <pre className="card-drawer__source" data-testid="card-source">{detail.body}</pre>
               ) : sectionEntries.length > 0 ? (
-                sectionEntries.map(([heading, text]) => (
-                  <section key={heading} className="card-drawer__section">
-                    <h3 className="card-drawer__section-heading">
-                      {sectionLabel(heading)}
-                    </h3>
-                    <MarkdownView text={text} />
-                  </section>
-                ))
+                sectionEntries.map(([heading, text]) => {
+                  // Quest-log timeline (WF-030 chunk 9, stretch) — "##
+                  // Progress log" only, and only when it parses cleanly
+                  // (parseProgressLog returns null rather than a partial
+                  // list on any malformed line — see its doc comment).
+                  // Every other section, and a Progress log that doesn't
+                  // parse, renders through the existing MarkdownView path
+                  // unchanged.
+                  const progressEntries =
+                    heading === "## Progress log"
+                      ? parseProgressLog(text)
+                      : null;
+                  return (
+                    <section key={heading} className="card-drawer__section">
+                      <h3 className="card-drawer__section-heading">
+                        {sectionLabel(heading)}
+                      </h3>
+                      {progressEntries ? (
+                        <ol className="card-drawer__quest-log">
+                          {progressEntries.map((entry, i) => (
+                            <li
+                              key={i}
+                              className={
+                                "card-drawer__quest-log-entry card-drawer__quest-log-entry--" +
+                                ACCENT_GROUPS[i % ACCENT_GROUPS.length]
+                              }
+                            >
+                              <span
+                                className="card-drawer__quest-log-dot"
+                                aria-hidden="true"
+                              />
+                              <span className="card-drawer__quest-log-text">
+                                {entry.note}
+                              </span>
+                              <span className="card-drawer__quest-log-stamp">
+                                {entry.timestamp}
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <MarkdownView text={text} />
+                      )}
+                    </section>
+                  );
+                })
               ) : (
                 <MarkdownView text={detail.body} />
               )}

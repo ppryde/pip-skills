@@ -323,3 +323,78 @@ describe("TileShell checklist focus window", () => {
     );
   });
 });
+
+describe("TileShell in-flight progress bar (WF-028 chunk 5)", () => {
+  function renderInFlight(checklist: BoardCard["checklist"]) {
+    const c = card({
+      id: "WF-PROG",
+      title: "In flight",
+      status: "in-flight",
+      stage: "implementation",
+      checklist,
+    });
+    return render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} />
+        </SortableContext>
+      </DndContext>
+    );
+  }
+
+  it("renders no progress bar when the checklist is empty", () => {
+    const { container } = renderInFlight([]);
+    expect(container.querySelector(".card-tile__progress")).toBeNull();
+  });
+
+  it("renders no progress bar for a non-in-flight status even with a checklist", () => {
+    const c = card({
+      id: "WF-PROG-PLANNED",
+      status: "planned",
+      checklist: [{ task: "1", subject: "A", status: "pending" }],
+    });
+    const { container } = render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} />
+        </SortableContext>
+      </DndContext>
+    );
+    expect(container.querySelector(".card-tile__progress")).toBeNull();
+  });
+
+  it("computes the percentage from the FULL checklist, not the windowed 3-row slice", () => {
+    // 8 entries: 2 completed, 1 in_progress (the wheel's active row), 5
+    // pending. The 3-row window centres on the active (in_progress) entry,
+    // so its own done/total ratio (1/3 -> 33%) differs from the true
+    // full-checklist ratio (2/8 -> 25%) — a same-shaped-array wrong-source
+    // trap the two computations must NOT share.
+    const checklist = Array.from({ length: 8 }, (_, i) => ({
+      task: String(i + 1),
+      subject: `Task ${i + 1}`,
+      status: i < 2 ? "completed" : i === 2 ? "in_progress" : "pending",
+    }));
+    const { container } = renderInFlight(checklist);
+    const bar = container.querySelector(".card-tile__progress");
+    expect(bar).not.toBeNull();
+    expect(bar).toHaveAttribute("data-progress-pct", "25");
+  });
+
+  it("shows 0% for an all-pending checklist and 100% for an all-completed one", () => {
+    const { container: c0 } = renderInFlight([
+      { task: "1", subject: "A", status: "pending" },
+      { task: "2", subject: "B", status: "pending" },
+    ]);
+    expect(
+      c0.querySelector(".card-tile__progress")
+    ).toHaveAttribute("data-progress-pct", "0");
+
+    const { container: c100 } = renderInFlight([
+      { task: "1", subject: "A", status: "completed" },
+      { task: "2", subject: "B", status: "completed" },
+    ]);
+    expect(
+      c100.querySelector(".card-tile__progress")
+    ).toHaveAttribute("data-progress-pct", "100");
+  });
+});

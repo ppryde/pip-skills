@@ -12,7 +12,7 @@
  * scaffold for later chunks to call.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getBoard } from "../api/client";
+import { getBoard, setActiveRoot } from "../api/client";
 import type { Board, BoardResponse, Context, Limits } from "../api/types";
 
 /** Background poll cadence — paused while a drag or mutation is in flight. */
@@ -32,15 +32,30 @@ export interface UseBoardResult {
    *  state) so the setInterval tick always reads the latest value without
    *  needing to be re-created every render. */
   setDragActive: (active: boolean) => void;
+  /** WF-029: when the last successful `applyResponse` landed (manual load,
+   *  refresh, silent poll, or mutate — any of them count as "fresh data").
+   *  Feeds TopBar's subtitle timestamp; null until the first load resolves. */
+  lastRefreshedAt: Date | null;
 }
 
-export function useBoard(): UseBoardResult {
+/**
+ * `root` (WF-030 repo selector) is the currently-selected repo's root path,
+ * or `null` to use the dashboard's own launch root (the pre-selector
+ * default). Passing it here — rather than threading it through every
+ * mutate() call site across the tree — keeps the repo selection a single
+ * App-level concern: `setActiveRoot` is called synchronously at the START
+ * of the SAME effect that fires the mount/root-change fetch, so by the time
+ * that fetch's `getBoard()` call builds its URL, `api/client`'s module-level
+ * root is already correct — no cross-effect race.
+ */
+export function useBoard(root: string | null = null): UseBoardResult {
   const [board, setBoard] = useState<Board | null>(null);
   const [context, setContext] = useState<Context | null>(null);
   const [limits, setLimits] = useState<Limits>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   // Monotonic counter: each request gets an issued id; a response is only
   // applied if its id is still the latest issued when it resolves.
@@ -65,6 +80,7 @@ export function useBoard(): UseBoardResult {
     setBoard(res.board);
     setContext(res.context);
     setLimits(res.limits);
+    setLastRefreshedAt(new Date());
   }, []);
 
   // `silent` is for the background poll: it still goes through the SAME
@@ -111,10 +127,15 @@ export function useBoard(): UseBoardResult {
     [applyResponse]
   );
 
+  // Re-fires on mount AND whenever the selected repo root changes — setting
+  // the module-level active root FIRST (synchronously, before `load()`) so
+  // this fetch (and every one after it, until the next change) targets the
+  // newly-selected repo.
   useEffect(() => {
+    setActiveRoot(root);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [root]);
 
   const refresh = useCallback(async () => {
     await load();
@@ -173,5 +194,6 @@ export function useBoard(): UseBoardResult {
     refresh,
     mutate,
     setDragActive,
+    lastRefreshedAt,
   };
 }

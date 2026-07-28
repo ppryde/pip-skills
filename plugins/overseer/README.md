@@ -35,6 +35,11 @@ adversarial review loops, integrated with sprint planning and superpowers.
   orchestrator caps its own context creep by handing its ledger rollup to vigil,
   which resets context in-process via `/clear` and re-injects the handover.
   Install `vigil` to enable it; overseer nudges you if it's missing.
+- Card board storage: cards persist in a single SQLite `board.db` per repo, at
+  `$CLAUDE_CONFIG_DIR/overseer/<repo-label>/board.db` — shared across every
+  worktree of that repo, so claims are atomic across worktrees instead of
+  racing on separate `.workflow/` file trees. Sprints, usage and knowledge
+  remain file-based under `.workflow/` pending a follow-on migration.
 
 ## Skills
 

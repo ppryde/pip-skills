@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scripts import db
 from scripts.relations import epic_rollup, is_epic, is_ready
 from scripts.sprints import load_sprints
-from scripts.store import load_archived_cards, load_live_cards, state_root
+from scripts.store import state_root
 
 
 def board_data(repo_root: Path) -> dict:
@@ -50,10 +51,10 @@ def board_data(repo_root: Path) -> dict:
             "quarantined": [str],  # Paths to quarantined cards and sprints
         }
     """
-    root = state_root(repo_root)
-    live_cards, card_quarantined = load_live_cards(root)
-    archived_cards = load_archived_cards(root)
-    sprints, sprint_quarantined = load_sprints(root)
+    conn = db.connect(repo_root)
+    live_cards, card_quarantined = db.load_live_cards(conn)
+    archived_cards = db.load_archived_cards(conn)
+    sprints, sprint_quarantined = load_sprints(state_root(repo_root))
 
     # Pool = live + archived for ALL relation computes
     pool = live_cards + archived_cards

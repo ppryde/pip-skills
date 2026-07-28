@@ -1,5 +1,6 @@
 import type { Budget } from "../api/types";
 import { formatTokens } from "../board/formatTokens";
+import { CoinIcon } from "./icons";
 
 export interface BudgetMeterProps {
   budget: Budget;
@@ -20,6 +21,7 @@ function BudgetMeter({ budget }: BudgetMeterProps) {
       className={`budget-meter${tripwire ? " budget-meter--tripwire" : ""}`}
       data-tripwire={tripwire || undefined}
     >
+      <CoinIcon className="budget-meter__coin" aria-hidden="true" />
       <span
         className="budget-meter__value"
         title={estimate !== null ? `${actual} / ${estimate}` : `${actual}`}

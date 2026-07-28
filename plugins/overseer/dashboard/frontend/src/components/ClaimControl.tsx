@@ -19,8 +19,8 @@ export interface ClaimControlProps {
  * "Assign to session" drawer control (design spec §5). The board/card-detail
  * payload only carries `claimed_by` (a bare census session_id) — it has no
  * session data of its own, so this component fetches+polls `getSessions()`
- * itself, mirroring SessionsPanel's self-contained fetch pattern rather than
- * threading sessions down from a shared source. Unassigned: a select of
+ * itself, a self-contained fetch pattern deliberately independent of the
+ * shared useSessions() poll (see that hook's doc comment). Unassigned: a select of
  * LIVE (non-stale) sessions plus an Assign button. Claimed: the holder's
  * label (session_name if that session is still present in the live poll,
  * else the raw session id) dimmed when the holder has gone stale, plus an
@@ -45,7 +45,7 @@ function ClaimControl({
         const res = await getSessions();
         if (!cancelled) setSessions(res.sessions);
       } catch {
-        // Silently swallow — mirrors SessionsPanel, leaves prior state put.
+        // Silently swallow — leaves prior state put.
       }
     }
 

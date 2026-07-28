@@ -6,6 +6,7 @@ from scripts.models import Card
 from scripts.store import (
     archive_card,
     derive_repo_label,
+    derive_repo_root,
     find_card_path,
     init_workflow,
     load_archived_cards,
@@ -218,3 +219,40 @@ class TestDeriveRepoLabel:
 
     def test_missing_dir_returns_none(self, tmp_path):
         assert derive_repo_label(tmp_path / "does-not-exist") is None
+
+
+class TestDeriveRepoRoot:
+    def test_main_repo_resolves_to_its_own_path(self, tmp_path):
+        main_repo = tmp_path / "pip-skills"
+        main_repo.mkdir()
+        _git_init(main_repo)
+        assert derive_repo_root(main_repo) == main_repo.resolve()
+
+    def test_worktree_resolves_to_main_repo_root_not_worktree_path(self, tmp_path):
+        """Mirrors TestDeriveRepoLabel's worktree case: a board.db opened
+        from a linked worktree must record the MAIN repo's root path, so
+        every worktree of the same repo writes the same `repo_root` value."""
+        main_repo = tmp_path / "pip-skills"
+        main_repo.mkdir()
+        _git_init(main_repo)
+        (main_repo / "README.md").write_text("x")
+        subprocess.run(["git", "add", "."], cwd=main_repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=main_repo, check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "branch", "wt-branch"], cwd=main_repo, check=True)
+
+        worktree_dir = tmp_path / "totally-unrelated-worktree-name"
+        subprocess.run(
+            ["git", "worktree", "add", str(worktree_dir), "wt-branch"],
+            cwd=main_repo, check=True, capture_output=True,
+        )
+
+        assert derive_repo_root(worktree_dir) == main_repo.resolve()
+
+    def test_non_git_dir_returns_none(self, tmp_path):
+        assert derive_repo_root(tmp_path) is None
+
+    def test_missing_dir_returns_none(self, tmp_path):
+        assert derive_repo_root(tmp_path / "does-not-exist") is None

@@ -1,7 +1,8 @@
 import subprocess
 
+from scripts import db
 from scripts.resume import _branch_exists, format_report, resume_entries
-from scripts.store import init_workflow, save_card
+from scripts.store import init_workflow
 from tests.factories import git_init
 from tests.factories import make_card as _make_card
 
@@ -35,21 +36,21 @@ class TestBranchExists:
 
 class TestResumeEntries:
     def test_reports_in_flight_and_blocked_only(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001"))
-        save_card(root, card("WF-002", status="blocked", blocked_on="user: q"))
-        save_card(root, card("WF-003", status="planned", stage=None))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001"))
+        db.save_card(conn, card("WF-002", status="blocked", blocked_on="user: q"))
+        db.save_card(conn, card("WF-003", status="planned", stage=None))
         entries = resume_entries(tmp_path)
         assert [e["id"] for e in entries] == ["WF-001", "WF-002"]
         assert entries[1]["blocked_on"] == "user: q"
 
     def test_review_round_and_worktree_check(self, tmp_path):
-        root = init_workflow(tmp_path)
+        conn = db.connect(tmp_path)
         c = card("WF-001", stage="impl-review", worktree="wt/WF-001",
                  budget_estimate=400_000, budget_actual=310_000)
         c.log_review("impl-review", 2, "found wanting", NOW)
         c.log_review("impl-review", 2, "found wanting", NOW)
-        save_card(root, c)
+        db.save_card(conn, c)
         (tmp_path / "wt" / "WF-001").mkdir(parents=True)
         entry = resume_entries(tmp_path)[0]
         assert entry["round"] == 2
@@ -57,8 +58,8 @@ class TestResumeEntries:
         assert entry["budget"] == "310k/400k"
 
     def test_missing_worktree_flagged(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", worktree="gone/away"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", worktree="gone/away"))
         assert resume_entries(tmp_path)[0]["worktree_exists"] is False
 
 
@@ -67,38 +68,36 @@ class TestFormatReport:
         assert "clean slate" in format_report([])
 
     def test_lines(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", stage="verification"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", stage="verification"))
         report = format_report(resume_entries(tmp_path))
         assert "WF-001" in report and "verification" in report
 
 
 class TestPrInResume:
     def test_entry_carries_pr(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", stage="awaiting-merge",
-                             pr="https://github.com/x/y/pull/9"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", stage="awaiting-merge",
+                                 pr="https://github.com/x/y/pull/9"))
         entry = resume_entries(tmp_path)[0]
         assert entry["pr"] == "https://github.com/x/y/pull/9"
 
     def test_report_shows_pr(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", stage="awaiting-merge",
-                             pr="https://github.com/x/y/pull/9"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", stage="awaiting-merge",
+                                 pr="https://github.com/x/y/pull/9"))
         assert "PR: https://github.com/x/y/pull/9" in format_report(resume_entries(tmp_path))
 
 
 class TestEnrichedHandoff:
     def test_notes_absent_by_default(self, tmp_path):
         from scripts.resume import handoff_report
-        from scripts.store import init_workflow
 
         init_workflow(tmp_path)
         assert "## Orchestrator notes" not in handoff_report(tmp_path)
 
     def test_notes_embedded_verbatim(self, tmp_path):
         from scripts.resume import handoff_report
-        from scripts.store import init_workflow
 
         init_workflow(tmp_path)
         report = handoff_report(tmp_path, notes="Watch the flaky auth test on WF-002.")
@@ -110,42 +109,34 @@ class TestEnrichedHandoff:
 
 class TestResumeRelations:
     def test_entry_carries_relations_and_readiness(self, tmp_path):
-        from scripts.store import init_workflow, save_card
         from scripts.resume import resume_entries
-        from tests.factories import make_card
-        root = init_workflow(tmp_path)
-        save_card(root, make_card("WF-002", status="in-flight"))
-        save_card(root, make_card("WF-001", status="in-flight",
-                                  parent="WF-000", depends_on=["WF-002"]))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, _make_card("WF-002", status="in-flight"))
+        db.save_card(conn, _make_card("WF-001", status="in-flight",
+                                       parent="WF-000", depends_on=["WF-002"]))
         entry = next(e for e in resume_entries(tmp_path) if e["id"] == "WF-001")
         assert entry["parent"] == "WF-000"
         assert entry["depends_on"] == ["WF-002"]
         assert entry["ready"] is False  # WF-002 not done
 
     def test_report_shows_waiting(self, tmp_path):
-        from scripts.store import init_workflow, save_card
         from scripts.resume import resume_entries, format_report
-        from tests.factories import make_card
-        root = init_workflow(tmp_path)
-        save_card(root, make_card("WF-002", status="in-flight"))
-        save_card(root, make_card("WF-001", status="in-flight", depends_on=["WF-002"]))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, _make_card("WF-002", status="in-flight"))
+        db.save_card(conn, _make_card("WF-001", status="in-flight", depends_on=["WF-002"]))
         assert "waiting on WF-002" in format_report(resume_entries(tmp_path))
 
     def test_handoff_has_parked_section(self, tmp_path):
-        from scripts.store import init_workflow, save_card
         from scripts.resume import handoff_report
-        from tests.factories import make_card
-        root = init_workflow(tmp_path)
-        save_card(root, make_card("WF-005", status="parked", title="Legacy"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, _make_card("WF-005", status="parked", title="Legacy"))
         assert "## Parked" in handoff_report(tmp_path) and "WF-005" in handoff_report(tmp_path)
 
     def test_ready_when_dep_is_archived_done(self, tmp_path):
-        from scripts.store import archive_card, init_workflow, save_card
         from scripts.resume import resume_entries
-        from tests.factories import make_card
-        root = init_workflow(tmp_path)
-        archive_card(root, make_card("WF-002", status="done"))
-        save_card(root, make_card("WF-001", status="in-flight", depends_on=["WF-002"]))
+        conn = db.connect(tmp_path)
+        db.archive_card(conn, _make_card("WF-002", status="done"))
+        db.save_card(conn, _make_card("WF-001", status="in-flight", depends_on=["WF-002"]))
         entry = next(e for e in resume_entries(tmp_path) if e["id"] == "WF-001")
         assert entry["ready"] is True
 
@@ -154,45 +145,45 @@ class TestResumeClaimOrdering:
     """`resume_entries`/`format_report` claim-first ordering — design spec §3."""
 
     def test_no_session_id_leaves_order_unchanged(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001"))
-        save_card(root, card("WF-002", claimed_by="sess-1"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001"))
+        db.save_card(conn, card("WF-002", claimed_by="sess-1"))
         entries = resume_entries(tmp_path)
         assert [e["id"] for e in entries] == ["WF-001", "WF-002"]
 
     def test_session_id_sorts_own_claims_first_stably(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001"))
-        save_card(root, card("WF-002", claimed_by="sess-1"))
-        save_card(root, card("WF-003", claimed_by="sess-1"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001"))
+        db.save_card(conn, card("WF-002", claimed_by="sess-1"))
+        db.save_card(conn, card("WF-003", claimed_by="sess-1"))
         entries = resume_entries(tmp_path, session_id="sess-1")
         assert [e["id"] for e in entries] == ["WF-002", "WF-003", "WF-001"]
 
     def test_report_marks_own_claim(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", claimed_by="sess-1"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", claimed_by="sess-1"))
         entries = resume_entries(tmp_path, session_id="sess-1")
         assert "← claimed for this session" in format_report(entries, session_id="sess-1")
 
     def test_report_labels_other_holder(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", claimed_by="sess-other"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", claimed_by="sess-other"))
         entries = resume_entries(tmp_path, session_id="sess-mine")
         report = format_report(entries, session_id="sess-mine")
         assert "claimed by sess-other" in report
         assert "← claimed for this session" not in report
 
     def test_report_without_session_id_just_labels_holder(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", claimed_by="sess-1"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", claimed_by="sess-1"))
         entries = resume_entries(tmp_path)
         report = format_report(entries)
         assert "claimed by sess-1" in report
         assert "← claimed for this session" not in report
 
     def test_unclaimed_card_has_no_claim_label(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001"))
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001"))
         entries = resume_entries(tmp_path, session_id="sess-1")
         report = format_report(entries, session_id="sess-1")
         assert "claimed" not in report
@@ -200,16 +191,14 @@ class TestResumeClaimOrdering:
 
 class TestHandoff:
     def _populate(self, tmp_path):
-        root = init_workflow(tmp_path)
-        save_card(root, card("WF-001", stage="implementation",
-                             branch="feat/stack-a", budget_estimate=100_000))
-        save_card(root, card("WF-002", stage="impl-review", branch="feat/stack-a",
-                             pr="https://github.com/x/y/pull/7"))
-        save_card(root, card("WF-003", status="blocked", stage="planning",
-                             blocked_on="user: scope q"))
-        save_card(root, card("WF-004", status="planned", stage=None, complexity="S"))
-        (root / "cards" / "WF-666-bad.md").write_text("garbage")
-        return root
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", stage="implementation",
+                                 branch="feat/stack-a", budget_estimate=100_000))
+        db.save_card(conn, card("WF-002", stage="impl-review", branch="feat/stack-a",
+                                 pr="https://github.com/x/y/pull/7"))
+        db.save_card(conn, card("WF-003", status="blocked", stage="planning",
+                                 blocked_on="user: scope q"))
+        db.save_card(conn, card("WF-004", status="planned", stage=None, complexity="S"))
 
     def test_data_sections(self, tmp_path):
         from scripts.resume import handoff_data
@@ -221,8 +210,9 @@ class TestHandoff:
         assert data["planned"] == [{"id": "WF-004", "title": "T WF-004",
                                     "complexity": "S"}]
         assert data["stacks"] == {"feat/stack-a": ["WF-001", "WF-002"]}
-        assert len(data["quarantined"]) == 1
-        assert data["quarantined"][0].endswith("WF-666-bad.md")
+        # board.db rows are always structurally valid — no card quarantine
+        # is possible at this layer any more.
+        assert data["quarantined"] == []
 
     def test_report_renders_all_sections(self, tmp_path):
         from scripts.resume import handoff_report
@@ -233,9 +223,9 @@ class TestHandoff:
                          "PR: https://github.com/x/y/pull/7", "## Blocked",
                          "user: scope q", "## Planned", "WF-004",
                          "## Stacks", "feat/stack-a: WF-001, WF-002",
-                         "## Quarantined", "WF-666-bad.md", "## Resume",
-                         "resume"):
+                         "## Resume", "resume"):
             assert expected in report
+        assert "## Quarantined" not in report
 
     def test_empty_ledger_report(self, tmp_path):
         from scripts.resume import handoff_report
