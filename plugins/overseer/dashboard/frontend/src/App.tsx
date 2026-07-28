@@ -120,6 +120,12 @@ function App() {
     [board?.cards, sessions]
   );
 
+  // WF-042: the fleet's global default threshold — read once here and
+  // threaded down to the TopBar's fleet-health line, Board's PartyColumn,
+  // and PartyOverlay's hero cards, so every near-threshold cue agrees on
+  // the exact same value `context` carries.
+  const threshold = context?.threshold ?? null;
+
   return (
     <div className="app-shell">
       <TopBar
@@ -174,6 +180,7 @@ function App() {
                 setDragActive={setDragActive}
                 party={party}
                 activeBranch={activeBranch}
+                threshold={threshold}
               />
             )}
           </>
@@ -192,6 +199,7 @@ function App() {
           party={party}
           onClose={() => setPartyOpen(false)}
           activeBranch={activeBranch}
+          threshold={threshold}
         />
       )}
     </div>

@@ -183,6 +183,119 @@ describe("<PartyOverlay/>", () => {
     ).toBeNull();
   });
 
+  it("renders the session's explicit ctx% alongside the mana bar (WF-042)", () => {
+    render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: 42 }) })]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByText("ctx 42%")).toBeInTheDocument();
+  });
+
+  it("renders no ctx% line when the session carries no pct", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: undefined }) })]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(container.querySelector(".hero-card__ctx")).toBeNull();
+  });
+
+  it("renders the session's PR, number and review_state, when present", () => {
+    render(
+      <PartyOverlay
+        party={[
+          member({
+            session: session({
+              id: "s1",
+              pr: { number: 42, review_state: "approved" },
+            }),
+          }),
+        ]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.getByText("PR #42 · approved")).toBeInTheDocument();
+  });
+
+  it("links the PR when pr.url is present", () => {
+    render(
+      <PartyOverlay
+        party={[
+          member({
+            session: session({
+              id: "s1",
+              pr: { number: 42, url: "https://example.com/pr/42" },
+            }),
+          }),
+        ]}
+        onClose={vi.fn()}
+      />
+    );
+    const link = screen.getByRole("link", { name: "PR #42" });
+    expect(link).toHaveAttribute("href", "https://example.com/pr/42");
+  });
+
+  it("renders no PR line when the session carries no pr", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1" }) })]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(container.querySelector(".hero-card__pr")).toBeNull();
+  });
+
+  it("applies the near-threshold cue when pct >= threshold (WF-042)", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: 90 }) })]}
+        onClose={vi.fn()}
+        threshold={80}
+      />
+    );
+    const heroCard = container.querySelector(".hero-card:not(.hero-card--summon)");
+    expect(heroCard).toHaveClass("is-near-threshold");
+  });
+
+  it("does not apply the near-threshold cue when pct is below threshold", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: 50 }) })]}
+        onClose={vi.fn()}
+        threshold={80}
+      />
+    );
+    const heroCard = container.querySelector(".hero-card:not(.hero-card--summon)");
+    expect(heroCard).not.toHaveClass("is-near-threshold");
+  });
+
+  it("does not apply the near-threshold cue when threshold is null, regardless of pct", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: 99 }) })]}
+        onClose={vi.fn()}
+        threshold={null}
+      />
+    );
+    const heroCard = container.querySelector(".hero-card:not(.hero-card--summon)");
+    expect(heroCard).not.toHaveClass("is-near-threshold");
+  });
+
+  it("does not apply the near-threshold cue when the session has no pct", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1", pct: undefined }) })]}
+        onClose={vi.fn()}
+        threshold={0}
+      />
+    );
+    const heroCard = container.querySelector(".hero-card:not(.hero-card--summon)");
+    expect(heroCard).not.toHaveClass("is-near-threshold");
+  });
+
   it("always renders exactly one static, non-interactive summon slot at the end", () => {
     const { container } = render(
       <PartyOverlay

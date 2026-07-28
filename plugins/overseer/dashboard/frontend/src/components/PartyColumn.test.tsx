@@ -145,4 +145,72 @@ describe("<PartyColumn/>", () => {
     );
     expect(container.querySelector(".is-spotlight")).toBeNull();
   });
+
+  it("renders the session's explicit ctx% alongside the mana bar (WF-042)", () => {
+    render(
+      <PartyColumn party={[member({ session: session({ id: "s1", pct: 42 }) })]} />
+    );
+    expect(screen.getByText("ctx 42%")).toBeInTheDocument();
+  });
+
+  it("renders no ctx% line when the session carries no pct", () => {
+    const { container } = render(
+      <PartyColumn party={[member({ session: session({ id: "s1", pct: undefined }) })]} />
+    );
+    expect(container.querySelector(".party-row__ctx")).toBeNull();
+  });
+
+  it("renders the session's PR, linked when pr.url is present", () => {
+    render(
+      <PartyColumn
+        party={[
+          member({
+            session: session({
+              id: "s1",
+              pr: { number: 9, review_state: "pending", url: "https://example.com/pr/9" },
+            }),
+          }),
+        ]}
+      />
+    );
+    const link = screen.getByRole("link", { name: "PR #9 · pending" });
+    expect(link).toHaveAttribute("href", "https://example.com/pr/9");
+  });
+
+  it("renders no PR line when the session carries no pr", () => {
+    const { container } = render(
+      <PartyColumn party={[member({ session: session({ id: "s1" }) })]} />
+    );
+    expect(container.querySelector(".party-row__pr")).toBeNull();
+  });
+
+  it("applies the near-threshold cue when pct >= threshold (WF-042)", () => {
+    const { container } = render(
+      <PartyColumn
+        party={[member({ session: session({ id: "s1", pct: 90 }) })]}
+        threshold={80}
+      />
+    );
+    expect(container.querySelector(".party-row")).toHaveClass("is-near-threshold");
+  });
+
+  it("does not apply the near-threshold cue when pct is below threshold or threshold is null", () => {
+    const { container: below } = render(
+      <PartyColumn
+        party={[member({ session: session({ id: "s1", pct: 50 }) })]}
+        threshold={80}
+      />
+    );
+    expect(below.querySelector(".party-row")).not.toHaveClass("is-near-threshold");
+
+    const { container: noThreshold } = render(
+      <PartyColumn
+        party={[member({ session: session({ id: "s1", pct: 99 }) })]}
+        threshold={null}
+      />
+    );
+    expect(noThreshold.querySelector(".party-row")).not.toHaveClass(
+      "is-near-threshold"
+    );
+  });
 });

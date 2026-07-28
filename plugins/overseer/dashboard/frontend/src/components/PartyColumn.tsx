@@ -1,4 +1,5 @@
 import type { PartyMember } from "../board/party";
+import { prLabel } from "../board/prLabel";
 import PartyAvatar from "./PartyAvatar";
 
 export interface PartyColumnProps {
@@ -8,6 +9,10 @@ export interface PartyColumnProps {
    * Unlike cards, non-matching rows are NOT dimmed — the Party stays fully
    * legible, only the active branch's own heroes get called out. */
   activeBranch?: string | null;
+  /** WF-042: the fleet's global default (`context.threshold`) — a row gets
+   * the `is-near-threshold` cue when its own session's `pct >= threshold`.
+   * `null`/absent means no threshold is set, so the cue never fires. */
+  threshold?: number | null;
 }
 
 /**
@@ -21,8 +26,18 @@ export interface PartyColumnProps {
  * optional (census-derived, may be absent), and `100 - undefined` is NaN,
  * not a sensible width. The undefined case renders the same neutral
  * "— unknown" treatment the topbar's own ctx display already used.
+ *
+ * WF-042: each row also surfaces the raw ctx% (`session.pct`), the
+ * session's PR (`session.pr`, linked when `pr.url` is present), and gets
+ * the `is-near-threshold` cue when that ctx% is at/over the fleet's global
+ * default threshold — same fields/cue as PartyOverlay's hero cards, just in
+ * the compact row layout.
  */
-function PartyColumn({ party, activeBranch = null }: PartyColumnProps) {
+function PartyColumn({
+  party,
+  activeBranch = null,
+  threshold = null,
+}: PartyColumnProps) {
   return (
     <div className="party-column">
       <div className="party-column__header">Party</div>
@@ -32,13 +47,18 @@ function PartyColumn({ party, activeBranch = null }: PartyColumnProps) {
           const mana = session.pct === undefined ? null : 100 - session.pct;
           const spotlight =
             activeBranch !== null && session.branch === activeBranch;
+          const isNearThreshold =
+            session.pct !== undefined &&
+            threshold !== null &&
+            session.pct >= threshold;
           return (
             <div
               key={session.id}
               className={
                 "party-row" +
                 (session.stale ? " party-row--stale" : "") +
-                (spotlight ? " is-spotlight" : "")
+                (spotlight ? " is-spotlight" : "") +
+                (isNearThreshold ? " is-near-threshold" : "")
               }
             >
               <PartyAvatar session={session} size={32} />
@@ -51,6 +71,9 @@ function PartyColumn({ party, activeBranch = null }: PartyColumnProps) {
                 )}
                 {session.branch && (
                   <div className="party-row__branch">⑃ {session.branch}</div>
+                )}
+                {session.pct !== undefined && (
+                  <div className="party-row__ctx">ctx {session.pct}%</div>
                 )}
                 {mana === null ? (
                   <div className="party-row__mana party-row__mana--unknown">
@@ -65,6 +88,22 @@ function PartyColumn({ party, activeBranch = null }: PartyColumnProps) {
                       }
                       style={{ width: `${mana}%` }}
                     />
+                  </div>
+                )}
+                {session.pr && (
+                  <div className="party-row__pr">
+                    {session.pr.url ? (
+                      <a
+                        className="party-row__pr-link"
+                        href={session.pr.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {prLabel(session.pr)}
+                      </a>
+                    ) : (
+                      prLabel(session.pr)
+                    )}
                   </div>
                 )}
                 {member.questCardId && (

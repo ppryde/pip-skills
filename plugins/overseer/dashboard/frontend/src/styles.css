@@ -505,35 +505,21 @@ body {
   outline-offset: 2px;
 }
 
-.topbar__ctx {
+/* WF-042: wraps ThresholdControl, whose own label now reads "default
+   threshold" — the fleet's global default, not any one agent's fact (that
+   moved to the Party's hero cards). Replaces the old `.topbar__ctx` block
+   (launching-session ctx%/label/note), which is gone. */
+.topbar__threshold {
   display: flex;
   align-items: baseline;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  color: var(--qb-ink-500);
-}
-
-.topbar__ctx-label {
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  color: var(--qb-ink-400);
-}
-
-.topbar__ctx-value {
-  font-weight: 600;
-  color: var(--qb-ink-900);
-}
-
-.topbar__ctx-note {
-  color: var(--qb-ink-400);
-  font-size: 0.7rem;
-  font-style: italic;
-}
-
-.topbar__threshold {
   color: var(--qb-ink-400);
   font-size: 0.75rem;
+}
+
+/* WF-042: the ⚔ glyph prefixing the fleet-health pill's text (see
+   `.topbar__fleet-pill` in the Guild pills group below). */
+.topbar__fleet-icon {
+  font-size: 0.85rem;
 }
 
 .topbar__pill {
@@ -614,12 +600,14 @@ body {
   color: var(--legacy-color-ffd9d9);
 }
 
-/* Guild pills (HANDOFF: Gold total / vanquished / questing). Gold and
-   vanquished are informational spans; questing is the one clickable pill
-   — the Sessions dropdown's structural replacement (Decisions). */
+/* Guild pills (HANDOFF: Gold total / vanquished / fleet-health). Gold and
+   vanquished are informational spans; the fleet-health pill is the one
+   clickable pill — the Sessions dropdown's structural replacement
+   (Decisions), now folding the old dedicated questing pill's live count
+   together with the fleet's top ctx% and near-threshold count (WF-042). */
 .topbar__gold-pill,
 .topbar__vanquished-pill,
-.topbar__questing-pill {
+.topbar__fleet-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -641,7 +629,7 @@ body {
   color: var(--qb-success-chip-text);
 }
 
-.topbar__questing-pill {
+.topbar__fleet-pill {
   background: var(--qb-locked-chip-bg);
   border: 2px solid var(--qb-questing-chip-border);
   color: var(--qb-locked-chip-text);
@@ -915,6 +903,17 @@ body {
 
 .is-spotlight {
   outline: 2px solid var(--qb-spotlight-ring);
+  outline-offset: 1px;
+}
+
+/* WF-042: near-threshold cue — a hero card/party row whose own ctx% has hit
+   the fleet's global default threshold. Reuses the same red/blush pairing
+   `.card-tile--blocked`'s budget tripwire already uses for "getting close
+   to a bad number" (a documented exception to the guild-accent palette,
+   see the quarantine-banner comment above) rather than inventing a new
+   warning colour. Can stack with `.is-spotlight` on the same card/row. */
+.is-near-threshold {
+  outline: 2px solid var(--legacy-color-d33d3d);
   outline-offset: 1px;
 }
 
@@ -2384,6 +2383,16 @@ body {
   margin-bottom: 0.5rem;
 }
 
+/* WF-042: the raw ctx% the mana bar's `100 - pct` fill below is derived
+   from — explicit, not just implied by the mana bar's width. */
+.hero-card__ctx {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-hero-class);
+  margin-bottom: 0.35rem;
+}
+
 .hero-card__mana {
   height: 11px;
   border-radius: var(--legacy-radius-999px);
@@ -2415,6 +2424,19 @@ body {
   font-size: 0.7rem;
   font-style: italic;
   color: var(--qb-hero-class);
+}
+
+/* WF-042: the hero's PR, `PR #N · review_state` — plain text when there's
+   no `pr.url` to link to, an underlined chip-toned link when there is. */
+.hero-card__pr {
+  font-size: 0.7rem;
+  color: var(--qb-branch-chip-text);
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__pr-link {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .hero-card__quest {
@@ -2527,6 +2549,15 @@ body {
   color: var(--qb-party-text-muted);
 }
 
+/* WF-042: the raw ctx% the mana bar's `100 - pct` fill below is derived
+   from — explicit, not just implied by the mana bar's width. */
+.party-row__ctx {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-party-text-muted);
+}
+
 .party-row__mana {
   height: 6px;
   border-radius: var(--legacy-radius-999px);
@@ -2556,6 +2587,18 @@ body {
   font-size: 0.65rem;
   color: var(--qb-party-text-muted);
   font-style: italic;
+}
+
+/* WF-042: the session's PR, `PR #N · review_state` — plain text when
+   there's no `pr.url` to link to, an underlined link when there is. */
+.party-row__pr {
+  font-size: 0.65rem;
+  color: var(--qb-party-text-muted);
+}
+
+.party-row__pr-link {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .party-row__quest {
@@ -2751,18 +2794,12 @@ body {
     height: 38px;
   }
 
-  /* ctx + threshold get their own "scribe's line" under the crest. The
-     "as of last refresh" aside is the one item that can't shrink and
-     pushes the row past a phone viewport — dropped here, the subtitle's
-     "updated HH:MM" already carries that information. */
-  .topbar__ctx {
+  /* The default-threshold control gets its own "scribe's line" under the
+     crest, same as the old ctx+threshold row it replaced (WF-042). */
+  .topbar__threshold {
     flex-basis: 100%;
     flex-wrap: wrap;
     row-gap: 0.3rem;
-  }
-
-  .topbar__ctx-note {
-    display: none;
   }
 
   /* No right edge to hug once the bar is a wrapping shelf. */
@@ -2865,7 +2902,7 @@ body {
 
   /* Primary tappables meet ~44px. */
   .topbar__refresh,
-  .topbar__questing-pill,
+  .topbar__fleet-pill,
   .topbar__archive-toggle,
   .topbar__repo-select select,
   .topbar__branch-select select,

@@ -81,14 +81,6 @@ function baseProps() {
 }
 
 describe("<TopBar/>", () => {
-  it("renders 'as of last refresh' as visible text, scoped to the ctx-note span (belt-and-braces vs. the new subtitle's own timestamp copy)", () => {
-    render(<TopBar {...baseProps()} context={{ pct: 42, threshold: 80 }} />);
-
-    const note = document.querySelector(".topbar__ctx-note");
-    expect(note).not.toBeNull();
-    expect(note).toHaveTextContent(/as of last refresh/i);
-  });
-
   it("the subtitle does NOT contain 'as of last refresh'", () => {
     render(
       <TopBar
@@ -146,7 +138,7 @@ describe("<TopBar/>", () => {
     expect(screen.getByText("2 / 3 vanquished")).toBeInTheDocument();
   });
 
-  it("the questing pill counts only live (non-stale) party members", () => {
+  it("the fleet-health pill's questing count includes only live (non-stale) party members", () => {
     render(
       <TopBar
         {...baseProps()}
@@ -158,10 +150,10 @@ describe("<TopBar/>", () => {
       />
     );
 
-    expect(screen.getByText("2 questing")).toBeInTheDocument();
+    expect(screen.getByText(/2 questing/)).toBeInTheDocument();
   });
 
-  it("clicking the questing pill calls onOpenParty", () => {
+  it("clicking the fleet-health pill calls onOpenParty", () => {
     const onOpenParty = vi.fn();
     render(
       <TopBar
@@ -175,7 +167,68 @@ describe("<TopBar/>", () => {
     expect(onOpenParty).toHaveBeenCalledTimes(1);
   });
 
-  it("renders no Sessions toggle — the old sessions dropdown retired, the questing pill replaces it", () => {
+  // WF-042: the old dedicated launching-session readout (context.model,
+  // context.pr, the single "ctx NN%" value) is gone from this bar — those
+  // facts now live per-agent on the Party's hero cards instead.
+  it("no longer renders context.model, context.pr, or a single ctx% value", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        context={{
+          pct: 42,
+          threshold: 80,
+          model: "Opus",
+          pr: { number: 7, review_state: "approved" },
+        }}
+      />
+    );
+
+    expect(screen.queryByText("Opus")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PR #7/)).not.toBeInTheDocument();
+    expect(document.querySelector(".topbar__ctx-value")).toBeNull();
+    expect(document.querySelector(".topbar__ctx-note")).toBeNull();
+  });
+
+  it("renders the fleet-health line with top ctx and near-threshold segments derived from live party sessions", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        context={{ pct: null, threshold: 80 }}
+        party={[
+          partyMember({ id: "s1", pct: 86 }),
+          partyMember({ id: "s2", pct: 82 }),
+          partyMember({ id: "s3", pct: 10 }),
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByText(/3 questing · top ctx 86% · 2 near threshold/)
+    ).toBeInTheDocument();
+  });
+
+  it("omits the top-ctx and near-threshold segments gracefully when there's no pct data (never NaN/null)", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        context={{ pct: null, threshold: 80 }}
+        party={[partyMember({ id: "s1" }), partyMember({ id: "s2" })]}
+      />
+    );
+
+    const pill = screen.getByRole("button", { name: /questing/i });
+    expect(pill).toHaveTextContent(/^\D*2 questing\D*$/);
+    expect(pill.textContent).not.toMatch(/null|NaN|undefined/);
+  });
+
+  it("keeps the threshold control, relabeled as the fleet's default", () => {
+    render(<TopBar {...baseProps()} context={{ pct: null, threshold: 65 }} />);
+
+    expect(screen.getByLabelText("Threshold")).toHaveValue(65);
+    expect(screen.getByText(/default threshold/i)).toBeInTheDocument();
+  });
+
+  it("renders no Sessions toggle — the old sessions dropdown retired, the fleet-health pill replaces it", () => {
     render(<TopBar {...baseProps()} />);
     expect(
       screen.queryByRole("button", { name: /^sessions$/i })
