@@ -7,8 +7,12 @@
  * that to `runDropPlan.ts` to actually issue the calls through
  * `useBoard().mutate`.
  *
- * Mirrors wf005-context.md "Drag semantics" / the C4 brief exactly:
- * - within a lane -> setOrder only.
+ * Mirrors wf005-context.md "Drag semantics" / the C4 brief, updated for
+ * WF-044 (display order is recency-driven, not `order`-driven — see
+ * layout.ts's `compareRecency`):
+ * - within a lane -> NO_OP. A pure reorder has nothing to persist; a
+ *   setOrder call here would just bump `updated` and top-jump the card in
+ *   the recency sort it was meant to locally reshuffle.
  * - into a stage lane -> move({stage}) THEN setOrder (order matters: mutate
  *   applies whichever response `runDropPlan` returns LAST).
  * - into Parked/Done -> move({status}) only.
@@ -89,20 +93,14 @@ export function resolveDrop(
   const destCards = targetLane.cards.filter((c) => c.id !== dragged.id);
 
   if (sourceLane && sourceLane.key === targetLane.key) {
-    // Pure reorder within the lane the card already lives in.
-    //
-    // `destCards` has the dragged card filtered out, but `toIndex` was
-    // measured against the full lane (which still contained it). On a
-    // FORWARD drag (dragged card originally sits BEFORE the drop target),
-    // removing it shifts every later index left by one — so we subtract one
-    // to keep forward and backward drags symmetric (without this the card
-    // lands one slot too far, e.g. [A,B,C] drag A onto C would land AFTER C
-    // instead of between B and C).
-    const sourceIdx = targetLane.cards.findIndex((c) => c.id === dragged.id);
-    const adjustedIndex =
-      sourceIdx !== -1 && sourceIdx < toIndex ? toIndex - 1 : toIndex;
-    const order = orderForDrop(destCards, adjustedIndex);
-    return { calls: [{ kind: "setOrder", id: dragged.id, order }] };
+    // Pure reorder within the lane the card already lives in -> NO_OP.
+    // Display order is driven entirely by recency (`updated`, see
+    // layout.ts's `compareRecency`), NOT by `order` — so a same-lane
+    // reorder has nothing to persist. Emitting a setOrder call here would
+    // be a vestigial write: it bumps the card's `updated` timestamp
+    // server-side, which top-jumps the card in the very recency sort this
+    // drag was only meant to locally reshuffle.
+    return NO_OP;
   }
 
   // Parked cards NEVER leave Parked via drag (binding rule: they reorder

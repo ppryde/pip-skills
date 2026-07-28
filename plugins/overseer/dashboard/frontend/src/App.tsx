@@ -107,9 +107,18 @@ function App() {
   // Single shared join, computed once and handed to every consumer (TopBar's
   // questing pill, PartyColumn, PartyOverlay) — see Decisions: "consumers
   // render, never join".
+  //
+  // WF-045: forced empty for an unbegun repo. `useSessions` is hard-gated
+  // off for it (see the `!isUnbegun` comment above `useSessions` below), but
+  // that only SKIPS the next fetch — it doesn't clear whatever `sessions`
+  // was left over from the PREVIOUSLY selected (begun) repo. Without this
+  // guard, switching from a begun repo straight to an unbegun one (no
+  // remount in between) left `party` built from that stale, previous-repo
+  // session list, which the fleet pill's `onOpenParty` below would then
+  // hand to `<PartyOverlay/>` as if it belonged to the current repo.
   const party = useMemo(
-    () => buildParty(sessions, board?.cards ?? []),
-    [sessions, board?.cards]
+    () => (isUnbegun ? [] : buildParty(sessions, board?.cards ?? [])),
+    [isUnbegun, sessions, board?.cards]
   );
 
   // Distinct-branch union across cards + sessions (WF-031) — feeds the
@@ -142,7 +151,12 @@ function App() {
         cards={board?.cards ?? []}
         party={party}
         lastRefreshedAt={lastRefreshedAt}
-        onOpenParty={() => setPartyOpen(true)}
+        // WF-045: an unbegun repo has nothing real to show in the Party
+        // overlay (see the `party` guard above) — refuse to open it at all
+        // rather than popping an empty/confusing sheet on click.
+        onOpenParty={() => {
+          if (!isUnbegun) setPartyOpen(true);
+        }}
         repos={repos}
         activeRoot={activeRoot}
         onSelectRepo={handleSelectRepo}

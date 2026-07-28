@@ -2,8 +2,11 @@
  * Neighbour-midpoint order helper for drag-drop (see wf005-context.md
  * "Order-value computation" and the C4 brief). No client-side renumbering —
  * an integer midpoint can collide with a tight-packed neighbour's own order;
- * that tie is TOLERATED (layout.ts's lane sort tiebreaks on `id`). This is a
- * documented known limitation, not a bug.
+ * that tie is TOLERATED and has no visible effect, since `order` no longer
+ * drives display order at all (see api/types.ts and layout.ts's
+ * `compareRecency` — display is recency-first; `order` only ever feeds this
+ * cross-lane drag machinery, per WF-044). This is a documented known
+ * limitation, not a bug.
  */
 import type { BoardCard } from "../api/types";
 

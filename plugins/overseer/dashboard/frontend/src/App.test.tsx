@@ -112,4 +112,56 @@ describe("<App/> — WF-032 unbegun-repo holding page wiring", () => {
     // sources its count from the same `live_sessions` figure instead.
     expect(screen.getByText("6 questing")).toBeInTheDocument();
   });
+
+  it("WF-045: clicking the fleet pill on an unbegun repo does not open the Party overlay with the PREVIOUS repo's stale heroes", async () => {
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [
+        repo({ label: "acme", root: "/acme", current: true, has_board: true }),
+        repo({
+          label: "sandbox",
+          root: "/sandbox",
+          has_board: false,
+          live_sessions: 6,
+        }),
+      ],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+    // acme has one live census session — this is the "previous repo's hero"
+    // that must never leak into the Party overlay once we've switched to an
+    // unbegun repo.
+    vi.mocked(client.getSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-stale-hero",
+          worktree_cwd: "/acme",
+          updated_at: 100,
+          stale: false,
+          session_name: "Sir Stale-a-lot",
+        },
+      ],
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    // Confirm the party actually populated from acme's session before we
+    // switch repos — otherwise the "no leak" assertion below would be
+    // vacuously true.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /1 questing/ })).toBeInTheDocument()
+    );
+
+    fireEvent.change(screen.getByLabelText("Repo"), {
+      target: { value: "/sandbox" },
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/quest has not yet begun/i)).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /questing/ }));
+
+    expect(screen.queryByTestId("party-overlay")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sir Stale-a-lot")).not.toBeInTheDocument();
+  });
 });

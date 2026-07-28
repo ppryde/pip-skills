@@ -52,49 +52,55 @@ describe("isDragSource", () => {
 });
 
 describe("resolveDrop", () => {
-  it("(a) same-lane FORWARD drag (A onto C in [A,B,C]) lands A BETWEEN B and C — index derived via locateDropTarget, off-by-one guarded", () => {
+  it("WF-044: same-lane reorder is a NO_OP — display order is driven by recency (`updated`), not `order`, so a pure reorder has nothing to persist; emitting setOrder would bump `updated` server-side and top-jump the card", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
     const lanes = groupIntoLanes([a, b, c]);
 
-    // Derive toIndex the way Board.tsx does — from the card the drop landed
-    // on (C). Its full-lane index is 2; A sits BEFORE it (source index 0),
-    // so removing A shifts the target left by one -> destCards [B,C], index
-    // 1 -> midpoint(B=20, C=30) = 25 (between B and C), NOT after C.
     const { lane, index } = locateDropTarget("WF-C", lanes);
     const plan = resolveDrop(a, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-A", order: 25 }]);
+    expect(plan.calls).toEqual([]);
   });
 
-  it("(a) same-lane BACKWARD drag (C onto A in [A,B,C]) lands C BEFORE A — index derived via locateDropTarget", () => {
+  it("(a) same-lane FORWARD drag (A onto C in [A,B,C]) is a NO_OP — index derived via locateDropTarget", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
     const lanes = groupIntoLanes([a, b, c]);
 
-    // C (source index 2) dropped onto A (full-lane index 0). Source is NOT
-    // before the target, so no shift -> destCards [A,B], index 0 -> before A
-    // = A.order(10) - 10 = 0.
+    // Post-WF-044: same-lane reorders never persist an `order` — see the
+    // WF-044 test above. This covers a FORWARD drag specifically (dragged
+    // card originally sits BEFORE the drop target) staying a NO_OP too.
+    const { lane, index } = locateDropTarget("WF-C", lanes);
+    const plan = resolveDrop(a, lane!, index, lanes);
+
+    expect(plan.calls).toEqual([]);
+  });
+
+  it("(a) same-lane BACKWARD drag (C onto A in [A,B,C]) is a NO_OP — index derived via locateDropTarget", () => {
+    const a = card({ id: "WF-A", status: "planned", order: 10 });
+    const b = card({ id: "WF-B", status: "planned", order: 20 });
+    const c = card({ id: "WF-C", status: "planned", order: 30 });
+    const lanes = groupIntoLanes([a, b, c]);
+
     const { lane, index } = locateDropTarget("WF-A", lanes);
     const plan = resolveDrop(c, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-C", order: 0 }]);
+    expect(plan.calls).toEqual([]);
   });
 
-  it("(a) same-lane interior reorder (drag C onto B) lands between A and B", () => {
+  it("(a) same-lane interior reorder (drag C onto B) is a NO_OP", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
     const lanes = groupIntoLanes([a, b, c]);
 
-    // C (source index 2) onto B (full-lane index 1). Source not before target
-    // -> destCards [A,B], index 1 -> midpoint(A=10, B=20) = 15.
     const { lane, index } = locateDropTarget("WF-B", lanes);
     const plan = resolveDrop(c, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-C", order: 15 }]);
+    expect(plan.calls).toEqual([]);
   });
 
   it("(b) drop into a stage lane -> move({stage}) THEN setOrder", () => {
@@ -201,18 +207,17 @@ describe("resolveDrop", () => {
     expect(plan.calls).toEqual([]);
   });
 
-  it("parked cards STILL reorder WITHIN Parked via setOrder only (no move call)", () => {
+  it("parked cards reordering WITHIN Parked is a NO_OP too (same-lane rule applies uniformly, no move call either)", () => {
     const p1 = card({ id: "WF-P1", status: "parked", order: 10 });
     const p2 = card({ id: "WF-P2", status: "parked", order: 20 });
     const p3 = card({ id: "WF-P3", status: "parked", order: 30 });
     const lanes = groupIntoLanes([p1, p2, p3]);
 
-    // Backward drag P3 onto P1 within Parked -> destCards [P1,P2], index 0
-    // -> before P1 = P1.order(10) - 10 = 0. A setOrder, never a move.
+    // Backward drag P3 onto P1 within Parked — same-lane, so NO_OP.
     const { lane, index } = locateDropTarget("WF-P1", lanes);
     const plan = resolveDrop(p3, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([{ kind: "setOrder", id: "WF-P3", order: 0 }]);
+    expect(plan.calls).toEqual([]);
   });
 });
 
