@@ -318,6 +318,10 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
         card({ id: "WF-A", title: "On branch a", branch: "feat/a" }),
         card({ id: "WF-B", title: "On branch b", branch: "feat/b" }),
         card({ id: "WF-C", title: "No branch at all" }),
+        // A DONE card on a different branch — regression coverage for the
+        // `.card-tile--done` opacity clobber on the branch-filter `is-dimmed`
+        // side (mirrors the epic-focus WF-SHIPPED case above).
+        card({ id: "WF-D", title: "Shipped on branch b", branch: "feat/b", status: "done" }),
       ],
     },
     context: { pct: 10, threshold: 80 },
@@ -358,6 +362,14 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
     expect(
       container.querySelector('[data-card-id="WF-C"]')
     ).not.toHaveClass("is-spotlight");
+    // A DONE card on a different branch must dim exactly like any other
+    // lane's card — the Done lane's own opacity must not swallow it.
+    expect(
+      container.querySelector('[data-card-id="WF-D"]')
+    ).toHaveClass("is-dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-D"]')
+    ).toHaveClass("card-tile--done");
   });
 
   it("selecting a branch spotlights the Party agent on it", async () => {

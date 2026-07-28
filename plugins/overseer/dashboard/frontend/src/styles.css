@@ -941,6 +941,16 @@ body {
   opacity: 0.35;
 }
 
+/* Same cascade clash, branch-filter side: `.is-dimmed` (opacity 0.4) is
+   declared before `.card-tile--done` (opacity 0.94) above, so at equal
+   specificity `--done` wins by source order and Done cards never fade
+   under the branch filter either. Mirrors the epic-focus fix — two-class
+   selector wins regardless of order. `.is-spotlight` is outline-only, so
+   it never conflicted and needs no equivalent override. */
+.card-tile--done.is-dimmed {
+  opacity: 0.4;
+}
+
 .card-tile__title--done {
   text-decoration: line-through;
   color: var(--qb-ink-500);
