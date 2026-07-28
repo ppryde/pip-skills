@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -49,6 +51,38 @@ def repo_a(tmp_path: Path, isolated_config_dir: Path) -> Path:
 @pytest.fixture()
 def repo_b(tmp_path: Path, isolated_config_dir: Path) -> Path:
     return _make_repo(tmp_path, isolated_config_dir, "repo-b")
+
+
+@pytest.fixture()
+def boardless_repo(tmp_path: Path, isolated_config_dir: Path) -> Path:
+    """A real git repo with NO `board.db` (no `overseer init`) — a repo a
+    live census session can point at without it ever showing up in `repos
+    --json` discovery. Used to exercise the "unbegun repo" union."""
+    repo_root = tmp_path / "boardless-repo"
+    repo_root.mkdir()
+    subprocess.run(["git", "init"], cwd=repo_root, capture_output=True, check=True)
+    return repo_root.resolve()
+
+
+def _seed_live_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sessions: dict[str, Path]
+) -> None:
+    """Seed a CENSUS_STORE with one LIVE (fresh `updated_at`) entry per
+    ``{session_id: worktree_cwd}`` pair — mirrors test_sessions.py's/
+    test_claim.py's env-var seeding so `run_census_all` (shelled from the
+    endpoint) sees them through the same subprocess-env-inheritance chain."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {
+            sid: {"worktree_cwd": str(cwd), "updated_at": now, "payload": {}}
+            for sid, cwd in sessions.items()
+        },
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
 
 
 @pytest.fixture()
@@ -208,3 +242,79 @@ def test_get_card_honours_root(repo_a: Path, repo_b: Path) -> None:
 
     assert resp.status_code == 200
     assert resp.json()["title"] == "B card"
+
+
+def test_get_repos_lists_unbegun_repo_with_live_session(
+    repo_a: Path, boardless_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A board repo plus a LIVE census session in a different, boardless
+    repo -> `/api/repos` lists both: the boardless one as `has_board:false`
+    with `live_sessions>=1`, the board repo as `has_board:true`."""
+    _seed_live_sessions(tmp_path, monkeypatch, {"sess-1": boardless_repo})
+    client = TestClient(create_app(repo_a))
+
+    resp = client.get("/api/repos")
+
+    assert resp.status_code == 200
+    by_root = {r["root"]: r for r in resp.json()["repos"]}
+    assert by_root[str(repo_a)]["has_board"] is True
+    unbegun = by_root[str(boardless_repo)]
+    assert unbegun["has_board"] is False
+    assert unbegun["current"] is False
+    assert unbegun["live_sessions"] >= 1
+    assert unbegun["label"] == boardless_repo.name
+
+
+def test_get_repos_board_repo_is_never_double_listed(
+    repo_a: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repo that already has a board must not ALSO appear as an unbegun
+    entry, even when it has live census sessions of its own."""
+    _seed_live_sessions(tmp_path, monkeypatch, {"sess-1": repo_a})
+    client = TestClient(create_app(repo_a))
+
+    resp = client.get("/api/repos")
+
+    repos = resp.json()["repos"]
+    matches = [r for r in repos if r["root"] == str(repo_a)]
+    assert len(matches) == 1
+    assert matches[0]["has_board"] is True
+
+
+def test_get_repos_counts_live_sessions_for_board_repo(
+    repo_a: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`live_sessions` on a board repo counts the live census sessions that
+    derive to its root."""
+    _seed_live_sessions(
+        tmp_path, monkeypatch, {"sess-1": repo_a, "sess-2": repo_a}
+    )
+    client = TestClient(create_app(repo_a))
+
+    resp = client.get("/api/repos")
+
+    by_root = {r["root"]: r for r in resp.json()["repos"]}
+    assert by_root[str(repo_a)]["live_sessions"] == 2
+
+
+def test_board_with_unbegun_root_is_still_rejected(
+    repo_a: Path, boardless_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Security regression guard: an "unbegun" repo surfaced by `/api/repos`
+    (live session, no board) must NOT be added to `_resolve_root`'s
+    allowlist. `GET /api/board?root=<unbegun root>` still 400s — the
+    dashboard never fetches the board for an unbegun repo, and this listing
+    addition must not open a new shelled-root surface."""
+    _seed_live_sessions(tmp_path, monkeypatch, {"sess-1": boardless_repo})
+    client = TestClient(create_app(repo_a))
+
+    # Confirm it's actually surfaced as unbegun first (sanity: the listing
+    # addition worked), then confirm the board endpoint still rejects it.
+    repos_resp = client.get("/api/repos")
+    by_root = {r["root"]: r for r in repos_resp.json()["repos"]}
+    assert by_root[str(boardless_repo)]["has_board"] is False
+
+    resp = client.get("/api/board", params={"root": str(boardless_repo)})
+
+    assert resp.status_code == 400
+    assert "unknown root" in resp.json()["detail"]
