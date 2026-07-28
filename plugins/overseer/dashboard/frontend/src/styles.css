@@ -278,6 +278,31 @@
   /* Board-tile progress bar track (WF-028 Decisions: declared if missing —
      HANDOFF-sourced, §Design Tokens line 64). */
   --qb-progress-track: #f0e3c4;
+
+  /* CHOSEN button system (task-12): two roles across the board's real
+     controls. Role A — "fine hand-inked, light-recess hover" — the
+     rectangular text action/control buttons (Refresh, threshold Set,
+     Archive, Claim, status-menu items, link-editor dependency buttons).
+     Role B — "T1 gold underline" — tabs/secondary nav (the card-drawer
+     view toggle). Round close buttons (✕) get only the ink border +
+     hover recess, keeping their circular shape. */
+  --qb-btn-face: #faf3df;
+  --qb-btn-face-hover: #f1e7c8;
+  --qb-btn-face-active: #ece0c0;
+  --qb-btn-ink: #6b4f34;
+  --qb-btn-ink-hover: #5b4632;
+  --qb-btn-text: #4a3826;
+  /* Gentle hand-drawn wobble — FIXED, does NOT change on hover/active. */
+  --qb-btn-wobble: 12px 8px 13px 9px / 8px 12px 9px 11px;
+  --qb-btn-shadow-hover: inset 0 1px 4px rgba(74, 56, 38, 0.2);
+  --qb-btn-shadow-active: inset 0 2px 5px rgba(74, 56, 38, 0.3);
+
+  --qb-tab-text: #5b4632;
+  --qb-tab-text-active: #4a3826;
+  --qb-tab-underline: #c9a86a;
+  --qb-tab-underline-active: #7a8b45;
+  --qb-tab-hover-bg: rgba(216, 195, 154, 0.18);
+  --qb-tab-active-bg: rgba(122, 139, 69, 0.1);
 }
 
 /* Minimal reset */
@@ -460,29 +485,73 @@ body {
   color: var(--qb-ink-500);
 }
 
+/* Role A — "fine hand-inked, light-recess hover" (CHOSEN button system,
+   task-12). The wobble radius is fixed and does not shift on hover/active;
+   only background/border-color/box-shadow move. */
 .topbar__refresh {
   margin-left: auto;
   font-size: 0.8rem;
   padding: 0.35rem 0.75rem;
-  border-radius: var(--qb-radius-chip-sm);
-  border: 1px solid var(--qb-card-border);
-  background: var(--qb-panel);
-  color: var(--qb-ink-700);
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
   cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.topbar__refresh:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.topbar__refresh:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
 }
 
 .topbar__refresh:disabled {
   opacity: 0.6;
   cursor: default;
+  box-shadow: none;
 }
 
+/* Archive toggle is styled as a role-A button chrome around the existing
+   checkbox + label (HANDOFF markup unchanged — CSS-only). */
 .topbar__archive-toggle {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
   font-size: 0.8rem;
-  color: var(--qb-ink-500);
+  font-weight: 700;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
   cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.topbar__archive-toggle:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.topbar__archive-toggle:active {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
 }
 
 /* Quarantine alert keeps a strong danger red rather than a guild accent —
@@ -1264,6 +1333,8 @@ body {
 
 /* Round close button (HANDOFF: "✕, 38px, #F3EAD6/2px solid #D8C39A" —
    --qb-parchment-muted/--qb-line-dashed are those exact hexes). */
+/* Ink border + light-recess hover for cohesion with the role-A button
+   system (task-12) — stays circular, no wobble. */
 .card-drawer__close {
   position: absolute;
   top: 0.75rem;
@@ -1274,12 +1345,21 @@ body {
   width: 38px;
   height: 38px;
   border-radius: var(--qb-radius-circle);
-  border: 2px solid var(--qb-line-dashed);
+  border: 2px solid var(--qb-btn-ink);
   background: var(--qb-parchment-muted);
   font-size: 1.25rem;
   line-height: 1;
   color: var(--qb-ink-500);
   cursor: pointer;
+  box-shadow: none;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.card-drawer__close:hover {
+  background: var(--qb-btn-face-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
 }
 
 .card-drawer__status {
@@ -1749,6 +1829,7 @@ body {
   border-radius: 14px;
 }
 
+/* Role B — "T1 gold underline" tabs (CHOSEN button system, task-12). */
 .card-drawer__viewtoggle button {
   display: inline-flex;
   align-items: center;
@@ -1756,16 +1837,29 @@ body {
   font-size: 0.75rem;
   font-weight: 600;
   padding: 0.3rem 0.75rem;
-  border-radius: var(--qb-radius-chip-sm);
-  border: none;
+  border-radius: 5px 5px 2px 2px;
+  border: 0;
+  border-bottom: 2px solid var(--qb-tab-underline);
   background: transparent;
-  color: var(--qb-ink-400);
+  color: var(--qb-tab-text);
   cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    color var(--qb-motion-hover) ease;
 }
 
+.card-drawer__viewtoggle button:hover {
+  background: var(--qb-tab-hover-bg);
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+}
+
+/* Active tab — mapped to the existing selected-tab marker. */
 .card-drawer__viewtoggle button[aria-pressed="true"] {
-  background: var(--legacy-color-fff);
-  color: var(--qb-ink-900);
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+  background: var(--qb-tab-active-bg);
 }
 
 /* Tiny Silkscreen "MD" tag on the Scroll tab (HANDOFF: "#7A8B45 bg,
@@ -1816,14 +1910,38 @@ body {
   color: var(--qb-ink-700);
 }
 
+/* Role A (CHOSEN button system, task-12). */
 .threshold-control button {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
-  border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--qb-card-border);
-  background: var(--qb-parchment-muted);
-  color: var(--qb-ink-700);
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
   cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.threshold-control button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.threshold-control button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.threshold-control button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
 }
 
 .card-drawer__controls {
@@ -1842,14 +1960,38 @@ body {
   flex-wrap: wrap;
 }
 
+/* Role A (CHOSEN button system, task-12). */
 .status-menu button {
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
-  border-radius: var(--qb-radius-pill);
-  border: 1px solid var(--qb-card-border);
-  background: var(--qb-panel);
-  color: var(--qb-ink-700);
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
   cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.status-menu button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.status-menu button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.status-menu button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
 }
 
 .claim-control {
@@ -1868,14 +2010,38 @@ body {
   color: var(--qb-ink-700);
 }
 
+/* Role A (CHOSEN button system, task-12). */
 .claim-control button {
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
-  border-radius: var(--qb-radius-pill);
-  border: 1px solid var(--qb-card-border);
-  background: var(--qb-panel);
-  color: var(--qb-ink-700);
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
   cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.claim-control button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.claim-control button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.claim-control button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
 }
 
 .claim-control__holder {
@@ -1932,13 +2098,36 @@ body {
   font-size: 0.75rem;
 }
 
+/* Role A (CHOSEN button system, task-12) — small remove control nested
+   inside the locked-chip dependency pill; the chip itself keeps its own
+   colour (step 6: chips/pills are out of scope, only the button is
+   restyled). */
 .link-editor__deps-list button {
-  border: none;
-  background: transparent;
-  color: inherit;
+  padding: 0 0.2rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
   cursor: pointer;
   font-size: 0.85rem;
-  line-height: 1;
+  line-height: 1.4;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.link-editor__deps-list button:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.link-editor__deps-list button:active {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
 }
 
 /* Party overlay (WF-029 chunk 6, HANDOFF §Party page) — backdrop/
@@ -1968,7 +2157,12 @@ body {
 
 /* Round close button (HANDOFF's card-detail close: 38px circle, filled bg,
    2px border — adapted here to the dark sheet's own tokens rather than the
-   light parchment #F3EAD6/#D8C39A pair the card-detail modal uses). */
+   light parchment #F3EAD6/#D8C39A pair the card-detail modal uses). Border
+   colour unified to the guild ink hex (--qb-btn-ink is #6B4F34, a near
+   match for the prior --qb-party-border #6E4A32) and given the same
+   light-recess hover as the other round close button, for cohesion with
+   the role-A button system (task-12) — stays circular, no wobble, dark
+   sheet background/text untouched. */
 .party-sheet__close {
   position: absolute;
   top: 0.75rem;
@@ -1979,12 +2173,19 @@ body {
   width: 38px;
   height: 38px;
   border-radius: var(--qb-radius-circle);
-  border: 2px solid var(--qb-party-border);
+  border: 2px solid var(--qb-btn-ink);
   background: var(--qb-party-row-bg);
   font-size: 1.25rem;
   line-height: 1;
   color: var(--qb-party-text-muted);
   cursor: pointer;
+  box-shadow: none;
+  transition:
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.party-sheet__close:hover {
+  box-shadow: var(--qb-btn-shadow-hover);
 }
 
 .party-sheet__header {
