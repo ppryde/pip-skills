@@ -94,6 +94,14 @@ const fixture: BoardResponse = {
         status: "parked",
         budget: { estimate: 5, actual: 12 },
       }),
+      // A DONE card with no relation to WF-EPIC — used to prove the
+      // epic-focus dim reaches the Done lane the same as every other lane
+      // (regression coverage for the `.card-tile--done` opacity clobber).
+      card({
+        id: "WF-SHIPPED",
+        title: "Already shipped",
+        status: "done",
+      }),
     ],
   },
   context: { pct: 42, threshold: 80 },
@@ -248,6 +256,16 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     expect(
       container.querySelector('[data-card-id="WF-EPIC"].card-tile--highlighted')
     ).not.toBeNull();
+
+    // An unrelated DONE card must dim exactly like every other lane's cards
+    // do — the Done lane's filled/opaque treatment must not swallow the
+    // epic-focus dim.
+    expect(
+      container.querySelector('[data-card-id="WF-SHIPPED"]')
+    ).toHaveClass("card-tile--dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-SHIPPED"]')
+    ).not.toHaveClass("card-tile--highlighted");
 
     // ...but the drawer stayed shut (expand is a distinct action from open).
     expect(getCard).not.toHaveBeenCalled();

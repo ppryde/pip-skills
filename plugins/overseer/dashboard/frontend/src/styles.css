@@ -928,6 +928,19 @@ body {
   opacity: 0.94;
 }
 
+/* Epic-focus dim vs. Done's own opacity (bug fix): `.card-tile--dimmed`
+   and `.card-tile--done` are equal-specificity single-class selectors, so
+   without this rule the cascade falls back to source order and
+   `.card-tile--done`'s `opacity: 0.94` (declared after `--dimmed` above)
+   silently wins — Done cards never visibly faded during epic focus, even
+   though React correctly applied `--dimmed`. Two-class selector outranks
+   both single-class rules regardless of source order, so Done cards dim
+   exactly like every other lane while retaining their own look the rest
+   of the time. */
+.card-tile--done.card-tile--dimmed {
+  opacity: 0.35;
+}
+
 .card-tile__title--done {
   text-decoration: line-through;
   color: var(--qb-ink-500);
