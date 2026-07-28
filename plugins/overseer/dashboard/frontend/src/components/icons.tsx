@@ -91,3 +91,71 @@ export function CheckIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Park/"Camp" glyph (WF-046 item 4) — a small tent, door-flap doubling as
+ * the pause read: a card at rest pitches camp rather than marching on. */
+export function TentIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M8 2 L14.25 13.5 H1.75 Z" strokeLinejoin="round" />
+      <path d="M8 2 L6.25 13.5M8 2 L9.75 13.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Block/"Barred" glyph (WF-046 item 4) — a shield with a bar across it,
+ * echoing `PadlockIcon`'s stroke weight/viewBox for the same "held up"
+ * read as the dependency lock badge. */
+export function BarredShieldIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+      {...props}
+    >
+      <path
+        d="M8 1.75l5.25 1.75v4c0 3.5-2.25 5.5-5.25 6.75-3-1.25-5.25-3.25-5.25-6.75v-4L8 1.75z"
+        strokeLinejoin="round"
+      />
+      <path d="M5 8h6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Abandon/"Forsake" glyph (WF-046 item 4) — a small skull; the card's
+ * quest is given up for dead, not merely paused. */
+export function SkullIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      aria-hidden="true"
+      {...props}
+    >
+      <path
+        d="M8 1.75c-2.76 0-5 2.06-5 4.85 0 1.66.8 2.9 1.75 3.7v1.7h1.35v-1.15h1.15v1.15h1.5v-1.15h1.15v1.15h1.35v-1.7c.95-.8 1.75-2.04 1.75-3.7 0-2.79-2.24-4.85-5-4.85z"
+        strokeLinejoin="round"
+      />
+      <circle cx="5.9" cy="6.6" r="0.85" fill="currentColor" />
+      <circle cx="10.1" cy="6.6" r="0.85" fill="currentColor" />
+    </svg>
+  );
+}

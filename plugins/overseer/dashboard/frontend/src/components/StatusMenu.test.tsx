@@ -31,7 +31,8 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /park/i }));
+    // WF-046 item 4: park's button now reads "Camp" (themed relabel).
+    fireEvent.click(screen.getByRole("button", { name: /camp/i }));
 
     expect(park).toHaveBeenCalledWith("WF-1");
     expect(mutate).toHaveBeenCalledWith(expect.any(Function));
@@ -54,7 +55,8 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+    // WF-046 item 4: done's button now reads "Vanquished" (themed relabel).
+    fireEvent.click(screen.getByRole("button", { name: /^vanquished$/i }));
 
     expect(move).toHaveBeenCalledWith("WF-1", { status: "done" });
   });
@@ -65,7 +67,8 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /^abandon$/i }));
+    // WF-046 item 4: abandon's button now reads "Forsake" (themed relabel).
+    fireEvent.click(screen.getByRole("button", { name: /^forsake$/i }));
 
     expect(move).toHaveBeenCalledWith("WF-1", { status: "abandoned" });
   });
@@ -77,7 +80,8 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /block/i }));
+    // WF-046 item 4: block's button now reads "Barred…" (themed relabel).
+    fireEvent.click(screen.getByRole("button", { name: /barred/i }));
 
     expect(move).toHaveBeenCalledWith("WF-1", {
       status: "blocked",
@@ -91,7 +95,7 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /block/i }));
+    fireEvent.click(screen.getByRole("button", { name: /barred/i }));
 
     expect(move).not.toHaveBeenCalled();
     expect(mutate).not.toHaveBeenCalled();
@@ -103,7 +107,7 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /block/i }));
+    fireEvent.click(screen.getByRole("button", { name: /barred/i }));
 
     expect(move).not.toHaveBeenCalled();
     expect(mutate).not.toHaveBeenCalled();
@@ -115,7 +119,7 @@ describe("<StatusMenu/>", () => {
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: /block/i }));
+    fireEvent.click(screen.getByRole("button", { name: /barred/i }));
 
     expect(move).not.toHaveBeenCalled();
     expect(mutate).not.toHaveBeenCalled();
@@ -145,7 +149,7 @@ describe("<StatusMenu/>", () => {
         onMutated={onMutated}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /park/i }));
+    fireEvent.click(screen.getByRole("button", { name: /camp/i }));
 
     await waitFor(() => expect(onMutated).toHaveBeenCalledTimes(1));
   });
@@ -163,7 +167,7 @@ describe("<StatusMenu/>", () => {
         onMutated={onMutated}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /block/i }));
+    fireEvent.click(screen.getByRole("button", { name: /barred/i }));
 
     expect(onMutated).not.toHaveBeenCalled();
   });
