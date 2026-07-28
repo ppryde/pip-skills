@@ -27,6 +27,13 @@ export interface BoardProps {
   setDragActive: UseBoardResult["setDragActive"];
   /** WF-029: rendered by PartyColumn, the scroll row's rightmost item. */
   party: PartyMember[];
+  /** WF-031 branch filter: `null` clears dim/spotlight everywhere; passed
+   * straight through to every Lane (cards) and PartyColumn (agents). */
+  activeBranch: string | null;
+  /** WF-042: `context.threshold`, passed straight through to PartyColumn
+   * for its per-row near-threshold cue — App.tsx's single source, no
+   * re-derivation here. */
+  threshold: number | null;
 }
 
 /**
@@ -51,6 +58,8 @@ function Board({
   onOpenCard,
   setDragActive,
   party,
+  activeBranch,
+  threshold,
 }: BoardProps) {
   const lanes = useMemo(() => groupIntoLanes(board.cards), [board.cards]);
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
@@ -157,11 +166,12 @@ function Board({
             onToggleEpicHighlight={toggleEpicHighlight}
             dragDisabled={inFlight}
             onOpenCard={onOpenCard}
+            activeBranch={activeBranch}
           />
         ))}
         {/* Rightmost item in the scroll row (HANDOFF §Board) — the flex row
             puts it at the tail for free, no extra positioning needed. */}
-        <PartyColumn party={party} />
+        <PartyColumn party={party} activeBranch={activeBranch} threshold={threshold} />
       </div>
     </DndContext>
   );

@@ -376,3 +376,40 @@ describe("useBoard(root) — WF-030 repo selector threading", () => {
     expect(mockedSetActiveRoot).toHaveBeenLastCalledWith("/repo-b");
   });
 });
+
+describe("useBoard(root, enabled) — WF-032 unbegun-repo fetch gate", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("enabled: false skips the mount fetch entirely — never calls setActiveRoot or getBoard", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    const mockedSetActiveRoot = vi.mocked(setActiveRoot);
+
+    renderHook(() => useBoard("/unbegun-repo", false));
+
+    // Give any stray microtask a chance to fire, then assert nothing did.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockedGetBoard).not.toHaveBeenCalled();
+    expect(mockedSetActiveRoot).not.toHaveBeenCalled();
+  });
+
+  it("toggling enabled from false to true fires the fetch", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+    const mockedSetActiveRoot = vi.mocked(setActiveRoot);
+
+    const { rerender } = renderHook(
+      ({ enabled }) => useBoard("/repo-a", enabled),
+      { initialProps: { enabled: false } }
+    );
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockedGetBoard).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => expect(mockedGetBoard).toHaveBeenCalledTimes(1));
+    expect(mockedSetActiveRoot).toHaveBeenLastCalledWith("/repo-a");
+  });
+});

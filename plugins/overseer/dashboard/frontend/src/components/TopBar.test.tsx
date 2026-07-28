@@ -5,6 +5,7 @@ import type {
   BoardResponse,
   Context,
   Limits,
+  RateWindow,
   RepoEntry,
 } from "../api/types";
 import type { PartyMember } from "../board/party";
@@ -31,6 +32,8 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    created: "",
+    updated: "",
     checklist: [],
     ...overrides,
   };
@@ -72,18 +75,13 @@ function baseProps() {
     repos: [] as RepoEntry[],
     activeRoot: null as string | null,
     onSelectRepo: () => {},
+    branches: [] as string[],
+    activeBranch: null as string | null,
+    onSelectBranch: () => {},
   };
 }
 
 describe("<TopBar/>", () => {
-  it("renders 'as of last refresh' as visible text, scoped to the ctx-note span (belt-and-braces vs. the new subtitle's own timestamp copy)", () => {
-    render(<TopBar {...baseProps()} context={{ pct: 42, threshold: 80 }} />);
-
-    const note = document.querySelector(".topbar__ctx-note");
-    expect(note).not.toBeNull();
-    expect(note).toHaveTextContent(/as of last refresh/i);
-  });
-
   it("the subtitle does NOT contain 'as of last refresh'", () => {
     render(
       <TopBar
@@ -141,7 +139,7 @@ describe("<TopBar/>", () => {
     expect(screen.getByText("2 / 3 vanquished")).toBeInTheDocument();
   });
 
-  it("the questing pill counts only live (non-stale) party members", () => {
+  it("the fleet-health pill's questing count includes only live (non-stale) party members", () => {
     render(
       <TopBar
         {...baseProps()}
@@ -153,10 +151,10 @@ describe("<TopBar/>", () => {
       />
     );
 
-    expect(screen.getByText("2 questing")).toBeInTheDocument();
+    expect(screen.getByText(/2 questing/)).toBeInTheDocument();
   });
 
-  it("clicking the questing pill calls onOpenParty", () => {
+  it("clicking the fleet-health pill calls onOpenParty", () => {
     const onOpenParty = vi.fn();
     render(
       <TopBar
@@ -170,7 +168,68 @@ describe("<TopBar/>", () => {
     expect(onOpenParty).toHaveBeenCalledTimes(1);
   });
 
-  it("renders no Sessions toggle — the old sessions dropdown retired, the questing pill replaces it", () => {
+  // WF-042: the old dedicated launching-session readout (context.model,
+  // context.pr, the single "ctx NN%" value) is gone from this bar — those
+  // facts now live per-agent on the Party's hero cards instead.
+  it("no longer renders context.model, context.pr, or a single ctx% value", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        context={{
+          pct: 42,
+          threshold: 80,
+          model: "Opus",
+          pr: { number: 7, review_state: "approved" },
+        }}
+      />
+    );
+
+    expect(screen.queryByText("Opus")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PR #7/)).not.toBeInTheDocument();
+    expect(document.querySelector(".topbar__ctx-value")).toBeNull();
+    expect(document.querySelector(".topbar__ctx-note")).toBeNull();
+  });
+
+  it("renders the fleet-health line with top ctx and near-threshold segments derived from live party sessions", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        context={{ pct: null, threshold: 80 }}
+        party={[
+          partyMember({ id: "s1", pct: 86 }),
+          partyMember({ id: "s2", pct: 82 }),
+          partyMember({ id: "s3", pct: 10 }),
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByText(/3 questing · top ctx 86% · 2 near threshold/)
+    ).toBeInTheDocument();
+  });
+
+  it("omits the top-ctx and near-threshold segments gracefully when there's no pct data (never NaN/null)", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        context={{ pct: null, threshold: 80 }}
+        party={[partyMember({ id: "s1" }), partyMember({ id: "s2" })]}
+      />
+    );
+
+    const pill = screen.getByRole("button", { name: /questing/i });
+    expect(pill).toHaveTextContent(/^\D*2 questing\D*$/);
+    expect(pill.textContent).not.toMatch(/null|NaN|undefined/);
+  });
+
+  it("keeps the threshold control, relabeled as the fleet's default", () => {
+    render(<TopBar {...baseProps()} context={{ pct: null, threshold: 65 }} />);
+
+    expect(screen.getByLabelText("Threshold")).toHaveValue(65);
+    expect(screen.getByText(/default threshold/i)).toBeInTheDocument();
+  });
+
+  it("renders no Sessions toggle — the old sessions dropdown retired, the fleet-health pill replaces it", () => {
     render(<TopBar {...baseProps()} />);
     expect(
       screen.queryByRole("button", { name: /^sessions$/i })
@@ -187,8 +246,8 @@ describe("<TopBar/>", () => {
       <TopBar
         {...baseProps()}
         repos={[
-          { label: "repo-a", root: "/a", current: true },
-          { label: "repo-b", root: "/b", current: false },
+          { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
+          { label: "repo-b", root: "/b", current: false, has_board: true, live_sessions: 0 },
         ]}
         activeRoot="/a"
       />
@@ -207,8 +266,8 @@ describe("<TopBar/>", () => {
       <TopBar
         {...baseProps()}
         repos={[
-          { label: "repo-a", root: "/a", current: true },
-          { label: "repo-b", root: "/b", current: false },
+          { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
+          { label: "repo-b", root: "/b", current: false, has_board: true, live_sessions: 0 },
         ]}
         activeRoot="/a"
         onSelectRepo={onSelectRepo}
@@ -220,5 +279,77 @@ describe("<TopBar/>", () => {
     });
 
     expect(onSelectRepo).toHaveBeenCalledWith("/b");
+  });
+
+  it("renders no branch filter when there are no distinct branches", () => {
+    render(<TopBar {...baseProps()} branches={[]} />);
+    expect(screen.queryByLabelText("Branch")).not.toBeInTheDocument();
+  });
+
+  it("renders the branch filter with every distinct branch as an option", () => {
+    render(
+      <TopBar {...baseProps()} branches={["feat/a", "feat/b"]} activeBranch="feat/a" />
+    );
+
+    const select = screen.getByLabelText("Branch") as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select.value).toBe("feat/a");
+    expect(screen.getByRole("option", { name: "feat/a" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "feat/b" })).toBeInTheDocument();
+  });
+
+  it("selecting a different branch calls onSelectBranch with its name", () => {
+    const onSelectBranch = vi.fn();
+    render(
+      <TopBar
+        {...baseProps()}
+        branches={["feat/a", "feat/b"]}
+        activeBranch="feat/a"
+        onSelectBranch={onSelectBranch}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Branch"), {
+      target: { value: "feat/b" },
+    });
+
+    expect(onSelectBranch).toHaveBeenCalledWith("feat/b");
+  });
+
+  it("renders the Short Rest pill with the rounded 5h usage and a '5h window' tooltip", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        limits={{
+          five_hour: { used_percentage: 28.000000000000004 } as RateWindow,
+        }}
+      />
+    );
+
+    const pill = screen.getByText(/Short Rest/);
+    expect(pill).toHaveTextContent("Short Rest 28%");
+    expect(pill).toHaveAttribute("title", "5h window");
+  });
+
+  it("renders the Long Rest pill with the rounded 7d usage and a '7d window' tooltip", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        limits={{
+          seven_day: { used_percentage: 63.4 } as RateWindow,
+        }}
+      />
+    );
+
+    const pill = screen.getByText(/Long Rest/);
+    expect(pill).toHaveTextContent("Long Rest 63%");
+    expect(pill).toHaveAttribute("title", "7d window");
+  });
+
+  it("omits the Short Rest / Long Rest pills when their window is absent from limits", () => {
+    render(<TopBar {...baseProps()} limits={{}} />);
+
+    expect(screen.queryByText(/Short Rest/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Long Rest/)).not.toBeInTheDocument();
   });
 });

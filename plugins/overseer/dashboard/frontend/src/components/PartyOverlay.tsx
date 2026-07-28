@@ -1,10 +1,21 @@
 import { useEffect } from "react";
 import type { PartyMember } from "../board/party";
+import { prLabel } from "../board/prLabel";
 import PartyAvatar from "./PartyAvatar";
 
 export interface PartyOverlayProps {
   party: PartyMember[];
   onClose: () => void;
+  /** WF-031 branch filter: `null`/absent clears it; otherwise every hero
+   * card whose session `branch` matches gets the `is-spotlight` treatment
+   * (see PartyColumn's doc comment — no dimming of non-matching heroes
+   * here). */
+  activeBranch?: string | null;
+  /** WF-042: the fleet's global default (`context.threshold`, threaded down
+   * from App.tsx) — a hero card gets the `is-near-threshold` warning cue
+   * when its own `session.pct >= threshold`. `null`/absent means no
+   * threshold is set, so the cue never fires. */
+  threshold?: number | null;
 }
 
 /**
@@ -17,10 +28,24 @@ export interface PartyOverlayProps {
  * sessions including stale ghosts — both real census data, no invented
  * party capacity (Decisions). LV and the cleared/earned stat tiles are
  * omitted: the app has no level concept and no per-hero cleared/earned
- * metric (spec's honest-data cut) — mana, name, class, and ON QUEST are
- * all real data, so they stay.
+ * metric (spec's honest-data cut) — exhaustion, name, class, and ON QUEST
+ * are all real data, so they stay.
+ *
+ * Each hero card also surfaces a single "Exhaustion" bar (`session.pct`,
+ * fills UP as context is used — 0% fresh, 100% spent — replacing the old
+ * inverse `mana` bar and the separate WF-042 ctx% line, which were two
+ * representations of the same number pulling in opposite directions), its
+ * PR (`session.pr`, linked when `pr.url` is present), and an `is-near-
+ * threshold` cue when that pct is at/over the fleet's global default
+ * threshold. All mirror the "forward what's there" style already used for
+ * model/branch below — absent fields simply render nothing.
  */
-function PartyOverlay({ party, onClose }: PartyOverlayProps) {
+function PartyOverlay({
+  party,
+  onClose,
+  activeBranch = null,
+  threshold = null,
+}: PartyOverlayProps) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -56,15 +81,27 @@ function PartyOverlay({ party, onClose }: PartyOverlayProps) {
           </span>
         </div>
         <p className="party-sheet__helper">
-          …their mana is the context they have left.
+          …their exhaustion is the context they've spent.
         </p>
 
         <div className="party-sheet__grid">
           {party.map((member) => {
             const { session } = member;
-            const mana = session.pct === undefined ? null : 100 - session.pct;
+            const spotlight =
+              activeBranch !== null && session.branch === activeBranch;
+            const isNearThreshold =
+              session.pct !== undefined &&
+              threshold !== null &&
+              session.pct >= threshold;
             return (
-              <div key={session.id} className="hero-card">
+              <div
+                key={session.id}
+                className={
+                  "hero-card" +
+                  (spotlight ? " is-spotlight" : "") +
+                  (isNearThreshold ? " is-near-threshold" : "")
+                }
+              >
                 <PartyAvatar session={session} size={52} />
                 <div className="hero-card__name">
                   {session.session_name || session.id}
@@ -72,19 +109,44 @@ function PartyOverlay({ party, onClose }: PartyOverlayProps) {
                 {session.model && (
                   <div className="hero-card__class">{session.model}</div>
                 )}
-                {mana === null ? (
-                  <div className="hero-card__mana hero-card__mana--unknown">
-                    <span className="hero-card__mana-label">— unknown</span>
+                {session.branch && (
+                  <div className="hero-card__branch">⑃ {session.branch}</div>
+                )}
+                {session.pct !== undefined && (
+                  <div className="hero-card__exhaustion">
+                    <div className="hero-card__exhaustion-row">
+                      <span className="hero-card__exhaustion-label">
+                        Exhaustion
+                      </span>
+                      <span className="hero-card__exhaustion-value">
+                        {session.pct}%
+                      </span>
+                    </div>
+                    <div className="hero-card__exhaustion-bar">
+                      <div
+                        className={
+                          "hero-card__exhaustion-fill hero-card__exhaustion-fill--" +
+                          (session.pct >= 50 ? "high" : "low")
+                        }
+                        style={{ width: `${session.pct}%` }}
+                      />
+                    </div>
                   </div>
-                ) : (
-                  <div className="hero-card__mana">
-                    <div
-                      className={
-                        "hero-card__mana-fill hero-card__mana-fill--" +
-                        (mana >= 50 ? "high" : "low")
-                      }
-                      style={{ width: `${mana}%` }}
-                    />
+                )}
+                {session.pr && (
+                  <div className="hero-card__pr">
+                    {session.pr.url ? (
+                      <a
+                        className="hero-card__pr-link"
+                        href={session.pr.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {prLabel(session.pr)}
+                      </a>
+                    ) : (
+                      prLabel(session.pr)
+                    )}
                   </div>
                 )}
                 {member.questCardId && (

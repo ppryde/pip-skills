@@ -32,7 +32,7 @@ _OVERSEER_ROOT = Path(__file__).resolve().parents[3]
 if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
-from scripts.store import derive_repo_root  # noqa: E402  (must follow sys.path setup above)
+from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402  (must follow sys.path setup above)
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -145,10 +145,10 @@ def _entry_ts(entry: dict[str, Any]) -> float:
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
-    Returns {id, session_name?, model?, worktree_cwd, pct?, pr?, updated_at, stale}.
-    Optional fields (model, pr, session_name, pct) are omitted when absent, mirroring
-    _census_extras's "forward what's there" style. Malformed updated_at values are
-    coerced to 0.0 (treating as stale) rather than raising.
+    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at, stale}.
+    Optional fields (model, pr, session_name, branch, pct) are omitted when absent,
+    mirroring _census_extras's "forward what's there" style. Malformed updated_at
+    values are coerced to 0.0 (treating as stale) rather than raising.
     """
     payload = entry.get("payload") or {}
     ts = _entry_ts(entry)
@@ -158,6 +158,8 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
         "updated_at": entry.get("updated_at"),
         "stale": (now - ts) > _STALE_HORIZON_SECONDS,
     }
+    if entry.get("branch"):
+        out["branch"] = entry["branch"]
     model = payload.get("model") or {}
     if model.get("display_name"):
         out["model"] = model["display_name"]
@@ -172,8 +174,18 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
     return out
 
 
-def _sessions_list() -> list[dict[str, Any]]:
-    """Fetch all sessions from census and return sorted by updated_at descending.
+def _sessions_list(repo_root: Path) -> list[dict[str, Any]]:
+    """Fetch all sessions from census, scoped to ``repo_root``, sorted by
+    updated_at descending.
+
+    Census tracks sessions across every repo on the machine (it has no
+    per-repo scoping of its own), so this filters to only those sessions
+    whose `worktree_cwd` derives — via `derive_repo_root` — to the repo this
+    dashboard instance is serving. A session whose `worktree_cwd` no longer
+    resolves to a repo at all (e.g. a removed worktree) is a ghost and is
+    dropped rather than surfaced against the wrong repo. `derive_repo_root`
+    shells `git rev-parse` per session; memoized by cwd within this call
+    since census may report the same cwd for multiple sessions.
 
     Returns [] when census is unavailable (soft dependency, never 500s).
     Handles malformed timestamps defensively (treated as 0, sort last).
@@ -183,13 +195,58 @@ def _sessions_list() -> list[dict[str, Any]]:
         return []
     sessions_dict = data.get("sessions") or {}
     now = time.time()
+    root_cache: dict[str, Path | None] = {}
+
+    def _derived_root(cwd: str) -> Path | None:
+        if cwd not in root_cache:
+            root_cache[cwd] = derive_repo_root(Path(cwd))
+        return root_cache[cwd]
+
     sessions = [
         _session_summary(sid, entry, now)
         for sid, entry in sessions_dict.items()
+        if entry.get("worktree_cwd") and _derived_root(entry["worktree_cwd"]) == repo_root
     ]
     # Sort by coerced updated_at descending (freshest first); malformed -> 0.0 -> sorts last
     sessions.sort(key=lambda s: _entry_ts({"updated_at": s.get("updated_at")}), reverse=True)
     return sessions
+
+
+def _live_session_counts_by_root() -> dict[Path, int]:
+    """Count LIVE (non-stale) census sessions per derived repo root, across
+    every repo on the machine census knows about (not scoped to any single
+    board) — feeds `GET /api/repos`'s per-repo `live_sessions` count and its
+    "unbegun" repo union (a live session in a repo with no board.db).
+
+    "Live" mirrors `_session_summary`'s `stale` computation: a session is
+    live when `(now - updated_at) <= _STALE_HORIZON_SECONDS`. Ghost sessions
+    (a `worktree_cwd` that no longer resolves to any repo — e.g. a removed
+    worktree) are dropped, same as `_sessions_list`. `derive_repo_root`
+    shells `git rev-parse` per distinct cwd; memoized within this call.
+
+    Soft-degrades to `{}` when census is unavailable — never raises, mirrors
+    every other census read in this module.
+    """
+    data = run_census_all()
+    if not data:
+        return {}
+    sessions_dict = data.get("sessions") or {}
+    now = time.time()
+    root_cache: dict[str, Path | None] = {}
+    counts: dict[Path, int] = {}
+    for entry in sessions_dict.values():
+        cwd = entry.get("worktree_cwd")
+        if not cwd:
+            continue
+        if cwd not in root_cache:
+            root_cache[cwd] = derive_repo_root(Path(cwd))
+        root = root_cache[cwd]
+        if root is None:
+            continue
+        if (now - _entry_ts(entry)) > _STALE_HORIZON_SECONDS:
+            continue
+        counts[root] = counts.get(root, 0) + 1
+    return counts
 
 
 def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
@@ -307,18 +364,46 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
 
     @app.get("/api/repos")
     def get_repos() -> dict[str, Any]:
+        """Board repos (from `repos --json`, `has_board:true`) UNIONED with
+        "unbegun" repos — repos with live census sessions but no board.db
+        yet (`has_board:false`). Unbegun roots are a display-only addition:
+        they are never added to `_resolve_root`'s allowlist (that allowlist
+        is recomputed fresh, from `_discover_roots` only, on every request),
+        so `/api/board` etc. still 400 an unbegun root — the dashboard never
+        fetches the board for one (see docs/superpowers/specs/2026-07-28
+        -overseer-worktree-branch-distinction.md).
+        """
+        live_counts = _live_session_counts_by_root()
         repos_list: list[dict[str, Any]] = []
+        board_roots: set[Path] = set()
         for entry in _discover_roots(launch_root):
             if not isinstance(entry, dict) or not entry.get("root"):
                 continue
+            root = Path(entry["root"]).resolve()
             item = dict(entry)
-            item["current"] = Path(entry["root"]).resolve() == _derived_launch_root
+            item["current"] = root == _derived_launch_root
+            item["has_board"] = True
+            item["live_sessions"] = live_counts.get(root, 0)
             repos_list.append(item)
+            board_roots.add(root)
+
+        for root, count in live_counts.items():
+            if root in board_roots:
+                continue
+            repos_list.append({
+                "label": derive_repo_label(root) or root.name,
+                "root": str(root),
+                "current": False,
+                "has_board": False,
+                "live_sessions": count,
+            })
+
         return {"repos": repos_list}
 
     @app.get("/api/sessions")
-    def get_sessions() -> dict[str, Any]:
-        return {"sessions": _sessions_list()}
+    def get_sessions(root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        return {"sessions": _sessions_list(effective)}
 
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str, root: str | None = None) -> Any:

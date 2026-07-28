@@ -4,9 +4,11 @@ import type { PartyMember } from "../board/party";
 import { goldTotal } from "../board/goldTotal";
 import { vanquishedStats } from "../board/vanquished";
 import { formatTokens } from "../board/formatTokens";
+import { fleetSummary } from "../board/fleet";
 import { CoinIcon, CheckIcon } from "./icons";
 import ThresholdControl from "./ThresholdControl";
 import RepoSelector from "./RepoSelector";
+import BranchFilter from "./BranchFilter";
 
 export interface TopBarProps {
   projectName: string;
@@ -21,8 +23,9 @@ export interface TopBarProps {
   inFlight: boolean;
   /** All board cards — feeds the gold-total and vanquished pills. */
   cards: BoardCard[];
-  /** The shared session<->card join (App.tsx) — feeds the questing pill's
-   * live count. */
+  /** The shared session<->card join (App.tsx) — feeds the fleet-health
+   * pill's live questing count, top ctx%, and near-threshold count
+   * (`fleetSummary`, WF-042). */
   party: PartyMember[];
   /** From useBoard — feeds the parchment subtitle's timestamp. */
   lastRefreshedAt: Date | null;
@@ -35,16 +38,28 @@ export interface TopBarProps {
   repos: RepoEntry[];
   activeRoot: string | null;
   onSelectRepo: (root: string) => void;
+  /** WF-031 branch filter — the distinct-branch union (`distinctBranches`),
+   * the session-local active selection, and its setter. `null` = "All". */
+  branches: string[];
+  activeBranch: string | null;
+  onSelectBranch: (branch: string | null) => void;
+  /** Task 10: for an "unbegun" repo (WF-032, `has_board: false`) `useSessions`
+   * is hard-gated off (see App.tsx), so `party` is never populated for it —
+   * computing the questing pill from `party` would show a contradictory "0
+   * questing" next to `<UnbegunHolding/>`'s own "N adventurers already roam
+   * these lands" (sourced from `repo.live_sessions`). When set, this
+   * OVERRIDES the party-derived count so both readouts agree; `undefined`
+   * (every other repo) keeps the normal live-party-member count below. */
+  questingCountOverride?: number;
 }
 
 function formatPct(value: number): string {
-  return `${value}%`;
+  // Round to a whole percent — census `used_percentage` arrives as a float
+  // that can carry FP noise (e.g. 28.000000000000004); ctx% is already int,
+  // so Math.round is a no-op there.
+  return `${Math.round(value)}%`;
 }
 
-// Subtitle copy MUST NOT contain the substring "as of last refresh" — the
-// existing .topbar__ctx-note span hardcodes that exact text, and an RTL
-// getByText(/as of last refresh/i) query throws on multiple matches rather
-// than picking one (see TopBar.test.tsx).
 function formatSubtitle(projectName: string, lastRefreshedAt: Date | null): string {
   if (lastRefreshedAt === null) return projectName;
   const hh = String(lastRefreshedAt.getHours()).padStart(2, "0");
@@ -53,15 +68,25 @@ function formatSubtitle(projectName: string, lastRefreshedAt: Date | null): stri
 }
 
 /**
- * `context.model`/`context.pr` and top-level `limits` are census-derived
- * extras — OPTIONAL per the frozen contract. Each renders nothing when
- * absent so the bar degrades gracefully without the census integration.
+ * Top-level `limits` is a census-derived extra — OPTIONAL per the frozen
+ * contract. Renders nothing when absent so the bar degrades gracefully
+ * without the census integration.
+ *
+ * WF-042: `context.model`/`context.pr`/the single `ctx NN%` value are GONE
+ * from this bar — those were the *launching* session's facts, arbitrary in
+ * a multi-agent board (see the WF-042 spec's Problem statement). They now
+ * live per-agent on the Party's hero cards. What replaces them here is a
+ * fleet-health line (`fleetSummary()` over every live party session) plus
+ * the threshold control, reframed as the fleet's global DEFAULT (per-agent
+ * override is a deferred follow-up). `context.threshold` itself is still
+ * read from here — it's the one board/account-level fact this bar keeps.
  *
  * Parchment sticky bar (HANDOFF §Board "Top bar"): crest + branded title +
- * subtitle, then Refresh/Archive/Threshold/ctx (markup preserved from the
- * pre-theme bar, CSS-only restyle), then the three guild pills. The old
- * Sessions dropdown toggle is gone — the questing pill is its structural
- * replacement (Decisions), opening the Party overlay instead.
+ * subtitle, then Refresh/Archive/threshold-default/fleet-health, then the
+ * two remaining guild pills (gold, vanquished). The old Sessions dropdown
+ * toggle is gone, and the old dedicated questing pill is folded into the
+ * fleet-health line below (same live-count source, no duplicate readout,
+ * still opens the Party overlay on click).
  */
 function TopBar({
   projectName,
@@ -81,15 +106,27 @@ function TopBar({
   repos,
   activeRoot,
   onSelectRepo,
+  branches,
+  activeBranch,
+  onSelectBranch,
+  questingCountOverride,
 }: TopBarProps) {
-  const pct = context?.pct ?? null;
   const threshold = context?.threshold ?? null;
   const gold = goldTotal(cards);
   const { done, total } = vanquishedStats(cards);
+  // WF-042: fleet-health line replaces the old questing-only pill — same
+  // live-session source (`fleetSummary` drops stale sessions itself, see
+  // its doc comment), now paired with the fleet's top ctx% and
+  // near-threshold count.
+  const fleet = fleetSummary(
+    party.map((m) => m.session),
+    threshold
+  );
   // "N questing" = live party members only — a stale session isn't
   // currently out on a quest, it's just a ghost still shown in the Party
   // column/overlay (Decisions: honest data, no invented capacity).
-  const questingCount = party.filter((m) => !m.session.stale).length;
+  // `questingCountOverride` (task 10) wins when set — see its doc comment.
+  const questingCount = questingCountOverride ?? fleet.questing;
 
   return (
     <header className="topbar">
@@ -104,31 +141,24 @@ function TopBar({
       </div>
 
       <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
+      <BranchFilter
+        branches={branches}
+        activeBranch={activeBranch}
+        onSelect={onSelectBranch}
+      />
 
-      <div className="topbar__ctx">
-        <span className="topbar__ctx-label">ctx</span>
-        <span className="topbar__ctx-value">
-          {pct === null ? "— unknown" : `${pct}%`}
-        </span>
-        <span className="topbar__ctx-note">as of last refresh</span>
+      <div className="topbar__threshold">
         <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
       </div>
 
-      {context?.model && <span className="topbar__pill">{context.model}</span>}
-      {context?.pr && (
-        <span className="topbar__pill">
-          PR{context.pr.number !== undefined ? ` #${context.pr.number}` : ""}
-          {context.pr.review_state ? ` · ${context.pr.review_state}` : ""}
-        </span>
-      )}
       {limits?.five_hour?.used_percentage !== undefined && (
-        <span className="topbar__pill">
-          5h {formatPct(limits.five_hour.used_percentage)}
+        <span className="topbar__pill" title="5h window">
+          ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
         </span>
       )}
       {limits?.seven_day?.used_percentage !== undefined && (
-        <span className="topbar__pill">
-          7d {formatPct(limits.seven_day.used_percentage)}
+        <span className="topbar__pill" title="7d window">
+          ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
         </span>
       )}
 
@@ -166,12 +196,24 @@ function TopBar({
         {done} / {total} vanquished
       </span>
 
+      {/* WF-042 fleet-health line — replaces the old dedicated questing
+          pill (Decisions: single live-count source, folded in rather than
+          duplicated). `topCtx`/`nearThreshold` segments are omitted
+          gracefully when there's no pct data to report — never a
+          "top ctx null%" or a noisy "0 near threshold". */}
       <button
         type="button"
-        className="topbar__questing-pill"
+        className="topbar__fleet-pill"
         onClick={onOpenParty}
       >
+        <span className="topbar__fleet-icon" aria-hidden="true">
+          ⚔
+        </span>
         {questingCount} questing
+        {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
+        {fleet.nearThreshold > 0 && (
+          <> · {fleet.nearThreshold} near threshold</>
+        )}
       </button>
     </header>
   );

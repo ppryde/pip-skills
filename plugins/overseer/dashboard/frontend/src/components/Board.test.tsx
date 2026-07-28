@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
 
 // Mock the SOLE api client module — no real fetch in this test. getSessions
@@ -32,6 +32,8 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    created: "",
+    updated: "",
     checklist: [],
     ...overrides,
   };
@@ -93,6 +95,14 @@ const fixture: BoardResponse = {
         title: "Way over budget",
         status: "parked",
         budget: { estimate: 5, actual: 12 },
+      }),
+      // A DONE card with no relation to WF-EPIC — used to prove the
+      // epic-focus dim reaches the Done lane the same as every other lane
+      // (regression coverage for the `.card-tile--done` opacity clobber).
+      card({
+        id: "WF-SHIPPED",
+        title: "Already shipped",
+        status: "done",
       }),
     ],
   },
@@ -249,6 +259,16 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
       container.querySelector('[data-card-id="WF-EPIC"].card-tile--highlighted')
     ).not.toBeNull();
 
+    // An unrelated DONE card must dim exactly like every other lane's cards
+    // do — the Done lane's filled/opaque treatment must not swallow the
+    // epic-focus dim.
+    expect(
+      container.querySelector('[data-card-id="WF-SHIPPED"]')
+    ).toHaveClass("card-tile--dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-SHIPPED"]')
+    ).not.toHaveClass("card-tile--highlighted");
+
     // ...but the drawer stayed shut (expand is a distinct action from open).
     expect(getCard).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -287,5 +307,117 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     interactives.forEach((el) => {
       expect(el.querySelector('button, [role="button"], a[href]')).toBeNull();
     });
+  });
+});
+
+describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
+  const branchFixture: BoardResponse = {
+    board: {
+      project: "overseer-dashboard",
+      sprints: [],
+      quarantined: [],
+      cards: [
+        card({ id: "WF-A", title: "On branch a", branch: "feat/a" }),
+        card({ id: "WF-B", title: "On branch b", branch: "feat/b" }),
+        card({ id: "WF-C", title: "No branch at all" }),
+        // A DONE card on a different branch — regression coverage for the
+        // `.card-tile--done` opacity clobber on the branch-filter `is-dimmed`
+        // side (mirrors the epic-focus WF-SHIPPED case above).
+        card({ id: "WF-D", title: "Shipped on branch b", branch: "feat/b", status: "done" }),
+      ],
+    },
+    context: { pct: 10, threshold: 80 },
+    limits: null,
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getRepos).mockResolvedValue({ repos: [] });
+  });
+
+  it("selecting a branch dims non-matching cards and spotlights the matching one, leaving branchless cards neutral (task 10)", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+
+    const { container } = render(<App />);
+    await screen.findByText("On branch a");
+
+    fireEvent.change(screen.getByLabelText("Branch"), {
+      target: { value: "feat/a" },
+    });
+
+    expect(
+      container.querySelector('[data-card-id="WF-A"]')
+    ).toHaveClass("is-spotlight");
+    expect(
+      container.querySelector('[data-card-id="WF-A"]')
+    ).not.toHaveClass("is-dimmed");
+    // WF-B is ON a different branch — dimmed.
+    expect(
+      container.querySelector('[data-card-id="WF-B"]')
+    ).toHaveClass("is-dimmed");
+    // WF-C has NO branch at all (unclaimed backlog) — stays neutral, never
+    // dimmed alongside cards that are actively on another branch.
+    expect(
+      container.querySelector('[data-card-id="WF-C"]')
+    ).not.toHaveClass("is-dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-C"]')
+    ).not.toHaveClass("is-spotlight");
+    // A DONE card on a different branch must dim exactly like any other
+    // lane's card — the Done lane's own opacity must not swallow it.
+    expect(
+      container.querySelector('[data-card-id="WF-D"]')
+    ).toHaveClass("is-dimmed");
+    expect(
+      container.querySelector('[data-card-id="WF-D"]')
+    ).toHaveClass("card-tile--done");
+  });
+
+  it("selecting a branch spotlights the Party agent on it", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
+    vi.mocked(getSessions).mockResolvedValue({
+      sessions: [
+        { id: "s1", worktree_cwd: "/w/a", updated_at: 1, stale: false, branch: "feat/a" },
+        { id: "s2", worktree_cwd: "/w/b", updated_at: 1, stale: false, branch: "feat/b" },
+      ],
+    });
+
+    const { container } = render(<App />);
+    await screen.findByText("On branch a");
+    await waitFor(() => {
+      expect(container.querySelectorAll(".party-row__branch").length).toBe(2);
+    });
+
+    fireEvent.change(screen.getByLabelText("Branch"), {
+      target: { value: "feat/a" },
+    });
+
+    const rows = container.querySelectorAll(".party-row");
+    const rowForA = Array.from(rows).find((r) =>
+      r.textContent?.includes("feat/a")
+    );
+    const rowForB = Array.from(rows).find((r) =>
+      r.textContent?.includes("feat/b")
+    );
+    expect(rowForA).toHaveClass("is-spotlight");
+    expect(rowForB).not.toHaveClass("is-spotlight");
+  });
+
+  it("choosing 'All' clears every dim/spotlight", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(branchFixture);
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+
+    const { container } = render(<App />);
+    await screen.findByText("On branch a");
+
+    const select = screen.getByLabelText("Branch");
+    fireEvent.change(select, { target: { value: "feat/a" } });
+    expect(container.querySelector(".is-dimmed")).not.toBeNull();
+
+    fireEvent.change(select, { target: { value: "" } });
+
+    expect(container.querySelector(".is-dimmed")).toBeNull();
+    expect(container.querySelector(".is-spotlight")).toBeNull();
   });
 });

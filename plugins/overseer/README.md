@@ -14,8 +14,10 @@ adversarial review loops, integrated with sprint planning and superpowers.
 
 ## What it does
 
-- `.workflow/` or git-ignored `scratch/workflow/` directory holding one markdown card per unit of
-  work, a regenerated `ledger.md` index, and sprint files with budget rollups.
+- Cards persist in a single per-repo SQLite `board.db`, one per unit of work,
+  shared across worktrees. A `.workflow/` or git-ignored `scratch/workflow/`
+  directory holds the regenerated `ledger.md` index and sprint files with
+  budget rollups.
 - Card lifecycle: `planned → in-flight → done`, with `blocked`/`abandoned`
   exits and seven in-flight stages from `bootstrap` to `awaiting-merge`.
 - Token budgets with a 2× tripwire: overruns stop the card and escalate.
@@ -40,13 +42,17 @@ adversarial review loops, integrated with sprint planning and superpowers.
   worktree of that repo, so claims are atomic across worktrees instead of
   racing on separate `.workflow/` file trees. Sprints, usage and knowledge
   remain file-based under `.workflow/` pending a follow-on migration.
+- Dashboard Party/sessions are scoped to the served repo (worktrees of the
+  same repo share one Party); agents and cards carry per-branch tags with a
+  Party branch filter; a repo with live census sessions but no board yet
+  shows an unbegun-repo holding page instead of an empty board.
 
 ## Skills
 
-- **ledger** — drive the `.workflow/` state and the knowledge base through the CLI: cards,
-  stages, sprints and budgets, plus durable facts via `add-fact`, `verify-fact`, `retire-fact`,
-  and `facts` (auto-marked `[STALE]` after 90 days without re-verification; corrupted facts
-  quarantined, never lost).
+- **ledger** — drive cards (in `board.db`), the `.workflow/` sprint/usage state, and the
+  knowledge base through the CLI: cards, stages, sprints and budgets, plus durable facts via
+  `add-fact`, `verify-fact`, `retire-fact`, and `facts` (auto-marked `[STALE]` after 90 days
+  without re-verification; corrupted facts quarantined, never lost).
 - **orchestrate** — drive a card end-to-end: delegated planning and
   implementation, adversarial review loops scaled by complexity (1/2/3
   reviewers, capped rounds), plan + merge gates with S-card PR stacking,

@@ -23,6 +23,8 @@ const cardDetail: CardDetail = {
   is_epic: false,
   ready: true,
   rollup: null,
+  created: "2026-07-01",
+  updated: "2026-07-01T10:00",
   checklist: [],
   sections: { "## Goal": "Ship it" },
   body: "full markdown body",

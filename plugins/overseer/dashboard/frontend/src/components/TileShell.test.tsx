@@ -26,6 +26,8 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     is_epic: false,
     ready: true,
     rollup: null,
+    created: "",
+    updated: "",
     checklist: [],
     ...overrides,
   };
@@ -195,6 +197,110 @@ describe("TileShell repo chip", () => {
   it("renders no repo chip when the card carries no repo label", () => {
     const { container } = renderTile(card({ id: "WF-NOREPO" }));
     expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+});
+
+describe("TileShell branch chip (WF-031)", () => {
+  it("renders the branch chip when the card carries a branch", () => {
+    const { container } = renderTile(
+      card({ id: "WF-BRANCH", branch: "feat/night-shift" })
+    );
+    const chip = container.querySelector(".branch-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent("feat/night-shift");
+  });
+
+  it("renders no branch chip when the card carries no branch", () => {
+    const { container } = renderTile(card({ id: "WF-NOBRANCH" }));
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("renders no branch chip for an empty-string branch", () => {
+    const { container } = renderTile(card({ id: "WF-EMPTYBRANCH", branch: "" }));
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("is visually distinct from the status/rarity chips (its own class, not repo-chip/priority-chip)", () => {
+    const { container } = renderTile(
+      card({ id: "WF-BRANCH-2", branch: "feat/x", repo: "pip-skills", priority: "P1" })
+    );
+    const chip = container.querySelector(".branch-chip")!;
+    expect(chip.className).not.toMatch(/repo-chip|priority-chip/);
+  });
+});
+
+describe('TileShell "Awaiting a hero" badge (task 10)', () => {
+  it("shows the badge for a branchless, non-done/abandoned card", () => {
+    const { container } = renderTile(card({ id: "WF-TODO", status: "planned" }));
+    const chip = container.querySelector(".awaiting-hero-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent(/awaiting a hero/i);
+    // The branch chip never renders alongside it.
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("shows the branch chip, not the badge, once the card has a branch", () => {
+    const { container } = renderTile(
+      card({ id: "WF-STARTED", status: "in-flight", stage: "implementation", branch: "feat/quest" })
+    );
+    expect(container.querySelector(".branch-chip")).not.toBeNull();
+    expect(container.querySelector(".awaiting-hero-chip")).toBeNull();
+  });
+
+  it("shows neither chip for a done card with no branch", () => {
+    const { container } = renderTile(card({ id: "WF-DONE-NOBRANCH", status: "done" }));
+    expect(container.querySelector(".awaiting-hero-chip")).toBeNull();
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("shows neither chip for an abandoned card with no branch", () => {
+    const { container } = renderTile(
+      card({ id: "WF-ABANDONED-NOBRANCH", status: "abandoned" })
+    );
+    expect(container.querySelector(".awaiting-hero-chip")).toBeNull();
+    expect(container.querySelector(".branch-chip")).toBeNull();
+  });
+
+  it("still shows the badge for a parked card with no branch", () => {
+    const { container } = renderTile(card({ id: "WF-PARKED-NOBRANCH", status: "parked" }));
+    expect(container.querySelector(".awaiting-hero-chip")).not.toBeNull();
+  });
+});
+
+describe("TileShell branch filter dim/spotlight (WF-031)", () => {
+  it("applies is-dimmed when branchDimmed is true", () => {
+    const c = card({ id: "WF-DIM" });
+    const { container } = render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} branchDimmed />
+        </SortableContext>
+      </DndContext>
+    );
+    expect(container.querySelector('[data-card-id="WF-DIM"]')).toHaveClass(
+      "is-dimmed"
+    );
+  });
+
+  it("applies is-spotlight when branchSpotlight is true", () => {
+    const c = card({ id: "WF-SPOT" });
+    const { container } = render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} branchSpotlight />
+        </SortableContext>
+      </DndContext>
+    );
+    expect(container.querySelector('[data-card-id="WF-SPOT"]')).toHaveClass(
+      "is-spotlight"
+    );
+  });
+
+  it("applies neither class by default", () => {
+    const { container } = renderTile(card({ id: "WF-NEITHER" }));
+    const tile = container.querySelector('[data-card-id="WF-NEITHER"]')!;
+    expect(tile).not.toHaveClass("is-dimmed");
+    expect(tile).not.toHaveClass("is-spotlight");
   });
 });
 

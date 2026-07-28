@@ -222,8 +222,13 @@
      own border, missing from card 1's vocabulary. */
   --qb-questing-chip-border: #d9a0b4;
 
-  --qb-mana-high: linear-gradient(90deg, #5e86c7, #8fb6e0);
-  --qb-mana-low: linear-gradient(90deg, #c25a3b, #e08a3c);
+  /* Exhaustion bar fill — fills UP with context used, so "low" (little
+     spent, safe) keeps the old mana-high calm blue and "high" (lots spent,
+     getting dangerous) keeps the old mana-low warning orange. Same two
+     gradients as the retired inverse mana bar, re-labelled to match the
+     new direct (not inverse) fill direction. */
+  --qb-exhaustion-low: linear-gradient(90deg, #5e86c7, #8fb6e0);
+  --qb-exhaustion-high: linear-gradient(90deg, #c25a3b, #e08a3c);
 
   --qb-party-panel-bg: #3e2f22;
   --qb-party-row-bg: #4a3524;
@@ -240,8 +245,20 @@
   --qb-hero-card-bg: #f3e7ce;
   --qb-hero-name: #4a2e1c;
   --qb-hero-class: #a06a3c;
-  --qb-hero-mana-track: #e4d2ab;
+  --qb-hero-track: #e4d2ab;
   --qb-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
+
+  /* WF-031 branch chip/filter/spotlight — a fresh addition, no HANDOFF row
+     exists for it yet (declared + cited per Decisions' "missing
+     HANDOFF-sourced values" precedent). A cool slate-blue distinguishes it
+     from the repo-chip's neutral grey and the claim-badge's dashed
+     parchment, while the spotlight ring reuses the existing gold-chip
+     border so it reads as "this is the one" without inventing a third
+     accent hue. */
+  --qb-branch-chip-bg: #e2e9f2;
+  --qb-branch-chip-text: #3d5875;
+  --qb-branch-chip-border: #b7c9dc;
+  --qb-spotlight-ring: var(--qb-gold-chip-border);
 
   /* Font stacks */
   --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
@@ -446,35 +463,68 @@ body {
   outline-offset: 2px;
 }
 
-.topbar__ctx {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  color: var(--qb-ink-500);
-}
-
-.topbar__ctx-label {
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
+/* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
+   but-un-init'd root (has_board:false). Native <option> styling is limited
+   to a small CSS subset (colour/background/font-style, no border/shape),
+   so "faded" is expressed with those; the "⚔ N" live-agent hint lives in
+   the option's own text (see RepoSelector.tsx's `optionLabel`), since an
+   <option> can't host a nested badge element. Still a fully selectable
+   entry — this is a visual distinction only. */
+.repo-option--unbegun {
+  font-style: italic;
   color: var(--qb-ink-400);
 }
 
-.topbar__ctx-value {
+/* WF-031 branch filter — same topbar-chip shape as `.topbar__repo-select`,
+   sitting right after it so both wrap into the mobile chip shelf together. */
+.topbar__branch-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-branch-chip-bg);
+  color: var(--qb-branch-chip-text);
+}
+
+.topbar__branch-select-label {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-branch-chip-text);
+}
+
+.topbar__branch-select select {
+  font: inherit;
   font-weight: 600;
   color: var(--qb-ink-900);
+  background: transparent;
+  border: none;
+  padding: 0;
+  max-width: 40vw;
 }
 
-.topbar__ctx-note {
-  color: var(--qb-ink-400);
-  font-size: 0.7rem;
-  font-style: italic;
+.topbar__branch-select select:focus-visible {
+  outline: 2px solid var(--qb-branch-chip-border);
+  outline-offset: 2px;
 }
 
+/* WF-042: wraps ThresholdControl, whose own label now reads "default
+   threshold" — the fleet's global default, not any one agent's fact (that
+   moved to the Party's hero cards). Replaces the old `.topbar__ctx` block
+   (launching-session ctx%/label/note), which is gone. */
 .topbar__threshold {
+  display: flex;
+  align-items: baseline;
   color: var(--qb-ink-400);
   font-size: 0.75rem;
+}
+
+/* WF-042: the ⚔ glyph prefixing the fleet-health pill's text (see
+   `.topbar__fleet-pill` in the Guild pills group below). */
+.topbar__fleet-icon {
+  font-size: 0.85rem;
 }
 
 .topbar__pill {
@@ -555,12 +605,14 @@ body {
   color: var(--legacy-color-ffd9d9);
 }
 
-/* Guild pills (HANDOFF: Gold total / vanquished / questing). Gold and
-   vanquished are informational spans; questing is the one clickable pill
-   — the Sessions dropdown's structural replacement (Decisions). */
+/* Guild pills (HANDOFF: Gold total / vanquished / fleet-health). Gold and
+   vanquished are informational spans; the fleet-health pill is the one
+   clickable pill — the Sessions dropdown's structural replacement
+   (Decisions), now folding the old dedicated questing pill's live count
+   together with the fleet's top ctx% and near-threshold count (WF-042). */
 .topbar__gold-pill,
 .topbar__vanquished-pill,
-.topbar__questing-pill {
+.topbar__fleet-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -582,7 +634,7 @@ body {
   color: var(--qb-success-chip-text);
 }
 
-.topbar__questing-pill {
+.topbar__fleet-pill {
   background: var(--qb-locked-chip-bg);
   border: 2px solid var(--qb-questing-chip-border);
   color: var(--qb-locked-chip-text);
@@ -841,6 +893,35 @@ body {
   opacity: 0.35;
 }
 
+/* WF-031 branch filter — independent of the epic-highlight `--dimmed`/
+   `--highlighted` pair above: these fire from the topbar's BranchFilter
+   select, not the epic expand toggle, and both can be active on the same
+   tile at once (their opacity/outline effects simply stack). `.is-dimmed`
+   fades a non-matching card in place (never removes it from the lane);
+   `.is-spotlight` rings the matching card/hero with the same gold tone the
+   rarity stars/gold pill already use, so "this is the one" reads as an
+   emphasis, not a new colour language. Shared by card tiles AND Party rows
+   (party-row/hero-card) — see PartyColumn/PartyOverlay. */
+.is-dimmed {
+  opacity: 0.4;
+}
+
+.is-spotlight {
+  outline: 2px solid var(--qb-spotlight-ring);
+  outline-offset: 1px;
+}
+
+/* WF-042: near-threshold cue — a hero card/party row whose own ctx% has hit
+   the fleet's global default threshold. Reuses the same red/blush pairing
+   `.card-tile--blocked`'s budget tripwire already uses for "getting close
+   to a bad number" (a documented exception to the guild-accent palette,
+   see the quarantine-banner comment above) rather than inventing a new
+   warning colour. Can stack with `.is-spotlight` on the same card/row. */
+.is-near-threshold {
+  outline: 2px solid var(--legacy-color-d33d3d);
+  outline-offset: 1px;
+}
+
 /* Done treatment (WF-028 chunk 5, HANDOFF's quest-card prose): muted
    parchment card, strikethrough title. The strikethrough tone (#6E6250 in
    HANDOFF) has no declared --qb-* token and isn't one of the two approved
@@ -849,6 +930,29 @@ body {
 .card-tile--done {
   background: var(--qb-parchment-muted);
   opacity: 0.94;
+}
+
+/* Epic-focus dim vs. Done's own opacity (bug fix): `.card-tile--dimmed`
+   and `.card-tile--done` are equal-specificity single-class selectors, so
+   without this rule the cascade falls back to source order and
+   `.card-tile--done`'s `opacity: 0.94` (declared after `--dimmed` above)
+   silently wins — Done cards never visibly faded during epic focus, even
+   though React correctly applied `--dimmed`. Two-class selector outranks
+   both single-class rules regardless of source order, so Done cards dim
+   exactly like every other lane while retaining their own look the rest
+   of the time. */
+.card-tile--done.card-tile--dimmed {
+  opacity: 0.35;
+}
+
+/* Same cascade clash, branch-filter side: `.is-dimmed` (opacity 0.4) is
+   declared before `.card-tile--done` (opacity 0.94) above, so at equal
+   specificity `--done` wins by source order and Done cards never fade
+   under the branch filter either. Mirrors the epic-focus fix — two-class
+   selector wins regardless of order. `.is-spotlight` is outline-only, so
+   it never conflicted and needs no equivalent override. */
+.card-tile--done.is-dimmed {
+  opacity: 0.4;
 }
 
 .card-tile__title--done {
@@ -1190,6 +1294,43 @@ body {
   border-radius: var(--legacy-radius-3px);
   background: var(--legacy-color-f3f4f6);
   color: var(--legacy-color-6b7280);
+}
+
+/* Branch chip (WF-031): visually distinct from the repo-chip's grey
+   provenance label AND the priority/claim/blocked chips — its own
+   slate-blue tone flags which branch the card's work lives on, at a
+   glance, without competing with the higher-priority signals. */
+.branch-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-branch-chip-bg);
+  color: var(--qb-branch-chip-text);
+  border: 1px solid var(--qb-branch-chip-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 9rem;
+}
+
+/* "Awaiting a hero" chip (task 10): a todo/backlog card carries no `branch`
+   until the orchestrator actually starts it — this flags "no adventurer has
+   claimed this quest yet" for exactly that window. Deliberately muted/
+   dashed rather than the branch-chip's solid slate-blue: echoes
+   `.repo-option--unbegun`'s italic "not yet begun" treatment and
+   `.card-tile__hold-chip`'s dashed "inactive" border, so it reads as a
+   quiet placeholder, never mistaken for the branch chip it stands in for. */
+.awaiting-hero-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  font-style: italic;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-400);
+  border: 1px dashed var(--qb-line-dashed);
+  white-space: nowrap;
 }
 
 /* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
@@ -2236,41 +2377,68 @@ body {
   margin-bottom: 0.5rem;
 }
 
-.hero-card__mana {
-  height: 11px;
-  border-radius: var(--legacy-radius-999px);
-  background: var(--qb-hero-mana-track);
-  overflow: hidden;
+/* WF-031: the hero's branch, sitting under the class line — reuses the
+   branch chip's own slate-blue tone so the same "which branch" signal
+   reads consistently between the board tiles and the Party. */
+.hero-card__branch {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-branch-chip-text);
   margin-bottom: 0.5rem;
 }
 
-.hero-card__mana-fill {
+/* Exhaustion bar — replaces the old inverse `mana` bar and the separate
+   WF-042 ctx% line with one meter that fills UP as context is spent (0%
+   fresh, 100% spent), the percentage surfaced right on its label row. */
+.hero-card__exhaustion {
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__exhaustion-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-hero-class);
+  margin-bottom: 0.2rem;
+}
+
+.hero-card__exhaustion-bar {
+  height: 11px;
+  border-radius: var(--legacy-radius-999px);
+  background: var(--qb-hero-track);
+  overflow: hidden;
+}
+
+.hero-card__exhaustion-fill {
   height: 100%;
 }
 
-.hero-card__mana-fill--high {
-  background: var(--qb-mana-high);
+.hero-card__exhaustion-fill--low {
+  background: var(--qb-exhaustion-low);
 }
 
-.hero-card__mana-fill--low {
-  background: var(--qb-mana-low);
+.hero-card__exhaustion-fill--high {
+  background: var(--qb-exhaustion-high);
 }
 
-.hero-card__mana--unknown {
-  height: 11px;
-  display: flex;
-  align-items: center;
+/* WF-042: the hero's PR, `PR #N · review_state` — plain text when there's
+   no `pr.url` to link to, an underlined chip-toned link when there is. */
+.hero-card__pr {
+  font-size: 0.7rem;
+  color: var(--qb-branch-chip-text);
   margin-bottom: 0.5rem;
 }
 
-.hero-card__mana-label {
-  font-size: 0.7rem;
-  font-style: italic;
-  color: var(--qb-hero-class);
+.hero-card__pr-link {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .hero-card__quest {
-  border-top: 1px dashed var(--qb-hero-mana-track);
+  border-top: 1px dashed var(--qb-hero-track);
   padding-top: 0.5rem;
 }
 
@@ -2368,35 +2536,63 @@ body {
   color: var(--qb-party-text-muted);
 }
 
-.party-row__mana {
+/* WF-031: the session's branch, sitting under the class line. The dark
+   panel here (unlike the light hero-card) reuses the row's own muted
+   text tone rather than the branch chip's slate-blue, which would lose
+   contrast against `--qb-party-row-bg`. */
+.party-row__branch {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-party-text-muted);
+}
+
+/* Exhaustion bar (compact row) — same fill-up-with-usage meter as the hero
+   card's, replacing the old inverse `mana` bar + the separate WF-042 ctx%
+   line. */
+.party-row__exhaustion {
+  margin-top: 0.15rem;
+}
+
+.party-row__exhaustion-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-party-text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.party-row__exhaustion-bar {
   height: 6px;
   border-radius: var(--legacy-radius-999px);
   background: var(--qb-party-border);
   overflow: hidden;
 }
 
-.party-row__mana-fill {
+.party-row__exhaustion-fill {
   height: 100%;
 }
 
-.party-row__mana-fill--high {
-  background: var(--qb-mana-high);
+.party-row__exhaustion-fill--low {
+  background: var(--qb-exhaustion-low);
 }
 
-.party-row__mana-fill--low {
-  background: var(--qb-mana-low);
+.party-row__exhaustion-fill--high {
+  background: var(--qb-exhaustion-high);
 }
 
-.party-row__mana--unknown {
-  height: 6px;
-  display: flex;
-  align-items: center;
-}
-
-.party-row__mana-label {
+/* WF-042: the session's PR, `PR #N · review_state` — plain text when
+   there's no `pr.url` to link to, an underlined link when there is. */
+.party-row__pr {
   font-size: 0.65rem;
   color: var(--qb-party-text-muted);
-  font-style: italic;
+}
+
+.party-row__pr-link {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .party-row__quest {
@@ -2496,6 +2692,75 @@ body {
   }
 }
 
+/* Quest holding page (WF-032) — App.tsx renders this INSTEAD OF <Board/>
+   when the selected repo has no board.db yet (`has_board:false`) but
+   census sees live agents there. A centred parchment panel with a dashed
+   border — the same "on hold" read as the Parked/Archive lanes (muted
+   parchment + dashed edge) rather than an error/danger treatment, since
+   nothing here is actually wrong. */
+.unbegun-holding {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 2rem 1rem;
+}
+
+.unbegun-holding__panel {
+  max-width: 32rem;
+  text-align: center;
+  padding: 2rem 2.25rem;
+  background: var(--qb-panel);
+  border: 2px dashed var(--qb-line-dashed);
+  border-radius: var(--qb-radius-panel);
+  box-shadow: var(--qb-shadow-modal);
+}
+
+.unbegun-holding__glyph {
+  margin: 0 0 0.5rem;
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.unbegun-holding__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: clamp(18px, 3vw, 22px);
+  color: var(--qb-ink-900);
+}
+
+/* The repo name reads as emphasis via colour, not italics — `em` is used
+   for its semantic "this is the subject" meaning, not its default slant,
+   which would clash with the unbegun *option*'s own italic (faded) use of
+   font-style above. */
+.unbegun-holding__title em {
+  font-style: normal;
+  color: var(--qb-accent-sky-fill);
+}
+
+.unbegun-holding__body {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--qb-ink-700);
+}
+
+.unbegun-holding__body:last-child {
+  margin-bottom: 0;
+}
+
+.unbegun-holding__command {
+  font-family: var(--qb-font-mono);
+  font-size: 0.85rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-900);
+  word-break: break-word;
+}
+
 /* ==========================================================================
    Mobile layout layer (≤720px) — "the guild ledger, one page at a time".
    On a phone the corkboard becomes a ledger you leaf through: each lane is a
@@ -2523,18 +2788,12 @@ body {
     height: 38px;
   }
 
-  /* ctx + threshold get their own "scribe's line" under the crest. The
-     "as of last refresh" aside is the one item that can't shrink and
-     pushes the row past a phone viewport — dropped here, the subtitle's
-     "updated HH:MM" already carries that information. */
-  .topbar__ctx {
+  /* The default-threshold control gets its own "scribe's line" under the
+     crest, same as the old ctx+threshold row it replaced (WF-042). */
+  .topbar__threshold {
     flex-basis: 100%;
     flex-wrap: wrap;
     row-gap: 0.3rem;
-  }
-
-  .topbar__ctx-note {
-    display: none;
   }
 
   /* No right edge to hug once the bar is a wrapping shelf. */
@@ -2637,9 +2896,10 @@ body {
 
   /* Primary tappables meet ~44px. */
   .topbar__refresh,
-  .topbar__questing-pill,
+  .topbar__fleet-pill,
   .topbar__archive-toggle,
   .topbar__repo-select select,
+  .topbar__branch-select select,
   .threshold-control button,
   .status-menu button,
   .claim-control button,

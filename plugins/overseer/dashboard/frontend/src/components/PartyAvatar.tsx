@@ -14,6 +14,12 @@ export interface PartyAvatarProps {
  * (accent fill, initial, live green dot bottom-right that pulses)").
  * Shared by PartyColumn (chunk 4) and PartyOverlay (chunk 6) so both
  * surfaces render the exact same avatar for a given session.
+ *
+ * WF-031: when the session carries a `branch`, it's surfaced here as a
+ * hover title ("on <branch>") — the row-level text (PartyColumn/
+ * PartyOverlay) is where it's actually READ at a glance; this is just the
+ * avatar's own acknowledgement of it, mirroring how `session.stale` shows
+ * up as both the dot AND the row's dimmed treatment.
  */
 function PartyAvatar({ session, size = 32 }: PartyAvatarProps) {
   const label = session.session_name || session.id;
@@ -25,6 +31,7 @@ function PartyAvatar({ session, size = 32 }: PartyAvatarProps) {
       className={`party-avatar party-avatar--${accentGroup}`}
       style={{ width: size, height: size, fontSize: size * 0.42 }}
       aria-hidden="true"
+      title={session.branch ? `on ${session.branch}` : undefined}
     >
       <span className="party-avatar__initial">{initial}</span>
       <span

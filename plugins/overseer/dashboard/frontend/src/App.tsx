@@ -3,10 +3,12 @@ import TopBar from "./components/TopBar";
 import Board from "./components/Board";
 import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
+import UnbegunHolding from "./components/UnbegunHolding";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
 import { buildParty } from "./board/party";
+import { distinctBranches } from "./board/branches";
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
@@ -57,6 +59,15 @@ function App() {
     writeStoredRoot(root);
   }
 
+  // WF-032 "unbegun repo" holding page: a repo `/api/repos` discovered
+  // purely from live census sessions, never `overseer init`-ed, so it has
+  // no board.db (`has_board: false`). `undefined` (repos not yet loaded, or
+  // activeRoot not among them) deliberately falls through to `false` here —
+  // the pre-repos-load default stays "fetch the board", matching prior
+  // behaviour before this feature existed.
+  const selectedRepo = repos.find((r) => r.root === activeRoot) ?? null;
+  const isUnbegun = selectedRepo?.has_board === false;
+
   const {
     board,
     context,
@@ -68,8 +79,14 @@ function App() {
     refresh,
     setDragActive,
     lastRefreshedAt,
-  } = useBoard(activeRoot);
-  const { sessions } = useSessions();
+  } = useBoard(activeRoot, !isUnbegun);
+  // Threaded through the SAME `activeRoot` choke point the board uses (WF-031)
+  // — switching repos re-scopes the Party the same instant it re-scopes the
+  // board, no separate state or client-side filtering needed. `!isUnbegun`
+  // (task 10) mirrors `useBoard`'s own gate directly above: an unbegun root
+  // 400s `/api/sessions` exactly like it 400s `/api/board`, so this fetch
+  // (mount AND poll) must be hard-skipped for it too.
+  const { sessions } = useSessions(activeRoot, !isUnbegun);
   const [showArchive, setShowArchive] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   // HANDOFF §State Management assigns this App-level, alongside the
@@ -77,6 +94,9 @@ function App() {
   // TopBar/main below, exactly like CardDetailDrawer, never as TopBar-local
   // state (Decisions).
   const [partyOpen, setPartyOpen] = useState(false);
+  // WF-031 branch filter: session-local only (no localStorage, unlike the
+  // repo selector) — `null` means "All", clearing every dim/spotlight.
+  const [activeBranch, setActiveBranch] = useState<string | null>(null);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -91,6 +111,20 @@ function App() {
     () => buildParty(sessions, board?.cards ?? []),
     [sessions, board?.cards]
   );
+
+  // Distinct-branch union across cards + sessions (WF-031) — feeds the
+  // topbar's BranchFilter <select> options. Recomputed alongside `party`
+  // whenever either source changes.
+  const branches = useMemo(
+    () => distinctBranches(board?.cards ?? [], sessions),
+    [board?.cards, sessions]
+  );
+
+  // WF-042: the fleet's global default threshold — read once here and
+  // threaded down to the TopBar's fleet-health line, Board's PartyColumn,
+  // and PartyOverlay's hero cards, so every near-threshold cue agrees on
+  // the exact same value `context` carries.
+  const threshold = context?.threshold ?? null;
 
   return (
     <div className="app-shell">
@@ -112,22 +146,44 @@ function App() {
         repos={repos}
         activeRoot={activeRoot}
         onSelectRepo={handleSelectRepo}
+        branches={branches}
+        activeBranch={activeBranch}
+        onSelectBranch={setActiveBranch}
+        // Task 10: an unbegun repo never populates `party` (sessions are
+        // hard-gated off above), so source the questing pill from the SAME
+        // `live_sessions` count `<UnbegunHolding/>` already shows below —
+        // otherwise the pill would contradict the holding page with a false
+        // "0 questing".
+        questingCountOverride={
+          isUnbegun ? (selectedRepo?.live_sessions ?? 0) : undefined
+        }
       />
       <main className="board-region">
-        {loading && !board && (
-          <p className="board-placeholder">Loading board…</p>
-        )}
-        {error && <p className="board-error">{error}</p>}
-        {board && (
-          <Board
-            board={board}
-            showArchive={showArchive}
-            mutate={mutate}
-            inFlight={inFlight}
-            onOpenCard={setOpenCardId}
-            setDragActive={setDragActive}
-            party={party}
+        {isUnbegun && selectedRepo ? (
+          <UnbegunHolding
+            repo={selectedRepo}
+            liveSessions={selectedRepo.live_sessions}
           />
+        ) : (
+          <>
+            {loading && !board && (
+              <p className="board-placeholder">Loading board…</p>
+            )}
+            {error && <p className="board-error">{error}</p>}
+            {board && (
+              <Board
+                board={board}
+                showArchive={showArchive}
+                mutate={mutate}
+                inFlight={inFlight}
+                onOpenCard={setOpenCardId}
+                setDragActive={setDragActive}
+                party={party}
+                activeBranch={activeBranch}
+                threshold={threshold}
+              />
+            )}
+          </>
         )}
       </main>
       <CardDetailDrawer
@@ -139,7 +195,12 @@ function App() {
         party={party}
       />
       {partyOpen && (
-        <PartyOverlay party={party} onClose={() => setPartyOpen(false)} />
+        <PartyOverlay
+          party={party}
+          onClose={() => setPartyOpen(false)}
+          activeBranch={activeBranch}
+          threshold={threshold}
+        />
       )}
     </div>
   );

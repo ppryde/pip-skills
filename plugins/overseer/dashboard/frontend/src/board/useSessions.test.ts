@@ -101,4 +101,122 @@ describe("useSessions", () => {
       unmount();
     }).not.toThrow();
   });
+
+  it("defaults to root=null (setActiveRoot(null)) when no root arg is given", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+    mockGetSessions.mockResolvedValueOnce({ sessions: [] });
+
+    renderHook(() => useSessions());
+
+    await waitFor(() => {
+      expect(mockGetSessions).toHaveBeenCalled();
+    });
+    expect(mockSetActiveRoot).toHaveBeenCalledWith(null);
+  });
+
+  it("calls setActiveRoot(root) BEFORE fetching, threading the active root into the request", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+    const calls: string[] = [];
+    mockSetActiveRoot.mockImplementation(() => calls.push("setActiveRoot"));
+    mockGetSessions.mockImplementationOnce(async () => {
+      calls.push("getSessions");
+      return { sessions: [] };
+    });
+
+    renderHook(() => useSessions("/repo/a"));
+
+    await waitFor(() => {
+      expect(mockGetSessions).toHaveBeenCalled();
+    });
+    expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo/a");
+    expect(calls).toEqual(["setActiveRoot", "getSessions"]);
+  });
+
+  it("re-fetches and re-applies setActiveRoot when the root arg changes", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+    mockGetSessions.mockResolvedValue({ sessions: [] });
+
+    const { rerender } = renderHook(({ root }) => useSessions(root), {
+      initialProps: { root: "/repo/a" as string | null },
+    });
+
+    await waitFor(() => {
+      expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo/a");
+    });
+
+    rerender({ root: "/repo/b" });
+
+    await waitFor(() => {
+      expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo/b");
+    });
+    expect(mockGetSessions.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("useSessions(root, enabled) — task 10 unbegun-repo fetch gate", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("enabled: false skips the mount fetch entirely — never calls setActiveRoot or getSessions", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+
+    renderHook(() => useSessions("/unbegun-repo", false));
+
+    // Give any stray microtask a chance to fire, then assert nothing did.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockGetSessions).not.toHaveBeenCalled();
+    expect(mockSetActiveRoot).not.toHaveBeenCalled();
+  });
+
+  it("enabled: false also skips the 5s poll tick", async () => {
+    vi.useFakeTimers();
+    const mockGetSessions = vi.mocked(client.getSessions);
+
+    renderHook(() => useSessions("/unbegun-repo", false));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+
+    expect(mockGetSessions).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("toggling enabled from false to true fires the fetch", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    mockGetSessions.mockResolvedValue({ sessions: [] });
+    const mockSetActiveRoot = vi.mocked(client.setActiveRoot);
+
+    const { rerender } = renderHook(
+      ({ enabled }) => useSessions("/repo-a", enabled),
+      { initialProps: { enabled: false } }
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockGetSessions).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+
+    await waitFor(() => expect(mockGetSessions).toHaveBeenCalledTimes(1));
+    expect(mockSetActiveRoot).toHaveBeenCalledWith("/repo-a");
+  });
+
+  it("defaults to enabled: true when the param is omitted", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    mockGetSessions.mockResolvedValueOnce({ sessions: [] });
+
+    renderHook(() => useSessions("/repo-a"));
+
+    await waitFor(() => expect(mockGetSessions).toHaveBeenCalled());
+  });
 });

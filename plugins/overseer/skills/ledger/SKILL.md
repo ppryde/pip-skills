@@ -5,20 +5,25 @@ description: >
   durable knowledge base of facts, and session resume/handoff. Use when starting
   a piece of tracked work, when the user asks "what's in flight", "resume where
   we left off", "start a new card/task", "log progress", to record or recall a
-  durable fact, or at the start of any session in a repo with an overseer state
-  directory (`.workflow/` or `scratch/workflow/`). The state layer beneath the
-  orchestrate skill; drive it through the overseer CLI, never by editing files.
+  durable fact, or at the start of any session in a repo already tracked by
+  overseer (a `board.db` entry for cards, or a `.workflow/`/`scratch/workflow/`
+  state directory for sprints, usage and knowledge). The state layer beneath
+  the orchestrate skill; drive it through the overseer CLI, never by editing
+  files.
 ---
 
 # Overseer Ledger
 
-Manage the overseer **state root** — the single source of truth for planned,
-in-flight and completed work in this repo. The state root is resolved once:
-an existing `.workflow/` with content wins; otherwise, if the repo keeps a
-git-ignored `scratch/` directory, state lives in `scratch/workflow/`;
-otherwise `.workflow/`. The CLI resolves this for you — commands below refer
-to it as the state root. **Never edit its files directly**; drive everything
-through the CLI so write-ordering (card first, index second) holds:
+Manage the overseer ledger. Cards — planned, in-flight and completed work —
+live in a single per-repo SQLite `board.db`
+(`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/board.db`), shared across every
+worktree of this repo so claims are atomic; every mutation writes the card
+row first, then regenerates the `ledger.md` index view. Sprints, usage and
+the knowledge base remain file-based under the **state root**, resolved
+once: an existing `.workflow/` with content wins; otherwise, if the repo
+keeps a git-ignored `scratch/` directory, state lives in `scratch/workflow/`;
+otherwise `.workflow/`. The CLI resolves both for you. **Never edit `board.db`
+or state-root files directly**; drive everything through the CLI:
 
 ```bash
 python plugins/overseer/scripts/cli.py --root <repo-root> <command> ...
@@ -35,8 +40,8 @@ python .../cli.py --root . resume
 
 - If cards are in flight, report them to the user and offer per card:
   **resume / park / block / abandon**. Never silently start fresh.
-- Resuming a card: read its file under the state root's `cards/`, re-enter at
-  the recorded stage — never earlier, never assume later. If the report shows
+- Resuming a card: read it back via the CLI (`show <id>`), re-enter at the
+  recorded stage — never earlier, never assume later. If the report shows
   `(MISSING)` next to the worktree, recreate it from the recorded branch
   before continuing.
 - If no state root exists yet and the user wants tracked work: run `init`.
@@ -70,15 +75,16 @@ python .../cli.py --root . resume
 - **Blocked:** `block <id> --reason "user: <question>"` for a human/agent
   blocker; `unblock <id>` when cleared. For card→card ordering use `depends`
   (see Relationships), not a `block` reason.
-- **Decisions:** significant decisions and trade-offs go in the card's
-  `## Decisions` section — append via Edit on the card file is the one
-  exception to the no-direct-edits rule, since prose is not state.
+- **Decisions:** significant decisions and trade-offs belong in the card's
+  `## Decisions` section, part of its `board.db` body — there is no CLI verb
+  to append there after creation yet, so track new decisions via
+  `log-progress` notes in the meantime.
 - **Amending a goal:** never silently rewrite a card's goal — confirm the new
   wording with the user first. The goal is one of the by-hand fields under the
   prose exception, so it gets extra care.
 - **Index out of sync or corrupt cards suspected:** run `rebuild-index` —
-  regenerates ledger.md from the card files (cards are the truth) and reports
-  any quarantined cards.
+  regenerates ledger.md from `board.db` (cards are the truth) and reports any
+  quarantined cards.
 
 ## Relationships (epics, dependencies, parking)
 - **Epics are emergent.** Set a card's `parent` with `set-field <id> --parent

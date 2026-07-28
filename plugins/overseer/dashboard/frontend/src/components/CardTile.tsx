@@ -8,6 +8,9 @@ export interface CardTileProps {
   accentKey?: string;
   dimmed?: boolean;
   highlighted?: boolean;
+  /** WF-031 branch filter — see TileShell's doc comment. */
+  branchDimmed?: boolean;
+  branchSpotlight?: boolean;
   dragDisabled?: boolean;
   /** Chunk 5: clicking the tile body opens the detail drawer for this card. */
   onOpen?: (id: string) => void;
@@ -22,6 +25,8 @@ function CardTile({
   accentKey,
   dimmed = false,
   highlighted = false,
+  branchDimmed = false,
+  branchSpotlight = false,
   dragDisabled = false,
   onOpen,
 }: CardTileProps) {
@@ -31,6 +36,8 @@ function CardTile({
       accentKey={accentKey}
       dimmed={dimmed}
       highlighted={highlighted}
+      branchDimmed={branchDimmed}
+      branchSpotlight={branchSpotlight}
       dragDisabled={dragDisabled}
       onOpen={onOpen}
     />

@@ -47,8 +47,18 @@ export interface UseBoardResult {
  * of the SAME effect that fires the mount/root-change fetch, so by the time
  * that fetch's `getBoard()` call builds its URL, `api/client`'s module-level
  * root is already correct — no cross-effect race.
+ *
+ * `enabled` (WF-032 "unbegun repo" holding page) gates BOTH the mount/
+ * root-change fetch and the background poll — App.tsx passes `false` when
+ * the selected repo is `has_board: false` (App renders `<UnbegunHolding/>`
+ * instead of `<Board/>` for exactly that case). A `has_board: false` root
+ * 400s the backend's `/api/board`, so this must be a hard gate on the
+ * fetch itself, not just on what gets rendered.
  */
-export function useBoard(root: string | null = null): UseBoardResult {
+export function useBoard(
+  root: string | null = null,
+  enabled: boolean = true
+): UseBoardResult {
   const [board, setBoard] = useState<Board | null>(null);
   const [context, setContext] = useState<Context | null>(null);
   const [limits, setLimits] = useState<Limits>(null);
@@ -66,6 +76,12 @@ export function useBoard(root: string | null = null): UseBoardResult {
   // needing the effect that owns the interval to re-run every render.
   const inFlightRef = useRef(false);
   const dragActiveRef = useRef(false);
+  // Mirrors `enabled` for the poll tick, same rationale as the other refs
+  // above — the interval effect below only depends on `load` (stable), so a
+  // toggle of `enabled` alone must still be visible to an already-running
+  // interval without tearing it down and recreating it.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   // Poll gate for MANUAL loads (mount fetch / refresh). A poll tick fired
   // while a manual load is in flight would bump the shared epoch and mark
   // the manual response stale — polling must never interfere with a manual
@@ -127,15 +143,18 @@ export function useBoard(root: string | null = null): UseBoardResult {
     [applyResponse]
   );
 
-  // Re-fires on mount AND whenever the selected repo root changes — setting
-  // the module-level active root FIRST (synchronously, before `load()`) so
-  // this fetch (and every one after it, until the next change) targets the
-  // newly-selected repo.
+  // Re-fires on mount AND whenever the selected repo root (or `enabled`)
+  // changes — setting the module-level active root FIRST (synchronously,
+  // before `load()`) so this fetch (and every one after it, until the next
+  // change) targets the newly-selected repo. `enabled: false` is a hard
+  // skip: no `setActiveRoot`, no `load()` — an unbegun root must never
+  // reach `getBoard()` (see the doc comment on `useBoard` above).
   useEffect(() => {
+    if (!enabled) return;
     setActiveRoot(root);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root]);
+  }, [root, enabled]);
 
   const refresh = useCallback(async () => {
     await load();
@@ -177,7 +196,12 @@ export function useBoard(root: string | null = null): UseBoardResult {
   // needs to be torn down/recreated when they toggle.
   useEffect(() => {
     const intervalId = setInterval(() => {
-      if (inFlightRef.current || dragActiveRef.current || loadingRef.current)
+      if (
+        !enabledRef.current ||
+        inFlightRef.current ||
+        dragActiveRef.current ||
+        loadingRef.current
+      )
         return;
       void load({ silent: true });
     }, POLL_INTERVAL_MS);

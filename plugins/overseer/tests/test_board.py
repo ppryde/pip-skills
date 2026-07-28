@@ -160,6 +160,8 @@ Test sprint."""
         assert c["ready"] is False
         assert c["rollup"] is None
         assert c["checklist"] == []
+        assert c["created"] == "2026-07-08"  # factories.make_card default
+        assert c["updated"] == "2026-07-08T10:00"  # factories.make_card default
 
     def test_checklist_passed_through(self, repo, conn):
         from scripts.board import board_data
@@ -189,6 +191,16 @@ Test sprint."""
 
         data = board_data(repo)
         assert data["cards"][0]["repo"] is None
+
+    def test_created_updated_passed_through(self, repo, conn):
+        from scripts.board import board_data
+        card = make_card("WF-001", created="2026-07-01", updated="2026-07-13T10:00")
+        db.save_card(conn, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["created"] == "2026-07-01"
+        assert c["updated"] == "2026-07-13T10:00"
 
     def test_claim_fields_passed_through(self, repo, conn):
         from scripts.board import board_data

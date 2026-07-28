@@ -26,7 +26,7 @@ default, or `~/.claude-personal/census/status.json` when that account sets `CLAU
   "version": 1,
   "limits": { "five_hour": {"used_percentage": 23.5, "resets_at": 1738425600}, "updated_at": 1738420000 },
   "sessions": {
-    "<session_id>": { "worktree_cwd": "<abs path>", "updated_at": 1738420000, "payload": { "...verbatim..." } }
+    "<session_id>": { "worktree_cwd": "<abs path>", "updated_at": 1738420000, "branch": "<git branch or null>", "payload": { "...verbatim..." } }
   }
 }
 ```
@@ -79,3 +79,6 @@ limits = store.limits()
 - **Multi-account safe:** the store is rooted at `CLAUDE_CONFIG_DIR`, the same boundary Claude Code
   uses to separate accounts. A personal (Max) account and a work (API) account each get their own
   store file — sessions and rate limits never commingle, even when both share one status-line script.
+- **Records each session's git branch (fail-safe):** ingest resolves the current branch for the
+  worktree cwd at record time; if that resolution fails for any reason the entry's `branch` is
+  simply `null` rather than blocking the ingest or breaking the status line.
