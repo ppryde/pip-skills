@@ -33,7 +33,12 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # Opt-in gate: only snapshot repos that have run `overseer init`.
 [ -f "$repo_root/.overseer/config.json" ] || exit 0
 
-"${OVERSEER_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" \
+# Fail-open: under `set -u`, an unset CLAUDE_PLUGIN_ROOT would otherwise
+# abort the script with "unbound variable" (exit 1), which could block the
+# tool call. Guard it the same way the sibling hooks do.
+[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || exit 0
+
+"${OVERSEER_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
   --root "$repo_root" backup >/dev/null 2>&1 || exit 0
 
 if [ -n "$(git -C "$repo_root" status --porcelain .overseer/backups)" ]; then

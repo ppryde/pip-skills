@@ -612,9 +612,14 @@ class TestPrepushSnapshotHook:
             return []
         return [line for line in result.stdout.splitlines() if line]
 
-    def _run_script(self, payload: dict, repo: Path) -> subprocess.CompletedProcess:
+    def _run_script(
+        self, payload: dict, repo: Path, *, set_plugin_root: bool = True,
+    ) -> subprocess.CompletedProcess:
         env = dict(os.environ)
-        env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        if set_plugin_root:
+            env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        else:
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
         env["OVERSEER_PYTHON"] = sys.executable
         return subprocess.run(
             [BASH, str(PREPUSH_HOOK_SCRIPT)], input=json.dumps(payload),
@@ -677,3 +682,19 @@ class TestPrepushSnapshotHook:
         second = self._run_script(payload, git_repo)
         assert second.returncode == 0
         assert self._log_messages(git_repo) == commits_after_first
+
+    def test_fails_open_when_claude_plugin_root_unset(self, git_repo):
+        # `set -u` would otherwise abort the script with "unbound variable"
+        # (exit 1) when CLAUDE_PLUGIN_ROOT is missing from the environment —
+        # a PreToolUse hook exiting non-zero can BLOCK the tool call, which
+        # violates the hard "never block a push" contract.
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}},
+            git_repo, set_plugin_root=False,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
