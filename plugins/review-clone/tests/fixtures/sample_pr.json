@@ -1,0 +1,50 @@
+{
+  "pr": {
+    "number": 100,
+    "title": "Add widget",
+    "user": {"login": "jane"},
+    "merged": true,
+    "body": "FUNDE-123 — adds a new widget."
+  },
+  "review_comments": [
+    {
+      "id": 1001,
+      "user": {"login": "jen"},
+      "path": "frontend/widget.tsx",
+      "body": "Use Card.Header here.",
+      "diff_hunk": "@@ -10,3 +10,3 @@\n-old\n+new",
+      "html_url": "https://github.com/o/r/pull/100#discussion_r1001",
+      "in_reply_to_id": null,
+      "created_at": "2026-05-01T10:00:00Z"
+    },
+    {
+      "id": 1002,
+      "user": {"login": "jane"},
+      "path": "frontend/widget.tsx",
+      "body": "Good catch, fixed.",
+      "diff_hunk": "@@ -10,3 +10,3 @@\n-old\n+new",
+      "html_url": "https://github.com/o/r/pull/100#discussion_r1002",
+      "in_reply_to_id": 1001,
+      "created_at": "2026-05-01T10:05:00Z"
+    },
+    {
+      "id": 1003,
+      "user": {"login": "jen"},
+      "path": "backend/api.py",
+      "body": "Outside FE scope.",
+      "diff_hunk": "@@ -5,1 +5,1 @@\n-x\n+y",
+      "html_url": "https://github.com/o/r/pull/100#discussion_r1003",
+      "in_reply_to_id": null,
+      "created_at": "2026-05-01T11:00:00Z"
+    }
+  ],
+  "issue_comments": [
+    {
+      "id": 2001,
+      "user": {"login": "jen"},
+      "body": "@cubic-dev-ai re-review please",
+      "html_url": "https://github.com/o/r/pull/100#issuecomment-2001",
+      "created_at": "2026-05-01T12:00:00Z"
+    }
+  ]
+}

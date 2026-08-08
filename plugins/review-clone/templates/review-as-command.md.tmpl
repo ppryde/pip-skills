@@ -1,0 +1,13 @@
+---
+description: Review as {{ALIAS}} on {{REPO}} — {{RULE_COUNT}} rules from {{COMMENT_COUNT}} comments across {{PR_COUNT}} PRs ({{WINDOW_MONTHS}}mo window, last calibrated {{LAST_SCANNED_AT}}). Modes: review (default), refresh, chat.
+---
+
+Invoke the `review-as` skill for persona `{{ALIAS}}`.
+
+Parsing rule:
+- No args → `review` mode
+- First arg `refresh` → `refresh` mode
+- First arg `chat` → `chat` mode; the rest of the args are the prompt
+- Anything else → `chat` mode; full args are the prompt
+
+$ARGUMENTS
