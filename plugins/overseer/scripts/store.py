@@ -13,6 +13,7 @@ SCRATCH_DIRNAME = "scratch"
 SCRATCH_STATE_SUBDIR = "workflow"
 _MINTED_ID_RE = re.compile(r"\AWF-(\d+)-")
 _MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is a view
+_MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
 
 
 def workflow_root(repo_root: Path) -> Path:
@@ -115,7 +116,17 @@ def state_root(repo_root: Path) -> Path:
 def migrate_workflow_to_central(repo_root: Path) -> int:
     """Copy legacy .workflow/ sprint/usage/knowledge/archive state into the
     central folder, once. Never overwrites an existing central file. Sources
-    from the canonical repo's .workflow/ (not a worktree's). Returns files copied."""
+    from the canonical repo's .workflow/ (not a worktree's). Returns files copied.
+
+    Skips top-level ``cards/`` and ``ledger.md`` (the DB owns live cards;
+    ledger.md is a generated view) and ``archive/cards/`` (the DB owns
+    archived cards too, imported by ``db.migrate_from_workflow``). Keeps
+    ``archive/corrupt/`` — quarantined files are never in the DB and would
+    otherwise be lost. The skip checks are path-specific (top-level name, or
+    the exact ``archive/cards`` prefix), not a basename match, so e.g. a file
+    literally named ``ledger.md`` nested inside ``knowledge/`` is still
+    copied.
+    """
     from scripts.config import central_root
     source_root = (derive_repo_root(repo_root) or repo_root) / WORKFLOW_DIRNAME
     if not source_root.is_dir():
@@ -127,6 +138,8 @@ def migrate_workflow_to_central(repo_root: Path) -> int:
             continue
         rel = src.relative_to(source_root)
         if rel.parts and rel.parts[0] in _MIGRATE_SKIP_TOP:
+            continue
+        if rel.parts[:2] in _MIGRATE_SKIP_PATHS:
             continue
         dest = dest_root / rel
         if dest.exists():

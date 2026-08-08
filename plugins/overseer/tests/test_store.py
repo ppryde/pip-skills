@@ -51,6 +51,79 @@ def test_migrate_workflow_empty_is_noop(tmp_path, monkeypatch):
     assert store.migrate_workflow_to_central(repo) == 0
 
 
+def test_migrate_workflow_skips_cards_ledger_and_archived_cards(tmp_path, monkeypatch):
+    """cards/, ledger.md, and archive/cards/ are all DB-owned (imported by
+    db.migrate_from_workflow) and must NOT be copied into central — but
+    archive/corrupt/ (quarantined files, never in the DB) must be kept, and
+    the skip must be path-specific rather than a basename match: a file
+    literally named ``ledger.md`` nested inside knowledge/ is not the
+    top-level generated view and must still be copied."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+    wf = repo / ".workflow"
+
+    (wf / "cards").mkdir(parents=True)
+    (wf / "cards" / "WF-001-x.md").write_text("card")
+    (wf / "ledger.md").write_text("ledger view")
+    (wf / "archive" / "cards").mkdir(parents=True)
+    (wf / "archive" / "cards" / "WF-002-y.md").write_text("archived card")
+    (wf / "archive" / "corrupt").mkdir(parents=True)
+    (wf / "archive" / "corrupt" / "bad.md").write_text("quarantined")
+    (wf / "sprints").mkdir()
+    (wf / "sprints" / "sprint-1.md").write_text("sprint")
+    (wf / "usage.jsonl").write_text("usage")
+    (wf / "knowledge").mkdir()
+    (wf / "knowledge" / "notes.md").write_text("notes")
+    # nested file literally named ledger.md — NOT the top-level generated
+    # view — must still be copied; the skip is path-specific, not basename.
+    (wf / "knowledge" / "ledger.md").write_text("nested ledger, not the view")
+
+    n = store.migrate_workflow_to_central(repo)
+    central = config.central_root(repo)
+
+    # skipped
+    assert not (central / "cards" / "WF-001-x.md").exists()
+    assert not (central / "ledger.md").exists()
+    assert not (central / "archive" / "cards" / "WF-002-y.md").exists()
+
+    # kept
+    assert (central / "archive" / "corrupt" / "bad.md").exists()
+    assert (central / "sprints" / "sprint-1.md").exists()
+    assert (central / "usage.jsonl").exists()
+    assert (central / "knowledge" / "notes.md").exists()
+    assert (central / "knowledge" / "ledger.md").exists()
+
+    assert n == 5  # corrupt/bad.md, sprints/sprint-1.md, usage.jsonl, knowledge/notes.md, knowledge/ledger.md
+
+
+def test_migrate_workflow_sources_from_derived_main_root_not_connecting_root(tmp_path, monkeypatch):
+    """Mirrors db.py's worktree-sourcing guard (see
+    test_db.test_import_reads_from_derived_main_root_not_connecting_root):
+    migrate_workflow_to_central must read the MAIN repo's .workflow/ (via
+    derive_repo_root), not the connecting root's own (possibly empty) tree.
+    ``derive_repo_root`` is stubbed here, rather than using a real `git
+    worktree`, to isolate the exact behaviour under test."""
+    main_root = tmp_path / "main"
+    connecting_root = tmp_path / "not-the-main-root"
+    main_root.mkdir(); connecting_root.mkdir()
+    _init_git(main_root)
+
+    wf = main_root / ".workflow"
+    (wf / "sprints").mkdir(parents=True)
+    (wf / "sprints" / "sprint-1.md").write_text("sprint")
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+    monkeypatch.setattr(store, "derive_repo_root", lambda p: main_root)
+
+    n = store.migrate_workflow_to_central(connecting_root)
+    central = config.central_root(connecting_root)
+
+    assert (central / "sprints" / "sprint-1.md").exists()
+    assert n == 1
+
+
 def make_card(card_id: str = "WF-001", **overrides: object) -> Card:
     fields = dict(
         id=card_id, title="Fix the thing", status="planned",
