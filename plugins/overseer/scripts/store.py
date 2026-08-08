@@ -9,8 +9,6 @@ from pathlib import Path
 from scripts.models import Card, CardParseError
 
 WORKFLOW_DIRNAME = ".workflow"
-SCRATCH_DIRNAME = "scratch"
-SCRATCH_STATE_SUBDIR = "workflow"
 _MINTED_ID_RE = re.compile(r"\AWF-(\d+)-")
 _MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is a view
 _MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
@@ -18,18 +16,6 @@ _MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
 
 def workflow_root(repo_root: Path) -> Path:
     return repo_root / WORKFLOW_DIRNAME
-
-
-def _is_gitignored(repo_root: Path, relpath: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "check-ignore", "-q", relpath],
-            cwd=repo_root,
-            capture_output=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
 
 
 def _git_common_dir(repo_root: Path) -> Path | None:
