@@ -38,11 +38,18 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # tool call. Guard it the same way the sibling hooks do.
 [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || exit 0
 
+# Resolve the ACTUAL backup dir first: a custom `backup_dir` pref, or a
+# worktree's own `.overseer/backups`, must be looked up and committed in the
+# same place the backup itself is written — never hard-code the default.
+bdir="$("${OVERSEER_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
+  --root "$repo_root" backup --print-dir 2>/dev/null)" || exit 0
+[ -n "$bdir" ] || exit 0
+
 "${OVERSEER_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT:-}/scripts/cli.py" \
   --root "$repo_root" backup >/dev/null 2>&1 || exit 0
 
-if [ -n "$(git -C "$repo_root" status --porcelain .overseer/backups)" ]; then
-  git -C "$repo_root" add .overseer/backups \
+if [ -n "$(git -C "$repo_root" status --porcelain "$bdir")" ]; then
+  git -C "$repo_root" add "$bdir" \
     && git -C "$repo_root" commit -q -m "chore(overseer): board snapshot" || exit 0
 fi
 

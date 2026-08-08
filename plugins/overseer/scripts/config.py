@@ -54,9 +54,16 @@ def central_root(repo_root: Path) -> Path:
 
 
 def backup_dir(repo_root: Path) -> Path:
+    """The COMMITTED backup dir — resolved against the actual working tree
+    passed in (``repo_root``), never ``derive_repo_root``. Unlike
+    ``repo_config_dir``/``central_root`` (config + live state, correctly
+    shared across worktrees via the main repo root), the committed backup
+    must live in and ride the branch of whichever working tree is doing the
+    `git push` — a linked worktree pushes its OWN branch, and a backup
+    resolved onto the main root would either dirty the main tree or commit
+    onto the wrong branch entirely."""
     cfg = load_config(repo_root)
     if cfg.get("backup_dir"):
         p = Path(cfg["backup_dir"])
-        root = derive_repo_root(repo_root) or repo_root
-        return p if p.is_absolute() else root / p
-    return repo_config_dir(repo_root) / "backups"
+        return p if p.is_absolute() else repo_root / p
+    return repo_root / REPO_CONFIG_DIRNAME / "backups"

@@ -341,3 +341,18 @@ def test_restore_refuses_corrupt_meta(tmp_path, monkeypatch):
     (config.backup_dir(repo) / "meta.json").write_text("{ not json")
     with pytest.raises(ValueError, match="meta.json"):
         backup.restore_board(repo)
+
+
+def test_restore_refuses_unknown_card_column_with_clear_error(tmp_path, monkeypatch):
+    """A cards.json row with a key that isn't a real `cards` table column
+    (hand-edited backup, future/foreign schema, typo) must raise a clear
+    ValueError naming cards.json — not let a raw sqlite OperationalError
+    escape from the INSERT."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch); backup.backup_board(repo)
+    dest = config.backup_dir(repo)
+    cards = json.loads((dest / "cards.json").read_text())
+    cards[0]["totally_not_a_real_column"] = "surprise"
+    (dest / "cards.json").write_text(json.dumps(cards))
+    with pytest.raises(ValueError, match="cards.json"):
+        backup.restore_board(repo)

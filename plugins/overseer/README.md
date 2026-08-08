@@ -41,7 +41,8 @@ adversarial review loops, integrated with sprint planning and superpowers.
   all live together under one folder, shared across every worktree — see
   Storage below.
 - `overseer backup`/`overseer restore` snapshot the board into a committed,
-  diffable folder in the repo, and a PreToolUse hook can carry a fresh
+  diffable folder in the CURRENT working tree (not the shared central
+  folder — see Storage below), and a PreToolUse hook can carry a fresh
   snapshot with every `git push`.
 - Dashboard Party/sessions are scoped to the served repo (worktrees of the
   same repo share one Party); agents and cards carry per-branch tags with a
@@ -81,6 +82,21 @@ restore): `OVERSEER_CENTRAL` env → `central_dir` from
 `$CLAUDE_CONFIG_DIR/overseer/<repo-label>/`. `OVERSEER_DB` still overrides
 just the `board.db` file path, for back-compat.
 
+**The committed backup dir is the one exception to "shared central folder"
+above.** It resolves against the CURRENT working tree, not the repo's
+canonical/main root — deliberately, since a `git push` from a linked
+worktree commits onto *that worktree's own branch*, and the snapshot must
+land, be staged and be committed there so it rides the branch being pushed.
+Resolving it against the main root instead would either dirty the main
+working tree or commit the snapshot onto the wrong branch entirely. Concretely:
+`.overseer/backups/` (or a relative `backup_dir` config value) is always
+`<current working tree>/.overseer/backups/`, even when run from a worktree
+under e.g. `.claude/worktrees/<branch>/` — never the main repo root's
+`.overseer/backups/`. (`.overseer/config.json`/`config.local.json` themselves,
+and the live central state, are still read from/keyed to the main root, same
+as everywhere else in this doc — only the committed backup's location
+changes.)
+
 ### `overseer init`
 
 Bootstraps a repo for tracked work and prompts for the two storage
@@ -108,8 +124,10 @@ you can commit before a merge or push.
   copies `sprints/`, `usage.jsonl` and `knowledge/`, and writes a
   `manifest.json` (schema version, overseer version, timestamp, repo label,
   row/file counts) — all atomically swapped into `.overseer/backups/` (or
-  `--dir`). No zip: plain JSON and text so the result diffs and merges
-  cleanly in a PR.
+  `--dir`) in the current working tree. No zip: plain JSON and text so the
+  result diffs and merges cleanly in a PR. `--print-dir` prints the resolved
+  absolute backup dir and exits without backing up — used by the pre-push
+  hook to know exactly which path to `git add`/commit.
 - **`overseer restore [--dir PATH]`** rebuilds the central folder from a
   backup, non-destructively: cards upsert by id with **last-modified-wins**
   (backup only replaces a row if it's newer); board-identity meta
@@ -124,8 +142,10 @@ Once a repo has run `overseer init` (i.e. `.overseer/config.json` exists),
 the plugin's `PreToolUse` hook (`hooks/prepush-snapshot.sh`, matcher `Bash`)
 watches for Claude-issued `git push` commands. Before the push runs, it:
 
-1. Runs `overseer backup`.
-2. If `.overseer/backups/` changed, stages and commits it
+1. Runs `overseer backup`, writing into the CURRENT working tree's
+   `.overseer/backups/` (see Storage above — this deliberately does not
+   follow the repo to its main root when run from a worktree).
+2. If that dir changed, stages and commits it
    (`chore(overseer): board snapshot`) — so the commit lands on the branch
    *before* the push happens, and the push carries it in the same invocation.
 

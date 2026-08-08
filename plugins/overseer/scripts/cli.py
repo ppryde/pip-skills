@@ -269,7 +269,11 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
-    from scripts import backup
+    from scripts import backup, config
+    if getattr(args, "print_dir", False):
+        dest = Path(args.dir) if args.dir else config.backup_dir(args.root)
+        print(str(dest.resolve()))
+        return 0
     dest = Path(args.dir) if args.dir else None
     stats = backup.backup_board(args.root, dest)
     print(f"backed up {stats['cards']} cards, {stats['sprint_files']} sprints, "
@@ -1495,6 +1499,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("backup")
     p.add_argument("--dir", help="override the computed backup destination")
+    p.add_argument("--print-dir", action="store_true", dest="print_dir",
+                    help="print the resolved backup dir and exit without backing up")
     p.set_defaults(func=cmd_backup)
 
     p = sub.add_parser("restore")

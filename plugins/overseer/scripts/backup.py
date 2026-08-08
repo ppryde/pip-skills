@@ -155,6 +155,12 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
     central = config.central_root(repo_root)
     central.mkdir(parents=True, exist_ok=True)
     conn = db.connect(repo_root)
+    known_cols = {r[1] for r in conn.execute("PRAGMA table_info(cards)").fetchall()}
+    for row in rows:
+        unknown = set(row) - known_cols
+        if unknown:
+            raise ValueError(
+                f"{src / 'cards.json'}: unknown card column(s) {sorted(unknown)}")
     inserted = updated = skipped = 0
     for row in rows:
         existing = conn.execute(

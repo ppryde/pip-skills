@@ -698,3 +698,42 @@ class TestPrepushSnapshotHook:
 
         assert result.returncode == 0
         assert self._log_messages(git_repo) == []
+
+    def test_worktree_push_snapshots_to_worktree_and_leaves_main_clean(self, git_repo):
+        """Root-cause regression: the committed backup is a PER-WORKING-TREE,
+        per-branch artifact — it must land on whichever branch you're about
+        to `git push` from. A linked worktree pushes its OWN branch, so the
+        snapshot must be written+committed under the WORKTREE's own
+        `.overseer/backups`, never resolved against the main repo root (which
+        would either dirty the main working tree or land the commit on the
+        wrong branch). The shared, central board state (board.db, via
+        OVERSEER_CENTRAL) is untouched by this — it stays keyed to the main
+        root and is visible from both trees, which is exactly why the
+        worktree's backup can see the card created against the main root."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+        self._git(git_repo, "add", ".overseer/config.json")
+        self._git(git_repo, "commit", "-q", "-m", "opt in to overseer")
+
+        worktree = git_repo.parent / "wt"
+        added = self._git(git_repo, "worktree", "add", "-b", "feature", str(worktree))
+        assert added.returncode == 0, added.stderr
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin feature"}}, worktree,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(worktree)
+        show = self._git(worktree, "show", "HEAD:.overseer/backups/cards.json")
+        assert show.returncode == 0
+        assert "WF-001" in show.stdout
+
+        # written under the WORKTREE's own backups dir, not the main root's
+        assert (worktree / ".overseer" / "backups" / "cards.json").exists()
+
+        # the main working tree must never be dirtied by a push out of a
+        # linked worktree
+        main_status = self._git(git_repo, "status", "--porcelain", ".overseer/backups")
+        assert main_status.stdout == ""
+        assert not (git_repo / ".overseer" / "backups").exists()

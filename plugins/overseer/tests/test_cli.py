@@ -1233,6 +1233,24 @@ class TestBackupRestoreInit:
         assert (config.backup_dir(repo) / "cards.json").exists()
         assert cli.main(["--root", str(repo), "restore"]) == 0
 
+    def test_cli_backup_print_dir_prints_resolved_dir_and_does_not_back_up(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        assert cli.main(["--root", str(repo), "new-card", "--title", "T"]) == 0
+        capsys.readouterr()
+
+        assert cli.main(["--root", str(repo), "backup", "--print-dir"]) == 0
+
+        out = capsys.readouterr().out.strip()
+        assert out == str(config.backup_dir(repo).resolve())
+        assert not config.backup_dir(repo).exists()  # no backup actually performed
+
     def test_cli_init_writes_config(self, tmp_path, monkeypatch):
         import subprocess
         repo = tmp_path / "r"; repo.mkdir()
