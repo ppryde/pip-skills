@@ -162,7 +162,15 @@ gh pr comment <n> --body "[From <alias>]: <bundled findings>"
 
 ## Mode: refresh
 
-### 1 — Pull since last scan
+### 1 — Pull since last scan (Haiku subagent)
+
+Refresh is pure data gathering — no reasoning happens here. **Dispatch to a Haiku subagent** rather than running `collect.py` directly. Drift detection and rule updates (Steps 3–4) stay on the main Opus session.
+
+Tell the user:
+
+> Refreshing `<alias>` via a Haiku subagent. No live progress — summary on completion.
+
+Then call the `Agent` tool with `subagent_type: "general-purpose"`, `model: "haiku"`, and a prompt instructing the subagent to run **only** the command below and return its stdout verbatim. The subagent must not interpret, diff, or summarise the output.
 
 ```bash
 python <plugin>/scripts/collect.py \
@@ -174,6 +182,8 @@ python <plugin>/scripts/collect.py \
   --extensions <extensions> \
   --since <last_scanned_at>
 ```
+
+The subagent's reply is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json`) and continue from Step 2.
 
 ### 2 — Pre-extract gate
 
@@ -198,6 +208,10 @@ For each newly-derived rule:
 - Append/modify rules
 - Refresh voice patterns if new openers/quirks emerge
 - Drift log auto-caps via `persona_io.append_drift_entry`
+
+### 4b — Re-render the per-persona slash command
+
+The slash-command file at `~/.claude/commands/review-as-<alias>.md` embeds the persona summary in its `description`. After Step 4 changes any of: rule count, snapshot counts, or `last_scanned_at` — re-render `<plugin>/templates/review-as-command.md.tmpl` with the updated values and overwrite the command file. Placeholders to substitute are the same set as `clone-reviewer` Step 7 (`{{ALIAS}}`, `{{REPO}}`, `{{RULE_COUNT}}`, `{{COMMENT_COUNT}}`, `{{PR_COUNT}}`, `{{WINDOW_MONTHS}}`, `{{LAST_SCANNED_AT}}`). Do not skip this — a stale description is misleading.
 
 ### 5 — Print delta
 
