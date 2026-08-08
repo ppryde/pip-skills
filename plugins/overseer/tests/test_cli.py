@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts import db
+from scripts import cli, config, db
 from scripts.cli import main
-from scripts.store import state_root, workflow_root
+from scripts.store import state_root
 from tests.factories import git_init
 
 
@@ -31,7 +31,7 @@ def _card(repo, cid: str = "WF-001"):
 
 class TestInitAndNewCard:
     def test_init_creates_tree_and_index(self, repo):
-        root = workflow_root(repo)
+        root = state_root(repo)
         assert (root / "ledger.md").exists()
         assert (root / "cards").is_dir()
 
@@ -49,7 +49,7 @@ class TestInitAndNewCard:
 
     def test_new_card_updates_index(self, repo):
         run(repo, "new-card", "--title", "Fix the thing")
-        assert "WF-001" in (workflow_root(repo) / "ledger.md").read_text()
+        assert "WF-001" in (state_root(repo) / "ledger.md").read_text()
 
     def test_new_card_duplicate_jira_id_rejected(self, repo, capsys):
         assert run(repo, "new-card", "--title", "A", "--jira", "PROJ-142") == 0
@@ -77,7 +77,7 @@ class TestLifecycle:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-stage", "WF-001", "planning") == 0
         assert run(repo, "block", "WF-001", "--reason", "user: q") == 0
-        ledger = (workflow_root(repo) / "ledger.md").read_text()
+        ledger = (state_root(repo) / "ledger.md").read_text()
         assert "BLOCKED" in ledger
         assert run(repo, "unblock", "WF-001") == 0
 
@@ -88,7 +88,7 @@ class TestLifecycle:
         assert db.load_card(conn, "WF-001").status == "done"
         live, _ = db.load_live_cards(conn)
         assert live == []  # archiving removes it from the live set
-        assert "Recently done" in (workflow_root(repo) / "ledger.md").read_text()
+        assert "Recently done" in (state_root(repo) / "ledger.md").read_text()
 
     def test_unknown_card_errors(self, repo, capsys):
         assert run(repo, "set-stage", "WF-999", "planning") == 1
@@ -136,7 +136,7 @@ class TestSprintsAndResume:
         run(repo, "new-card", "--title", "T", "--sprint", "2026-07-S1",
             "--estimate", "400k")
         assert run(repo, "rollup-sprint", "2026-07-S1") == 0
-        sprint = (workflow_root(repo) / "sprints" / "2026-07-S1.md").read_text()
+        sprint = (state_root(repo) / "sprints" / "2026-07-S1.md").read_text()
         assert "| WF-001 |" in sprint
 
     def test_resume_json(self, repo, capsys):
@@ -187,7 +187,7 @@ class TestSetSprintStatus:
     def test_activates_sprint(self, repo):
         run(repo, "new-sprint", "2026-07-S2")
         assert run(repo, "set-sprint-status", "2026-07-S2", "active") == 0
-        content = (workflow_root(repo) / "sprints" / "2026-07-S2.md").read_text()
+        content = (state_root(repo) / "sprints" / "2026-07-S2.md").read_text()
         assert "status: active" in content
 
     def test_invalid_status_exits_1(self, repo):
@@ -211,12 +211,12 @@ class TestSetSprintStatus:
 
 
 class TestStateRootWiring:
-    def test_init_uses_scratch_when_gitignored(self, tmp_path):
+    def test_init_lands_in_resolved_central_root(self, tmp_path, monkeypatch):
         git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
+        central = tmp_path / "central-elsewhere"
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(central))
         assert main(["--root", str(tmp_path), "init"]) == 0
-        assert (tmp_path / "scratch" / "workflow" / "ledger.md").exists()
+        assert (central / "ledger.md").exists()
         assert not (tmp_path / ".workflow").exists()
 
     def test_new_card_lands_in_resolved_root(self, tmp_path):
@@ -299,7 +299,7 @@ class TestUsageTelemetry:
         assert run(repo, "log-usage", "WF-001", "--role", "reviewer",
                    "--stage", "impl-review", "--tier", "mid",
                    "--tokens", "48k", "--round", "2") == 0
-        lines = (workflow_root(repo) / "usage.jsonl").read_text().strip().split("\n")
+        lines = (state_root(repo) / "usage.jsonl").read_text().strip().split("\n")
         entry = json.loads(lines[0])
         assert entry["card"] == "WF-001" and entry["role"] == "reviewer"
         assert entry["tokens"] == 48_000 and entry["round"] == 2
@@ -310,7 +310,7 @@ class TestUsageTelemetry:
         run(repo, "new-card", "--title", "T")
         run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
         run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "20k")
-        content = (workflow_root(repo) / "usage.jsonl").read_text()
+        content = (state_root(repo) / "usage.jsonl").read_text()
         assert len(content.strip().split("\n")) == 2
 
     def test_usage_summary(self, repo, capsys):
@@ -341,7 +341,7 @@ class TestUsageTelemetry:
     def test_usage_skips_corrupt_line_and_warns(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
         run(repo, "log-usage", "WF-001", "--role", "worker", "--tokens", "30k")
-        usage_path = workflow_root(repo) / "usage.jsonl"
+        usage_path = state_root(repo) / "usage.jsonl"
         with usage_path.open("a") as fh:
             fh.write("not valid json\n")
         capsys.readouterr()
@@ -618,12 +618,11 @@ class TestRelationsArchivedRollup:
         run(repo, "set-field", "WF-003", "--parent", "WF-001")
         run(repo, "depends", "WF-003", "--on", "WF-002")
         # before: WF-003 waits on WF-002
-        from scripts.store import workflow_root
-        ledger = (workflow_root(repo) / "ledger.md").read_text()
+        ledger = (state_root(repo) / "ledger.md").read_text()
         assert "waiting on WF-002" in ledger
         # complete WF-002 → archived out of live set
         assert run(repo, "done", "WF-002") == 0
-        ledger = (workflow_root(repo) / "ledger.md").read_text()
+        ledger = (state_root(repo) / "ledger.md").read_text()
         assert "1/2 done" in ledger              # rollup counts the archived done child
         assert "WF-003" in ledger and "waiting on WF-002" not in ledger  # dep satisfied → ready
 
@@ -1146,11 +1145,12 @@ class TestResumeClaimOrdering:
 class TestReposCommand:
     """`overseer repos --json` — enumerates every discoverable board under
     `$CLAUDE_CONFIG_DIR/overseer/*/board.db`. Unlike every other test in this
-    file, these tests must NOT pin a single-file `OVERSEER_DB` (the autouse
-    `_no_ambient_task_env` fixture does that for every test) — discovery is
-    keyed on the config-dir-style `overseer/<label>/board.db` layout, so each
-    test here explicitly clears it and points `CLAUDE_CONFIG_DIR` at a fresh
-    tmp directory instead.
+    file, these tests must NOT pin a single-file `OVERSEER_DB` or a fixed
+    `OVERSEER_CENTRAL` (the autouse `_no_ambient_task_env` fixture sets both
+    for every test) — discovery is keyed on the config-dir-style
+    `overseer/<label>/board.db` layout, so each test here explicitly clears
+    both overrides and points `CLAUDE_CONFIG_DIR` at a fresh tmp directory
+    instead.
     """
 
     def _seed(self, tmp_path, monkeypatch, name: str, *, with_git: bool = True) -> Path:
@@ -1163,6 +1163,7 @@ class TestReposCommand:
 
     def test_discovers_boards_with_repo_root(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
         repo_a = self._seed(tmp_path, monkeypatch, "repo-a")
         repo_b = self._seed(tmp_path, monkeypatch, "repo-b")
@@ -1179,6 +1180,7 @@ class TestReposCommand:
 
     def test_skips_board_without_git_derived_repo_root(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
         self._seed(tmp_path, monkeypatch, "no-git-repo", with_git=False)
         capsys.readouterr()
@@ -1188,6 +1190,7 @@ class TestReposCommand:
 
     def test_skips_board_whose_repo_root_no_longer_exists(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
         gone = self._seed(tmp_path, monkeypatch, "repo-gone")
         shutil.rmtree(gone)
@@ -1198,6 +1201,7 @@ class TestReposCommand:
 
     def test_no_overseer_dir_yields_empty_list(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
         capsys.readouterr()
 
@@ -1206,6 +1210,7 @@ class TestReposCommand:
 
     def test_text_output_lists_label_and_root(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
         repo_a = self._seed(tmp_path, monkeypatch, "repo-a")
         capsys.readouterr()
@@ -1213,3 +1218,48 @@ class TestReposCommand:
         assert main(["--root", str(tmp_path), "repos"]) == 0
         out = capsys.readouterr().out
         assert "repo-a" in out and str(repo_a.resolve()) in out
+
+
+class TestBackupRestoreInit:
+    def test_cli_backup_then_restore(self, tmp_path, monkeypatch, capsys):
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        assert cli.main(["--root", str(repo), "new-card", "--title", "T"]) == 0
+        assert cli.main(["--root", str(repo), "backup"]) == 0
+        assert (config.backup_dir(repo) / "cards.json").exists()
+        assert cli.main(["--root", str(repo), "restore"]) == 0
+
+    def test_cli_backup_print_dir_prints_resolved_dir_and_does_not_back_up(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        assert cli.main(["--root", str(repo), "new-card", "--title", "T"]) == 0
+        capsys.readouterr()
+
+        assert cli.main(["--root", str(repo), "backup", "--print-dir"]) == 0
+
+        out = capsys.readouterr().out.strip()
+        assert out == str(config.backup_dir(repo).resolve())
+        assert not config.backup_dir(repo).exists()  # no backup actually performed
+
+    def test_cli_init_writes_config(self, tmp_path, monkeypatch):
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        cli.main(["--root", str(repo), "init", "--yes",
+                  "--central", str(tmp_path / "c"), "--backup-dir", ".overseer/backups"])
+        cfg = json.loads((repo / ".overseer" / "config.json").read_text())
+        local = json.loads((repo / ".overseer" / "config.local.json").read_text())
+        assert cfg["backup_dir"] == ".overseer/backups"
+        assert local["central_dir"] == str(tmp_path / "c")
+        assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()

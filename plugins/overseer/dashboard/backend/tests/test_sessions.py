@@ -283,6 +283,7 @@ def isolated_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     config_dir = tmp_path / "claude-config"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
     monkeypatch.delenv("OVERSEER_DB", raising=False)
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
     return config_dir
 
 

@@ -2,7 +2,7 @@
 import pytest
 
 from scripts import db
-from scripts.store import init_workflow, workflow_root
+from scripts.store import init_workflow, state_root
 from tests.factories import make_card, git_init
 
 
@@ -85,7 +85,7 @@ class TestBoardData:
     def test_sprint_list(self, repo):
         from scripts.board import board_data
         from scripts.sprints import save_sprint, Sprint
-        root = workflow_root(repo)
+        root = state_root(repo)
         sprint_text = """---
 id: 2026-07-S1
 status: active
@@ -115,7 +115,7 @@ Test sprint."""
         can only ever carry corrupt SPRINT files now (sprints stay
         file-based)."""
         from scripts.board import board_data
-        root = workflow_root(repo)
+        root = state_root(repo)
         (root / "sprints" / "corrupt-sprint.md").write_text("garbage")
 
         data = board_data(repo)

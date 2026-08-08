@@ -1,7 +1,9 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from scripts import config, store
 from scripts.models import Card
 from scripts.store import (
     archive_card,
@@ -17,6 +19,109 @@ from scripts.store import (
     state_root,
 )
 from tests.factories import git_init as _git_init
+
+
+def _init_git(root): subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+
+
+def test_migrate_workflow_copies_once(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+    # seed a legacy .workflow tree
+    wf = repo / ".workflow"
+    (wf / "sprints").mkdir(parents=True)
+    (wf / "sprints" / "sprint-1.md").write_text("---\nid: sprint-1\nstatus: active\n---\n")
+    (wf / "usage.jsonl").write_text('{"card":"WF-001","tokens":5}\n')
+    n = store.migrate_workflow_to_central(repo)
+    central = config.central_root(repo)
+    assert (central / "sprints" / "sprint-1.md").exists()
+    assert (central / "usage.jsonl").exists()
+    assert n == 2
+    # second run must not overwrite / re-copy
+    (central / "usage.jsonl").write_text("LOCAL\n")
+    n2 = store.migrate_workflow_to_central(repo)
+    assert n2 == 0
+    assert (central / "usage.jsonl").read_text() == "LOCAL\n"
+
+
+def test_migrate_workflow_empty_is_noop(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert store.migrate_workflow_to_central(repo) == 0
+
+
+def test_migrate_workflow_skips_cards_ledger_and_archived_cards(tmp_path, monkeypatch):
+    """cards/, ledger.md, and archive/cards/ are all DB-owned (imported by
+    db.migrate_from_workflow) and must NOT be copied into central — but
+    archive/corrupt/ (quarantined files, never in the DB) must be kept, and
+    the skip must be path-specific rather than a basename match: a file
+    literally named ``ledger.md`` nested inside knowledge/ is not the
+    top-level generated view and must still be copied."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+    wf = repo / ".workflow"
+
+    (wf / "cards").mkdir(parents=True)
+    (wf / "cards" / "WF-001-x.md").write_text("card")
+    (wf / "ledger.md").write_text("ledger view")
+    (wf / "archive" / "cards").mkdir(parents=True)
+    (wf / "archive" / "cards" / "WF-002-y.md").write_text("archived card")
+    (wf / "archive" / "corrupt").mkdir(parents=True)
+    (wf / "archive" / "corrupt" / "bad.md").write_text("quarantined")
+    (wf / "sprints").mkdir()
+    (wf / "sprints" / "sprint-1.md").write_text("sprint")
+    (wf / "usage.jsonl").write_text("usage")
+    (wf / "knowledge").mkdir()
+    (wf / "knowledge" / "notes.md").write_text("notes")
+    # nested file literally named ledger.md — NOT the top-level generated
+    # view — must still be copied; the skip is path-specific, not basename.
+    (wf / "knowledge" / "ledger.md").write_text("nested ledger, not the view")
+
+    n = store.migrate_workflow_to_central(repo)
+    central = config.central_root(repo)
+
+    # skipped
+    assert not (central / "cards" / "WF-001-x.md").exists()
+    assert not (central / "ledger.md").exists()
+    assert not (central / "archive" / "cards" / "WF-002-y.md").exists()
+
+    # kept
+    assert (central / "archive" / "corrupt" / "bad.md").exists()
+    assert (central / "sprints" / "sprint-1.md").exists()
+    assert (central / "usage.jsonl").exists()
+    assert (central / "knowledge" / "notes.md").exists()
+    assert (central / "knowledge" / "ledger.md").exists()
+
+    assert n == 5  # corrupt/bad.md, sprints/sprint-1.md, usage.jsonl, knowledge/notes.md, knowledge/ledger.md
+
+
+def test_migrate_workflow_sources_from_derived_main_root_not_connecting_root(tmp_path, monkeypatch):
+    """Mirrors db.py's worktree-sourcing guard (see
+    test_db.test_import_reads_from_derived_main_root_not_connecting_root):
+    migrate_workflow_to_central must read the MAIN repo's .workflow/ (via
+    derive_repo_root), not the connecting root's own (possibly empty) tree.
+    ``derive_repo_root`` is stubbed here, rather than using a real `git
+    worktree`, to isolate the exact behaviour under test."""
+    main_root = tmp_path / "main"
+    connecting_root = tmp_path / "not-the-main-root"
+    main_root.mkdir(); connecting_root.mkdir()
+    _init_git(main_root)
+
+    wf = main_root / ".workflow"
+    (wf / "sprints").mkdir(parents=True)
+    (wf / "sprints" / "sprint-1.md").write_text("sprint")
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+    monkeypatch.setattr(store, "derive_repo_root", lambda p: main_root)
+
+    n = store.migrate_workflow_to_central(connecting_root)
+    central = config.central_root(connecting_root)
+
+    assert (central / "sprints" / "sprint-1.md").exists()
+    assert n == 1
 
 
 def make_card(card_id: str = "WF-001", **overrides: object) -> Card:
@@ -40,12 +145,18 @@ class TestInit:
         for sub in ("cards", "sprints", "archive/cards", "archive/corrupt"):
             assert (root / sub).is_dir()
 
-    def test_gitignore_entry_added_once(self, tmp_path):
+    def test_gitignore_entry_added_once(self, tmp_path, monkeypatch):
+        # init_workflow only touches .gitignore when the resolved state root
+        # is the repo-local .workflow/ dir — under central storage that's no
+        # longer the default, so force it via OVERSEER_CENTRAL to exercise
+        # the branch directly.
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / ".workflow"))
         init_workflow(tmp_path)
         init_workflow(tmp_path)
         assert (tmp_path / ".gitignore").read_text().count(".workflow/") == 1
 
-    def test_existing_gitignore_preserved(self, tmp_path):
+    def test_existing_gitignore_preserved(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / ".workflow"))
         (tmp_path / ".gitignore").write_text("*.pyc\n")
         init_workflow(tmp_path)
         content = (tmp_path / ".gitignore").read_text()
@@ -141,47 +252,32 @@ class TestArchive:
 
 
 class TestStateRoot:
-    def test_fresh_repo_no_scratch_uses_workflow(self, tmp_path):
-        assert state_root(tmp_path) == tmp_path / ".workflow"
+    """``state_root`` is now a thin delegate to ``config.central_root`` (see
+    ``TestStateRootDelegatesToConfig`` below); the old ``.workflow/`` vs
+    gitignored-``scratch/`` precedence logic it used to implement itself was
+    removed in the central-storage migration, so those scenarios no longer
+    apply here — they're covered as ``config.central_root`` precedence in
+    ``tests/test_config.py`` instead."""
 
-    def test_existing_workflow_with_content_wins(self, tmp_path):
+    def test_default_resolves_under_config_dir(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        cfgdir = tmp_path / "cfg"
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfgdir))
         _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
-        (tmp_path / ".workflow" / "cards").mkdir(parents=True)
-        (tmp_path / ".workflow" / "cards" / "WF-001-x.md").write_text("x")
-        assert state_root(tmp_path) == tmp_path / ".workflow"
+        assert state_root(tmp_path) == cfgdir / "overseer" / tmp_path.name
 
-    def test_gitignored_scratch_used_when_no_workflow(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
-        assert state_root(tmp_path) == tmp_path / "scratch" / "workflow"
+    def test_env_override_wins(self, tmp_path, monkeypatch):
+        central = tmp_path / "central-elsewhere"
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(central))
+        assert state_root(tmp_path) == central
 
-    def test_scratch_not_gitignored_falls_back(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / "scratch").mkdir()
-        assert state_root(tmp_path) == tmp_path / ".workflow"
-
-    def test_scratch_without_git_falls_back(self, tmp_path):
-        (tmp_path / "scratch").mkdir()
-        assert state_root(tmp_path) == tmp_path / ".workflow"
-
-    def test_empty_workflow_dir_does_not_hijack(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
-        (tmp_path / ".workflow").mkdir()  # exists but empty
-        assert state_root(tmp_path) == tmp_path / "scratch" / "workflow"
-
-    def test_init_under_scratch_skips_gitignore_edit(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
+    def test_init_under_central_root_skips_gitignore_edit(self, tmp_path, monkeypatch):
+        central = tmp_path / "central-elsewhere"
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(central))
         root = init_workflow(tmp_path)
-        assert root == tmp_path / "scratch" / "workflow"
+        assert root == central
         assert (root / "cards").is_dir()
-        assert ".workflow/" not in (tmp_path / ".gitignore").read_text()
+        assert not (tmp_path / ".gitignore").exists()
 
 
 class TestDeriveRepoLabel:
