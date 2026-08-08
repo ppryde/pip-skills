@@ -107,6 +107,11 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
             conn.commit()
     if migrate:
         _maybe_import(conn, repo_root)  # defined in Task 6; no-op stub until then
+    if migrate and get_meta(conn, "workflow_fs_imported") is None:
+        from scripts.store import migrate_workflow_to_central
+        migrate_workflow_to_central(repo_root)
+        set_meta(conn, "workflow_fs_imported", "1")
+        conn.commit()
     return conn
 
 

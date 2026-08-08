@@ -1,7 +1,9 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from scripts import config, store
 from scripts.models import Card
 from scripts.store import (
     archive_card,
@@ -17,6 +19,36 @@ from scripts.store import (
     state_root,
 )
 from tests.factories import git_init as _git_init
+
+
+def _init_git(root): subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+
+
+def test_migrate_workflow_copies_once(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+    # seed a legacy .workflow tree
+    wf = repo / ".workflow"
+    (wf / "sprints").mkdir(parents=True)
+    (wf / "sprints" / "sprint-1.md").write_text("---\nid: sprint-1\nstatus: active\n---\n")
+    (wf / "usage.jsonl").write_text('{"card":"WF-001","tokens":5}\n')
+    n = store.migrate_workflow_to_central(repo)
+    central = config.central_root(repo)
+    assert (central / "sprints" / "sprint-1.md").exists()
+    assert (central / "usage.jsonl").exists()
+    assert n == 2
+    # second run must not overwrite / re-copy
+    (central / "usage.jsonl").write_text("LOCAL\n")
+    n2 = store.migrate_workflow_to_central(repo)
+    assert n2 == 0
+    assert (central / "usage.jsonl").read_text() == "LOCAL\n"
+
+
+def test_migrate_workflow_empty_is_noop(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert store.migrate_workflow_to_central(repo) == 0
 
 
 def make_card(card_id: str = "WF-001", **overrides: object) -> Card:

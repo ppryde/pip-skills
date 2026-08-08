@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,7 @@ WORKFLOW_DIRNAME = ".workflow"
 SCRATCH_DIRNAME = "scratch"
 SCRATCH_STATE_SUBDIR = "workflow"
 _MINTED_ID_RE = re.compile(r"\AWF-(\d+)-")
+_MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is a view
 
 
 def workflow_root(repo_root: Path) -> Path:
@@ -108,6 +110,31 @@ def state_root(repo_root: Path) -> Path:
     """Resolve the overseer state root: the central per-repo folder."""
     from scripts.config import central_root
     return central_root(repo_root)
+
+
+def migrate_workflow_to_central(repo_root: Path) -> int:
+    """Copy legacy .workflow/ sprint/usage/knowledge/archive state into the
+    central folder, once. Never overwrites an existing central file. Sources
+    from the canonical repo's .workflow/ (not a worktree's). Returns files copied."""
+    from scripts.config import central_root
+    source_root = (derive_repo_root(repo_root) or repo_root) / WORKFLOW_DIRNAME
+    if not source_root.is_dir():
+        return 0
+    dest_root = central_root(repo_root)
+    copied = 0
+    for src in source_root.rglob("*"):
+        if not src.is_file():
+            continue
+        rel = src.relative_to(source_root)
+        if rel.parts and rel.parts[0] in _MIGRATE_SKIP_TOP:
+            continue
+        dest = dest_root / rel
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        copied += 1
+    return copied
 
 
 def init_workflow(repo_root: Path) -> Path:
