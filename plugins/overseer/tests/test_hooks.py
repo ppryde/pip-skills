@@ -14,6 +14,7 @@ from scripts.models import Card
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "checklist-sync.sh"
+PREPUSH_HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "prepush-snapshot.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 
 
@@ -593,3 +594,86 @@ class TestClaimPromptScriptSmoke:
         assert result.returncode == 0
         out = json.loads(result.stdout)
         assert "WF-001" in out["hookSpecificOutput"]["additionalContext"]
+
+
+class TestPrepushSnapshotHook:
+    """`prepush-snapshot.sh` is a PreToolUse/Bash hook that snapshots +
+    commits the board immediately before a `git push` runs, so the push
+    naturally includes the snapshot commit. It must always exit 0."""
+
+    def _git(self, repo: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True,
+        )
+
+    def _log_messages(self, repo: Path) -> list[str]:
+        result = self._git(repo, "log", "--pretty=%s")
+        if result.returncode != 0:
+            return []
+        return [line for line in result.stdout.splitlines() if line]
+
+    def _run_script(self, payload: dict, repo: Path) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
+        return subprocess.run(
+            [BASH, str(PREPUSH_HOOK_SCRIPT)], input=json.dumps(payload),
+            env=env, cwd=repo, capture_output=True, text=True,
+        )
+
+    @pytest.fixture
+    def git_repo(self, tmp_path):
+        repo = tmp_path
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.email", "test@example.com")
+        self._git(repo, "config", "user.name", "Test")
+        return repo
+
+    def test_snapshots_on_opted_in_push(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}}, git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+        show = self._git(git_repo, "show", "HEAD:.overseer/backups/cards.json")
+        assert show.returncode == 0
+        assert "WF-001" in show.stdout
+
+    def test_noop_when_not_opted_in(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+        (git_repo / ".overseer" / "config.json").unlink()
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}}, git_repo,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_noop_on_non_push_command(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script({"tool_input": {"command": "git status"}}, git_repo)
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_no_empty_commit_when_board_unchanged(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        payload = {"tool_input": {"command": "git push origin main"}}
+        first = self._run_script(payload, git_repo)
+        assert first.returncode == 0
+        commits_after_first = self._log_messages(git_repo)
+        assert "chore(overseer): board snapshot" in commits_after_first
+
+        second = self._run_script(payload, git_repo)
+        assert second.returncode == 0
+        assert self._log_messages(git_repo) == commits_after_first

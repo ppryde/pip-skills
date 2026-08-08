@@ -223,8 +223,8 @@ def _load(repo_root: Path, card_id: str) -> Card:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """`overseer init [--central PATH] [--backup-dir PATH] [--install-hook]
-    [--yes]` — bootstraps the `.workflow/` state tree (as before) and, new
+    """`overseer init [--central PATH] [--backup-dir PATH] [--yes]` —
+    bootstraps the `.workflow/` state tree (as before) and, new
     here, writes the repo's `.overseer/` config pair:
 
     - `.overseer/config.json` (`backup_dir`) — committed, shared default.
@@ -262,9 +262,6 @@ def cmd_init(args: argparse.Namespace) -> int:
     init_workflow(args.root)
     _conn(args.root)  # creates + one-time-imports the board.db
     rebuild_index(args.root, args.root.resolve().name, _now())
-
-    if getattr(args, "install_hook", False) and callable(globals().get("_install_prepush_hook")):
-        _install_prepush_hook(args.root)  # Task 6
 
     print(f"initialised {state_root(args.root)} "
           f"(central={central} backup_dir={backup_dir_value})")
@@ -1305,8 +1302,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("init")
     p.add_argument("--central", help="central state folder (default: derived)")
     p.add_argument("--backup-dir", help="repo-relative or absolute backup dir")
-    p.add_argument("--install-hook", action="store_true",
-                    help="install the pre-push backup hook (Task 6)")
     p.add_argument("--yes", action="store_true",
                     help="accept defaults non-interactively")
     p.set_defaults(func=cmd_init)
