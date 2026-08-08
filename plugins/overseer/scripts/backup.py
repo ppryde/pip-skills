@@ -20,20 +20,31 @@ def _dump_table(conn, table: str) -> list[dict]:
 
 
 def _atomic_replace_dir(staged: Path, dest: Path) -> None:
-    """Swap ``staged`` into ``dest`` without ever leaving a window where
-    neither the old nor the new snapshot exists. ``backup_dir`` is a
-    repeatedly-refreshed committed path, so the overwrite case is the
-    PRIMARY case, not an edge case: a crash between removing the old
-    snapshot and installing the new one must never destroy the last good
-    backup. Uses same-filesystem atomic renames (``staged`` is created in
-    ``dest.parent`` by the caller) to move the existing snapshot aside
-    first, swap the new one in, and only then delete the old one — with a
+    """Swap ``staged`` into ``dest`` such that ``dest`` or ``dest.old``
+    ALWAYS holds a complete snapshot — including across a crash followed by
+    a retry. ``backup_dir`` is a repeatedly-refreshed committed path, so the
+    overwrite case is the PRIMARY case, not an edge case: the last good
+    backup must never be destroyed, no matter where a crash lands.
+
+    On entry, ``old`` (``dest.old``) is disposable stale garbage ONLY when
+    ``dest`` also exists — that means a prior swap fully completed. If
+    ``dest`` is missing while ``old`` is present, a prior run crashed
+    mid-swap (after moving the current snapshot aside, before installing
+    the new one); ``old`` IS the recovery snapshot in that case and must be
+    restored, never deleted, before proceeding.
+
+    Uses same-filesystem atomic renames (``staged`` is created in
+    ``dest.parent`` by the caller) to move the existing snapshot aside,
+    swap the new one in, and only then delete the old one — with a
     rollback if the swap itself fails.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     old = dest.with_name(dest.name + ".old")
     if old.exists():
-        shutil.rmtree(old)
+        if dest.exists():
+            shutil.rmtree(old)  # prior swap completed; old is stale garbage
+        else:
+            os.replace(old, dest)  # recovery: prior run crashed mid-swap; restore
     if dest.exists():
         os.replace(dest, old)  # atomic rename existing snapshot aside
     try:

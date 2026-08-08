@@ -1,4 +1,4 @@
-import json, subprocess
+import json, os, subprocess, tempfile
 from pathlib import Path
 import pytest
 from scripts import backup, db, config
@@ -110,3 +110,65 @@ def test_backup_copies_knowledge_dir_and_counts_fact_files(tmp_path, monkeypatch
     manifest = json.loads((dest / "manifest.json").read_text())
     assert manifest["fact_files"] == 1
     assert summary["fact_files"] == 1
+
+
+def _make_staged(tmp_path, marker):
+    staged = Path(tempfile.mkdtemp(dir=tmp_path))
+    (staged / "manifest.json").write_text(json.dumps({"marker": marker}))
+    return staged
+
+
+def test_atomic_replace_dir_recovers_from_crash_mid_swap(tmp_path):
+    """Fix round 2, recovery-on-entry: on-disk state {dest absent,
+    dest.old present} is what a PRIOR run leaves behind if it was hard-
+    killed right after `os.replace(dest, old)` but before
+    `os.replace(staged, dest)` — `old` is the recovery snapshot, not stale
+    garbage. A fresh call must recover cleanly: swap the new staged
+    content into `dest` and leave no `.old` lingering."""
+    dest = tmp_path / "backups"
+    old = dest.with_name(dest.name + ".old")
+    old.mkdir()
+    (old / "manifest.json").write_text(json.dumps({"marker": "recovery-snapshot"}))
+    assert not dest.exists()
+
+    staged = _make_staged(tmp_path, "new-snapshot")
+    backup._atomic_replace_dir(staged, dest)
+
+    assert dest.exists()
+    assert json.loads((dest / "manifest.json").read_text())["marker"] == "new-snapshot"
+    assert not old.exists()
+
+
+def test_atomic_replace_dir_survives_crash_during_retry_swap(tmp_path, monkeypatch):
+    """Fix round 2, crash-during-retry — the exact scenario the reviewer
+    reproduced: recovery state {dest absent, old present with the last
+    good snapshot}, and the retry's own staged->dest swap ALSO fails (disk
+    full, lock, etc). The old (round-1) implementation unconditionally
+    rmtree'd `old` on entry whenever it existed, so by the time the swap
+    failed there was nothing left to roll back to -> total loss. The fix
+    only treats `old` as disposable once `dest` exists again (i.e. a swap
+    has actually completed), so a failed retry must still leave a complete
+    snapshot in place (restored from `old`) rather than losing everything."""
+    dest = tmp_path / "backups"
+    old = dest.with_name(dest.name + ".old")
+    old.mkdir()
+    (old / "manifest.json").write_text(json.dumps({"marker": "recovery-snapshot"}))
+    assert not dest.exists()
+
+    staged = _make_staged(tmp_path, "new-snapshot")
+
+    real_replace = os.replace
+
+    def flaky_replace(src, dst):
+        if Path(src) == staged:
+            raise OSError("simulated disk full")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(backup.os, "replace", flaky_replace)
+
+    with pytest.raises(OSError):
+        backup._atomic_replace_dir(staged, dest)
+
+    # Not total loss: a complete snapshot must exist after the failed retry.
+    assert dest.exists()
+    assert json.loads((dest / "manifest.json").read_text())["marker"] == "recovery-snapshot"
