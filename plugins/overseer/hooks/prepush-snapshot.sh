@@ -56,13 +56,31 @@ fi
 # same as central_root/repo_config_dir) — never a linked worktree's own
 # `.overseer/`, which typically doesn't exist. Resolve the canonical root
 # the same way `derive_repo_root` does: the git-common-dir's parent
-# directory. Any failure (older git, detached common-dir resolution, etc.)
-# falls back to treating `repo_root` itself as canonical.
-canonical_root="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-case "$canonical_root" in
-  */.git) canonical_root="${canonical_root%/.git}" ;;
-  "") canonical_root="$repo_root" ;;
-esac
+# directory.
+#
+# Deliberately avoids `git rev-parse --path-format=absolute` (needs git
+# >= 2.31, mirroring the portability note on `store.py::_git_common_dir`):
+# on an older git, an unrecognised `--path-format=absolute` flag is simply
+# ECHOED back on its own stdout line instead of erroring (still exit 0), so
+# `--git-common-dir`'s real output would land on a second line and the
+# whole thing would resolve to a garbage path — silently disabling the
+# opt-in gate for every repo, not just worktrees, with no error at all.
+# Plain `--git-common-dir` + manual `cd .. && pwd` resolution (same
+# technique `store.py` already uses in Python) sidesteps the whole
+# version dependency. Any failure still falls back to `repo_root` itself.
+common="$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null)" || common=""
+canonical_root=""
+if [ -n "$common" ]; then
+  case "$common" in
+    /*) ;;                              # already absolute
+    *)  common="$repo_root/$common" ;;  # relative -> resolve against repo_root
+  esac
+  case "$common" in
+    */.git) canonical_root="$(cd "$(dirname "$common")" 2>/dev/null && pwd)" ;;
+    *)      canonical_root="$(cd "$common" 2>/dev/null && pwd)" ;;
+  esac
+fi
+[ -n "$canonical_root" ] || canonical_root="$repo_root"
 [ -f "$canonical_root/.overseer/config.json" ] || exit 0
 
 # Fail-open: under `set -u`, an unset CLAUDE_PLUGIN_ROOT would otherwise
