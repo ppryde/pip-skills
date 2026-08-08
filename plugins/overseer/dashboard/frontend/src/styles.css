@@ -299,18 +299,33 @@
   /* CHOSEN button system (task-12): two roles across the board's real
      controls. Role A — "fine hand-inked, light-recess hover" — the
      rectangular text action/control buttons (Refresh, threshold Set,
-     Archive, Claim, status-menu items, link-editor dependency buttons).
-     Role B — "T1 gold underline" — tabs/secondary nav (the card-drawer
-     view toggle). Round close buttons (✕) get only the ink border +
-     hover recess, keeping their circular shape. */
+     Claim, status-menu items) plus the native dropdowns restyled to match
+     (WF-046 item 3: topbar repo/branch selects, priority-select,
+     claim-control select, link-editor selects). Role B — "T1 gold
+     underline" — tabs/secondary nav (the card-drawer view toggle). Round
+     close buttons (✕) get only the ink border + hover recess, keeping
+     their circular shape — the link-editor dependency-chip remove ✕ joins
+     that round-exception family as of WF-046 item 2 (too small for a
+     rectangular ink outline; see `.link-editor__deps-list button` below). */
   --qb-btn-face: #faf3df;
   --qb-btn-face-hover: #f1e7c8;
   --qb-btn-face-active: #ece0c0;
   --qb-btn-ink: #6b4f34;
   --qb-btn-ink-hover: #5b4632;
   --qb-btn-text: #4a3826;
-  /* Gentle hand-drawn wobble — FIXED, does NOT change on hover/active. */
+  /* Gentle hand-drawn wobble — FIXED, does NOT change on hover/active.
+     WF-046 item 1: every Role-A control previously shared this ONE wobble,
+     reading as stamped rather than individually inked. Four variants below
+     are cyclic rotations of the same four corner offsets (so the "gentle
+     hand-drawn" magnitude never changes, only which corner gets which
+     value) — cycled per control via fixed selector assignment and, where a
+     control has real siblings (status-menu's buttons, the deps-list), via
+     `:nth-of-type`/`:nth-child`. No JS, no re-render variance — each
+     element's wobble is picked once, in CSS, and never moves. */
   --qb-btn-wobble: 12px 8px 13px 9px / 8px 12px 9px 11px;
+  --qb-btn-wobble-2: 9px 12px 8px 13px / 11px 8px 12px 9px;
+  --qb-btn-wobble-3: 13px 9px 12px 8px / 9px 11px 8px 12px;
+  --qb-btn-wobble-4: 8px 13px 9px 12px / 12px 9px 11px 8px;
   --qb-btn-shadow-hover: inset 0 1px 4px rgba(74, 56, 38, 0.2);
   --qb-btn-shadow-active: inset 0 2px 5px rgba(74, 56, 38, 0.3);
 
@@ -448,14 +463,24 @@ body {
   color: var(--qb-ink-400);
 }
 
+/* WF-046 item 3: a hand-inked border + wobble silhouette so the native
+   control reads as individually drawn rather than the browser's stock
+   rectangle, even sitting inside the pill's own rounded chip — background
+   stays transparent so the pill's own shape still reads as the outer
+   chrome. */
 .topbar__repo-select select {
   font: inherit;
   font-weight: 600;
   color: var(--qb-ink-900);
   background: transparent;
-  border: none;
-  padding: 0;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  padding: 0 0.3rem;
   max-width: 40vw;
+}
+
+.topbar__repo-select select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
 }
 
 .topbar__repo-select select:focus-visible {
@@ -495,14 +520,22 @@ body {
   color: var(--qb-branch-chip-text);
 }
 
+/* WF-046 item 3 — same treatment as `.topbar__repo-select select` above,
+   a different wobble variant so the two neighbouring topbar chips don't
+   read as the same stamped shape. */
 .topbar__branch-select select {
   font: inherit;
   font-weight: 600;
   color: var(--qb-ink-900);
   background: transparent;
-  border: none;
-  padding: 0;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-2);
+  padding: 0 0.3rem;
   max-width: 40vw;
+}
+
+.topbar__branch-select select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
 }
 
 .topbar__branch-select select:focus-visible {
@@ -2002,13 +2035,21 @@ body {
 }
 
 /* Mutation controls (Chunk 6). */
+/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, replacing
+   the plain square swatch, so it matches the button family it sits next
+   to in the card drawer. */
 .priority-select {
   font-size: 0.75rem;
-  border: 1px solid var(--qb-card-border);
-  border-radius: var(--qb-radius-chip-sm);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-3);
   padding: 0.15rem 0.4rem;
-  background: var(--qb-panel);
+  background: var(--qb-btn-face);
   color: var(--qb-ink-700);
+}
+
+.priority-select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+  background: var(--qb-btn-face-hover);
 }
 
 .threshold-control {
@@ -2037,12 +2078,14 @@ body {
   color: var(--qb-ink-700);
 }
 
-/* Role A (CHOSEN button system, task-12). */
+/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-2 wobble
+   — the Refresh button next door in the topbar keeps the default variant,
+   so the two aren't stamped from the same outline. */
 .threshold-control button {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
+  border-radius: var(--qb-btn-wobble-2);
   border: 1.5px solid var(--qb-btn-ink);
   background: var(--qb-btn-face);
   color: var(--qb-btn-text);
@@ -2083,12 +2126,16 @@ body {
 
 .status-menu {
   display: flex;
+  align-items: center;
   gap: 0.4rem;
   flex-wrap: wrap;
 }
 
 /* Role A (CHOSEN button system, task-12). */
 .status-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
   font-weight: 700;
@@ -2102,6 +2149,31 @@ body {
     background-color var(--qb-motion-hover) ease,
     border-color var(--qb-motion-hover) ease,
     box-shadow var(--qb-motion-hover) ease;
+}
+
+/* WF-046 item 1: this menu is the one place where up to four Role-A
+   buttons sit as direct siblings — `:nth-of-type` cycles the wobble
+   variants across them (park/unpark, block/unblock, done, abandon) so
+   the row doesn't read as four copies of the same stamp. The base rule
+   above already carries the default variant for the first button. */
+.status-menu button:nth-of-type(2) {
+  border-radius: var(--qb-btn-wobble-3);
+}
+
+.status-menu button:nth-of-type(3) {
+  border-radius: var(--qb-btn-wobble-4);
+}
+
+.status-menu button:nth-of-type(4) {
+  border-radius: var(--qb-btn-wobble-2);
+}
+
+/* WF-046 item 4: park/block/abandon/done pair a small glyph with their
+   cuter guild-flavoured label (StatusMenu.tsx) — Unpark/Unblock keep
+   their plain text, they're the toggle-back state, not one of the four
+   themed verbs. */
+.status-menu button svg {
+  flex: 0 0 auto;
 }
 
 .status-menu button:hover:not(:disabled) {
@@ -2128,21 +2200,29 @@ body {
   flex-wrap: wrap;
 }
 
+/* WF-046 item 3: Role-A hand-inked border + wobble silhouette. */
 .claim-control select {
   font-size: 0.75rem;
-  border: 1px solid var(--qb-card-border);
-  border-radius: var(--qb-radius-chip-sm);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-4);
   padding: 0.15rem 0.3rem;
-  background: var(--qb-panel);
+  background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
 
-/* Role A (CHOSEN button system, task-12). */
+.claim-control select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+  background: var(--qb-btn-face-hover);
+}
+
+/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-3 wobble
+   so Assign/Unassign don't share an outline with the select right next
+   to it. */
 .claim-control button {
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
   font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
+  border-radius: var(--qb-btn-wobble-3);
   border: 1.5px solid var(--qb-btn-ink);
   background: var(--qb-btn-face);
   color: var(--qb-btn-text);
@@ -2188,6 +2268,23 @@ body {
   font-size: 0.8rem;
 }
 
+/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, shared by
+   both selects in this component (parent + add-dependency); the
+   add-dependency one gets its own variant below so the two don't match. */
+.link-editor select {
+  font: inherit;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  padding: 0.1rem 0.3rem;
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-700);
+}
+
+.link-editor select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+  background: var(--qb-btn-face-hover);
+}
+
 .link-editor__field {
   display: flex;
   align-items: center;
@@ -2199,6 +2296,10 @@ body {
   align-items: center;
   gap: 0.4rem;
   flex-wrap: wrap;
+}
+
+.link-editor__deps select {
+  border-radius: var(--qb-btn-wobble-2);
 }
 
 .link-editor__deps-label {
@@ -2217,7 +2318,7 @@ body {
 .link-editor__deps-list li {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.3rem;
   background: var(--qb-locked-chip-bg);
   color: var(--qb-locked-chip-text);
   border-radius: var(--qb-radius-pill);
@@ -2225,36 +2326,37 @@ body {
   font-size: 0.75rem;
 }
 
-/* Role A (CHOSEN button system, task-12) — small remove control nested
-   inside the locked-chip dependency pill; the chip itself keeps its own
-   colour (step 6: chips/pills are out of scope, only the button is
-   restyled). */
+/* WF-046 item 2 — the remove ✕ used to carry the full Role-A button face
+   (opaque cream fill + ink wobble border), which read as a bolt-on
+   control stapled to the chip rather than part of the label. Now a small
+   round glyph (well under the 38px `.card-drawer__close` circle) whose
+   own fill is the CHIP'S accent colour bled through at low alpha via
+   color-mix — no separate swatch — so it reads as part of the pill. */
 .link-editor__deps-list button {
-  padding: 0 0.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
   font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
+  font-size: 0.65rem;
+  line-height: 1;
+  border: none;
+  border-radius: var(--qb-radius-circle);
+  background: color-mix(in srgb, var(--qb-locked-chip-text) 16%, transparent);
+  color: var(--qb-locked-chip-text);
   cursor: pointer;
-  font-size: 0.85rem;
-  line-height: 1.4;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
+  transition: background-color var(--qb-motion-hover) ease;
 }
 
 .link-editor__deps-list button:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
+  background: color-mix(in srgb, var(--qb-locked-chip-text) 30%, transparent);
 }
 
 .link-editor__deps-list button:active {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
+  background: color-mix(in srgb, var(--qb-locked-chip-text) 44%, transparent);
 }
 
 /* Party overlay (WF-029 chunk 6, HANDOFF §Party page) — backdrop/

@@ -1,6 +1,7 @@
 import { park, unpark, move } from "../api/client";
 import type { Status } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+import { TentIcon, BarredShieldIcon, SkullIcon, CheckIcon } from "./icons";
 
 export interface StatusMenuProps {
   cardId: string;
@@ -22,6 +23,11 @@ export interface StatusMenuProps {
  *
  * Block REQUIRES a non-empty reason (prompted via `window.prompt`) — an
  * empty or cancelled prompt sends NO call at all (`mutate` is never invoked).
+ *
+ * WF-046 item 4: the four "committing" verbs (park/block/abandon/done) each
+ * carry a small glyph + a cuter guild-flavoured label — Camp/Barred…/
+ * Forsake/Vanquished. Unpark/Unblock are the plain toggle-back state, not
+ * one of the four, so they keep their bare verb text.
  */
 function StatusMenu({
   cardId,
@@ -71,7 +77,8 @@ function StatusMenu({
         </button>
       ) : (
         <button type="button" onClick={() => void handlePark()} disabled={inFlight}>
-          Park
+          <TentIcon aria-hidden="true" />
+          Camp
         </button>
       )}
 
@@ -81,15 +88,18 @@ function StatusMenu({
         </button>
       ) : (
         <button type="button" onClick={() => void handleBlock()} disabled={inFlight}>
-          Block…
+          <BarredShieldIcon aria-hidden="true" />
+          Barred…
         </button>
       )}
 
       <button type="button" onClick={() => void handleDone()} disabled={inFlight}>
-        Done
+        <CheckIcon aria-hidden="true" />
+        Vanquished
       </button>
       <button type="button" onClick={() => void handleAbandon()} disabled={inFlight}>
-        Abandon
+        <SkullIcon aria-hidden="true" />
+        Forsake
       </button>
     </div>
   );
