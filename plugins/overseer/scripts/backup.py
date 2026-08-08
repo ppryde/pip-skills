@@ -3,13 +3,13 @@ restore it back. Git never holds board.db; it holds cards.json + text state."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
 
 from scripts import config, db
 
-SCHEMA_TABLES = ("cards", "meta")
 IDENTITY_META_KEYS = {"repo_root", "schema_version", "workflow_fs_imported", "migrated_from_workflow"}
 _COPY_STATE = ("sprints", "usage.jsonl", "knowledge")
 
@@ -20,10 +20,29 @@ def _dump_table(conn, table: str) -> list[dict]:
 
 
 def _atomic_replace_dir(staged: Path, dest: Path) -> None:
+    """Swap ``staged`` into ``dest`` without ever leaving a window where
+    neither the old nor the new snapshot exists. ``backup_dir`` is a
+    repeatedly-refreshed committed path, so the overwrite case is the
+    PRIMARY case, not an edge case: a crash between removing the old
+    snapshot and installing the new one must never destroy the last good
+    backup. Uses same-filesystem atomic renames (``staged`` is created in
+    ``dest.parent`` by the caller) to move the existing snapshot aside
+    first, swap the new one in, and only then delete the old one — with a
+    rollback if the swap itself fails.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    old = dest.with_name(dest.name + ".old")
+    if old.exists():
+        shutil.rmtree(old)
     if dest.exists():
-        shutil.rmtree(dest)
-    shutil.move(str(staged), str(dest))
+        os.replace(dest, old)  # atomic rename existing snapshot aside
+    try:
+        os.replace(staged, dest)  # atomic swap new snapshot in
+    except Exception:
+        if old.exists() and not dest.exists():
+            os.replace(old, dest)  # roll back
+        raise
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
@@ -37,31 +56,35 @@ def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
     parent = dest.parent
     parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix=".overseer-bak-", dir=parent))
-    (staged / "cards.json").write_text(json.dumps(cards, indent=2, sort_keys=True))
-    (staged / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
+    try:
+        (staged / "cards.json").write_text(json.dumps(cards, indent=2, sort_keys=True))
+        (staged / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
 
-    sprint_files = fact_files = usage_lines = 0
-    for name in _COPY_STATE:
-        src = central / name
-        if src.is_dir():
-            shutil.copytree(src, staged / name)
-            count = sum(1 for _ in (staged / name).rglob("*") if _.is_file())
-            if name == "sprints": sprint_files = count
-            if name == "knowledge": fact_files = count
-        elif src.is_file():
-            shutil.copy2(src, staged / name)
-            if name == "usage.jsonl":
-                usage_lines = sum(1 for ln in src.read_text().splitlines() if ln.strip())
+        sprint_files = fact_files = usage_lines = 0
+        for name in _COPY_STATE:
+            src = central / name
+            if src.is_dir():
+                shutil.copytree(src, staged / name)
+                count = sum(1 for _ in (staged / name).rglob("*") if _.is_file())
+                if name == "sprints": sprint_files = count
+                if name == "knowledge": fact_files = count
+            elif src.is_file():
+                shutil.copy2(src, staged / name)
+                if name == "usage.jsonl":
+                    usage_lines = sum(1 for ln in src.read_text().splitlines() if ln.strip())
 
-    manifest = {
-        "schema_version": db.SCHEMA_VERSION,
-        "repo_label": central.name,
-        "cards": len(cards),
-        "sprint_files": sprint_files,
-        "fact_files": fact_files,
-        "usage_lines": usage_lines,
-    }
-    (staged / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
-    _atomic_replace_dir(staged, dest)
+        manifest = {
+            "schema_version": db.SCHEMA_VERSION,
+            "repo_label": central.name,
+            "cards": len(cards),
+            "sprint_files": sprint_files,
+            "fact_files": fact_files,
+            "usage_lines": usage_lines,
+        }
+        (staged / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
+        _atomic_replace_dir(staged, dest)
+    except Exception:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
     return {**{k: manifest[k] for k in ("cards", "sprint_files", "fact_files", "usage_lines")},
             "dest": str(dest)}
