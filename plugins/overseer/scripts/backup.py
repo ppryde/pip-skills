@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scripts import config, db
 from scripts.index import rebuild_index
+from scripts.store import derive_repo_label, slugify
 
 IDENTITY_META_KEYS = {"repo_root", "schema_version", "workflow_fs_imported", "migrated_from_workflow"}
 # "archive/corrupt" is quarantined files ONLY — never "archive/cards", which
@@ -107,7 +108,14 @@ def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
             "schema_version": db.SCHEMA_VERSION,
             "overseer_version": _overseer_version(),
             "created": datetime.now().strftime("%Y-%m-%dT%H:%M"),
-            "repo_label": central.name,
+            # CLEAN display label, never the (possibly `<label>-<hash>`)
+            # central folder name — see config.central_root for why the
+            # folder is disambiguated by hash but labels stay clean.
+            "repo_label": (
+                derive_repo_label(repo_root)
+                or slugify(repo_root.resolve().name)
+                or "repo"
+            ),
             "cards": len(cards),
             "sprint_files": sprint_files,
             "fact_files": fact_files,

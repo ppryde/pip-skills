@@ -371,3 +371,27 @@ def test_connect_imports_cards_and_migrates_workflow_files_together(tmp_path, mo
     assert db.get_meta(conn2, "migrated_from_workflow") == "1"
     assert db.get_meta(conn2, "workflow_fs_imported") == "1"
     assert (central / "sprints" / "sprint-1.md").read_text() == "LOCAL EDIT\n"
+
+
+def test_connect_warns_on_repo_root_meta_mismatch(tmp_path, monkeypatch, capsys):
+    """I2 identity guard: a board.db that already records a DIFFERENT canonical
+    root than the one connecting now (a residual basename collision) prints a
+    loud one-line warning to stderr. Behaviour is otherwise unchanged — the
+    stamped repo_root is NOT overwritten (set-if-absent)."""
+    dir_a = tmp_path / "a"; dir_a.mkdir(); git_init(dir_a)
+    dir_b = tmp_path / "b"; dir_b.mkdir(); git_init(dir_b)
+    shared_db = tmp_path / "shared.db"
+    monkeypatch.setenv(db.DB_ENV, str(shared_db))
+
+    conn_a = db.connect(dir_a, migrate=False)  # stamps repo_root = dir_a
+    from scripts.store import derive_repo_root
+    assert db.get_meta(conn_a, "repo_root") == str(derive_repo_root(dir_a))
+    capsys.readouterr()  # drain
+
+    conn_b = db.connect(dir_b, migrate=False)  # different root → warn
+    err = capsys.readouterr().err
+    assert "warning:" in err
+    assert str(derive_repo_root(dir_a)) in err  # created-for root
+    assert str(derive_repo_root(dir_b)) in err  # now-connected-from root
+    # set-if-absent preserved: original owner NOT overwritten
+    assert db.get_meta(conn_b, "repo_root") == str(derive_repo_root(dir_a))

@@ -260,11 +260,18 @@ class TestStateRoot:
     ``tests/test_config.py`` instead."""
 
     def test_default_resolves_under_config_dir(self, tmp_path, monkeypatch):
+        from scripts import config
+        from scripts.store import derive_repo_root
         monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
         cfgdir = tmp_path / "cfg"
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfgdir))
         _git_init(tmp_path)
-        assert state_root(tmp_path) == cfgdir / "overseer" / tmp_path.name
+        # Fresh repo → hash-disambiguated folder (finding I2); see
+        # tests/test_config.py for the full precedence/adopt-legacy coverage.
+        canonical = derive_repo_root(tmp_path)
+        assert state_root(tmp_path) == (
+            cfgdir / "overseer" / f"{tmp_path.name}-{config._short_hash(canonical)}"
+        )
 
     def test_env_override_wins(self, tmp_path, monkeypatch):
         central = tmp_path / "central-elsewhere"

@@ -1117,7 +1117,11 @@ def cmd_repos(args: argparse.Namespace) -> int:
                 continue
             if not Path(root_str).exists():
                 continue
-            results.append({"label": label_dir.name, "root": root_str})
+            # Display label comes from the repo root, never the folder name —
+            # the default folder is now `<label>-<hash>` (see
+            # config.central_root), so `label_dir.name` would leak the hash.
+            label = derive_repo_label(Path(root_str)) or Path(root_str).name
+            results.append({"label": label, "root": root_str})
     results.sort(key=lambda r: r["label"])
     if args.json:
         print(json.dumps(results))

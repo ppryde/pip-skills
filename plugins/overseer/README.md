@@ -55,7 +55,7 @@ All overseer state for a repo lives in one **central per-repo folder**,
 shared by every worktree of that repo:
 
 ```
-$CLAUDE_CONFIG_DIR/overseer/<repo-label>/
+$CLAUDE_CONFIG_DIR/overseer/<repo-label>-<hash>/
 ├── board.db            # cards + meta (SQLite, WAL sidecars alongside)
 ├── sprints/
 ├── usage.jsonl
@@ -66,7 +66,16 @@ $CLAUDE_CONFIG_DIR/overseer/<repo-label>/
 The folder resolves from the repo's canonical root (same identity that keys
 `board.db`), so a card in one worktree, a sprint in another, and knowledge
 facts from a third all read and write the same files — no more per-worktree
-drift. `ledger.md` is written into this folder as a regenerated *view*; it is
+drift. The folder name carries an 8-char hash of the canonical root
+(`<label>-<hash>`) so two repos with the **same basename** (e.g. `~/work/api`
+and `~/personal/api`) never collide on one folder — which would otherwise share
+a single `board.db` and let `overseer backup` commit one repo's cards into the
+other repo's git history. Existing single-repo installs keep their current
+plain `overseer/<repo-label>/` folder: it is adopted in place (no move, no data
+loss) whenever it belongs to this repo or is unclaimed; only a new repo or a
+genuine collision gets a hashed folder. Display labels (backup manifest,
+dashboard repo switcher) always stay clean — the hash lives only in the folder
+name. `ledger.md` is written into this folder as a regenerated *view*; it is
 never backed up (it's rebuildable from `board.db`).
 
 `.workflow/` is **retired**: it is only ever read once, as a one-time import
@@ -79,8 +88,9 @@ unused, for the user to remove once satisfied. Fresh installs never create a
 Location precedence (same resolver for every verb — CLI, dashboard, backup,
 restore): `OVERSEER_CENTRAL` env → `central_dir` from
 `.overseer/config.local.json` → default
-`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/`. `OVERSEER_DB` still overrides
-just the `board.db` file path, for back-compat.
+`$CLAUDE_CONFIG_DIR/overseer/<repo-label>-<hash>/` (adopting a legacy plain
+`<repo-label>/` folder in place when it exists and belongs to this repo).
+`OVERSEER_DB` still overrides just the `board.db` file path, for back-compat.
 
 **The committed backup dir is the one exception to "shared central folder"
 above.** It resolves against the CURRENT working tree, not the repo's

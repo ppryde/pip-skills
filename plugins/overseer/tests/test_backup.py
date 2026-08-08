@@ -88,11 +88,26 @@ def test_backup_manifest_fields(tmp_path, monkeypatch):
     manifest = json.loads((config.backup_dir(repo) / "manifest.json").read_text())
     assert manifest["sprint_files"] == 1
     assert manifest["usage_lines"] == 1
-    assert manifest["repo_label"] == central.name
+    # CLEAN display label, NOT the (hash-disambiguated) central folder name.
+    from scripts.store import derive_repo_label
+    assert manifest["repo_label"] == derive_repo_label(repo)
     plugin_json = Path(backup.__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
     assert manifest["overseer_version"] == json.loads(plugin_json.read_text())["version"]
     assert manifest["created"]
     datetime.strptime(manifest["created"], "%Y-%m-%dT%H:%M")  # raises if unparseable
+
+
+def test_backup_manifest_repo_label_is_clean_when_folder_is_hashed(tmp_path, monkeypatch):
+    """I2: even when the central folder is `<label>-<hash>`, the manifest's
+    repo_label must be the CLEAN label, never the hashed folder name."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    # precondition: default resolution produced the hash-disambiguated folder
+    assert "-" in central.name and central.name != "r"
+    backup.backup_board(repo)
+    manifest = json.loads((config.backup_dir(repo) / "manifest.json").read_text())
+    assert manifest["repo_label"] == "r"
+    assert manifest["repo_label"] != central.name
 
 
 def test_backup_depends_on_and_checklist_round_trip_verbatim(tmp_path, monkeypatch):

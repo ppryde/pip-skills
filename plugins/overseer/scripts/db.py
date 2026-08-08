@@ -7,6 +7,7 @@ import json
 import os
 import re as _re
 import sqlite3
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -100,11 +101,24 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     # value (stable identity even if this repo_root is ever unreachable on a
     # later connect), and only writes when `derive_repo_root` succeeds — a
     # no-op, no extra commit, on every connect that isn't the very first one.
-    if get_meta(conn, "repo_root") is None:
+    existing_root = get_meta(conn, "repo_root")
+    if existing_root is None:
         root = derive_repo_root(repo_root)
         if root is not None:
             set_meta(conn, "repo_root", str(root))
             conn.commit()
+    else:
+        # Identity guard (finding I2): a board that already names a DIFFERENT
+        # canonical root than the one connecting now means two repos are
+        # sharing one board.db (a residual basename collision). Surface it
+        # loudly on stderr; behaviour is otherwise unchanged (set-if-absent).
+        this_root = derive_repo_root(repo_root)
+        if this_root is not None and str(this_root) != existing_root:
+            print(
+                f"warning: overseer board at {path} was created for "
+                f"{existing_root}; now connected from {this_root}",
+                file=sys.stderr,
+            )
     if migrate:
         _maybe_import(conn, repo_root)  # defined in Task 6; no-op stub until then
     if migrate and get_meta(conn, "workflow_fs_imported") is None:

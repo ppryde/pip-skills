@@ -50,7 +50,7 @@ projection of the DB) plus the already-textual sprint/usage/knowledge state.
 ### Central folder (single source of truth)
 
 ```
-$CLAUDE_CONFIG_DIR/overseer/<repo-label>/
+$CLAUDE_CONFIG_DIR/overseer/<repo-label>-<hash>/
 ├── board.db            # cards + meta  (unchanged location)
 ├── board.db-wal        # WAL sidecars
 ├── board.db-shm
@@ -63,8 +63,38 @@ $CLAUDE_CONFIG_DIR/overseer/<repo-label>/
 - Location resolves from the **canonical repo root** (`derive_repo_root`), the
   same identity that already keys `board.db`. Every worktree of the repo
   therefore reads and writes this one folder.
+- **Folder name is disambiguated by an 8-char hash of the canonical root**
+  (`<label>-<hash>`, where `<hash>` = `sha1(str(canonical_root.resolve()))[:8]`).
+  Keying only on the directory **basename** (finding I2) let two repos with the
+  same name (e.g. `~/work/api` and `~/personal/api`) collide on one
+  `overseer/api/` folder — sharing a single `board.db` AND letting `overseer
+  backup` commit one repo's cards into the OTHER repo's git history. The hash
+  is a pure function of the canonical root, so every worktree of a repo still
+  lands on the same folder.
+- **Safe, no-move adoption of legacy folders.** Resolution never moves data:
+    1. If `overseer/<label>-<hash>/` exists → use it.
+    2. Else if a legacy plain `overseer/<label>/` exists AND it belongs to this
+       repo → adopt it in place (no hash suffix, no move). "Belongs to this
+       repo" = its `board.db` `meta.repo_root` equals this canonical root, OR
+       it is unclaimed (no `board.db` / no `repo_root` meta / unreadable —
+       treated as ours for back-compat with the common single-repo install).
+    3. Otherwise → use the hashed folder (a fresh repo, or the *second* repo
+       colliding on a plain folder that positively belongs to a different root;
+       the plain folder is left untouched).
+  So an existing single-repo install keeps its current `overseer/<label>/`
+  folder with zero data loss; only a new repo or a genuine collision gets a
+  hashed folder.
+- **Identity guard.** `db.connect` additionally warns (loudly, to stderr) when
+  a `board.db` already records a `meta.repo_root` different from the connecting
+  repo's canonical root — surfacing any residual collision. Behaviour is
+  otherwise unchanged (`repo_root` is set-if-absent, never overwritten).
+- **Display labels stay clean.** The folder name may carry the hash, but
+  user-facing labels never do: the backup manifest's `repo_label` and the
+  dashboard's `repos` switcher derive from `derive_repo_label` /
+  `derive_repo_root`, not the folder name.
 - Overridable via config (see `init`) and, for the DB specifically, the
-  existing `OVERSEER_DB` env var.
+  existing `OVERSEER_DB` env var. The `OVERSEER_CENTRAL` env and
+  `config.local.json:central_dir` overrides still win first, unchanged.
 - `ledger.md` remains a regenerated *view*; it is written into the central
   folder and is **not** part of any backup (it is rebuildable).
 
@@ -148,7 +178,8 @@ Edge cases:
 `overseer init` (interactive prompts):
 
 1. **Central folder location** — default
-   `$CLAUDE_CONFIG_DIR/overseer/<repo-label>/`. Written to
+   `$CLAUDE_CONFIG_DIR/overseer/<repo-label>-<hash>/` (see Storage model for the
+   hash-disambiguation and safe legacy-folder adoption). Written to
    `.overseer/config.local.json` (machine-specific absolute path).
 2. **Backup dir** — default `.overseer/backups/`. Written to
    `.overseer/config.json` (repo-level, travels with the repo).
