@@ -11,6 +11,8 @@ Clone a reviewer's voice and rules from their public GitHub review history. Ever
 - `refresh` → pull comments since last scan, fold into rules
 - `chat <question>` → ask the persona's opinion (cited or "no signal")
 
+A review can be emitted to chat, written to a file, or **posted inline onto the open PR** — one comment per finding, each prefixed `[From <alias>]:` so the clone is never mistaken for the real reviewer. Posting always asks for confirmation first.
+
 ## Storage
 
 Personas are personal and portable across repos:

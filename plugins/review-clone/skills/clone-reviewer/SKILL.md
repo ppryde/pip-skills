@@ -62,21 +62,38 @@ After answers, before scraping, print:
 
 Continue without confirmation — non-blocking by design.
 
-### Step 3 — Run the collector
+### Step 3 — Run the collector (Haiku subagent)
 
-Invoke the scraper:
+Data collection is pure I/O — `gh` API calls, file writes, no reasoning. **Dispatch it to a Haiku subagent** so the main (Opus) session keeps its context budget for theme extraction in Step 5. Do not run `collect.py` directly from this session.
 
-```bash
-python <plugin>/scripts/collect.py \
-  --alias <alias> \
-  --handles <handles> \
-  --repo <repo> \
-  --months <months> \
-  --paths <paths> \
-  --extensions <extensions>
-```
+Before dispatching, tell the user:
 
-Capture stdout (the JSON snapshot). Stream stderr to the user so they see progress.
+> Pulling `<handle>`'s comments via a Haiku subagent. No live progress — I'll surface the summary when it finishes.
+
+Then call the `Agent` tool:
+
+- `subagent_type: "general-purpose"`
+- `model: "haiku"`
+- `description: "Scrape <handle> review history"`
+- `prompt`: instruct the subagent to run the exact `collect.py` command below and return its stdout verbatim. **The subagent must not interpret, summarise, or post-process the output** — its only job is to run the script and report what came back.
+
+Prompt body to send to the subagent:
+
+> Run this command exactly and return its stdout verbatim — it is a single line of JSON (the snapshot).
+>
+> ```bash
+> python <plugin>/scripts/collect.py \
+>   --alias <alias> \
+>   --handles <handles> \
+>   --repo <repo> \
+>   --months <months> \
+>   --paths <paths> \
+>   --extensions <extensions>
+> ```
+>
+> The script writes raw scrape files and `snapshot.json` to `~/.claude/review-clone/<alias>/` and prints per-PR progress to stderr — you do not need to relay the stderr lines. When the command exits, reply with ONLY the JSON snapshot from stdout. If the command fails, reply with the stderr output prefixed `ERROR:`.
+
+The subagent's final message is the snapshot JSON. Parse it (or re-read `~/.claude/review-clone/<alias>/snapshot.json` from disk) and continue from Step 4. Theme extraction stays on the main session — Haiku fetches, Opus reasons.
 
 ### Step 4 — Pre-extract gate
 
@@ -136,7 +153,21 @@ Body sections: `## Voice & tone`, `## Rules` (one ### per rule, with severity/ci
 
 ### Step 7 — Write the per-persona slash command
 
-Render `<plugin>/templates/review-as-command.md.tmpl` substituting `<alias>` and `<last_scanned_at>`. Write to `~/.claude/commands/review-as-<alias>.md`. Create the `~/.claude/commands/` dir if missing.
+Render `<plugin>/templates/review-as-command.md.tmpl` and write the result to `~/.claude/commands/review-as-<alias>.md`. Create the `~/.claude/commands/` dir if missing.
+
+The template's `description` field encodes the persona summary so it shows up in the slash-command palette. Substitute every placeholder:
+
+| Placeholder | Source |
+|---|---|
+| `{{ALIAS}}` | Step 1.1 |
+| `{{REPO}}` | Step 1.3 (e.g. `wayflyer/wayflyer`) |
+| `{{RULE_COUNT}}` | count of rules derived in Step 5 |
+| `{{COMMENT_COUNT}}` | `snapshot.counts.review_comments + snapshot.counts.issue_comments` |
+| `{{PR_COUNT}}` | `snapshot.counts.prs` |
+| `{{WINDOW_MONTHS}}` | Step 1.6 |
+| `{{LAST_SCANNED_AT}}` | the ISO timestamp written into PERSONA frontmatter in Step 6 |
+
+All placeholders are required — do not leave any unsubstituted, and do not invent extra fields. If `{{RULE_COUNT}}` is 0, the persona is unusable; surface that as a warning before writing the file rather than emitting a zero-rule description.
 
 ### Step 8 — Final summary
 
