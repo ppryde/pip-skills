@@ -1,4 +1,4 @@
-import json, os, subprocess, tempfile
+import json, os, shutil, subprocess, tempfile
 from pathlib import Path
 import pytest
 from scripts import backup, db, config
@@ -172,3 +172,51 @@ def test_atomic_replace_dir_survives_crash_during_retry_swap(tmp_path, monkeypat
     # Not total loss: a complete snapshot must exist after the failed retry.
     assert dest.exists()
     assert json.loads((dest / "manifest.json").read_text())["marker"] == "recovery-snapshot"
+
+
+def test_restore_roundtrip_and_lmw(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    backup.backup_board(repo)
+    # mutate live: bump WF-001 to older-in-backup vs newer-in-db scenarios
+    conn = db.connect(repo)
+    from scripts.models import Card
+    # a newer local edit than the backup -> restore must NOT clobber it
+    db.save_card(conn, Card(id="WF-001", title="Edited later", status="in-flight",
+                            updated="2026-09-01T00:00:00"))
+    res = backup.restore_board(repo)
+    conn = db.connect(repo)
+    card = db.load_card(conn, "WF-001")
+    assert card.title == "Edited later"          # local newer kept
+    assert res["skipped_older"] == 1
+
+
+def test_restore_inserts_missing_and_fills_files(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    backup.backup_board(repo)
+    # wipe central entirely (simulate fresh clone / lost board)
+    shutil.rmtree(central)
+    res = backup.restore_board(repo)
+    conn = db.connect(repo)
+    assert db.load_card(conn, "WF-001") is not None
+    assert (config.central_root(repo) / "sprints" / "sprint-1.md").exists()
+    assert res["inserted"] == 1
+
+
+def test_restore_refuses_schema_mismatch(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch); backup.backup_board(repo)
+    man = config.backup_dir(repo) / "manifest.json"
+    m = json.loads(man.read_text()); m["schema_version"] = 999
+    man.write_text(json.dumps(m))
+    with pytest.raises(ValueError, match="schema"):
+        backup.restore_board(repo)
+
+
+def test_restore_corrupt_cards_is_loud(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch); backup.backup_board(repo)
+    (config.backup_dir(repo) / "cards.json").write_text("{ not json")
+    with pytest.raises(ValueError, match="cards.json"):
+        backup.restore_board(repo)

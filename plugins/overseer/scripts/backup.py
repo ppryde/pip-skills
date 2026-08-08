@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from scripts import config, db
+from scripts.index import rebuild_index
 
 IDENTITY_META_KEYS = {"repo_root", "schema_version", "workflow_fs_imported", "migrated_from_workflow"}
 _COPY_STATE = ("sprints", "usage.jsonl", "knowledge")
@@ -99,3 +100,89 @@ def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
         raise
     return {**{k: manifest[k] for k in ("cards", "sprint_files", "fact_files", "usage_lines")},
             "dest": str(dest)}
+
+
+def _iso_gt(a: str, b: str) -> bool:
+    return (a or "") > (b or "")   # ISO-8601 UTC strings sort lexically
+
+
+def restore_board(repo_root: Path, src: Path | None = None) -> dict:
+    """Merge a backup snapshot back into the repo's central folder.
+
+    Cards upsert by ``id``, last-modified-wins via ``updated`` (equal
+    timestamps keep the current row). Meta merges in, excluding
+    ``IDENTITY_META_KEYS``. ``sprints/``/``usage.jsonl``/``knowledge/`` fill
+    gaps only — an existing file in central is never overwritten. Refuses
+    (``ValueError``) on a missing/empty backup dir, a schema mismatch
+    against ``db.SCHEMA_VERSION``, or corrupt ``cards.json``. Rebuilds the
+    index once the merge is committed.
+    """
+    src = src or config.backup_dir(repo_root)
+    if not src.is_dir() or not (src / "cards.json").exists():
+        raise ValueError(f"no backup found at {src}")
+    manifest = json.loads((src / "manifest.json").read_text())
+    if manifest.get("schema_version") != db.SCHEMA_VERSION:
+        raise ValueError(
+            f"backup schema {manifest.get('schema_version')} != current "
+            f"{db.SCHEMA_VERSION}; refusing to restore")
+    try:
+        rows = json.loads((src / "cards.json").read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{src / 'cards.json'}: corrupt JSON: {exc}") from exc
+
+    central = config.central_root(repo_root)
+    central.mkdir(parents=True, exist_ok=True)
+    conn = db.connect(repo_root)
+    inserted = updated = skipped = 0
+    for row in rows:
+        existing = conn.execute(
+            "SELECT updated FROM cards WHERE id = ?", (row["id"],)).fetchone()
+        if existing is None:
+            inserted += 1
+        elif _iso_gt(row.get("updated", ""), existing["updated"] or ""):
+            updated += 1
+        else:
+            skipped += 1
+            continue
+        cols = ", ".join(f'"{c}"' for c in row)
+        ph = ", ".join(f":{c}" for c in row)
+        upd = ", ".join(f'"{c}" = excluded."{c}"' for c in row if c != "id")
+        conn.execute(
+            f'INSERT INTO cards ({cols}) VALUES ({ph}) '
+            f'ON CONFLICT(id) DO UPDATE SET {upd}', row)
+    # meta merge (skip identity keys)
+    meta_path = src / "meta.json"
+    if meta_path.exists():
+        for m in json.loads(meta_path.read_text()):
+            if m["key"] in IDENTITY_META_KEYS:
+                continue
+            db.set_meta(conn, m["key"], m["value"])
+    conn.commit()
+
+    files_restored = files_skipped = 0
+    for name in _COPY_STATE:
+        s = src / name
+        if not s.exists():
+            continue
+        if s.is_dir():
+            for f in s.rglob("*"):
+                if not f.is_file():
+                    continue
+                target = central / name / f.relative_to(s)
+                if target.exists():
+                    files_skipped += 1
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, target)
+                files_restored += 1
+        else:
+            target = central / name
+            if target.exists():
+                files_skipped += 1
+            else:
+                shutil.copy2(s, target)
+                files_restored += 1
+
+    rebuild_index(repo_root, repo_root.resolve().name, manifest.get("created", ""))
+    return {"inserted": inserted, "updated": updated, "skipped_older": skipped,
+            "files_restored": files_restored, "files_skipped": files_skipped}
