@@ -1,5 +1,13 @@
 [
   {
+    "id": "PAT-070",
+    "severity_internal": "info",
+    "tier_displayed": "banner",
+    "location_pattern": "settings.py",
+    "savings_basis": "unknown",
+    "signals_caveat": false
+  },
+  {
     "id": "WRITE-006",
     "severity_internal": "critical",
     "tier_displayed": "critical",
@@ -11,7 +19,7 @@
     "id": "WRITE-007",
     "severity_internal": "critical",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:21",
+    "location_pattern": "target.py:22",
     "savings_basis": "unknown",
     "signals_caveat": true
   },
@@ -19,7 +27,7 @@
     "id": "WRITE-009",
     "severity_internal": "critical",
     "tier_displayed": "critical",
-    "location_pattern": "target.py:28",
+    "location_pattern": "target.py:30",
     "savings_basis": "unknown",
     "signals_caveat": true
   }

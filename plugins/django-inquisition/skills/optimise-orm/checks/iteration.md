@@ -90,18 +90,23 @@ for record in LargeModel.objects.all().iterator(chunk_size=2000):
 
 ### ITER-010
 
-**Signature:** The same QuerySet variable is evaluated twice in the same scope — e.g. two `for` loops, or a `for` loop followed by `list()`. After the first evaluation, Django caches the results on the QuerySet object; a second evaluation re-issues the SQL. Explicitly caching with `list(qs)` before both uses makes intent clear and avoids the second query.
+**Signature:** The same logical query is **re-issued** to the database within one scope. The two patterns that actually re-query:
+
+1. **Cache-bypassing methods on the same variable** — `qs.count()`, `qs.exists()`, `qs.aggregate(...)`, and `qs.in_bulk(...)` each issue their own SQL even after the queryset has been iterated. e.g. `for x in qs:` followed by `qs.count()` is two queries.
+2. **Re-derived querysets** — `Model.objects.filter(...)` repeated in two places, or a chain like `qs.filter(...)` after `qs` has been evaluated. The new clone has its own (empty) result cache.
+
+> Note: iterating the **same** QuerySet object twice (`for x in qs: ...; for x in qs: ...`) does **not** re-query — Django caches the result set on first evaluation. Likewise `len(qs)` after iteration uses the populated cache. Only flag the patterns above; do not flag plain re-iteration.
 
 **Grep / AST hints:**
 ```regex
-for\s+\w+\s+in\s+(\w+)
+\.(count|exists|aggregate|in_bulk)\(
 ```
-Follow-up: after finding the first loop variable (`qs`), scan the rest of the scope for a second `for <var> in <same_qs>` or `list(<same_qs>)`.
+Follow-up: after the cache-bypass call site, scan the surrounding scope for prior or subsequent iteration of the same variable. Also scan for two near-identical `Model.objects.filter(...)` chains assigned to different names — the second clone re-queries.
 
 **Confidence rules:**
-- High: Same QuerySet variable used in two evaluation contexts (two loops, or loop + `list()`/`len()`), no slice or filter between them.
-- Medium: Same variable used twice but one use is a method call that may be a lazy chain (`.filter(...)`) rather than evaluation.
-- Low: Variable reuse across function boundaries (caller may re-assign).
+- High: Same `qs` variable used in iteration AND `.count()`/`.exists()`/`.aggregate()` within the same function — confirmed second query.
+- Medium: Two near-identical `Model.objects.filter(...)` expressions in the same scope, or a `qs.filter(...)` clone after evaluation.
+- Low: Pattern found across function boundaries — caller may have re-assigned.
 
 **Savings formula:**
 - Saves one query round-trip. Estimate 1 × per_query_overhead.
@@ -109,34 +114,44 @@ Follow-up: after finding the first loop variable (`qs`), scan the rest of the sc
 
 **Suggested fix template:**
 ```python
-# Before — qs evaluated twice
+# Before — qs.count() issues a second SELECT COUNT(*) even though
+# the first loop already populated the qs result cache.
 orders = Order.objects.filter(status="open")
 for order in orders:
     send_reminder(order)
-count = len(orders)  # re-queries if qs cache not yet populated
+count = orders.count()  # second query
 
-# After — explicit cache
+# After — derive the count from the already-fetched cache.
 orders = list(Order.objects.filter(status="open"))
 for order in orders:
     send_reminder(order)
-count = len(orders)  # uses the list
+count = len(orders)  # zero queries
 ```
 
 ---
 
 ### ITER-011
 
-**Signature:** `qs.all().filter(...)` — `.all()` called on a queryset followed immediately by `.filter()`. `.all()` clones the queryset (clearing any existing result cache), so the chain always re-queries. This is a no-op that reads confusingly as if it does something useful; just call `.filter()` directly.
+**Signature:** `qs.all().filter(...)` — `.all()` called on an already-realised QuerySet variable, followed by `.filter()`. `.all()` clones the queryset (clearing any existing result cache), so the chain always re-queries. This is a no-op that reads confusingly as if it does something useful; just call `.filter()` directly.
+
+**Important:** Manager-origin chains (`Model.objects.all().filter(...)`, `Model._default_manager.all().filter(...)`) are the **canonical** Django idiom for `Manager → QuerySet` and must NOT be flagged. Only the variable-on-QuerySet form is a problem.
 
 **Grep / AST hints:**
 ```regex
 \.all\(\)\.(filter|exclude|order_by|annotate)
 ```
+**Disambiguation step (required before emitting):**
+For each match, walk backwards along the chain to the leftmost identifier. Skip if the chain begins with:
+- `<Model>.objects` — Manager origin, idiomatic, ignore.
+- `<Model>._default_manager` / `_base_manager` — Manager origin, idiomatic, ignore.
+- A custom manager attribute (e.g. `Model.published`) — Manager origin, ignore.
+
+Only emit when the leftmost identifier resolves to a previously-assigned QuerySet variable (e.g. `qs = Model.objects.filter(...)` then `qs.all().filter(...)`).
 
 **Confidence rules:**
-- High: `.all().filter(...)` chain confirmed on a QuerySet variable.
-- Medium: `.all()` chained but on a Manager (e.g. `Model.objects.all().filter(...)`) — this is the intended pattern and should be ignored.
-- Low: `.all()` call but context ambiguous.
+- High: `.all().filter(...)` chain on a variable that's been assigned a QuerySet earlier in the function.
+- Medium: `.all().filter(...)` chain on a parameter or attribute whose type cannot be statically determined.
+- Low: Pattern found in an expression where the receiver type is ambiguous.
 
 **Savings formula:**
 - Avoids redundant queryset clone and potential cache thrash.

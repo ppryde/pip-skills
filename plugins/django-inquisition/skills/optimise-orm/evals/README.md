@@ -34,11 +34,16 @@ python3.11 -m pip install anthropic
 # Export the API key (or use direnv)
 export ANTHROPIC_API_KEY=sk-ant-…
 
+# Locate your skill-creator install. The path varies per Claude Code version
+# and OS; resolve it once and reuse. On most macOS/Linux installs:
+SKILL_CREATOR=$(find ~/.claude-personal -type d -name skill-creator -path '*/skills/skill-creator' 2>/dev/null | head -1)
+SKILL_REPO=$(git -C "$(pwd)" rev-parse --show-toplevel)
+
 # Run the loop (5 iterations, train/test split, opens an HTML report at the end)
-cd ~/.claude-personal/plugins/cache/claude-plugins-official/skill-creator/unknown/skills/skill-creator
+cd "$SKILL_CREATOR"
 python3.11 -m scripts.run_loop \
-  --eval-set /Users/philip.pryde/repos/pip-skills/plugins/django-inquisition/skills/optimise-orm/evals/trigger_eval.json \
-  --skill-path /Users/philip.pryde/repos/pip-skills/plugins/django-inquisition/skills/optimise-orm \
+  --eval-set "$SKILL_REPO/plugins/django-inquisition/skills/optimise-orm/evals/trigger_eval.json" \
+  --skill-path "$SKILL_REPO/plugins/django-inquisition/skills/optimise-orm" \
   --model claude-opus-4-7 \
   --max-iterations 5 \
   --verbose
