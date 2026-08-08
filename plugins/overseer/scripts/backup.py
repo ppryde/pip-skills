@@ -21,6 +21,17 @@ def _dump_table(conn, table: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _overseer_version() -> str:
+    """Read the plugin's own version from plugin.json, for manifest
+    provenance. Never lets a read failure break a backup — falls back to
+    an empty string on any error (missing file, malformed JSON, missing key)."""
+    plugin_json = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
+    try:
+        return json.loads(plugin_json.read_text())["version"]
+    except Exception:
+        return ""
+
+
 def _atomic_replace_dir(staged: Path, dest: Path) -> None:
     """Swap ``staged`` into ``dest`` such that ``dest`` or ``dest.old``
     ALWAYS holds a complete snapshot — including across a crash followed by
@@ -88,6 +99,8 @@ def backup_board(repo_root: Path, dest: Path | None = None) -> dict:
 
         manifest = {
             "schema_version": db.SCHEMA_VERSION,
+            "overseer_version": _overseer_version(),
+            "created": datetime.now().strftime("%Y-%m-%dT%H:%M"),
             "repo_label": central.name,
             "cards": len(cards),
             "sprint_files": sprint_files,

@@ -1,4 +1,5 @@
 import json, os, shutil, subprocess, tempfile
+from datetime import datetime
 from pathlib import Path
 import pytest
 from scripts import backup, db, config
@@ -88,6 +89,10 @@ def test_backup_manifest_fields(tmp_path, monkeypatch):
     assert manifest["sprint_files"] == 1
     assert manifest["usage_lines"] == 1
     assert manifest["repo_label"] == central.name
+    plugin_json = Path(backup.__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
+    assert manifest["overseer_version"] == json.loads(plugin_json.read_text())["version"]
+    assert manifest["created"]
+    datetime.strptime(manifest["created"], "%Y-%m-%dT%H:%M")  # raises if unparseable
 
 
 def test_backup_depends_on_and_checklist_round_trip_verbatim(tmp_path, monkeypatch):
