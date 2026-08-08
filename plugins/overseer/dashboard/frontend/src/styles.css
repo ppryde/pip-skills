@@ -1,0 +1,3042 @@
+/* Quest Board guild fonts — local woff2, latin subset only (no Google Fonts CDN at runtime) */
+@font-face {
+  font-family: "Baloo 2";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/Baloo2-600.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Baloo 2";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/Baloo2-700.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Baloo 2";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("./assets/fonts/Baloo2-800.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Patrick Hand";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/PatrickHand-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Gaegu";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/Gaegu-700.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Silkscreen";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/Silkscreen-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/Nunito-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/Nunito-700.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  /* Legacy tokens — mechanical hoist of every hex/radius/shadow literal (WF-027 chunk 2). */
+  --legacy-color-1b1f24: #1b1f24;
+  --legacy-color-fff: #fff;
+  --legacy-color-cbd5e1: #cbd5e1;
+  --legacy-color-8b95a1: #8b95a1;
+  --legacy-color-2a313b: #2a313b;
+  --legacy-color-3a4453: #3a4453;
+  --legacy-color-7a2e2e: #7a2e2e;
+  --legacy-color-ffd9d9: #ffd9d9;
+  --legacy-color-20262d: #20262d;
+  --legacy-color-16a34a: #16a34a;
+  --legacy-color-6b7280: #6b7280;
+  --legacy-color-b3261e: #b3261e;
+  --legacy-color-e2e5e9: #e2e5e9;
+  --legacy-color-f0f1f4: #f0f1f4;
+  --legacy-color-374151: #374151;
+  --legacy-color-9ca3af: #9ca3af;
+  --legacy-color-d33d3d: #d33d3d;
+  --legacy-color-fff5f5: #fff5f5;
+  --legacy-color-2563eb: #2563eb;
+  --legacy-color-4b5563: #4b5563;
+  --legacy-color-15803d: #15803d;
+  --legacy-color-eef2ff: #eef2ff;
+  --legacy-color-4338ca: #4338ca;
+  --legacy-color-f3f4f6: #f3f4f6;
+  --legacy-color-eef4ff: #eef4ff;
+  --legacy-color-3654a6: #3654a6;
+  --legacy-color-dcfce7: #dcfce7;
+  --legacy-color-fef3c7: #fef3c7;
+  --legacy-color-92400e: #92400e;
+  --legacy-color-c7d2fe: #c7d2fe;
+  --legacy-color-e5e7eb: #e5e7eb;
+  --legacy-color-d0d5dd: #d0d5dd;
+  --legacy-radius-999px: 999px;
+  --legacy-radius-4px: 4px;
+  --legacy-radius-6px: 6px;
+  --legacy-radius-50pct: 50%;
+  --legacy-radius-5px: 5px;
+  --legacy-radius-3px: 3px;
+  --legacy-shadow-1: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --legacy-shadow-2: -4px 0 16px rgba(0, 0, 0, 0.15);
+  --legacy-overlay-1b1f24-40: rgba(27, 31, 36, 0.4);
+}
+
+/* Guild token vocabulary (WF-027 chunk 3, per docs/design/quest-board/HANDOFF.md).
+   Additive and still unconsumed — nothing reads these yet, so this block has
+   no visual effect on its own. Chunk 4 onward wires components to them. */
+:root {
+  /* Base */
+  --qb-bg-page: #efe3cc;
+  --qb-bg-page-highlight-tl: #f7eed8;
+  --qb-bg-page-highlight-br: #eadcbd;
+  --qb-panel: #fbf4e1;
+  --qb-parchment-muted: #f3ead6;
+  --qb-parchment-muted-2: #f1e9da;
+  --qb-line-dashed: #d8c39a;
+  --qb-line-dashed-2: #e0cea5;
+  --qb-card-border: #c9a86a;
+  /* HANDOFF's translucent banner count chip (rgba(255,255,255,.25)) — a
+     fresh HANDOFF value (WF-028 chunk 2), not old-theme debt, so it lives
+     in the guild vocabulary rather than under --legacy-*. */
+  --qb-chip-translucent: rgba(255, 255, 255, 0.25);
+  /* WF-030 chunk 3: the Quest|Scroll segmented tab bar's track (HANDOFF
+     §Card detail line 76). */
+  --qb-tab-track: #ede0c2;
+  /* WF-030 chunk 4: the sub-quests panel's border radius (HANDOFF §Card
+     detail line 77). */
+  --qb-radius-panel: 16px;
+  /* WF-030 chunk 7: the card-detail overlay backdrop (HANDOFF line 70). */
+  --qb-overlay: rgba(52, 36, 22, 0.5);
+
+  /* Ink scale (5-tone) */
+  --qb-ink-900: #4a3826; /* headings */
+  --qb-ink-700: #5b4632; /* body */
+  --qb-ink-500: #7a6a54; /* muted */
+  --qb-ink-400: #9a8464; /* muted */
+  --qb-ink-300: #b0a088; /* todo/disabled */
+
+  /* Column accent groups: fill (banner) / shadow (banner) / border (card) /
+     cardshadow (card's soft sticker shadow). Where HANDOFF gives no distinct
+     cardshadow tint for a group, cardshadow aliases to that group's own
+     border colour (documented per group below) rather than inventing a hex
+     HANDOFF doesn't specify. */
+  --qb-accent-forest-fill: #7a8b45; /* Backlog */
+  --qb-accent-forest-shadow: #63722f;
+  --qb-accent-forest-border: #c9a86a; /* HANDOFF: Backlog reuses the base card border */
+  --qb-accent-forest-cardshadow: var(--qb-accent-forest-border); /* no distinct tint given */
+
+  --qb-accent-amber-fill: #b08948; /* Bootstrap */
+  --qb-accent-amber-shadow: #977236;
+  --qb-accent-amber-border: #ddbb7c;
+  --qb-accent-amber-cardshadow: #edd9ae;
+
+  --qb-accent-sky-fill: #5c86b0; /* Planning / Plan Review / Verification */
+  --qb-accent-sky-shadow: #47709a;
+  --qb-accent-sky-border: #a9c0da;
+  --qb-accent-sky-cardshadow: #d3e0ee;
+
+  --qb-accent-orange-fill: #d98a3d; /* Implementation / Impl Review */
+  --qb-accent-orange-shadow: #bc722c;
+  --qb-accent-orange-border: #e0a24c;
+  --qb-accent-orange-cardshadow: #f0dbae;
+
+  --qb-accent-rose-fill: #a8506b; /* Awaiting Merge */
+  --qb-accent-rose-shadow: #8c3e56;
+  --qb-accent-rose-border: #d49aad;
+  --qb-accent-rose-cardshadow: #ebd1d9;
+
+  --qb-accent-umber-fill: #5b4632; /* Done */
+  --qb-accent-umber-shadow: #43331f;
+  --qb-accent-umber-border: #c9b48c; /* HANDOFF: Done's muted-card border */
+  --qb-accent-umber-cardshadow: var(--qb-accent-umber-border); /* no distinct tint given */
+
+  --qb-accent-taupe-fill: #9a8464; /* Parked */
+  --qb-accent-taupe-shadow: #7f6b4e;
+  --qb-accent-taupe-border: #c4b292; /* HANDOFF: Parked card's dashed border */
+  --qb-accent-taupe-cardshadow: var(--qb-accent-taupe-border); /* no distinct tint given */
+
+  /* Column-keyed aliases — original column names kept verbatim, only the
+     styling is themed (HANDOFF terminology table). */
+  --qb-col-backlog: var(--qb-accent-forest-fill);
+  --qb-col-bootstrap: var(--qb-accent-amber-fill);
+  --qb-col-planning: var(--qb-accent-sky-fill);
+  --qb-col-plan-review: var(--qb-accent-sky-fill);
+  --qb-col-implementation: var(--qb-accent-orange-fill);
+  --qb-col-impl-review: var(--qb-accent-orange-fill);
+  --qb-col-verification: var(--qb-accent-sky-fill);
+  --qb-col-awaiting-merge: var(--qb-accent-rose-fill);
+  --qb-col-done: var(--qb-accent-umber-fill);
+  --qb-col-parked: var(--qb-accent-taupe-fill);
+
+  /* Accent utilities */
+  --qb-gold-coin-fill: #e7b93d;
+  --qb-gold-coin-stroke: #b5851f;
+  --qb-gold-chip-bg: #f3e1b8;
+  --qb-gold-chip-border: #d9a441;
+  --qb-gold-chip-text: #7a5a1a;
+
+  /* Rarity-star empty pip (WF-028 Decisions: adjudicated ASK 2 — HANDOFF-
+     sourced from the quest-card prose, not §Design Tokens; card 1's
+     vocabulary sweep missed it). Filled stars reuse --qb-gold-chip-border. */
+  --qb-star-empty: #e0d3b4;
+
+  --qb-success-fill: #7a8b45;
+  --qb-success-chip-bg: #eaf0de;
+  --qb-success-chip-text: #5a6e38;
+  /* WF-029 chunk 5: HANDOFF §Board "Top bar" gives the vanquished pill a
+     border card 1's vocabulary sweep missed (HANDOFF line 53). */
+  --qb-success-chip-border: #a9be7e;
+
+  --qb-locked-chip-bg: #f3e1e7;
+  --qb-locked-chip-text: #a8506b;
+  /* WF-029 chunk 5: the "N questing" pill shares locked-chip's fill/text
+     (HANDOFF line 53 gives both the identical #F3E1E7/#A8506B) but has its
+     own border, missing from card 1's vocabulary. */
+  --qb-questing-chip-border: #d9a0b4;
+
+  /* Exhaustion bar fill — fills UP with context used, so "low" (little
+     spent, safe) keeps the old mana-high calm blue and "high" (lots spent,
+     getting dangerous) keeps the old mana-low warning orange. Same two
+     gradients as the retired inverse mana bar, re-labelled to match the
+     new direct (not inverse) fill direction. */
+  --qb-exhaustion-low: linear-gradient(90deg, #5e86c7, #8fb6e0);
+  --qb-exhaustion-high: linear-gradient(90deg, #c25a3b, #e08a3c);
+
+  --qb-party-panel-bg: #3e2f22;
+  --qb-party-row-bg: #4a3524;
+  --qb-party-border: #6e4a32;
+  --qb-party-text: #f6ead2;
+  --qb-party-text-muted: #c9ae84;
+
+  /* WF-029 chunk 6: HANDOFF §Party page's hero-card tokens (line 84-89) —
+     missing from card 1's vocabulary sweep, declared here per Decisions
+     ("missing HANDOFF-sourced values: declare + cite + report"). These are
+     light-card tones distinct from the dark --qb-party-* group above:
+     hero cards sit on #F3E7CE inside the dark sheet, not on the panel/row
+     dark backgrounds PartyColumn uses. */
+  --qb-hero-card-bg: #f3e7ce;
+  --qb-hero-name: #4a2e1c;
+  --qb-hero-class: #a06a3c;
+  --qb-hero-track: #e4d2ab;
+  --qb-hero-card-shadow-color: rgba(0, 0, 0, 0.18);
+
+  /* WF-031 branch chip/filter/spotlight — a fresh addition, no HANDOFF row
+     exists for it yet (declared + cited per Decisions' "missing
+     HANDOFF-sourced values" precedent). A cool slate-blue distinguishes it
+     from the repo-chip's neutral grey and the claim-badge's dashed
+     parchment, while the spotlight ring reuses the existing gold-chip
+     border so it reads as "this is the one" without inventing a third
+     accent hue. */
+  --qb-branch-chip-bg: #e2e9f2;
+  --qb-branch-chip-text: #3d5875;
+  --qb-branch-chip-border: #b7c9dc;
+  --qb-spotlight-ring: var(--qb-gold-chip-border);
+
+  /* Font stacks */
+  --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
+  --qb-font-body: "Patrick Hand", Gaegu, "Comic Neue", cursive;
+  --qb-font-banner: "Gaegu", "Patrick Hand", cursive;
+  --qb-font-mono: "Silkscreen", ui-monospace, Menlo, monospace;
+  --qb-font-prose: "Nunito", sans-serif;
+
+  /* Radii scale */
+  --qb-radius-card-a: 14px 20px 14px 20px;
+  --qb-radius-card-b: 20px 14px 20px 14px;
+  --qb-radius-modal: 26px;
+  --qb-radius-chip-sm: 10px;
+  --qb-radius-chip-lg: 14px;
+  --qb-radius-checkbox-sm: 5px;
+  --qb-radius-checkbox-lg: 7px;
+  --qb-radius-pennant: 255px 10px 225px 10px / 10px 225px 10px 255px;
+  --qb-radius-pill: 999px;
+  --qb-radius-circle: 50%;
+
+  /* Shadow recipes — offset/blur/spread only; the colour is supplied at the
+     consuming rule (it varies per accent group / surface), e.g.
+     `box-shadow: var(--qb-shadow-card) var(--qb-accent-forest-cardshadow);` */
+  --qb-shadow-card: 0 3px 0;
+  --qb-shadow-banner: 0 4px 0;
+  --qb-shadow-hero: 0 5px 0;
+  --qb-shadow-modal: 0 24px 60px rgba(50, 30, 15, 0.4);
+  --qb-topbar-shadow: 0 6px 16px rgba(90, 62, 40, 0.08);
+
+  /* Motion durations */
+  --qb-motion-pulse: 1.6s;
+  --qb-motion-hover: 0.12s;
+
+  /* Board-tile progress bar track (WF-028 Decisions: declared if missing —
+     HANDOFF-sourced, §Design Tokens line 64). */
+  --qb-progress-track: #f0e3c4;
+
+  /* CHOSEN button system (task-12): two roles across the board's real
+     controls. Role A — "fine hand-inked, light-recess hover" — the
+     rectangular text action/control buttons (Refresh, threshold Set,
+     Claim, status-menu items) plus the native dropdowns restyled to match
+     (WF-046 item 3: topbar repo/branch selects, priority-select,
+     claim-control select, link-editor selects). Role B — "T1 gold
+     underline" — tabs/secondary nav (the card-drawer view toggle). Round
+     close buttons (✕) get only the ink border + hover recess, keeping
+     their circular shape — the link-editor dependency-chip remove ✕ joins
+     that round-exception family as of WF-046 item 2 (too small for a
+     rectangular ink outline; see `.link-editor__deps-list button` below). */
+  --qb-btn-face: #faf3df;
+  --qb-btn-face-hover: #f1e7c8;
+  --qb-btn-face-active: #ece0c0;
+  --qb-btn-ink: #6b4f34;
+  --qb-btn-ink-hover: #5b4632;
+  --qb-btn-text: #4a3826;
+  /* Gentle hand-drawn wobble — FIXED, does NOT change on hover/active.
+     WF-046 item 1: every Role-A control previously shared this ONE wobble,
+     reading as stamped rather than individually inked. Four variants below
+     are cyclic rotations of the same four corner offsets (so the "gentle
+     hand-drawn" magnitude never changes, only which corner gets which
+     value) — cycled per control via fixed selector assignment and, where a
+     control has real siblings (status-menu's buttons, the deps-list), via
+     `:nth-of-type`/`:nth-child`. No JS, no re-render variance — each
+     element's wobble is picked once, in CSS, and never moves. */
+  --qb-btn-wobble: 12px 8px 13px 9px / 8px 12px 9px 11px;
+  --qb-btn-wobble-2: 9px 12px 8px 13px / 11px 8px 12px 9px;
+  --qb-btn-wobble-3: 13px 9px 12px 8px / 9px 11px 8px 12px;
+  --qb-btn-wobble-4: 8px 13px 9px 12px / 12px 9px 11px 8px;
+  --qb-btn-shadow-hover: inset 0 1px 4px rgba(74, 56, 38, 0.2);
+  --qb-btn-shadow-active: inset 0 2px 5px rgba(74, 56, 38, 0.3);
+
+  --qb-tab-text: #5b4632;
+  --qb-tab-text-active: #4a3826;
+  --qb-tab-underline: #c9a86a;
+  --qb-tab-underline-active: #7a8b45;
+  --qb-tab-hover-bg: rgba(216, 195, 154, 0.18);
+  --qb-tab-active-bg: rgba(122, 139, 69, 0.1);
+}
+
+/* Minimal reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--qb-font-body);
+  color: var(--qb-ink-700);
+  background:
+    radial-gradient(circle at top left, var(--qb-bg-page-highlight-tl), transparent 55%),
+    radial-gradient(circle at bottom right, var(--qb-bg-page-highlight-br), transparent 55%),
+    var(--qb-bg-page);
+  /* The board-region is the app's ONE horizontal scroller — the page body
+     itself must never scroll sideways at any width (mobile pass). */
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keyboard focus stays visible everywhere — themed to the guild sky accent
+   rather than the UA default so it reads as part of the board, not a bolt-on.
+   :focus-visible only: mouse/touch presses don't flash rings. */
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 3px solid var(--qb-accent-sky-fill);
+  outline-offset: 2px;
+}
+
+/* Guild base utility (WF-027 chunk 4) — unused by markup this card; a
+   restyled selector adopts it once a divider is themed. */
+.qb-divider {
+  border-bottom: 2px dashed var(--qb-line-dashed);
+}
+
+/* App shell skeleton: top bar strip + a horizontally scrollable board region. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Parchment sticky top bar (WF-029 chunk 5, HANDOFF §Board "Top bar"). */
+.topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 18px 26px;
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
+  border-bottom: 2px dashed var(--qb-line-dashed);
+  box-shadow: var(--qb-topbar-shadow);
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.topbar__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Irregular-radius crest (HANDOFF: "50px circular crest, irregular radius
+   50% 48% 52% 50%"). Purely decorative — no image asset. */
+.topbar__crest {
+  flex: 0 0 auto;
+  width: 50px;
+  height: 50px;
+  border-radius: 50% 48% 52% 50%;
+  border: 2px solid var(--qb-ink-700);
+  background: var(--qb-gold-chip-bg);
+}
+
+.topbar__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  /* Fluid: 26px on desktop, easing down to 20px on a phone — no breakpoint
+     jump in the guild wordmark. */
+  font-size: clamp(20px, 4.5vw, 26px);
+  color: var(--qb-ink-900);
+}
+
+.topbar__subtitle {
+  margin: 0;
+  font-family: var(--qb-font-body);
+  font-size: clamp(14px, 3.6vw, 17px);
+  color: var(--qb-ink-400);
+}
+
+/* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
+   after the identity block so it wraps into the mobile chip shelf with
+   everything else in this flex row; no bespoke breakpoint rules needed. */
+.topbar__repo-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+}
+
+.topbar__repo-select-label {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+/* WF-046 item 3: a hand-inked border + wobble silhouette so the native
+   control reads as individually drawn rather than the browser's stock
+   rectangle, even sitting inside the pill's own rounded chip — background
+   stays transparent so the pill's own shape still reads as the outer
+   chrome. */
+.topbar__repo-select select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--qb-ink-900);
+  background: transparent;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  padding: 0 0.3rem;
+  max-width: 40vw;
+}
+
+.topbar__repo-select select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.topbar__repo-select select:focus-visible {
+  outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
+}
+
+/* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
+   but-un-init'd root (has_board:false). Native <option> styling is limited
+   to a small CSS subset (colour/background/font-style, no border/shape),
+   so "faded" is expressed with those; the "⚔ N" live-agent hint lives in
+   the option's own text (see RepoSelector.tsx's `optionLabel`), since an
+   <option> can't host a nested badge element. Still a fully selectable
+   entry — this is a visual distinction only. */
+.repo-option--unbegun {
+  font-style: italic;
+  color: var(--qb-ink-400);
+}
+
+/* WF-031 branch filter — same topbar-chip shape as `.topbar__repo-select`,
+   sitting right after it so both wrap into the mobile chip shelf together. */
+.topbar__branch-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-branch-chip-bg);
+  color: var(--qb-branch-chip-text);
+}
+
+.topbar__branch-select-label {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-branch-chip-text);
+}
+
+/* WF-046 item 3 — same treatment as `.topbar__repo-select select` above,
+   a different wobble variant so the two neighbouring topbar chips don't
+   read as the same stamped shape. */
+.topbar__branch-select select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--qb-ink-900);
+  background: transparent;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-2);
+  padding: 0 0.3rem;
+  max-width: 40vw;
+}
+
+.topbar__branch-select select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.topbar__branch-select select:focus-visible {
+  outline: 2px solid var(--qb-branch-chip-border);
+  outline-offset: 2px;
+}
+
+/* WF-042: wraps ThresholdControl, whose own label now reads "default
+   threshold" — the fleet's global default, not any one agent's fact (that
+   moved to the Party's hero cards). Replaces the old `.topbar__ctx` block
+   (launching-session ctx%/label/note), which is gone. */
+.topbar__threshold {
+  display: flex;
+  align-items: baseline;
+  color: var(--qb-ink-400);
+  font-size: 0.75rem;
+}
+
+/* WF-042: the ⚔ glyph prefixing the fleet-health pill's text (see
+   `.topbar__fleet-pill` in the Guild pills group below). */
+.topbar__fleet-icon {
+  font-size: 0.85rem;
+}
+
+.topbar__pill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+}
+
+/* Role A — "fine hand-inked, light-recess hover" (CHOSEN button system,
+   task-12). The wobble radius is fixed and does not shift on hover/active;
+   only background/border-color/box-shadow move. */
+.topbar__refresh {
+  margin-left: auto;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.topbar__refresh:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.topbar__refresh:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.topbar__refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* Archive is an on/off TOGGLE (checkbox + label), not an action button —
+   task-12 reverts the stray role-A button chrome 3951828 wrapped this in.
+   It keeps light on-theme colouring but must read as a checked/unchecked
+   state, never identical to the Refresh/Set/Claim action buttons. */
+.topbar__archive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--qb-ink-500);
+  cursor: pointer;
+}
+
+.topbar__archive-toggle input {
+  accent-color: var(--qb-btn-ink);
+  cursor: pointer;
+}
+
+/* Quarantine alert keeps a strong danger red rather than a guild accent —
+   HANDOFF's happy-path mockup has no error/danger state to source a token
+   from, and none of the 7 accent groups mean "danger" (misusing rose/
+   Awaiting-Merge for this would be a semantic mismatch, same reasoning as
+   leaving .board-error and the budget-tripwire flag on their own alert
+   reds elsewhere). Genuine exception to this chunk's "off legacy" sweep —
+   reported, not silently left. */
+.topbar__quarantine-banner {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--qb-radius-chip-sm);
+  background: var(--legacy-color-7a2e2e);
+  color: var(--legacy-color-ffd9d9);
+}
+
+/* Guild pills (HANDOFF: Gold total / vanquished / fleet-health). Gold and
+   vanquished are informational spans; the fleet-health pill is the one
+   clickable pill — the Sessions dropdown's structural replacement
+   (Decisions), now folding the old dedicated questing pill's live count
+   together with the fleet's top ctx% and near-threshold count (WF-042). */
+.topbar__gold-pill,
+.topbar__vanquished-pill,
+.topbar__fleet-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--legacy-radius-999px);
+}
+
+.topbar__gold-pill {
+  background: var(--qb-gold-chip-bg);
+  border: 2px solid var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+}
+
+.topbar__vanquished-pill {
+  background: var(--qb-success-chip-bg);
+  border: 2px solid var(--qb-success-chip-border);
+  color: var(--qb-success-chip-text);
+}
+
+.topbar__fleet-pill {
+  background: var(--qb-locked-chip-bg);
+  border: 2px solid var(--qb-questing-chip-border);
+  color: var(--qb-locked-chip-text);
+  cursor: pointer;
+}
+
+/* Narrow-viewport topbar/board/drawer rules live in the consolidated
+   "Mobile layout layer" at the END of this file — placed last so its
+   overrides win the cascade over every base rule above. */
+
+.board-region {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1rem;
+}
+
+.board-placeholder {
+  color: var(--qb-ink-400);
+}
+
+/* Same danger-red exception as .topbar__quarantine-banner above — no
+   HANDOFF-sourced alert colour to convert to. */
+.board-error {
+  color: var(--legacy-color-b3261e);
+}
+
+/* Board: a flex row of lanes, horizontally scrollable. */
+.board {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  height: 100%;
+  min-width: max-content;
+}
+
+/* Drag drop-mismatch toast (see Board.tsx's reconciliation after a drop). */
+.board-toast {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--legacy-color-7a2e2e);
+  color: var(--legacy-color-ffd9d9);
+  font-size: 0.8rem;
+}
+
+.board-toast__dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.lane {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--qb-panel);
+  border: 1px solid var(--qb-card-border);
+  border-radius: var(--legacy-radius-6px);
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+/* Parked/Done/Archive are visually distinct and right-grouped in the row. */
+.lane--parked,
+.lane--done,
+.lane--archive {
+  background: var(--qb-parchment-muted);
+  border-style: dashed;
+  margin-left: 0;
+}
+
+.lane--parked {
+  margin-left: 1.5rem;
+}
+
+/* Pennant banner header (WF-028 chunk 2) — HANDOFF's column banner: an
+   asymmetric-radius pennant shape, white text, hard offset shadow. Fill
+   colour is per accent key (`.lane__header--<key>` below); the header
+   itself only owns shape/spacing/text-colour, not colour. */
+.lane__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--legacy-color-fff);
+  border-radius: var(--qb-radius-pennant);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.lane__count {
+  font-weight: 400;
+  color: inherit;
+  background: var(--qb-chip-translucent);
+  border-radius: var(--qb-radius-chip-sm);
+  padding: 0.05rem 0.4rem;
+}
+
+/* Per-column accent fills (HANDOFF §Design Tokens "Column accents") — the
+   three sky lanes (Planning/Plan Review/Verification) and the two orange
+   lanes (Implementation/Impl Review) share one accent group each; Archive
+   is mapped onto "parked" upstream in Lane.tsx (taupe reuse, no HANDOFF
+   row of its own), so no separate `--archive` selector exists here. */
+.lane__header--backlog {
+  background: var(--qb-accent-forest-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-forest-shadow);
+}
+
+.lane__header--bootstrap {
+  background: var(--qb-accent-amber-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+}
+
+.lane__header--planning,
+.lane__header--plan-review,
+.lane__header--verification {
+  background: var(--qb-accent-sky-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-sky-shadow);
+}
+
+.lane__header--implementation,
+.lane__header--impl-review {
+  background: var(--qb-accent-orange-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-orange-shadow);
+}
+
+.lane__header--awaiting-merge {
+  background: var(--qb-accent-rose-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-rose-shadow);
+}
+
+.lane__header--done {
+  background: var(--qb-accent-umber-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-umber-shadow);
+}
+
+.lane__header--parked {
+  background: var(--qb-accent-taupe-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-taupe-shadow);
+}
+
+.lane__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+/* Empty stage lanes collapse to a thin labelled strip. */
+.lane--empty {
+  flex-basis: 44px;
+  min-width: 44px;
+}
+
+.lane--empty .lane__header {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  height: 100%;
+  border-bottom: none;
+}
+
+/* Per-accent custom properties (WF-028 chunk 3) — each `.card-tile--accent-*`
+   modifier sets these three, which `.card-tile`/`.epic-card` below read with
+   a legacy fallback for accent-less renders (e.g. isolated component tests
+   that mount TileShell without a Lane-computed accentKey). Mirrors the
+   lane__header accent grouping one chunk up. */
+.card-tile--accent-backlog {
+  --card-accent-fill: var(--qb-accent-forest-fill);
+  --card-accent-border: var(--qb-accent-forest-border);
+  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
+}
+
+.card-tile--accent-bootstrap {
+  --card-accent-fill: var(--qb-accent-amber-fill);
+  --card-accent-border: var(--qb-accent-amber-border);
+  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
+}
+
+.card-tile--accent-planning,
+.card-tile--accent-plan-review,
+.card-tile--accent-verification {
+  --card-accent-fill: var(--qb-accent-sky-fill);
+  --card-accent-border: var(--qb-accent-sky-border);
+  --card-accent-shadow: var(--qb-accent-sky-cardshadow);
+}
+
+.card-tile--accent-implementation,
+.card-tile--accent-impl-review {
+  --card-accent-fill: var(--qb-accent-orange-fill);
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
+}
+
+.card-tile--accent-awaiting-merge {
+  --card-accent-fill: var(--qb-accent-rose-fill);
+  --card-accent-border: var(--qb-accent-rose-border);
+  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
+}
+
+.card-tile--accent-done {
+  --card-accent-fill: var(--qb-accent-umber-fill);
+  --card-accent-border: var(--qb-accent-umber-border);
+  --card-accent-shadow: var(--qb-accent-umber-cardshadow);
+}
+
+.card-tile--accent-parked {
+  --card-accent-fill: var(--qb-accent-taupe-fill);
+  --card-accent-border: var(--qb-accent-taupe-border);
+  --card-accent-shadow: var(--qb-accent-taupe-cardshadow);
+}
+
+.card-tile {
+  display: flex;
+  gap: 0.4rem;
+  background: var(--legacy-color-fff);
+  border: 2px solid var(--card-accent-border);
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  padding: 14px;
+  font-size: 0.8rem;
+}
+
+/* Alternating asymmetric radii (HANDOFF's "sticker" card shapes) — CSS-only,
+   no JS index prop (Decisions). */
+.lane__cards > .card-tile:nth-child(even) {
+  border-radius: var(--qb-radius-card-b);
+}
+
+.card-tile--blocked {
+  border-color: var(--legacy-color-d33d3d);
+  background: var(--legacy-color-fff5f5);
+}
+
+.card-tile--highlighted {
+  outline: 2px solid var(--legacy-color-2563eb);
+  outline-offset: 1px;
+}
+
+.card-tile--dimmed {
+  opacity: 0.35;
+}
+
+/* WF-031 branch filter — independent of the epic-highlight `--dimmed`/
+   `--highlighted` pair above: these fire from the topbar's BranchFilter
+   select, not the epic expand toggle, and both can be active on the same
+   tile at once (their opacity/outline effects simply stack). `.is-dimmed`
+   fades a non-matching card in place (never removes it from the lane);
+   `.is-spotlight` rings the matching card/hero with the same gold tone the
+   rarity stars/gold pill already use, so "this is the one" reads as an
+   emphasis, not a new colour language. Shared by card tiles AND Party rows
+   (party-row/hero-card) — see PartyColumn/PartyOverlay. */
+.is-dimmed {
+  opacity: 0.4;
+}
+
+.is-spotlight {
+  outline: 2px solid var(--qb-spotlight-ring);
+  outline-offset: 1px;
+}
+
+/* WF-042: near-threshold cue — a hero card/party row whose own ctx% has hit
+   the fleet's global default threshold. Reuses the same red/blush pairing
+   `.card-tile--blocked`'s budget tripwire already uses for "getting close
+   to a bad number" (a documented exception to the guild-accent palette,
+   see the quarantine-banner comment above) rather than inventing a new
+   warning colour. Can stack with `.is-spotlight` on the same card/row. */
+.is-near-threshold {
+  outline: 2px solid var(--legacy-color-d33d3d);
+  outline-offset: 1px;
+}
+
+/* Done treatment (WF-028 chunk 5, HANDOFF's quest-card prose): muted
+   parchment card, strikethrough title. The strikethrough tone (#6E6250 in
+   HANDOFF) has no declared --qb-* token and isn't one of the two approved
+   new additions (Decisions) — reusing the closest existing ink tone
+   (--qb-ink-500, #7A6A54) rather than inventing one. */
+.card-tile--done {
+  background: var(--qb-parchment-muted);
+  opacity: 0.94;
+}
+
+/* Epic-focus dim vs. Done's own opacity (bug fix): `.card-tile--dimmed`
+   and `.card-tile--done` are equal-specificity single-class selectors, so
+   without this rule the cascade falls back to source order and
+   `.card-tile--done`'s `opacity: 0.94` (declared after `--dimmed` above)
+   silently wins — Done cards never visibly faded during epic focus, even
+   though React correctly applied `--dimmed`. Two-class selector outranks
+   both single-class rules regardless of source order, so Done cards dim
+   exactly like every other lane while retaining their own look the rest
+   of the time. */
+.card-tile--done.card-tile--dimmed {
+  opacity: 0.35;
+}
+
+/* Same cascade clash, branch-filter side: `.is-dimmed` (opacity 0.4) is
+   declared before `.card-tile--done` (opacity 0.94) above, so at equal
+   specificity `--done` wins by source order and Done cards never fade
+   under the branch filter either. Mirrors the epic-focus fix — two-class
+   selector wins regardless of order. `.is-spotlight` is outline-only, so
+   it never conflicted and needs no equivalent override. */
+.card-tile--done.is-dimmed {
+  opacity: 0.4;
+}
+
+.card-tile__title--done {
+  text-decoration: line-through;
+  color: var(--qb-ink-500);
+}
+
+.card-tile__done-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: var(--qb-radius-circle);
+  background: var(--qb-success-fill);
+  color: var(--legacy-color-fff);
+}
+
+.card-tile__gold-earned {
+  font-size: 0.7rem;
+  color: var(--qb-gold-chip-text);
+}
+
+/* Parked treatment: dashed muted card, "on hold" chip replaces the meters.
+   Neither HANDOFF nor the accent utilities give this chip its own colour
+   (same reasoning as .claim-badge above) — neutral base tokens. */
+.card-tile--parked {
+  background: var(--qb-parchment-muted-2);
+  border-style: dashed;
+}
+
+.card-tile__hold-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+  border: 1px dashed var(--qb-line-dashed);
+}
+
+/* Board-tile progress bar (HANDOFF): fill is the lane accent, same custom
+   property the card border/shadow read (chunk 3). */
+.card-tile__progress {
+  height: 8px;
+  margin: 0.15rem 0 0.35rem;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-progress-track);
+  overflow: hidden;
+}
+
+.card-tile__progress-fill {
+  height: 100%;
+  background: var(--card-accent-fill);
+}
+
+.card-tile__handle {
+  flex: 0 0 auto;
+  color: var(--legacy-color-9ca3af);
+  cursor: grab;
+  user-select: none;
+  padding: 0.1rem 0.2rem 0 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  touch-action: none;
+}
+
+.card-tile__handle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.card-tile__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.card-tile__header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.card-tile__id {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--legacy-color-6b7280);
+}
+
+/*
+  Shared by the plain-<div> title (read-only tiles) AND the <button> title
+  that is the keyboard-reachable "open drawer" control on openable tiles. The
+  button-reset properties (border/background/padding/text-align/font/width)
+  are inert for the <div> and make the <button> render identically to it, so
+  the visual layout is unchanged by the a11y restructure.
+*/
+.card-tile__title {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  color: var(--legacy-color-1b1f24);
+  word-break: break-word;
+  cursor: pointer;
+}
+
+/*
+  Live task checklist (WF-008). `.checklist` is shared by the tile's
+  sliding-wheel window (`--windowed`, capped to a fixed 3-row height) and
+  the drawer's full unwindowed list. Rows are plain <li> — see
+  ChecklistRows.tsx's doc comment on why: they render inside the tile
+  body's non-interactive div, and MUST NOT introduce any interactive
+  element there.
+*/
+.checklist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.1rem 0 0.35rem;
+  padding: 0;
+}
+
+/* Fixed-height sliding-wheel window (3 rows). The active row (marked
+   `--active` by ChecklistRows) is vertically centred when the window has
+   room, or sits off-centre when clamped at either end of the list (see
+   checklistWindow's clamping) — never padded with ghost rows. Neighbours
+   fade via the per-row `--dist-1`/`--dist-2` classes below rather than a
+   mask-image: fade strength must track logical distance from the active
+   row, which isn't always the same as raw pixel distance from the
+   window's edge once clamping kicks in. */
+.checklist--windowed {
+  max-height: calc(3 * 1.15rem);
+  overflow: hidden;
+}
+
+/* Distance-from-active fade (windowed mode only — see ChecklistRows). */
+.checklist__row--dist-1 {
+  opacity: 0.55;
+}
+
+.checklist__row--dist-2 {
+  opacity: 0.25;
+}
+
+.checklist__row--active .checklist__subject {
+  font-weight: 500;
+}
+
+.checklist__row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+  color: var(--qb-ink-300);
+}
+
+/* Sub-quest checkbox (WF-028 chunk 6, HANDOFF's rounded-checkbox spec) —
+   CSS-only re-skin of the EXISTING glyph span; ChecklistRows.tsx's markup
+   (including the literal ✓/●/○ characters ChecklistRows.test.tsx asserts)
+   is untouched. Default/pending: a ~15px solid-outline empty box (HANDOFF:
+   "todo = 2px solid #D8C39A" — authoritative over the plan's own "dashed
+   outline" paraphrase), the glyph character coloured to blend into its own
+   border rather than read as a visible mark. Completed/in-progress fill
+   the box solid and flip the glyph to white — see the two modifiers below. */
+.checklist__glyph {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  line-height: 1;
+  border-radius: var(--qb-radius-checkbox-sm);
+  border: 2px solid var(--qb-line-dashed);
+  color: var(--qb-line-dashed);
+}
+
+.checklist__subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Done = filled lane-accent box + white check (HANDOFF: "filled
+   column-color w/ white check"). */
+.checklist__row--completed .checklist__glyph {
+  border-style: solid;
+  border-color: var(--card-accent-fill);
+  background: var(--card-accent-fill);
+  color: var(--legacy-color-fff);
+}
+
+.checklist__row--completed .checklist__subject {
+  color: var(--qb-ink-500);
+  text-decoration: line-through;
+}
+
+/* In-progress isn't in HANDOFF's binary done/todo checkbox model (this is
+   the live three-state wheel, a system of its own — see Decisions). Reuses
+   the same lane-accent fill as done rather than a separate invented "live"
+   colour; the pulsing glyph (kept below, unchanged) and the distinct ●
+   character are what carry the in-progress signal, not a unique hue. */
+.checklist__row--in_progress .checklist__glyph {
+  border-style: solid;
+  border-color: var(--card-accent-fill);
+  background: var(--card-accent-fill);
+  color: var(--legacy-color-fff);
+}
+
+.checklist__row--in_progress .checklist__subject {
+  color: var(--qb-ink-700);
+  font-weight: 500;
+}
+
+/* All motion below is opt-in: a user who has asked the OS to reduce motion
+   gets the end state instantly — no fade-in, no pulse, no wheel slide. */
+@media (prefers-reduced-motion: no-preference) {
+  .checklist__row--appear {
+    animation: checklist-row-appear 200ms ease-out;
+  }
+
+  .checklist__row--in_progress .checklist__glyph {
+    animation: checklist-pulse 2s ease-in-out infinite;
+  }
+
+  /* Smooths a row's own opacity when its `--dist-*` class changes without
+     the row unmounting (e.g. the active task advances but the window is
+     clamped at the list's start/end, so the same rows stay put and only
+     their distance-from-active shifts). */
+  .checklist--windowed .checklist__row {
+    transition: opacity 180ms ease;
+  }
+
+  /* Set for one render on the `<ul>` when the ACTIVE task changes (see
+     ChecklistRows's `didAdvance`) — the window settling into its new
+     position reads as the wheel advancing by one task. */
+  .checklist--shift {
+    animation: checklist-wheel-shift 220ms ease-out;
+  }
+
+  /* Quest-card hover lift (WF-028 chunk 3, HANDOFF's card interaction spec)
+     — the whole effect, including the transform itself, is opt-in: reduced-
+     motion users get no lift at all, not an instant jump. */
+  .card-tile {
+    transition:
+      transform var(--qb-motion-hover) ease,
+      box-shadow var(--qb-motion-hover) ease;
+  }
+
+  .card-tile:hover {
+    transform: translateY(-3px);
+  }
+
+  @keyframes checklist-row-appear {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes checklist-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes checklist-wheel-shift {
+    from {
+      transform: translateY(0.5rem);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+}
+
+.card-tile__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Rarity stars (WF-028 chunk 4) — filled pips use the gold chip border
+   tone, empty pips the dedicated --qb-star-empty token. */
+.card-tile__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+}
+
+.card-tile__star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.card-tile__star--empty {
+  color: var(--qb-star-empty);
+}
+
+.priority-chip {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--legacy-color-eef2ff);
+  color: var(--legacy-color-4338ca);
+}
+
+/* Quiet, muted label — the card's origin repo. Deliberately low-contrast
+   next to the priority chip: this is provenance metadata, not a signal that
+   should compete for attention on the tile. */
+.repo-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--legacy-color-f3f4f6);
+  color: var(--legacy-color-6b7280);
+}
+
+/* Branch chip (WF-031): visually distinct from the repo-chip's grey
+   provenance label AND the priority/claim/blocked chips — its own
+   slate-blue tone flags which branch the card's work lives on, at a
+   glance, without competing with the higher-priority signals. */
+.branch-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-branch-chip-bg);
+  color: var(--qb-branch-chip-text);
+  border: 1px solid var(--qb-branch-chip-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 9rem;
+}
+
+/* "Awaiting a hero" chip (task 10): a todo/backlog card carries no `branch`
+   until the orchestrator actually starts it — this flags "no adventurer has
+   claimed this quest yet" for exactly that window. Deliberately muted/
+   dashed rather than the branch-chip's solid slate-blue: echoes
+   `.repo-option--unbegun`'s italic "not yet begun" treatment and
+   `.card-tile__hold-chip`'s dashed "inactive" border, so it reads as a
+   quiet placeholder, never mistaken for the branch chip it stands in for. */
+.awaiting-hero-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  font-style: italic;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-400);
+  border: 1px dashed var(--qb-line-dashed);
+  white-space: nowrap;
+}
+
+/* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
+   without competing with the priority/blocked badges. CSS-only restyle
+   (WF-028 chunk 4): HANDOFF specs an avatar-chip visual with no colour of
+   its own, so this reuses neutral base parchment/ink tokens rather than
+   inventing or misappropriating a semantically distinct chip's colours. */
+.claim-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted-2);
+  color: var(--qb-ink-500);
+  border: 1px solid var(--qb-line-dashed);
+}
+
+.badge--blocked {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--legacy-color-d33d3d);
+  color: var(--legacy-color-fff);
+}
+
+.dep-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+}
+
+.dep-badge--ready {
+  background: var(--qb-success-chip-bg);
+  color: var(--qb-success-chip-text);
+}
+
+/* Locked-behind pill (HANDOFF's "Locked/dep" accent utility). */
+.dep-badge--waiting {
+  background: var(--qb-locked-chip-bg);
+  color: var(--qb-locked-chip-text);
+}
+
+.budget-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--qb-gold-chip-text);
+}
+
+.budget-meter__coin {
+  flex: 0 0 auto;
+  color: var(--qb-gold-coin-fill);
+}
+
+/* Tripwire (actual >= 2x estimate) is visually distinct. */
+.budget-meter--tripwire .budget-meter__value {
+  color: var(--legacy-color-b3261e);
+  font-weight: 700;
+}
+
+.budget-meter__flag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--legacy-color-b3261e);
+  color: var(--legacy-color-fff);
+}
+
+.epic-card {
+  border-left: 3px solid var(--card-accent-fill);
+}
+
+.epic-card__expand {
+  margin-left: auto;
+  font-size: 0.65rem;
+  border: 1px solid var(--legacy-color-c7d2fe);
+  background: var(--legacy-color-eef2ff);
+  color: var(--legacy-color-4338ca);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.05rem 0.4rem;
+  cursor: pointer;
+}
+
+.epic-card__rollup {
+  font-size: 0.7rem;
+  color: var(--legacy-color-4338ca);
+  margin-bottom: 0.35rem;
+}
+
+/* Card detail drawer (Chunk 5): a right-hand panel over a dimming overlay. */
+/* Backdrop (HANDOFF line 70: both halves — the tint AND the blur, the
+   blur had been silently dropped from an earlier draft). */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--qb-overlay);
+  backdrop-filter: blur(3px);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 20;
+}
+
+/* Parchment sheet — keeps the right-anchored slide-in geometry (the spec's
+   own binding decision: a drawer, not HANDOFF's centered 640px modal), so
+   only the board-facing left edge gets a border rather than HANDOFF's
+   all-around 2px. */
+.card-drawer {
+  position: relative;
+  width: min(28rem, 100%);
+  height: 100%;
+  overflow-y: auto;
+  /* Reaching the sheet's end must not chain the scroll to the board behind
+     it (touch scroll-through). */
+  overscroll-behavior: contain;
+  background: var(--qb-panel);
+  border-left: 2px solid var(--qb-card-border);
+  padding: 26px 28px;
+  box-shadow: var(--qb-shadow-modal);
+}
+
+/* Round close button (HANDOFF: "✕, 38px, #F3EAD6/2px solid #D8C39A" —
+   --qb-parchment-muted/--qb-line-dashed are those exact hexes). */
+/* Ink border + light-recess hover for cohesion with the role-A button
+   system (task-12) — stays circular, no wobble. */
+.card-drawer__close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--qb-radius-circle);
+  border: 2px solid var(--qb-btn-ink);
+  background: var(--qb-parchment-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--qb-ink-500);
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.card-drawer__close:hover {
+  background: var(--qb-btn-face-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.card-drawer__status {
+  color: var(--qb-ink-400);
+  font-size: 0.9rem;
+}
+
+/* Same danger-red exception as .board-error/.topbar__quarantine-banner
+   elsewhere in the epic — no HANDOFF-sourced alert colour to convert to. */
+.card-drawer__status--error {
+  color: var(--legacy-color-b3261e);
+}
+
+.card-drawer__header {
+  padding-right: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Header row: banner pill + WF-id + rarity stars (HANDOFF: "Header row:
+   column banner pill + WF-id + rarity stars"). */
+.card-drawer__banner-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.card-drawer__banner {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--qb-radius-chip-sm);
+  color: var(--legacy-color-fff);
+}
+
+.card-drawer__id {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  color: var(--qb-ink-400);
+}
+
+.card-drawer__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  margin-left: auto;
+}
+
+.card-drawer__star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.card-drawer__star--empty {
+  color: var(--qb-star-empty);
+}
+
+.card-drawer__title {
+  margin: 0.15rem 0 0.5rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--qb-ink-900);
+}
+
+.card-drawer__facts {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--qb-ink-500);
+}
+
+/* Status chip: pale accent-tinted background, saturated accent text — a
+   lighter "tinted" chip distinct from the banner pill's solid fill so the
+   two don't compete for attention right next to each other. */
+.card-drawer__status-fact {
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-chip-sm);
+  font-weight: 600;
+}
+
+.card-drawer__banner--backlog {
+  background: var(--qb-accent-forest-fill);
+}
+.card-drawer__status-fact--backlog {
+  background: var(--qb-accent-forest-cardshadow);
+  color: var(--qb-accent-forest-fill);
+}
+
+.card-drawer__banner--bootstrap {
+  background: var(--qb-accent-amber-fill);
+}
+.card-drawer__status-fact--bootstrap {
+  background: var(--qb-accent-amber-cardshadow);
+  color: var(--qb-accent-amber-fill);
+}
+
+.card-drawer__banner--planning,
+.card-drawer__banner--plan-review,
+.card-drawer__banner--verification {
+  background: var(--qb-accent-sky-fill);
+}
+.card-drawer__status-fact--planning,
+.card-drawer__status-fact--plan-review,
+.card-drawer__status-fact--verification {
+  background: var(--qb-accent-sky-cardshadow);
+  color: var(--qb-accent-sky-fill);
+}
+
+.card-drawer__banner--implementation,
+.card-drawer__banner--impl-review {
+  background: var(--qb-accent-orange-fill);
+}
+.card-drawer__status-fact--implementation,
+.card-drawer__status-fact--impl-review {
+  background: var(--qb-accent-orange-cardshadow);
+  color: var(--qb-accent-orange-fill);
+}
+
+.card-drawer__banner--awaiting-merge {
+  background: var(--qb-accent-rose-fill);
+}
+.card-drawer__status-fact--awaiting-merge {
+  background: var(--qb-accent-rose-cardshadow);
+  color: var(--qb-accent-rose-fill);
+}
+
+.card-drawer__banner--done {
+  background: var(--qb-accent-umber-fill);
+}
+.card-drawer__status-fact--done {
+  background: var(--qb-accent-umber-cardshadow);
+  color: var(--qb-accent-umber-fill);
+}
+
+.card-drawer__banner--parked {
+  background: var(--qb-accent-taupe-fill);
+}
+.card-drawer__status-fact--parked {
+  background: var(--qb-accent-taupe-cardshadow);
+  color: var(--qb-accent-taupe-fill);
+}
+
+/* Hero chip: PartyAvatar + name + class (HANDOFF: "assigned-hero chip
+   (avatar + name + class)"). No avatar when the session has fallen out of
+   the shared party poll (stale-evicted edge, Decisions) — text-only then. */
+.card-drawer__hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.15rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-700);
+}
+
+.card-drawer__hero-name {
+  font-weight: 600;
+}
+
+.card-drawer__hero-class {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  color: var(--qb-ink-400);
+}
+
+.card-drawer__section {
+  margin-bottom: 1rem;
+}
+
+.card-drawer__section-heading {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--qb-ink-500);
+}
+
+.card-drawer__section-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--qb-ink-700);
+  font-family: var(--qb-font-prose);
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+/* Rendered markdown inside a card section/body — headings are clamped down
+ * to card-scale type (a card body is not a document, so an author's `#`
+ * should not blow up to page-heading size). HANDOFF: description prose is
+ * 18px/#5B4632/line-height 1.5 -- --qb-ink-700 is that exact hex. */
+.md-view {
+  color: var(--qb-ink-700);
+  font-family: var(--qb-font-prose);
+  font-size: 18px;
+  line-height: 1.5;
+  /* Long unbroken tokens (URLs, file paths, WF-ids) must wrap inside the
+     drawer, never widen it into a horizontal page scroll. */
+  overflow-wrap: break-word;
+}
+
+/* Wide markdown media/tables scroll inside their own box, not the page. */
+.md-view img {
+  max-width: 100%;
+  height: auto;
+}
+
+.md-view table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md-view h1,
+.md-view h2 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.md-view h3,
+.md-view h4,
+.md-view h5,
+.md-view h6 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.md-view p {
+  margin: 0 0 0.5rem;
+}
+
+.md-view p:last-child {
+  margin-bottom: 0;
+}
+
+.md-view ul,
+.md-view ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.md-view pre,
+.md-view code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.md-view pre {
+  overflow-x: auto;
+  padding: 0.5rem;
+  background: var(--qb-parchment-muted);
+  border-radius: var(--legacy-radius-4px);
+}
+
+.md-view code {
+  background: var(--qb-parchment-muted);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.05rem 0.25rem;
+}
+
+.md-view pre code {
+  background: none;
+  padding: 0;
+}
+
+/* Verbatim source view of a card body — a plain monospace block, distinct
+ * from the rendered `.md-view` above. Sits inside a white sub-quests-style
+ * card so raw markdown reads as its own panel (HANDOFF's Scroll tab: "the
+ * quest rendered as Markdown inside a white card"). */
+.card-drawer__source {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--qb-font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--qb-ink-700);
+  background: var(--legacy-color-fff);
+  border: 2px solid var(--qb-line-dashed-2);
+  border-radius: var(--qb-radius-panel);
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+/* Drawer's "Tasks" section — the full, unwindowed `.checklist` (no
+ * `--windowed` edge-fade/max-height there; see ChecklistRows usage in
+ * CardDetailDrawer.tsx). Sits above the Rendered/Source toggle. */
+/* Journey progress (HANDOFF: Quest tab, above the sub-quests panel). Reuses
+   the board-tile progress bar's track token (--qb-progress-track). */
+.card-drawer__journey {
+  margin-bottom: 0.75rem;
+}
+
+.card-drawer__journey-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--qb-ink-500);
+  margin-bottom: 0.25rem;
+}
+
+.card-drawer__journey-track {
+  height: 8px;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-progress-track);
+  overflow: hidden;
+}
+
+.card-drawer__journey-fill {
+  height: 100%;
+}
+
+/* Fill colour is the card's own column accent (HANDOFF's board-tile
+   progress bar says "fill column-color" — same convention here). */
+.card-drawer__journey-fill--backlog {
+  background: var(--qb-accent-forest-fill);
+}
+.card-drawer__journey-fill--bootstrap {
+  background: var(--qb-accent-amber-fill);
+}
+.card-drawer__journey-fill--planning,
+.card-drawer__journey-fill--plan-review,
+.card-drawer__journey-fill--verification {
+  background: var(--qb-accent-sky-fill);
+}
+.card-drawer__journey-fill--implementation,
+.card-drawer__journey-fill--impl-review {
+  background: var(--qb-accent-orange-fill);
+}
+.card-drawer__journey-fill--awaiting-merge {
+  background: var(--qb-accent-rose-fill);
+}
+.card-drawer__journey-fill--done {
+  background: var(--qb-accent-umber-fill);
+}
+.card-drawer__journey-fill--parked {
+  background: var(--qb-accent-taupe-fill);
+}
+
+/* Sub-quests panel (HANDOFF: "white card, 2px solid #E0CEA5,
+   border-radius:16px; header 'Sub-quests' + 'done / total' count; 22px
+   rounded checkboxes"). */
+.card-drawer__checklist {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem 1rem;
+  border: 2px solid var(--qb-line-dashed-2);
+  border-radius: var(--qb-radius-panel);
+  background: var(--legacy-color-fff);
+}
+
+.card-drawer__checklist-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.card-drawer__checklist-header .card-drawer__section-heading {
+  margin: 0;
+}
+
+.card-drawer__checklist-count {
+  font-size: 0.75rem;
+  color: var(--qb-ink-400);
+}
+
+.card-drawer__checklist .checklist__row {
+  font-size: 0.85rem;
+  line-height: 1.4rem;
+}
+
+/* Drawer checkboxes are HANDOFF's 22px for this context — the board tile
+   keeps its own 15px (chunk 6 of the board card). Scoped so nothing else
+   sharing .checklist__glyph is affected. */
+.card-drawer__checklist .checklist__glyph {
+  width: 22px;
+  height: 22px;
+  font-size: 0.8rem;
+  border-radius: var(--qb-radius-checkbox-lg);
+}
+
+/* Locked-behind pill wrapper — just spacing; .dep-badge itself is already
+   themed (WF-028). Empty (zero margin impact) when DependencyBadge
+   self-gates to null. */
+.card-drawer__locked:empty {
+  display: none;
+}
+
+.card-drawer__locked {
+  margin-bottom: 0.75rem;
+}
+
+/* Quest log timeline (WF-030 chunk 9, stretch — HANDOFF: "vertical
+   timeline, 2px dashed #D8C39A left rule, colored dots, entry text +
+   Silkscreen day stamp"). Dot colour rotates through the 7 guild accent
+   groups by entry index (board/avatarAccent.ts's ACCENT_GROUPS) —
+   presentational variety, not data, same convention as the party
+   avatars' accent rotation. */
+.card-drawer__quest-log {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border-left: 2px dashed var(--qb-line-dashed);
+}
+
+.card-drawer__quest-log-entry {
+  position: relative;
+  padding: 0 0 0.75rem 1rem;
+}
+
+.card-drawer__quest-log-dot {
+  position: absolute;
+  left: -5px;
+  top: 0.3rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: var(--qb-radius-circle);
+}
+
+.card-drawer__quest-log-entry--forest .card-drawer__quest-log-dot {
+  background: var(--qb-accent-forest-fill);
+}
+.card-drawer__quest-log-entry--amber .card-drawer__quest-log-dot {
+  background: var(--qb-accent-amber-fill);
+}
+.card-drawer__quest-log-entry--sky .card-drawer__quest-log-dot {
+  background: var(--qb-accent-sky-fill);
+}
+.card-drawer__quest-log-entry--orange .card-drawer__quest-log-dot {
+  background: var(--qb-accent-orange-fill);
+}
+.card-drawer__quest-log-entry--rose .card-drawer__quest-log-dot {
+  background: var(--qb-accent-rose-fill);
+}
+.card-drawer__quest-log-entry--umber .card-drawer__quest-log-dot {
+  background: var(--qb-accent-umber-fill);
+}
+.card-drawer__quest-log-entry--taupe .card-drawer__quest-log-dot {
+  background: var(--qb-accent-taupe-fill);
+}
+
+.card-drawer__quest-log-text {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--qb-ink-700);
+}
+
+.card-drawer__quest-log-stamp {
+  display: block;
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  color: var(--qb-ink-400);
+  margin-top: 0.15rem;
+}
+
+/* Segmented Quest | Scroll (MD) tab bar (HANDOFF: "segmented, in a
+   #EDE0C2 track, border-radius:14px, padding:5px"). */
+.card-drawer__viewtoggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+  padding: 5px;
+  background: var(--qb-tab-track);
+  border-radius: 14px;
+}
+
+/* Role B — "T1 gold underline" tabs (CHOSEN button system, task-12). */
+.card-drawer__viewtoggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  border-radius: 5px 5px 2px 2px;
+  border: 0;
+  border-bottom: 2px solid var(--qb-tab-underline);
+  background: transparent;
+  color: var(--qb-tab-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    color var(--qb-motion-hover) ease;
+}
+
+.card-drawer__viewtoggle button:hover {
+  background: var(--qb-tab-hover-bg);
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+}
+
+/* Active tab — mapped to the existing selected-tab marker. */
+.card-drawer__viewtoggle button[aria-pressed="true"] {
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+  background: var(--qb-tab-active-bg);
+}
+
+/* Tiny Silkscreen "MD" tag on the Scroll tab (HANDOFF: "#7A8B45 bg,
+   white"). --qb-success-fill is the exact HANDOFF hex for this tag. */
+.card-drawer__md-badge {
+  font-family: var(--qb-font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--qb-radius-chip-sm);
+  background: var(--qb-success-fill);
+  color: var(--legacy-color-fff);
+}
+
+/* Mutation controls (Chunk 6). */
+/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, replacing
+   the plain square swatch, so it matches the button family it sits next
+   to in the card drawer. */
+.priority-select {
+  font-size: 0.75rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-3);
+  padding: 0.15rem 0.4rem;
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-700);
+}
+
+.priority-select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+  background: var(--qb-btn-face-hover);
+}
+
+.threshold-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.threshold-control__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--qb-ink-400);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.threshold-control input {
+  width: 3.5rem;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: var(--legacy-radius-3px);
+  border: 1px solid var(--qb-card-border);
+  background: var(--qb-panel);
+  color: var(--qb-ink-700);
+}
+
+/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-2 wobble
+   — the Refresh button next door in the topbar keeps the default variant,
+   so the two aren't stamped from the same outline. */
+.threshold-control button {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-2);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.threshold-control button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.threshold-control button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.threshold-control button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+.card-drawer__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px dashed var(--qb-line-dashed);
+}
+
+.status-menu {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Role A (CHOSEN button system, task-12). */
+.status-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+/* WF-046 item 1: this menu is the one place where up to four Role-A
+   buttons sit as direct siblings — `:nth-of-type` cycles the wobble
+   variants across them (park/unpark, block/unblock, done, abandon) so
+   the row doesn't read as four copies of the same stamp. The base rule
+   above already carries the default variant for the first button. */
+.status-menu button:nth-of-type(2) {
+  border-radius: var(--qb-btn-wobble-3);
+}
+
+.status-menu button:nth-of-type(3) {
+  border-radius: var(--qb-btn-wobble-4);
+}
+
+.status-menu button:nth-of-type(4) {
+  border-radius: var(--qb-btn-wobble-2);
+}
+
+/* WF-046 item 4: park/block/abandon/done pair a small glyph with their
+   cuter guild-flavoured label (StatusMenu.tsx) — Unpark/Unblock keep
+   their plain text, they're the toggle-back state, not one of the four
+   themed verbs. */
+.status-menu button svg {
+  flex: 0 0 auto;
+}
+
+.status-menu button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.status-menu button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.status-menu button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+.claim-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* WF-046 item 3: Role-A hand-inked border + wobble silhouette. */
+.claim-control select {
+  font-size: 0.75rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-4);
+  padding: 0.15rem 0.3rem;
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-700);
+}
+
+.claim-control select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+  background: var(--qb-btn-face-hover);
+}
+
+/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-3 wobble
+   so Assign/Unassign don't share an outline with the select right next
+   to it. */
+.claim-control button {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-3);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.claim-control button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.claim-control button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.claim-control button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+.claim-control__holder {
+  font-size: 0.75rem;
+  color: var(--qb-ink-500);
+}
+
+.claim-control__holder--stale {
+  color: var(--qb-ink-300);
+  font-style: italic;
+}
+
+.link-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, shared by
+   both selects in this component (parent + add-dependency); the
+   add-dependency one gets its own variant below so the two don't match. */
+.link-editor select {
+  font: inherit;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  padding: 0.1rem 0.3rem;
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-700);
+}
+
+.link-editor select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+  background: var(--qb-btn-face-hover);
+}
+
+.link-editor__field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.link-editor__deps {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.link-editor__deps select {
+  border-radius: var(--qb-btn-wobble-2);
+}
+
+.link-editor__deps-label {
+  color: var(--qb-ink-400);
+}
+
+.link-editor__deps-list {
+  list-style: none;
+  display: flex;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.link-editor__deps-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--qb-locked-chip-bg);
+  color: var(--qb-locked-chip-text);
+  border-radius: var(--qb-radius-pill);
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* WF-046 item 2 — the remove ✕ used to carry the full Role-A button face
+   (opaque cream fill + ink wobble border), which read as a bolt-on
+   control stapled to the chip rather than part of the label. Now a small
+   round glyph (well under the 38px `.card-drawer__close` circle) whose
+   own fill is the CHIP'S accent colour bled through at low alpha via
+   color-mix — no separate swatch — so it reads as part of the pill. */
+.link-editor__deps-list button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-weight: 700;
+  font-size: 0.65rem;
+  line-height: 1;
+  border: none;
+  border-radius: var(--qb-radius-circle);
+  background: color-mix(in srgb, var(--qb-locked-chip-text) 16%, transparent);
+  color: var(--qb-locked-chip-text);
+  cursor: pointer;
+  transition: background-color var(--qb-motion-hover) ease;
+}
+
+.link-editor__deps-list button:hover {
+  background: color-mix(in srgb, var(--qb-locked-chip-text) 30%, transparent);
+}
+
+.link-editor__deps-list button:active {
+  background: color-mix(in srgb, var(--qb-locked-chip-text) 44%, transparent);
+}
+
+/* Party overlay (WF-029 chunk 6, HANDOFF §Party page) — backdrop/
+   stopPropagation convention shared with .drawer-overlay/.card-drawer. */
+.party-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--legacy-overlay-1b1f24-40);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.party-sheet {
+  position: relative;
+  width: min(50rem, 90vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--qb-party-panel-bg);
+  color: var(--qb-party-text);
+  border-radius: var(--qb-radius-modal);
+  padding: 26px 28px;
+  box-shadow: var(--qb-shadow-modal);
+}
+
+/* Round close button (HANDOFF's card-detail close: 38px circle, filled bg,
+   2px border — adapted here to the dark sheet's own tokens rather than the
+   light parchment #F3EAD6/#D8C39A pair the card-detail modal uses). Border
+   colour unified to the guild ink hex (--qb-btn-ink is #6B4F34, a near
+   match for the prior --qb-party-border #6E4A32) and given the same
+   light-recess hover as the other round close button, for cohesion with
+   the role-A button system (task-12) — stays circular, no wobble, dark
+   sheet background/text untouched. */
+.party-sheet__close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--qb-radius-circle);
+  border: 2px solid var(--qb-btn-ink);
+  background: var(--qb-party-row-bg);
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--qb-party-text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.party-sheet__close:hover {
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.party-sheet__header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.party-sheet__title {
+  margin: 0;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--qb-party-text);
+}
+
+.party-sheet__count {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-party-text-muted);
+}
+
+.party-sheet__helper {
+  margin: 0.4rem 0 1.25rem;
+  color: var(--qb-party-text-muted);
+  font-family: var(--qb-font-body);
+  font-size: 0.9rem;
+}
+
+.party-sheet__grid {
+  display: grid;
+  /* min(340px, 100%) — a hard 340px minimum overflows the sheet on phones
+     narrower than the column; capping at 100% lets hero cards shrink to a
+     single full-width column instead of pushing a horizontal scroll. */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: 16px;
+}
+
+/* Hero card (HANDOFF: light card floating inside the dark sheet). */
+.hero-card {
+  background: var(--qb-hero-card-bg);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: var(--qb-shadow-hero) var(--qb-hero-card-shadow-color);
+}
+
+.hero-card__name {
+  margin-top: 0.5rem;
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--qb-hero-name);
+}
+
+.hero-card__class {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  color: var(--qb-hero-class);
+  margin-bottom: 0.5rem;
+}
+
+/* WF-031: the hero's branch, sitting under the class line — reuses the
+   branch chip's own slate-blue tone so the same "which branch" signal
+   reads consistently between the board tiles and the Party. */
+.hero-card__branch {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-branch-chip-text);
+  margin-bottom: 0.5rem;
+}
+
+/* Exhaustion bar — replaces the old inverse `mana` bar and the separate
+   WF-042 ctx% line with one meter that fills UP as context is spent (0%
+   fresh, 100% spent), the percentage surfaced right on its label row. */
+.hero-card__exhaustion {
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__exhaustion-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-hero-class);
+  margin-bottom: 0.2rem;
+}
+
+.hero-card__exhaustion-bar {
+  height: 11px;
+  border-radius: var(--legacy-radius-999px);
+  background: var(--qb-hero-track);
+  overflow: hidden;
+}
+
+.hero-card__exhaustion-fill {
+  height: 100%;
+}
+
+.hero-card__exhaustion-fill--low {
+  background: var(--qb-exhaustion-low);
+}
+
+.hero-card__exhaustion-fill--high {
+  background: var(--qb-exhaustion-high);
+}
+
+/* WF-042: the hero's PR, `PR #N · review_state` — plain text when there's
+   no `pr.url` to link to, an underlined chip-toned link when there is. */
+.hero-card__pr {
+  font-size: 0.7rem;
+  color: var(--qb-branch-chip-text);
+  margin-bottom: 0.5rem;
+}
+
+.hero-card__pr-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.hero-card__quest {
+  border-top: 1px dashed var(--qb-hero-track);
+  padding-top: 0.5rem;
+}
+
+.hero-card__quest-label {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+  color: var(--qb-hero-class);
+}
+
+.hero-card__quest-title {
+  font-size: 0.85rem;
+  color: var(--qb-hero-name);
+}
+
+/* Static, non-interactive summon slot (Decisions) — a dashed empty tile,
+   no invented party-size limit. */
+.hero-card--summon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  background: transparent;
+  border: 2px dashed var(--qb-party-border);
+  box-shadow: none;
+  color: var(--qb-party-text-muted);
+  font-family: var(--qb-font-body);
+  font-size: 0.95rem;
+}
+
+/* Party column (WF-029 chunk 4) — dark panel at the board scroll-row's
+   tail (HANDOFF §Board). */
+.party-column {
+  flex: 0 0 288px;
+  display: flex;
+  flex-direction: column;
+  background: var(--qb-party-panel-bg);
+  border-radius: var(--legacy-radius-6px);
+  max-height: 100%;
+  overflow-y: auto;
+  color: var(--qb-party-text);
+}
+
+.party-column__header {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--qb-party-border);
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+
+.party-column__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.party-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-party-row-bg);
+}
+
+/* Dimmed hollow-ring ghost row for a stale session — the avatar's own dot
+   (below) additionally swaps to a hollow ring. */
+.party-row--stale {
+  opacity: 0.55;
+}
+
+.party-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.party-row__name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--qb-party-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.party-row__class {
+  font-size: 0.7rem;
+  color: var(--qb-party-text-muted);
+}
+
+/* WF-031: the session's branch, sitting under the class line. The dark
+   panel here (unlike the light hero-card) reuses the row's own muted
+   text tone rather than the branch chip's slate-blue, which would lose
+   contrast against `--qb-party-row-bg`. */
+.party-row__branch {
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-party-text-muted);
+}
+
+/* Exhaustion bar (compact row) — same fill-up-with-usage meter as the hero
+   card's, replacing the old inverse `mana` bar + the separate WF-042 ctx%
+   line. */
+.party-row__exhaustion {
+  margin-top: 0.15rem;
+}
+
+.party-row__exhaustion-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--qb-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-party-text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.party-row__exhaustion-bar {
+  height: 6px;
+  border-radius: var(--legacy-radius-999px);
+  background: var(--qb-party-border);
+  overflow: hidden;
+}
+
+.party-row__exhaustion-fill {
+  height: 100%;
+}
+
+.party-row__exhaustion-fill--low {
+  background: var(--qb-exhaustion-low);
+}
+
+.party-row__exhaustion-fill--high {
+  background: var(--qb-exhaustion-high);
+}
+
+/* WF-042: the session's PR, `PR #N · review_state` — plain text when
+   there's no `pr.url` to link to, an underlined link when there is. */
+.party-row__pr {
+  font-size: 0.65rem;
+  color: var(--qb-party-text-muted);
+}
+
+.party-row__pr-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.party-row__quest {
+  font-size: 0.65rem;
+  color: var(--qb-party-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Party avatar (WF-029 chunk 4) — shared by PartyColumn and PartyOverlay
+   (chunk 6). Accent fill is a deterministic presentational hash rotation
+   across the 7 guild accent groups (board/avatarAccent.ts), not data. */
+.party-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: var(--qb-radius-circle);
+  color: var(--legacy-color-fff);
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+}
+
+.party-avatar--forest {
+  background: var(--qb-accent-forest-fill);
+}
+
+.party-avatar--amber {
+  background: var(--qb-accent-amber-fill);
+}
+
+.party-avatar--sky {
+  background: var(--qb-accent-sky-fill);
+}
+
+.party-avatar--orange {
+  background: var(--qb-accent-orange-fill);
+}
+
+.party-avatar--rose {
+  background: var(--qb-accent-rose-fill);
+}
+
+.party-avatar--umber {
+  background: var(--qb-accent-umber-fill);
+}
+
+.party-avatar--taupe {
+  background: var(--qb-accent-taupe-fill);
+}
+
+.party-avatar__initial {
+  pointer-events: none;
+}
+
+/* Live/stale status dot, corner-anchored (HANDOFF: "live green dot
+   bottom-right that pulses"). The pulse keyframe (qb-pulse) is declared in
+   chunk 8 and shared by both this dot and the overlay's — referencing it
+   here ahead of its declaration is valid CSS (an animation naming an
+   undefined keyframe is simply inert until the keyframe exists). */
+.party-avatar__dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: var(--qb-radius-circle);
+  background: var(--legacy-color-16a34a);
+}
+
+.party-avatar__dot--stale {
+  background: transparent;
+  border: 1.5px solid var(--qb-party-text-muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .party-avatar__dot:not(.party-avatar__dot--stale) {
+    animation: qb-pulse var(--qb-motion-pulse) ease-in-out infinite;
+  }
+
+  /* WF-029 chunk 8 — shared by both live dots: PartyColumn's row avatars
+     and PartyOverlay's hero-card avatars both render a PartyAvatar, so
+     this single keyframe backs the animation reference declared above
+     (chunk 4) for both surfaces. */
+  @keyframes qb-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(0.8);
+      opacity: 0.4;
+    }
+  }
+}
+
+/* Quest holding page (WF-032) — App.tsx renders this INSTEAD OF <Board/>
+   when the selected repo has no board.db yet (`has_board:false`) but
+   census sees live agents there. A centred parchment panel with a dashed
+   border — the same "on hold" read as the Parked/Archive lanes (muted
+   parchment + dashed edge) rather than an error/danger treatment, since
+   nothing here is actually wrong. */
+.unbegun-holding {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 2rem 1rem;
+}
+
+.unbegun-holding__panel {
+  max-width: 32rem;
+  text-align: center;
+  padding: 2rem 2.25rem;
+  background: var(--qb-panel);
+  border: 2px dashed var(--qb-line-dashed);
+  border-radius: var(--qb-radius-panel);
+  box-shadow: var(--qb-shadow-modal);
+}
+
+.unbegun-holding__glyph {
+  margin: 0 0 0.5rem;
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.unbegun-holding__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: clamp(18px, 3vw, 22px);
+  color: var(--qb-ink-900);
+}
+
+/* The repo name reads as emphasis via colour, not italics — `em` is used
+   for its semantic "this is the subject" meaning, not its default slant,
+   which would clash with the unbegun *option*'s own italic (faded) use of
+   font-style above. */
+.unbegun-holding__title em {
+  font-style: normal;
+  color: var(--qb-accent-sky-fill);
+}
+
+.unbegun-holding__body {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--qb-ink-700);
+}
+
+.unbegun-holding__body:last-child {
+  margin-bottom: 0;
+}
+
+.unbegun-holding__command {
+  font-family: var(--qb-font-mono);
+  font-size: 0.85rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-900);
+  word-break: break-word;
+}
+
+/* ==========================================================================
+   Mobile layout layer (≤720px) — "the guild ledger, one page at a time".
+   On a phone the corkboard becomes a ledger you leaf through: each lane is a
+   near-full-width parchment page with scroll-snap, a sliver of the next
+   pennant peeking in from the right as the "there's more" affordance. All
+   rules here are overrides of base rules above — this block sits LAST in
+   the file so equal-specificity overrides win the cascade. Desktop (>720px)
+   is untouched by everything below.
+   ========================================================================== */
+@media (max-width: 720px) {
+  /* --- Top bar: crest row, then a wrapping chip shelf ------------------- */
+  .topbar {
+    padding: 12px 14px 10px;
+    gap: 0.4rem 0.5rem;
+  }
+
+  /* The identity takes the full first row; every control below it wraps
+     into a chip shelf instead of stranding off-screen right. */
+  .topbar__identity {
+    flex-basis: 100%;
+  }
+
+  .topbar__crest {
+    width: 38px;
+    height: 38px;
+  }
+
+  /* The default-threshold control gets its own "scribe's line" under the
+     crest, same as the old ctx+threshold row it replaced (WF-042). */
+  .topbar__threshold {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    row-gap: 0.3rem;
+  }
+
+  /* No right edge to hug once the bar is a wrapping shelf. */
+  .topbar__refresh {
+    margin-left: 0;
+  }
+
+  /* --- Board: lane-pager with scroll-snap ------------------------------- */
+  .board-region {
+    padding: 0.75rem 0.75rem 1rem;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.75rem;
+  }
+
+  /* A lane is a ledger page: ~84vw leaves the next lane's pennant peeking
+     in as the swipe affordance; capped so small tablets don't get comically
+     wide pages. */
+  .lane {
+    flex-basis: min(84vw, 340px);
+    scroll-snap-align: start;
+  }
+
+  /* Empty lanes stay thin vertical spines — and are NOT snap stops, so
+     swiping never pins the viewport to a 44px strip. */
+  .lane--empty {
+    flex-basis: 44px;
+    scroll-snap-align: none;
+  }
+
+  .lane--parked {
+    margin-left: 0.5rem;
+  }
+
+  .party-column {
+    flex-basis: min(84vw, 340px);
+    scroll-snap-align: start;
+  }
+
+  /* --- Drag-mismatch toast: full-width strip, not an off-screen pin ----- */
+  .board-toast {
+    left: 0.75rem;
+    right: 0.75rem;
+    justify-content: space-between;
+  }
+
+  /* --- Card detail: full-width parchment sheet -------------------------- */
+  .card-drawer {
+    width: 100%;
+    border-left: none;
+    padding: 20px 18px 30px;
+  }
+
+  /* Clear the floating ✕ so the banner row never runs under it. */
+  .card-drawer__header {
+    padding-right: 2.75rem;
+  }
+
+  .card-drawer__title {
+    font-size: 24px;
+  }
+
+  .card-drawer__section-text,
+  .md-view {
+    font-size: 17px;
+  }
+
+  /* --- Party overlay: near-full sheet, still visibly floating ----------- */
+  .party-sheet {
+    width: calc(100% - 1.25rem);
+    max-height: calc(100% - 1.25rem);
+    padding: 22px 18px;
+  }
+
+  .party-sheet__title {
+    font-size: 24px;
+  }
+}
+
+/* ==========================================================================
+   Touch-target layer (coarse pointers, any width) — fingers get bigger
+   targets without changing the mouse/desktop experience. Sizing only; no
+   colour or layout re-theming.
+   ========================================================================== */
+@media (pointer: coarse) {
+  /* The drag handle is the touch user's way to move a card — grow its hit
+     area to ~44px, pulling it back into the tile's own padding with
+     negative margins so the visual card doesn't balloon. `touch-action:
+     none` (base rule) plus the TouchSensor's long-press activation means
+     press-and-hold here drags; swiping anywhere else scrolls. */
+  .card-tile__handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    margin: -8px 0 -8px -10px;
+    font-size: 1rem;
+  }
+
+  /* Primary tappables meet ~44px. */
+  .topbar__refresh,
+  .topbar__fleet-pill,
+  .topbar__archive-toggle,
+  .topbar__repo-select select,
+  .topbar__branch-select select,
+  .threshold-control button,
+  .status-menu button,
+  .claim-control button,
+  .card-drawer__viewtoggle button {
+    min-height: 44px;
+  }
+
+  .card-drawer__close,
+  .party-sheet__close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .topbar__archive-toggle input {
+    width: 18px;
+    height: 18px;
+  }
+
+  .link-editor__deps-list button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .epic-card__expand {
+    min-height: 32px;
+  }
+
+  /* 16px minimum stops iOS Safari's auto-zoom on focused form fields —
+     which would otherwise leave the page zoomed-in mid-board. */
+  .threshold-control input,
+  .priority-select,
+  .claim-control select,
+  .link-editor select,
+  .link-editor input {
+    font-size: 16px;
+    min-height: 38px;
+  }
+}

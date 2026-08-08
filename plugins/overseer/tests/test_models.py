@@ -1,0 +1,631 @@
+import pytest
+
+from scripts.models import (
+    Card,
+    CardParseError,
+    append_to_section,
+    format_tokens,
+    parse_tokens,
+    split_frontmatter,
+)
+
+
+class TestTokens:
+    @pytest.mark.parametrize("raw, expected", [
+        pytest.param(400000, 400000, id="plain-int"),
+        pytest.param("400k", 400_000, id="k-suffix"),
+        pytest.param("2.1M", 2_100_000, id="decimal-m-suffix"),
+        pytest.param(None, None, id="none"),
+    ])
+    def test_parse(self, raw, expected):
+        assert parse_tokens(raw) == expected
+
+    def test_parse_garbage_raises(self):
+        with pytest.raises(CardParseError):
+            parse_tokens("lots")
+
+    @pytest.mark.parametrize("value, expected", [
+        pytest.param(310_000, "310k", id="k"),
+        pytest.param(2_100_000, "2.1M", id="m"),
+        pytest.param(950, "950", id="small"),
+        pytest.param(None, None, id="none"),
+    ])
+    def test_format(self, value, expected):
+        assert format_tokens(value) == expected
+
+    def test_round_trip(self):
+        for raw in ("150k", "2.1M", "999"):
+            assert format_tokens(parse_tokens(raw)) == raw
+
+
+class TestSplitFrontmatter:
+    def test_splits_meta_and_body(self):
+        meta, body = split_frontmatter("---\nid: WF-001\n---\n\n## Goal\nHi\n")
+        assert meta == {"id": "WF-001"}
+        assert body.strip() == "## Goal\nHi"
+
+    @pytest.mark.parametrize("text", [
+        pytest.param("## Goal\nno frontmatter here\n", id="missing-frontmatter"),
+        pytest.param("---\n{ not: valid: yaml\n---\nbody\n", id="invalid-yaml"),
+        pytest.param("---\n- just\n- a list\n---\nbody\n", id="non-mapping"),
+    ])
+    def test_raises(self, text):
+        with pytest.raises(CardParseError):
+            split_frontmatter(text)
+
+
+SAMPLE_CARD = """---
+id: WF-012
+jira: PROJ-142
+title: Fix auth redirect loop on SSO logout
+status: in-flight
+stage: impl-review
+complexity: M
+sprint: 2026-07-S1
+branch: fix/PROJ-142-auth-redirect-loop
+worktree: ../pip-skills-wt/PROJ-142
+budget:
+  estimate: 400k
+  actual: 310k
+created: 2026-07-08
+updated: 2026-07-08T14:32
+blocked_on: null
+---
+
+## Goal
+Stop the redirect loop.
+
+## Plan
+1. Reproduce.
+
+## Decisions
+
+## Review log
+
+## Progress log
+
+## Verification
+"""
+
+
+class TestCardParse:
+    def test_parses_all_fields(self):
+        card = Card.from_text(SAMPLE_CARD)
+        assert card.id == "WF-012"
+        assert card.jira == "PROJ-142"
+        assert card.title == "Fix auth redirect loop on SSO logout"
+        assert card.status == "in-flight"
+        assert card.stage == "impl-review"
+        assert card.complexity == "M"
+        assert card.sprint == "2026-07-S1"
+        assert card.branch == "fix/PROJ-142-auth-redirect-loop"
+        assert card.worktree == "../pip-skills-wt/PROJ-142"
+        assert card.budget_estimate == 400_000
+        assert card.budget_actual == 310_000
+        assert card.created == "2026-07-08"
+        assert card.updated == "2026-07-08T14:32"
+        assert card.blocked_on is None
+        assert card.body.startswith("## Goal")
+
+    def test_minimal_card(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.stage is None
+        assert card.budget_estimate is None
+        assert card.budget_actual == 0
+
+    @pytest.mark.parametrize("text, match", [
+        pytest.param(
+            "---\nid: WF-001\nstatus: planned\n---\nbody\n", "title",
+            id="missing-required-field",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: doing\n---\nbody\n", "status",
+            id="bad-status",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: in-flight\nstage: coding\n---\nbody\n",
+            "stage", id="bad-stage",
+        ),
+        pytest.param(
+            "---\nid: W-1\ntitle: T\nstatus: planned\nbudget: TBD\n---\nx", "budget",
+            id="non-mapping-budget",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\npriority: P5\n---\nbody\n",
+            "priority", id="bad-priority",
+        ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\norder: notanumber\n---\nbody\n",
+            "order", id="bad-order",
+        ),
+    ])
+    def test_from_text_raises(self, text, match):
+        with pytest.raises(CardParseError, match=match):
+            Card.from_text(text)
+
+    def test_round_trip_is_lossless(self):
+        card = Card.from_text(SAMPLE_CARD)
+        again = Card.from_text(card.to_text())
+        assert again == card
+
+    def test_checklist_less_card_stays_byte_stable(self):
+        """Cards without checklist frontmatter must not gain a `checklist:` key
+        on re-serialization — existing card files stay byte-stable."""
+        card = Card.from_text(SAMPLE_CARD)
+        assert "checklist" not in card.to_text()
+
+    def test_repo_less_card_stays_byte_stable(self):
+        """Cards without a `repo:` label must not gain one on re-serialization
+        — existing card files stay byte-stable."""
+        card = Card.from_text(SAMPLE_CARD)
+        assert "repo" not in card.to_text()
+
+    def test_unclaimed_card_stays_byte_stable(self):
+        """An unclaimed card must not gain any of the four claim keys on
+        re-serialization (design spec §3, checklist/repo precedent)."""
+        card = Card.from_text(SAMPLE_CARD)
+        text = card.to_text()
+        assert "claimed_by" not in text
+        assert "claimed_at" not in text
+        assert "claim_acked" not in text
+        assert "claim_nudged" not in text
+
+    def test_to_text_formats_budget_as_strings(self):
+        card = Card.from_text(SAMPLE_CARD)
+        assert "estimate: 400k" in card.to_text()
+        assert "actual: 310k" in card.to_text()
+
+
+NOW = "2026-07-08T15:00"
+
+
+def make_card() -> Card:
+    return Card.from_text(SAMPLE_CARD)
+
+
+class TestAppendToSection:
+    def test_appends_inside_section(self):
+        body = "## Progress log\n- old line\n\n## Verification\nevidence"
+        out = append_to_section(body, "## Progress log", "- new line")
+        assert out.index("- new line") < out.index("## Verification")
+        assert out.index("- old line") < out.index("- new line")
+
+    def test_appends_to_last_section(self):
+        out = append_to_section("## Progress log\n- old", "## Progress log", "- new")
+        assert out.endswith("- new")
+
+    def test_missing_section_is_created(self):
+        out = append_to_section("## Goal\nhi", "## Progress log", "- new")
+        assert "## Progress log\n- new" in out
+
+
+class TestMutations:
+    def test_set_stage(self):
+        card = make_card()
+        card.set_stage("verification", NOW)
+        assert (card.status, card.stage, card.updated) == ("in-flight", "verification", NOW)
+
+    def test_set_bad_stage_raises(self):
+        with pytest.raises(CardParseError):
+            make_card().set_stage("coding", NOW)
+
+    def test_set_stage_clears_stale_blocked_on(self):
+        card = make_card()
+        card.block("user: q", NOW)
+        card.set_stage("verification", NOW)
+        assert card.blocked_on is None
+
+    def test_block_preserves_stage(self):
+        card = make_card()
+        card.block("user: scope question", NOW)
+        assert card.status == "blocked"
+        assert card.blocked_on == "user: scope question"
+        assert card.stage == "impl-review"
+
+    def test_unblock_returns_to_in_flight(self):
+        card = make_card()
+        card.block("user: q", NOW)
+        card.unblock(NOW)
+        assert card.status == "in-flight"
+        assert card.blocked_on is None
+
+    def test_unblock_without_stage_returns_to_planned(self):
+        card = Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\n---\nx")
+        card.block("card: WF-011", NOW)
+        card.unblock(NOW)
+        assert card.status == "planned"
+
+    def test_complete_clears_stage(self):
+        card = make_card()
+        card.complete(NOW)
+        assert (card.status, card.stage) == ("done", None)
+
+    def test_abandon(self):
+        card = make_card()
+        card.abandon(NOW)
+        assert card.status == "abandoned"
+
+    def test_log_progress_adds_tokens_and_line(self):
+        card = make_card()
+        card.log_progress("impl agent: steps 1-3 done", 120_000, NOW)
+        assert card.budget_actual == 430_000
+        assert f"- {NOW} — impl agent: steps 1-3 done (~120k tokens)" in card.body
+
+    def test_log_review_rounds_auto_increment(self):
+        card = make_card()
+        card.log_review("impl-review", 2, "found wanting — 2 findings", NOW)
+        card.log_review("impl-review", 2, "approved", NOW)
+        assert card.review_rounds("impl-review") == 2
+        assert "### impl-review — round 2 (2 reviewers)\nVerdict: approved" in card.body
+
+    def test_tripwire(self):
+        card = make_card()
+        assert card.tripwire_breached is False
+        card.log_progress("big burn", 490_000, NOW)  # 310k + 490k = 800k >= 2*400k
+        assert card.tripwire_breached is True
+
+    def test_tripwire_without_estimate_never_fires(self):
+        card = Card.from_text("---\nid: W-1\ntitle: T\nstatus: planned\n---\nx")
+        card.log_progress("work", 10_000_000, NOW)
+        assert card.tripwire_breached is False
+
+
+class TestLinearAndPrFields:
+    def test_linear_round_trip(self):
+        card = Card.from_text(
+            "---\nid: ENG-42\nlinear: ENG-42\ntitle: T\nstatus: planned\n---\nx"
+        )
+        assert card.linear == "ENG-42"
+        assert Card.from_text(card.to_text()) == card
+        assert "linear: ENG-42" in card.to_text()
+
+    def test_pr_round_trip(self):
+        card = Card.from_text(SAMPLE_CARD)
+        card.pr = "https://github.com/ppryde/pip-skills/pull/22"
+        again = Card.from_text(card.to_text())
+        assert again.pr == card.pr
+
+    def test_both_default_none(self):
+        card = Card.from_text(SAMPLE_CARD)
+        assert card.linear is None
+        assert card.pr is None
+
+
+class TestTouches:
+    def test_touches_round_trip(self):
+        from scripts.models import Card
+        card = Card(
+            id="WF-001", title="T", status="planned",
+            created="2026-07-09", updated="2026-07-09T10:00",
+            touches=["src/auth/", "src/models.py"], body="## Goal\nx",
+        )
+        parsed = Card.from_text(card.to_text())
+        assert parsed.touches == ["src/auth/", "src/models.py"]
+
+    def test_touches_absent_defaults_empty(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-002\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).touches == []
+
+    def test_touches_scalar_not_exploded_to_characters(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-003\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n"
+            "touches: src/a.py\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).touches == ["src/a.py"]
+
+
+class TestRelationsFields:
+    def _card_text(self, extra=""):
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{extra}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_parent_and_depends_parsed(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("parent: WF-010\ndepends_on:\n- WF-002\n- WF-003\n"))
+        assert c.parent == "WF-010"
+        assert c.depends_on == ["WF-002", "WF-003"]
+
+    def test_depends_scalar_coerced_to_list(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("depends_on: WF-002\n"))
+        assert c.depends_on == ["WF-002"]
+
+    def test_defaults_when_absent(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text())
+        assert c.parent is None and c.depends_on == []
+
+    def test_round_trip_preserves_relations(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text("parent: WF-010\ndepends_on:\n- WF-002\n"))
+        c2 = Card.from_text(c.to_text())
+        assert c2.parent == "WF-010" and c2.depends_on == ["WF-002"]
+
+    def test_parked_status_accepted(self):
+        from scripts.models import Card
+        c = Card.from_text(self._card_text().replace("status: planned", "status: parked"))
+        assert c.status == "parked"
+
+
+class TestParkUnpark:
+    def _card(self, **kw):
+        from scripts.models import Card
+        base = dict(id="WF-001", title="T", status="in-flight", stage="implementation")
+        base.update(kw)
+        return Card(**base)  # type: ignore[arg-type]
+
+    def test_park_sets_status_preserves_stage(self):
+        c = self._card(branch="feat/x", worktree="wt/WF-001")
+        c.park("2026-07-11T10:00")
+        assert c.status == "parked"
+        assert c.stage == "implementation" and c.branch == "feat/x" and c.worktree == "wt/WF-001"
+        assert c.updated == "2026-07-11T10:00"
+
+    def test_unpark_with_stage_returns_in_flight(self):
+        c = self._card(status="parked")
+        c.unpark("2026-07-11T11:00")
+        assert c.status == "in-flight"
+
+    def test_unpark_without_stage_returns_planned(self):
+        c = self._card(status="parked", stage=None)
+        c.unpark("2026-07-11T11:00")
+        assert c.status == "planned"
+
+
+class TestOrderAndPriority:
+    def test_order_defaults_to_zero(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.order == 0
+
+    def test_priority_defaults_to_none(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.priority is None
+
+    def test_order_and_priority_round_trip(self):
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\n"
+            "order: 5\npriority: P1\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        assert card.order == 5
+        assert card.priority == "P1"
+        again = Card.from_text(card.to_text())
+        assert again.order == 5
+        assert again.priority == "P1"
+
+    def test_order_zero_round_trip(self):
+        """Ensure order 0 (move to top) is preserved and not lost."""
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\norder: 3\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        card.order = 0
+        again = Card.from_text(card.to_text())
+        assert again.order == 0
+
+
+class TestChecklist:
+    def _card_text(self, checklist_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{checklist_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_checklist_parses_and_round_trips(self):
+        text = self._card_text(
+            "checklist:\n"
+            "  - {task: '7', subject: write tests, status: in_progress}\n"
+            "  - {task: '8', subject: implement, status: pending}\n"
+        )
+        card = Card.from_text(text)
+        assert card.checklist == [
+            {"task": "7", "subject": "write tests", "status": "in_progress"},
+            {"task": "8", "subject": "implement", "status": "pending"},
+        ]
+        assert "checklist:" in card.to_text()  # survives re-serialization
+        again = Card.from_text(card.to_text())
+        assert again.checklist == card.checklist
+
+    def test_checklist_absent_defaults_empty(self):
+        card = Card.from_text(self._card_text())
+        assert card.checklist == []
+        assert "checklist:" not in card.to_text()
+
+    def test_checklist_non_list_becomes_empty(self):
+        card = Card.from_text(self._card_text("checklist: not-a-list\n"))
+        assert card.checklist == []
+
+    def test_checklist_non_dict_entries_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "checklist:\n"
+                "  - 'not a mapping'\n"
+                "  - {task: '1', subject: real entry, status: pending}\n"
+            )
+        )
+        assert card.checklist == [
+            {"task": "1", "subject": "real entry", "status": "pending"},
+        ]
+
+    def test_checklist_entries_missing_keys_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "checklist:\n"
+                "  - {task: '1', subject: missing status}\n"
+                "  - {task: '2', status: pending}\n"
+                "  - {subject: missing task, status: pending}\n"
+                "  - {task: '3', subject: complete entry, status: done}\n"
+            )
+        )
+        assert card.checklist == [
+            {"task": "3", "subject": "complete entry", "status": "done"},
+        ]
+
+    def test_checklist_status_values_pass_through_verbatim(self):
+        card = Card.from_text(
+            self._card_text(
+                "checklist:\n"
+                "  - {task: '1', subject: whatever, status: some-weird-status}\n"
+            )
+        )
+        assert card.checklist == [
+            {"task": "1", "subject": "whatever", "status": "some-weird-status"},
+        ]
+
+    def test_checklist_empty_omitted_from_serialized_text(self):
+        card = Card(id="WF-001", title="T", status="planned", body="## Goal\nx")
+        assert "checklist" not in card.to_text()
+
+    def test_checklist_non_empty_round_trips_via_dataclass(self):
+        card = Card(
+            id="WF-001", title="T", status="planned", body="## Goal\nx",
+            checklist=[{"task": "1", "subject": "s", "status": "pending"}],
+        )
+        again = Card.from_text(card.to_text())
+        assert again.checklist == card.checklist
+
+
+class TestRepo:
+    def _card_text(self, repo_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{repo_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_repo_parses_and_round_trips(self):
+        card = Card.from_text(self._card_text("repo: pip-skills\n"))
+        assert card.repo == "pip-skills"
+        assert "repo: pip-skills" in card.to_text()  # survives re-serialization
+        again = Card.from_text(card.to_text())
+        assert again.repo == card.repo
+
+    def test_repo_absent_defaults_none(self):
+        card = Card.from_text(self._card_text())
+        assert card.repo is None
+        assert "repo:" not in card.to_text()
+
+    def test_repo_non_str_becomes_none(self):
+        card = Card.from_text(self._card_text("repo: 42\n"))
+        assert card.repo is None
+
+    def test_repo_empty_omitted_from_serialized_text(self):
+        card = Card(id="WF-001", title="T", status="planned", body="## Goal\nx")
+        assert "repo" not in card.to_text()
+
+    def test_repo_round_trips_via_dataclass(self):
+        card = Card(
+            id="WF-001", title="T", status="planned", body="## Goal\nx",
+            repo="pip-skills",
+        )
+        again = Card.from_text(card.to_text())
+        assert again.repo == card.repo
+
+
+class TestClaimFields:
+    def _card_text(self, claim_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{claim_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_claim_fields_parse_and_round_trip(self):
+        card = Card.from_text(self._card_text(
+            "claimed_by: sess-abc\n"
+            "claimed_at: '2026-07-13T10:00'\n"
+            "claim_acked: true\n"
+            "claim_nudged: false\n"
+        ))
+        assert card.claimed_by == "sess-abc"
+        assert card.claimed_at == "2026-07-13T10:00"
+        assert card.claim_acked is True
+        assert card.claim_nudged is False
+        text = card.to_text()
+        assert "claimed_by: sess-abc" in text
+        again = Card.from_text(text)
+        assert again == card
+
+    def test_claim_fields_absent_default_unclaimed(self):
+        card = Card.from_text(self._card_text())
+        assert card.claimed_by is None
+        assert card.claimed_at is None
+        assert card.claim_acked is False
+        assert card.claim_nudged is False
+
+    def test_claim_acked_and_nudged_omitted_while_unclaimed(self):
+        """Even a stray `claim_acked`/`claim_nudged` with no `claimed_by`
+        (hand-edited or corrupt) must not survive re-serialization — the
+        group only appears once `claimed_by` is set."""
+        card = Card.from_text(self._card_text("claim_acked: true\n"))
+        assert "claim_acked" not in card.to_text()
+
+    def test_claim_by_non_str_becomes_none(self):
+        card = Card.from_text(self._card_text("claimed_by: 42\n"))
+        assert card.claimed_by is None
+
+
+class TestClaimMethods:
+    def _card(self, **overrides: object) -> Card:
+        fields = dict(id="WF-001", title="T", status="in-flight", updated="2026-07-13T09:00")
+        fields.update(overrides)
+        return Card(**fields)  # type: ignore[arg-type]
+
+    def test_claim_stamps_all_fields_and_resets_acked_nudged(self):
+        card = self._card(claim_acked=True, claim_nudged=True)
+        card.claim("sess-1", "2026-07-13T10:00")
+        assert card.claimed_by == "sess-1"
+        assert card.claimed_at == "2026-07-13T10:00"
+        assert card.claim_acked is False
+        assert card.claim_nudged is False
+        assert card.updated == "2026-07-13T10:00"
+
+    def test_claim_does_not_touch_status_or_stage(self):
+        card = self._card(status="planned", stage=None)
+        card.claim("sess-1", "2026-07-13T10:00")
+        assert card.status == "planned"
+        assert card.stage is None
+
+    def test_unclaim_clears_all_four_fields(self):
+        card = self._card(
+            claimed_by="sess-1", claimed_at="2026-07-13T10:00",
+            claim_acked=True, claim_nudged=True,
+        )
+        card.unclaim("2026-07-13T11:00")
+        assert card.claimed_by is None
+        assert card.claimed_at is None
+        assert card.claim_acked is False
+        assert card.claim_nudged is False
+        assert card.updated == "2026-07-13T11:00"
+
+    def test_ack_claim_noop_when_unclaimed(self):
+        card = self._card()
+        card.ack_claim()
+        assert card.claim_acked is False
+
+    def test_ack_claim_sets_true_when_claimed(self):
+        card = self._card(claimed_by="sess-1")
+        card.ack_claim()
+        assert card.claim_acked is True
