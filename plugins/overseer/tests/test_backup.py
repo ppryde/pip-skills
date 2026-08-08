@@ -220,3 +220,119 @@ def test_restore_corrupt_cards_is_loud(tmp_path, monkeypatch):
     (config.backup_dir(repo) / "cards.json").write_text("{ not json")
     with pytest.raises(ValueError, match="cards.json"):
         backup.restore_board(repo)
+
+
+def test_restore_stamps_real_ledger_timestamp(tmp_path, monkeypatch):
+    """Regression: rebuild_index used to be called with manifest.get("created", "")
+    — a key backup_board never writes — leaving ledger.md's `Updated:` line
+    blank after every restore. restore_board must stamp a real current
+    timestamp in cli._now()'s "%Y-%m-%dT%H:%M" format instead."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    backup.backup_board(repo)
+    shutil.rmtree(central)
+    backup.restore_board(repo)
+    from scripts.store import state_root
+    ledger = (state_root(repo) / "ledger.md").read_text()
+    first_line = ledger.splitlines()[1]
+    assert first_line.startswith("Updated: ")
+    stamp = first_line.removeprefix("Updated: ")
+    assert stamp != ""
+    # must parse as a real "%Y-%m-%dT%H:%M" timestamp, not a blank/garbage string
+    from datetime import datetime
+    datetime.strptime(stamp, "%Y-%m-%dT%H:%M")
+
+
+def test_restore_replaces_when_backup_is_newer(tmp_path, monkeypatch):
+    """Inverse of the LMW roundtrip test: when the LIVE card is older than
+    the backup's copy, restore must replace it with the backup version and
+    count it under "updated"."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    backup.backup_board(repo)  # captures WF-001 updated="2026-08-01T00:00:00"
+    conn = db.connect(repo)
+    from scripts.models import Card
+    db.save_card(conn, Card(id="WF-001", title="Stale local edit", status="in-flight",
+                             updated="2026-07-01T00:00:00"))  # older than the backup
+    res = backup.restore_board(repo)
+    conn = db.connect(repo)
+    card = db.load_card(conn, "WF-001")
+    assert card.title == "First"  # backup's newer copy wins
+    assert card.updated == "2026-08-01T00:00:00"
+    assert res["updated"] == 1
+
+
+def test_restore_fill_gaps_leaves_existing_files_untouched(tmp_path, monkeypatch):
+    """Partial loss: sprints/ survives locally (with local edits since the
+    backup), usage.jsonl and knowledge/ are gone. Restore must leave the
+    surviving file byte-for-byte untouched (files_skipped) and only fill in
+    what's actually missing (files_restored)."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch, with_knowledge=True)
+    backup.backup_board(repo)
+
+    local_content = "---\nid: sprint-1\nstatus: LOCAL-EDIT\n---\n"
+    (central / "sprints" / "sprint-1.md").write_text(local_content)
+    (central / "usage.jsonl").unlink()
+    shutil.rmtree(central / "knowledge")
+
+    res = backup.restore_board(repo)
+
+    assert (central / "sprints" / "sprint-1.md").read_text() == local_content
+    assert (central / "usage.jsonl").exists()
+    assert (central / "knowledge" / "KB-001-x.md").exists()
+    assert res["files_skipped"] == 1
+    assert res["files_restored"] == 2
+
+
+def test_restore_merges_meta_excluding_identity_keys(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    conn = db.connect(repo)
+    db.set_meta(conn, "some_key", "v")
+    conn.commit()
+    backup.backup_board(repo)
+
+    # tamper: inject an identity key into the backup's meta.json to prove
+    # restore refuses to apply it even when present in the snapshot
+    meta_path = config.backup_dir(repo) / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta.append({"key": "repo_root", "value": "/tainted/from/backup"})
+    meta_path.write_text(json.dumps(meta))
+
+    shutil.rmtree(central)
+    backup.restore_board(repo)
+    conn = db.connect(repo)
+    assert db.get_meta(conn, "some_key") == "v"          # non-identity key restored
+    assert db.get_meta(conn, "repo_root") != "/tainted/from/backup"  # identity key not taken from backup
+
+
+def test_restore_preserves_archived_flag(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    conn = db.connect(repo)
+    from scripts.models import Card
+    db.archive_card(conn, Card(id="WF-002", title="Done card", status="done",
+                                updated="2026-08-02T00:00:00"))
+    backup.backup_board(repo)
+    shutil.rmtree(central)
+    backup.restore_board(repo)
+    conn = db.connect(repo)
+    archived = db.load_archived_cards(conn)
+    assert any(c.id == "WF-002" for c in archived)
+
+
+def test_restore_refuses_corrupt_manifest(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch); backup.backup_board(repo)
+    (config.backup_dir(repo) / "manifest.json").write_text("{ not json")
+    with pytest.raises(ValueError, match="manifest.json"):
+        backup.restore_board(repo)
+
+
+def test_restore_refuses_corrupt_meta(tmp_path, monkeypatch):
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch); backup.backup_board(repo)
+    (config.backup_dir(repo) / "meta.json").write_text("{ not json")
+    with pytest.raises(ValueError, match="meta.json"):
+        backup.restore_board(repo)

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from scripts import config, db
@@ -106,6 +107,17 @@ def _iso_gt(a: str, b: str) -> bool:
     return (a or "") > (b or "")   # ISO-8601 UTC strings sort lexically
 
 
+def _load_json_or_raise(path: Path):
+    """``json.loads`` a backup file's contents, naming the file in the
+    raised ``ValueError`` instead of letting a raw ``JSONDecodeError``
+    escape — a corrupt manifest/cards/meta file must fail loudly and
+    identifiably, matching ``cards.json``'s existing guard."""
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path}: corrupt JSON: {exc}") from exc
+
+
 def restore_board(repo_root: Path, src: Path | None = None) -> dict:
     """Merge a backup snapshot back into the repo's central folder.
 
@@ -120,15 +132,12 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
     src = src or config.backup_dir(repo_root)
     if not src.is_dir() or not (src / "cards.json").exists():
         raise ValueError(f"no backup found at {src}")
-    manifest = json.loads((src / "manifest.json").read_text())
+    manifest = _load_json_or_raise(src / "manifest.json")
     if manifest.get("schema_version") != db.SCHEMA_VERSION:
         raise ValueError(
             f"backup schema {manifest.get('schema_version')} != current "
             f"{db.SCHEMA_VERSION}; refusing to restore")
-    try:
-        rows = json.loads((src / "cards.json").read_text())
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{src / 'cards.json'}: corrupt JSON: {exc}") from exc
+    rows = _load_json_or_raise(src / "cards.json")
 
     central = config.central_root(repo_root)
     central.mkdir(parents=True, exist_ok=True)
@@ -153,7 +162,7 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
     # meta merge (skip identity keys)
     meta_path = src / "meta.json"
     if meta_path.exists():
-        for m in json.loads(meta_path.read_text()):
+        for m in _load_json_or_raise(meta_path):
             if m["key"] in IDENTITY_META_KEYS:
                 continue
             db.set_meta(conn, m["key"], m["value"])
@@ -183,6 +192,6 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
                 shutil.copy2(s, target)
                 files_restored += 1
 
-    rebuild_index(repo_root, repo_root.resolve().name, manifest.get("created", ""))
+    rebuild_index(repo_root, repo_root.resolve().name, datetime.now().strftime("%Y-%m-%dT%H:%M"))
     return {"inserted": inserted, "updated": updated, "skipped_older": skipped,
             "files_restored": files_restored, "files_skipped": files_skipped}
