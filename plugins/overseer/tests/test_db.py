@@ -2,8 +2,22 @@ from __future__ import annotations
 import pytest
 from scripts import db
 from scripts.models import Card
-from scripts.store import init_workflow, save_card as file_save_card
+from scripts.store import save_card as file_save_card, workflow_root
 from tests.factories import git_init
+
+
+def _seed_legacy_workflow(repo_root):
+    """Create the legacy on-disk ``.workflow/cards`` and
+    ``.workflow/archive/cards`` directories directly (NOT via
+    ``init_workflow``, which resolves through ``state_root`` — the CENTRAL
+    folder under this suite's autouse env pinning, not ``.workflow/``).
+    ``migrate_from_workflow`` sources legacy card markdown from
+    ``.workflow/`` on disk, so tests exercising that import must seed cards
+    there, not in the central folder."""
+    root = workflow_root(repo_root)
+    (root / "cards").mkdir(parents=True, exist_ok=True)
+    (root / "archive" / "cards").mkdir(parents=True, exist_ok=True)
+    return root
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
@@ -17,6 +31,7 @@ def test_board_db_path_honours_env(repo, monkeypatch):
 def test_board_db_path_falls_back_to_config_dir(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.delenv(db.DB_ENV, raising=False)
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     p = db.board_db_path(tmp_path)
     # rooted under <config>/overseer/<repo-label>/board.db
@@ -188,7 +203,7 @@ def test_reclaim_empty_live_set_frees_all(repo):
 def test_migrate_imports_live_and_archived(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
-    root = init_workflow(tmp_path)
+    root = _seed_legacy_workflow(tmp_path)
     file_save_card(root, Card(id="WF-001", title="live one", status="in-flight"))
     # archived card written straight into archive/cards
     (root / "archive" / "cards" / "WF-002-done.md").write_text(
@@ -202,7 +217,7 @@ def test_migrate_imports_live_and_archived(tmp_path, monkeypatch):
 def test_migrate_is_idempotent(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
-    root = init_workflow(tmp_path)
+    root = _seed_legacy_workflow(tmp_path)
     file_save_card(root, Card(id="WF-001", title="one", status="planned"))
     db.connect(tmp_path, migrate=True).close()
     conn = db.connect(tmp_path, migrate=True)  # second connect re-imports?
@@ -262,7 +277,7 @@ class TestRepoRootMeta:
 def test_migrate_is_atomic_on_failure(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
-    root = init_workflow(tmp_path)
+    root = _seed_legacy_workflow(tmp_path)
     file_save_card(root, Card(id="WF-001", title="one", status="planned"))
     file_save_card(root, Card(id="WF-002", title="two", status="planned"))
     conn = db.connect(tmp_path, migrate=False)  # no import yet
@@ -285,7 +300,9 @@ def test_migrate_is_atomic_on_failure(tmp_path, monkeypatch):
 def test_import_reads_from_derived_main_root_not_connecting_root(tmp_path, monkeypatch):
     """Guards against permanent card loss (Fix 1): `board_db_path` keys one
     shared board.db per MAIN repo, but the one-time import used to read
-    straight from `state_root(repo_root)` — the raw connecting root. If a
+    straight from `state_root(repo_root)` (and even after resolving to the
+    main root, from the CENTRAL folder rather than `.workflow/` on disk) —
+    not the raw connecting root, and not the wrong on-disk tree. If a
     worktree (with no `.workflow/` of its own) happened to be the FIRST
     caller to connect, the import would read the worktree's empty tree,
     import 0 cards, and permanently stamp migrated_from_workflow=1 —
@@ -294,8 +311,9 @@ def test_import_reads_from_derived_main_root_not_connecting_root(tmp_path, monke
     `derive_repo_root` is stubbed here (rather than using a real `git
     worktree`) to isolate the exact behaviour under test: the import must
     resolve its source from the DB's OWN repo identity
-    (`derive_repo_root(repo_root)`), not from whichever root happens to
-    make the first connection.
+    (`derive_repo_root(repo_root)`) and from `.workflow/` on disk (via
+    `workflow_root`), not from whichever root happens to make the first
+    connection, and not from the central folder.
     """
     main_root = tmp_path / "main"
     connecting_root = tmp_path / "not-the-main-root"
@@ -303,7 +321,7 @@ def test_import_reads_from_derived_main_root_not_connecting_root(tmp_path, monke
     connecting_root.mkdir()
     git_init(main_root)
 
-    wf_root = init_workflow(main_root)
+    wf_root = _seed_legacy_workflow(main_root)
     file_save_card(wf_root, Card(id="WF-001", title="one", status="planned"))
 
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "shared-board.db"))
@@ -314,3 +332,66 @@ def test_import_reads_from_derived_main_root_not_connecting_root(tmp_path, monke
 
     assert [c.id for c in cards] == ["WF-001"]
     assert db.get_meta(conn, "migrated_from_workflow") == "1"
+
+
+def test_connect_imports_cards_and_migrates_workflow_files_together(tmp_path, monkeypatch):
+    """`connect()` runs BOTH one-time migrations behind their own meta guards:
+    `_maybe_import` (cards -> DB, guarded by `migrated_from_workflow`) and
+    `migrate_workflow_to_central` (remaining .workflow/ files -> central,
+    guarded by `workflow_fs_imported`). Seeds a live card, an archived card,
+    and a non-card file (sprints/) in the legacy `.workflow/` tree, then
+    asserts a single `connect()` call lands the cards in the DB (live +
+    archived) AND copies the sprint file to the central folder. A second
+    `connect()` must be a no-op for both: no double import, no re-copy, both
+    guards stay set at "1"."""
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = _seed_legacy_workflow(tmp_path)
+    file_save_card(root, Card(id="WF-001", title="live one", status="in-flight"))
+    (root / "archive" / "cards" / "WF-002-done.md").write_text(
+        Card(id="WF-002", title="done one", status="done").to_text()
+    )
+    (root / "sprints").mkdir(parents=True)
+    (root / "sprints" / "sprint-1.md").write_text("---\nid: sprint-1\n---\n")
+
+    conn = db.connect(tmp_path)  # migrate=True (default) — first connect
+    assert db.load_card(conn, "WF-001").title == "live one"
+    assert [c.id for c in db.load_archived_cards(conn)] == ["WF-002"]
+    assert db.get_meta(conn, "migrated_from_workflow") == "1"
+    assert db.get_meta(conn, "workflow_fs_imported") == "1"
+
+    from scripts.config import central_root
+    central = central_root(tmp_path)
+    assert (central / "sprints" / "sprint-1.md").exists()
+
+    # Second connect: no-op for both migrations — no double import, guards stay set.
+    (central / "sprints" / "sprint-1.md").write_text("LOCAL EDIT\n")
+    conn2 = db.connect(tmp_path)
+    assert conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 2
+    assert db.get_meta(conn2, "migrated_from_workflow") == "1"
+    assert db.get_meta(conn2, "workflow_fs_imported") == "1"
+    assert (central / "sprints" / "sprint-1.md").read_text() == "LOCAL EDIT\n"
+
+
+def test_connect_warns_on_repo_root_meta_mismatch(tmp_path, monkeypatch, capsys):
+    """I2 identity guard: a board.db that already records a DIFFERENT canonical
+    root than the one connecting now (a residual basename collision) prints a
+    loud one-line warning to stderr. Behaviour is otherwise unchanged — the
+    stamped repo_root is NOT overwritten (set-if-absent)."""
+    dir_a = tmp_path / "a"; dir_a.mkdir(); git_init(dir_a)
+    dir_b = tmp_path / "b"; dir_b.mkdir(); git_init(dir_b)
+    shared_db = tmp_path / "shared.db"
+    monkeypatch.setenv(db.DB_ENV, str(shared_db))
+
+    conn_a = db.connect(dir_a, migrate=False)  # stamps repo_root = dir_a
+    from scripts.store import derive_repo_root
+    assert db.get_meta(conn_a, "repo_root") == str(derive_repo_root(dir_a))
+    capsys.readouterr()  # drain
+
+    conn_b = db.connect(dir_b, migrate=False)  # different root → warn
+    err = capsys.readouterr().err
+    assert "warning:" in err
+    assert str(derive_repo_root(dir_a)) in err  # created-for root
+    assert str(derive_repo_root(dir_b)) in err  # now-connected-from root
+    # set-if-absent preserved: original owner NOT overwritten
+    assert db.get_meta(conn_b, "repo_root") == str(derive_repo_root(dir_a))

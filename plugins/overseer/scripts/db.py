@@ -7,15 +7,15 @@ import json
 import os
 import re as _re
 import sqlite3
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from scripts.models import Card, CardParseError
-from scripts.store import derive_repo_label, derive_repo_root, slugify
+from scripts.store import derive_repo_root
 
 SCHEMA_VERSION = 1
 DB_ENV = "OVERSEER_DB"
-CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _ID_RE = _re.compile(r"\AWF-(\d+)\Z")
 
 _SCHEMA = """
@@ -59,17 +59,12 @@ CREATE INDEX IF NOT EXISTS idx_cards_claim ON cards(claimed_by);
 """
 
 
-def _config_dir() -> Path:
-    override = os.environ.get(CONFIG_DIR_ENV)
-    return Path(override) if override else Path.home() / ".claude"
-
-
 def board_db_path(repo_root: Path) -> Path:
     override = os.environ.get(DB_ENV)
     if override:
         return Path(override)
-    label = derive_repo_label(repo_root) or slugify(repo_root.resolve().name) or "repo"
-    return _config_dir() / "overseer" / label / "board.db"
+    from scripts.config import central_root
+    return central_root(repo_root) / "board.db"
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -106,29 +101,55 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     # value (stable identity even if this repo_root is ever unreachable on a
     # later connect), and only writes when `derive_repo_root` succeeds — a
     # no-op, no extra commit, on every connect that isn't the very first one.
-    if get_meta(conn, "repo_root") is None:
+    existing_root = get_meta(conn, "repo_root")
+    if existing_root is None:
         root = derive_repo_root(repo_root)
         if root is not None:
             set_meta(conn, "repo_root", str(root))
             conn.commit()
+    else:
+        # Identity guard (finding I2): a board that already names a DIFFERENT
+        # canonical root than the one connecting now means two repos are
+        # sharing one board.db (a residual basename collision). Surface it
+        # loudly on stderr; behaviour is otherwise unchanged (set-if-absent).
+        this_root = derive_repo_root(repo_root)
+        if this_root is not None and str(this_root) != existing_root:
+            print(
+                f"warning: overseer board at {path} was created for "
+                f"{existing_root}; now connected from {this_root}",
+                file=sys.stderr,
+            )
     if migrate:
         _maybe_import(conn, repo_root)  # defined in Task 6; no-op stub until then
+    if migrate and get_meta(conn, "workflow_fs_imported") is None:
+        from scripts.store import migrate_workflow_to_central
+        migrate_workflow_to_central(repo_root)
+        set_meta(conn, "workflow_fs_imported", "1")
+        conn.commit()
     return conn
 
 
 def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
     """Import live and archived cards from .workflow/ directory tree.
 
-    Reads live cards from <state_root>/cards/*.md (archived=0) and
-    archived cards from <state_root>/archive/cards/*.md (archived=1).
+    Reads live cards from <repo>/.workflow/cards/*.md (archived=0) and
+    archived cards from <repo>/.workflow/archive/cards/*.md (archived=1).
     Skips CardParseError. Sets meta migrated_from_workflow=1.
+
+    Sources from ``.workflow/`` (via ``workflow_root``) — the legacy,
+    pre-central-storage on-disk location — NOT ``state_root``. Since Task 1,
+    ``state_root`` resolves to the CENTRAL folder, which is empty on a
+    legacy upgrade; reading from it here would import zero cards and then
+    permanently stamp ``migrated_from_workflow=1``, stranding every legacy
+    card forever. ``.workflow/`` is where legacy card markdown actually
+    lives on disk, regardless of where the central folder points.
 
     The source root is the DB's OWN repo identity — ``derive_repo_root(repo_root)``
     (falling back to ``repo_root`` itself when derivation fails, e.g. no git) —
     not the raw connecting ``repo_root``. ``board_db_path`` keys one shared
     board.db per MAIN repo, but a worktree can be the FIRST caller to connect
     (and thus the first to trigger this one-time import). Reading straight
-    from ``state_root(repo_root)`` in that case finds the worktree's own
+    from ``workflow_root(repo_root)`` in that case finds the worktree's own
     (typically empty) `.workflow/`, imports 0 cards, and permanently stamps
     ``migrated_from_workflow=1`` — stranding the main repo's cards forever
     since the import never retries. Resolving to the main root first makes
@@ -145,9 +166,9 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
 
     Returns count of successfully imported cards.
     """
-    from scripts.store import state_root  # local import: avoid cycle
+    from scripts.store import workflow_root  # local import: avoid cycle
     source_root = derive_repo_root(repo_root) or repo_root
-    root = state_root(source_root)
+    root = workflow_root(source_root)
     imported = 0
     live_dir = root / "cards"
     arch_dir = root / "archive" / "cards"

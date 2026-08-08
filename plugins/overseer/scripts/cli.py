@@ -20,7 +20,7 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import db, liveness  # noqa: E402
+from scripts import config, db, liveness  # noqa: E402
 from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
@@ -223,10 +223,86 @@ def _load(repo_root: Path, card_id: str) -> Card:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    """`overseer init [--central PATH] [--backup-dir PATH] [--yes]` —
+    bootstraps the `.workflow/` state tree (as before) and, new
+    here, writes the repo's `.overseer/` config pair:
+
+    - `.overseer/config.json` (`backup_dir`) — committed, shared default.
+    - `.overseer/config.local.json` (`central_dir`) — gitignored, per-machine
+      (mirrors `config.py`'s local-wins precedence).
+
+    Both files, and the `.gitignore` line for the local one, are written at
+    the repo's CANONICAL main root (`repo_config_dir`'s resolution, via
+    `derive_repo_root`) — even when `init` is run from a linked worktree.
+    This must agree with where `prepush-snapshot.sh`'s opt-in gate looks for
+    `config.json`: writing config at the canonical root but gitignoring at
+    the worktree (or vice versa) leaves opt-in incoherent between worktrees.
+
+    `--central`/`--backup-dir` skip the corresponding prompt; with neither
+    flag AND no TTY (e.g. under pytest, or a script), the resolved default
+    is accepted silently. `--yes` forces the default even on a TTY.
+    """
+    from scripts import config as cfg
+
+    base = cfg.repo_config_dir(args.root)  # canonical main root's `.overseer/`
+    base.mkdir(parents=True, exist_ok=True)
+
+    default_central = str(cfg.central_root(args.root))
+    default_backup_dir = ".overseer/backups"
+    non_interactive = args.yes or not sys.stdin.isatty()
+    central = args.central or (
+        default_central if non_interactive
+        else input(f"Central folder [{default_central}]: ") or default_central
+    )
+    backup_dir_value = args.backup_dir or (
+        default_backup_dir if non_interactive
+        else input(f"Backup dir [{default_backup_dir}]: ") or default_backup_dir
+    )
+
+    (base / "config.json").write_text(
+        json.dumps({"backup_dir": backup_dir_value}, indent=2))
+    (base / "config.local.json").write_text(
+        json.dumps({"central_dir": central}, indent=2))
+
+    # `base.parent` is the same canonical root `base` itself was resolved
+    # against — never a linked worktree's own root — so the gitignore line
+    # lands next to the config files it's ignoring one of.
+    gitignore = base.parent / ".gitignore"
+    line = ".overseer/config.local.json"
+    text = gitignore.read_text() if gitignore.exists() else ""
+    if line not in text.split("\n"):
+        gitignore.write_text(text + ("" if not text or text.endswith("\n") else "\n") + line + "\n")
+
     init_workflow(args.root)
     _conn(args.root)  # creates + one-time-imports the board.db
     rebuild_index(args.root, args.root.resolve().name, _now())
-    print(f"initialised {state_root(args.root)}")
+
+    print(f"initialised {state_root(args.root)} "
+          f"(central={central} backup_dir={backup_dir_value})")
+    return 0
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    from scripts import backup, config
+    if getattr(args, "print_dir", False):
+        dest = Path(args.dir) if args.dir else config.backup_dir(args.root)
+        print(str(dest.resolve()))
+        return 0
+    dest = Path(args.dir) if args.dir else None
+    stats = backup.backup_board(args.root, dest)
+    print(f"backed up {stats['cards']} cards, {stats['sprint_files']} sprints, "
+          f"{stats['fact_files']} facts, {stats['usage_lines']} usage lines "
+          f"-> {stats['dest']}")
+    return 0
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    from scripts import backup
+    src = Path(args.dir) if args.dir else None
+    stats = backup.restore_board(args.root, src)
+    print(f"restored: {stats['inserted']} inserted, {stats['updated']} updated, "
+          f"{stats['skipped_older']} skipped-older, {stats['files_restored']} files, "
+          f"{stats['files_skipped']} files-present")
     return 0
 
 
@@ -894,6 +970,13 @@ def cmd_log_review(args: argparse.Namespace) -> int:
 
 
 def cmd_new_sprint(args: argparse.Namespace) -> int:
+    # Ensure the one-time `.workflow/` -> central migration guard has run
+    # before this verb creates/touches central state directly (bypassing
+    # `_load`/`_sync`'s usual `_conn` call). On an upgraded repo, this verb
+    # running FIRST would otherwise write straight into an unmigrated
+    # central folder and collide with legacy `.workflow/sprints/` data that
+    # `db.connect`'s migration would have imported.
+    _conn(args.root)
     sprint = Sprint(
         id=args.sprint_id,
         status="planned",
@@ -1019,7 +1102,7 @@ def cmd_repos(args: argparse.Namespace) -> int:
     moved since the board was written). Output is a JSON list of
     `{"label": ..., "root": ...}`, sorted by label.
     """
-    config_dir = db._config_dir()
+    config_dir = config._config_dir()
     overseer_dir = config_dir / "overseer"
     results: list[dict[str, str]] = []
     if overseer_dir.is_dir():
@@ -1034,7 +1117,11 @@ def cmd_repos(args: argparse.Namespace) -> int:
                 continue
             if not Path(root_str).exists():
                 continue
-            results.append({"label": label_dir.name, "root": root_str})
+            # Display label comes from the repo root, never the folder name —
+            # the default folder is now `<label>-<hash>` (see
+            # config.central_root), so `label_dir.name` would leak the hash.
+            label = derive_repo_label(Path(root_str)) or Path(root_str).name
+            results.append({"label": label, "root": root_str})
     results.sort(key=lambda r: r["label"])
     if args.json:
         print(json.dumps(results))
@@ -1090,6 +1177,11 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_log_usage(args: argparse.Namespace) -> int:
+    # Same migration-ordering guard as `cmd_new_sprint` — this verb appends
+    # straight to central's `usage.jsonl` without going through `_load`/
+    # `_sync`, so it must trigger the one-time `.workflow/` import itself
+    # before it can run first on an upgraded repo.
+    _conn(args.root)
     entry = {
         "ts": _now(),
         "card": args.card_id,
@@ -1158,6 +1250,10 @@ def cmd_calibration(args: argparse.Namespace) -> int:
 
 
 def cmd_add_fact(args: argparse.Namespace) -> int:
+    # Same migration-ordering guard as `cmd_new_sprint`/`cmd_log_usage` —
+    # `ensure_kb` creates central's `knowledge/` tree directly, so it must
+    # not run ahead of the one-time `.workflow/` import on an upgraded repo.
+    _conn(args.root)
     kb = knowledge_root(args.root)
     ensure_kb(kb)
     tags = [t.strip() for t in (args.tags or "").split(",") if t.strip()]
@@ -1241,7 +1337,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init").set_defaults(func=cmd_init)
+    p = sub.add_parser("init")
+    p.add_argument("--central", help="central state folder (default: derived)")
+    p.add_argument("--backup-dir", help="repo-relative or absolute backup dir")
+    p.add_argument("--yes", action="store_true",
+                    help="accept defaults non-interactively")
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("new-card")
     p.add_argument("--title", required=True)
@@ -1430,6 +1531,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_facts)
 
+    p = sub.add_parser("backup")
+    p.add_argument("--dir", help="override the computed backup destination")
+    p.add_argument("--print-dir", action="store_true", dest="print_dir",
+                    help="print the resolved backup dir and exit without backing up")
+    p.set_defaults(func=cmd_backup)
+
+    p = sub.add_parser("restore")
+    p.add_argument("--dir", help="override the computed backup source")
+    p.set_defaults(func=cmd_restore)
+
     return parser
 
 
@@ -1442,7 +1553,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result: int = args.func(args)
         return result
-    except (CardParseError, FactParseError, FileNotFoundError) as exc:
+    except (CardParseError, FactParseError, FileNotFoundError, ValueError) as exc:
+        # ValueError covers backup.restore_board's designed refusals (no
+        # backup found, schema mismatch, corrupt manifest/cards/meta JSON,
+        # unknown card column) and config.load_config's malformed-JSON
+        # guard — every verb reads config via state_root/central_root, so
+        # a broken config.json would otherwise traceback on any command.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     finally:
