@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import db
+from scripts import cli, config, db
 from scripts.cli import main
 from scripts.store import state_root
 from tests.factories import git_init
@@ -1218,3 +1218,30 @@ class TestReposCommand:
         assert main(["--root", str(tmp_path), "repos"]) == 0
         out = capsys.readouterr().out
         assert "repo-a" in out and str(repo_a.resolve()) in out
+
+
+class TestBackupRestoreInit:
+    def test_cli_backup_then_restore(self, tmp_path, monkeypatch, capsys):
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        assert cli.main(["--root", str(repo), "new-card", "--title", "T"]) == 0
+        assert cli.main(["--root", str(repo), "backup"]) == 0
+        assert (config.backup_dir(repo) / "cards.json").exists()
+        assert cli.main(["--root", str(repo), "restore"]) == 0
+
+    def test_cli_init_writes_config(self, tmp_path, monkeypatch):
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        cli.main(["--root", str(repo), "init", "--yes",
+                  "--central", str(tmp_path / "c"), "--backup-dir", ".overseer/backups"])
+        cfg = json.loads((repo / ".overseer" / "config.json").read_text())
+        local = json.loads((repo / ".overseer" / "config.local.json").read_text())
+        assert cfg["backup_dir"] == ".overseer/backups"
+        assert local["central_dir"] == str(tmp_path / "c")
+        assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()

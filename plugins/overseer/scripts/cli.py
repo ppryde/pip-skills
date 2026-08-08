@@ -223,10 +223,71 @@ def _load(repo_root: Path, card_id: str) -> Card:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    """`overseer init [--central PATH] [--backup-dir PATH] [--install-hook]
+    [--yes]` — bootstraps the `.workflow/` state tree (as before) and, new
+    here, writes the repo's `.overseer/` config pair:
+
+    - `.overseer/config.json` (`backup_dir`) — committed, shared default.
+    - `.overseer/config.local.json` (`central_dir`) — gitignored, per-machine
+      (mirrors `config.py`'s local-wins precedence).
+
+    `--central`/`--backup-dir` skip the corresponding prompt; with neither
+    flag AND no TTY (e.g. under pytest, or a script), the resolved default
+    is accepted silently. `--yes` forces the default even on a TTY.
+    """
+    from scripts import config as cfg
+
+    base = cfg.repo_config_dir(args.root)
+    base.mkdir(parents=True, exist_ok=True)
+
+    default_central = str(cfg.central_root(args.root))
+    non_interactive = args.yes or not sys.stdin.isatty()
+    central = args.central or (
+        default_central if non_interactive
+        else input(f"Central folder [{default_central}]: ") or default_central
+    )
+    backup_dir_value = args.backup_dir or ".overseer/backups"
+
+    (base / "config.json").write_text(
+        json.dumps({"backup_dir": backup_dir_value}, indent=2))
+    (base / "config.local.json").write_text(
+        json.dumps({"central_dir": central}, indent=2))
+
+    gitignore = args.root / ".gitignore"
+    line = ".overseer/config.local.json"
+    text = gitignore.read_text() if gitignore.exists() else ""
+    if line not in text.split("\n"):
+        gitignore.write_text(text + ("" if not text or text.endswith("\n") else "\n") + line + "\n")
+
     init_workflow(args.root)
     _conn(args.root)  # creates + one-time-imports the board.db
     rebuild_index(args.root, args.root.resolve().name, _now())
-    print(f"initialised {state_root(args.root)}")
+
+    if getattr(args, "install_hook", False) and callable(globals().get("_install_prepush_hook")):
+        _install_prepush_hook(args.root)  # Task 6
+
+    print(f"initialised {state_root(args.root)} "
+          f"(central={central} backup_dir={backup_dir_value})")
+    return 0
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    from scripts import backup
+    dest = Path(args.dir) if args.dir else None
+    stats = backup.backup_board(args.root, dest)
+    print(f"backed up {stats['cards']} cards, {stats['sprint_files']} sprints, "
+          f"{stats['fact_files']} facts, {stats['usage_lines']} usage lines "
+          f"-> {stats['dest']}")
+    return 0
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    from scripts import backup
+    src = Path(args.dir) if args.dir else None
+    stats = backup.restore_board(args.root, src)
+    print(f"restored: {stats['inserted']} inserted, {stats['updated']} updated, "
+          f"{stats['skipped_older']} skipped-older, {stats['files_restored']} files, "
+          f"{stats['files_skipped']} files-present")
     return 0
 
 
@@ -1241,7 +1302,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init").set_defaults(func=cmd_init)
+    p = sub.add_parser("init")
+    p.add_argument("--central", help="central state folder (default: derived)")
+    p.add_argument("--backup-dir", help="repo-relative or absolute backup dir")
+    p.add_argument("--install-hook", action="store_true",
+                    help="install the pre-push backup hook (Task 6)")
+    p.add_argument("--yes", action="store_true",
+                    help="accept defaults non-interactively")
+    p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("new-card")
     p.add_argument("--title", required=True)
@@ -1429,6 +1497,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stale", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_facts)
+
+    p = sub.add_parser("backup")
+    p.add_argument("--dir", help="override the computed backup destination")
+    p.set_defaults(func=cmd_backup)
+
+    p = sub.add_parser("restore")
+    p.add_argument("--dir", help="override the computed backup source")
+    p.set_defaults(func=cmd_restore)
 
     return parser
 
