@@ -222,6 +222,29 @@ def _load(repo_root: Path, card_id: str) -> Card:
     return card
 
 
+def _install_prepush_hook(repo_root: Path) -> Path:
+    """Install `.git/hooks/pre-push` chaining to the plugin's
+    `hooks/pre-push.sh`, which snapshots the board before every push
+    (see that script for the re-entrant guard). Resolves the hooks dir
+    via `git rev-parse --git-path hooks` (worktree-safe), writes a thin
+    exec wrapper, marks it executable, and returns its path.
+    """
+    import stat as _stat
+
+    hooks = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--git-path", "hooks"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    hooks_dir = (repo_root / hooks) if not Path(hooks).is_absolute() else Path(hooks)
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    target = hooks_dir / "pre-push"
+    script = Path(__file__).resolve().parent.parent / "hooks" / "pre-push.sh"
+    body = f'#!/usr/bin/env bash\nexec "{script}" "$@"\n'
+    target.write_text(body)
+    target.chmod(target.stat().st_mode | _stat.S_IXUSR | _stat.S_IXGRP)
+    return target
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """`overseer init [--central PATH] [--backup-dir PATH] [--install-hook]
     [--yes]` — bootstraps the `.workflow/` state tree (as before) and, new

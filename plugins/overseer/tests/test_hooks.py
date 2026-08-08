@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import db
+from scripts import cli, db
 from scripts.cli import main
 from scripts.models import Card
 
@@ -484,6 +484,21 @@ class TestClaimPromptHook:
         _stdin(monkeypatch, {"cwd": str(tmp_path), "session_id": "sess-1"})
         assert main(["--root", str(tmp_path), "claim-prompt-hook"]) == 0
         assert capsys.readouterr().out == ""
+
+
+class TestInstallPrepushHook:
+    def test_install_prepush_hook_is_executable(self, tmp_path):
+        import subprocess as _subprocess
+        import os as _os
+        import stat as _stat
+        repo = tmp_path / "r"
+        repo.mkdir()
+        _subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        path = cli._install_prepush_hook(repo)
+        assert path.exists()
+        assert _os.stat(path).st_mode & _stat.S_IXUSR
+        assert "OVERSEER_PREPUSH_REENTRANT" in path.read_text() or \
+               "pre-push.sh" in path.read_text()
 
 
 class TestHookScriptSmoke:
