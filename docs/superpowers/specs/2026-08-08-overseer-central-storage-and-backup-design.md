@@ -38,8 +38,9 @@ never the live store.**
 2. Add `overseer backup` — dumps cards to JSON and copies the text state into a
    committed, diffable folder in the repo (`.overseer/backups/`).
 3. Add `overseer restore` — rebuilds the central folder from a backup.
-4. `init` prompts for the two locations and installs an opt-in pre-push hook
-   that snapshots the board and carries it with the pushed branch.
+4. `init` prompts for the two locations and, by writing `.overseer/config.json`,
+   opts the repo into the plugin's pre-push snapshot hook, which carries a
+   fresh board snapshot with the pushed branch.
 
 The live `board.db` is **never** committed. Git tracks `cards.json` (a portable
 projection of the DB) plus the already-textual sprint/usage/knowledge state.
@@ -151,7 +152,10 @@ Edge cases:
    `.overseer/config.local.json` (machine-specific absolute path).
 2. **Backup dir** — default `.overseer/backups/`. Written to
    `.overseer/config.json` (repo-level, travels with the repo).
-3. **Install pre-push hook?** — y/N. If yes, installs the hook (below).
+3. Writing `.overseer/config.json` at all is what opts the repo into the
+   pre-push snapshot gate (below) — the gate hook ships with the plugin and
+   simply checks for this file's presence, so there is no separate
+   install step.
 
 Config files:
 
@@ -175,27 +179,42 @@ the dashboard scan of the default location is unaffected.)
 
 ## Pre-push gate
 
-An opt-in git `pre-push` hook that carries a fresh board snapshot with the
-branch being pushed.
+Not a git-native `pre-push` hook. Instead, an opt-in Claude Code **PreToolUse
+hook** (matcher `Bash`) that snapshots and commits the board *before* a
+Claude-issued `git push` runs, so the push naturally carries the snapshot —
+no re-invoke, no aborting the original tool call.
 
-Behaviour: **auto snapshot-commit, then continue.**
+The hook (`plugins/overseer/hooks/prepush-snapshot.sh`) is shipped with the
+plugin and fires on every `Bash` tool call; it is a fast no-op unless the
+command is a `git push` in a repo that has opted in. Behaviour:
 
-1. Hook runs `overseer backup`.
-2. If `.overseer/backups/` is unchanged → exit 0, push proceeds normally.
-3. If changed → stage `.overseer/backups/`, create a
-   `chore(overseer): board snapshot` commit, then **re-invoke the push** for the
-   same remote/refspec and exit non-zero to abort the original invocation.
+1. Parse the tool call's `command` field from the hook JSON payload (`jq`,
+   falling back to `python3`; if neither is available, no-op). Not a `git
+   push` → exit 0 immediately.
+2. Resolve the repo root (`git rev-parse --show-toplevel`); not a git repo →
+   exit 0.
+3. **Opt-in gate:** `.overseer/config.json` must exist (written by `overseer
+   init`) → otherwise exit 0. This is the only gate; there is no separate
+   "install the hook?" prompt because the hook ships with the plugin and is
+   always present — opting in is exactly running `init`.
+4. Run `overseer backup`. If it fails for any reason, exit 0 (fail-open).
+5. If `.overseer/backups/` is unchanged → exit 0, nothing to commit.
+6. If changed → `git add .overseer/backups` and commit
+   (`chore(overseer): board snapshot`). The commit lands on the current
+   branch *before* the `git push` tool call executes, so the same push sends
+   it — no re-invoke and no second push are needed, because the hook runs
+   ahead of the push rather than after it.
 
-The re-invoke is required because git resolves the refs to push *before*
-running the hook, so a commit made inside the hook would otherwise only land on
-the *next* push. A guard environment variable
-(`OVERSEER_PREPUSH_REENTRANT=1`) is set on the re-invocation so the hook does
-not recurse. Net effect: a single `git push` sends the branch with the snapshot
-commit on top.
+The hook **always exits 0** — every failure path (missing `jq`/`python3`, no
+git repo, not opted in, backup failure, commit failure) is fail-open, and the
+hook never blocks or fails the underlying tool call. It covers pushes issued
+through Claude Code's `Bash` tool; a `git push` run outside Claude Code (a
+plain terminal, CI, another tool) is not gated by it — there is no git-native
+`pre-push` hook installed into `.git/hooks/`.
 
-The hook is a thin shell script under `plugins/overseer/hooks/`; `init`
-installs it into `.git/hooks/pre-push` (or the worktree's hooks path),
-preserving any existing hook by chaining.
+Wiring: `plugins/overseer/hooks/hooks.json` registers the script under
+`PreToolUse` with matcher `Bash`. No installation step is needed beyond
+having the plugin enabled and having run `overseer init` in the target repo.
 
 ## Structure and code
 
@@ -210,7 +229,8 @@ preserving any existing hook by chaining.
   resolution shared with `store.py`.
 - `scripts/cli.py`: add `backup`, `restore`, and interactive `init` prompts;
   wire mutation commands unchanged (no auto-dump — backup is explicit).
-- `plugins/overseer/hooks/pre-push.sh`: the gate script.
+- `plugins/overseer/hooks/prepush-snapshot.sh`: the gate script, registered
+  under `PreToolUse`/`Bash` in `plugins/overseer/hooks/hooks.json`.
 - No SQLite schema change (the `updated` column already exists and is stamped
   by every mutator).
 

@@ -6,24 +6,24 @@ description: >
   a piece of tracked work, when the user asks "what's in flight", "resume where
   we left off", "start a new card/task", "log progress", to record or recall a
   durable fact, or at the start of any session in a repo already tracked by
-  overseer (a `board.db` entry for cards, or a `.workflow/`/`scratch/workflow/`
-  state directory for sprints, usage and knowledge). The state layer beneath
-  the orchestrate skill; drive it through the overseer CLI, never by editing
-  files.
+  overseer (a `board.db` entry for cards, sprints, usage and knowledge, all
+  under the central per-repo folder). The state layer beneath the orchestrate
+  skill; drive it through the overseer CLI, never by editing files.
 ---
 
 # Overseer Ledger
 
 Manage the overseer ledger. Cards — planned, in-flight and completed work —
-live in a single per-repo SQLite `board.db`
-(`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/board.db`), shared across every
-worktree of this repo so claims are atomic; every mutation writes the card
-row first, then regenerates the `ledger.md` index view. Sprints, usage and
-the knowledge base remain file-based under the **state root**, resolved
-once: an existing `.workflow/` with content wins; otherwise, if the repo
-keeps a git-ignored `scratch/` directory, state lives in `scratch/workflow/`;
-otherwise `.workflow/`. The CLI resolves both for you. **Never edit `board.db`
-or state-root files directly**; drive everything through the CLI:
+live in a single per-repo SQLite `board.db`, alongside sprints, usage and the
+knowledge base, in one central per-repo folder
+(`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/` by default, overridable via
+`overseer init`/`OVERSEER_CENTRAL`), shared across every worktree of this
+repo so claims are atomic; every mutation writes the card row first, then
+regenerates the `ledger.md` index view. Sprints, usage and the knowledge base
+remain file-based under this **state root**. A legacy `.workflow/` tree is
+imported into the central folder once, on first connect after upgrade, then
+left in place unused. **Never edit `board.db` or state-root files
+directly**; drive everything through the CLI:
 
 ```bash
 python plugins/overseer/scripts/cli.py --root <repo-root> <command> ...
@@ -131,6 +131,23 @@ view.
   superseded — moves it to `retired/`, never deletes it.
 - `facts [--tag <t>] [--stale] [--json]` lists live facts; facts older than
   90 days show `[STALE]` and must be re-verified before they are trusted.
+
+## Backup and restore
+
+The live `board.db` and state root are never committed. `backup`/`restore`
+are the bridge to git — a diffable, mergeable snapshot in the repo.
+
+- `backup [--dir PATH]` dumps cards + meta to `cards.json`/`meta.json` and
+  copies sprints/usage/knowledge into `.overseer/backups/` (or `--dir`),
+  atomically. Run it before a merge or a push you want a safety net for.
+- `restore [--dir PATH]` rebuilds the central state root from a backup:
+  cards upsert by id with last-modified-wins, board-identity meta
+  (`repo_root`, `schema_version`) is never overwritten, and sprint/usage/
+  knowledge files are restored only where absent locally (fill-gaps, never
+  clobbers). Refuses loudly on a schema-version mismatch or corrupt JSON.
+- A repo that has run `init` gets an opt-in `PreToolUse` hook that runs
+  `backup` and commits `.overseer/backups/` before a Claude-issued `git push`
+  proceeds, so the push carries the snapshot.
 
 ## Reporting style
 
