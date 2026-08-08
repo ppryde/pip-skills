@@ -20,7 +20,7 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import db, liveness  # noqa: E402
+from scripts import config, db, liveness  # noqa: E402
 from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
@@ -1019,7 +1019,7 @@ def cmd_repos(args: argparse.Namespace) -> int:
     moved since the board was written). Output is a JSON list of
     `{"label": ..., "root": ...}`, sorted by label.
     """
-    config_dir = db._config_dir()
+    config_dir = config._config_dir()
     overseer_dir = config_dir / "overseer"
     results: list[dict[str, str]] = []
     if overseer_dir.is_dir():

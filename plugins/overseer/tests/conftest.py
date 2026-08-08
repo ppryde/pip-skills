@@ -24,16 +24,23 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     itself populates it — mirroring vigil's precedent of stripping ambient
     env in an autouse fixture so tests can never leak into real state.
 
-    OVERSEER_DB is pinned to this same ``tmp_path`` independently of
-    CLAUDE_CONFIG_DIR: several hook tests deliberately repoint
-    CLAUDE_CONFIG_DIR mid-test to exercise task-list env precedence, and
-    board.db must not follow that move — a card seeded before the repoint
-    would otherwise become unreachable to a helper reading the board after
-    it. Pinning both independently keeps each concern's isolation orthogonal
-    to the other. A test that needs a specific config dir or board path still
-    wins by calling ``monkeypatch.setenv`` itself afterwards.
+    OVERSEER_DB and OVERSEER_CENTRAL are pinned to this same ``tmp_path``
+    independently of CLAUDE_CONFIG_DIR: several hook tests deliberately
+    repoint CLAUDE_CONFIG_DIR mid-test to exercise task-list env precedence,
+    and neither the board.db nor the central state root must follow that
+    move — a card (or ``ledger.md``/checklist state) seeded before the
+    repoint would otherwise become unreachable to a helper reading the board
+    afterwards, and ``scripts.cli.cmd_checklist_sync_hook``'s
+    ``state_root(repo_root).is_dir()`` guard would see an uninitialised
+    directory and silently no-op. Pinning all three independently keeps each
+    concern's isolation orthogonal to the others. A test that needs a
+    specific config dir, board path, or central root still wins by calling
+    ``monkeypatch.setenv``/``monkeypatch.delenv`` itself afterwards (see
+    ``TestReposCommand``, which deletes both overrides to exercise discovery
+    keyed on the real ``CLAUDE_CONFIG_DIR``-relative layout).
     """
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-ambient-config"))
     monkeypatch.setenv("OVERSEER_DB", str(tmp_path / "board.db"))
+    monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)

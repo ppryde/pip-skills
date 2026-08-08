@@ -17,6 +17,7 @@ def test_board_db_path_honours_env(repo, monkeypatch):
 def test_board_db_path_falls_back_to_config_dir(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.delenv(db.DB_ENV, raising=False)
+    monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     p = db.board_db_path(tmp_path)
     # rooted under <config>/overseer/<repo-label>/board.db

@@ -11,11 +11,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from scripts.models import Card, CardParseError
-from scripts.store import derive_repo_label, derive_repo_root, slugify
+from scripts.store import derive_repo_root
 
 SCHEMA_VERSION = 1
 DB_ENV = "OVERSEER_DB"
-CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _ID_RE = _re.compile(r"\AWF-(\d+)\Z")
 
 _SCHEMA = """
@@ -59,17 +58,12 @@ CREATE INDEX IF NOT EXISTS idx_cards_claim ON cards(claimed_by);
 """
 
 
-def _config_dir() -> Path:
-    override = os.environ.get(CONFIG_DIR_ENV)
-    return Path(override) if override else Path.home() / ".claude"
-
-
 def board_db_path(repo_root: Path) -> Path:
     override = os.environ.get(DB_ENV)
     if override:
         return Path(override)
-    label = derive_repo_label(repo_root) or slugify(repo_root.resolve().name) or "repo"
-    return _config_dir() / "overseer" / label / "board.db"
+    from scripts.config import central_root
+    return central_root(repo_root) / "board.db"
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

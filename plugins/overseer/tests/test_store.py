@@ -40,12 +40,18 @@ class TestInit:
         for sub in ("cards", "sprints", "archive/cards", "archive/corrupt"):
             assert (root / sub).is_dir()
 
-    def test_gitignore_entry_added_once(self, tmp_path):
+    def test_gitignore_entry_added_once(self, tmp_path, monkeypatch):
+        # init_workflow only touches .gitignore when the resolved state root
+        # is the repo-local .workflow/ dir — under central storage that's no
+        # longer the default, so force it via OVERSEER_CENTRAL to exercise
+        # the branch directly.
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / ".workflow"))
         init_workflow(tmp_path)
         init_workflow(tmp_path)
         assert (tmp_path / ".gitignore").read_text().count(".workflow/") == 1
 
-    def test_existing_gitignore_preserved(self, tmp_path):
+    def test_existing_gitignore_preserved(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / ".workflow"))
         (tmp_path / ".gitignore").write_text("*.pyc\n")
         init_workflow(tmp_path)
         content = (tmp_path / ".gitignore").read_text()
@@ -141,47 +147,32 @@ class TestArchive:
 
 
 class TestStateRoot:
-    def test_fresh_repo_no_scratch_uses_workflow(self, tmp_path):
-        assert state_root(tmp_path) == tmp_path / ".workflow"
+    """``state_root`` is now a thin delegate to ``config.central_root`` (see
+    ``TestStateRootDelegatesToConfig`` below); the old ``.workflow/`` vs
+    gitignored-``scratch/`` precedence logic it used to implement itself was
+    removed in the central-storage migration, so those scenarios no longer
+    apply here — they're covered as ``config.central_root`` precedence in
+    ``tests/test_config.py`` instead."""
 
-    def test_existing_workflow_with_content_wins(self, tmp_path):
+    def test_default_resolves_under_config_dir(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        cfgdir = tmp_path / "cfg"
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfgdir))
         _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
-        (tmp_path / ".workflow" / "cards").mkdir(parents=True)
-        (tmp_path / ".workflow" / "cards" / "WF-001-x.md").write_text("x")
-        assert state_root(tmp_path) == tmp_path / ".workflow"
+        assert state_root(tmp_path) == cfgdir / "overseer" / tmp_path.name
 
-    def test_gitignored_scratch_used_when_no_workflow(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
-        assert state_root(tmp_path) == tmp_path / "scratch" / "workflow"
+    def test_env_override_wins(self, tmp_path, monkeypatch):
+        central = tmp_path / "central-elsewhere"
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(central))
+        assert state_root(tmp_path) == central
 
-    def test_scratch_not_gitignored_falls_back(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / "scratch").mkdir()
-        assert state_root(tmp_path) == tmp_path / ".workflow"
-
-    def test_scratch_without_git_falls_back(self, tmp_path):
-        (tmp_path / "scratch").mkdir()
-        assert state_root(tmp_path) == tmp_path / ".workflow"
-
-    def test_empty_workflow_dir_does_not_hijack(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
-        (tmp_path / ".workflow").mkdir()  # exists but empty
-        assert state_root(tmp_path) == tmp_path / "scratch" / "workflow"
-
-    def test_init_under_scratch_skips_gitignore_edit(self, tmp_path):
-        _git_init(tmp_path)
-        (tmp_path / ".gitignore").write_text("scratch/\n")
-        (tmp_path / "scratch").mkdir()
+    def test_init_under_central_root_skips_gitignore_edit(self, tmp_path, monkeypatch):
+        central = tmp_path / "central-elsewhere"
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(central))
         root = init_workflow(tmp_path)
-        assert root == tmp_path / "scratch" / "workflow"
+        assert root == central
         assert (root / "cards").is_dir()
-        assert ".workflow/" not in (tmp_path / ".gitignore").read_text()
+        assert not (tmp_path / ".gitignore").exists()
 
 
 class TestDeriveRepoLabel:

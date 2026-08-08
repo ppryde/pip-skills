@@ -105,14 +105,9 @@ def derive_repo_root(repo_root: Path) -> Path | None:
 
 
 def state_root(repo_root: Path) -> Path:
-    """Resolve the overseer state root. Existing .workflow/ always wins."""
-    existing = workflow_root(repo_root)
-    if existing.is_dir() and any(existing.iterdir()):
-        return existing
-    scratch = repo_root / SCRATCH_DIRNAME
-    if scratch.is_dir() and _is_gitignored(repo_root, SCRATCH_DIRNAME):
-        return scratch / SCRATCH_STATE_SUBDIR
-    return existing
+    """Resolve the overseer state root: the central per-repo folder."""
+    from scripts.config import central_root
+    return central_root(repo_root)
 
 
 def init_workflow(repo_root: Path) -> Path:
