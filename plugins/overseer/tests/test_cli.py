@@ -1220,6 +1220,80 @@ class TestReposCommand:
         assert "repo-a" in out and str(repo_a.resolve()) in out
 
 
+class TestMigrationOrderingForFileVerbs:
+    """`add-fact`/`log-usage`/`new-sprint` touch central state directly
+    (`ensure_kb`, `append_usage`, `save_sprint`) without going through
+    `_load`/`_sync`'s `_conn` call. On an upgraded repo, if one of these ran
+    BEFORE the one-time `.workflow/` -> central import (triggered by
+    `db.connect`), it would write straight into an unmigrated central
+    folder: legacy state would be permanently stranded in `.workflow/`
+    (`migrate_workflow_to_central` never overwrites an existing central
+    file), and — worse for facts — a freshly minted id could collide with
+    an un-migrated legacy fact of the same id, since `mint_fact_id` only
+    ever sees what's already in central."""
+
+    def _seed_legacy_workflow(self, repo: Path, monkeypatch) -> None:
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(repo.parent / "cfg"))
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        wf = repo / ".workflow"
+        (wf / "knowledge" / "facts").mkdir(parents=True)
+        (wf / "knowledge" / "facts" / "KB-001-legacy.md").write_text(
+            "---\nid: KB-001\nstatement: legacy fact\nstatus: active\n---\nbody\n"
+        )
+        (wf / "sprints").mkdir(parents=True)
+        (wf / "sprints" / "2026-01-S1.md").write_text(
+            "---\nid: 2026-01-S1\nstatus: active\n---\n"
+        )
+        (wf / "usage.jsonl").write_text('{"card":"WF-legacy","tokens":5}\n')
+
+    def test_add_fact_first_migrates_legacy_and_avoids_id_collision(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        self._seed_legacy_workflow(repo, monkeypatch)
+
+        assert cli.main(["--root", str(repo), "add-fact",
+                          "--statement", "new fact", "--source", "WF-1"]) == 0
+
+        kb = state_root(repo) / "knowledge"
+        # legacy fact migrated into central, not stranded in .workflow/
+        assert list((kb / "facts").glob("KB-001-legacy*.md"))
+        # the new fact minted past the (now-visible) legacy KB-001, no collision
+        new_facts = list((kb / "facts").glob("KB-002-*.md"))
+        assert new_facts and new_facts[0] != list((kb / "facts").glob("KB-001-*"))[0]
+
+    def test_log_usage_first_migrates_legacy_usage_line(self, tmp_path, monkeypatch):
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        self._seed_legacy_workflow(repo, monkeypatch)
+
+        assert cli.main(["--root", str(repo), "log-usage", "WF-new",
+                          "--role", "worker", "--tokens", "10k"]) == 0
+
+        lines = (state_root(repo) / "usage.jsonl").read_text().strip().splitlines()
+        # legacy line migrated in first (it's what append_usage's "a" mode
+        # opened after migrate_workflow_to_central copied it into place),
+        # new entry appended after — neither overwrites the other.
+        assert len(lines) == 2
+        assert "WF-legacy" in lines[0]
+        assert "WF-new" in lines[1]
+
+    def test_new_sprint_first_migrates_legacy_sprint_file(self, tmp_path, monkeypatch):
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        self._seed_legacy_workflow(repo, monkeypatch)
+
+        assert cli.main(["--root", str(repo), "new-sprint", "2026-02-S1"]) == 0
+
+        sprints_dir = state_root(repo) / "sprints"
+        # legacy sprint migrated in, not permanently stranded in .workflow/
+        assert (sprints_dir / "2026-01-S1.md").exists()
+        # new sprint created alongside it without collision
+        assert (sprints_dir / "2026-02-S1.md").exists()
+
+
 class TestBackupRestoreInit:
     def test_cli_backup_then_restore(self, tmp_path, monkeypatch, capsys):
         import subprocess
@@ -1250,6 +1324,27 @@ class TestBackupRestoreInit:
         out = capsys.readouterr().out.strip()
         assert out == str(config.backup_dir(repo).resolve())
         assert not config.backup_dir(repo).exists()  # no backup actually performed
+
+    def test_restore_with_no_backup_prints_clean_error_not_traceback(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """`backup.restore_board` raises a plain ValueError for every
+        designed refusal (no backup dir here). `main()` only caught
+        CardParseError/FactParseError/FileNotFoundError, so this ValueError
+        used to propagate and crash the CLI with a raw traceback instead of
+        exiting 1 with a clean `error: ...` message."""
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+
+        result = cli.main(["--root", str(repo), "restore"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "error:" in captured.err
 
     def test_cli_init_writes_config(self, tmp_path, monkeypatch):
         import subprocess

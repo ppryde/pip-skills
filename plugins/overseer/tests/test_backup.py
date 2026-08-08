@@ -267,6 +267,27 @@ def test_restore_replaces_when_backup_is_newer(tmp_path, monkeypatch):
     assert res["updated"] == 1
 
 
+def test_backup_restore_round_trips_quarantined_corrupt_files(tmp_path, monkeypatch):
+    """`archive/corrupt/` holds quarantined files that are unrecoverable
+    elsewhere (migrate_workflow_to_central deliberately preserves them on
+    disk for the same reason) — excluding them from backup/restore would
+    make that guarantee inconsistent. A corrupt-quarantine file must
+    round-trip: survive a backup, and be restored if the central folder is
+    lost."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    central = _seed(repo, monkeypatch)
+    (central / "archive" / "corrupt").mkdir(parents=True, exist_ok=True)
+    (central / "archive" / "corrupt" / "WF-666-bad.md").write_text("not a valid card\n")
+
+    backup.backup_board(repo)
+    dest = config.backup_dir(repo)
+    assert (dest / "archive" / "corrupt" / "WF-666-bad.md").read_text() == "not a valid card\n"
+
+    shutil.rmtree(central)
+    backup.restore_board(repo)
+    assert (central / "archive" / "corrupt" / "WF-666-bad.md").read_text() == "not a valid card\n"
+
+
 def test_restore_fill_gaps_leaves_existing_files_untouched(tmp_path, monkeypatch):
     """Partial loss: sprints/ survives locally (with local edits since the
     backup), usage.jsonl and knowledge/ are gone. Restore must leave the
@@ -340,6 +361,21 @@ def test_restore_refuses_corrupt_meta(tmp_path, monkeypatch):
     _seed(repo, monkeypatch); backup.backup_board(repo)
     (config.backup_dir(repo) / "meta.json").write_text("{ not json")
     with pytest.raises(ValueError, match="meta.json"):
+        backup.restore_board(repo)
+
+
+def test_restore_refuses_card_row_missing_id_with_clear_error(tmp_path, monkeypatch):
+    """A cards.json row with no `id` key (hand-edited backup, truncated
+    export) must raise a clear ValueError naming cards.json — not let a
+    bare KeyError escape from `row["id"]`, matching the unknown-column
+    guard's shape."""
+    repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
+    _seed(repo, monkeypatch); backup.backup_board(repo)
+    dest = config.backup_dir(repo)
+    cards = json.loads((dest / "cards.json").read_text())
+    del cards[0]["id"]
+    (dest / "cards.json").write_text(json.dumps(cards))
+    with pytest.raises(ValueError, match="cards.json"):
         backup.restore_board(repo)
 
 

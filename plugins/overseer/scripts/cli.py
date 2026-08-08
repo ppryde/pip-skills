@@ -231,29 +231,43 @@ def cmd_init(args: argparse.Namespace) -> int:
     - `.overseer/config.local.json` (`central_dir`) — gitignored, per-machine
       (mirrors `config.py`'s local-wins precedence).
 
+    Both files, and the `.gitignore` line for the local one, are written at
+    the repo's CANONICAL main root (`repo_config_dir`'s resolution, via
+    `derive_repo_root`) — even when `init` is run from a linked worktree.
+    This must agree with where `prepush-snapshot.sh`'s opt-in gate looks for
+    `config.json`: writing config at the canonical root but gitignoring at
+    the worktree (or vice versa) leaves opt-in incoherent between worktrees.
+
     `--central`/`--backup-dir` skip the corresponding prompt; with neither
     flag AND no TTY (e.g. under pytest, or a script), the resolved default
     is accepted silently. `--yes` forces the default even on a TTY.
     """
     from scripts import config as cfg
 
-    base = cfg.repo_config_dir(args.root)
+    base = cfg.repo_config_dir(args.root)  # canonical main root's `.overseer/`
     base.mkdir(parents=True, exist_ok=True)
 
     default_central = str(cfg.central_root(args.root))
+    default_backup_dir = ".overseer/backups"
     non_interactive = args.yes or not sys.stdin.isatty()
     central = args.central or (
         default_central if non_interactive
         else input(f"Central folder [{default_central}]: ") or default_central
     )
-    backup_dir_value = args.backup_dir or ".overseer/backups"
+    backup_dir_value = args.backup_dir or (
+        default_backup_dir if non_interactive
+        else input(f"Backup dir [{default_backup_dir}]: ") or default_backup_dir
+    )
 
     (base / "config.json").write_text(
         json.dumps({"backup_dir": backup_dir_value}, indent=2))
     (base / "config.local.json").write_text(
         json.dumps({"central_dir": central}, indent=2))
 
-    gitignore = args.root / ".gitignore"
+    # `base.parent` is the same canonical root `base` itself was resolved
+    # against — never a linked worktree's own root — so the gitignore line
+    # lands next to the config files it's ignoring one of.
+    gitignore = base.parent / ".gitignore"
     line = ".overseer/config.local.json"
     text = gitignore.read_text() if gitignore.exists() else ""
     if line not in text.split("\n"):
@@ -956,6 +970,13 @@ def cmd_log_review(args: argparse.Namespace) -> int:
 
 
 def cmd_new_sprint(args: argparse.Namespace) -> int:
+    # Ensure the one-time `.workflow/` -> central migration guard has run
+    # before this verb creates/touches central state directly (bypassing
+    # `_load`/`_sync`'s usual `_conn` call). On an upgraded repo, this verb
+    # running FIRST would otherwise write straight into an unmigrated
+    # central folder and collide with legacy `.workflow/sprints/` data that
+    # `db.connect`'s migration would have imported.
+    _conn(args.root)
     sprint = Sprint(
         id=args.sprint_id,
         status="planned",
@@ -1152,6 +1173,11 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_log_usage(args: argparse.Namespace) -> int:
+    # Same migration-ordering guard as `cmd_new_sprint` — this verb appends
+    # straight to central's `usage.jsonl` without going through `_load`/
+    # `_sync`, so it must trigger the one-time `.workflow/` import itself
+    # before it can run first on an upgraded repo.
+    _conn(args.root)
     entry = {
         "ts": _now(),
         "card": args.card_id,
@@ -1220,6 +1246,10 @@ def cmd_calibration(args: argparse.Namespace) -> int:
 
 
 def cmd_add_fact(args: argparse.Namespace) -> int:
+    # Same migration-ordering guard as `cmd_new_sprint`/`cmd_log_usage` —
+    # `ensure_kb` creates central's `knowledge/` tree directly, so it must
+    # not run ahead of the one-time `.workflow/` import on an upgraded repo.
+    _conn(args.root)
     kb = knowledge_root(args.root)
     ensure_kb(kb)
     tags = [t.strip() for t in (args.tags or "").split(",") if t.strip()]
@@ -1519,7 +1549,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result: int = args.func(args)
         return result
-    except (CardParseError, FactParseError, FileNotFoundError) as exc:
+    except (CardParseError, FactParseError, FileNotFoundError, ValueError) as exc:
+        # ValueError covers backup.restore_board's designed refusals (no
+        # backup found, schema mismatch, corrupt manifest/cards/meta JSON,
+        # unknown card column) and config.load_config's malformed-JSON
+        # guard — every verb reads config via state_root/central_root, so
+        # a broken config.json would otherwise traceback on any command.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     finally:

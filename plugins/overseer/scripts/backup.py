@@ -13,7 +13,13 @@ from scripts import config, db
 from scripts.index import rebuild_index
 
 IDENTITY_META_KEYS = {"repo_root", "schema_version", "workflow_fs_imported", "migrated_from_workflow"}
-_COPY_STATE = ("sprints", "usage.jsonl", "knowledge")
+# "archive/corrupt" is quarantined files ONLY — never "archive/cards", which
+# the DB owns and cards.json already carries. migrate_workflow_to_central
+# deliberately preserves archive/corrupt/ on disk as unrecoverable-elsewhere
+# (see its docstring); excluding it from backup would make that guarantee
+# inconsistent, since a lost/rotated central folder would then lose the
+# quarantined files backup was supposed to protect.
+_COPY_STATE = ("sprints", "usage.jsonl", "knowledge", "archive/corrupt")
 
 
 def _dump_table(conn, table: str) -> list[dict]:
@@ -157,6 +163,8 @@ def restore_board(repo_root: Path, src: Path | None = None) -> dict:
     conn = db.connect(repo_root)
     known_cols = {r[1] for r in conn.execute("PRAGMA table_info(cards)").fetchall()}
     for row in rows:
+        if "id" not in row:
+            raise ValueError(f"{src / 'cards.json'}: card row missing required \"id\" field")
         unknown = set(row) - known_cols
         if unknown:
             raise ValueError(

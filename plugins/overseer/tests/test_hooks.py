@@ -737,3 +737,109 @@ class TestPrepushSnapshotHook:
         main_status = self._git(git_repo, "status", "--porcelain", ".overseer/backups")
         assert main_status.stdout == ""
         assert not (git_repo / ".overseer" / "backups").exists()
+
+    def test_snapshot_commit_excludes_other_staged_files(self, git_repo):
+        """Root-cause regression: the commit used to be a bare `git commit`
+        with no pathspec, so it swept EVERY staged file into the snapshot
+        commit (and a gated push would then publish it). The commit must be
+        scoped to the backup dir only, and must leave any other staged file
+        exactly as it was — staged, uncommitted."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+        (git_repo / "secret.txt").write_text("do-not-commit-me")
+        self._git(git_repo, "add", "secret.txt")
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}}, git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+        show = self._git(git_repo, "show", "--name-only", "--pretty=", "HEAD")
+        files = [f for f in show.stdout.splitlines() if f]
+        assert files
+        assert all(f.startswith(".overseer/backups/") for f in files)
+        assert "secret.txt" not in files
+
+        # secret.txt must remain staged — the snapshot commit must not have
+        # touched the rest of the index at all.
+        staged = self._git(git_repo, "diff", "--cached", "--name-only")
+        assert "secret.txt" in staged.stdout.splitlines()
+
+    def test_git_dash_capital_c_push_triggers_snapshot(self, git_repo):
+        """Push-detection regex must catch `git -C <dir> push`, not just a
+        bare `git push`."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": f"git -C {git_repo} push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_resolves_repo_root_from_payload_cwd_not_process_cwd(
+        self, git_repo, tmp_path_factory
+    ):
+        """The hook must resolve the repo root from the JSON payload's `cwd`
+        field (matching cli.py's `_hook_root` convention used by the sibling
+        hooks), not from the hook process's own cwd — the two can differ.
+        `elsewhere` must live outside `git_repo`'s own tree entirely (not
+        just be a different subdirectory of it), or `git -C elsewhere`
+        would still resolve up to the very same repo and the regression
+        this test targets couldn't be observed."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+
+        result = self._run_script(
+            {"cwd": str(git_repo), "tool_input": {"command": "git push origin main"}},
+            elsewhere,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+        assert self._log_messages(elsewhere) == []
+
+    def test_init_from_worktree_writes_config_at_canonical_root_and_hook_opts_in(
+        self, git_repo
+    ):
+        """`cmd_init`, run from a linked worktree, must write config.json /
+        config.local.json (and gitignore the local one) at the CANONICAL
+        main root — not the worktree's own root — because that's also
+        where the hook's opt-in gate looks. Config location, the gitignore
+        line, and the opt-in gate must all agree on the same root, or
+        opt-in from a worktree is incoherent."""
+        (git_repo / "README.md").write_text("x")
+        self._git(git_repo, "add", "README.md")
+        self._git(git_repo, "commit", "-q", "-m", "init")
+
+        # `git_repo.parent` is the shared pytest tmp root, not a per-test
+        # dir (`git_repo` fixture == `tmp_path` itself) — a plain "wt" name
+        # would collide with the sibling worktree test using the same
+        # parent dir in the same test session.
+        worktree = git_repo.parent / "wt-init-canonical-root"
+        added = self._git(git_repo, "worktree", "add", "-b", "feature", str(worktree))
+        assert added.returncode == 0, added.stderr
+
+        assert main(["--root", str(worktree), "init", "--yes"]) == 0
+        assert main(["--root", str(worktree), "new-card", "--title", "T"]) == 0
+
+        # (a) config.json lands at the canonical (main) root, not the worktree
+        assert (git_repo / ".overseer" / "config.json").exists()
+        assert not (worktree / ".overseer" / "config.json").exists()
+
+        # (b) the gitignore line for the local config lands at the canonical root
+        assert ".overseer/config.local.json" in (git_repo / ".gitignore").read_text()
+
+        # (c) the hook, fired from the worktree, sees the canonical root's
+        # opt-in and DOES snapshot — opt-in is effective from a worktree.
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin feature"}}, worktree,
+        )
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(worktree)
