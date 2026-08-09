@@ -43,21 +43,11 @@ import sys
 cmd = sys.argv[1] if len(sys.argv) > 1 else ""
 WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
             "--exec-path", "--super-prefix"}
-SEP = {";", "&", "&&", "|", "||", "(", ")", "\n"}
-try:
-    lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    toks = list(lex)
-except ValueError:
-    sys.exit(1)  # unbalanced quotes etc. -> don't fire
-segs, seg = [], []
-for t in toks:
-    if t in SEP:
-        segs.append(seg)
-        seg = []
-    else:
-        seg.append(t)
-segs.append(seg)
+# Shell operators that separate one simple command from the next. Newlines are
+# NOT listed here: shlex with whitespace_split consumes them as whitespace, so
+# multiline commands are handled by splitting on "\n" per line below (a shell
+# newline is a command separator exactly like ";").
+SEP = {";", "&", "&&", "|", "||", "(", ")"}
 
 
 def is_push(seg):
@@ -76,7 +66,27 @@ def is_push(seg):
     return i < len(seg) and seg[i] == "push"
 
 
-sys.exit(0 if any(is_push(s) for s in segs) else 1)
+def line_has_push(line):
+    try:
+        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        return False  # unbalanced quotes etc. -> don't fire
+    segs, seg = [], []
+    for t in toks:
+        if t in SEP:
+            segs.append(seg)
+            seg = []
+        else:
+            seg.append(t)
+    segs.append(seg)
+    return any(is_push(s) for s in segs)
+
+
+# Split on newlines first (each line is its own command chain), then within a
+# line split on shell operators — so `git add …\ngit commit …\ngit push` fires.
+sys.exit(0 if any(line_has_push(ln) for ln in cmd.split("\n")) else 1)
 PY
     return $?
   fi

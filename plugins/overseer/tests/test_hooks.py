@@ -713,6 +713,20 @@ class TestPrepushSnapshotHook:
         assert result.returncode == 0
         assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
 
+    def test_snapshots_on_multiline_push(self, git_repo):
+        # A push on its own line of a multiline command must fire — shlex eats
+        # newlines, so detection splits on "\n" per line (WF-049 regression).
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "git add -A\ngit commit -m wip\ngit push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
     def test_no_empty_commit_when_board_unchanged(self, git_repo):
         assert main(["--root", str(git_repo), "init"]) == 0
         assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
