@@ -1,9 +1,11 @@
 from pathlib import Path
 from scripts.persona_io import read_frontmatter
 
+_FIX = Path(__file__).parent / "fixtures"
+
 
 def test_read_frontmatter_parses_yaml_header():
-    fm = read_frontmatter(Path("tests/fixtures/sample_persona.md"))
+    fm = read_frontmatter(_FIX / "sample_persona.md")
     assert fm["alias"] == "jen"
     assert fm["handles"] == ["jenniferjensen"]
     assert fm["repo"] == "wayflyer/wayflyer"

@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+_FIX = Path(__file__).parent / "fixtures"
+
 
 def test_collect_cli_help():
     """`python scripts/collect.py --help` exits 0 and shows known args."""
@@ -24,7 +26,7 @@ def test_collect_cli_help():
 def test_discover_prs_dedupes_across_handles():
     from scripts.collect import discover_prs
 
-    fixture = Path("tests/fixtures/sample_search.json").read_text()
+    fixture = (_FIX / "sample_search.json").read_text()
 
     with patch("scripts.collect._gh_search") as mock_search:
         mock_search.return_value = [
@@ -41,7 +43,7 @@ def test_discover_prs_dedupes_across_handles():
 def test_fetch_pr_filters_by_handle_and_path():
     from scripts.collect import fetch_pr
 
-    fixture = json.loads(Path("tests/fixtures/sample_pr.json").read_text())
+    fixture = json.loads((_FIX / "sample_pr.json").read_text())
 
     with patch("scripts.collect._gh_get") as mock_get:
         mock_get.side_effect = [
@@ -74,7 +76,7 @@ def test_fetch_pr_filters_by_handle_and_path():
 def test_fetch_pr_captures_pr_description_if_authored_by_handle():
     from scripts.collect import fetch_pr
 
-    fixture = json.loads(Path("tests/fixtures/sample_pr.json").read_text())
+    fixture = json.loads((_FIX / "sample_pr.json").read_text())
 
     with patch("scripts.collect._gh_get") as mock_get:
         mock_get.side_effect = [
@@ -157,7 +159,7 @@ def test_run_collect_writes_raw_and_snapshot(tmp_path, monkeypatch):
 
     monkeypatch.setattr(collect_mod, "PERSONA_ROOT", tmp_path)
 
-    fixture = json.loads(Path("tests/fixtures/sample_pr.json").read_text())
+    fixture = json.loads((_FIX / "sample_pr.json").read_text())
 
     with patch.object(collect_mod, "discover_prs", return_value=[100]), \
          patch.object(collect_mod, "fetch_pr", return_value={
