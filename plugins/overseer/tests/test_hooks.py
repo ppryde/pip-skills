@@ -669,6 +669,47 @@ class TestPrepushSnapshotHook:
         assert result.returncode == 0
         assert self._log_messages(git_repo) == []
 
+    def test_noop_when_push_is_inside_quoted_arg(self, git_repo):
+        # `git push` appears only inside a quoted commit message — a raw-string
+        # regex would false-positive; the shlex tokenizer must not (WF-049).
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": 'git commit -m "remember to git push later"'}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_snapshots_when_git_dash_C_quoted_path_push(self, git_repo):
+        # A quoted `-C` value containing spaces must not defeat detection
+        # (the old `-C[^space]+` regex missed this) (WF-049).
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": 'git -C "/some path with spaces" push origin main'}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_snapshots_on_cd_then_push_segment(self, git_repo):
+        # A push in a later shell segment (`cd x && git push`) still fires.
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "cd /tmp && git push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
     def test_no_empty_commit_when_board_unchanged(self, git_repo):
         assert main(["--root", str(git_repo), "init"]) == 0
         assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
