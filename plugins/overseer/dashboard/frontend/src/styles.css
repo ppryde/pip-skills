@@ -2455,6 +2455,67 @@ body {
   gap: 16px;
 }
 
+/* Clear-data "dragons" modal (dashboard settings) — rides the same
+   .party-overlay/.party-sheet backdrop as the Party page; these rules only
+   cover the bits specific to its two-step confirm flow. */
+.clear-dialog__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 24px;
+  color: var(--qb-party-text);
+}
+
+.clear-scope {
+  border: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.clear-scope legend {
+  font-family: var(--qb-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--qb-party-text-muted);
+  padding: 0;
+}
+
+.clear-scope label {
+  display: block;
+  margin: 0.35rem 0;
+  color: var(--qb-party-text);
+}
+
+.clear-confirm-label {
+  display: block;
+  margin: 0.75rem 0;
+  color: var(--qb-party-text);
+}
+
+.clear-confirm-label input {
+  display: block;
+  margin-top: 0.35rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.clear-error {
+  color: #b00020;
+}
+
+.clear-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+
+.clear-dialog .danger {
+  background: #b00020;
+  color: #fff;
+  border-color: #b00020;
+}
+
 /* Hero card (HANDOFF: light card floating inside the dark sheet). */
 .hero-card {
   background: var(--qb-hero-card-bg);
