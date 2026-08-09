@@ -1,0 +1,22 @@
+{
+  "name": "test-crucible",
+  "version": "0.1.0",
+  "description": "Make a test suite faster, or drier, by measuring it first. Profiles the whole suite rather than the part you pointed at, catches accidental quadratics with a scaling ladder, proves a fix removed the defect rather than shrinking its constant, and names what the speedup cost in fidelity so the trade-off is the user's to make.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": [
+    "tests",
+    "performance",
+    "ci",
+    "pytest",
+    "junit",
+    "profiling",
+    "quadratic",
+    "fixtures",
+    "duplication",
+    "coverage",
+    "optimisation"
+  ]
+}

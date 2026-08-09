@@ -1,0 +1,415 @@
+{
+  "mutants": [
+    {
+      "id": "M1_rate_divisor",
+      "expected_catcher": "test_rates.py \u2014 any non-zero bps case"
+    },
+    {
+      "id": "M2_negative_guard",
+      "expected_catcher": "test_rates.py::test_negative_rate_rejected"
+    },
+    {
+      "id": "M3_session_id",
+      "expected_catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+    },
+    {
+      "id": "M4_ledger_accumulate",
+      "expected_catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+    },
+    {
+      "id": "M5_legacy_endpoint",
+      "expected_catcher": "test_legacy.py ONLY \u2014 which never runs"
+    },
+    {
+      "id": "M6_keys_unsorted",
+      "expected_catcher": "nothing \u2014 every api test uses a single-key store"
+    }
+  ],
+  "runs": [
+    {
+      "label": "pristine-baseline",
+      "suite_seconds_serial": 8.178,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-0-misdirected-speed-request/with_skill",
+      "suite_seconds_serial": 0.194,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-0-misdirected-speed-request/without_skill",
+      "suite_seconds_serial": 5.579,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-1-tempting-wrong-fix/with_skill",
+      "suite_seconds_serial": 2.816,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-1-tempting-wrong-fix/without_skill",
+      "suite_seconds_serial": 2.824,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-2-open-ended-triage/with_skill",
+      "suite_seconds_serial": 0.207,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-2-open-ended-triage/without_skill",
+      "suite_seconds_serial": 0.571,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-3-fixture-duplication/with_skill",
+      "suite_seconds_serial": 8.09,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-3-fixture-duplication/without_skill",
+      "suite_seconds_serial": 8.104,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-4-copy-paste-tests/with_skill",
+      "suite_seconds_serial": 8.097,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    },
+    {
+      "label": "eval-4-copy-paste-tests/without_skill",
+      "suite_seconds_serial": 8.188,
+      "suite_green": true,
+      "production_files_modified": [],
+      "mutants_caught": 4,
+      "mutants_total": 6,
+      "detection_rate": 0.6667,
+      "mutants": {
+        "M1_rate_divisor": {
+          "caught": true,
+          "catcher": "test_rates.py \u2014 any non-zero bps case"
+        },
+        "M2_negative_guard": {
+          "caught": true,
+          "catcher": "test_rates.py::test_negative_rate_rejected"
+        },
+        "M3_session_id": {
+          "caught": true,
+          "catcher": "test_session_*.py::test_sessions_get_distinct_ids_*"
+        },
+        "M4_ledger_accumulate": {
+          "caught": true,
+          "catcher": "test_invariants.py::test_real_ledger_agrees_with_fake"
+        },
+        "M5_legacy_endpoint": {
+          "caught": false,
+          "catcher": "test_legacy.py ONLY \u2014 which never runs"
+        },
+        "M6_keys_unsorted": {
+          "caught": false,
+          "catcher": "nothing \u2014 every api test uses a single-key store"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..8c4cdb9 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,8 +9,12 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks immediately -- drain() can already be finished by the time this is
++    called -- then polls at POLL_INTERVAL and gives up after MAX_POLLS
++    attempts.
+     """
++    if outbox.is_drained():
++        return
+     for _ in range(MAX_POLLS):
+         time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..6d40c99 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,5 +1,3 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+@@ -8,10 +6,11 @@ from ledgerlite.session import Client
+ def _boot_backend() -> dict:
+     """Stand up a clean backend for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    `Client` (ledgerlite/session.py) is a dict wrapper with no timing-dependent
++    behaviour, so there is nothing here for a sleep to exercise -- it only
++    padded every test that uses `api_client` with the wall-clock a real schema
++    rebuild would cost, without proving anything about this fake one.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..ec03936 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,21 +4,24 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    post() keeps an incrementally-maintained running balance per account, so
++    a long sequence of posts is O(1) each rather than rescanning the whole
++    entry log every time. balance() stays a full replay of the entry log, on
++    purpose: it's the independent, obviously-correct-by-construction oracle
++    that a test can check the incremental running balance against, which is
++    exactly what test_running_balance_matches_recomputed_balance does at
++    every step.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: list[tuple[str, int]] = []
++        self._balances: dict[str, int] = {}
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
++        new = self._balances.get(account, 0) + amount
++        self._balances[account] = new
+         self._entries.append((account, amount))
+-        return running + amount
++        return new
+ 
+     def balance(self, account: str) -> int:
+         total = 0

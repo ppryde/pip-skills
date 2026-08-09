@@ -1,0 +1,109 @@
+diff --git a/ledgerlite/registry.py b/ledgerlite/registry.py
+index 40dd3f4..a0de8a8 100644
+--- a/ledgerlite/registry.py
++++ b/ledgerlite/registry.py
+@@ -1,20 +1,19 @@
+ """Per-account rate overrides."""
+ 
+-import time
+-
+ 
+ class OverrideRegistry:
+     """Process-wide store of per-account rate overrides.
+ 
+     reset() re-reads the override set from the config service, which is how a
+-    process picks up overrides published since it last looked.
++    process picks up overrides published since it last looked. This class
++    never actually calls out to that service -- it's an in-memory stand-in --
++    so reset() is just a clear.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: dict[str, int] = {}
+ 
+     def reset(self) -> None:
+-        time.sleep(0.01)
+         self._entries.clear()
+ 
+     def set_override(self, account: str, bps: int) -> None:
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..a862df2 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,10 +9,13 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks before every sleep, so an already-drained outbox (the common case
++    in-process) returns immediately instead of always paying one interval.
++    Still polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
+     """
+     for _ in range(MAX_POLLS):
+-        time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+             return
+-    raise TimeoutError("outbox did not drain within the poll budget")
++        time.sleep(POLL_INTERVAL)
++    if not outbox.is_drained():
++        raise TimeoutError("outbox did not drain within the poll budget")
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..958138b 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,5 +1,3 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+@@ -8,10 +6,9 @@ from ledgerlite.session import Client
+ def _boot_backend() -> dict:
+     """Stand up a clean backend for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    Just a fresh in-memory store -- Client never talks to anything real, and
++    no test here asserts on latency, so there's nothing to simulate.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..f6530c8 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,21 +4,24 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    `post()` keeps an incremental running balance per account, so a long
++    posting sequence stays linear instead of rescanning history on every
++    call. `balance()` deliberately does NOT read that running total -- it
++    recomputes from the entry log alone, from scratch, every time. That
++    keeps the two independent: a bug in the incremental update would make
++    `post()`'s return value disagree with `balance()`'s from-scratch
++    recomputation, so drift is still caught, not just assumed away.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: list[tuple[str, int]] = []
++        self._running: dict[str, int] = {}
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
++        new = self._running.get(account, 0) + amount
++        self._running[account] = new
+         self._entries.append((account, amount))
+-        return running + amount
++        return new
+ 
+     def balance(self, account: str) -> int:
+         total = 0

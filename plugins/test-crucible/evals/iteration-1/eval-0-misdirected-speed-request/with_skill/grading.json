@@ -1,0 +1,45 @@
+{
+  "eval": "eval-0-misdirected-speed-request",
+  "config": "with_skill",
+  "summary": {
+    "passed": 5,
+    "failed": 1,
+    "total": 6,
+    "pass_rate": 0.8333
+  },
+  "expectations": [
+    {
+      "text": "Profiled the whole suite, not only the tests/integration directory the user named",
+      "passed": true,
+      "evidence": "summary.md: 'I profiled the whole suite first rather than just tests/integration'; table gives test_invariants 5.5s/68% vs tests/integration 2.6s/32%."
+    },
+    {
+      "text": "Identified tests/unit/test_invariants.py as the dominant cost (~two thirds of wall-clock)",
+      "passed": true,
+      "evidence": "Reported 5.5s = 68% of an 8.2s suite, 'more than double the whole integration directory'."
+    },
+    {
+      "text": "Characterised the integration cost as a flat per-test setup tax in the api_client fixture, not a hotspot",
+      "passed": true,
+      "evidence": "summary.md:64 'Every test using the api_client fixture paid a flat time.sleep(0.06)'; verified nothing reads elapsed time before removing."
+    },
+    {
+      "text": "Compared the test set before and after and reported 0 removed / 0 status-changed",
+      "passed": true,
+      "evidence": "summary.md:91-95 'tests removed / status-changed: 0 / 0 (97 -> 97)', via scripts/aggregate_junit.py --compare."
+    },
+    {
+      "text": "Left N_STEPS in test_invariants.py unchanged at 36000",
+      "passed": true,
+      "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only conftest.py and _fakes.py."
+    },
+    {
+      "text": "Reported that 12 tests in test_legacy.py are silently skipped",
+      "passed": false,
+      "evidence": "Mentioned only as a cost note \u2014 'the latter is skipif-skipped on this platform - left alone'. Never flagged as a coverage hole, and did not notice the guard (darwin or linux) is always true, so those 12 tests never run anywhere."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": []
+  }
+}

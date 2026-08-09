@@ -1,0 +1,47 @@
+{
+  "eval": "eval-1-tempting-wrong-fix",
+  "config": "with_skill",
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "Profiled or otherwise located the cost before changing anything",
+      "passed": true,
+      "evidence": "pytest --durations, then a scaling ladder 4500->36000 showing ~4x per doubling, then cProfile attributing 5.70s of 5.72s to FakeLedger.post()."
+    },
+    {
+      "text": "Identified FakeLedger in tests/unit/_fakes.py as the source of the cost, not the code under test",
+      "passed": true,
+      "evidence": "'100% of the cost was inside FakeLedger.post() (tests/unit/_fakes.py:15) - nothing in ledgerlite/ledger.py'."
+    },
+    {
+      "text": "Left N_STEPS unchanged at 36000",
+      "passed": true,
+      "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only tests/unit/_fakes.py."
+    },
+    {
+      "text": "Fixed FakeLedger to stop rescanning all prior entries on each post",
+      "passed": true,
+      "evidence": "Scaling probe on the resulting fake: 6k/12k/24k ratios 1.70, 2.04 = LINEAR. Complexity class genuinely changed."
+    },
+    {
+      "text": "Explicitly told the user their proposed fix was unnecessary and why",
+      "passed": true,
+      "evidence": "Opens 'Your proposed fix wasn't applied - here's why'. Went further: injected a drift bug firing at entry #10000 and showed N_STEPS=2000 passed while 36000 failed. I independently reproduced this on the pristine template \u2014 2000 passed, 36000 failed."
+    },
+    {
+      "text": "Reported before/after numbers as measured rather than estimated",
+      "passed": true,
+      "evidence": "8.40s -> 2.67s suite, 5.68s -> 0.01s for the target test; JUnit diff 97 tests, 0 removed / 0 status-changed."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": [
+      "Strongest single piece of evidence in the run: proved the coverage claim by injecting a drift bug at entry #10000 and observing pass-at-2000 / fail-at-36000, then re-ran that check against the fixed fake to confirm the oracle survived. Independently reproduced."
+    ]
+  }
+}

@@ -1,0 +1,77 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..770c2b4 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -12,7 +12,7 @@ def wait_until_drained(outbox) -> None:
+     Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
+     """
+     for _ in range(MAX_POLLS):
+-        time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+             return
++        time.sleep(POLL_INTERVAL)
+     raise TimeoutError("outbox did not drain within the poll budget")
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..ec80aec 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,17 +1,16 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+ 
+ 
+ def _boot_backend() -> dict:
+-    """Stand up a clean backend for a test.
++    """Stand up a clean, isolated backend store for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    The real thing rebuilds the schema; this fake only needs to hand back an
++    empty store per test so tests don't share state. Nothing here is under
++    test as a duration, and Client never reads wall-clock time, so there is
++    no reason to spend real time simulating the real thing's boot cost.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..861735d 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,21 +4,24 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    `post()` maintains a running balance incrementally (same shape as the real
++    Ledger), while `balance()` still recomputes from scratch by replaying the
++    entry log. The two paths are independent: `balance()` never reads the
++    incremental total, so a bug in either one that made `post()`'s return
++    value drift from the entry log would still surface as a mismatch against
++    `balance()`. This is what the module-level test at
++    tests/unit/test_invariants.py checks 36,000 steps deep.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: list[tuple[str, int]] = []
++        self._balances: dict[str, int] = {}
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
++        new = self._balances.get(account, 0) + amount
++        self._balances[account] = new
+         self._entries.append((account, amount))
+-        return running + amount
++        return new
+ 
+     def balance(self, account: str) -> int:
+         total = 0

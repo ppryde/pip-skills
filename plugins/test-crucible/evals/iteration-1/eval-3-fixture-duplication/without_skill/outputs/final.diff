@@ -1,0 +1,276 @@
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..a73eae4 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -2,7 +2,7 @@ import time
+ 
+ import pytest
+ 
+-from ledgerlite.session import Client
++from ledgerlite.session import Client, Session
+ 
+ 
+ def _boot_backend() -> dict:
+@@ -21,3 +21,28 @@ def api_client():
+     store = _boot_backend()
+     yield Client(store)
+     store.clear()
++
++
++@pytest.fixture
++def setup_session():
++    def _make(user):
++        session = Session(user)
++        assert session.open
++        return session
++
++    return _make
++
++
++@pytest.fixture
++def two_sessions(setup_session):
++    first = setup_session("alice")
++    second = setup_session("bob")
++    yield first, second
++    first.close()
++    second.close()
++
++
++@pytest.fixture
++def race_ids(two_sessions):
++    first, second = two_sessions
++    return sorted((first.id, second.id))
+diff --git a/tests/integration/test_session_a.py b/tests/integration/test_session_a.py
+index 2edaf00..a9d3198 100644
+--- a/tests/integration/test_session_a.py
++++ b/tests/integration/test_session_a.py
+@@ -1,34 +1,5 @@
+ """Concurrent session behaviour, group a."""
+ 
+-import pytest
+-
+-from ledgerlite.session import Session
+-
+-
+-@pytest.fixture
+-def setup_session():
+-    def _make(user):
+-        session = Session(user)
+-        assert session.open
+-        return session
+-
+-    return _make
+-
+-
+-@pytest.fixture
+-def two_sessions(setup_session):
+-    first = setup_session("alice")
+-    second = setup_session("bob")
+-    yield first, second
+-    first.close()
+-    second.close()
+-
+-
+-@pytest.fixture
+-def race_ids(two_sessions):
+-    first, second = two_sessions
+-    return sorted((first.id, second.id))
+-
+ 
+ def test_sessions_get_distinct_ids_a(two_sessions):
+     first, second = two_sessions
+diff --git a/tests/integration/test_session_b.py b/tests/integration/test_session_b.py
+index 9222907..6681ffb 100644
+--- a/tests/integration/test_session_b.py
++++ b/tests/integration/test_session_b.py
+@@ -1,34 +1,5 @@
+ """Concurrent session behaviour, group b."""
+ 
+-import pytest
+-
+-from ledgerlite.session import Session
+-
+-
+-@pytest.fixture
+-def setup_session():
+-    def _make(user):
+-        session = Session(user)
+-        assert session.open
+-        return session
+-
+-    return _make
+-
+-
+-@pytest.fixture
+-def two_sessions(setup_session):
+-    first = setup_session("alice")
+-    second = setup_session("bob")
+-    yield first, second
+-    first.close()
+-    second.close()
+-
+-
+-@pytest.fixture
+-def race_ids(two_sessions):
+-    first, second = two_sessions
+-    return sorted((first.id, second.id))
+-
+ 
+ def test_sessions_get_distinct_ids_b(two_sessions):
+     first, second = two_sessions
+diff --git a/tests/integration/test_session_c.py b/tests/integration/test_session_c.py
+index ba18126..0085a34 100644
+--- a/tests/integration/test_session_c.py
++++ b/tests/integration/test_session_c.py
+@@ -1,34 +1,5 @@
+ """Concurrent session behaviour, group c."""
+ 
+-import pytest
+-
+-from ledgerlite.session import Session
+-
+-
+-@pytest.fixture
+-def setup_session():
+-    def _make(user):
+-        session = Session(user)
+-        assert session.open
+-        return session
+-
+-    return _make
+-
+-
+-@pytest.fixture
+-def two_sessions(setup_session):
+-    first = setup_session("alice")
+-    second = setup_session("bob")
+-    yield first, second
+-    first.close()
+-    second.close()
+-
+-
+-@pytest.fixture
+-def race_ids(two_sessions):
+-    first, second = two_sessions
+-    return sorted((first.id, second.id))
+-
+ 
+ def test_sessions_get_distinct_ids_c(two_sessions):
+     first, second = two_sessions
+diff --git a/tests/integration/test_session_d.py b/tests/integration/test_session_d.py
+index 028d1bc..b010c4d 100644
+--- a/tests/integration/test_session_d.py
++++ b/tests/integration/test_session_d.py
+@@ -1,34 +1,5 @@
+ """Concurrent session behaviour, group d."""
+ 
+-import pytest
+-
+-from ledgerlite.session import Session
+-
+-
+-@pytest.fixture
+-def setup_session():
+-    def _make(user):
+-        session = Session(user)
+-        assert session.open
+-        return session
+-
+-    return _make
+-
+-
+-@pytest.fixture
+-def two_sessions(setup_session):
+-    first = setup_session("alice")
+-    second = setup_session("bob")
+-    yield first, second
+-    first.close()
+-    second.close()
+-
+-
+-@pytest.fixture
+-def race_ids(two_sessions):
+-    first, second = two_sessions
+-    return sorted((first.id, second.id))
+-
+ 
+ def test_sessions_get_distinct_ids_d(two_sessions):
+     first, second = two_sessions
+diff --git a/tests/integration/test_session_e.py b/tests/integration/test_session_e.py
+index 5b44d63..a857f6d 100644
+--- a/tests/integration/test_session_e.py
++++ b/tests/integration/test_session_e.py
+@@ -1,34 +1,5 @@
+ """Concurrent session behaviour, group e."""
+ 
+-import pytest
+-
+-from ledgerlite.session import Session
+-
+-
+-@pytest.fixture
+-def setup_session():
+-    def _make(user):
+-        session = Session(user)
+-        assert session.open
+-        return session
+-
+-    return _make
+-
+-
+-@pytest.fixture
+-def two_sessions(setup_session):
+-    first = setup_session("alice")
+-    second = setup_session("bob")
+-    yield first, second
+-    first.close()
+-    second.close()
+-
+-
+-@pytest.fixture
+-def race_ids(two_sessions):
+-    first, second = two_sessions
+-    return sorted((first.id, second.id))
+-
+ 
+ def test_sessions_get_distinct_ids_e(two_sessions):
+     first, second = two_sessions
+diff --git a/tests/integration/test_session_f.py b/tests/integration/test_session_f.py
+index d34e8d3..8a0e53b 100644
+--- a/tests/integration/test_session_f.py
++++ b/tests/integration/test_session_f.py
+@@ -1,34 +1,5 @@
+ """Concurrent session behaviour, group f."""
+ 
+-import pytest
+-
+-from ledgerlite.session import Session
+-
+-
+-@pytest.fixture
+-def setup_session():
+-    def _make(user):
+-        session = Session(user)
+-        assert session.open
+-        return session
+-
+-    return _make
+-
+-
+-@pytest.fixture
+-def two_sessions(setup_session):
+-    first = setup_session("alice")
+-    second = setup_session("bob")
+-    yield first, second
+-    first.close()
+-    second.close()
+-
+-
+-@pytest.fixture
+-def race_ids(two_sessions):
+-    first, second = two_sessions
+-    return sorted((first.id, second.id))
+-
+ 
+ def test_sessions_get_distinct_ids_f(two_sessions):
+     first, second = two_sessions

@@ -1,0 +1,18 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..2b9126f 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,8 +9,12 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks immediately first (the common case: `drain()` is synchronous, so
++    there is usually nothing to wait for), then polls at POLL_INTERVAL and
++    gives up after MAX_POLLS further attempts.
+     """
++    if outbox.is_drained():
++        return
+     for _ in range(MAX_POLLS):
+         time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():

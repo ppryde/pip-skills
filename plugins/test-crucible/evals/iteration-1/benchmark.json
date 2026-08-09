@@ -1,0 +1,513 @@
+{
+  "metadata": {
+    "skill_name": "test-suite-health",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-08-08T21:12:12Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8333,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Profiled the whole suite, not only the tests/integration directory the user named",
+          "passed": true,
+          "evidence": "summary.md: 'I profiled the whole suite first rather than just tests/integration'; table gives test_invariants 5.5s/68% vs tests/integration 2.6s/32%."
+        },
+        {
+          "text": "Identified tests/unit/test_invariants.py as the dominant cost (~two thirds of wall-clock)",
+          "passed": true,
+          "evidence": "Reported 5.5s = 68% of an 8.2s suite, 'more than double the whole integration directory'."
+        },
+        {
+          "text": "Characterised the integration cost as a flat per-test setup tax in the api_client fixture, not a hotspot",
+          "passed": true,
+          "evidence": "summary.md:64 'Every test using the api_client fixture paid a flat time.sleep(0.06)'; verified nothing reads elapsed time before removing."
+        },
+        {
+          "text": "Compared the test set before and after and reported 0 removed / 0 status-changed",
+          "passed": true,
+          "evidence": "summary.md:91-95 'tests removed / status-changed: 0 / 0 (97 -> 97)', via scripts/aggregate_junit.py --compare."
+        },
+        {
+          "text": "Left N_STEPS in test_invariants.py unchanged at 36000",
+          "passed": true,
+          "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only conftest.py and _fakes.py."
+        },
+        {
+          "text": "Reported that 12 tests in test_legacy.py are silently skipped",
+          "passed": false,
+          "evidence": "Mentioned only as a cost note \u2014 'the latter is skipif-skipped on this platform - left alone'. Never flagged as a coverage hole, and did not notice the guard (darwin or linux) is always true, so those 12 tests never run anywhere."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Profiled or otherwise located the cost before changing anything",
+          "passed": true,
+          "evidence": "pytest --durations, then a scaling ladder 4500->36000 showing ~4x per doubling, then cProfile attributing 5.70s of 5.72s to FakeLedger.post()."
+        },
+        {
+          "text": "Identified FakeLedger in tests/unit/_fakes.py as the source of the cost, not the code under test",
+          "passed": true,
+          "evidence": "'100% of the cost was inside FakeLedger.post() (tests/unit/_fakes.py:15) - nothing in ledgerlite/ledger.py'."
+        },
+        {
+          "text": "Left N_STEPS unchanged at 36000",
+          "passed": true,
+          "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only tests/unit/_fakes.py."
+        },
+        {
+          "text": "Fixed FakeLedger to stop rescanning all prior entries on each post",
+          "passed": true,
+          "evidence": "Scaling probe on the resulting fake: 6k/12k/24k ratios 1.70, 2.04 = LINEAR. Complexity class genuinely changed."
+        },
+        {
+          "text": "Explicitly told the user their proposed fix was unnecessary and why",
+          "passed": true,
+          "evidence": "Opens 'Your proposed fix wasn't applied - here's why'. Went further: injected a drift bug firing at entry #10000 and showed N_STEPS=2000 passed while 36000 failed. I independently reproduced this on the pristine template \u2014 2000 passed, 36000 failed."
+        },
+        {
+          "text": "Reported before/after numbers as measured rather than estimated",
+          "passed": true,
+          "evidence": "8.40s -> 2.67s suite, 5.68s -> 0.01s for the target test; JUnit diff 97 tests, 0 removed / 0 status-changed."
+        }
+      ],
+      "notes": [
+        "Strongest single piece of evidence in the run: proved the coverage claim by injecting a drift bug at entry #10000 and observing pass-at-2000 / fail-at-36000, then re-ran that check against the fixed fake to confirm the oracle survived. Independently reproduced."
+      ]
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 4,
+        "failed": 1,
+        "total": 5,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Measured per-test durations across the whole suite",
+          "passed": true,
+          "evidence": "Baseline 97 tests / 8.50s with a per-file breakdown; scaling check at 9k/18k/36k steps."
+        },
+        {
+          "text": "Distinguished the single hotspot from the uniform per-test tax as different problems",
+          "passed": true,
+          "evidence": "Two separately-reported findings: a 5.8s O(n^2) hotspot, and a uniform ~67ms/test tax across 39 tests; found the second only after re-measuring post-fix."
+        },
+        {
+          "text": "Reported concentration \u2014 how few files hold most of the wall-clock",
+          "passed": true,
+          "evidence": "'one single test held 69% of total wall-clock', 5.8s of 8.4s measured test time."
+        },
+        {
+          "text": "Reported that 12 tests are silently skipped",
+          "passed": false,
+          "evidence": "Reported '85 passed / 12 skipped' only as a tally in the before/after table. Never identified the 12 as a coverage hole, nor that the skipif guard is unconditionally true."
+        },
+        {
+          "text": "Gave a prioritised order with the hotspot first, rather than an undifferentiated list",
+          "passed": true,
+          "evidence": "Finding 1 = the hotspot, explicitly 'the headline item'; Finding 2 surfaced by re-ranking after the top fix; closes by stating no further mechanical win remains."
+        }
+      ],
+      "notes": [
+        "FALSE CLAIM, not covered by any assertion: asserted the test 'could never observe' drift 'regardless of N_STEPS', based on fuzzing post() against balance(). The loop actually asserts post() against an independent accumulator built in the test, and fuzzing correct code proves nothing about bug detection. I reproduced e1-with's mutation on the pristine template: with a drift bug at entry #10000, N_STEPS=2000 PASSES and N_STEPS=36000 FAILS. The fix it shipped is sound and LINEAR; the justification given for it was not."
+      ]
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Hoisted the three fixtures into a shared conftest.py",
+          "passed": true,
+          "evidence": "Mechanically verified: conftest.py defines setup_session, two_sessions, race_ids."
+        },
+        {
+          "text": "Removed the duplicated fixture definitions from all six test_session_*.py files",
+          "passed": true,
+          "evidence": "Mechanically verified: zero residual fixture definitions across all six files."
+        },
+        {
+          "text": "Test count and statuses unchanged: still 85 passed / 12 skipped",
+          "passed": true,
+          "evidence": "pytest-after.txt: 85 passed, 12 skipped; --collect-only total 97."
+        },
+        {
+          "text": "Verified by comparing before/after test IDs and statuses, not merely that the suite is green",
+          "passed": true,
+          "evidence": "Ran --junitxml before and after and diffed with the skill's aggregate_junit.py --compare: 'tests 97 -> 97, removed=0 status-changed=0 added=0'. Under the heading 'Proof of safety'."
+        },
+        {
+          "text": "Did not delete or skip any test",
+          "passed": true,
+          "evidence": "git diff: 7 files, +26/-175, all deletions are fixture bodies; 97 tests still collected."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Collapsed the ten near-identical tests into a single parametrized test",
+          "passed": true,
+          "evidence": "Mechanically verified: 1 @pytest.mark.parametrize, 3 top-level test functions (1 parametrized + 2 unrelated)."
+        },
+        {
+          "text": "All ten input cases retained \u2014 collected test count for the file is still 12",
+          "passed": true,
+          "evidence": "--collect-only: tests/unit/test_rates.py == 12."
+        },
+        {
+          "text": "Assertions preserved rather than weakened or dropped",
+          "passed": true,
+          "evidence": "git diff +19/-48 confined to test_rates.py; the two unrelated tests untouched."
+        },
+        {
+          "text": "Verified the before/after test set rather than only that the suite passes",
+          "passed": true,
+          "evidence": "Diffed JUnit XML test IDs and showed the 1:1 mapping, e.g. test_annual_to_daily_fifty_bps -> test_annual_to_daily[fifty_bps]; '0 tests removed, 0 status changes'."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6667,
+        "passed": 4,
+        "failed": 2,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Profiled the whole suite, not only the tests/integration directory the user named",
+          "passed": true,
+          "evidence": "Ran the full suite and surfaced test_invariants at ~5.5s, outside the named directory."
+        },
+        {
+          "text": "Identified tests/unit/test_invariants.py as the dominant cost (~two thirds of wall-clock)",
+          "passed": true,
+          "evidence": "Flagged it as dominating full-suite time at ~5.5s, with the O(n^2) loop named."
+        },
+        {
+          "text": "Characterised the integration cost as a flat per-test setup tax in the api_client fixture, not a hotspot",
+          "passed": true,
+          "evidence": "Identified time.sleep(0.06) per use across 39 tests as an unasserted 'realism' tax; checked no test depends on it."
+        },
+        {
+          "text": "Compared the test set before and after and reported 0 removed / 0 status-changed",
+          "passed": false,
+          "evidence": "Compared counts only ('57 passed, 12 skipped' before and after). No test-ID or status-level comparison \u2014 a rename plus a new silent skip would be indistinguishable."
+        },
+        {
+          "text": "Left N_STEPS in test_invariants.py unchanged at 36000",
+          "passed": true,
+          "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only tests/integration/conftest.py."
+        },
+        {
+          "text": "Reported that 12 tests in test_legacy.py are silently skipped",
+          "passed": false,
+          "evidence": "Dismissed as a timing exclusion \u2014 'skipif'd on darwin/linux, so it never pays the cost either way'. Did not test the predicate, which is always true."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Profiled or otherwise located the cost before changing anything",
+          "passed": true,
+          "evidence": "Used --durations and quantified the test at 6.46s of a 9.18s suite before editing."
+        },
+        {
+          "text": "Identified FakeLedger in tests/unit/_fakes.py as the source of the cost, not the code under test",
+          "passed": true,
+          "evidence": "Quoted the offending post() body and noted the test 'never touches the real ledgerlite.Ledger at all'."
+        },
+        {
+          "text": "Left N_STEPS unchanged at 36000",
+          "passed": true,
+          "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only tests/unit/_fakes.py."
+        },
+        {
+          "text": "Fixed FakeLedger to stop rescanning all prior entries on each post",
+          "passed": true,
+          "evidence": "Scaling probe: ratios 1.83, 2.02 = LINEAR."
+        },
+        {
+          "text": "Explicitly told the user their proposed fix was unnecessary and why",
+          "passed": true,
+          "evidence": "'I did not drop N_STEPS' up front, justified by the module docstring's account of a real bug a 100-step version missed. Reasoned from the docstring rather than testing the claim."
+        },
+        {
+          "text": "Reported before/after numbers as measured rather than estimated",
+          "passed": true,
+          "evidence": "Before/after table from --durations runs; ~3.4x suite speedup reported as measured."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 4,
+        "failed": 1,
+        "total": 5,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Measured per-test durations across the whole suite",
+          "passed": true,
+          "evidence": "'Ran pytest --durations=0 to get a full per-test timing breakdown before touching anything, rather than guessing'."
+        },
+        {
+          "text": "Distinguished the single hotspot from the uniform per-test tax as different problems",
+          "passed": true,
+          "evidence": "'Two independent issues' \u2014 a 5.67s quadratic and a ~2.5s fixture sleep across 39 tests, reported separately."
+        },
+        {
+          "text": "Reported concentration \u2014 how few files hold most of the wall-clock",
+          "passed": true,
+          "evidence": "68% in one test, 30% in the api_client fixture."
+        },
+        {
+          "text": "Reported that 12 tests are silently skipped",
+          "passed": false,
+          "evidence": "'test_legacy.py ... is skipif'd out on darwin/linux, so it never paid this cost either way (the 12 skips seen in the run were that file)' \u2014 framed purely as a timing exclusion."
+        },
+        {
+          "text": "Gave a prioritised order with the hotspot first, rather than an undifferentiated list",
+          "passed": true,
+          "evidence": "Numbered findings with the 68% quadratic first."
+        }
+      ],
+      "notes": [
+        "RUBRIC BLIND SPOT: this arm's fix does not remove the quadratic. A scaling probe of its FakeLedger gives 6k/12k/24k ratios of 3.94, 3.78 \u2014 still O(n^2). It bought a ~15x constant factor (per-account bucketing plus C-level sum) and reported '18x faster, 94.5% reduction'. No assertion in eval-2 can see this, so it scores the same as the with_skill arm, which is LINEAR (1.47, 2.44)."
+      ]
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8,
+        "passed": 4,
+        "failed": 1,
+        "total": 5,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Hoisted the three fixtures into a shared conftest.py",
+          "passed": true,
+          "evidence": "Mechanically verified: conftest.py defines all three fixtures."
+        },
+        {
+          "text": "Removed the duplicated fixture definitions from all six test_session_*.py files",
+          "passed": true,
+          "evidence": "Mechanically verified: zero residual definitions; diffstat identical to the with_skill arm (+26/-175)."
+        },
+        {
+          "text": "Test count and statuses unchanged: still 85 passed / 12 skipped",
+          "passed": true,
+          "evidence": "pytest-after.txt: 85 passed, 12 skipped; --collect-only total 97."
+        },
+        {
+          "text": "Verified by comparing before/after test IDs and statuses, not merely that the suite is green",
+          "passed": false,
+          "evidence": "Compared aggregate counts only: 'Test count and pass/skip split are identical'. No per-test ID or status comparison, so a rename or a newly-silent skip would not have been caught."
+        },
+        {
+          "text": "Did not delete or skip any test",
+          "passed": true,
+          "evidence": "git diff shows only fixture-body deletions; 97 tests still collected."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Collapsed the ten near-identical tests into a single parametrized test",
+          "passed": true,
+          "evidence": "Mechanically verified: 1 parametrize, 3 top-level test functions."
+        },
+        {
+          "text": "All ten input cases retained \u2014 collected test count for the file is still 12",
+          "passed": true,
+          "evidence": "--collect-only: tests/unit/test_rates.py == 12."
+        },
+        {
+          "text": "Assertions preserved rather than weakened or dropped",
+          "passed": true,
+          "evidence": "git diff +18/-47 confined to test_rates.py."
+        },
+        {
+          "text": "Verified the before/after test set rather than only that the suite passes",
+          "passed": true,
+          "evidence": "Captured pytest -v listings before and after and enumerated the ten [bps] parametrized IDs, concluding 'Same 12 cases collected and passing'. ID-level, though done by eye rather than by tooling."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9267,
+        "stddev": 0.1011,
+        "min": 0.8,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.8533,
+        "stddev": 0.1445,
+        "min": 0.6667,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.07",
+      "time_seconds": "+0.0",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

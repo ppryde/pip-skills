@@ -1,0 +1,42 @@
+{
+  "eval": "eval-2-open-ended-triage",
+  "config": "with_skill",
+  "summary": {
+    "passed": 4,
+    "failed": 1,
+    "total": 5,
+    "pass_rate": 0.8
+  },
+  "expectations": [
+    {
+      "text": "Measured per-test durations across the whole suite",
+      "passed": true,
+      "evidence": "Baseline 97 tests / 8.50s with a per-file breakdown; scaling check at 9k/18k/36k steps."
+    },
+    {
+      "text": "Distinguished the single hotspot from the uniform per-test tax as different problems",
+      "passed": true,
+      "evidence": "Two separately-reported findings: a 5.8s O(n^2) hotspot, and a uniform ~67ms/test tax across 39 tests; found the second only after re-measuring post-fix."
+    },
+    {
+      "text": "Reported concentration \u2014 how few files hold most of the wall-clock",
+      "passed": true,
+      "evidence": "'one single test held 69% of total wall-clock', 5.8s of 8.4s measured test time."
+    },
+    {
+      "text": "Reported that 12 tests are silently skipped",
+      "passed": false,
+      "evidence": "Reported '85 passed / 12 skipped' only as a tally in the before/after table. Never identified the 12 as a coverage hole, nor that the skipif guard is unconditionally true."
+    },
+    {
+      "text": "Gave a prioritised order with the hotspot first, rather than an undifferentiated list",
+      "passed": true,
+      "evidence": "Finding 1 = the hotspot, explicitly 'the headline item'; Finding 2 surfaced by re-ranking after the top fix; closes by stating no further mechanical win remains."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": [
+      "FALSE CLAIM, not covered by any assertion: asserted the test 'could never observe' drift 'regardless of N_STEPS', based on fuzzing post() against balance(). The loop actually asserts post() against an independent accumulator built in the test, and fuzzing correct code proves nothing about bug detection. I reproduced e1-with's mutation on the pristine template: with a drift bug at entry #10000, N_STEPS=2000 PASSES and N_STEPS=36000 FAILS. The fix it shipped is sound and LINEAR; the justification given for it was not."
+    ]
+  }
+}

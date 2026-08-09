@@ -1,0 +1,45 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..f1fe06f 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,10 +9,14 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks before sleeping, so an outbox that is already drained (the case
++    for every caller today, since `Outbox.drain()` is synchronous) returns
++    immediately instead of paying a guaranteed POLL_INTERVAL sleep. Still
++    polls at POLL_INTERVAL and gives up after MAX_POLLS attempts for a
++    backend where draining is genuinely asynchronous.
+     """
+     for _ in range(MAX_POLLS):
+-        time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+             return
++        time.sleep(POLL_INTERVAL)
+     raise TimeoutError("outbox did not drain within the poll budget")
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..86db7d7 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,5 +1,3 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+@@ -8,10 +6,10 @@ from ledgerlite.session import Client
+ def _boot_backend() -> dict:
+     """Stand up a clean backend for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    This fixture only ever hands back a fresh in-memory dict -- there is no
++    schema to rebuild and Client never touches a clock, so there is nothing
++    here that benefits from an artificial delay.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 
