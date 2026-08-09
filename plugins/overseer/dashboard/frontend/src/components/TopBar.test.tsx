@@ -352,4 +352,24 @@ describe("<TopBar/>", () => {
     expect(screen.queryByText(/Short Rest/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Long Rest/)).not.toBeInTheDocument();
   });
+
+  // Task 7: Clear-data control — gated entirely on the `onClear` prop so
+  // App.tsx can withhold it when no repo is selected (see App.tsx's
+  // `selectedRepo ? () => setClearOpen(true) : undefined`).
+  it("renders no Clear button when onClear is not provided", () => {
+    render(<TopBar {...baseProps()} />);
+    expect(
+      screen.queryByRole("button", { name: /clear/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a Clear button beside the repo selector when onClear is provided, and clicking it calls onClear", () => {
+    const onClear = vi.fn();
+    render(<TopBar {...baseProps()} onClear={onClear} />);
+
+    const button = screen.getByRole("button", { name: /clear/i });
+    expect(button).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(onClear).toHaveBeenCalledTimes(1);
+  });
 });
