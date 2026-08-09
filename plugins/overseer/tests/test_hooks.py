@@ -14,6 +14,7 @@ from scripts.models import Card
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "checklist-sync.sh"
+PREPUSH_HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "prepush-snapshot.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 
 
@@ -527,6 +528,7 @@ class TestHookScriptSmoke:
         }
         env = dict(os.environ)
         env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
         result = self._run_script(payload, env, tmp_path)
         assert result.returncode == 0
         assert _checklist(tmp_path) == [
@@ -558,6 +560,7 @@ class TestClaimStopScriptSmoke:
         assert main(["--root", str(tmp_path), "claim", "WF-001", "--session", "sess-1"]) == 0
         env = dict(os.environ)
         env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
         result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
         assert result.returncode == 0
         out = json.loads(result.stdout)
@@ -589,7 +592,312 @@ class TestClaimPromptScriptSmoke:
         assert main(["--root", str(tmp_path), "claim", "WF-001", "--session", "sess-1"]) == 0
         env = dict(os.environ)
         env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
         result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
         assert result.returncode == 0
         out = json.loads(result.stdout)
         assert "WF-001" in out["hookSpecificOutput"]["additionalContext"]
+
+
+class TestPrepushSnapshotHook:
+    """`prepush-snapshot.sh` is a PreToolUse/Bash hook that snapshots +
+    commits the board immediately before a `git push` runs, so the push
+    naturally includes the snapshot commit. It must always exit 0."""
+
+    def _git(self, repo: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True,
+        )
+
+    def _log_messages(self, repo: Path) -> list[str]:
+        result = self._git(repo, "log", "--pretty=%s")
+        if result.returncode != 0:
+            return []
+        return [line for line in result.stdout.splitlines() if line]
+
+    def _run_script(
+        self, payload: dict, repo: Path, *, set_plugin_root: bool = True,
+    ) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        if set_plugin_root:
+            env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        else:
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+        env["OVERSEER_PYTHON"] = sys.executable
+        return subprocess.run(
+            [BASH, str(PREPUSH_HOOK_SCRIPT)], input=json.dumps(payload),
+            env=env, cwd=repo, capture_output=True, text=True,
+        )
+
+    @pytest.fixture
+    def git_repo(self, tmp_path):
+        repo = tmp_path
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.email", "test@example.com")
+        self._git(repo, "config", "user.name", "Test")
+        return repo
+
+    def test_snapshots_on_opted_in_push(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}}, git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+        show = self._git(git_repo, "show", "HEAD:.overseer/backups/cards.json")
+        assert show.returncode == 0
+        assert "WF-001" in show.stdout
+
+    def test_noop_when_not_opted_in(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+        (git_repo / ".overseer" / "config.json").unlink()
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}}, git_repo,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_noop_on_non_push_command(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script({"tool_input": {"command": "git status"}}, git_repo)
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_noop_when_push_is_inside_quoted_arg(self, git_repo):
+        # `git push` appears only inside a quoted commit message — a raw-string
+        # regex would false-positive; the shlex tokenizer must not (WF-049).
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": 'git commit -m "remember to git push later"'}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_snapshots_when_git_dash_C_quoted_path_push(self, git_repo):
+        # A quoted `-C` value containing spaces must not defeat detection
+        # (the old `-C[^space]+` regex missed this) (WF-049).
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": 'git -C "/some path with spaces" push origin main'}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_snapshots_on_cd_then_push_segment(self, git_repo):
+        # A push in a later shell segment (`cd x && git push`) still fires.
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "cd /tmp && git push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_snapshots_on_multiline_push(self, git_repo):
+        # A push on its own line of a multiline command must fire — shlex eats
+        # newlines, so detection splits on "\n" per line (WF-049 regression).
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "git add -A\ngit commit -m wip\ngit push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_no_empty_commit_when_board_unchanged(self, git_repo):
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        payload = {"tool_input": {"command": "git push origin main"}}
+        first = self._run_script(payload, git_repo)
+        assert first.returncode == 0
+        commits_after_first = self._log_messages(git_repo)
+        assert "chore(overseer): board snapshot" in commits_after_first
+
+        second = self._run_script(payload, git_repo)
+        assert second.returncode == 0
+        assert self._log_messages(git_repo) == commits_after_first
+
+    def test_fails_open_when_claude_plugin_root_unset(self, git_repo):
+        # `set -u` would otherwise abort the script with "unbound variable"
+        # (exit 1) when CLAUDE_PLUGIN_ROOT is missing from the environment —
+        # a PreToolUse hook exiting non-zero can BLOCK the tool call, which
+        # violates the hard "never block a push" contract.
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}},
+            git_repo, set_plugin_root=False,
+        )
+
+        assert result.returncode == 0
+        assert self._log_messages(git_repo) == []
+
+    def test_worktree_push_snapshots_to_worktree_and_leaves_main_clean(self, git_repo):
+        """Root-cause regression: the committed backup is a PER-WORKING-TREE,
+        per-branch artifact — it must land on whichever branch you're about
+        to `git push` from. A linked worktree pushes its OWN branch, so the
+        snapshot must be written+committed under the WORKTREE's own
+        `.overseer/backups`, never resolved against the main repo root (which
+        would either dirty the main working tree or land the commit on the
+        wrong branch). The shared, central board state (board.db, via
+        OVERSEER_CENTRAL) is untouched by this — it stays keyed to the main
+        root and is visible from both trees, which is exactly why the
+        worktree's backup can see the card created against the main root."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+        self._git(git_repo, "add", ".overseer/config.json")
+        self._git(git_repo, "commit", "-q", "-m", "opt in to overseer")
+
+        worktree = git_repo.parent / "wt"
+        added = self._git(git_repo, "worktree", "add", "-b", "feature", str(worktree))
+        assert added.returncode == 0, added.stderr
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin feature"}}, worktree,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(worktree)
+        show = self._git(worktree, "show", "HEAD:.overseer/backups/cards.json")
+        assert show.returncode == 0
+        assert "WF-001" in show.stdout
+
+        # written under the WORKTREE's own backups dir, not the main root's
+        assert (worktree / ".overseer" / "backups" / "cards.json").exists()
+
+        # the main working tree must never be dirtied by a push out of a
+        # linked worktree
+        main_status = self._git(git_repo, "status", "--porcelain", ".overseer/backups")
+        assert main_status.stdout == ""
+        assert not (git_repo / ".overseer" / "backups").exists()
+
+    def test_snapshot_commit_excludes_other_staged_files(self, git_repo):
+        """Root-cause regression: the commit used to be a bare `git commit`
+        with no pathspec, so it swept EVERY staged file into the snapshot
+        commit (and a gated push would then publish it). The commit must be
+        scoped to the backup dir only, and must leave any other staged file
+        exactly as it was — staged, uncommitted."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+        (git_repo / "secret.txt").write_text("do-not-commit-me")
+        self._git(git_repo, "add", "secret.txt")
+
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin main"}}, git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+        show = self._git(git_repo, "show", "--name-only", "--pretty=", "HEAD")
+        files = [f for f in show.stdout.splitlines() if f]
+        assert files
+        assert all(f.startswith(".overseer/backups/") for f in files)
+        assert "secret.txt" not in files
+
+        # secret.txt must remain staged — the snapshot commit must not have
+        # touched the rest of the index at all.
+        staged = self._git(git_repo, "diff", "--cached", "--name-only")
+        assert "secret.txt" in staged.stdout.splitlines()
+
+    def test_git_dash_capital_c_push_triggers_snapshot(self, git_repo):
+        """Push-detection regex must catch `git -C <dir> push`, not just a
+        bare `git push`."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        result = self._run_script(
+            {"tool_input": {"command": f"git -C {git_repo} push origin main"}},
+            git_repo,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+
+    def test_resolves_repo_root_from_payload_cwd_not_process_cwd(
+        self, git_repo, tmp_path_factory
+    ):
+        """The hook must resolve the repo root from the JSON payload's `cwd`
+        field (matching cli.py's `_hook_root` convention used by the sibling
+        hooks), not from the hook process's own cwd — the two can differ.
+        `elsewhere` must live outside `git_repo`'s own tree entirely (not
+        just be a different subdirectory of it), or `git -C elsewhere`
+        would still resolve up to the very same repo and the regression
+        this test targets couldn't be observed."""
+        assert main(["--root", str(git_repo), "init"]) == 0
+        assert main(["--root", str(git_repo), "new-card", "--title", "T"]) == 0
+
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+
+        result = self._run_script(
+            {"cwd": str(git_repo), "tool_input": {"command": "git push origin main"}},
+            elsewhere,
+        )
+
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(git_repo)
+        assert self._log_messages(elsewhere) == []
+
+    def test_init_from_worktree_writes_config_at_canonical_root_and_hook_opts_in(
+        self, git_repo
+    ):
+        """`cmd_init`, run from a linked worktree, must write config.json /
+        config.local.json (and gitignore the local one) at the CANONICAL
+        main root — not the worktree's own root — because that's also
+        where the hook's opt-in gate looks. Config location, the gitignore
+        line, and the opt-in gate must all agree on the same root, or
+        opt-in from a worktree is incoherent."""
+        (git_repo / "README.md").write_text("x")
+        self._git(git_repo, "add", "README.md")
+        self._git(git_repo, "commit", "-q", "-m", "init")
+
+        # `git_repo.parent` is the shared pytest tmp root, not a per-test
+        # dir (`git_repo` fixture == `tmp_path` itself) — a plain "wt" name
+        # would collide with the sibling worktree test using the same
+        # parent dir in the same test session.
+        worktree = git_repo.parent / "wt-init-canonical-root"
+        added = self._git(git_repo, "worktree", "add", "-b", "feature", str(worktree))
+        assert added.returncode == 0, added.stderr
+
+        assert main(["--root", str(worktree), "init", "--yes"]) == 0
+        assert main(["--root", str(worktree), "new-card", "--title", "T"]) == 0
+
+        # (a) config.json lands at the canonical (main) root, not the worktree
+        assert (git_repo / ".overseer" / "config.json").exists()
+        assert not (worktree / ".overseer" / "config.json").exists()
+
+        # (b) the gitignore line for the local config lands at the canonical root
+        assert ".overseer/config.local.json" in (git_repo / ".gitignore").read_text()
+
+        # (c) the hook, fired from the worktree, sees the canonical root's
+        # opt-in and DOES snapshot — opt-in is effective from a worktree.
+        result = self._run_script(
+            {"tool_input": {"command": "git push origin feature"}}, worktree,
+        )
+        assert result.returncode == 0
+        assert "chore(overseer): board snapshot" in self._log_messages(worktree)

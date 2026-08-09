@@ -2,31 +2,20 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
 from scripts.models import Card, CardParseError
 
 WORKFLOW_DIRNAME = ".workflow"
-SCRATCH_DIRNAME = "scratch"
-SCRATCH_STATE_SUBDIR = "workflow"
 _MINTED_ID_RE = re.compile(r"\AWF-(\d+)-")
+_MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is a view
+_MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
 
 
 def workflow_root(repo_root: Path) -> Path:
     return repo_root / WORKFLOW_DIRNAME
-
-
-def _is_gitignored(repo_root: Path, relpath: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "check-ignore", "-q", relpath],
-            cwd=repo_root,
-            capture_output=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
 
 
 def _git_common_dir(repo_root: Path) -> Path | None:
@@ -105,14 +94,46 @@ def derive_repo_root(repo_root: Path) -> Path | None:
 
 
 def state_root(repo_root: Path) -> Path:
-    """Resolve the overseer state root. Existing .workflow/ always wins."""
-    existing = workflow_root(repo_root)
-    if existing.is_dir() and any(existing.iterdir()):
-        return existing
-    scratch = repo_root / SCRATCH_DIRNAME
-    if scratch.is_dir() and _is_gitignored(repo_root, SCRATCH_DIRNAME):
-        return scratch / SCRATCH_STATE_SUBDIR
-    return existing
+    """Resolve the overseer state root: the central per-repo folder."""
+    from scripts.config import central_root
+    return central_root(repo_root)
+
+
+def migrate_workflow_to_central(repo_root: Path) -> int:
+    """Copy legacy .workflow/ sprint/usage/knowledge/archive state into the
+    central folder, once. Never overwrites an existing central file. Sources
+    from the canonical repo's .workflow/ (not a worktree's). Returns files copied.
+
+    Skips top-level ``cards/`` and ``ledger.md`` (the DB owns live cards;
+    ledger.md is a generated view) and ``archive/cards/`` (the DB owns
+    archived cards too, imported by ``db.migrate_from_workflow``). Keeps
+    ``archive/corrupt/`` — quarantined files are never in the DB and would
+    otherwise be lost. The skip checks are path-specific (top-level name, or
+    the exact ``archive/cards`` prefix), not a basename match, so e.g. a file
+    literally named ``ledger.md`` nested inside ``knowledge/`` is still
+    copied.
+    """
+    from scripts.config import central_root
+    source_root = (derive_repo_root(repo_root) or repo_root) / WORKFLOW_DIRNAME
+    if not source_root.is_dir():
+        return 0
+    dest_root = central_root(repo_root)
+    copied = 0
+    for src in source_root.rglob("*"):
+        if not src.is_file():
+            continue
+        rel = src.relative_to(source_root)
+        if rel.parts and rel.parts[0] in _MIGRATE_SKIP_TOP:
+            continue
+        if rel.parts[:2] in _MIGRATE_SKIP_PATHS:
+            continue
+        dest = dest_root / rel
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        copied += 1
+    return copied
 
 
 def init_workflow(repo_root: Path) -> Path:
