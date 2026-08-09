@@ -11,6 +11,7 @@ directly below to compute the launch root's OWN main-repo root, matching how
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 import time
@@ -74,6 +75,11 @@ class ThresholdBody(BaseModel):
 
 class ClaimBody(BaseModel):
     session_id: str | None = None
+
+
+class ClearBody(BaseModel):
+    scope: str = "repo"
+    root: str | None = None
 
 
 def _context_pct(root: Path) -> int | None:
@@ -337,9 +343,17 @@ def _mutation_error(exc: CliError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
-def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _is_loopback(host: str) -> bool:
+    return host in _LOOPBACK_HOSTS
+
+
+def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
+    launch_host = host
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -558,6 +572,26 @@ def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
             run_vigil(effective, "config", "set", "context.threshold", str(body.value))
 
         return _mutate(do, effective)
+
+    @app.post("/api/repo/clear")
+    def clear_repo(body: ClearBody) -> dict[str, Any]:
+        if body.scope not in ("cards", "repo"):
+            raise HTTPException(status_code=400, detail=f"unknown clear scope: {body.scope!r}")
+        if not _is_loopback(launch_host) and \
+                os.environ.get("OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE") != "1":
+            raise HTTPException(
+                status_code=403,
+                detail=("destructive clear is disabled on a non-loopback bind; relaunch with "
+                        "--host 127.0.0.1 or set OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1"),
+            )
+        effective = _resolve_root(launch_root, _derived_launch_root, body.root)
+        try:
+            return run_overseer(
+                effective, "clear", "--scope", body.scope, "--yes", "--json",
+                json_out=True, timeout=60,
+            )
+        except CliError as exc:
+            raise _mutation_error(exc) from exc
 
     _mount_frontend(app, dist_dir)
 

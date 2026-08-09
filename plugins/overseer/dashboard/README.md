@@ -79,6 +79,32 @@ Options:
 | `--port PORT` | `8770` | Bind port |
 | `--no-browser` | off | Don't auto-open a browser tab |
 
+## Clear data
+
+A "Clear data" control in the dashboard settings wipes the served repo's
+overseer state via `POST /api/repo/clear`, which shells out to
+`overseer clear --scope {cards,repo} --yes --json` (see
+`../README.md#overseer-clear` for the CLI verb). Two scopes:
+
+- **Cards** — deletes every card, keeping the central folder and the repo's
+  identity/meta intact.
+- **Repo** — removes the whole central per-repo folder (board, sprints,
+  usage, knowledge).
+
+A recovery snapshot is **always** taken first (unless the CLI is run
+directly with `--no-backup`, which the dashboard never does) — undo with
+`overseer restore`. The UI gates the action behind a two-step "dragons"
+confirmation modal: step 1 picks the scope and previews what will be
+removed, step 2 only unlocks the destructive button once you've typed the
+exact repo label — a deliberate speed bump, not a security boundary.
+
+The real boundary is server-side: `/api/repo/clear` is refused with a 403
+unless the dashboard was launched bound to loopback (`127.0.0.1`/`::1`/
+`localhost`). To allow it on a non-loopback bind (e.g. serving over a LAN
+address), set `OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE=1` in the
+server's environment — an explicit, deliberate opt-in, since this endpoint
+can delete an entire repo's tracked work.
+
 ## Updating a running dashboard (redeploy)
 
 A running server reads static files off disk per request, and each build

@@ -70,18 +70,20 @@ def test_main_builds_app_from_resolved_root_and_runs_uvicorn(
     rc = serve.main(["--root", str(tmp_path), "--port", "9001", "--no-browser"])
 
     assert rc == 0
-    fake_create_app.assert_called_once_with(tmp_path.resolve())
+    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="127.0.0.1")
     fake_run.assert_called_once_with(sentinel_app, host="127.0.0.1", port=9001)
 
 
 def test_main_passes_through_custom_host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fake_create_app = MagicMock(return_value=object())
     fake_run = MagicMock()
-    monkeypatch.setattr(serve, "create_app", MagicMock(return_value=object()))
+    monkeypatch.setattr(serve, "create_app", fake_create_app)
     monkeypatch.setattr(serve.uvicorn, "run", fake_run)
     monkeypatch.setattr(serve.threading, "Timer", MagicMock())
 
     serve.main(["--root", str(tmp_path), "--host", "0.0.0.0", "--port", "8080", "--no-browser"])
 
+    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="0.0.0.0")
     fake_run.assert_called_once_with(fake_run.call_args.args[0], host="0.0.0.0", port=8080)
 
 

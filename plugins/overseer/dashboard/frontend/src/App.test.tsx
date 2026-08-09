@@ -165,3 +165,49 @@ describe("<App/> — WF-032 unbegun-repo holding page wiring", () => {
     expect(screen.queryByText("Sir Stale-a-lot")).not.toBeInTheDocument();
   });
 });
+
+describe("<App/> — task 7: Clear control wiring", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("shows a Clear button once a repo is selected, and clicking it opens ClearDialog scoped to that repo", async () => {
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+
+    const clearButton = await screen.findByRole("button", { name: /clear/i });
+    fireEvent.click(clearButton);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: /clear repository data/i,
+    });
+    expect(dialog).toBeInTheDocument();
+    // Scoped to the SELECTED repo's label, per App.tsx's
+    // `selectedRepo.label`/`selectedRepo.root` props to `<ClearDialog/>`.
+    expect(dialog.textContent).toMatch(/acme/);
+  });
+
+  it("renders no Clear button before any repo is selected", async () => {
+    vi.mocked(client.getRepos).mockResolvedValue({ repos: [] });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+
+    render(<App />);
+
+    await waitFor(() => expect(client.getRepos).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("button", { name: /^clear/i })
+    ).not.toBeInTheDocument();
+  });
+});
