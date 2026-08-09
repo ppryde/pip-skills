@@ -146,6 +146,22 @@ you can commit before a merge or push.
   clobbers). Refuses loudly on a schema-version mismatch or corrupt JSON —
   overseer's "never silently lose state" ethos extends to restores.
 
+### `overseer clear`
+
+**`overseer clear [--scope {cards,repo}] [--yes] [--no-backup] [--json]`**
+wipes state for a fresh start. `--scope repo` (the default) removes the
+entire central per-repo folder (board, sprints, usage, knowledge — see
+Storage above); `--scope cards` deletes every card but keeps the folder and
+the repo's identity/meta intact. It always takes a recovery snapshot first
+via `overseer backup` (skip with `--no-backup`) — undo with
+`overseer restore`. A backup failure aborts the clear rather than wiping
+without a net. Interactive use without `--yes` prompts you to type the
+repo label to confirm; non-interactive use (scripts, the dashboard) must
+pass `--yes`. `--json` emits a machine-readable result (used by the
+dashboard). Run against a repo with no board yet, it's a no-op. This is
+the same destructive action the dashboard's "Clear data" button drives —
+see `dashboard/README.md`.
+
 ### Pre-push board snapshot (opt-in)
 
 Once a repo has run `overseer init` (i.e. `.overseer/config.json` exists),
