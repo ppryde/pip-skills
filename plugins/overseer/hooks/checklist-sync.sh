@@ -8,8 +8,8 @@ trap 'exit 0' EXIT
 
 input="$(cat)"
 
-py="python3"
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python" ]; then
+py="${OVERSEER_PYTHON:-python3}"
+if [ -z "${OVERSEER_PYTHON:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python" ]; then
   py="${CLAUDE_PLUGIN_ROOT}/../../.venv/bin/python"
 fi
 

@@ -528,6 +528,7 @@ class TestHookScriptSmoke:
         }
         env = dict(os.environ)
         env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
         result = self._run_script(payload, env, tmp_path)
         assert result.returncode == 0
         assert _checklist(tmp_path) == [
@@ -559,6 +560,7 @@ class TestClaimStopScriptSmoke:
         assert main(["--root", str(tmp_path), "claim", "WF-001", "--session", "sess-1"]) == 0
         env = dict(os.environ)
         env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
         result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
         assert result.returncode == 0
         out = json.loads(result.stdout)
@@ -590,6 +592,7 @@ class TestClaimPromptScriptSmoke:
         assert main(["--root", str(tmp_path), "claim", "WF-001", "--session", "sess-1"]) == 0
         env = dict(os.environ)
         env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        env["OVERSEER_PYTHON"] = sys.executable
         result = self._run_script({"cwd": str(tmp_path), "session_id": "sess-1"}, env, tmp_path)
         assert result.returncode == 0
         out = json.loads(result.stdout)
