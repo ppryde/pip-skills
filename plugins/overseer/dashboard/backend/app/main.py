@@ -343,7 +343,7 @@ def _mutation_error(exc: CliError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", ""}
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _is_loopback(host: str) -> bool:

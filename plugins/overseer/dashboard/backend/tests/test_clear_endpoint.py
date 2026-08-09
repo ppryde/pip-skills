@@ -31,6 +31,12 @@ def test_clear_is_403_on_non_loopback_without_optin(root: Path) -> None:
     assert resp.status_code == 403
 
 
+def test_clear_is_403_on_empty_host_without_optin(root: Path) -> None:
+    remote = TestClient(create_app(root, host=""))
+    resp = remote.post("/api/repo/clear", json={"scope": "cards"})
+    assert resp.status_code == 403
+
+
 def test_clear_allowed_on_non_loopback_with_optin(root: Path, monkeypatch) -> None:
     monkeypatch.setenv("OVERSEER_DASHBOARD_ALLOW_REMOTE_DESTRUCTIVE", "1")
     remote = TestClient(create_app(root, host="0.0.0.0"))
