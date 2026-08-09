@@ -26,14 +26,73 @@ else
   exit 0
 fi
 
-# Not a git push invocation -> no-op. Matches plain `git push` as well as a
-# push preceded by intermediate global flags such as `git -C <dir> push` or
-# `git --git-dir=<path> push`, without firing merely because the word
-# "push" shows up later in an unrelated subcommand's own arguments (e.g. a
-# commit message) — the token immediately after `git` (and its recognised
-# global-flag detours) must itself be `push`.
-PUSH_RE='(^|[;&| ])git([[:space:]]+(-C[[:space:]]+[^[:space:]]+|--git-dir=[^[:space:]]+|--work-tree=[^[:space:]]+|-c[[:space:]]+[^[:space:]]+|--no-pager|--paginate|-p))*[[:space:]]+push([[:space:]]|$)'
-if ! grep -Eq "$PUSH_RE" <<<"$cmd"; then
+# Not a git push invocation -> no-op. Detection tokenizes the command the way
+# a shell would (shlex), so it is quote-aware where a raw-string regex cannot
+# be: `push` inside a quoted argument (e.g. `git commit -m "...git push..."`)
+# does NOT match, while a quoted flag value like `git -C "/my repo" push`
+# DOES. It splits on shell operators (`;`, `&&`, `|`, ...) and checks each
+# segment: after a leading `git` token and its recognised global-flag detours
+# (skipping arg-taking flags like `-C <dir>`), the next token must be `push`.
+# Falls back to a best-effort regex only when python3 is unavailable.
+_is_git_push() {
+  if command -v "${OVERSEER_PYTHON:-python3}" >/dev/null 2>&1; then
+    "${OVERSEER_PYTHON:-python3}" - "$cmd" <<'PY'
+import shlex
+import sys
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+            "--exec-path", "--super-prefix"}
+# Shell operators that separate one simple command from the next. Newlines are
+# NOT listed here: shlex with whitespace_split consumes them as whitespace, so
+# multiline commands are handled by splitting on "\n" per line below (a shell
+# newline is a command separator exactly like ";").
+SEP = {";", "&", "&&", "|", "||", "(", ")"}
+
+
+def is_push(seg):
+    if not seg or seg[0] != "git":
+        return False
+    i = 1
+    while i < len(seg):
+        t = seg[i]
+        if t in WITH_ARG:          # arg-taking global flag: skip flag + value
+            i += 2
+            continue
+        if t.startswith("-"):      # `--flag=val`, `--no-pager`, `-p`, ...
+            i += 1
+            continue
+        break
+    return i < len(seg) and seg[i] == "push"
+
+
+def line_has_push(line):
+    try:
+        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        return False  # unbalanced quotes etc. -> don't fire
+    segs, seg = [], []
+    for t in toks:
+        if t in SEP:
+            segs.append(seg)
+            seg = []
+        else:
+            seg.append(t)
+    segs.append(seg)
+    return any(is_push(s) for s in segs)
+
+
+# Split on newlines first (each line is its own command chain), then within a
+# line split on shell operators — so `git add …\ngit commit …\ngit push` fires.
+sys.exit(0 if any(line_has_push(ln) for ln in cmd.split("\n")) else 1)
+PY
+    return $?
+  fi
+  grep -Eq '(^|[;&| ])git([[:space:]]+(-C[[:space:]]+[^[:space:]]+|--git-dir=[^[:space:]]+|--work-tree=[^[:space:]]+|-c[[:space:]]+[^[:space:]]+|--no-pager|--paginate|-p))*[[:space:]]+push([[:space:]]|$)' <<<"$cmd"
+}
+if ! _is_git_push; then
   exit 0
 fi
 

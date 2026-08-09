@@ -768,6 +768,14 @@ git commit -m "feat(overseer): backup/restore CLI verbs + init config flow"
 
 ### Task 6: Pre-push snapshot hook
 
+> **Superseded during implementation.** This git-native `pre-push` hook design
+> was reverted (`git push "$@"` inside a pre-push hook is broken — the hook
+> receives remote-name/URL as argv, refs on stdin). It was replaced by a
+> Claude Code **PreToolUse hook on Bash** (`hooks/prepush-snapshot.sh`) that
+> snapshots + commits `.overseer/backups/` *before* an opted-in repo's
+> `git push` runs, so the push carries the snapshot. See the shipped design in
+> `docs/superpowers/specs/2026-08-08-overseer-central-storage-and-backup-design.md`.
+
 **Files:**
 - Create: `plugins/overseer/hooks/pre-push.sh`
 - Modify: `plugins/overseer/scripts/cli.py` (`_install_prepush_hook`)

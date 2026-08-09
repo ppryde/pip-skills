@@ -179,3 +179,14 @@ def test_backup_dir_resolves_relative_to_passed_root_not_main_repo_root(tmp_path
         json.dumps({"backup_dir": "custom/backups"})
     )
     assert config.backup_dir(worktree) == worktree / "custom" / "backups"
+
+
+def test_plain_owner_reads_board_at_path_with_special_chars(tmp_path):
+    # A central path containing a '#' (URI fragment delimiter) or a space must
+    # be percent-encoded when building the sqlite file: URI. Unencoded, sqlite
+    # mis-parses the path and the open fails, so _plain_owner falsely returns
+    # "unknown" — which would wrongly adopt a folder that isn't ours (WF-050).
+    owner_root = "/some/canonical/root"
+    plain = tmp_path / "weird #dir with space" / "api"
+    _seed_plain_board(plain, owner_root)
+    assert config._plain_owner(plain) == owner_root
