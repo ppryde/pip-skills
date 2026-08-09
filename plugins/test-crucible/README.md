@@ -37,7 +37,7 @@ document are Postgres-specific and labelled as such.
 Unusually for a skill, this one has been measured rather than asserted.
 
 - **28 subagent runs** across three iterations against a synthetic repo with seven
-  planted defects (`evals/`). Iteration 2 established the problem precisely — the skill
+  planted defects (`evals/test-crucible/` at the repo root). Iteration 2 established the problem precisely — the skill
   made agents *thorough* (0.62s vs 5.66s suite time, zero overlap between arms) and
   **not** *careful* (fix correctness stuck at 50% in both arms). Iteration 3 fixed that:
   the always-true skip guard went from 0/3 to 6/6, and genuinely-linear quadratic fixes
@@ -65,8 +65,11 @@ Phase 4.
 
 ## Running the evals
 
+The eval evidence + harness live at the repo root under `evals/test-crucible/`
+(kept out of the installed plugin path so they don't ship with the skill).
+
 ```bash
-cd evals
+cd evals/test-crucible          # from the repo root
 python scripts/build_eval_repo.py <dest>      # the substrate; its docstring is ground truth
 python scripts/scaling_probe.py   <repo>      # complexity class, times the TEST not a proxy
 python scripts/mutation_score.py              # detection power + serial wall-clock

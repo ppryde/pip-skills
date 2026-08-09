@@ -3,7 +3,7 @@ import pytest
 
 from scripts import db
 from scripts.store import init_workflow, state_root
-from tests.factories import make_card, git_init
+from factories import make_card, git_init
 
 
 @pytest.fixture

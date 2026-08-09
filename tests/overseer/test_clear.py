@@ -80,7 +80,7 @@ def test_clear_no_backup_skips_snapshot(repo, capsys):
 
 def test_clear_is_noop_when_no_board(tmp_path, capsys):
     # A repo root with NO overseer init -> no board.db.
-    from tests.factories import git_init
+    from factories import git_init
     git_init(tmp_path)
     assert main(["--root", str(tmp_path), "clear", "--scope", "repo", "--yes", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)

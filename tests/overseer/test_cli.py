@@ -10,7 +10,7 @@ import pytest
 from scripts import cli, config, db
 from scripts.cli import main
 from scripts.store import state_root
-from tests.factories import git_init
+from factories import git_init
 
 
 @pytest.fixture
@@ -230,7 +230,7 @@ class TestStateRootWiring:
 
 def test_direct_script_invocation(tmp_path):
     """cli.py must work when invoked as a script, not just as a module."""
-    cli = Path(__file__).parent.parent / "scripts" / "cli.py"
+    cli = Path(__file__).resolve().parents[2] / "plugins" / "overseer" / "scripts" / "cli.py"
     result = subprocess.run(
         [sys.executable, str(cli), "--root", str(tmp_path), "init"],
         capture_output=True,

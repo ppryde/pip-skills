@@ -3,8 +3,8 @@ import subprocess
 from scripts import db
 from scripts.resume import _branch_exists, format_report, resume_entries
 from scripts.store import init_workflow
-from tests.factories import git_init
-from tests.factories import make_card as _make_card
+from factories import git_init
+from factories import make_card as _make_card
 
 NOW = "2026-07-08T15:00"
 

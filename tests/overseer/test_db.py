@@ -3,7 +3,7 @@ import pytest
 from scripts import db
 from scripts.models import Card
 from scripts.store import save_card as file_save_card, workflow_root
-from tests.factories import git_init
+from factories import git_init
 
 
 def _seed_legacy_workflow(repo_root):

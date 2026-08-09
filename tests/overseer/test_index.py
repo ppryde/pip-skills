@@ -1,7 +1,7 @@
 from scripts import db
 from scripts.index import generate_index, rebuild_index
 from scripts.store import init_workflow
-from tests.factories import make_card
+from factories import make_card
 
 NOW = "2026-07-08T14:32"
 
@@ -63,7 +63,7 @@ class TestEpicsAndParked:
         return generate_index("proj", cards, [], "2026-07-11T10:00")
 
     def test_epic_section_with_rollup_and_children(self):
-        from tests.factories import make_card
+        from factories import make_card
         cards = [
             make_card("WF-010", status="in-flight", title="Auth"),
             make_card("WF-011", parent="WF-010", status="done",
@@ -77,7 +77,7 @@ class TestEpicsAndParked:
         assert "WF-011" in out and "WF-012" in out            # nested children
 
     def test_children_not_in_status_sections(self):
-        from tests.factories import make_card
+        from factories import make_card
         cards = [make_card("WF-010"), make_card("WF-011", parent="WF-010", status="in-flight")]
         out = self._gen(cards)
         # WF-011 appears under the epic, not as a standalone In-flight row
@@ -85,7 +85,7 @@ class TestEpicsAndParked:
         assert "WF-011" not in infl
 
     def test_readiness_shown(self):
-        from tests.factories import make_card
+        from factories import make_card
         cards = [
             make_card("WF-001", status="planned", depends_on=["WF-002"]),
             make_card("WF-002", status="in-flight"),
@@ -94,7 +94,7 @@ class TestEpicsAndParked:
         assert "waiting on WF-002" in out
 
     def test_parked_section(self):
-        from tests.factories import make_card
+        from factories import make_card
         cards = [make_card("WF-005", status="parked", title="Legacy", updated="2026-07-09T10:00")]
         out = self._gen(cards)
         assert "## Parked" in out and "WF-005" in out and "shelved" in out

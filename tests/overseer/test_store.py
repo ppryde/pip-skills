@@ -18,7 +18,7 @@ from scripts.store import (
     slugify,
     state_root,
 )
-from tests.factories import git_init as _git_init
+from factories import git_init as _git_init
 
 
 def _init_git(root): subprocess.run(["git", "init", "-q"], cwd=root, check=True)

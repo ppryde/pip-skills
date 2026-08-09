@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "vigil"
 STOP = PLUGIN_ROOT / "hooks" / "stop.sh"
 SESSION_START = PLUGIN_ROOT / "hooks" / "session-start.sh"
 NUDGE = PLUGIN_ROOT / "hooks" / "nudge-hook.sh"
@@ -272,7 +272,7 @@ class TestPackaging:
     def test_plugin_manifest_valid(self):
         data = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())
         assert data["name"] == "vigil"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "0.2.0"
 
     def test_marketplace_lists_vigil(self):
         mkt = PLUGIN_ROOT.parent.parent / ".claude-plugin" / "marketplace.json"
