@@ -4,9 +4,9 @@ from pathlib import Path
 
 from scripts import db
 from scripts.resume import handoff_report
-from tests.factories import make_card as _card
+from factories import make_card as _card
 
-VIGIL_CLI = Path(__file__).resolve().parents[2] / "vigil" / "scripts" / "cli.py"
+VIGIL_CLI = Path(__file__).resolve().parents[2] / "plugins" / "vigil" / "scripts" / "cli.py"
 
 
 def test_overseer_rollup_feeds_vigil_handover(tmp_path):

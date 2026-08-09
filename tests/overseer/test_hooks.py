@@ -12,7 +12,7 @@ from scripts import db
 from scripts.cli import main
 from scripts.models import Card
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "overseer"
 HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "checklist-sync.sh"
 PREPUSH_HOOK_SCRIPT = PLUGIN_ROOT / "hooks" / "prepush-snapshot.sh"
 BASH = shutil.which("bash") or "/bin/bash"

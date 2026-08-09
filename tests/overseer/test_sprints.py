@@ -3,7 +3,7 @@ import pytest
 from scripts.models import CardParseError
 from scripts.sprints import Sprint, replace_section, rollup, save_sprint
 from scripts.store import init_workflow
-from tests.factories import make_card
+from factories import make_card
 
 SAMPLE_SPRINT = """---
 id: 2026-07-S1
