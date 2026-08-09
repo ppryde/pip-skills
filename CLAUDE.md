@@ -27,8 +27,9 @@ invokes the overseer/vigil/census CLIs, or reads a config/state dir, has to
 pin its environment into the test's `tmp_path` **before** running:
 
 - `CLAUDE_CONFIG_DIR`, `OVERSEER_CENTRAL`, `OVERSEER_DB` → point at `tmp_path`
-  (see `plugins/overseer/tests/conftest.py` — an autouse fixture that does
-  exactly this and explains why).
+  (see the autouse fixtures in `plugins/overseer/tests/conftest.py` and
+  `plugins/overseer/dashboard/backend/tests/conftest.py` — each does exactly
+  this and explains why).
 - Prefer `tmp_path`/`monkeypatch` over writing anywhere under `~`.
 - Create nothing outside `tmp_path`; if a test must, it removes it on teardown.
 
