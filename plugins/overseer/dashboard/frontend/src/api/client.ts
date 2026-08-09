@@ -6,6 +6,7 @@
 import type {
   BoardResponse,
   CardDetail,
+  ClearResponse,
   DependsBody,
   MoveBody,
   ReposResponse,
@@ -156,4 +157,14 @@ export function claimCard(id: string, sessionId: string): Promise<BoardResponse>
 
 export function unclaimCard(id: string): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/unclaim`));
+}
+
+/** Clear-data action (dashboard settings). Deliberately NOT `withRoot`-scoped
+ * — the clear target is the modal's explicitly selected repo, not whatever
+ * root happens to be active, so `root` is threaded through the body instead. */
+export function clearRepo(
+  root: string,
+  scope: "cards" | "repo"
+): Promise<ClearResponse> {
+  return request<ClearResponse>("POST", "/api/repo/clear", { root, scope });
 }

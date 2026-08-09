@@ -306,6 +306,77 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_clear(args: argparse.Namespace, payload: dict, human: str) -> None:
+    if getattr(args, "json", False):
+        print(json.dumps(payload))
+    else:
+        print(human)
+
+
+def cmd_clear(args: argparse.Namespace) -> int:
+    import shutil
+
+    from scripts import backup, config
+    from scripts.db import board_db_path
+
+    scope = args.scope
+    label = derive_repo_label(args.root) or args.root.resolve().name
+
+    # No board yet -> no-op (not an error).
+    if not board_db_path(args.root).exists():
+        removed = {"cards": 0} if scope == "cards" else {
+            "folder": str(config.central_root(args.root)), "existed": False}
+        _print_clear(
+            args,
+            {"scope": scope, "backup_path": None, "removed": removed,
+             "label": label, "noop": True},
+            human=f"no overseer board for {label!r}; nothing to clear",
+        )
+        return 0
+
+    # Confirmation gate (the dashboard always passes --yes).
+    if not args.yes:
+        if sys.stdin.isatty():
+            reply = input(
+                f"Clear scope={scope} for {label!r}? Type the repo label to confirm: "
+            ).strip()
+            if reply != label:
+                raise ValueError("confirmation did not match; aborted")
+        else:
+            raise ValueError("clear requires --yes for non-interactive use")
+
+    # Backup first (recoverable). A failure here ABORTS the wipe.
+    backup_path = None
+    if not args.no_backup:
+        try:
+            backup_path = backup.backup_board(args.root)["dest"]
+        except OSError as exc:
+            raise ValueError(f"backup failed, aborting clear: {exc}") from exc
+
+    if scope == "cards":
+        conn = _conn(args.root)
+        deleted = conn.execute("DELETE FROM cards").rowcount
+        conn.commit()
+        rebuild_index(args.root, args.root.resolve().name, _now())
+        removed: dict = {"cards": deleted}
+    else:  # scope == "repo"
+        folder = config.central_root(args.root)
+        _close_conns()  # drop cached conn before removing the folder under it
+        existed = folder.exists()
+        if existed:
+            shutil.rmtree(folder)
+        removed = {"folder": str(folder), "existed": existed}
+
+    snap = f" (recovery snapshot: {backup_path})" if backup_path else ""
+    _print_clear(
+        args,
+        {"scope": scope, "backup_path": backup_path, "removed": removed,
+         "label": label, "noop": False},
+        human=f"cleared scope={scope} for {label!r}{snap}",
+    )
+    return 0
+
+
 def cmd_new_card(args: argparse.Namespace) -> int:
     conn = _conn(args.root)
     card_id = args.jira or args.linear or db.mint_id(conn)
@@ -1540,6 +1611,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("restore")
     p.add_argument("--dir", help="override the computed backup source")
     p.set_defaults(func=cmd_restore)
+
+    p = sub.add_parser("clear")
+    p.add_argument("--scope", choices=["cards", "repo"], default="repo")
+    p.add_argument("--yes", action="store_true",
+                   help="skip the interactive confirmation prompt")
+    p.add_argument("--no-backup", dest="no_backup", action="store_true",
+                   help="do NOT take a recovery snapshot before wiping")
+    p.add_argument("--json", action="store_true",
+                   help="emit the result as JSON (for the dashboard)")
+    p.set_defaults(func=cmd_clear)
 
     return parser
 

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "./client";
-import type { BoardResponse, CardDetail, SessionsResponse } from "./types";
+import type {
+  BoardResponse,
+  CardDetail,
+  ClearResponse,
+  SessionsResponse,
+} from "./types";
 
 const boardResponse: BoardResponse = {
   board: { project: {}, cards: [], sprints: [], quarantined: [] },
@@ -314,6 +319,25 @@ describe("api/client", () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ value: 75 });
     expect(result).toEqual(boardResponse);
+  });
+
+  it("clearRepo(root, scope) POSTs {root, scope} to /api/repo/clear and returns the parsed response", async () => {
+    const clearResponse: ClearResponse = {
+      scope: "repo",
+      backup_path: "/tmp/snap",
+      removed: { folder: "/x", existed: true },
+      label: "demo",
+      noop: false,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(clearResponse));
+
+    const result = await client.clearRepo("/repos/demo", "repo");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/repo/clear");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ root: "/repos/demo", scope: "repo" });
+    expect(result).toEqual(clearResponse);
   });
 
   it("throws an Error with the backend detail message on a non-2xx response", async () => {

@@ -43,6 +43,12 @@ export interface TopBarProps {
   branches: string[];
   activeBranch: string | null;
   onSelectBranch: (branch: string | null) => void;
+  /** Task 7: opens the destructive clear-data dialog (`ClearDialog`,
+   * App-owned) for the currently selected repo. Optional and rendered only
+   * when set — App.tsx passes `undefined` while no repo is selected (no
+   * `selectedRepo`), so there is never a Clear control with nothing to
+   * target. */
+  onClear?: () => void;
   /** Task 10: for an "unbegun" repo (WF-032, `has_board: false`) `useSessions`
    * is hard-gated off (see App.tsx), so `party` is never populated for it —
    * computing the questing pill from `party` would show a contradictory "0
@@ -110,6 +116,7 @@ function TopBar({
   activeBranch,
   onSelectBranch,
   questingCountOverride,
+  onClear,
 }: TopBarProps) {
   const threshold = context?.threshold ?? null;
   const gold = goldTotal(cards);
@@ -141,6 +148,16 @@ function TopBar({
       </div>
 
       <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
+      {onClear && (
+        <button
+          type="button"
+          className="topbar-clear danger"
+          onClick={onClear}
+          title="Clear this repo's data"
+        >
+          Clear…
+        </button>
+      )}
       <BranchFilter
         branches={branches}
         activeBranch={activeBranch}

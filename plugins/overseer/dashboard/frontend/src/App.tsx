@@ -4,6 +4,7 @@ import Board from "./components/Board";
 import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
 import UnbegunHolding from "./components/UnbegunHolding";
+import ClearDialog from "./components/ClearDialog";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
@@ -33,7 +34,7 @@ function writeStoredRoot(root: string): void {
 }
 
 function App() {
-  const { repos } = useRepos();
+  const { repos, reload: reloadRepos } = useRepos();
   // Seeded synchronously from localStorage so the very first board fetch
   // (useBoard's mount effect) already targets a persisted repo choice
   // rather than defaulting to the launch root and then re-fetching once
@@ -97,6 +98,11 @@ function App() {
   // WF-031 branch filter: session-local only (no localStorage, unlike the
   // repo selector) — `null` means "All", clearing every dim/spotlight.
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
+  // Task 7: App-owned ClearDialog open-state + post-clear success toast —
+  // same App-level precedent as `partyOpen`/`openCardId` above (Decisions:
+  // this state never lives on TopBar itself).
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearToast, setClearToast] = useState<string | null>(null);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -171,6 +177,10 @@ function App() {
         questingCountOverride={
           isUnbegun ? (selectedRepo?.live_sessions ?? 0) : undefined
         }
+        // Task 7: only offer the destructive clear action once a repo is
+        // actually selected — `undefined` (rather than a no-op closure)
+        // means TopBar renders no Clear control at all until then.
+        onClear={selectedRepo ? () => setClearOpen(true) : undefined}
       />
       <main className="board-region">
         {isUnbegun && selectedRepo ? (
@@ -215,6 +225,41 @@ function App() {
           activeBranch={activeBranch}
           threshold={threshold}
         />
+      )}
+      {clearOpen && selectedRepo && (
+        <ClearDialog
+          repoLabel={selectedRepo.label}
+          repoRoot={selectedRepo.root}
+          cardCount={board?.cards.length ?? 0}
+          onClose={() => setClearOpen(false)}
+          onCleared={(res) => {
+            setClearToast(
+              res.noop
+                ? `Nothing to clear for ${res.label}.`
+                : `Cleared ${res.label}. Recovery snapshot: ${
+                    res.backup_path ?? "(none)"
+                  } — restore with \`overseer restore\`.`
+            );
+            // Task 7: a clear can change has_board/live_sessions (repos) and
+            // always changes the board's own cards/sprints — refresh both so
+            // the dashboard reflects reality rather than a stale pre-clear
+            // snapshot.
+            void reloadRepos();
+            void refresh();
+          }}
+        />
+      )}
+      {clearToast && (
+        <div className="board-toast board-toast--success" role="status">
+          {clearToast}
+          <button
+            type="button"
+            className="board-toast__dismiss"
+            onClick={() => setClearToast(null)}
+          >
+            dismiss
+          </button>
+        </div>
       )}
     </div>
   );
