@@ -1,0 +1,84 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..f47087d 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,8 +9,13 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks immediately -- most callers invoke this right after drain(),
++    where the condition already holds and there is nothing to wait for.
++    Only polls, at POLL_INTERVAL, if the first check fails; gives up after
++    MAX_POLLS further attempts.
+     """
++    if outbox.is_drained():
++        return
+     for _ in range(MAX_POLLS):
+         time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..ae57796 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,5 +1,3 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+@@ -8,10 +6,14 @@ from ledgerlite.session import Client
+ def _boot_backend() -> dict:
+     """Stand up a clean backend for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    This is an in-memory fake (a plain dict) with no schema, connection, or
++    process to actually stand up, so there is no real work to pay for here.
++    A prior version added an artificial time.sleep(0.06) "so the timing
++    profile matches production" -- that traded correctness-irrelevant
++    wall-clock for nothing: no test depends on this fixture's duration, and
++    matching a slow production profile is not a property worth having in a
++    fast test suite.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 
+diff --git a/tests/unit/test_invariants.py b/tests/unit/test_invariants.py
+index 42ab047..d752a27 100644
+--- a/tests/unit/test_invariants.py
++++ b/tests/unit/test_invariants.py
+@@ -15,20 +15,27 @@ ACCOUNTS = ("assets", "liabilities", "equity")
+ 
+ 
+ def test_running_balance_matches_recomputed_balance():
+-    """post() must return exactly what balance() would recompute."""
+-    fake = FakeLedger()
++    """post() must return exactly what balance() would recompute.
++
++    This must run against the real Ledger, not FakeLedger: the fake
++    recomputes every balance from scratch on every call (see its
++    docstring), so it is correct by construction and cannot drift by
++    definition. Only the real ledger's incremental bookkeeping can
++    exhibit the cumulative-drift bug this test exists to catch.
++    """
++    ledger = Ledger()
+     expected = {a: 0 for a in ACCOUNTS}
+ 
+     for i in range(N_STEPS):
+         account = ACCOUNTS[i % len(ACCOUNTS)]
+         amount = (i % 97) - 48
+         expected[account] += amount
+-        returned = fake.post(account, amount)
++        returned = ledger.post(account, amount)
+         assert returned == expected[account], f"drift at step {i} on {account}"
+ 
+     for account in ACCOUNTS:
+-        assert fake.balance(account) == expected[account]
+-    assert fake.entry_count() == N_STEPS
++        assert ledger.balance(account) == expected[account]
++    assert ledger.entry_count() == N_STEPS
+ 
+ 
+ def test_real_ledger_agrees_with_fake():

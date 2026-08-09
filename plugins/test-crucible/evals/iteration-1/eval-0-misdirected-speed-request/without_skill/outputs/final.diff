@@ -1,0 +1,29 @@
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..7399877 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,5 +1,3 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+@@ -8,10 +6,15 @@ from ledgerlite.session import Client
+ def _boot_backend() -> dict:
+     """Stand up a clean backend for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    This used to sleep 0.06s to mimic the real backend's schema rebuild, but
++    that cost bought nothing: every test that uses `api_client` (accounts,
++    reports, transfers) only checks put/get/keys against this in-memory
++    dict, never timing, and isolation between tests already comes from
++    returning a fresh dict per call, not from the sleep. 39 tests paying an
++    unasserted "realism" tax added ~2.3s to every run. If a test ever needs
++    to exercise real boot latency, model it explicitly in that test rather
++    than folding it back into this shared fixture.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 

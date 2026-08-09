@@ -55,6 +55,13 @@
       "description": "Portable context handover: measure a session's context usage (ctx NN%) and reset in-process via /clear at points you choose, resuming from a re-injected handover. Works in any repo; ships fail-safe Stop/SessionStart hooks.",
       "category": "engineering",
       "tags": ["context", "handover", "session", "tmux", "portability", "hooks", "resume"]
+    },
+    {
+      "name": "test-crucible",
+      "source": "./plugins/test-crucible",
+      "description": "Test suite speed and dryness, by measurement. Profiles the whole suite rather than the part you pointed at, catches accidental quadratics with a scaling ladder, proves a fix removed the defect rather than shrinking its constant, and names what the speedup cost in fidelity.",
+      "category": "engineering",
+      "tags": ["tests", "performance", "ci", "pytest", "junit", "profiling", "quadratic", "fixtures", "duplication", "coverage", "optimisation"]
     }
   ]
 }

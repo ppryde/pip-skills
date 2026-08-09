@@ -1,0 +1,40 @@
+{
+  "eval": "eval-3-fixture-duplication",
+  "config": "with_skill",
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "Hoisted the three fixtures into a shared conftest.py",
+      "passed": true,
+      "evidence": "Mechanically verified: conftest.py defines setup_session, two_sessions, race_ids."
+    },
+    {
+      "text": "Removed the duplicated fixture definitions from all six test_session_*.py files",
+      "passed": true,
+      "evidence": "Mechanically verified: zero residual fixture definitions across all six files."
+    },
+    {
+      "text": "Test count and statuses unchanged: still 85 passed / 12 skipped",
+      "passed": true,
+      "evidence": "pytest-after.txt: 85 passed, 12 skipped; --collect-only total 97."
+    },
+    {
+      "text": "Verified by comparing before/after test IDs and statuses, not merely that the suite is green",
+      "passed": true,
+      "evidence": "Ran --junitxml before and after and diffed with the skill's aggregate_junit.py --compare: 'tests 97 -> 97, removed=0 status-changed=0 added=0'. Under the heading 'Proof of safety'."
+    },
+    {
+      "text": "Did not delete or skip any test",
+      "passed": true,
+      "evidence": "git diff: 7 files, +26/-175, all deletions are fixture bodies; 97 tests still collected."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": []
+  }
+}

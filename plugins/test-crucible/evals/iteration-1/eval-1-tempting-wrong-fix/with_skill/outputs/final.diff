@@ -1,0 +1,47 @@
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..97cbc67 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,28 +4,29 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    Keeps the full entry log (so entry_count() and any future replay-based
++    checks stay honest) but tracks per-account balances incrementally,
++    mirroring ledgerlite.Ledger's own O(1)-per-post design. An earlier version
++    recomputed each balance by rescanning the entire entry log on every
++    post()/balance() call; that made a single N_STEPS-sized test loop O(n^2)
++    without buying any extra correctness -- the per-step assertions in
++    test_invariants.py check post()'s return value against an independently
++    maintained accumulator in the test itself, not against a from-scratch
++    rescan here, so the rescan was pure overhead.
+     """
+ 
+     def __init__(self) -> None:
++        self._balances: dict[str, int] = {}
+         self._entries: list[tuple[str, int]] = []
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
++        new = self._balances.get(account, 0) + amount
++        self._balances[account] = new
+         self._entries.append((account, amount))
+-        return running + amount
++        return new
+ 
+     def balance(self, account: str) -> int:
+-        total = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                total += amt
+-        return total
++        return self._balances.get(account, 0)
+ 
+     def entry_count(self) -> int:
+         return len(self._entries)

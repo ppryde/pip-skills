@@ -1,0 +1,54 @@
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..37a9536 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -1,31 +1,35 @@
+ """Test doubles for the unit suite."""
+ 
++from collections import defaultdict
++
+ 
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+     Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+     the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    balance that could drift from the entries. post() and balance() both
++    recompute from the log on every call -- neither one trusts a cached
++    running total -- so this stays an independent oracle for the real
++    Ledger's incremental balance-tracking.
++
++    Entries are partitioned per account (rather than kept as one flat log)
++    purely so that recomputation only has to touch that account's own amounts
++    instead of rescanning every account's history. This is the same
++    O(n^2)-drop-to-O(n * k) trick as summing per-bucket instead of
++    filter-then-sum over everything: it does not change what gets recomputed,
++    only how much irrelevant history each call has to walk past to do it.
+     """
+ 
+     def __init__(self) -> None:
+-        self._entries: list[tuple[str, int]] = []
++        self._by_account: dict[str, list[int]] = defaultdict(list)
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
+-        self._entries.append((account, amount))
+-        return running + amount
++        self._by_account[account].append(amount)
++        return sum(self._by_account[account])
+ 
+     def balance(self, account: str) -> int:
+-        total = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                total += amt
+-        return total
++        return sum(self._by_account.get(account, ()))
+ 
+     def entry_count(self) -> int:
+-        return len(self._entries)
++        return sum(len(amounts) for amounts in self._by_account.values())

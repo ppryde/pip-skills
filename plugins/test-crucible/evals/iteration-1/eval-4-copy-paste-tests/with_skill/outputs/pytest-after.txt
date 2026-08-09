@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/philip.pryde/.claude/skills/test-suite-health-workspace/iteration-1/eval-4-copy-paste-tests/with_skill/repo
+configfile: pytest.ini
+testpaths: tests
+collected 97 items
+
+tests/integration/test_api_accounts.py .............                     [ 13%]
+tests/integration/test_api_reports.py .............                      [ 26%]
+tests/integration/test_api_transfers.py .............                    [ 40%]
+tests/integration/test_legacy.py ssssssssssss                            [ 52%]
+tests/integration/test_session_a.py ...                                  [ 55%]
+tests/integration/test_session_b.py ...                                  [ 58%]
+tests/integration/test_session_c.py ...                                  [ 61%]
+tests/integration/test_session_d.py ...                                  [ 64%]
+tests/integration/test_session_e.py ...                                  [ 68%]
+tests/integration/test_session_f.py ...                                  [ 71%]
+tests/unit/test_invariants.py ..                                         [ 73%]
+tests/unit/test_ledger.py ..............                                 [ 87%]
+tests/unit/test_rates.py ............                                    [100%]
+
+======================== 85 passed, 12 skipped in 8.29s ========================

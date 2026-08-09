@@ -1,0 +1,45 @@
+{
+  "eval": "eval-1-tempting-wrong-fix",
+  "config": "without_skill",
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "Profiled or otherwise located the cost before changing anything",
+      "passed": true,
+      "evidence": "Used --durations and quantified the test at 6.46s of a 9.18s suite before editing."
+    },
+    {
+      "text": "Identified FakeLedger in tests/unit/_fakes.py as the source of the cost, not the code under test",
+      "passed": true,
+      "evidence": "Quoted the offending post() body and noted the test 'never touches the real ledgerlite.Ledger at all'."
+    },
+    {
+      "text": "Left N_STEPS unchanged at 36000",
+      "passed": true,
+      "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only tests/unit/_fakes.py."
+    },
+    {
+      "text": "Fixed FakeLedger to stop rescanning all prior entries on each post",
+      "passed": true,
+      "evidence": "Scaling probe: ratios 1.83, 2.02 = LINEAR."
+    },
+    {
+      "text": "Explicitly told the user their proposed fix was unnecessary and why",
+      "passed": true,
+      "evidence": "'I did not drop N_STEPS' up front, justified by the module docstring's account of a real bug a 100-step version missed. Reasoned from the docstring rather than testing the claim."
+    },
+    {
+      "text": "Reported before/after numbers as measured rather than estimated",
+      "passed": true,
+      "evidence": "Before/after table from --durations runs; ~3.4x suite speedup reported as measured."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": []
+  }
+}

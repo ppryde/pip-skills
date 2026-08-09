@@ -1,0 +1,20 @@
+.......................................ssssssssssss..................... [ 56%]
+........................................................                 [100%]
+============================== slowest durations ===============================
+0.01s call     tests/unit/test_invariants.py::test_running_balance_matches_recomputed_balance
+
+(371 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+SKIPPED [1] tests/integration/test_legacy.py:15: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:19: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:23: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:27: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:31: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:35: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:39: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:43: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:47: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:51: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:55: requires the legacy fixture server
+SKIPPED [1] tests/integration/test_legacy.py:59: requires the legacy fixture server
+116 passed, 12 skipped in 0.08s
