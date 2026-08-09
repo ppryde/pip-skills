@@ -48,14 +48,20 @@ def _plain_owner(plain: Path) -> str:
     unclaimed board that we treat as adoptable for back-compat."""
     db_path = plain / "board.db"
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        # Build the read-only URI via ``Path.as_uri()`` so a central path
+        # containing a space / ``?`` / ``#`` is percent-encoded rather than
+        # mis-parsed by sqlite's URI reader (an unencoded ``?`` or ``#`` would
+        # be read as the query/fragment delimiter, truncating the path and
+        # failing the open → a false "unknown" that wrongly adopts the folder).
+        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
         try:
             row = conn.execute(
                 "SELECT value FROM meta WHERE key = 'repo_root'"
             ).fetchone()
         finally:
             conn.close()
-    except sqlite3.Error:
+    except (sqlite3.Error, ValueError):
         return "unknown"
     if row is None or row[0] is None:
         return "unknown"
