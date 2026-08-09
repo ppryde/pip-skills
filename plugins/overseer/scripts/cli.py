@@ -348,7 +348,10 @@ def cmd_clear(args: argparse.Namespace) -> int:
     # Backup first (recoverable). A failure here ABORTS the wipe.
     backup_path = None
     if not args.no_backup:
-        backup_path = backup.backup_board(args.root)["dest"]
+        try:
+            backup_path = backup.backup_board(args.root)["dest"]
+        except OSError as exc:
+            raise ValueError(f"backup failed, aborting clear: {exc}") from exc
 
     if scope == "cards":
         conn = _conn(args.root)
