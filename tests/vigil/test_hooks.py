@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "vigil"
 STOP = PLUGIN_ROOT / "hooks" / "stop.sh"
 SESSION_START = PLUGIN_ROOT / "hooks" / "session-start.sh"
 NUDGE = PLUGIN_ROOT / "hooks" / "nudge-hook.sh"
