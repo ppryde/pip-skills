@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CLI = Path(__file__).resolve().parent.parent / "scripts" / "cli.py"
+CLI = Path(__file__).resolve().parents[2] / "plugins" / "census" / "scripts" / "cli.py"
 
 
 def _spawn_ingest(store_path, sid):
