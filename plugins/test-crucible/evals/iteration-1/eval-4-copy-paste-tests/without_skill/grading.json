@@ -1,0 +1,35 @@
+{
+  "eval": "eval-4-copy-paste-tests",
+  "config": "without_skill",
+  "summary": {
+    "passed": 4,
+    "failed": 0,
+    "total": 4,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "Collapsed the ten near-identical tests into a single parametrized test",
+      "passed": true,
+      "evidence": "Mechanically verified: 1 parametrize, 3 top-level test functions."
+    },
+    {
+      "text": "All ten input cases retained \u2014 collected test count for the file is still 12",
+      "passed": true,
+      "evidence": "--collect-only: tests/unit/test_rates.py == 12."
+    },
+    {
+      "text": "Assertions preserved rather than weakened or dropped",
+      "passed": true,
+      "evidence": "git diff +18/-47 confined to test_rates.py."
+    },
+    {
+      "text": "Verified the before/after test set rather than only that the suite passes",
+      "passed": true,
+      "evidence": "Captured pytest -v listings before and after and enumerated the ten [bps] parametrized IDs, concluding 'Same 12 cases collected and passing'. ID-level, though done by eye rather than by tooling."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": []
+  }
+}

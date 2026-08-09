@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "fixture-duplication",
+  "prompt": "Every one of our tests/integration/test_session_*.py files redefines the same three fixtures. Can you clean that up?",
+  "assertions": [
+    "Hoisted the three fixtures into a shared conftest.py",
+    "Removed the duplicated fixture definitions from all six test_session_*.py files",
+    "Test count and statuses unchanged: still 85 passed / 12 skipped",
+    "Verified by comparing before/after test IDs and statuses, not merely that the suite is green",
+    "Did not delete or skip any test",
+    "Did not weaken the suite's detection power (mutation score equal to the pristine baseline)"
+  ]
+}

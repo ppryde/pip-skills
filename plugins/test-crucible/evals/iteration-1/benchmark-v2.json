@@ -1,0 +1,219 @@
+{
+  "note": "Re-score of iteration 1's UNCHANGED transcripts under the v2 rubric. Not a new run.",
+  "summary": {
+    "with_skill": {
+      "passed": 32,
+      "total": 36,
+      "rate": 0.8889
+    },
+    "without_skill": {
+      "passed": 28,
+      "total": 36,
+      "rate": 0.7778
+    }
+  },
+  "delta_v1": 0.074,
+  "delta_v2": 0.1111,
+  "rows": [
+    {
+      "eval": "eval-0-misdirected-speed-request",
+      "arm": "with_skill",
+      "v1": "5/6",
+      "v2": "6/8",
+      "v1_rate": 0.8333,
+      "v2_rate": 0.75,
+      "additions": [
+        {
+          "text": "Identified that the skipif predicate is unconditionally true",
+          "passed": false,
+          "evidence": "Wrote only 'the latter is skipif-skipped on this platform - left alone'. Never tested the predicate."
+        },
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine baseline."
+        }
+      ]
+    },
+    {
+      "eval": "eval-0-misdirected-speed-request",
+      "arm": "without_skill",
+      "v1": "4/6",
+      "v2": "5/8",
+      "v1_rate": 0.6667,
+      "v2_rate": 0.625,
+      "additions": [
+        {
+          "text": "Identified that the skipif predicate is unconditionally true",
+          "passed": false,
+          "evidence": "'skipif'd on darwin/linux, so it never pays the cost either way' \u2014 read as a platform exclusion."
+        },
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-1-tempting-wrong-fix",
+      "arm": "with_skill",
+      "v1": "6/6",
+      "v2": "9/9",
+      "v1_rate": 1.0,
+      "v2_rate": 1.0,
+      "additions": [
+        {
+          "text": "Fix changed the complexity class, not the constant",
+          "passed": true,
+          "evidence": "Scaling ladder on the resulting fake: 1.70, 2.04 = LINEAR."
+        },
+        {
+          "text": "Proved the coverage claim empirically rather than citing the docstring",
+          "passed": true,
+          "evidence": "Injected a drift bug at entry #10000; N_STEPS=2000 passed, 36000 failed. Independently reproduced on the pristine template."
+        },
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-1-tempting-wrong-fix",
+      "arm": "without_skill",
+      "v1": "6/6",
+      "v2": "8/9",
+      "v1_rate": 1.0,
+      "v2_rate": 0.8889,
+      "additions": [
+        {
+          "text": "Fix changed the complexity class, not the constant",
+          "passed": true,
+          "evidence": "Scaling ladder: 1.83, 2.02 = LINEAR."
+        },
+        {
+          "text": "Proved the coverage claim empirically rather than citing the docstring",
+          "passed": false,
+          "evidence": "Took the module docstring's account of a historical bug as fact. Correct conclusion, untested premise."
+        },
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-2-open-ended-triage",
+      "arm": "with_skill",
+      "v1": "4/5",
+      "v2": "6/8",
+      "v1_rate": 0.8,
+      "v2_rate": 0.75,
+      "additions": [
+        {
+          "text": "Any fix to the quadratic changed the complexity class",
+          "passed": true,
+          "evidence": "Scaling ladder: 1.47, 2.44 = LINEAR. Serial suite time 0.21s vs pristine 8.18s."
+        },
+        {
+          "text": "Claims about what a test can detect are backed by a mutation",
+          "passed": false,
+          "evidence": "Claimed the test 'could never observe' drift 'regardless of N_STEPS' from fuzzing CORRECT code (post vs balance). Refuted by mutation: bug at entry #10000 gives pass at 2000, fail at 36000."
+        },
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-2-open-ended-triage",
+      "arm": "without_skill",
+      "v1": "4/5",
+      "v2": "5/8",
+      "v1_rate": 0.8,
+      "v2_rate": 0.625,
+      "additions": [
+        {
+          "text": "Any fix to the quadratic changed the complexity class",
+          "passed": false,
+          "evidence": "Scaling ladder: 3.94, 3.78 = STILL QUADRATIC. Bought a ~15x constant (per-account bucketing + C-level sum) and reported '18x faster, 94.5% reduction'. Serial suite time 0.57s vs the with_skill arm's 0.21s."
+        },
+        {
+          "text": "Claims about what a test can detect are backed by a mutation",
+          "passed": false,
+          "evidence": "Reasoned from the docstring; no mutation run."
+        },
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-3-fixture-duplication",
+      "arm": "with_skill",
+      "v1": "5/5",
+      "v2": "6/6",
+      "v1_rate": 1.0,
+      "v2_rate": 1.0,
+      "additions": [
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-3-fixture-duplication",
+      "arm": "without_skill",
+      "v1": "4/5",
+      "v2": "5/6",
+      "v1_rate": 0.8,
+      "v2_rate": 0.8333,
+      "additions": [
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-4-copy-paste-tests",
+      "arm": "with_skill",
+      "v1": "4/4",
+      "v2": "5/5",
+      "v1_rate": 1.0,
+      "v2_rate": 1.0,
+      "additions": [
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    },
+    {
+      "eval": "eval-4-copy-paste-tests",
+      "arm": "without_skill",
+      "v1": "4/4",
+      "v2": "5/5",
+      "v1_rate": 1.0,
+      "v2_rate": 1.0,
+      "additions": [
+        {
+          "text": "Did not weaken detection power",
+          "passed": true,
+          "evidence": "Mutation score 4/6, equal to pristine."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "eval": "eval-3-fixture-duplication",
+  "config": "without_skill",
+  "summary": {
+    "passed": 4,
+    "failed": 1,
+    "total": 5,
+    "pass_rate": 0.8
+  },
+  "expectations": [
+    {
+      "text": "Hoisted the three fixtures into a shared conftest.py",
+      "passed": true,
+      "evidence": "Mechanically verified: conftest.py defines all three fixtures."
+    },
+    {
+      "text": "Removed the duplicated fixture definitions from all six test_session_*.py files",
+      "passed": true,
+      "evidence": "Mechanically verified: zero residual definitions; diffstat identical to the with_skill arm (+26/-175)."
+    },
+    {
+      "text": "Test count and statuses unchanged: still 85 passed / 12 skipped",
+      "passed": true,
+      "evidence": "pytest-after.txt: 85 passed, 12 skipped; --collect-only total 97."
+    },
+    {
+      "text": "Verified by comparing before/after test IDs and statuses, not merely that the suite is green",
+      "passed": false,
+      "evidence": "Compared aggregate counts only: 'Test count and pass/skip split are identical'. No per-test ID or status comparison, so a rename or a newly-silent skip would not have been caught."
+    },
+    {
+      "text": "Did not delete or skip any test",
+      "passed": true,
+      "evidence": "git diff shows only fixture-body deletions; 97 tests still collected."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": []
+  }
+}

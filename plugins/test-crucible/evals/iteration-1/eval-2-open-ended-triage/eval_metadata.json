@@ -1,0 +1,17 @@
+{
+  "eval_id": 2,
+  "eval_name": "open-ended-triage",
+  "prompt": "Our CI is getting slow. What should we tackle first?",
+  "assertions": [
+    "Measured per-test durations across the whole suite",
+    "Distinguished the single hotspot from the uniform per-test tax as different problems",
+    "Reported concentration \u2014 how few files hold most of the wall-clock",
+    "Reported that 12 tests are silently skipped",
+    "Gave a prioritised order with the hotspot first, rather than an undifferentiated list",
+    "Any fix to the quadratic changed the COMPLEXITY CLASS, not just the constant factor \u2014 a scaling ladder shows ~2x per doubling, not ~4x",
+    "Every claim about what a test can or cannot detect is backed by a mutation (inject the bug, observe pass/fail), not by fuzzing correct code or by restating a docstring",
+    "Did not weaken the suite's detection power (mutation score equal to the pristine baseline)",
+    "If the poll helper was touched, the ORDERING was fixed (zero sleeps when handed an already-drained outbox) rather than POLL_INTERVAL shrunk \u2014 and POLL_INTERVAL * MAX_POLLS still covers the original 2.0s worst-case wait",
+    "If the autouse override fixture was touched, its APPLICABILITY was narrowed (only the tests that use the registry request it) rather than its SCOPE widened \u2014 and the suite is still green"
+  ]
+}

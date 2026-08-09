@@ -1,0 +1,42 @@
+{
+  "eval": "eval-2-open-ended-triage",
+  "config": "without_skill",
+  "summary": {
+    "passed": 4,
+    "failed": 1,
+    "total": 5,
+    "pass_rate": 0.8
+  },
+  "expectations": [
+    {
+      "text": "Measured per-test durations across the whole suite",
+      "passed": true,
+      "evidence": "'Ran pytest --durations=0 to get a full per-test timing breakdown before touching anything, rather than guessing'."
+    },
+    {
+      "text": "Distinguished the single hotspot from the uniform per-test tax as different problems",
+      "passed": true,
+      "evidence": "'Two independent issues' \u2014 a 5.67s quadratic and a ~2.5s fixture sleep across 39 tests, reported separately."
+    },
+    {
+      "text": "Reported concentration \u2014 how few files hold most of the wall-clock",
+      "passed": true,
+      "evidence": "68% in one test, 30% in the api_client fixture."
+    },
+    {
+      "text": "Reported that 12 tests are silently skipped",
+      "passed": false,
+      "evidence": "'test_legacy.py ... is skipif'd out on darwin/linux, so it never paid this cost either way (the 12 skips seen in the run were that file)' \u2014 framed purely as a timing exclusion."
+    },
+    {
+      "text": "Gave a prioritised order with the hotspot first, rather than an undifferentiated list",
+      "passed": true,
+      "evidence": "Numbered findings with the 68% quadratic first."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": [
+      "RUBRIC BLIND SPOT: this arm's fix does not remove the quadratic. A scaling probe of its FakeLedger gives 6k/12k/24k ratios of 3.94, 3.78 \u2014 still O(n^2). It bought a ~15x constant factor (per-account bucketing plus C-level sum) and reported '18x faster, 94.5% reduction'. No assertion in eval-2 can see this, so it scores the same as the with_skill arm, which is LINEAR (1.47, 2.44)."
+    ]
+  }
+}

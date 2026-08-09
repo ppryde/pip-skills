@@ -1,0 +1,46 @@
+.......................................ssssssssssss..................... [ 74%]
+.........................                                                [100%]
+============================== slowest durations ===============================
+5.49s call     tests/unit/test_invariants.py::test_running_balance_matches_recomputed_balance
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_0
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_7
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_5
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_12
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_11
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_9
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_8
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_2
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_9
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_4
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_4
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_3
+0.07s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_12
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_6
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_0
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_7
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_6
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_1
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_8
+0.07s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_11
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_2
+0.07s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_5
+0.06s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_12
+0.06s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_10
+0.06s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_0
+0.06s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_9
+0.06s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_1
+0.06s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_11
+0.06s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_4
+0.06s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_1
+0.06s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_10
+0.06s setup    tests/integration/test_api_transfers.py::test_transfers_roundtrip_3
+0.06s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_10
+0.06s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_7
+0.06s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_8
+0.06s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_6
+0.06s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_5
+0.06s setup    tests/integration/test_api_reports.py::test_reports_roundtrip_2
+0.06s setup    tests/integration/test_api_accounts.py::test_accounts_roundtrip_3
+
+(239 durations < 0.005s hidden.  Use -vv to show these durations.)
+85 passed, 12 skipped in 8.15s

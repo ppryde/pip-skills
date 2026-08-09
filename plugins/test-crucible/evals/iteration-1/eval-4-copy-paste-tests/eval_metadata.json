@@ -1,0 +1,12 @@
+{
+  "eval_id": 4,
+  "eval_name": "copy-paste-tests",
+  "prompt": "tests/unit/test_rates.py is basically ten copies of the same test with different numbers in it. Can you tidy that up?",
+  "assertions": [
+    "Collapsed the ten near-identical tests into a single parametrized test",
+    "All ten input cases retained \u2014 collected test count for the file is still 12",
+    "Assertions preserved rather than weakened or dropped",
+    "Verified the before/after test set rather than only that the suite passes",
+    "Did not weaken the suite's detection power (mutation score equal to the pristine baseline)"
+  ]
+}

@@ -1,0 +1,79 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..8577bc8 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,10 +9,15 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks before each sleep, so an outbox that is already drained (true of
++    every caller here, since Outbox.drain() is synchronous) returns
++    immediately instead of paying a full POLL_INTERVAL for nothing. Retries
++    up to MAX_POLLS times, same total poll budget as before.
+     """
+     for _ in range(MAX_POLLS):
+-        time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+             return
++        time.sleep(POLL_INTERVAL)
++    if outbox.is_drained():
++        return
+     raise TimeoutError("outbox did not drain within the poll budget")
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..d5ea37a 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,17 +1,10 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+ 
+ 
+ def _boot_backend() -> dict:
+-    """Stand up a clean backend for a test.
+-
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
+-    """
+-    time.sleep(0.06)
++    """Stand up a clean backend for a test."""
+     return {}
+ 
+ 
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..af94597 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,21 +4,21 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    post() keeps a running per-account total so it is O(1) per call. balance()
++    stays an honest from-scratch replay of the entry log, deliberately not
++    sharing state with post()'s running total -- so the two paths can still
++    disagree if either one is wrong, which is the property that matters here,
++    not which of them happens to keep a running total.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: list[tuple[str, int]] = []
++        self._running: dict[str, int] = {}
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
+         self._entries.append((account, amount))
+-        return running + amount
++        self._running[account] = self._running.get(account, 0) + amount
++        return self._running[account]
+ 
+     def balance(self, account: str) -> int:
+         total = 0

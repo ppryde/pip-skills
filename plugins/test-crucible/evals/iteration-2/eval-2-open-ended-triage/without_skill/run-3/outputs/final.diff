@@ -1,0 +1,36 @@
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..e3eba01 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,21 +4,23 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    post() keeps a running per-account total so it stays O(1): the total is
++    updated in the same call that appends the entry, so there is only ever
++    one write path and no second copy of the balance that could drift from
++    the entries. balance() still recomputes independently by replaying the
++    full entry log, so it remains an obviously-correct-by-construction oracle
++    that a drifted running total would fail to match.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: list[tuple[str, int]] = []
++        self._running: dict[str, int] = {}
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
++        running = self._running.get(account, 0) + amount
++        self._running[account] = running
+         self._entries.append((account, amount))
+-        return running + amount
++        return running
+ 
+     def balance(self, account: str) -> int:
+         total = 0

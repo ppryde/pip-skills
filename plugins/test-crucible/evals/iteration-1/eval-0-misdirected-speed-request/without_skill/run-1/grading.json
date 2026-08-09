@@ -1,0 +1,45 @@
+{
+  "eval": "eval-0-misdirected-speed-request",
+  "config": "without_skill",
+  "summary": {
+    "passed": 4,
+    "failed": 2,
+    "total": 6,
+    "pass_rate": 0.6667
+  },
+  "expectations": [
+    {
+      "text": "Profiled the whole suite, not only the tests/integration directory the user named",
+      "passed": true,
+      "evidence": "Ran the full suite and surfaced test_invariants at ~5.5s, outside the named directory."
+    },
+    {
+      "text": "Identified tests/unit/test_invariants.py as the dominant cost (~two thirds of wall-clock)",
+      "passed": true,
+      "evidence": "Flagged it as dominating full-suite time at ~5.5s, with the O(n^2) loop named."
+    },
+    {
+      "text": "Characterised the integration cost as a flat per-test setup tax in the api_client fixture, not a hotspot",
+      "passed": true,
+      "evidence": "Identified time.sleep(0.06) per use across 39 tests as an unasserted 'realism' tax; checked no test depends on it."
+    },
+    {
+      "text": "Compared the test set before and after and reported 0 removed / 0 status-changed",
+      "passed": false,
+      "evidence": "Compared counts only ('57 passed, 12 skipped' before and after). No test-ID or status-level comparison \u2014 a rename plus a new silent skip would be indistinguishable."
+    },
+    {
+      "text": "Left N_STEPS in test_invariants.py unchanged at 36000",
+      "passed": true,
+      "evidence": "Mechanically verified: N_STEPS == 36000; git diff touches only tests/integration/conftest.py."
+    },
+    {
+      "text": "Reported that 12 tests in test_legacy.py are silently skipped",
+      "passed": false,
+      "evidence": "Dismissed as a timing exclusion \u2014 'skipif'd on darwin/linux, so it never pays the cost either way'. Did not test the predicate, which is always true."
+    }
+  ],
+  "user_notes_summary": {
+    "needs_review": []
+  }
+}

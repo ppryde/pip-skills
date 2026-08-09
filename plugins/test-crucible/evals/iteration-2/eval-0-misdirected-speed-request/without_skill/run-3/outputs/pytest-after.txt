@@ -1,0 +1,14 @@
+.......................................ssssssssssss..................... [ 56%]
+........................................................                 [100%]
+============================= slowest 10 durations =============================
+5.44s call     tests/unit/test_invariants.py::test_running_balance_matches_recomputed_balance
+0.02s setup    tests/unit/test_overrides.py::test_accrue_grows_with_days
+0.02s setup    tests/unit/test_overrides.py::test_accrue_over_zero_days_is_zero
+0.01s setup    tests/unit/test_overrides.py::test_accrue_grows_with_rate
+0.01s setup    tests/unit/test_overrides.py::test_accrue_rejects_negative_rate
+0.01s setup    tests/unit/test_overrides.py::test_accrue_on_zero_principal_is_zero
+0.01s setup    tests/unit/test_overrides.py::test_override_rejects_a_negative_rate
+0.01s setup    tests/unit/test_overrides.py::test_accrue_returns_a_decimal
+0.01s setup    tests/unit/test_overrides.py::test_accrue_at_one_basis_point_is_tiny
+0.01s setup    tests/unit/test_overrides.py::test_accrue_handles_a_long_horizon
+116 passed, 12 skipped in 5.73s

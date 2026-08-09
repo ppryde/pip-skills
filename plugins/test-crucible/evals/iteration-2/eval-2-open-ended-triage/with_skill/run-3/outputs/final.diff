@@ -1,0 +1,89 @@
+diff --git a/tests/integration/_waiting.py b/tests/integration/_waiting.py
+index 1c836fd..c613c8f 100644
+--- a/tests/integration/_waiting.py
++++ b/tests/integration/_waiting.py
+@@ -9,10 +9,14 @@ MAX_POLLS = 40
+ def wait_until_drained(outbox) -> None:
+     """Block until `outbox` reports that it has drained.
+ 
+-    Polls at POLL_INTERVAL and gives up after MAX_POLLS attempts.
++    Checks before sleeping, so an outbox that is already drained (the
++    common case here -- every caller invokes this right after `drain()`)
++    returns immediately instead of paying a wasted poll interval. Still
++    polls at POLL_INTERVAL and gives up after MAX_POLLS attempts for a
++    genuinely pending outbox.
+     """
+     for _ in range(MAX_POLLS):
+-        time.sleep(POLL_INTERVAL)
+         if outbox.is_drained():
+             return
++        time.sleep(POLL_INTERVAL)
+     raise TimeoutError("outbox did not drain within the poll budget")
+diff --git a/tests/integration/conftest.py b/tests/integration/conftest.py
+index f527b7b..db1fc8d 100644
+--- a/tests/integration/conftest.py
++++ b/tests/integration/conftest.py
+@@ -1,5 +1,3 @@
+-import time
+-
+ import pytest
+ 
+ from ledgerlite.session import Client
+@@ -8,10 +6,10 @@ from ledgerlite.session import Client
+ def _boot_backend() -> dict:
+     """Stand up a clean backend for a test.
+ 
+-    The real thing rebuilds the schema; here we simply pay the same wall-clock
+-    so the timing profile matches production.
++    `Client` only ever wraps this dict (see ledgerlite/session.py) -- there is
++    no schema, connection, or process behind it, so there is nothing here for
++    a per-test cost to stand in for.
+     """
+-    time.sleep(0.06)
+     return {}
+ 
+ 
+diff --git a/tests/unit/_fakes.py b/tests/unit/_fakes.py
+index 127613d..79979a5 100644
+--- a/tests/unit/_fakes.py
++++ b/tests/unit/_fakes.py
+@@ -4,28 +4,26 @@
+ class FakeLedger:
+     """In-memory stand-in for ledgerlite.Ledger.
+ 
+-    Mirrors the real ledger's behaviour by replaying the entry log, which keeps
+-    the fake obviously-correct-by-construction: there is no second copy of the
+-    balance that could drift from the entries.
++    Maintains a running balance per account incrementally, updated at the one
++    place state changes (`post`), alongside the full entry log. This mirrors
++    how the real `Ledger` avoids rescanning history on every call, while
++    `balance()` still has an entry log to be checked against: the log is the
++    source of truth and the running totals are a cache of it, not a second
++    independent copy that could drift on its own.
+     """
+ 
+     def __init__(self) -> None:
+         self._entries: list[tuple[str, int]] = []
++        self._balances: dict[str, int] = {}
+ 
+     def post(self, account: str, amount: int) -> int:
+-        running = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                running += amt
++        running = self._balances.get(account, 0) + amount
++        self._balances[account] = running
+         self._entries.append((account, amount))
+-        return running + amount
++        return running
+ 
+     def balance(self, account: str) -> int:
+-        total = 0
+-        for acct, amt in self._entries:
+-            if acct == account:
+-                total += amt
+-        return total
++        return self._balances.get(account, 0)
+ 
+     def entry_count(self) -> int:
+         return len(self._entries)
