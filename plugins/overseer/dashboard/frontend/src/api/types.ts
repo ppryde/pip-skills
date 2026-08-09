@@ -196,3 +196,16 @@ export interface RepoEntry {
 export interface ReposResponse {
   repos: RepoEntry[];
 }
+
+/** POST /api/repo/clear response — the dashboard's clear-data action
+ * (per-repo cards-only or full-repo destructive clear, always preceded by
+ * a git-trackable backup). `backup_path` is null on a `noop` clear (nothing
+ * existed to remove); `removed` is a loose passthrough of whatever the
+ * backend actually deleted, keyed by target name. */
+export interface ClearResponse {
+  scope: "cards" | "repo";
+  backup_path: string | null;
+  removed: Record<string, unknown>;
+  label: string;
+  noop: boolean;
+}
