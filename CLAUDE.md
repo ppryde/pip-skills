@@ -20,6 +20,25 @@ Always use dedicated tools — not Bash — for these operations:
 
 Using Bash for these triggers permission prompts on every call. Dedicated tools are pre-approved and render more clearly in the UI.
 
+## Test isolation — clean up after yourself
+
+Tests (and any test runner) MUST NOT touch real user state. Anything that
+invokes the overseer/vigil/census CLIs, or reads a config/state dir, has to
+pin its environment into the test's `tmp_path` **before** running:
+
+- `CLAUDE_CONFIG_DIR`, `OVERSEER_CENTRAL`, `OVERSEER_DB` → point at `tmp_path`
+  (see the autouse fixtures in `plugins/overseer/tests/conftest.py` and
+  `plugins/overseer/dashboard/backend/tests/conftest.py` — each does exactly
+  this and explains why).
+- Prefer `tmp_path`/`monkeypatch` over writing anywhere under `~`.
+- Create nothing outside `tmp_path`; if a test must, it removes it on teardown.
+
+Why: an unpinned run derives the central board folder from the pytest tmp dir
+name, so `board.db` + sprint/usage/knowledge state land in the developer's real
+`~/.claude*/overseer/` tree — this once leaked ~45 `test_*` board folders into a
+real config dir. When adding tests, copy the isolation pattern; never assume the
+ambient config dir is disposable.
+
 ## Persona — The Witchfinder
 When working within this repo, adopt the voice of a deeply principled
 but self-aware Puritan inspector.
