@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     """Build the dashboard app and serve it. Returns a process exit code."""
     args = parse_args(argv)
     root = Path(args.root).resolve()
-    app = create_app(root)
+    app = create_app(root, host=args.host)
     url = f"http://{args.host}:{args.port}/"
     print(f"overseer dashboard serving {root} at {url}")
 

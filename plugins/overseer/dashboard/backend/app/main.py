@@ -337,9 +337,10 @@ def _mutation_error(exc: CliError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
-def create_app(root: Path, *, dist_dir: Path | None = None) -> FastAPI:
+def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
+    launch_host = host
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
