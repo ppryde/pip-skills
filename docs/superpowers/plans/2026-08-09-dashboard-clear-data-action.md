@@ -32,7 +32,7 @@
 ```
 - `scope: "cards"` → `removed = {"cards": <rows deleted>}`.
 - `scope: "repo"` → `removed = {"folder": "<central_root path>", "existed": <bool>}`.
-- No board yet → `noop: true`, `backup_path: null`, `removed: {"existed": false}`.
+- No board yet → `noop: true`, `backup_path: null`, and `removed` uses the **scope's own shape** (cards → `{"cards": 0}`; repo → `{"folder": "<central_root path>", "existed": false}`). The noop case never introduces a third `removed` shape.
 
 ---
 
