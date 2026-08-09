@@ -41,3 +41,14 @@ def test_clear_cards_deletes_all_cards_and_keeps_identity_meta(repo, capsys):
     assert db.get_meta(conn, "repo_root") == repo_root_before
     # ledger regenerated (now empty of live cards)
     assert (state_root(repo) / "ledger.md").exists()
+
+
+def test_clear_cards_noop_uses_cards_shape(tmp_path, capsys):
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    assert main(["--root", str(tmp_path), "clear", "--scope", "cards", "--yes", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["noop"] is True
+    assert payload["backup_path"] is None
+    assert payload["removed"] == {"cards": 0}

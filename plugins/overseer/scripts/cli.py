@@ -324,9 +324,11 @@ def cmd_clear(args: argparse.Namespace) -> int:
 
     # No board yet -> no-op (not an error).
     if not board_db_path(args.root).exists():
+        removed = {"cards": 0} if scope == "cards" else {
+            "folder": str(config.central_root(args.root)), "existed": False}
         _print_clear(
             args,
-            {"scope": scope, "backup_path": None, "removed": {"existed": False},
+            {"scope": scope, "backup_path": None, "removed": removed,
              "label": label, "noop": True},
             human=f"no overseer board for {label!r}; nothing to clear",
         )
