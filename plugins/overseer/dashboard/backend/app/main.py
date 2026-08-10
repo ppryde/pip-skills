@@ -576,6 +576,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
+    @app.post("/api/card/{card_id}/pull-children", dependencies=[Depends(require_token)])
+    def pull_children(card_id: str, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            run_overseer(effective, "pull-children", card_id)
+
+        return _mutate(do, effective)
+
     @app.post("/api/card/{card_id}/unpark", dependencies=[Depends(require_token)])
     def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)

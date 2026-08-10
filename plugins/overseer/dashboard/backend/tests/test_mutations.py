@@ -221,6 +221,43 @@ def test_move_status_dispatch_parked_and_abandoned(client: TestClient, root: Pat
     assert cards[abandoned_id]["status"] == "abandoned"
 
 
+def test_pull_children_moves_children_to_parent_stage(client: TestClient, root: Path) -> None:
+    parent_id = _new_card(root, "Epic")
+    child1_id = _new_card(root, "K1")
+    child2_id = _new_card(root, "K2")
+    run_overseer(root, "set-field", child1_id, "--parent", parent_id)
+    run_overseer(root, "set-field", child2_id, "--parent", parent_id)
+    run_overseer(root, "set-stage", parent_id, "implementation")
+
+    resp = client.post(f"/api/card/{parent_id}/pull-children")
+
+    assert resp.status_code == 200
+    assert _show(root, child1_id)["stage"] == "implementation"
+    assert _show(root, child2_id)["stage"] == "implementation"
+
+
+def test_pull_children_unknown_card_is_400(client: TestClient) -> None:
+    resp = client.post("/api/card/NOPE-999/pull-children")
+
+    assert resp.status_code == 400
+
+
+def test_gate_rejects_missing_token_pull_children(root: Path) -> None:
+    parent_id = _new_card(root, "Epic")
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{parent_id}/pull-children")
+    assert resp.status_code == 401
+
+
+def test_gate_accepts_correct_token_pull_children(root: Path) -> None:
+    parent_id = _new_card(root, "Epic")
+    gc = _gated_client(root)
+    resp = gc.post(
+        f"/api/card/{parent_id}/pull-children", headers={"X-Overseer-Token": "s3cret"}
+    )
+    assert resp.status_code == 200
+
+
 def test_gate_open_when_no_token(client: TestClient, root: Path) -> None:
     card_id = _new_card(root)
     # default `client` fixture builds create_app(root) with token=None
