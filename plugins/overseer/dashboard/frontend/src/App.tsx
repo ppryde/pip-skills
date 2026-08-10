@@ -279,6 +279,7 @@ function App() {
         mutate={mutate}
         inFlight={inFlight}
         allCardIds={board?.cards.map((c) => c.id) ?? []}
+        cardTitles={Object.fromEntries((board?.cards ?? []).map((c) => [c.id, c.title]))}
         party={party}
         colorRegistry={board?.label_colors}
       />
