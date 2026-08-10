@@ -58,6 +58,10 @@ class ParentBody(BaseModel):
     parent: str | None = None
 
 
+class LabelsBody(BaseModel):
+    labels: list[str] = []
+
+
 class DependsBody(BaseModel):
     on: str | None = None
     off: str | None = None
@@ -446,6 +450,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             check_id(card_id)
             value = body.priority if body.priority is not None else ""
             run_overseer(effective, "set-field", card_id, "--priority", value)
+
+        return _mutate(do, effective)
+
+    @app.post("/api/card/{card_id}/labels")
+    def set_labels(card_id: str, body: LabelsBody, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            run_overseer(effective, "set-field", card_id, "--labels", ",".join(body.labels))
 
         return _mutate(do, effective)
 
