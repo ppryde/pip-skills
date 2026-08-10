@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.cli_client import run_overseer
+from app.main import create_app
 
 
 def _new_card(root: Path, title: str = "T") -> str:
@@ -14,6 +15,10 @@ def _new_card(root: Path, title: str = "T") -> str:
 
 def _show(root: Path, card_id: str) -> dict:
     return run_overseer(root, "show", card_id, "--json", json_out=True)  # type: ignore[no-any-return]
+
+
+def _gated_client(root: Path, token: str = "s3cret") -> TestClient:
+    return TestClient(create_app(root, token=token))
 
 
 def test_order(client: TestClient, root: Path) -> None:
@@ -213,3 +218,35 @@ def test_move_status_dispatch_parked_and_abandoned(client: TestClient, root: Pat
     # abandon archives the card; the board still lists it, now "abandoned".
     cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
     assert cards[abandoned_id]["status"] == "abandoned"
+
+
+def test_gate_open_when_no_token(client: TestClient, root: Path) -> None:
+    card_id = _new_card(root)
+    # default `client` fixture builds create_app(root) with token=None
+    assert client.post(f"/api/card/{card_id}/park").status_code == 200
+
+
+def test_gate_rejects_missing_token(root: Path) -> None:
+    card_id = _new_card(root)
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{card_id}/park")
+    assert resp.status_code == 401
+
+
+def test_gate_rejects_wrong_token(root: Path) -> None:
+    card_id = _new_card(root)
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{card_id}/park", headers={"X-Overseer-Token": "nope"})
+    assert resp.status_code == 401
+
+
+def test_gate_accepts_correct_token(root: Path) -> None:
+    card_id = _new_card(root)
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{card_id}/park", headers={"X-Overseer-Token": "s3cret"})
+    assert resp.status_code == 200
+
+
+def test_gate_leaves_reads_open(root: Path) -> None:
+    gc = _gated_client(root)
+    assert gc.get("/api/board").status_code == 200  # no token, still 200
