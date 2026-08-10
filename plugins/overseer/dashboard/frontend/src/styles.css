@@ -2197,10 +2197,15 @@ body {
   gap: 0.5rem;
 }
 
+/* Real editable prose, not a badge — the decorative --qb-font-mono
+ * (Silkscreen) pixel font reads as shouting all-caps at body length (WF-082),
+ * so this uses the same plain monospace stack as `.md-view pre`/`code`
+ * instead; Silkscreen stays reserved for small badges (MD tag, hero-class
+ * chip, quest-log stamp). */
 .card-drawer__body-textarea {
   width: 100%;
   min-height: 14rem;
-  font-family: var(--qb-font-mono);
+  font-family: ui-monospace, Menlo, monospace;
   font-size: 0.85rem;
   line-height: 1.5;
   color: var(--qb-ink-900);
@@ -2471,7 +2476,9 @@ a.card-drawer__pr-chip:hover {
 .card-drawer__source {
   margin: 0;
   white-space: pre-wrap;
-  font-family: var(--qb-font-mono);
+  /* Same WF-082 fix as `.card-drawer__body-textarea` above — real body
+   * content, not a badge, so no shouting-caps pixel-font effect. */
+  font-family: ui-monospace, Menlo, monospace;
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--qb-ink-700);

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BoardResponse, CardDetail, SessionSummary } from "../api/types";
@@ -1648,6 +1651,43 @@ describe("<CardDetailDrawer/>", () => {
       expect(pullChildren).not.toHaveBeenCalled();
       // No refetch fired either — still just the initial open fetch.
       expect(getCard).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("body/source legibility (WF-082 — no shouty pixel font)", () => {
+    // CardDetailDrawer.tsx never applies text-transform to body content, and
+    // vitest's jsdom environment doesn't run the real stylesheet cascade
+    // (this test file never imports styles.css — only main.tsx does, and
+    // even then CSS imports are stubbed under vitest) — so the "renders
+    // ALL-CAPS" bug can't be caught via getComputedStyle here. The actual
+    // cause is `--qb-font-mono` ("Silkscreen", a decorative pixel/badge
+    // font) being applied to the FULL body content in the edit textarea and
+    // Scroll/source view, which reads as shouting caps even though the text
+    // itself is untouched — that font is reserved elsewhere in styles.css
+    // for small badges (MD tag, hero-class chip, quest-log stamp) only.
+    // Assert those two rules directly against the stylesheet text.
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"),
+      "utf8"
+    );
+
+    function ruleBody(selector: string): string {
+      const escaped = selector.replace(/[.]/g, "\\.");
+      const match = css.match(new RegExp(`${escaped}\\s*{([^}]*)}`));
+      if (!match) {
+        throw new Error(`selector ${selector} not found in styles.css`);
+      }
+      return match[1];
+    }
+
+    it("edit textarea does not use the decorative pixel badge font", () => {
+      const rule = ruleBody(".card-drawer__body-textarea");
+      expect(rule).not.toMatch(/Silkscreen|--qb-font-mono/);
+    });
+
+    it("source/scroll view does not use the decorative pixel badge font", () => {
+      const rule = ruleBody(".card-drawer__source");
+      expect(rule).not.toMatch(/Silkscreen|--qb-font-mono/);
     });
   });
 });
