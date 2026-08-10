@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
@@ -472,5 +475,84 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
 
     expect(container.querySelector(".is-dimmed")).toBeNull();
     expect(container.querySelector(".is-spotlight")).toBeNull();
+  });
+});
+
+// WF-085 review (both final reviewers, CONFIRMED): at <=720px `.board` (not
+// `.board-region`) is the intended horizontal scroller — Board.tsx binds
+// onScroll={handleTrackScroll} directly to the `.board` div, and LaneIconNav
+// is a sibling of `.board` inside `.board-region` that must stay put while
+// `.board` scrolls. Two bugs conspired to break this: (1) the base
+// `.board { min-width: max-content }` rule was never overridden on mobile,
+// so `.board` had no internal overflow of its own — it overflowed its
+// PARENT `.board-region` instead, making `.board-region` the real
+// horizontal scroller and dragging the icon-nav off-screen on swipe; (2) a
+// duplicate/orphaned `.board-region` rule (resurrected by cherry-pick
+// 470fd6d) still declared `scroll-snap-type: x mandatory` inside the mobile
+// media query, alongside the later intentional `.board-region` rule — a
+// second, competing horizontal snap container nested around `.board`.
+// styles.css is never imported by these component tests (only main.tsx
+// imports it, and CSS imports are stubbed under vitest — see the
+// WF-082/WF-085b guards in CardDetailDrawer.test.tsx/TopBar.test.tsx for the
+// same rationale), so this reads the real stylesheet source directly.
+describe("mobile board scroll-container (WF-085 review — CSS regression guard)", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"),
+    "utf8"
+  );
+
+  // Isolate the `@media (max-width: 720px) { ... }` block by brace-depth
+  // matching (the block contains many nested rules, so a naive
+  // non-greedy `[^}]*` regex would stop at the first inner `}`).
+  function mobileBlock(): string {
+    const start = css.indexOf("@media (max-width: 720px)");
+    expect(
+      start,
+      "expected an @media (max-width: 720px) block in styles.css"
+    ).toBeGreaterThan(-1);
+    const braceStart = css.indexOf("{", start);
+    let depth = 0;
+    let i = braceStart;
+    for (; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return css.slice(braceStart + 1, i);
+  }
+
+  function ruleBodies(block: string, selector: string): string[] {
+    const escaped = selector.replace(/[.]/g, "\\.");
+    const re = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "g");
+    const bodies: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(block))) {
+      bodies.push(match[1]);
+    }
+    return bodies;
+  }
+
+  it("no mobile .board-region rule declares scroll-snap-type (the orphaned duplicate from 470fd6d is gone)", () => {
+    const bodies = ruleBodies(mobileBlock(), ".board-region");
+    expect(
+      bodies.length,
+      "expected at least one .board-region rule inside the mobile block"
+    ).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).not.toMatch(/scroll-snap-type/);
+    }
+  });
+
+  it("the mobile .board rule overrides min-width to 0, so .board (not .board-region) has real internal overflow", () => {
+    // `\.board\s*\{` (not `.board-region`/`.board-toast`/etc — those have
+    // a `-` immediately after "board", not whitespace then "{").
+    const bodies = ruleBodies(mobileBlock(), ".board");
+    expect(
+      bodies.length,
+      "expected an exact `.board { ... }` rule inside the mobile block"
+    ).toBeGreaterThan(0);
+    expect(bodies.some((body) => /min-width:\s*0\b/.test(body))).toBe(true);
   });
 });
