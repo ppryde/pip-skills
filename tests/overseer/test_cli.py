@@ -1458,6 +1458,7 @@ class TestBackupRestoreInit:
         local = json.loads((repo / ".overseer" / "config.local.json").read_text())
         assert cfg["backup_dir"] == ".overseer/backups"
         assert local["central_dir"] == str(tmp_path / "c")
+        assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()
 
 
 class TestLabelColorCommand:
@@ -1505,4 +1506,3 @@ class TestLabelColorCommand:
     def test_list_text_empty(self, repo, capsys):
         assert run(repo, "label-color", "list") == 0
         assert "No label colours registered." in capsys.readouterr().out
-        assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()
