@@ -357,6 +357,37 @@ describe("api/client", () => {
     expect(url).toBe("/api/card/WF-1/labels?root=%2Frepo-b");
   });
 
+  it("setLabelColor(name, color) POSTs {name, color} to /api/labels/colors", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    const result = await client.setLabelColor("policy", "sky");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/labels/colors");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ name: "policy", color: "sky" });
+    expect(result).toEqual(boardResponse);
+  });
+
+  it("setLabelColor(name, null) sends {name, color: null} (reset to hash default)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.setLabelColor("policy", null);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ name: "policy", color: null });
+  });
+
+  it("threads the active root into setLabelColor() too", async () => {
+    client.setActiveRoot("/repo-b");
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.setLabelColor("policy", "sky");
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/labels/colors?root=%2Frepo-b");
+  });
+
   it("createCard(body) POSTs body to /api/card and returns card_id", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ ...boardResponse, card_id: "WF-9" })

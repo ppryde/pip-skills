@@ -223,6 +223,22 @@ export function setLabels(id: string, labels: string[]): Promise<BoardResponse> 
   });
 }
 
+/** Sets (or, with `color: null`, clears) a label's entry in the F10
+ * editable colour registry (WF-067) — `board.label_colors`. `color` is one
+ * of `labelColor.ts`'s `PALETTE_KEYS`, or `null` to reset the label back to
+ * its curated-palette hash default. Root-scoped like the other card/board
+ * mutations (`setLabels`, `setThreshold`) — the backend's `/api/labels/colors`
+ * takes the same `root` query param. */
+export function setLabelColor(
+  name: string,
+  color: string | null
+): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", withRoot("/api/labels/colors"), {
+    name,
+    color,
+  });
+}
+
 /** Clear-data action (dashboard settings). Deliberately NOT `withRoot`-scoped
  * — the clear target is the modal's explicitly selected repo, not whatever
  * root happens to be active, so `root` is threaded through the body instead. */

@@ -194,6 +194,7 @@ function App() {
         mutate={mutate}
         inFlight={inFlight}
         cards={board?.cards ?? []}
+        labelColors={board?.label_colors}
         party={party}
         lastRefreshedAt={lastRefreshedAt}
         // WF-045: an unbegun repo has nothing real to show in the Party

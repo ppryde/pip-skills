@@ -391,4 +391,34 @@ describe("<TopBar/>", () => {
 
     expect(screen.getByRole("dialog", { name: /new card/i })).toBeInTheDocument();
   });
+
+  // Task 10 (F10, WF-067): the Labels settings control — TopBar owns the
+  // dialog's open state itself, same pattern as "＋ New card" above.
+  it("renders no Label colors dialog until the Labels settings button is clicked", () => {
+    render(<TopBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: /labels/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /label colors/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("clicking the Labels settings button opens LabelSettingsDialog with the board's distinct labels", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        cards={[
+          card({ id: "WF-1", labels: ["policy"] }),
+          card({ id: "WF-2", labels: ["architecture"] }),
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /labels/i }));
+
+    expect(
+      screen.getByRole("dialog", { name: /label colors/i })
+    ).toBeInTheDocument();
+    expect(screen.getByText("policy")).toBeInTheDocument();
+    expect(screen.getByText("architecture")).toBeInTheDocument();
+  });
 });

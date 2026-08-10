@@ -13,7 +13,11 @@
  * (not guaranteed — it's a fixed-size hash bucket) land on different
  * swatches.
  */
-const PALETTE_KEYS = [
+/** Exported (F10, WF-067) so the settings dialog's 9-swatch picker can
+ * render exactly these keys, in this order, without a second hardcoded
+ * copy — `LabelSettingsDialog` imports this array rather than repeating
+ * the palette. */
+export const PALETTE_KEYS = [
   "slate",
   "sage",
   "plum",

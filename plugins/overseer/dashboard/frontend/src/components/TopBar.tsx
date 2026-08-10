@@ -6,11 +6,13 @@ import { goldTotal } from "../board/goldTotal";
 import { vanquishedStats } from "../board/vanquished";
 import { formatTokens } from "../board/formatTokens";
 import { fleetSummary } from "../board/fleet";
+import { distinctLabels } from "../board/cardFilter";
 import { CoinIcon, CheckIcon } from "./icons";
 import ThresholdControl from "./ThresholdControl";
 import RepoSelector from "./RepoSelector";
 import BranchFilter from "./BranchFilter";
 import NewCardDialog from "./NewCardDialog";
+import LabelSettingsDialog from "./LabelSettingsDialog";
 
 export interface TopBarProps {
   projectName: string;
@@ -51,6 +53,12 @@ export interface TopBarProps {
    * `selectedRepo`), so there is never a Clear control with nothing to
    * target. */
   onClear?: () => void;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * threaded straight through to `LabelSettingsDialog` when it's open.
+   * Optional (defaults to `{}`, same "undefined indistinguishable from
+   * empty" contract as `LabelChips`/`LabelEditor`'s own `colorRegistry`
+   * prop) so every existing call site keeps compiling unchanged. */
+  labelColors?: Record<string, string>;
   /** Task 10: for an "unbegun" repo (WF-032, `has_board: false`) `useSessions`
    * is hard-gated off (see App.tsx), so `party` is never populated for it —
    * computing the questing pill from `party` would show a contradictory "0
@@ -119,6 +127,7 @@ function TopBar({
   onSelectBranch,
   questingCountOverride,
   onClear,
+  labelColors,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -126,6 +135,9 @@ function TopBar({
   // TopBar's own `mutate` prop straight through, so the create routes
   // through the same single mutation entrypoint as every other control.
   const [newCardOpen, setNewCardOpen] = useState(false);
+  // F10 (WF-067): the label-colors settings dialog — same TopBar-owned
+  // open-state pattern as NewCardDialog above (no App-level prop needed).
+  const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
   const threshold = context?.threshold ?? null;
   const gold = goldTotal(cards);
   const { done, total } = vanquishedStats(cards);
@@ -174,6 +186,18 @@ function TopBar({
             Clear…
           </button>
         )}
+        <button
+          type="button"
+          // Task 10: shares the "＋ New card" control's Role-A button paint
+          // (non-destructive positive action, same wobble shape) — see
+          // `.topbar__new-card` in styles.css, reused here rather than
+          // duplicated.
+          className="topbar__new-card topbar__labels-settings"
+          onClick={() => setLabelSettingsOpen(true)}
+          title="Edit label colors"
+        >
+          Labels…
+        </button>
         <BranchFilter
           branches={branches}
           activeBranch={activeBranch}
@@ -255,6 +279,18 @@ function TopBar({
       <NewCardDialog
         open={newCardOpen}
         onClose={() => setNewCardOpen(false)}
+        mutate={mutate}
+      />
+      {/* F10 (WF-067): same "modal is TopBar state, rendered as a sibling
+          of <header>" precedent as NewCardDialog above. `distinctLabels`
+          (board/cardFilter) is recomputed from `cards` on every render —
+          same source FilterBar's own label list uses (App.tsx), just
+          computed here instead of threaded down as a prop. */}
+      <LabelSettingsDialog
+        open={labelSettingsOpen}
+        onClose={() => setLabelSettingsOpen(false)}
+        labels={distinctLabels(cards)}
+        colors={labelColors ?? {}}
         mutate={mutate}
       />
     </>
