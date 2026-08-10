@@ -97,27 +97,26 @@ function Board({
     (lane) => lane.kind !== "archive" || showArchive
   );
 
-  // WF-085a: mobile icon-nav (LaneIconNav) + swipe-lane active-sync. The nav
-  // lists only NON-EMPTY lanes from `visibleLanes` (same order, same `.key`
-  // for whichever lanes it does show) — empty stage lanes are deliberately
-  // excluded. An empty lane isn't a swipe snap-stop (`.lane--empty {
-  // scroll-snap-align: none }` in styles.css), so a nav icon pointing at one
-  // would tap-jump to a target the swipe track can't settle on. The swipe
-  // track itself still renders every `visibleLanes` entry (empty lanes as
-  // the thin `.lane--empty` sliver) — only this nav strip filters. Always
+  // WF-085a/mobile-v2: mobile icon-nav (LaneIconNav) + swipe-lane
+  // active-sync. The nav lists EVERY lane in `visibleLanes` (same order,
+  // same `.key`), including empty stage lanes — an earlier revision (commit
+  // 9327dd8) filtered those out because empty lanes were thin, non-snapping
+  // slivers with nowhere for a tap to land. That's no longer true: empty
+  // lanes are now full 88vw swipe panes with their own `scroll-snap-align:
+  // center` (see `.lane--empty` in the mobile media block), so every lane
+  // the board has is a real tap-jump target and gets a nav icon — per
+  // user direction ("even the empty columns should have one"). Always
   // rendered — CSS (`@media (max-width:720px)`) is what actually shows the
   // strip / turns `.board` into a snap-scroller; on desktop the listener
   // below just never fires because `.board` itself never scrolls there.
   const navLanes = useMemo(
     () =>
-      visibleLanes
-        .filter((lane) => lane.cards.length > 0)
-        .map((lane) => ({
-          key: lane.key,
-          label: lane.label,
-          count: lane.cards.length,
-          accent: laneIconKey(lane),
-        })),
+      visibleLanes.map((lane) => ({
+        key: lane.key,
+        label: lane.label,
+        count: lane.cards.length,
+        accent: laneIconKey(lane),
+      })),
     [visibleLanes]
   );
 
@@ -127,10 +126,9 @@ function Board({
   );
 
   // The filter bar / archive toggle can remove the currently-active lane
-  // from `navLanes` out from under us (e.g. a search that no longer matches
-  // its cards, or the active lane's last card leaves it empty) — fall back
-  // to the first remaining NON-EMPTY lane rather than pointing the nav's
-  // active pill at a lane the strip no longer shows an icon for.
+  // from `navLanes` out from under us (e.g. toggling Abandoned off) — fall
+  // back to the first remaining lane rather than pointing the nav's active
+  // pill at a lane the strip no longer shows an icon for.
   useEffect(() => {
     if (navLanes.length === 0) return;
     if (!navLanes.some((lane) => lane.key === activeLaneKey)) {
@@ -141,11 +139,11 @@ function Board({
   // Scroll-sync: on every scroll of the lane track, find whichever
   // `[data-lane-key]` pane's centre sits nearest the track's own centre and
   // make that the active lane. Cheap enough (≤11 lanes) to run unthrottled
-  // on scroll — no rAF/debounce needed at this scale. Only panes the nav
-  // actually shows an icon for are candidates (`navLaneKeys`) — an empty
-  // lane can still be nearest-centre mid-swipe (it's a thin sliver, not a
-  // snap-stop), but it must never become the active key since no nav icon
-  // exists to light up for it.
+  // on scroll — no rAF/debounce needed at this scale. `navLaneKeys` mirrors
+  // `visibleLanes` 1:1 now (every lane, empty or not, gets a nav icon —
+  // mobile-v2), kept as an explicit candidate set rather than trusting
+  // `[data-lane-key]` alone so a lane hidden by `showArchive`/the filter
+  // bar can never become the active key with no icon to light up for it.
   const navLaneKeys = useMemo(
     () => new Set(navLanes.map((lane) => lane.key)),
     [navLanes]

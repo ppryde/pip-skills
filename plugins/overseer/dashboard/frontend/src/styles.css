@@ -1129,6 +1129,14 @@ body {
   border-bottom: none;
 }
 
+/* Lane.tsx's mobile-v2 "No cards" placeholder for an empty lane — inert on
+   desktop (the vertical-strip header above already reads fine on its own);
+   the `@media (max-width:720px)` block near the bottom of this file shows
+   it once empty lanes become full-width panes there. */
+.lane__empty-state {
+  display: none;
+}
+
 /* Mobile icon-nav strip (WF-085 — LaneIconNav) — always in the DOM (see
    Board.tsx) so it's testable/measurable at any width, but only ever shown
    on mobile: the `@media (max-width:720px)` block near the bottom of this
@@ -3917,52 +3925,78 @@ a.card-drawer__pr-chip:hover {
   .topbar__controls-group:not([hidden]) {
     display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem;
   }
+  /* WF-085b: same collapse driven by the SAME "Controls ▾" toggle, mirrored
+     onto the separate <FilterBar/> App.tsx renders below the topbar — see
+     `.filter-bar` base rule (always `display: flex`, so desktop is
+     unaffected by `hidden` per the origin-cascade rule the group above
+     already relies on). `[hidden]` here is what actually hides it, and
+     only inside this ≤720px block. */
+  .filter-bar[hidden] { display: none; }
   /* compact status glance shrinks so it fits a couple of wrapped rows on a phone */
   .topbar__pill, .topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill {
     font-size: 0.68rem; padding: 0.15rem 0.45rem;
   }
-  /* --- Icon-nav strip (WF-085 — LaneIconNav): one transparent RPG icon +
-     count per lane, above the swipe track. Inactive icons full-strength;
-     only the active lane gets an accent pill + slight lift. --- */
+  /* --- Icon-nav strip (mobile-v2 — LaneIconNav): one hand-drawn wobble box
+     (RPG icon + count) per lane, evenly spaced above the swipe track,
+     including empty lanes (every lane is now a real tap-jump target — see
+     Board.tsx's `navLanes`). Inactive boxes are a transparent/parchment
+     wobble box with just an ink outline; only the active lane fills
+     accent-coloured + lifts. Icons stay full-strength always, no fade. --- */
   .lane-icon-nav {
     display: flex;
-    gap: 0.3rem;
+    align-items: stretch;
+    gap: 0.35rem;
     overflow-x: auto;
-    padding: 0.1rem 0.75rem 0.6rem;
+    padding: 0.3rem 0.75rem 0.6rem;
   }
 
+  /* `flex: 1 1 0` + a shared `min-width` is the "evenly spaced" mechanism:
+     with room to spare (few lanes) every box grows equally to fill the
+     strip; past ~9-11 lanes on a narrow phone the boxes shrink equally
+     instead until they hit `min-width`, at which point the strip's own
+     `overflow-x: auto` above takes over — spacing stays even either way,
+     it just switches from "stretch to fill" to "scroll at the floor". */
   .lane-icon-nav__item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.1rem;
-    flex: 0 0 auto;
-    padding: 0.3rem 0.4rem;
-    border: none;
-    background: transparent;
-    border-radius: var(--legacy-radius-6px);
+    justify-content: center;
+    gap: 0.15rem;
+    flex: 1 1 0;
+    min-width: 38px;
+    max-width: 68px;
+    padding: 0.3rem 0.25rem;
+    border: 1.5px solid var(--qb-btn-ink);
+    border-radius: var(--qb-btn-wobble);
+    background: var(--qb-btn-face);
     color: var(--qb-ink-500);
     cursor: pointer;
-    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .lane-icon-nav__item:hover {
+    border-color: var(--qb-btn-ink-hover);
   }
 
   .lane-icon-nav__icon {
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     object-fit: contain;
   }
 
   .lane-icon-nav__count {
-    font-size: 0.65rem;
+    font-size: 0.62rem;
     font-weight: 600;
     line-height: 1;
   }
 
-  /* Active lane: a lifted, accent-coloured pill. Same per-accent fill
+  /* Active lane: the wobble box itself fills accent-coloured + lifts/scales
+     (replacing the old hard-orange-square treatment). Same per-accent fill
      custom properties as `.lane__header--<key>` above (WF-028 §Design
      Tokens) — one lane, one colour, everywhere it shows up. */
   .lane-icon-nav__item--active {
     color: var(--legacy-color-fff);
+    border-color: var(--qb-btn-ink-hover);
     transform: translateY(-3px) scale(1.08);
   }
 
@@ -4038,11 +4072,36 @@ a.card-drawer__pr-chip:hover {
     overflow-y: visible;
   }
 
-  /* Empty lanes stay thin vertical spines — and are NOT snap stops, so
-     swiping never pins the viewport to a 44px strip. */
+  /* mobile-v2: empty lanes are now real swipe panes too — same size/snap
+     as every other lane (overrides the base `.lane--empty { flex-basis:
+     44px }` thin-spine rule, desktop-only now), so the icon-nav's "even
+     the empty columns get an icon" tap target actually has somewhere to
+     land. `.lane__header`'s vertical-writing-mode thin-strip treatment
+     (base rule, still correct for desktop) is reset back to a normal
+     horizontal header to match. */
   .lane--empty {
-    flex-basis: 44px;
-    scroll-snap-align: none;
+    flex-basis: 88vw;
+    scroll-snap-align: center;
+  }
+
+  .lane--empty .lane__header {
+    writing-mode: horizontal-tb;
+    height: auto;
+  }
+
+  /* The centred "No cards" placeholder Lane.tsx renders in place of
+     `.lane__cards` for an empty lane — hidden on desktop (base rule below
+     the `.lane--empty` block up top), shown here now that the pane has
+     real width to hold it. */
+  .lane__empty-state {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    color: var(--qb-ink-400);
+    font-size: 0.85rem;
+    font-style: italic;
   }
 
   .lane--parked {
