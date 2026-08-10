@@ -1884,19 +1884,19 @@ body {
   font-size: 0.65rem;
   line-height: 1;
   border: none;
-  border-radius: var(--qb-radius-circle);
-  background: color-mix(in srgb, currentColor 16%, transparent);
+  background: transparent;
   color: inherit;
+  opacity: 0.6;
   cursor: pointer;
-  transition: background-color var(--qb-motion-hover) ease;
+  transition: opacity var(--qb-motion-hover) ease;
 }
 
 .label-editor__remove:hover {
-  background: color-mix(in srgb, currentColor 30%, transparent);
+  opacity: 1;
 }
 
 .label-editor__remove:active {
-  background: color-mix(in srgb, currentColor 44%, transparent);
+  opacity: 1;
 }
 
 .label-editor__input {
