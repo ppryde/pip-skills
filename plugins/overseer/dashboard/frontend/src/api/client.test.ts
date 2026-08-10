@@ -51,6 +51,7 @@ describe("api/client", () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -58,6 +59,7 @@ describe("api/client", () => {
     // `activeRoot` is module-level state (the repo selector's single choke
     // point) — reset it so a root set by one test never leaks into the next.
     client.setActiveRoot(null);
+    localStorage.clear();
   });
 
   it("getBoard() GETs /api/board and returns the parsed response", async () => {
@@ -341,6 +343,89 @@ describe("api/client", () => {
 
     const [url] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/card/WF-1/labels?root=%2Frepo-b");
+  });
+
+  it("createCard(body) POSTs body to /api/card and returns card_id", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ...boardResponse, card_id: "WF-9" })
+    );
+
+    const result = await client.createCard({ title: "New", complexity: "M" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ title: "New", complexity: "M" });
+    expect(result.card_id).toBe("WF-9");
+  });
+
+  it("threads the active root into createCard() too", async () => {
+    client.setActiveRoot("/repo-b");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ...boardResponse, card_id: "WF-9" })
+    );
+
+    await client.createCard({ title: "New" });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card?root=%2Frepo-b");
+  });
+
+  it("editCard(id, body) POSTs {title,body} to /api/card/{id}", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    const result = await client.editCard("WF-1", { title: "T", body: "B" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ title: "T", body: "B" });
+    expect(result).toEqual(boardResponse);
+  });
+
+  it("sends no X-Overseer-Token header when localStorage is empty", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.park("WF-1");
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init.headers as Record<string, string>)["X-Overseer-Token"]).toBeUndefined();
+  });
+
+  it("sends X-Overseer-Token header when one is stored", async () => {
+    localStorage.setItem("overseer_dashboard_token", "tok-1");
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.park("WF-1");
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init.headers as Record<string, string>)["X-Overseer-Token"]).toBe("tok-1");
+  });
+
+  it("on 401 prompts for a token, stores it, and retries once", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ detail: "x" }, 401))
+      .mockResolvedValueOnce(jsonResponse(boardResponse));
+    vi.spyOn(window, "prompt").mockReturnValue("pasted-tok");
+
+    const result = await client.park("WF-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem("overseer_dashboard_token")).toBe("pasted-tok");
+    const [, retryInit] = fetchMock.mock.calls[1];
+    expect((retryInit.headers as Record<string, string>)["X-Overseer-Token"]).toBe(
+      "pasted-tok"
+    );
+    expect(result).toEqual(boardResponse);
+  });
+
+  it("on 401 with prompt cancelled (null) does not retry and throws", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: "unauthorized" }, 401));
+    vi.spyOn(window, "prompt").mockReturnValue(null);
+
+    await expect(client.park("WF-1")).rejects.toThrow("unauthorized");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("overseer_dashboard_token")).toBeNull();
   });
 
   it("setThreshold(value) POSTs {value} to /api/config/threshold", async () => {
