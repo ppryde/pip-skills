@@ -345,6 +345,50 @@ def test_edit_requires_a_field(client: TestClient, root: Path) -> None:
     assert client.post(f"/api/card/{cid}", json={}).status_code == 400
 
 
+def test_label_color_set_persists(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/labels/colors", json={"name": "policy", "color": "sky"})
+
+    assert resp.status_code == 200
+    assert resp.json()["board"]["label_colors"]["policy"] == "sky"
+
+
+def test_label_color_clear_removes(client: TestClient, root: Path) -> None:
+    client.post("/api/labels/colors", json={"name": "policy", "color": "sky"})
+
+    resp = client.post("/api/labels/colors", json={"name": "policy", "color": None})
+
+    assert resp.status_code == 200
+    assert "policy" not in resp.json()["board"]["label_colors"]
+
+
+def test_label_color_invalid_color_is_400(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/labels/colors", json={"name": "policy", "color": "not-a-color"})
+
+    assert resp.status_code == 400
+
+
+def test_label_color_empty_name_is_400(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/labels/colors", json={"name": "  ", "color": "sky"})
+
+    assert resp.status_code == 400
+
+
+def test_gate_rejects_missing_token_label_color(root: Path) -> None:
+    gc = _gated_client(root)
+    resp = gc.post("/api/labels/colors", json={"name": "policy", "color": "sky"})
+    assert resp.status_code == 401
+
+
+def test_gate_accepts_correct_token_label_color(root: Path) -> None:
+    gc = _gated_client(root)
+    resp = gc.post(
+        "/api/labels/colors",
+        json={"name": "policy", "color": "sky"},
+        headers={"X-Overseer-Token": "s3cret"},
+    )
+    assert resp.status_code == 200
+
+
 def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -> None:
     """Meta-test / safety net (fix-up, PR3 dual review): walks the app's OWN
     route table rather than a hardcoded route list, so it also covers routes

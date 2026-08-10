@@ -99,6 +99,11 @@ class EditBody(BaseModel):
     body: str | None = None
 
 
+class LabelColorBody(BaseModel):
+    name: str
+    color: str | None = None
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
@@ -665,6 +670,20 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         def do() -> None:
             run_vigil(effective, "config", "set", "context.threshold", str(body.value))
+
+        return _mutate(do, effective)
+
+    @app.post("/api/labels/colors", dependencies=[Depends(require_token)])
+    def set_label_color(body: LabelColorBody, root: str | None = None) -> dict[str, Any]:
+        if not body.name.strip():
+            raise HTTPException(status_code=400, detail="label name required")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            if body.color:
+                run_overseer(effective, "label-color", "set", body.name, body.color)
+            else:
+                run_overseer(effective, "label-color", "clear", body.name)
 
         return _mutate(do, effective)
 
