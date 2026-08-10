@@ -23,6 +23,7 @@ function card(id: string, order: number): BoardCard {
     updated: "",
     checklist: [],
     labels: [],
+    body: "",
   };
 }
 

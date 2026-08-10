@@ -185,6 +185,15 @@ Test sprint."""
         c = data["cards"][0]
         assert c["repo"] == "pip-skills"
 
+    def test_body_passed_through(self, repo, conn):
+        from scripts.board import board_data
+        card = make_card("WF-001", body="## Goal\n\nFind the elusive body field.")
+        db.save_card(conn, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["body"] == "## Goal\n\nFind the elusive body field."
+
     def test_repo_defaults_none(self, repo, conn):
         from scripts.board import board_data
         db.save_card(conn, make_card("WF-001"))

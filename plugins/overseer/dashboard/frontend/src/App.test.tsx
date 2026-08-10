@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import type { BoardResponse, RepoEntry } from "./api/types";
+import type { BoardCard, BoardResponse, RepoEntry } from "./api/types";
 
 // Only the read endpoints App's mount path touches are stubbed — every
 // other export is the real module (mutations are never exercised by this
@@ -29,6 +29,30 @@ function boardResponse(): BoardResponse {
     board: { project: "acme", cards: [], sprints: [], quarantined: [] },
     context: { pct: 10, threshold: 80 },
     limits: null,
+  };
+}
+
+function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
+  return {
+    title: `Title ${overrides.id}`,
+    status: "planned",
+    stage: null,
+    complexity: null,
+    priority: null,
+    sprint: null,
+    parent: null,
+    depends_on: [],
+    order: 10,
+    budget: { estimate: null, actual: 0 },
+    is_epic: false,
+    ready: true,
+    rollup: null,
+    created: "",
+    updated: "",
+    checklist: [],
+    labels: [],
+    body: "",
+    ...overrides,
   };
 }
 
@@ -187,7 +211,10 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
 
-    const clearButton = await screen.findByRole("button", { name: /clear/i });
+    // Exact "Clear…" (with ellipsis) — task 6 added a second, unrelated
+    // "Clear filters" button to the filter bar, so a bare /clear/i now
+    // matches both.
+    const clearButton = await screen.findByRole("button", { name: "Clear…" });
     fireEvent.click(clearButton);
 
     const dialog = await screen.findByRole("dialog", {
@@ -206,8 +233,57 @@ describe("<App/> — task 7: Clear control wiring", () => {
     render(<App />);
 
     await waitFor(() => expect(client.getRepos).toHaveBeenCalled());
+    // Exact "Clear…" — see the sibling test above for why a bare /clear/i
+    // regex is no longer specific enough post-task-6 (filter bar's own
+    // "Clear filters" button renders here regardless of repo selection).
     expect(
-      screen.queryByRole("button", { name: /^clear/i })
+      screen.queryByRole("button", { name: "Clear…" })
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("searching an epic's title reveals its children and hides unrelated cards", async () => {
+    vi.mocked(client.getBoard).mockResolvedValue({
+      board: {
+        project: "acme",
+        sprints: [],
+        quarantined: [],
+        cards: [
+          card({ id: "WF-EPIC", title: "The great migration", is_epic: true }),
+          card({ id: "WF-EPIC-C1", title: "Migration child", parent: "WF-EPIC" }),
+          card({ id: "WF-OTHER", title: "Totally unrelated card" }),
+        ],
+      },
+      context: { pct: 10, threshold: 80 },
+      limits: null,
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    expect(await screen.findByText("Totally unrelated card")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("search"), {
+      target: { value: "migration" },
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Totally unrelated card")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("The great migration")).toBeInTheDocument();
+    expect(screen.getByText("Migration child")).toBeInTheDocument();
   });
 });

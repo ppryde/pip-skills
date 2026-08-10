@@ -764,6 +764,150 @@ body {
    "Mobile layout layer" at the END of this file — placed last so its
    overrides win the cascade over every base rule above. */
 
+/* Filter bar (F3, WF-061) — search + priority/complexity + a Labels button
+   (which folds out `LabelFilterPopover`) + a visible/total readout + Clear,
+   sitting between the topbar and `.board-region`. Search/selects borrow the
+   topbar chip's hand-inked select treatment (`.topbar__repo-select select`);
+   the Labels/Clear buttons are the shared Role A button system (`--qb-btn-*`,
+   see `.card-drawer__edit-actions button`) — no new button style. */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  background: var(--qb-parchment-muted);
+  border-bottom: 1.5px dashed var(--qb-line-dashed);
+}
+
+.filter-bar__search {
+  font: inherit;
+  font-size: 0.8rem;
+  flex: 0 1 22rem;
+  min-width: 8rem;
+  max-width: 22rem;
+  box-sizing: border-box;
+  padding: 0.3rem 0.6rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-900);
+}
+
+.filter-bar__search:hover,
+.filter-bar__search:focus {
+  border-color: var(--qb-btn-ink-hover);
+  outline: none;
+}
+
+.filter-bar__search::placeholder {
+  color: var(--qb-ink-400);
+}
+
+.filter-bar__select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-500);
+}
+
+.filter-bar__select select {
+  font: inherit;
+  font-size: 0.8rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 600;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble-2);
+  padding: 0.2rem 0.4rem;
+}
+
+.filter-bar__select select:hover,
+.filter-bar__select select:focus-visible {
+  border-color: var(--qb-btn-ink-hover);
+  outline: none;
+}
+
+/* Same Role A button system as `.card-drawer__edit-actions button` — the
+   Labels/Clear controls are just another toolbar action, not a new style. */
+.filter-bar__labels-btn,
+.filter-bar__clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.filter-bar__labels-btn {
+  border-radius: var(--qb-btn-wobble-3);
+}
+
+.filter-bar__clear-btn {
+  border-radius: var(--qb-btn-wobble-4);
+}
+
+.filter-bar__labels-btn:hover:not(:disabled),
+.filter-bar__clear-btn:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.filter-bar__labels-btn:active:not(:disabled),
+.filter-bar__clear-btn:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.filter-bar__clear-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* Same neutral base tokens as `.claim-badge` — a quiet count pill, no
+   colour of its own to compete with the priority/label chips it sits next
+   to. */
+.filter-bar__labels-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 500;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted-2);
+  color: var(--qb-ink-500);
+  border: 1px solid var(--qb-line-dashed);
+}
+
+.filter-bar__count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--qb-ink-500);
+  white-space: nowrap;
+}
+
 .board-region {
   flex: 1 1 auto;
   overflow-x: auto;
@@ -1553,6 +1697,90 @@ body {
   background: var(--qb-label-teal-bg);
   color: var(--qb-label-teal-text);
   border: 1px solid var(--qb-label-teal-border);
+}
+
+/* Label filter popover (F3 fold-in, WF-060/061) — `LabelFilterPopover`'s own
+   full-backdrop overlay. Same fixed-inset/centered/stopPropagation shape as
+   `.party-overlay`/`.party-sheet` (the codebase's one dismissible-layer
+   convention), but its own class names — the component ships its own
+   backdrop testid rather than reusing the Party page's — and the board's
+   light parchment panel palette (`--qb-panel`/`--qb-card-border`) rather
+   than the Party page's dark sheet, since this overlays board content, not
+   the Party page. */
+.label-filter-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--qb-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.label-filter-popover {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.4rem;
+  width: min(32rem, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--qb-panel);
+  border: 1.5px solid var(--qb-card-border);
+  border-radius: var(--qb-radius-panel);
+  padding: 1rem;
+  box-shadow: var(--qb-shadow-modal);
+}
+
+.label-filter-popover__legend {
+  flex-basis: 100%;
+  margin: 0 0 0.3rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+/* Base pill shape only — colour is ALWAYS the shared `.label-chip--<key>`
+   palette (board/labelColor.ts's stable hash) applied alongside this class,
+   same rule as `.label-chips` above. These `--include/--exclude/--neutral`
+   modifiers layer only the tri-state affordance (ring/opacity) on top —
+   never a new colour of their own, and no danger red for exclude. Declared
+   after the `.label-chip--<key>` block above so same-specificity overrides
+   (e.g. `--exclude`'s border-style) win in the cascade. */
+.label-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--qb-radius-pill);
+  cursor: pointer;
+  transition:
+    box-shadow var(--qb-motion-hover) ease,
+    opacity var(--qb-motion-hover) ease;
+}
+
+.label-filter-chip:hover {
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.label-filter-chip--neutral {
+  opacity: 0.6;
+}
+
+.label-filter-chip--include {
+  opacity: 1;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--qb-ink-900) inset;
+}
+
+.label-filter-chip--exclude {
+  opacity: 0.8;
+  border-style: dashed;
+  box-shadow: 0 0 0 2px var(--qb-ink-400) inset;
 }
 
 /* Tile placement: a compact row under the title, capped and scrollable
