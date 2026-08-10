@@ -390,6 +390,19 @@ class TestLinks:
             {"label": "PR #9", "path": "https://x/9"},
         ]
 
+    def test_links_bad_scheme_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "links:\n"
+                "  - {label: 'evil js', path: 'javascript:alert(1)'}\n"
+                "  - {label: 'evil data', path: 'data:text/html,<script>alert(1)</script>'}\n"
+                "  - {label: 'PR #9', path: 'https://x/9'}\n"
+            )
+        )
+        assert card.links == [
+            {"label": "PR #9", "path": "https://x/9"},
+        ]
+
 
 class TestRelationsFields:
     def _card_text(self, extra=""):

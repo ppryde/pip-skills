@@ -19,6 +19,14 @@ import PartyAvatar from "./PartyAvatar";
 import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
 
+/** Defense-in-depth scheme allowlist for card link `path` values (F8/PR5
+ * final-review Fix 1). `Card.from_text` already drops non-http(s) link
+ * entries at parse time, but existing DBs may still hold rows written before
+ * that guard existed — so the drawer re-checks before ever rendering a
+ * `path` as a clickable `href`, to close the `javascript:`/`data:` URI XSS
+ * vector on click. */
+const HTTP_URL_RE = /^https?:\/\//i;
+
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
   cardId: string | null;
@@ -498,13 +506,17 @@ function CardDetailDrawer({
                     <ul className="card-drawer__links-list">
                       {detail.links.map((l, i) => (
                         <li key={i}>
-                          <a
-                            href={l.path}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {l.label}
-                          </a>
+                          {HTTP_URL_RE.test(l.path) ? (
+                            <a
+                              href={l.path}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {l.label}
+                            </a>
+                          ) : (
+                            <span>{l.label}</span>
+                          )}
                         </li>
                       ))}
                     </ul>

@@ -176,9 +176,12 @@ class Card:
                     continue
                 if not all(k in entry for k in ("label", "path")):
                     continue
+                path = str(entry["path"]).strip()
+                if not path.lower().startswith(("http://", "https://")):
+                    continue
                 links.append({
                     "label": str(entry["label"]),
-                    "path": str(entry["path"]),
+                    "path": path,
                 })
         order_raw = meta.get("order")
         if order_raw is not None:

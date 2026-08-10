@@ -367,6 +367,15 @@ def test_label_color_invalid_color_is_400(client: TestClient, root: Path) -> Non
     assert resp.status_code == 400
 
 
+def test_label_color_strips_padded_name(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/labels/colors", json={"name": "  policy  ", "color": "sky"})
+
+    assert resp.status_code == 200
+    colors = resp.json()["board"]["label_colors"]
+    assert colors.get("policy") == "sky"
+    assert "  policy  " not in colors
+
+
 def test_label_color_empty_name_is_400(client: TestClient, root: Path) -> None:
     resp = client.post("/api/labels/colors", json={"name": "  ", "color": "sky"})
 

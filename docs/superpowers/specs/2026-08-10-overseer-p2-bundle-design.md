@@ -40,8 +40,9 @@ the importer silently drops them. This preserves + surfaces them.
   and parse back (same round-trip contract as `labels`), tolerant of absence
   (older cards → `[]`).
 - **Importer** (`scripts/importer` / migrate path): carry the source `links`
-  onto the Card. Malformed entries (missing label/path) are skipped with a
-  warning, consistent with D1's skip-reporting.
+  onto the Card. Malformed entries (missing label/path, or a non-http(s)
+  scheme) are silently dropped (no warning), consistent with the model's
+  other list-field parsing (`labels`, `checklist`, etc.).
 - **Payload**: add `"links": card.links` to the board card dict (`board.py`) and
   it flows to `CardDetail`; frontend `BoardCard` gains `links: {label:string;
   path:string}[]`.

@@ -267,6 +267,39 @@ describe("<CardDetailDrawer/>", () => {
     expect(links[1]).toHaveAttribute("href", "https://example.com/pr/1");
   });
 
+  it("renders a non-http(s) link path as inert text, not an anchor (security fix, PR5 final review)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-A",
+        links: [
+          { label: "evil js", path: "javascript:alert(1)" },
+          { label: "PR", path: "https://example.com/pr/1" },
+        ],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    const anchors = container.querySelectorAll(".card-drawer__links-list a");
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]).toHaveTextContent("PR");
+    expect(anchors[0]).toHaveAttribute("href", "https://example.com/pr/1");
+
+    const items = container.querySelectorAll(".card-drawer__links-list li");
+    expect(items[0].querySelector("a")).toBeNull();
+    expect(items[0]).toHaveTextContent("evil js");
+  });
+
   it("renders nothing for Links when the card carries no links", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
 

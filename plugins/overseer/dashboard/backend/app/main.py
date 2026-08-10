@@ -675,15 +675,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.post("/api/labels/colors", dependencies=[Depends(require_token)])
     def set_label_color(body: LabelColorBody, root: str | None = None) -> dict[str, Any]:
-        if not body.name.strip():
+        name = body.name.strip()
+        if not name:
             raise HTTPException(status_code=400, detail="label name required")
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:
             if body.color:
-                run_overseer(effective, "label-color", "set", body.name, body.color)
+                run_overseer(effective, "label-color", "set", name, body.color)
             else:
-                run_overseer(effective, "label-color", "clear", body.name)
+                run_overseer(effective, "label-color", "clear", name)
 
         return _mutate(do, effective)
 
