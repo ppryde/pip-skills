@@ -56,6 +56,23 @@ class TestGenerateIndex:
         out = generate_index("p", [], [], NOW)
         assert "_Nothing in flight._" in out
 
+    def test_labels_shown_on_in_flight_row(self):
+        c = card("WF-016", status="in-flight", stage="implementation",
+                 labels=["policy", "architecture"])
+        out = generate_index("p", [c], [], NOW)
+        assert "[policy, architecture]" in out
+
+    def test_no_labels_no_bracket_on_in_flight_row(self):
+        c = card("WF-017", status="in-flight", stage="implementation")
+        out = generate_index("p", [c], [], NOW)
+        section = out.split("## In flight")[1].split("##")[0]
+        assert "[" not in section
+
+    def test_labels_shown_on_planned_line(self):
+        c = card("WF-018", labels=["ops"])
+        out = generate_index("p", [c], [], NOW)
+        assert "[ops]" in out
+
 
 class TestEpicsAndParked:
     def _gen(self, cards):

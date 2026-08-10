@@ -51,11 +51,67 @@ def test_connect_is_idempotent(repo):
     conn = db.connect(repo, migrate=False)  # must not raise on existing schema
     assert db.get_meta(conn, "schema_version") == str(db.SCHEMA_VERSION)
 
+def test_migration_adds_labels_column_to_pre_existing_db(repo):
+    """A board.db created before `labels` existed (via `CREATE TABLE IF NOT
+    EXISTS`, `ensure_schema` never touches an already-existing table) must
+    gain the column on the next connect, with no data loss for existing
+    rows -- covers WF-058's migration requirement for real-world boards."""
+    import sqlite3
+    path = db.board_db_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = sqlite3.connect(str(path))
+    raw.executescript("""
+        CREATE TABLE cards (
+            id              TEXT PRIMARY KEY,
+            title           TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'planned',
+            stage           TEXT,
+            "order"         INTEGER NOT NULL DEFAULT 0,
+            complexity      TEXT,
+            priority        TEXT,
+            jira            TEXT,
+            linear          TEXT,
+            sprint          TEXT,
+            parent          TEXT,
+            branch          TEXT,
+            worktree        TEXT,
+            pr              TEXT,
+            touches         TEXT NOT NULL DEFAULT '[]',
+            depends_on      TEXT NOT NULL DEFAULT '[]',
+            budget_estimate INTEGER,
+            budget_actual   INTEGER NOT NULL DEFAULT 0,
+            created         TEXT NOT NULL DEFAULT '',
+            updated         TEXT NOT NULL DEFAULT '',
+            blocked_on      TEXT,
+            checklist       TEXT NOT NULL DEFAULT '[]',
+            repo            TEXT,
+            claimed_by      TEXT,
+            claimed_at      TEXT,
+            claim_acked     INTEGER NOT NULL DEFAULT 0,
+            claim_nudged    INTEGER NOT NULL DEFAULT 0,
+            body            TEXT NOT NULL DEFAULT '',
+            archived        INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    """)
+    raw.execute(
+        "INSERT INTO cards (id, title, status) VALUES ('WF-001', 'Legacy card', 'planned')"
+    )
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(repo, migrate=False)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cards)").fetchall()}
+    assert "labels" in cols
+    row = conn.execute("SELECT * FROM cards WHERE id = 'WF-001'").fetchone()
+    assert row["title"] == "Legacy card"  # no data loss
+    assert db.row_to_card(row).labels == []
+
 def _sample_card():
     return Card(
         id="WF-007", title="thing", status="in-flight", stage="implementation",
         order=3, priority="P1", sprint="2026-07-S3", parent="WF-001",
-        touches=["a.py", "b.py"], depends_on=["WF-002"],
+        touches=["a.py", "b.py"], depends_on=["WF-002"], labels=["policy", "architecture"],
         budget_estimate=400_000, budget_actual=120_000,
         created="2026-07-01T09:00", updated="2026-07-02T10:00",
         checklist=[{"task": "t1", "subject": "s", "status": "done"}],

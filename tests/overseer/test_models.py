@@ -324,6 +324,35 @@ class TestTouches:
         assert Card.from_text(text).touches == ["src/a.py"]
 
 
+class TestLabels:
+    def test_labels_round_trip(self):
+        from scripts.models import Card
+        card = Card(
+            id="WF-001", title="T", status="planned",
+            created="2026-07-09", updated="2026-07-09T10:00",
+            labels=["policy", "architecture"], body="## Goal\nx",
+        )
+        parsed = Card.from_text(card.to_text())
+        assert parsed.labels == ["policy", "architecture"]
+
+    def test_labels_absent_defaults_empty(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-002\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).labels == []
+
+    def test_labels_scalar_not_exploded_to_characters(self):
+        from scripts.models import Card
+        text = (
+            "---\nid: WF-003\ntitle: T\nstatus: planned\n"
+            "created: 2026-07-09\nupdated: 2026-07-09T10:00\n"
+            "labels: policy\n---\n\n## Goal\nx\n"
+        )
+        assert Card.from_text(text).labels == ["policy"]
+
+
 class TestRelationsFields:
     def _card_text(self, extra=""):
         return (

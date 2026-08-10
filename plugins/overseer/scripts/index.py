@@ -11,6 +11,13 @@ from scripts.store import state_root
 RECENTLY_DONE_LIMIT = 5
 
 
+def _labels_suffix(card: Card) -> str:
+    """Compact, appendable ``' [label1, label2]'`` for a card's ledger line,
+    or ``''`` when it has none -- keeps every existing byte-exact assertion
+    on lines for label-less cards untouched."""
+    return f" [{', '.join(card.labels)}]" if card.labels else ""
+
+
 def _budget_cell(card: Card) -> str:
     actual = format_tokens(card.budget_actual) or "0"
     estimate = format_tokens(card.budget_estimate) or "?"
@@ -49,7 +56,7 @@ def _in_flight_row(card: Card, cards: list[Card]) -> str:
         ready = _readiness(card, cards)
         note = ready if ready else ("2× BUDGET" if card.tripwire_breached else "—")
     return (
-        f"| {card.id} | {card.title} | {stage} | {card.complexity or '?'} "
+        f"| {card.id} | {card.title}{_labels_suffix(card)} | {stage} | {card.complexity or '?'} "
         f"| {_budget_cell(card)} | {note} |"
     )
 
@@ -101,7 +108,8 @@ def generate_index(
             ready = _readiness(c, pool)
             suffix = f" · {ready}" if ready else ""
             lines.append(
-                f"- {c.id} — {c.title} ({c.complexity or '?'}, ~{estimate}{sprint}){suffix}"
+                f"- {c.id} — {c.title} ({c.complexity or '?'}, ~{estimate}{sprint})"
+                f"{suffix}{_labels_suffix(c)}"
             )
     else:
         lines.append("_Backlog empty._")

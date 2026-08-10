@@ -370,6 +370,38 @@ class TestTouchesField:
         assert _card(repo).touches == ["src/auth/", "src/models.py"]
 
 
+class TestLabelsField:
+    def test_new_card_sets_labels(self, repo):
+        assert run(repo, "new-card", "--title", "T", "--labels", "a,b") == 0
+        assert _card(repo).labels == ["a", "b"]
+
+    def test_set_labels_round_trip(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001",
+                   "--labels", "policy, architecture") == 0
+        assert _card(repo).labels == ["policy", "architecture"]
+
+    def test_labels_survive_rebuild_index(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--labels", "policy,architecture")
+        assert run(repo, "rebuild-index") == 0
+        assert _card(repo).labels == ["policy", "architecture"]
+
+    def test_labels_appear_in_ledger(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--labels", "policy,architecture")
+        run(repo, "rebuild-index")
+        content = (state_root(repo) / "ledger.md").read_text()
+        assert "policy" in content and "architecture" in content
+
+    def test_show_includes_labels(self, repo, capsys):
+        run(repo, "new-card", "--title", "T", "--labels", "policy")
+        capsys.readouterr()
+        assert run(repo, "show", "WF-001", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["labels"] == ["policy"]
+
+
 class TestConflictsCommand:
     def test_conflicts_text(self, repo, capsys):
         run(repo, "new-card", "--title", "A")

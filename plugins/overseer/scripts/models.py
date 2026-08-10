@@ -102,6 +102,7 @@ class Card:
     pr: str | None = None
     touches: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    labels: list[str] = field(default_factory=list)
     budget_estimate: int | None = None
     budget_actual: int = 0
     created: str = ""
@@ -144,6 +145,13 @@ class Card:
             depends_on = [str(depends_raw)]
         else:
             depends_on = []
+        labels_raw = meta.get("labels")
+        if isinstance(labels_raw, list):
+            labels = [str(lb) for lb in labels_raw]
+        elif labels_raw:
+            labels = [str(labels_raw)]
+        else:
+            labels = []
         order_raw = meta.get("order")
         if order_raw is not None:
             try:
@@ -202,6 +210,7 @@ class Card:
             pr=meta.get("pr"),
             touches=touches,
             depends_on=depends_on,
+            labels=labels,
             budget_estimate=parse_tokens(budget.get("estimate")),
             budget_actual=parse_tokens(budget.get("actual")) or 0,
             created=str(meta.get("created", "")),
@@ -234,6 +243,7 @@ class Card:
             "pr": self.pr,
             "touches": self.touches or None,
             "depends_on": self.depends_on or None,
+            "labels": self.labels or None,
             "budget": {
                 "estimate": format_tokens(self.budget_estimate),
                 "actual": format_tokens(self.budget_actual),
