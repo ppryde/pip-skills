@@ -270,16 +270,18 @@ function CardDetailDrawer({
               </div>
               {/* Editable labels (F1, WF-058) — its own row below the facts
                   line so it never crowds the priority/budget/hero chips
-                  there. Saves through the existing `setLabels` client call
-                  (full-replace semantics), then reuses `refetchDetail` — the
-                  SAME counter-guarded closure the sibling mutation controls
-                  (PrioritySelect/StatusMenu/LinkEditor/ClaimControl, above
-                  and below) pass as their own `onMutated` — so the drawer's
-                  view refreshes the same way theirs does. */}
+                  there. Routes through `useBoard().mutate` (the SAME
+                  single-mutation-entrypoint `mutate` prop PrioritySelect/
+                  LinkEditor/ClaimControl use — see wf005-context.md) so the
+                  shared board state updates instantly, same as every other
+                  drawer control, then calls `refetchDetail` — the SAME
+                  counter-guarded closure those siblings pass as their own
+                  `onMutated` — so the drawer's own detail view refreshes
+                  too. */}
               <LabelEditor
                 labels={detail.labels ?? []}
                 onSave={async (labels) => {
-                  await setLabels(detail.id, labels);
+                  await mutate(() => setLabels(detail.id, labels));
                   refetchDetail();
                 }}
               />

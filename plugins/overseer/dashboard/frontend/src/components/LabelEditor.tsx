@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
+import { labelColor } from "../board/labelColor";
 
 export interface LabelEditorProps {
   labels: string[];
@@ -16,6 +17,12 @@ export interface LabelEditorProps {
  * caller's source of truth, same pattern as the drawer's other mutation
  * controls (PrioritySelect/StatusMenu/LinkEditor) deferring to their own
  * props rather than tracking a shadow copy.
+ *
+ * Each chip carries the SAME `label-chip label-chip--<key>` classes the
+ * read-only `LabelChips` uses (`board/labelColor.ts`'s stable hash), so an
+ * edited label keeps its established colour — `.label-editor__chip` in
+ * styles.css only adds the layout needed to sit the remove glyph inline,
+ * it never overrides the palette itself.
  */
 function LabelEditor({ labels, onSave }: LabelEditorProps) {
   const [draft, setDraft] = useState("");
@@ -41,7 +48,10 @@ function LabelEditor({ labels, onSave }: LabelEditorProps) {
   return (
     <div className="label-editor">
       {labels.map((label) => (
-        <span key={label} className="label-editor__chip">
+        <span
+          key={label}
+          className={`label-editor__chip label-chip label-chip--${labelColor(label)}`}
+        >
           {label}
           <button
             type="button"

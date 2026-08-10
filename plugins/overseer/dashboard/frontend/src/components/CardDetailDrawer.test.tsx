@@ -239,7 +239,7 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByPlaceholderText(/add label/i)).toBeInTheDocument();
   });
 
-  it("saves an added label via setLabels and re-fetches the open card (same onMutated/refetchDetail closure as the sibling controls)", async () => {
+  it("saves an added label through mutate() (board tiles) AND re-fetches the open card (refetchDetail), same as the sibling controls", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({ id: "WF-LBL", title: "Label me", labels: ["policy"] })
     );
@@ -254,11 +254,16 @@ describe("<CardDetailDrawer/>", () => {
       })
     );
 
+    // liveMutate() actually invokes the function it's given (unlike
+    // noopMutate) — needed here because the fix under test is that the
+    // label save is routed THROUGH `mutate`, exactly like PrioritySelect/
+    // LinkEditor/ClaimControl, not called directly.
+    const mutate = liveMutate();
     render(
       <CardDetailDrawer
         cardId="WF-LBL"
         onClose={() => {}}
-        mutate={noopMutate()}
+        mutate={mutate}
         inFlight={false}
         allCardIds={[]}
         party={[]}
@@ -273,6 +278,11 @@ describe("<CardDetailDrawer/>", () => {
       fireEvent.keyDown(input, { key: "Enter" });
     });
 
+    // The mutate path is exercised — this is the SAME `mutate` prop
+    // PrioritySelect/LinkEditor/ClaimControl call, and it's what keeps the
+    // board's own state (and thus TileShell's tiles) in sync; bypassing it
+    // was the bug being fixed here.
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function));
     expect(setLabels).toHaveBeenCalledWith("WF-LBL", ["policy", "arch"]);
     await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
   });

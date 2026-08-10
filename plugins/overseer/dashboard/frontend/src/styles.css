@@ -1445,10 +1445,12 @@ body {
   border: 1px solid var(--qb-line-dashed);
 }
 
-/* Label chips (F1, WF-058) — shared by the tile (`.card-tile__labels`) and
-   the drawer (`.card-drawer__labels`) wrappers below. Colour is ALWAYS the
-   per-label `.label-chip--<key>` modifier (board/labelColor.ts's stable
-   hash -> palette key), never an inline style — same chip-formula shape as
+/* Label chips (F1, WF-058) — the base pill shared by the read-only tile
+   wrapper (`.card-tile__labels`, below) and the drawer's editable
+   `.label-editor__chip` (further down, alongside `.label-editor`'s other
+   rules) — both apply `.label-chip--<key>`. Colour is ALWAYS the per-label
+   `.label-chip--<key>` modifier (board/labelColor.ts's stable hash ->
+   palette key), never an inline style — same chip-formula shape as
    `.branch-chip` (pale bg / saturated text / medium border) so a label chip
    reads as a sibling of the other tile chips, not a foreign element. */
 .label-chips {
@@ -1532,10 +1534,82 @@ body {
   overflow-y: auto;
 }
 
-/* Drawer placement: its own row below the facts line, never sharing that
-   row's `gap` with the priority/budget/hero chips. */
-.card-drawer__labels {
+/* Editable label control (F1 fold-in, WF-058) — drawer-only, replaces the
+   read-only `.card-drawer__labels` wrapper that used to sit here (now
+   removed — `LabelEditor` is the sole drawer label renderer). Its own row
+   below the facts line, never sharing that row's `gap` with the
+   priority/budget/hero chips (same placement the old wrapper had). Each
+   chip keeps the base `.label-chip--<key>` palette (above) — only the
+   layout needed for the inline remove glyph, and the add-input, are new
+   here. The remove glyph reuses `.link-editor__deps-list button`'s
+   currentColor + color-mix trick so it tints itself to whichever palette
+   key the chip landed on, without a rule per key. */
+.label-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
   margin-top: 0.5rem;
+}
+
+.label-editor__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  /* .label-chip's ellipsis-and-clip sizing is tuned for a bare text pill;
+     override it here so the remove glyph never gets clipped. */
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.label-editor__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-weight: 700;
+  font-size: 0.65rem;
+  line-height: 1;
+  border: none;
+  border-radius: var(--qb-radius-circle);
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
+  cursor: pointer;
+  transition: background-color var(--qb-motion-hover) ease;
+}
+
+.label-editor__remove:hover {
+  background: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.label-editor__remove:active {
+  background: color-mix(in srgb, currentColor 44%, transparent);
+}
+
+.label-editor__input {
+  font: inherit;
+  font-size: 0.75rem;
+  border: 1.5px dashed var(--qb-line-dashed);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.05rem 0.4rem;
+  background: transparent;
+  color: var(--qb-ink-500);
+  min-width: 6rem;
+}
+
+.label-editor__input:hover,
+.label-editor__input:focus {
+  border-color: var(--qb-btn-ink-hover);
+  outline: none;
+}
+
+.label-editor__input::placeholder {
+  color: var(--qb-ink-400);
 }
 
 .badge--blocked {
@@ -3238,7 +3312,8 @@ body {
     height: 18px;
   }
 
-  .link-editor__deps-list button {
+  .link-editor__deps-list button,
+  .label-editor__remove {
     min-width: 32px;
     min-height: 32px;
   }
@@ -3253,7 +3328,8 @@ body {
   .priority-select,
   .claim-control select,
   .link-editor select,
-  .link-editor input {
+  .link-editor input,
+  .label-editor__input {
     font-size: 16px;
     min-height: 38px;
   }
