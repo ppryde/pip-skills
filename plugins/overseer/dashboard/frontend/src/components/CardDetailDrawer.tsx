@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCard } from "../api/client";
+import { getCard, setLabels } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -16,7 +16,7 @@ import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
 import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
-import LabelChips from "./LabelChips";
+import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
 
 export interface CardDetailDrawerProps {
@@ -268,10 +268,21 @@ function CardDetailDrawer({
                   </span>
                 )}
               </div>
-              {/* Label chips (F1, WF-058) — self-gates to nothing when the
-                  card carries no labels. Its own row below the facts line so
-                  it never crowds the priority/budget/hero chips there. */}
-              <LabelChips labels={detail.labels} className="card-drawer__labels" />
+              {/* Editable labels (F1, WF-058) — its own row below the facts
+                  line so it never crowds the priority/budget/hero chips
+                  there. Saves through the existing `setLabels` client call
+                  (full-replace semantics), then reuses `refetchDetail` — the
+                  SAME counter-guarded closure the sibling mutation controls
+                  (PrioritySelect/StatusMenu/LinkEditor/ClaimControl, above
+                  and below) pass as their own `onMutated` — so the drawer's
+                  view refreshes the same way theirs does. */}
+              <LabelEditor
+                labels={detail.labels ?? []}
+                onSave={async (labels) => {
+                  await setLabels(detail.id, labels);
+                  refetchDetail();
+                }}
+              />
             </header>
 
             <div className="card-drawer__controls">

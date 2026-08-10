@@ -17,9 +17,10 @@ vi.mock("../api/client", () => ({
   getSessions: vi.fn(),
   claimCard: vi.fn(),
   unclaimCard: vi.fn(),
+  setLabels: vi.fn(),
 }));
 
-import { getCard, getSessions, setPriority } from "../api/client";
+import { getCard, getSessions, setPriority, setLabels } from "../api/client";
 import CardDetailDrawer from "./CardDetailDrawer";
 
 const BOARD_RESPONSE = {} as BoardResponse;
@@ -196,7 +197,7 @@ describe("<CardDetailDrawer/>", () => {
     expect(container.querySelector(".repo-chip")).toBeNull();
   });
 
-  it("renders a chip for each of the card's labels (F1, WF-058)", async () => {
+  it("renders a chip for each of the card's labels via the editable LabelEditor (F1, WF-058)", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({ id: "WF-A", labels: ["policy", "architecture"] })
     );
@@ -213,13 +214,13 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText(`Title WF-A`);
-    const chips = container.querySelectorAll(".label-chip");
+    const chips = container.querySelectorAll(".label-editor__chip");
     expect(chips).toHaveLength(2);
     expect(chips[0]).toHaveTextContent("policy");
     expect(chips[1]).toHaveTextContent("architecture");
   });
 
-  it("renders no label chips (no layout break) when the card carries no labels", async () => {
+  it("renders the label editor with no chips (just the add-input) when the card carries no labels", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
 
     const { container } = render(
@@ -234,8 +235,46 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText(`Title WF-A`);
-    expect(container.querySelector(".label-chips")).toBeNull();
-    expect(container.querySelector(".label-chip")).toBeNull();
+    expect(container.querySelector(".label-editor__chip")).toBeNull();
+    expect(screen.getByPlaceholderText(/add label/i)).toBeInTheDocument();
+  });
+
+  it("saves an added label via setLabels and re-fetches the open card (same onMutated/refetchDetail closure as the sibling controls)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-LBL", title: "Label me", labels: ["policy"] })
+    );
+    vi.mocked(setLabels).mockResolvedValueOnce(BOARD_RESPONSE);
+    // The refetch after the save returns updated content — proves it's a
+    // REAL second `getCard` call, not just a re-render of stale state.
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-LBL",
+        title: "Label me",
+        labels: ["policy", "arch"],
+      })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-LBL"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Label me");
+    expect(getCard).toHaveBeenCalledTimes(1);
+
+    const input = screen.getByPlaceholderText(/add label/i);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "arch" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    expect(setLabels).toHaveBeenCalledWith("WF-LBL", ["policy", "arch"]);
+    await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
   });
 
   it("renders unknown section headings too — no hardcoded fixed set", async () => {
