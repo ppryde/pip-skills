@@ -126,9 +126,22 @@ class TestEpicsAndParked:
 
     def test_labels_shown_on_epic_line(self):
         from factories import make_card
-        cards = [make_card("WF-010", status="in-flight", title="Auth", labels=["security"])]
+        # WF-010 only counts as an epic (routed through the "## Epics"
+        # header-line path at index.py's `_labels_suffix(e)` call) once it
+        # has a child -- relations.is_epic requires a card with
+        # parent == "WF-010". Without WF-011 this card would instead render
+        # via the standalone in-flight-row path, which already had labels
+        # before this fix, making the assertion pass vacuously.
+        cards = [
+            make_card("WF-010", status="in-flight", title="Auth", labels=["security"]),
+            make_card("WF-011", parent="WF-010", status="in-flight"),
+        ]
         out = self._gen(cards)
-        assert "[security]" in out
+        epics_section = out.split("## Epics")[1].split("##")[0]
+        header_line = next(
+            line for line in epics_section.splitlines() if line.startswith("- WF-010")
+        )
+        assert "[security]" in header_line
 
     def test_labels_shown_on_epic_child_line(self):
         from factories import make_card
