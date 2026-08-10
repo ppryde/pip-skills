@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupIntoLanes, STAGES } from "./layout";
+import { collapseStagesForMobile, groupIntoLanes, STAGES } from "./layout";
 import type { BoardCard } from "../api/types";
 
 /** Minimal card builder — fills every required field with a sane default. */
@@ -266,5 +266,105 @@ describe("groupIntoLanes", () => {
     const stageLaneKeys = lanes.filter((l) => l.kind === "stage").map((l) => l.key);
     expect(stageLaneKeys).toEqual(STAGES.map((s) => `stage:${s}`));
     expect(lanes.every((l) => l.cards.length === 0)).toBe(true);
+  });
+});
+
+describe("collapseStagesForMobile", () => {
+  it("merges the 7 stage lanes into ONE in-progress lane, in place of the first stage lane, cards in STAGES order", () => {
+    const cards: BoardCard[] = [
+      card({ id: "WF-BACKLOG", status: "planned" }),
+      ...STAGES.map((stage, i) =>
+        card({ id: `WF-STAGE-${i}`, status: "in-flight", stage })
+      ),
+      card({ id: "WF-PARKED", status: "parked" }),
+      card({ id: "WF-DONE", status: "done" }),
+      card({ id: "WF-ARCHIVE", status: "abandoned" }),
+    ];
+    const lanes = groupIntoLanes(cards);
+
+    const collapsed = collapseStagesForMobile(lanes);
+
+    expect(collapsed.map((l) => l.key)).toEqual([
+      "backlog",
+      "in-progress",
+      "parked",
+      "done",
+      "archive",
+    ]);
+
+    const inProgress = laneByKey(collapsed, "in-progress");
+    expect(inProgress.kind).toBe("in-progress");
+    expect(inProgress.label).toBe("In Progress");
+    // One card per stage, concatenated in STAGES order (bootstrap first,
+    // awaiting-merge last) — matches how `cards` above was built.
+    expect(inProgress.cards.map((c) => c.id)).toEqual(
+      STAGES.map((_, i) => `WF-STAGE-${i}`)
+    );
+  });
+
+  it("preserves each stage's own internal (recency) order inside the merged lane", () => {
+    const cards: BoardCard[] = [
+      card({
+        id: "WF-IMPL-OLD",
+        status: "in-flight",
+        stage: "implementation",
+        updated: "2026-07-01T09:00",
+      }),
+      card({
+        id: "WF-IMPL-NEW",
+        status: "in-flight",
+        stage: "implementation",
+        updated: "2026-07-20T09:00",
+      }),
+      card({
+        id: "WF-BOOTSTRAP",
+        status: "in-flight",
+        stage: "bootstrap",
+        updated: "2026-07-10T09:00",
+      }),
+    ];
+    const lanes = groupIntoLanes(cards);
+
+    const inProgress = laneByKey(collapseStagesForMobile(lanes), "in-progress");
+
+    // bootstrap (STAGES[0]) before implementation (STAGES[3]); within
+    // implementation, recency-desc (NEW before OLD) — same order
+    // `groupIntoLanes`'s own `stage:implementation` lane already produced.
+    expect(inProgress.cards.map((c) => c.id)).toEqual([
+      "WF-BOOTSTRAP",
+      "WF-IMPL-NEW",
+      "WF-IMPL-OLD",
+    ]);
+  });
+
+  it("passes non-stage lanes through untouched, same order", () => {
+    const cards: BoardCard[] = [
+      card({ id: "WF-BACKLOG", status: "planned" }),
+      card({ id: "WF-PARKED", status: "parked" }),
+      card({ id: "WF-DONE", status: "done" }),
+      card({ id: "WF-ARCHIVE", status: "abandoned" }),
+    ];
+    const lanes = groupIntoLanes(cards);
+
+    const collapsed = collapseStagesForMobile(lanes);
+
+    expect(laneByKey(collapsed, "backlog")).toBe(laneByKey(lanes, "backlog"));
+    expect(laneByKey(collapsed, "parked")).toBe(laneByKey(lanes, "parked"));
+    expect(laneByKey(collapsed, "done")).toBe(laneByKey(lanes, "done"));
+    expect(laneByKey(collapsed, "archive")).toBe(laneByKey(lanes, "archive"));
+  });
+
+  it("an empty board still gets an empty (faded) in-progress lane, correctly positioned", () => {
+    const collapsed = collapseStagesForMobile(groupIntoLanes([]));
+
+    expect(collapsed.map((l) => l.key)).toEqual([
+      "backlog",
+      "in-progress",
+      "parked",
+      "done",
+      "archive",
+    ]);
+    expect(laneByKey(collapsed, "in-progress").cards).toHaveLength(0);
+    expect(collapsed.every((l) => l.cards.length === 0)).toBe(true);
   });
 });

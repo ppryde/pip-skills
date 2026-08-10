@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
 
@@ -593,5 +593,81 @@ describe("mobile board scroll-container (WF-085 review — CSS regression guard)
       expect(body).toMatch(/scroll-snap-align:\s*none/);
       expect(body).not.toMatch(/88vw/);
     }
+  });
+});
+
+// WF-085 in-progress lane: mobile (<=720px, stubbed via `window.matchMedia`
+// — jsdom itself doesn't implement it, see setupTests.ts's default polyfill)
+// collapses the 7 stage lanes into ONE "In Progress" tab/pane
+// (`collapseStagesForMobile`, board/layout.ts), and each in-flight card
+// inside that merged pane carries its own small stage icon (CardTile's
+// `showStage`, wired by Lane.tsx off `lane.kind === "in-progress"`). The
+// sibling "desktop" test below — matchMedia stubbed NOT-mobile — locks in
+// the "byte-for-byte unchanged" guardrail: same 11-lane nav every other test
+// in this file already exercises.
+describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(getRepos).mockResolvedValue({ repos: [] });
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  function stubViewport(matches: boolean) {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+
+  it("mobile: collapses the 7 stage tabs into one In Progress tab, merging their cards into one swipe pane", async () => {
+    stubViewport(true);
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Backlog");
+
+    // Merged tab present with the combined stage-lane count — only
+    // WF-EPIC-C2 (Implementation) carries a stage in this fixture.
+    expect(screen.getByLabelText("In Progress, 1 cards")).toBeInTheDocument();
+
+    // NOT the individual stage tabs (Implementation, Bootstrap, ...).
+    expect(
+      screen.queryByLabelText(/^Implementation, /)
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Bootstrap, /)).not.toBeInTheDocument();
+
+    // The swipe track has exactly one merged pane, holding the card — no
+    // leftover per-stage pane.
+    const pane = container.querySelector('[data-lane-key="in-progress"]');
+    expect(pane).not.toBeNull();
+    expect(pane!.querySelector('[data-card-id="WF-EPIC-C2"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-lane-key="stage:implementation"]')
+    ).toBeNull();
+  });
+
+  it("desktop (matchMedia reports not-mobile): full 11-lane nav is untouched — stage tabs present, no In Progress tab", async () => {
+    stubViewport(false);
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    render(<App />);
+    await screen.findByText("Backlog");
+
+    expect(
+      screen.getByLabelText("Implementation, 1 cards")
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^In Progress, /)).not.toBeInTheDocument();
   });
 });

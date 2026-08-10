@@ -17,6 +17,12 @@ describe("laneIconKey", () => {
     expect(laneIconKey(lane({ key: "archive", kind: "archive" }))).toBe("abandoned");
   });
 
+  it("maps the mobile in-progress lane (WF-085 collapseStagesForMobile) to 'in-progress'", () => {
+    expect(
+      laneIconKey(lane({ key: "in-progress", kind: "in-progress" }))
+    ).toBe("in-progress");
+  });
+
   it("maps every stage lane to its own stage string", () => {
     const stages = [
       "bootstrap",
@@ -60,5 +66,11 @@ describe("laneIcon", () => {
 
   it("falls back to the backlog icon for an unrecognised key", () => {
     expect(laneIcon("not-a-real-lane")).toBe(laneIcon("backlog"));
+  });
+
+  it("resolves 'in-progress' to its own bundled asset, distinct from every stage icon", () => {
+    expect(laneIcon("in-progress")).toEqual(expect.any(String));
+    expect(laneIcon("in-progress")).not.toBe(laneIcon("backlog"));
+    expect(laneIcon("in-progress")).not.toBe(laneIcon("implementation"));
   });
 });

@@ -1121,6 +1121,15 @@ body {
   box-shadow: var(--qb-shadow-banner) var(--qb-accent-ash-shadow);
 }
 
+/* WF-085 in-progress lane (mobile-only — `collapseStagesForMobile`'s
+   synthetic lane never exists on desktop): reuses the amber accent group
+   rather than inventing a new one, since it's the umbrella over all 7
+   stages this lane replaces on a phone. */
+.lane__header--in-progress {
+  background: var(--qb-accent-amber-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+}
+
 .lane__cards {
   display: flex;
   flex-direction: column;
@@ -1207,6 +1216,13 @@ body {
   --card-accent-fill: var(--qb-accent-ash-fill);
   --card-accent-border: var(--qb-accent-ash-border);
   --card-accent-shadow: var(--qb-accent-ash-cardshadow);
+}
+
+/* WF-085 in-progress lane (mobile-only) — see `.lane__header--in-progress`. */
+.card-tile--accent-in-progress {
+  --card-accent-fill: var(--qb-accent-amber-fill);
+  --card-accent-border: var(--qb-accent-amber-border);
+  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
 }
 
 .card-tile {
@@ -4029,6 +4045,13 @@ a.card-drawer__pr-chip:hover {
   }
 
   .lane-icon-nav__item--bootstrap.lane-icon-nav__item--active {
+    background: var(--qb-accent-amber-fill);
+  }
+
+  /* WF-085 in-progress lane: same amber family as `.lane__header--in-progress` /
+     `.card-tile--accent-in-progress` — one accent, everywhere this merged
+     mobile-only lane shows up. */
+  .lane-icon-nav__item--in-progress.lane-icon-nav__item--active {
     background: var(--qb-accent-amber-fill);
   }
 

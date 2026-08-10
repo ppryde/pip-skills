@@ -25,6 +25,7 @@ import awaitingMerge from "../assets/lane-icons/awaiting-merge.png";
 import done from "../assets/lane-icons/done.png";
 import parked from "../assets/lane-icons/parked.png";
 import abandoned from "../assets/lane-icons/abandoned.png";
+import inProgress from "../assets/lane-icons/in-progress.png";
 
 const ICONS: Record<string, string> = {
   backlog,
@@ -38,16 +39,19 @@ const ICONS: Record<string, string> = {
   done,
   parked,
   abandoned,
+  "in-progress": inProgress,
 };
 
 /** Derives a lane's icon/accent key from its `kind`/`stage` — mirrors
  * Lane.tsx's `accentKey`. `archive` (labelled "Abandoned") maps to
  * `abandoned`; every `stage` lane's key IS its `Stage` string already
- * (STAGES in layout.ts lists exactly the 7 stage icon keys below). */
+ * (STAGES in layout.ts lists exactly the 7 stage icon keys below).
+ * `in-progress` (WF-085 mobile collapse — `collapseStagesForMobile`'s
+ * synthetic lane) is its own key, mapped to the drawn-shortsword icon. */
 export function laneIconKey(lane: Lane): string {
   if (lane.kind === "archive") return "abandoned";
   if (lane.kind === "stage") return lane.stage!;
-  return lane.kind; // "backlog" | "parked" | "done"
+  return lane.kind; // "backlog" | "parked" | "done" | "in-progress"
 }
 
 /** Returns the imported/bundled icon URL for a given icon key (one of the

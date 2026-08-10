@@ -8,8 +8,9 @@ import {
 import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
-import { groupIntoLanes } from "../board/layout";
+import { collapseStagesForMobile, groupIntoLanes } from "../board/layout";
 import { laneIconKey } from "../board/laneIcons";
+import { useMediaQuery } from "../board/useMediaQuery";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
 import { locateDropTarget, resolveDrop } from "../board/dragPlan";
 import { runDropPlan } from "../board/runDropPlan";
@@ -78,6 +79,23 @@ function Board({
     [board.cards, visibleIds]
   );
   const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
+
+  // WF-085 in-progress lane: mobile (<=720px, same breakpoint the CSS mobile
+  // block already gates on) collapses the 7 `kind:"stage"` lanes into ONE
+  // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
+  // mostly-empty swipe panes/nav icons on a phone. `displayLanes` (NOT
+  // `lanes`) is what the swipe track and the icon-nav both render from
+  // below, so they can never disagree about which lanes exist. Desktop
+  // (`isMobile === false`) is byte-for-byte the old path: `displayLanes ===
+  // lanes`, the real 11-lane result. Drag/drop below deliberately keeps
+  // using `lanes` (the real per-stage layout), never `displayLanes` — see
+  // `handleDragEnd`'s comment.
+  const isMobile = useMediaQuery("(max-width:720px)");
+  const displayLanes = useMemo(
+    () => (isMobile ? collapseStagesForMobile(lanes) : lanes),
+    [isMobile, lanes]
+  );
+
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
     null
   );
@@ -93,7 +111,7 @@ function Board({
     setHighlightedEpicId((current) => (current === id ? null : id));
   };
 
-  const visibleLanes = lanes.filter(
+  const visibleLanes = displayLanes.filter(
     (lane) => lane.kind !== "archive" || showArchive
   );
 
@@ -213,6 +231,15 @@ function Board({
       const dragged = board.cards.find((c) => c.id === draggedId);
       if (!dragged) return;
 
+      // Deliberately `lanes` (the real per-stage layout), never
+      // `displayLanes` — the mobile "in-progress" lane is a view/navigation
+      // construct only, with no single stage of its own, so it must never
+      // be wired as a stage-change drop target. Its droppable id
+      // ("in-progress") never matches any REAL lane key here, so a drop on
+      // its background resolves to `targetLane: undefined` below and
+      // no-ops harmlessly; a drop on a CARD inside it still resolves via
+      // that card's own real stage lane, same as desktop. Either way: no
+      // crash, and desktop drag/drop (the real 7 stage lanes) is untouched.
       const { lane: targetLane, index } = locateDropTarget(
         String(over.id),
         lanes
