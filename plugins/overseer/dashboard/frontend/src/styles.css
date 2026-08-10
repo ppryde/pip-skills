@@ -783,8 +783,9 @@ body {
 .filter-bar__search {
   font: inherit;
   font-size: 0.8rem;
-  flex: 1 1 12rem;
+  flex: 0 1 22rem;
   min-width: 8rem;
+  max-width: 22rem;
   box-sizing: border-box;
   padding: 0.3rem 0.6rem;
   border: 1.5px solid var(--qb-btn-ink);
