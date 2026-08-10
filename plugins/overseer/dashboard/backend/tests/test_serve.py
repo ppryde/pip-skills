@@ -89,7 +89,9 @@ def test_main_passes_through_custom_host(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     # non-loopback bind, no env token → a token is auto-generated (never
     # tokenless off localhost)
-    _args, kwargs = fake_create_app.call_args
+    assert fake_create_app.call_count == 1
+    args, kwargs = fake_create_app.call_args
+    assert args == (tmp_path.resolve(),)
     assert kwargs["host"] == "0.0.0.0"
     assert kwargs["token"]
     fake_run.assert_called_once_with(fake_run.call_args.args[0], host="0.0.0.0", port=8080)
