@@ -675,6 +675,27 @@ class TestRelationsCommands:
         assert _card(repo).status == "planned"
 
 
+class TestPullChildren:
+    def test_pull_children_moves_live_children_to_parent_stage(self, repo):
+        run(repo, "new-card", "--title", "Epic")            # WF-001
+        run(repo, "new-card", "--title", "K1"); run(repo, "set-field", "WF-002", "--parent", "WF-001")
+        run(repo, "new-card", "--title", "K2"); run(repo, "set-field", "WF-003", "--parent", "WF-001")
+        run(repo, "set-stage", "WF-001", "implementation")   # parent in a stage
+        assert run(repo, "pull-children", "WF-001") == 0
+        assert _card(repo, "WF-002").stage == "implementation"
+        assert _card(repo, "WF-003").stage == "implementation"
+
+    def test_pull_children_skips_archived_children(self, repo):
+        run(repo, "new-card", "--title", "Epic"); run(repo, "new-card", "--title", "K1")
+        run(repo, "set-field", "WF-002", "--parent", "WF-001"); run(repo, "done", "WF-002")
+        run(repo, "set-stage", "WF-001", "implementation")
+        assert run(repo, "pull-children", "WF-001") == 0   # no crash; archived child untouched
+
+    def test_pull_children_no_live_children_is_noop(self, repo):
+        run(repo, "new-card", "--title", "Solo")
+        assert run(repo, "pull-children", "WF-001") == 0
+
+
 class TestRelationsArchivedRollup:
     def test_done_child_counts_in_rollup_and_readiness(self, repo):
         run(repo, "new-card", "--title", "Epic")     # WF-001

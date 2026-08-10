@@ -804,6 +804,47 @@ def cmd_unpark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pull_children(args: argparse.Namespace) -> int:
+    """`overseer pull-children <card_id>` — F9/WF-066: moves every LIVE
+    child of an epic into the parent's board column in one shot.
+
+    "Column" here is (stage, status) together, mirroring how `set-stage`
+    and `unblock` derive it for a single card: if the parent has a stage,
+    each child is stamped into that same stage via `set_stage` (which also
+    flips status to "in-flight" and clears any `blocked_on`, same as
+    `set-stage` does for one card). If the parent has NO stage, there is no
+    stage to copy, so children are cleared back to stage=None — landing
+    them in the same planned/backlog lane as a stage-less parent, mirroring
+    the `unblock`/`unpark` "in-flight if stage else planned" idiom.
+
+    Archived cards (done/abandoned) never appear in `load_live_cards`, so
+    they're skipped without any special-casing. Batches the writes (one
+    `db.save_card` per child) and runs a single `rebuild_index` at the end
+    rather than looping `_sync`, since a naive per-child `_sync` would
+    rebuild the index N times for one logical move.
+    """
+    parent = _load(args.root, args.card_id)
+    cards, _ = db.load_live_cards(_conn(args.root))
+    children = [c for c in cards if c.parent == args.card_id]
+    if not children:
+        print(f"no live children of {parent.id}")
+        return 0
+    now = _now()
+    for child in children:
+        if parent.stage:
+            child.set_stage(parent.stage, now)
+        else:
+            child.stage = None
+            child.status = "planned"
+            child.blocked_on = None
+            child.updated = now
+        db.save_card(_conn(args.root), child)
+    quarantined = rebuild_index(args.root, args.root.resolve().name, now)
+    _report_quarantined(quarantined)
+    print(f"pulled {len(children)} children into {parent.id}")
+    return 0
+
+
 def cmd_claim(args: argparse.Namespace) -> int:
     """`overseer claim <id> --session <sid> [--force]` — design spec §3.
 
@@ -1500,6 +1541,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("unpark")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_unpark)
+
+    p = sub.add_parser("pull-children")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_pull_children)
 
     p = sub.add_parser("claim")
     p.add_argument("card_id")
