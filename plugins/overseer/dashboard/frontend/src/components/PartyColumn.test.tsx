@@ -195,6 +195,31 @@ describe("<PartyColumn/>", () => {
     expect(container.querySelector(".party-row")).toHaveClass("is-near-threshold");
   });
 
+  it("renders the session id in small text, truncated with a full-id title (WF-084)", () => {
+    const { container } = render(
+      <PartyColumn
+        party={[
+          member({
+            session: session({ id: "sess-1234567890-abcdef", session_name: "night-shift" }),
+          }),
+        ]}
+      />
+    );
+    const idEl = container.querySelector(".party-row__session-id");
+    expect(idEl).not.toBeNull();
+    expect(idEl!.textContent).toBe("sess-123…");
+    expect(idEl).toHaveAttribute("title", "sess-1234567890-abcdef");
+  });
+
+  it("renders the full session id verbatim (no ellipsis) when it is short", () => {
+    const { container } = render(
+      <PartyColumn party={[member({ session: session({ id: "s1" }) })]} />
+    );
+    const idEl = container.querySelector(".party-row__session-id");
+    expect(idEl!.textContent).toBe("s1");
+    expect(idEl).toHaveAttribute("title", "s1");
+  });
+
   it("does not apply the near-threshold cue when pct is below threshold or threshold is null", () => {
     const { container: below } = render(
       <PartyColumn

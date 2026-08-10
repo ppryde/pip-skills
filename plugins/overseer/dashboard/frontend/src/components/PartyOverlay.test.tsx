@@ -319,6 +319,35 @@ describe("<PartyOverlay/>", () => {
     expect(heroCard).not.toHaveClass("is-near-threshold");
   });
 
+  it("renders the session id in small text, truncated with a full-id title (WF-084)", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[
+          member({
+            session: session({ id: "sess-1234567890-abcdef", session_name: "aria" }),
+          }),
+        ]}
+        onClose={vi.fn()}
+      />
+    );
+    const idEl = container.querySelector(".hero-card__session-id");
+    expect(idEl).not.toBeNull();
+    expect(idEl!.textContent).toBe("sess-123…");
+    expect(idEl).toHaveAttribute("title", "sess-1234567890-abcdef");
+  });
+
+  it("renders the full session id verbatim (no ellipsis) when it is short", () => {
+    const { container } = render(
+      <PartyOverlay
+        party={[member({ session: session({ id: "s1" }) })]}
+        onClose={vi.fn()}
+      />
+    );
+    const idEl = container.querySelector(".hero-card__session-id");
+    expect(idEl!.textContent).toBe("s1");
+    expect(idEl).toHaveAttribute("title", "s1");
+  });
+
   it("always renders exactly one static, non-interactive summon slot at the end", () => {
     const { container } = render(
       <PartyOverlay
