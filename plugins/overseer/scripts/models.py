@@ -18,6 +18,21 @@ STAGES = [
 ]
 PRIORITIES = {"P0", "P1", "P2", "P3", "P4"}
 COMPLEXITIES = {"S", "M", "L", "XL"}
+# Mirrors the frontend's curated swatch palette (dashboard/frontend/src/board/
+# labelColor.ts PALETTE_KEYS) — same 9 keys, same order. That module owns the
+# label -> key hash for the un-configured default; this tuple is the set of
+# keys an F10 editable label_colors row is allowed to point at (WF-067).
+LABEL_PALETTE_KEYS = (
+    "slate",
+    "sage",
+    "plum",
+    "clay",
+    "sky",
+    "violet",
+    "olive",
+    "terracotta",
+    "teal",
+)
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kM])?")

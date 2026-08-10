@@ -1458,4 +1458,51 @@ class TestBackupRestoreInit:
         local = json.loads((repo / ".overseer" / "config.local.json").read_text())
         assert cfg["backup_dir"] == ".overseer/backups"
         assert local["central_dir"] == str(tmp_path / "c")
+
+
+class TestLabelColorCommand:
+    """F10 registry CLI (WF-067): `label-color set|clear|list`."""
+
+    def test_set_persists(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "sky") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {"foo": "sky"}
+
+    def test_set_invalid_color_key_exits_1(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "notakey") == 1
+
+    def test_set_overwrites_existing(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "sky") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "set", "foo", "plum") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {"foo": "plum"}
+
+    def test_clear_removes(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "sky") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "clear", "foo") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {}
+
+    def test_clear_absent_is_noop_exit_0(self, repo, capsys):
+        assert run(repo, "label-color", "clear", "nope") == 0
+
+    def test_list_json_returns_full_map(self, repo, capsys):
+        assert run(repo, "label-color", "set", "bug", "sky") == 0
+        assert run(repo, "label-color", "set", "feature", "sage") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {"bug": "sky", "feature": "sage"}
+
+    def test_list_text_empty(self, repo, capsys):
+        assert run(repo, "label-color", "list") == 0
+        assert "No label colours registered." in capsys.readouterr().out
         assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()

@@ -25,7 +25,7 @@ from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import (  # noqa: E402
-    Card, CardParseError, PRIORITIES, format_tokens, parse_tokens,
+    Card, CardParseError, LABEL_PALETTE_KEYS, PRIORITIES, format_tokens, parse_tokens,
 )
 from scripts.relations import would_cycle_depends, would_cycle_parent  # noqa: E402
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
@@ -1464,6 +1464,39 @@ def cmd_facts(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- label-color: editable colour registry (F10, WF-067) -----------------
+#
+# `color_key` validity is enforced by argparse's `choices=LABEL_PALETTE_KEYS`
+# on the `set` subparser (see build_parser) — an invalid key is a usage
+# error, which `main()` already turns into exit 1, matching every other
+# choice-validated positional in this file (e.g. `set-sprint-status`).
+
+
+def cmd_label_color_set(args: argparse.Namespace) -> int:
+    db.set_label_color(_conn(args.root), args.name, args.color_key)
+    print(f"{args.name} -> {args.color_key}")
+    return 0
+
+
+def cmd_label_color_clear(args: argparse.Namespace) -> int:
+    db.clear_label_color(_conn(args.root), args.name)
+    print(f"{args.name} cleared")
+    return 0
+
+
+def cmd_label_color_list(args: argparse.Namespace) -> int:
+    colors = db.load_label_colors(_conn(args.root))
+    if args.json:
+        print(json.dumps(colors, indent=2))
+        return 0
+    if not colors:
+        print("No label colours registered.")
+        return 0
+    for name in sorted(colors):
+        print(f"{name}: {colors[name]}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -1695,6 +1728,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="emit the result as JSON (for the dashboard)")
     p.set_defaults(func=cmd_clear)
+
+    p = sub.add_parser("label-color")
+    label_color_sub = p.add_subparsers(dest="action", required=True)
+
+    lp = label_color_sub.add_parser("set")
+    lp.add_argument("name")
+    lp.add_argument("color_key", choices=LABEL_PALETTE_KEYS)
+    lp.set_defaults(func=cmd_label_color_set)
+
+    lp = label_color_sub.add_parser("clear")
+    lp.add_argument("name")
+    lp.set_defaults(func=cmd_label_color_clear)
+
+    lp = label_color_sub.add_parser("list")
+    lp.add_argument("--json", action="store_true")
+    lp.set_defaults(func=cmd_label_color_list)
 
     return parser
 

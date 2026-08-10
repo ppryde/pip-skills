@@ -591,3 +591,55 @@ def test_connect_warns_on_repo_root_meta_mismatch(tmp_path, monkeypatch, capsys)
     assert str(derive_repo_root(dir_b)) in err  # now-connected-from root
     # set-if-absent preserved: original owner NOT overwritten
     assert db.get_meta(conn_b, "repo_root") == str(derive_repo_root(dir_a))
+
+
+# --- label_colors registry (F10, WF-067) ----------------------------------
+
+def test_label_colors_table_exists_on_fresh_db(repo):
+    conn = db.connect(repo, migrate=False)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "label_colors" in tables
+
+def test_label_colors_table_created_on_pre_existing_db(repo):
+    """`CREATE TABLE IF NOT EXISTS label_colors` runs on every `ensure_schema`
+    call (unlike the additive-column migration, no ALTER is needed — this is
+    a brand-new table, not a new column on an existing one), so a board.db
+    created before F10 existed still gains the table on its next connect."""
+    import sqlite3
+    path = db.board_db_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = sqlite3.connect(str(path))
+    raw.executescript("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(repo, migrate=False)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "label_colors" in tables
+
+def test_set_label_color_then_load_roundtrip(repo):
+    conn = db.connect(repo, migrate=False)
+    db.set_label_color(conn, "bug", "sky")
+    assert db.load_label_colors(conn) == {"bug": "sky"}
+
+def test_set_label_color_overwrites_existing(repo):
+    conn = db.connect(repo, migrate=False)
+    db.set_label_color(conn, "bug", "sky")
+    db.set_label_color(conn, "bug", "plum")
+    assert db.load_label_colors(conn) == {"bug": "plum"}
+
+def test_clear_label_color_removes_entry(repo):
+    conn = db.connect(repo, migrate=False)
+    db.set_label_color(conn, "bug", "sky")
+    db.set_label_color(conn, "feature", "sage")
+    db.clear_label_color(conn, "bug")
+    assert db.load_label_colors(conn) == {"feature": "sage"}
+
+def test_clear_label_color_absent_is_noop(repo):
+    conn = db.connect(repo, migrate=False)
+    db.clear_label_color(conn, "nope")  # must not raise
+    assert db.load_label_colors(conn) == {}
+
+def test_load_label_colors_empty_registry(repo):
+    conn = db.connect(repo, migrate=False)
+    assert db.load_label_colors(conn) == {}
