@@ -392,6 +392,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         created=_today(),
         updated=_now(),
         repo=args.repo if args.repo else derive_repo_label(args.root),
+        labels=[lb.strip() for lb in args.labels.split(",") if lb.strip()] if args.labels else [],
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
     # Insert-only (not `_sync`'s upsert path): a plain existence check here
@@ -461,6 +462,8 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.pr = args.pr
     if args.touches is not None:
         card.touches = [t.strip() for t in args.touches.split(",") if t.strip()]
+    if args.labels is not None:
+        card.labels = [lb.strip() for lb in args.labels.split(",") if lb.strip()]
     if args.repo is not None:
         card.repo = args.repo if args.repo else None
     if args.order is not None:
@@ -1223,6 +1226,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         "pr": card.pr,
         "touches": card.touches,
         "depends_on": card.depends_on,
+        "labels": card.labels,
         "budget": {
             "estimate": card.budget_estimate,
             "actual": card.budget_actual,
@@ -1429,6 +1433,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the derived top-level repo name (default: derived "
              "from --root via `git rev-parse --git-common-dir`)",
     )
+    p.add_argument("--labels", help="comma-separated tags, e.g. policy,architecture")
     p.set_defaults(func=cmd_new_card)
 
     p = sub.add_parser("set-stage")
@@ -1456,6 +1461,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree")
     p.add_argument("--pr")
     p.add_argument("--touches")
+    p.add_argument("--labels", help="comma-separated tags, e.g. policy,architecture")
     p.add_argument("--parent")
     p.add_argument("--order", type=int)
     p.add_argument("--priority")

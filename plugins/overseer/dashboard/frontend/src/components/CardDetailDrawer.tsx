@@ -16,6 +16,7 @@ import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
 import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
+import LabelChips from "./LabelChips";
 import { StarIcon } from "./icons";
 
 export interface CardDetailDrawerProps {
@@ -267,6 +268,10 @@ function CardDetailDrawer({
                   </span>
                 )}
               </div>
+              {/* Label chips (F1, WF-058) — self-gates to nothing when the
+                  card carries no labels. Its own row below the facts line so
+                  it never crowds the priority/budget/hero chips there. */}
+              <LabelChips labels={detail.labels} className="card-drawer__labels" />
             </header>
 
             <div className="card-drawer__controls">

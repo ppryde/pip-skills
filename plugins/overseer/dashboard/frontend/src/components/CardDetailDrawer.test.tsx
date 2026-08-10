@@ -59,6 +59,7 @@ function cardDetail(
     created: "",
     updated: "",
     checklist: [],
+    labels: [],
     sections: {},
     body: "",
     ...overrides,
@@ -193,6 +194,48 @@ describe("<CardDetailDrawer/>", () => {
 
     await screen.findByText(`Title WF-A`);
     expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+
+  it("renders a chip for each of the card's labels (F1, WF-058)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-A", labels: ["policy", "architecture"] })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    const chips = container.querySelectorAll(".label-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toHaveTextContent("policy");
+    expect(chips[1]).toHaveTextContent("architecture");
+  });
+
+  it("renders no label chips (no layout break) when the card carries no labels", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(container.querySelector(".label-chips")).toBeNull();
+    expect(container.querySelector(".label-chip")).toBeNull();
   });
 
   it("renders unknown section headings too — no hardcoded fixed set", async () => {

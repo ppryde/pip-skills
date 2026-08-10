@@ -51,6 +51,26 @@ def test_parent_set_and_clear(client: TestClient, root: Path) -> None:
     assert _show(root, card_id)["parent"] is None
 
 
+def test_labels_set_and_clear(client: TestClient, root: Path) -> None:
+    card_id = _new_card(root)
+
+    resp = client.post(f"/api/card/{card_id}/labels", json={"labels": ["policy", "architecture"]})
+    assert resp.status_code == 200
+    assert _show(root, card_id)["labels"] == ["policy", "architecture"]
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["labels"] == ["policy", "architecture"]
+
+    resp = client.post(f"/api/card/{card_id}/labels", json={"labels": []})
+    assert resp.status_code == 200
+    assert _show(root, card_id)["labels"] == []
+
+
+def test_labels_unknown_card_is_400(client: TestClient) -> None:
+    resp = client.post("/api/card/NOPE-999/labels", json={"labels": ["policy"]})
+
+    assert resp.status_code == 400
+
+
 def test_depends_on_and_off(client: TestClient, root: Path) -> None:
     other_id = _new_card(root, "Other")
     card_id = _new_card(root, "Depender")

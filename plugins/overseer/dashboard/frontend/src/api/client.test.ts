@@ -31,6 +31,7 @@ const cardDetail: CardDetail = {
   created: "2026-07-01",
   updated: "2026-07-01T10:00",
   checklist: [],
+  labels: [],
   sections: { "## Goal": "Ship it" },
   body: "full markdown body",
 };
@@ -307,6 +308,39 @@ describe("api/client", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBeUndefined();
     expect(result).toEqual(boardResponse);
+  });
+
+  it("setLabels(id, labels) POSTs {labels} to /api/card/{id}/labels", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    const result = await client.setLabels("WF-1", ["policy", "architecture"]);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1/labels");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      labels: ["policy", "architecture"],
+    });
+    expect(result).toEqual(boardResponse);
+  });
+
+  it("setLabels(id, []) sends {labels: []} (clear-all)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.setLabels("WF-1", []);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ labels: [] });
+  });
+
+  it("threads the active root into setLabels() too", async () => {
+    client.setActiveRoot("/repo-b");
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    await client.setLabels("WF-1", ["policy"]);
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1/labels?root=%2Frepo-b");
   });
 
   it("setThreshold(value) POSTs {value} to /api/config/threshold", async () => {

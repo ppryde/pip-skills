@@ -21,6 +21,7 @@ function card(actual: number): BoardCard {
     created: "",
     updated: "",
     checklist: [],
+    labels: [],
   };
 }
 

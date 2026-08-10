@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS cards (
     pr              TEXT,
     touches         TEXT NOT NULL DEFAULT '[]',
     depends_on      TEXT NOT NULL DEFAULT '[]',
+    labels          TEXT NOT NULL DEFAULT '[]',
     budget_estimate INTEGER,
     budget_actual   INTEGER NOT NULL DEFAULT 0,
     created         TEXT NOT NULL DEFAULT '',
@@ -69,9 +70,31 @@ def board_db_path(repo_root: Path) -> Path:
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    _migrate_columns(conn)
     if get_meta(conn, "schema_version") is None:
         set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     conn.commit()
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    """Idempotent additive-column migration for boards created before a
+    column existed. ``CREATE TABLE IF NOT EXISTS`` in ``_SCHEMA`` above is a
+    no-op against an already-existing ``cards`` table, so a pre-existing
+    board.db never picks up a newly added column on its own -- this runs on
+    every ``ensure_schema`` call and adds any column here that's missing,
+    with an ``ALTER TABLE ... ADD COLUMN`` default that matches the CREATE
+    TABLE default, so existing rows backfill to the same value a brand-new
+    table would have given them (no data loss, no NULLs where callers expect
+    ``'[]'``). Add future additive columns to this dict rather than only to
+    ``_SCHEMA``.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(cards)").fetchall()}
+    additive_columns = {
+        "labels": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column, ddl in additive_columns.items():
+        if column not in existing:
+            conn.execute(f'ALTER TABLE cards ADD COLUMN "{column}" {ddl}')
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> "str | None":
@@ -258,6 +281,7 @@ def card_to_params(card: Card) -> dict:
         "pr": card.pr,
         "touches": json.dumps(card.touches or []),
         "depends_on": json.dumps(card.depends_on or []),
+        "labels": json.dumps(card.labels or []),
         "budget_estimate": card.budget_estimate,
         "budget_actual": card.budget_actual,
         "created": card.created,
@@ -305,6 +329,7 @@ def row_to_card(row: sqlite3.Row) -> Card:
         pr=row["pr"],
         touches=_json_loads_column(row, "touches"),
         depends_on=_json_loads_column(row, "depends_on"),
+        labels=_json_loads_column(row, "labels"),
         budget_estimate=row["budget_estimate"],
         budget_actual=row["budget_actual"] or 0,
         created=row["created"] or "",

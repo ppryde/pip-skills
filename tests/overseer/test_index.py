@@ -56,6 +56,31 @@ class TestGenerateIndex:
         out = generate_index("p", [], [], NOW)
         assert "_Nothing in flight._" in out
 
+    def test_labels_shown_on_in_flight_row(self):
+        c = card("WF-016", status="in-flight", stage="implementation",
+                 labels=["policy", "architecture"])
+        out = generate_index("p", [c], [], NOW)
+        assert "[policy, architecture]" in out
+
+    def test_no_labels_no_bracket_on_in_flight_row(self):
+        c = card("WF-017", status="in-flight", stage="implementation")
+        out = generate_index("p", [c], [], NOW)
+        section = out.split("## In flight")[1].split("##")[0]
+        assert "[" not in section
+
+    def test_labels_shown_on_planned_line(self):
+        c = card("WF-018", labels=["ops"])
+        out = generate_index("p", [c], [], NOW)
+        assert "[ops]" in out
+
+    def test_no_labels_on_recently_done_line(self):
+        # Recently-done lines are terse (id/status/day only, no title) --
+        # labels are intentionally not rendered here.
+        c = card("WF-019", status="done", updated="2026-07-07T18:00",
+                  labels=["ops"])
+        out = generate_index("p", [], [c], NOW)
+        assert "[ops]" not in out
+
 
 class TestEpicsAndParked:
     def _gen(self, cards):
@@ -98,6 +123,42 @@ class TestEpicsAndParked:
         cards = [make_card("WF-005", status="parked", title="Legacy", updated="2026-07-09T10:00")]
         out = self._gen(cards)
         assert "## Parked" in out and "WF-005" in out and "shelved" in out
+
+    def test_labels_shown_on_epic_line(self):
+        from factories import make_card
+        # WF-010 only counts as an epic (routed through the "## Epics"
+        # header-line path at index.py's `_labels_suffix(e)` call) once it
+        # has a child -- relations.is_epic requires a card with
+        # parent == "WF-010". Without WF-011 this card would instead render
+        # via the standalone in-flight-row path, which already had labels
+        # before this fix, making the assertion pass vacuously.
+        cards = [
+            make_card("WF-010", status="in-flight", title="Auth", labels=["security"]),
+            make_card("WF-011", parent="WF-010", status="in-flight"),
+        ]
+        out = self._gen(cards)
+        epics_section = out.split("## Epics")[1].split("##")[0]
+        header_line = next(
+            line for line in epics_section.splitlines() if line.startswith("- WF-010")
+        )
+        assert "[security]" in header_line
+
+    def test_labels_shown_on_epic_child_line(self):
+        from factories import make_card
+        cards = [
+            make_card("WF-010", status="in-flight", title="Auth"),
+            make_card("WF-011", parent="WF-010", status="in-flight", stage="implementation",
+                      labels=["backend"]),
+        ]
+        out = self._gen(cards)
+        assert "[backend]" in out
+
+    def test_labels_shown_on_parked_line(self):
+        from factories import make_card
+        cards = [make_card("WF-005", status="parked", title="Legacy",
+                            updated="2026-07-09T10:00", labels=["legacy"])]
+        out = self._gen(cards)
+        assert "[legacy]" in out
 
 
 class TestRebuildIndex:

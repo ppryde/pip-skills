@@ -159,6 +159,14 @@ export function unclaimCard(id: string): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/unclaim`));
 }
 
+/** Persists a card's labels (F1, WF-058) — full-replace semantics, same as
+ * the backend's `POST /api/card/{id}/labels`. */
+export function setLabels(id: string, labels: string[]): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/labels`), {
+    labels,
+  });
+}
+
 /** Clear-data action (dashboard settings). Deliberately NOT `withRoot`-scoped
  * — the clear target is the modal's explicitly selected repo, not whatever
  * root happens to be active, so `root` is threaded through the body instead. */

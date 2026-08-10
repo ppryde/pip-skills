@@ -79,6 +79,12 @@ export interface BoardCard {
   claimed_by?: string | null;
   claimed_at?: string | null;
   claim_acked?: boolean;
+  /** Free-text labels (F1, WF-058) — always present (possibly []), same
+   * blank-tolerant contract as `checklist` above. Rendered as coloured chips
+   * (see board/labelColor.ts + components/LabelChips.tsx); this is NOT yet
+   * the F10 editable colour registry (WF-067, deferred) — no per-project
+   * colour configuration, just a stable curated-palette mapping. */
+  labels: string[];
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */
@@ -152,6 +158,11 @@ export interface ThresholdBody {
 
 export interface ClaimBody {
   session_id: string;
+}
+
+/** POST /api/card/{id}/labels body (F1, WF-058). */
+export interface LabelsBody {
+  labels: string[];
 }
 
 export interface SessionSummary {

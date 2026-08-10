@@ -29,6 +29,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     created: "",
     updated: "",
     checklist: [],
+    labels: [],
     ...overrides,
   };
 }
@@ -317,6 +318,30 @@ describe("TileShell claim badge", () => {
   it("renders no claim badge when the card carries no claimed_by", () => {
     const { container } = renderTile(card({ id: "WF-UNCLAIMED" }));
     expect(container.querySelector(".claim-badge")).toBeNull();
+  });
+});
+
+describe("TileShell label chips (F1, WF-058)", () => {
+  it("renders a chip for each of the card's labels", () => {
+    const { container } = renderTile(
+      card({ id: "WF-LABELS", labels: ["policy", "architecture"] })
+    );
+    const chips = container.querySelectorAll(".label-chip");
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toHaveTextContent("policy");
+    expect(chips[1]).toHaveTextContent("architecture");
+  });
+
+  it("renders no label-chips wrapper (no layout break) for a card with 0 labels", () => {
+    const { container } = renderTile(card({ id: "WF-NOLABELS", labels: [] }));
+    expect(container.querySelector(".label-chips")).toBeNull();
+    expect(container.querySelector(".label-chip")).toBeNull();
+  });
+
+  it("renders every chip for a card with many labels (wraps, doesn't truncate the list)", () => {
+    const many = Array.from({ length: 8 }, (_, i) => `label-${i}`);
+    const { container } = renderTile(card({ id: "WF-MANYLABELS", labels: many }));
+    expect(container.querySelectorAll(".label-chip")).toHaveLength(8);
   });
 });
 

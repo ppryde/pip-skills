@@ -26,6 +26,7 @@ def board_data(repo_root: Path) -> dict:
                     "sprint": str | None,
                     "parent": str | None,
                     "depends_on": list[str],
+                    "labels": list[str],
                     "order": int,
                     "budget": {"estimate": int | None, "actual": int},
                     "is_epic": bool,
@@ -77,6 +78,7 @@ def board_data(repo_root: Path) -> dict:
                 "sprint": card.sprint,
                 "parent": card.parent,
                 "depends_on": card.depends_on,
+                "labels": card.labels,
                 "order": card.order,
                 "budget": {
                     "estimate": card.budget_estimate,
