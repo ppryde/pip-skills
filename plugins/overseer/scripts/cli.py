@@ -1,9 +1,11 @@
 """Overseer ledger CLI — the interface the ledger skill drives.
 
 Single-writer by convention: only the orchestrating session calls this.
-Cards live in ``board.db`` (see ``scripts/db.py``); every mutation writes the
-card row first, then regenerates the ``ledger.md`` index view. Sprints,
-usage, and knowledge remain file-based under the ``.workflow/`` state root.
+Cards live in ``board.db`` (see ``scripts/db.py``), the source of truth read
+directly by the CLI, dashboard and ``resume``; every mutation writes the card
+row, then reconciles (surfaces quarantined cards; ``ledger.md`` itself is
+retired, WF-072). Sprints, usage, and knowledge remain file-based under the
+``.workflow/`` state root.
 """
 from __future__ import annotations
 
@@ -203,7 +205,9 @@ def _census_session_live(session_id: str) -> bool:
 
 
 def _sync(repo_root: Path, card: Card) -> None:
-    """Write ordering per spec: card first, then the index view.
+    """Persist the card, then reconcile: surface any quarantined cards. No
+    ledger is written (WF-072 retired ``ledger.md``; board.db is the sole
+    source of truth).
 
     Known multi-session limitation (spec-accepted YAGNI, no locking):
     ``save_card`` upserts the whole card row, so a hook racing another
@@ -1148,9 +1152,13 @@ def cmd_set_sprint_status(args: argparse.Namespace) -> int:
 
 
 def cmd_rebuild_index(args: argparse.Namespace) -> int:
+    """``ledger.md`` is retired (WF-072) — board.db is the source of truth
+    and the CLI/dashboard/resume all read it directly. This verb now just
+    reconciles: it surfaces quarantined (corrupt) cards and removes any
+    stale ``ledger.md`` left over from before the retirement."""
     quarantined = rebuild_index(args.root, args.root.resolve().name, _now())
     _report_quarantined(quarantined)
-    print("index rebuilt")
+    print("reconciled — quarantined cards (if any) reported above")
     return 0
 
 

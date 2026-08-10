@@ -183,6 +183,12 @@
   --qb-accent-taupe-border: #c4b292; /* HANDOFF: Parked card's dashed border */
   --qb-accent-taupe-cardshadow: var(--qb-accent-taupe-border); /* no distinct tint given */
 
+  --qb-accent-ash-fill: #6e6e68; /* Abandoned (WF-076) — muted charcoal/ash,
+    distinct from Parked's warm taupe; reads as "retired", not "paused" */
+  --qb-accent-ash-shadow: #55554f;
+  --qb-accent-ash-border: #b4b2aa;
+  --qb-accent-ash-cardshadow: var(--qb-accent-ash-border); /* no distinct tint given, mirrors taupe/umber */
+
   /* Column-keyed aliases — original column names kept verbatim, only the
      styling is themed (HANDOFF terminology table). */
   --qb-col-backlog: var(--qb-accent-forest-fill);
@@ -1021,8 +1027,9 @@ body {
 /* Per-column accent fills (HANDOFF §Design Tokens "Column accents") — the
    three sky lanes (Planning/Plan Review/Verification) and the two orange
    lanes (Implementation/Impl Review) share one accent group each; Archive
-   is mapped onto "parked" upstream in Lane.tsx (taupe reuse, no HANDOFF
-   row of its own), so no separate `--archive` selector exists here. */
+   (labelled "Abandoned") gets its own muted ash accent (WF-076) — no
+   HANDOFF row of its own, so this is a new, deliberately desaturated
+   addition rather than a borrowed group. */
 .lane__header--backlog {
   background: var(--qb-accent-forest-fill);
   box-shadow: var(--qb-shadow-banner) var(--qb-accent-forest-shadow);
@@ -1059,6 +1066,11 @@ body {
 .lane__header--parked {
   background: var(--qb-accent-taupe-fill);
   box-shadow: var(--qb-shadow-banner) var(--qb-accent-taupe-shadow);
+}
+
+.lane__header--abandoned {
+  background: var(--qb-accent-ash-fill);
+  box-shadow: var(--qb-shadow-banner) var(--qb-accent-ash-shadow);
 }
 
 .lane__cards {
@@ -1131,6 +1143,12 @@ body {
   --card-accent-fill: var(--qb-accent-taupe-fill);
   --card-accent-border: var(--qb-accent-taupe-border);
   --card-accent-shadow: var(--qb-accent-taupe-cardshadow);
+}
+
+.card-tile--accent-abandoned {
+  --card-accent-fill: var(--qb-accent-ash-fill);
+  --card-accent-border: var(--qb-accent-ash-border);
+  --card-accent-shadow: var(--qb-accent-ash-cardshadow);
 }
 
 .card-tile {
@@ -1553,6 +1571,38 @@ body {
   border-radius: var(--legacy-radius-3px);
   background: var(--legacy-color-eef2ff);
   color: var(--legacy-color-4338ca);
+}
+
+/* PR chip (WF-073): the card's own stored `pr` ref/URL — deliberately the
+   loudest chip in the header row after priority (sky accent + solid border,
+   vs. the repo/branch chips' quieter provenance tones) since a card's PR is
+   exactly the kind of thing an orchestrator scanning the board wants to spot
+   at a glance. The link variant (`<a>`, http(s) values) and the text-only
+   `--text` variant (bare refs, no href) share this base; `--text` only drops
+   the underline affordance a non-clickable badge shouldn't imply. */
+.pr-chip {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-accent-sky-cardshadow);
+  color: var(--qb-accent-sky-shadow);
+  border: 1px solid var(--qb-accent-sky-border);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pr-chip:hover {
+  text-decoration: underline;
+}
+
+.pr-chip--text {
+  cursor: default;
+}
+
+.pr-chip--text:hover {
+  text-decoration: none;
 }
 
 /* Quiet, muted label — the card's origin repo. Deliberately low-contrast
@@ -2260,6 +2310,14 @@ body {
   color: var(--qb-accent-taupe-fill);
 }
 
+.card-drawer__banner--abandoned {
+  background: var(--qb-accent-ash-fill);
+}
+.card-drawer__status-fact--abandoned {
+  background: var(--qb-accent-ash-cardshadow);
+  color: var(--qb-accent-ash-fill);
+}
+
 /* Hero chip: PartyAvatar + name + class (HANDOFF: "assigned-hero chip
    (avatar + name + class)"). No avatar when the session has fallen out of
    the shared party poll (stale-evicted edge, Decisions) — text-only then. */
@@ -2272,6 +2330,26 @@ body {
   border-radius: var(--qb-radius-pill);
   background: var(--qb-parchment-muted);
   color: var(--qb-ink-700);
+}
+
+/* Card's own PR ref/URL (WF-073) — same sky accent as the tile's `.pr-chip`
+   so the drawer and the board tile read as the same signal, just inline
+   with the other fact chips (status/repo/priority/budget) here instead of
+   the header badge row. */
+.card-drawer__pr-chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-accent-sky-cardshadow);
+  color: var(--qb-accent-sky-shadow);
+  border: 1px solid var(--qb-accent-sky-border);
+  text-decoration: none;
+}
+
+a.card-drawer__pr-chip:hover {
+  text-decoration: underline;
 }
 
 .card-drawer__hero-name {
@@ -2456,6 +2534,9 @@ body {
 }
 .card-drawer__journey-fill--parked {
   background: var(--qb-accent-taupe-fill);
+}
+.card-drawer__journey-fill--abandoned {
+  background: var(--qb-accent-ash-fill);
 }
 
 /* Sub-quests panel (HANDOFF: "white card, 2px solid #E0CEA5,
@@ -3650,7 +3731,7 @@ body {
 /* Quest holding page (WF-032) — App.tsx renders this INSTEAD OF <Board/>
    when the selected repo has no board.db yet (`has_board:false`) but
    census sees live agents there. A centred parchment panel with a dashed
-   border — the same "on hold" read as the Parked/Archive lanes (muted
+   border — the same "on hold" read as the Parked/Abandoned lanes (muted
    parchment + dashed edge) rather than an error/danger treatment, since
    nothing here is actually wrong. */
 .unbegun-holding {

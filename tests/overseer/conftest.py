@@ -28,7 +28,7 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     independently of CLAUDE_CONFIG_DIR: several hook tests deliberately
     repoint CLAUDE_CONFIG_DIR mid-test to exercise task-list env precedence,
     and neither the board.db nor the central state root must follow that
-    move — a card (or ``ledger.md``/checklist state) seeded before the
+    move — a card (or checklist state) seeded before the
     repoint would otherwise become unreachable to a helper reading the board
     afterwards, and ``scripts.cli.cmd_checklist_sync_hook``'s
     ``state_root(repo_root).is_dir()`` guard would see an uninitialised

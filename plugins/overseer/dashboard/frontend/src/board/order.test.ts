@@ -25,6 +25,7 @@ function card(id: string, order: number): BoardCard {
     labels: [],
     body: "",
     links: [],
+    pr: null,
   };
 }
 

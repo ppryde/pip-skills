@@ -234,7 +234,7 @@ function TopBar({
             checked={showArchive}
             onChange={onToggleArchive}
           />
-          Archive
+          Abandoned
         </label>
 
         {quarantinedCount > 0 && (

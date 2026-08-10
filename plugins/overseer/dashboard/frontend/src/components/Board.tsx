@@ -44,7 +44,7 @@ export interface BoardProps {
 /**
  * Horizontally-scrollable lane container. Renders exactly the lanes
  * `groupIntoLanes` produces — Parked/Done/Archive sit at the right of the
- * row (see styles.css), and the Archive lane is only rendered when the
+ * row (see styles.css), and the Abandoned lane is only rendered when the
  * TopBar toggle (`showArchive`) is on. Empty stage lanes still render (as a
  * thin strip via `.lane--empty` in styles.css) so the board's shape is
  * stable.

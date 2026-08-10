@@ -1,5 +1,5 @@
 from scripts import db
-from scripts.index import generate_index, rebuild_index
+from scripts.index import rebuild_index
 from scripts.store import init_workflow
 from factories import make_card
 
@@ -14,162 +14,30 @@ def card(card_id: str, **overrides: object):
     return make_card(card_id, **overrides)
 
 
-class TestGenerateIndex:
-    def test_in_flight_row(self):
-        c = card("WF-012", status="in-flight", stage="implementation",
-                 complexity="M", budget_estimate=400_000, budget_actual=310_000)
-        out = generate_index("pip-skills", [c], [], NOW)
-        assert "# Ledger — pip-skills" in out
-        assert f"Updated: {NOW}" in out
-        assert "| WF-012 | Title WF-012 | implementation | M | 310k/400k | — |" in out
-
-    def test_review_stage_shows_round(self):
-        c = card("WF-012", status="in-flight", stage="impl-review")
-        c.log_review("impl-review", 2, "found wanting", NOW)
-        c.log_review("impl-review", 2, "found wanting again", NOW)
-        out = generate_index("p", [c], [], NOW)
-        assert "impl-review (r2)" in out
-
-    def test_blocked_card_shouts(self):
-        c = card("WF-014", status="blocked", stage="planning",
-                 blocked_on="user: scope Q")
-        out = generate_index("p", [c], [], NOW)
-        assert "| BLOCKED |" in out
-        assert "user: scope Q" in out
-
-    def test_tripwire_noted(self):
-        c = card("WF-013", status="in-flight", stage="implementation",
-                 budget_estimate=100_000, budget_actual=250_000)
-        out = generate_index("p", [c], [], NOW)
-        assert "2× BUDGET" in out
-
-    def test_planned_and_done_sections(self):
-        planned = card("WF-015", complexity="S", budget_estimate=150_000,
-                       sprint="2026-07-S1")
-        done = card("WF-011", status="done", updated="2026-07-07T18:00",
-                    budget_estimate=250_000, budget_actual=210_000)
-        out = generate_index("p", [planned], [done], NOW)
-        assert "- WF-015 — Title WF-015 (S, ~150k, sprint 2026-07-S1)" in out
-        assert "- WF-011 — done 2026-07-07, 210k/250k" in out
-
-    def test_empty_ledger(self):
-        out = generate_index("p", [], [], NOW)
-        assert "_Nothing in flight._" in out
-
-    def test_labels_shown_on_in_flight_row(self):
-        c = card("WF-016", status="in-flight", stage="implementation",
-                 labels=["policy", "architecture"])
-        out = generate_index("p", [c], [], NOW)
-        assert "[policy, architecture]" in out
-
-    def test_no_labels_no_bracket_on_in_flight_row(self):
-        c = card("WF-017", status="in-flight", stage="implementation")
-        out = generate_index("p", [c], [], NOW)
-        section = out.split("## In flight")[1].split("##")[0]
-        assert "[" not in section
-
-    def test_labels_shown_on_planned_line(self):
-        c = card("WF-018", labels=["ops"])
-        out = generate_index("p", [c], [], NOW)
-        assert "[ops]" in out
-
-    def test_no_labels_on_recently_done_line(self):
-        # Recently-done lines are terse (id/status/day only, no title) --
-        # labels are intentionally not rendered here.
-        c = card("WF-019", status="done", updated="2026-07-07T18:00",
-                  labels=["ops"])
-        out = generate_index("p", [], [c], NOW)
-        assert "[ops]" not in out
-
-
-class TestEpicsAndParked:
-    def _gen(self, cards):
-        from scripts.index import generate_index
-        return generate_index("proj", cards, [], "2026-07-11T10:00")
-
-    def test_epic_section_with_rollup_and_children(self):
-        from factories import make_card
-        cards = [
-            make_card("WF-010", status="in-flight", title="Auth"),
-            make_card("WF-011", parent="WF-010", status="done",
-                      budget_estimate=100_000, budget_actual=90_000),
-            make_card("WF-012", parent="WF-010", status="in-flight", stage="implementation",
-                      budget_estimate=300_000, budget_actual=120_000),
-        ]
-        out = self._gen(cards)
-        assert "## Epics" in out
-        assert "WF-010" in out and "1/2 done" in out          # rollup
-        assert "WF-011" in out and "WF-012" in out            # nested children
-
-    def test_children_not_in_status_sections(self):
-        from factories import make_card
-        cards = [make_card("WF-010"), make_card("WF-011", parent="WF-010", status="in-flight")]
-        out = self._gen(cards)
-        # WF-011 appears under the epic, not as a standalone In-flight row
-        infl = out.split("## In flight")[1].split("##")[0]
-        assert "WF-011" not in infl
-
-    def test_readiness_shown(self):
-        from factories import make_card
-        cards = [
-            make_card("WF-001", status="planned", depends_on=["WF-002"]),
-            make_card("WF-002", status="in-flight"),
-        ]
-        out = self._gen(cards)
-        assert "waiting on WF-002" in out
-
-    def test_parked_section(self):
-        from factories import make_card
-        cards = [make_card("WF-005", status="parked", title="Legacy", updated="2026-07-09T10:00")]
-        out = self._gen(cards)
-        assert "## Parked" in out and "WF-005" in out and "shelved" in out
-
-    def test_labels_shown_on_epic_line(self):
-        from factories import make_card
-        # WF-010 only counts as an epic (routed through the "## Epics"
-        # header-line path at index.py's `_labels_suffix(e)` call) once it
-        # has a child -- relations.is_epic requires a card with
-        # parent == "WF-010". Without WF-011 this card would instead render
-        # via the standalone in-flight-row path, which already had labels
-        # before this fix, making the assertion pass vacuously.
-        cards = [
-            make_card("WF-010", status="in-flight", title="Auth", labels=["security"]),
-            make_card("WF-011", parent="WF-010", status="in-flight"),
-        ]
-        out = self._gen(cards)
-        epics_section = out.split("## Epics")[1].split("##")[0]
-        header_line = next(
-            line for line in epics_section.splitlines() if line.startswith("- WF-010")
-        )
-        assert "[security]" in header_line
-
-    def test_labels_shown_on_epic_child_line(self):
-        from factories import make_card
-        cards = [
-            make_card("WF-010", status="in-flight", title="Auth"),
-            make_card("WF-011", parent="WF-010", status="in-flight", stage="implementation",
-                      labels=["backend"]),
-        ]
-        out = self._gen(cards)
-        assert "[backend]" in out
-
-    def test_labels_shown_on_parked_line(self):
-        from factories import make_card
-        cards = [make_card("WF-005", status="parked", title="Legacy",
-                            updated="2026-07-09T10:00", labels=["legacy"])]
-        out = self._gen(cards)
-        assert "[legacy]" in out
-
-
 class TestRebuildIndex:
-    def test_writes_ledger_and_self_heals(self, tmp_path):
+    def test_does_not_write_ledger(self, tmp_path):
+        root = init_workflow(tmp_path)
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", status="in-flight", stage="planning"))
+        rebuild_index(tmp_path, "proj", NOW)
+        assert not (root / "ledger.md").exists()
+
+    def test_returns_quarantined(self, tmp_path):
+        init_workflow(tmp_path)
+        conn = db.connect(tmp_path)
+        db.save_card(conn, card("WF-001", status="in-flight", stage="planning"))
+        quarantined = rebuild_index(tmp_path, "proj", NOW)
+        # Cards no longer quarantine at this layer -- board.db rows are
+        # always structurally valid (see db.load_live_cards's signature).
+        # The empty return is still load-bearing: callers (cli.py's
+        # _report_quarantined) rely on the shape, and a future db-level
+        # corruption check would populate it without an API change.
+        assert quarantined == []
+
+    def test_removes_stale_ledger(self, tmp_path):
         root = init_workflow(tmp_path)
         conn = db.connect(tmp_path)
         db.save_card(conn, card("WF-001", status="in-flight", stage="planning"))
         (root / "ledger.md").write_text("stale nonsense")
-        quarantined = rebuild_index(tmp_path, "proj", NOW)
-        content = (root / "ledger.md").read_text()
-        assert "WF-001" in content and "stale nonsense" not in content
-        # Cards no longer quarantine at this layer — board.db rows are
-        # always structurally valid (see db.load_live_cards's signature).
-        assert quarantined == []
+        rebuild_index(tmp_path, "proj", NOW)
+        assert not (root / "ledger.md").exists()

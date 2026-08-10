@@ -38,6 +38,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     labels: [],
     body: "",
     links: [],
+    pr: null,
     ...overrides,
   };
 }
@@ -237,6 +238,20 @@ describe("<TopBar/>", () => {
     expect(
       screen.queryByRole("button", { name: /^sessions$/i })
     ).not.toBeInTheDocument();
+  });
+
+  // WF-076 renamed the abandoned-cards lane Archive → Abandoned but the
+  // toggle's rendered label was missed — nothing asserted on it, so the
+  // mismatch slipped through review. Internal names (`showArchive`,
+  // `onToggleArchive`, `topbar__archive-toggle`) stay as-is; only the
+  // user-visible text must read "Abandoned".
+  it("renders the abandoned-lane toggle labelled 'Abandoned'", () => {
+    render(<TopBar {...baseProps()} />);
+
+    const toggle = document.querySelector(".topbar__archive-toggle");
+    expect(toggle).not.toBeNull();
+    expect(toggle!.textContent).toMatch(/Abandoned/);
+    expect(toggle!.textContent).not.toMatch(/Archive/);
   });
 
   it("renders no repo selector when no boards are discoverable", () => {

@@ -39,8 +39,9 @@ def test_clear_cards_deletes_all_cards_and_keeps_identity_meta(repo, capsys):
     # identity meta preserved
     assert db.get_meta(conn, "schema_version") == schema_before
     assert db.get_meta(conn, "repo_root") == repo_root_before
-    # ledger regenerated (now empty of live cards)
-    assert (state_root(repo) / "ledger.md").exists()
+    # ledger.md is retired (WF-072) -- board.db (asserted above via
+    # load_live_cards) is the source of truth, no generated file to check.
+    assert not (state_root(repo) / "ledger.md").exists()
 
 
 def test_clear_cards_noop_uses_cards_shape(tmp_path, capsys):

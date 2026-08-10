@@ -33,6 +33,7 @@ const cardDetail: CardDetail = {
   checklist: [],
   labels: [],
   links: [],
+  pr: null,
   sections: { "## Goal": "Ship it" },
   body: "full markdown body",
 };

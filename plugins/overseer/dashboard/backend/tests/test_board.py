@@ -130,6 +130,20 @@ def test_board_carries_label_colors_passthrough(client: TestClient, root: Path) 
     assert resp.json()["board"]["label_colors"] == {"policy": "sky"}
 
 
+def test_board_carries_pr_passthrough(client: TestClient, root: Path) -> None:
+    """`board_data` (overseer core) gained a `pr` field on cards (WF-073). The
+    dashboard backend shells `overseer board --json` and does no transform on
+    card dicts, so this must pass through verbatim with no backend code change."""
+    card_id = run_overseer(root, "new-card", "--title", "PR card").strip()
+    run_overseer(root, "set-field", card_id, "--pr", "https://github.com/org/repo/pull/7")
+
+    resp = client.get("/api/board")
+
+    assert resp.status_code == 200
+    cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
+    assert cards[card_id]["pr"] == "https://github.com/org/repo/pull/7"
+
+
 def test_board_carries_created_updated_passthrough(client: TestClient, root: Path) -> None:
     """`board_data` (overseer core) gained `created`/`updated` fields on cards
     (recency-first lane ordering, dashboard frontend). Same passthrough

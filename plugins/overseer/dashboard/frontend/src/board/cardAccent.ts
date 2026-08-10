@@ -7,9 +7,11 @@
  * drop and out of scope this late in the epic (Decisions: blast-radius
  * minimisation over DRY).
  *
- * Mirrors Lane.tsx's accentKey convention exactly, including the archive->
- * "parked" mapping (11 lanes, 10 --qb-col-* accent groups — Archive reuses
- * the taupe/Parked group, adjudicated in WF-028).
+ * Mirrors Lane.tsx's accentKey convention exactly. Archive (labelled
+ * "Abandoned" in the UI) used to borrow the taupe/Parked accent group
+ * (WF-028 adjudication) — WF-076 gives it its own muted "abandoned"/ash
+ * accent instead, so abandoned cards no longer read as visually identical
+ * to parked ones.
  */
 import type { BoardCard, Stage } from "../api/types";
 import { STAGES, STAGE_LABELS } from "./layout";
@@ -48,14 +50,13 @@ function laneKindForCard(
  * for the lane that card would land in. */
 export function accentKeyForCard(card: CardForAccent): string {
   const kind = laneKindForCard(card);
-  if (kind === "archive") return "parked";
+  if (kind === "archive") return "abandoned";
   if (kind === "stage") return card.stage as Stage;
   return kind;
 }
 
 /** The banner label for a single card — same text the lane header would
- * show. Archive is the one place key and label diverge (key "parked",
- * label "Archive" — the lane's own name, not its borrowed accent group's). */
+ * show. */
 export function bannerLabelForCard(card: CardForAccent): string {
   const kind = laneKindForCard(card);
   switch (kind) {
@@ -66,7 +67,7 @@ export function bannerLabelForCard(card: CardForAccent): string {
     case "done":
       return "Done";
     case "archive":
-      return "Archive";
+      return "Abandoned";
     case "stage":
       return STAGE_LABELS[card.stage as Stage];
   }

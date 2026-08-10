@@ -15,9 +15,9 @@ adversarial review loops, integrated with sprint planning and superpowers.
 ## What it does
 
 - Cards persist in a single per-repo SQLite `board.db`, one per unit of work,
-  shared across worktrees. The regenerated `ledger.md` index and sprint files
-  with budget rollups live alongside it in the same central folder (see
-  Storage below).
+  shared across worktrees — the source of truth read directly by the CLI,
+  dashboard and `resume`. Sprint files with budget rollups live alongside it
+  in the same central folder (see Storage below).
 - Card lifecycle: `planned → in-flight → done`, with `blocked`/`abandoned`
   exits and seven in-flight stages from `bootstrap` to `awaiting-merge`.
 - Token budgets with a 2× tripwire: overruns stop the card and escalate.
@@ -75,8 +75,11 @@ plain `overseer/<repo-label>/` folder: it is adopted in place (no move, no data
 loss) whenever it belongs to this repo or is unclaimed; only a new repo or a
 genuine collision gets a hashed folder. Display labels (backup manifest,
 dashboard repo switcher) always stay clean — the hash lives only in the folder
-name. `ledger.md` is written into this folder as a regenerated *view*; it is
-never backed up (it's rebuildable from `board.db`).
+name. `ledger.md` — a generated Markdown view of the board — is **retired**
+(WF-072); `board.db` is the sole source of truth and the CLI, dashboard and
+`resume` all read it directly. `rebuild-index` still runs on every mutation
+to surface quarantined cards and delete any stale `ledger.md` left over
+from before the retirement.
 
 `.workflow/` is **retired**: it is only ever read once, as a one-time import
 source. On first connect after upgrading, any existing `.workflow/` sprint,

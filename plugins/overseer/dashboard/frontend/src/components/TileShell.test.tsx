@@ -32,6 +32,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     labels: [],
     body: "",
     links: [],
+    pr: null,
     ...overrides,
   };
 }
@@ -200,6 +201,50 @@ describe("TileShell repo chip", () => {
   it("renders no repo chip when the card carries no repo label", () => {
     const { container } = renderTile(card({ id: "WF-NOREPO" }));
     expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+});
+
+describe("TileShell PR chip (WF-073)", () => {
+  it("renders a clickable, safely-attributed anchor for an http(s) pr", () => {
+    const { container } = renderTile(
+      card({ id: "WF-PR-URL", pr: "https://github.com/org/repo/pull/42" })
+    );
+    const chip = container.querySelector("a.pr-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveAttribute("href", "https://github.com/org/repo/pull/42");
+    expect(chip).toHaveAttribute("target", "_blank");
+    expect(chip).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("renders non-link badge text for a bare (non-http) pr ref", () => {
+    const { container } = renderTile(card({ id: "WF-PR-BARE", pr: "#42" }));
+    expect(container.querySelector("a.pr-chip")).toBeNull();
+    const chip = container.querySelector("span.pr-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent("#42");
+  });
+
+  it("renders nothing when the card carries no pr", () => {
+    const { container } = renderTile(card({ id: "WF-PR-NONE", pr: null }));
+    expect(container.querySelector(".pr-chip")).toBeNull();
+  });
+
+  it("clicking the PR link does not also open the drawer", () => {
+    const onOpen = vi.fn();
+    const c = card({
+      id: "WF-PR-CLICK",
+      pr: "https://github.com/org/repo/pull/7",
+    });
+    const { container } = render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} onOpen={onOpen} />
+        </SortableContext>
+      </DndContext>
+    );
+    const chip = container.querySelector("a.pr-chip")!;
+    fireEvent.click(chip);
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });
 

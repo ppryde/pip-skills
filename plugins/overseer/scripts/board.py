@@ -20,6 +20,8 @@ def board_data(repo_root: Path) -> dict:
                     "id": str,
                     "title": str,
                     "status": str,
+                    "pr": str | None,  # card's stored PR ref/URL (WF-073) — plain
+                                       # passthrough, NOT census's live PrWindow
                     "stage": str | None,
                     "complexity": str | None,
                     "priority": str | None,
@@ -74,6 +76,7 @@ def board_data(repo_root: Path) -> dict:
                 "id": card.id,
                 "title": card.title,
                 "body": card.body,
+                "pr": card.pr,
                 "status": card.status,
                 "stage": card.stage,
                 "complexity": card.complexity,

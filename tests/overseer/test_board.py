@@ -194,6 +194,22 @@ Test sprint."""
         c = data["cards"][0]
         assert c["body"] == "## Goal\n\nFind the elusive body field."
 
+    def test_pr_passed_through(self, repo, conn):
+        from scripts.board import board_data
+        card = make_card("WF-001", pr="https://github.com/org/repo/pull/42")
+        db.save_card(conn, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["pr"] == "https://github.com/org/repo/pull/42"
+
+    def test_pr_defaults_none(self, repo, conn):
+        from scripts.board import board_data
+        db.save_card(conn, make_card("WF-001"))
+
+        data = board_data(repo)
+        assert data["cards"][0]["pr"] is None
+
     def test_links_passed_through(self, repo, conn):
         from scripts.board import board_data
         links = [

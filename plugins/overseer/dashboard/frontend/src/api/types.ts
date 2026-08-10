@@ -93,6 +93,12 @@ export interface BoardCard {
    * the dashboard for now (see CardDetailDrawer's Links section); editing is
    * not yet wired up client-side. */
   links: { label: string; path: string }[];
+  /** The card's stored PR ref/URL (WF-073) — set via `overseer set-field
+   * --pr`, plain passthrough from `Card.pr`. NOT the same thing as
+   * `Context.pr` (`PrWindow`, below) — that's live census session data
+   * about whichever PR the SESSION currently has open, unrelated to any
+   * particular card. Always present, but null on cards with no PR set. */
+  pr: string | null;
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */
