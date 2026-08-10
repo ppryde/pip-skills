@@ -176,12 +176,33 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     expect(screen.getByLabelText("Parked, 1 cards")).toBeInTheDocument();
     expect(screen.getByLabelText("Done, 2 cards")).toBeInTheDocument();
     // mobile-v2 (reverses the WF-085a-review restriction from 9327dd8): an
-    // empty stage lane DOES get a nav icon now — every lane the board has
-    // is a real tap-jump target, empty or not (empty lanes are full-width
-    // swipe panes on mobile too, see `.lane--empty` in the mobile media
-    // block), per user direction ("even the empty columns should have
-    // one").
-    expect(screen.getByLabelText("Bootstrap, 0 cards")).toBeInTheDocument();
+    // empty stage lane DOES get a nav icon now, for completeness/even
+    // spacing — but it's not a real tap target, since its lane is still a
+    // thin non-snapping sliver in the swipe track (no pane to jump to).
+    // The icon renders disabled/faded with its own "..., empty" aria-label
+    // rather than a plain count.
+    const bootstrapIcon = screen.getByLabelText("Bootstrap, 0 cards, empty");
+    expect(bootstrapIcon).toBeInTheDocument();
+    expect(bootstrapIcon).toBeDisabled();
+    expect(bootstrapIcon).toHaveClass("lane-icon-nav__item--empty");
+    expect(bootstrapIcon).toHaveTextContent("0");
+  });
+
+  it("(mobile-v2) an empty lane's icon-nav entry is not a jump target and never becomes active", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<App />);
+    await screen.findByText("Backlog");
+
+    const bootstrapIcon = screen.getByLabelText("Bootstrap, 0 cards, empty");
+    fireEvent.click(bootstrapIcon);
+
+    // A disabled button doesn't fire its click handler at all — no jump,
+    // no active-pill flip.
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(bootstrapIcon).not.toHaveClass("lane-icon-nav__item--active");
   });
 
   it("(WF-085) tapping an icon-nav entry marks it active and jumps the matching lane pane into view", async () => {
@@ -555,5 +576,22 @@ describe("mobile board scroll-container (WF-085 review — CSS regression guard)
       "expected an exact `.board { ... }` rule inside the mobile block"
     ).toBeGreaterThan(0);
     expect(bodies.some((body) => /min-width:\s*0\b/.test(body))).toBe(true);
+  });
+
+  // mobile-v2 refinement: empty lanes briefly became full 88vw snap panes
+  // (so an empty lane's icon-nav entry had somewhere to jump to), then got
+  // reverted — an empty lane's nav icon is disabled/faded instead, and the
+  // lane itself goes back to being a thin, non-snapping sliver. This locks
+  // that revert in so `.lane--empty` never re-grows into a swipe pane.
+  it("the mobile .lane--empty rule stays a non-snapping sliver (44px, scroll-snap-align: none) — no swipe pane for a lane with a disabled nav icon", () => {
+    const bodies = ruleBodies(mobileBlock(), ".lane--empty");
+    expect(
+      bodies.length,
+      "expected an exact `.lane--empty { ... }` rule inside the mobile block"
+    ).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).toMatch(/scroll-snap-align:\s*none/);
+      expect(body).not.toMatch(/88vw/);
+    }
   });
 });

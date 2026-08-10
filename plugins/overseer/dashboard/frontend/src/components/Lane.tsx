@@ -78,15 +78,6 @@ function Lane({
         items={lane.cards.map((c) => c.id)}
         strategy={verticalListSortingStrategy}
       >
-        {isEmpty && (
-          // mobile-v2: on mobile an empty lane is now a real 88vw swipe
-          // pane (not a 44px sliver — see `.lane--empty` in the
-          // `@media (max-width:720px)` block), so it needs its own content
-          // rather than an empty `.lane__cards`. Hidden entirely on desktop
-          // (`.lane__empty-state { display: none }` base rule) where the
-          // vertical-strip header already reads fine on its own.
-          <div className="lane__empty-state">No cards</div>
-        )}
         {!isEmpty && (
           <div className="lane__cards">
             {lane.cards.map((card) => {

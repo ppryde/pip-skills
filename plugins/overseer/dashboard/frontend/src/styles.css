@@ -1129,14 +1129,6 @@ body {
   border-bottom: none;
 }
 
-/* Lane.tsx's mobile-v2 "No cards" placeholder for an empty lane — inert on
-   desktop (the vertical-strip header above already reads fine on its own);
-   the `@media (max-width:720px)` block near the bottom of this file shows
-   it once empty lanes become full-width panes there. */
-.lane__empty-state {
-  display: none;
-}
-
 /* Mobile icon-nav strip (WF-085 — LaneIconNav) — always in the DOM (see
    Board.tsx) so it's testable/measurable at any width, but only ever shown
    on mobile: the `@media (max-width:720px)` block near the bottom of this
@@ -3938,10 +3930,13 @@ a.card-drawer__pr-chip:hover {
   }
   /* --- Icon-nav strip (mobile-v2 — LaneIconNav): one hand-drawn wobble box
      (RPG icon + count) per lane, evenly spaced above the swipe track,
-     including empty lanes (every lane is now a real tap-jump target — see
-     Board.tsx's `navLanes`). Inactive boxes are a transparent/parchment
-     wobble box with just an ink outline; only the active lane fills
-     accent-coloured + lifts. Icons stay full-strength always, no fade. --- */
+     including empty lanes — but an empty lane has no swipe pane to jump to
+     (see `.lane--empty` further down: reverted to a non-snapping sliver),
+     so LaneIconNav renders its box `disabled` + faded instead of a real tap
+     target (`.lane-icon-nav__item--empty` below). Every other (non-empty)
+     box is a transparent/parchment wobble box with just an ink outline,
+     full-strength icon, no fade; only the active lane fills
+     accent-coloured + lifts. --- */
   .lane-icon-nav {
     display: flex;
     align-items: stretch;
@@ -3976,6 +3971,18 @@ a.card-drawer__pr-chip:hover {
 
   .lane-icon-nav__item:hover {
     border-color: var(--qb-btn-ink-hover);
+  }
+
+  /* Empty lane: no pane to jump to (see `.lane--empty` — reverted to a
+     non-snapping sliver), so this box is a real `disabled` `<button>`
+     (LaneIconNav.tsx) — faded, no pointer feedback of any kind, count
+     always reads "0". Still occupies its evenly-spaced slot in the strip
+     so the layout communicates "this lane exists, it's just empty" rather
+     than silently dropping it. */
+  .lane-icon-nav__item--empty {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
   }
 
   .lane-icon-nav__icon {
@@ -4072,36 +4079,17 @@ a.card-drawer__pr-chip:hover {
     overflow-y: visible;
   }
 
-  /* mobile-v2: empty lanes are now real swipe panes too — same size/snap
-     as every other lane (overrides the base `.lane--empty { flex-basis:
-     44px }` thin-spine rule, desktop-only now), so the icon-nav's "even
-     the empty columns get an icon" tap target actually has somewhere to
-     land. `.lane__header`'s vertical-writing-mode thin-strip treatment
-     (base rule, still correct for desktop) is reset back to a normal
-     horizontal header to match. */
+  /* Empty lanes stay thin vertical spines — and are NOT snap stops, so
+     swiping never pins the viewport to a 44px strip. WF-085 (mobile-v2
+     refinement): empty lanes briefly became full 88vw swipe panes with a
+     "No cards" placeholder, but the board still needs to know about every
+     lane's icon in the strip above WITHOUT giving each one a real pane to
+     land on — so this reverts to the original thin-sliver treatment; the
+     icon-nav's own empty-lane entries are faded + non-interactive instead
+     (see `.lane-icon-nav__item--empty` above). */
   .lane--empty {
-    flex-basis: 88vw;
-    scroll-snap-align: center;
-  }
-
-  .lane--empty .lane__header {
-    writing-mode: horizontal-tb;
-    height: auto;
-  }
-
-  /* The centred "No cards" placeholder Lane.tsx renders in place of
-     `.lane__cards` for an empty lane — hidden on desktop (base rule below
-     the `.lane--empty` block up top), shown here now that the pane has
-     real width to hold it. */
-  .lane__empty-state {
-    display: flex;
-    flex: 1 1 auto;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem 1rem;
-    color: var(--qb-ink-400);
-    font-size: 0.85rem;
-    font-style: italic;
+    flex-basis: 44px;
+    scroll-snap-align: none;
   }
 
   .lane--parked {

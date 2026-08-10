@@ -23,22 +23,27 @@ export interface LaneIconNavProps {
 /**
  * Mobile-only (≤720px, gated in styles.css) horizontal strip: one
  * hand-drawn wobble box (RPG icon + card count) per lane, evenly spaced
- * across the strip — including empty lanes (mobile-v2: every lane the
- * board has is a real tap-jump target now, see Board.tsx's `navLanes`).
- * The active lane (synced by Board.tsx from scroll position, or set
- * directly on tap) renders as an accent-filled box with a slight lift;
- * every other box stays a transparent/parchment box with just an ink
- * outline — icons are always full-strength, never faded.
+ * across the strip — including empty lanes, for completeness/even spacing.
+ * An empty lane (`count === 0`) has no swipe pane to jump to (Board.tsx
+ * reverted `.lane--empty` to a non-snapping sliver — see styles.css), so
+ * its box renders `disabled`, faded, and with no `onJump` wired up: it's
+ * there to show the lane exists and is empty, not to be tapped. Every
+ * non-empty box stays a real tap target — full-strength icon, transparent/
+ * parchment wobble box with an ink outline, accent-filled + lifted when
+ * active (synced by Board.tsx from scroll position, or set directly on
+ * tap).
  */
 function LaneIconNav({ lanes, activeKey, onJump }: LaneIconNavProps) {
   return (
     <nav className="lane-icon-nav" aria-label="Lane navigator">
       {lanes.map((lane) => {
         const isActive = lane.key === activeKey;
+        const isEmpty = lane.count === 0;
         const className = [
           "lane-icon-nav__item",
           `lane-icon-nav__item--${lane.accent}`,
           isActive ? "lane-icon-nav__item--active" : "",
+          isEmpty ? "lane-icon-nav__item--empty" : "",
         ]
           .filter(Boolean)
           .join(" ");
@@ -48,9 +53,14 @@ function LaneIconNav({ lanes, activeKey, onJump }: LaneIconNavProps) {
             key={lane.key}
             type="button"
             className={className}
-            aria-label={`${lane.label}, ${lane.count} cards`}
+            aria-label={
+              isEmpty
+                ? `${lane.label}, ${lane.count} cards, empty`
+                : `${lane.label}, ${lane.count} cards`
+            }
             aria-current={isActive ? "true" : undefined}
-            onClick={() => onJump(lane.key)}
+            disabled={isEmpty}
+            onClick={isEmpty ? undefined : () => onJump(lane.key)}
           >
             <img className="lane-icon-nav__icon" src={laneIcon(lane.accent)} alt="" />
             <span className="lane-icon-nav__count">{lane.count}</span>
