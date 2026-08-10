@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS cards (
     touches         TEXT NOT NULL DEFAULT '[]',
     depends_on      TEXT NOT NULL DEFAULT '[]',
     labels          TEXT NOT NULL DEFAULT '[]',
+    links           TEXT NOT NULL DEFAULT '[]',
     budget_estimate INTEGER,
     budget_actual   INTEGER NOT NULL DEFAULT 0,
     created         TEXT NOT NULL DEFAULT '',
@@ -91,6 +92,7 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(cards)").fetchall()}
     additive_columns = {
         "labels": "TEXT NOT NULL DEFAULT '[]'",
+        "links": "TEXT NOT NULL DEFAULT '[]'",
     }
     for column, ddl in additive_columns.items():
         if column not in existing:
@@ -282,6 +284,7 @@ def card_to_params(card: Card) -> dict:
         "touches": json.dumps(card.touches or []),
         "depends_on": json.dumps(card.depends_on or []),
         "labels": json.dumps(card.labels or []),
+        "links": json.dumps(card.links or []),
         "budget_estimate": card.budget_estimate,
         "budget_actual": card.budget_actual,
         "created": card.created,
@@ -330,6 +333,7 @@ def row_to_card(row: sqlite3.Row) -> Card:
         touches=_json_loads_column(row, "touches"),
         depends_on=_json_loads_column(row, "depends_on"),
         labels=_json_loads_column(row, "labels"),
+        links=_json_loads_column(row, "links"),
         budget_estimate=row["budget_estimate"],
         budget_actual=row["budget_actual"] or 0,
         created=row["created"] or "",
