@@ -189,6 +189,24 @@ class TestLinearAndPr:
                    "--pr", "https://github.com/x/y/pull/9") == 0
         assert _card(repo).pr == "https://github.com/x/y/pull/9"
 
+    def test_set_field_title(self, repo):
+        run(repo, "new-card", "--title", "Old")
+        assert run(repo, "set-field", "WF-001", "--title", "New title") == 0
+        assert _card(repo).title == "New title"
+
+    def test_set_field_empty_title_rejected(self, repo, capsys):
+        run(repo, "new-card", "--title", "Old")
+        assert run(repo, "set-field", "WF-001", "--title", "") == 1
+        assert "title cannot be empty" in capsys.readouterr().err
+        assert _card(repo).title == "Old"  # unchanged
+
+    def test_set_field_body_set_and_clear(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--body", "## Goal\nShip it") == 0
+        assert _card(repo).body == "## Goal\nShip it"
+        assert run(repo, "set-field", "WF-001", "--body", "") == 0
+        assert _card(repo).body == ""
+
 
 class TestSetSprintStatus:
     def test_activates_sprint(self, repo):
