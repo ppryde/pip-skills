@@ -24,7 +24,7 @@ export interface LaneProps {
 }
 
 /**
- * A single column: header (label + count) + a vertical list of tiles.
+ * A single column: header (label) + a vertical list of tiles.
  * Placement of cards into this lane is entirely `layout.ts`'s job — this
  * component just renders whatever `lane.cards` it is given, in order.
  *

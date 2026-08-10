@@ -172,9 +172,12 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     expect(screen.getByLabelText("Implementation, 1 cards")).toBeInTheDocument();
     expect(screen.getByLabelText("Parked, 1 cards")).toBeInTheDocument();
     expect(screen.getByLabelText("Done, 2 cards")).toBeInTheDocument();
-    // An empty stage lane still gets a nav icon (mirrors the swipe track,
-    // which still renders empty lanes as thin strips).
-    expect(screen.getByLabelText("Bootstrap, 0 cards")).toBeInTheDocument();
+    // An empty stage lane does NOT get a nav icon — the nav strip only
+    // lists non-empty lanes (WF-085a review). The swipe track still renders
+    // the empty lane as a thin strip; only the nav filters it out, since an
+    // empty lane isn't a swipe snap-stop (`.lane--empty { scroll-snap-align:
+    // none }`) and a tap-to-jump there would land on a non-snap target.
+    expect(screen.queryByLabelText("Bootstrap, 0 cards")).not.toBeInTheDocument();
   });
 
   it("(WF-085) tapping an icon-nav entry marks it active and jumps the matching lane pane into view", async () => {

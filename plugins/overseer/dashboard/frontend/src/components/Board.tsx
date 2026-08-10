@@ -97,43 +97,60 @@ function Board({
     (lane) => lane.kind !== "archive" || showArchive
   );
 
-  // WF-085: mobile icon-nav (LaneIconNav) + swipe-lane active-sync. The nav
-  // mirrors `visibleLanes` 1:1 (same set, same order, same `.key`) so a tap
-  // and a scroll-settle can never point at different lanes. Always rendered
-  // — CSS (`@media (max-width:720px)`) is what actually shows the strip /
-  // turns `.board` into a snap-scroller; on desktop the listener below just
-  // never fires because `.board` itself never scrolls there.
+  // WF-085a: mobile icon-nav (LaneIconNav) + swipe-lane active-sync. The nav
+  // lists only NON-EMPTY lanes from `visibleLanes` (same order, same `.key`
+  // for whichever lanes it does show) — empty stage lanes are deliberately
+  // excluded. An empty lane isn't a swipe snap-stop (`.lane--empty {
+  // scroll-snap-align: none }` in styles.css), so a nav icon pointing at one
+  // would tap-jump to a target the swipe track can't settle on. The swipe
+  // track itself still renders every `visibleLanes` entry (empty lanes as
+  // the thin `.lane--empty` sliver) — only this nav strip filters. Always
+  // rendered — CSS (`@media (max-width:720px)`) is what actually shows the
+  // strip / turns `.board` into a snap-scroller; on desktop the listener
+  // below just never fires because `.board` itself never scrolls there.
   const navLanes = useMemo(
     () =>
-      visibleLanes.map((lane) => ({
-        key: lane.key,
-        label: lane.label,
-        count: lane.cards.length,
-        accent: laneIconKey(lane),
-      })),
+      visibleLanes
+        .filter((lane) => lane.cards.length > 0)
+        .map((lane) => ({
+          key: lane.key,
+          label: lane.label,
+          count: lane.cards.length,
+          accent: laneIconKey(lane),
+        })),
     [visibleLanes]
   );
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [activeLaneKey, setActiveLaneKey] = useState<string>(
-    visibleLanes[0]?.key ?? ""
+    navLanes[0]?.key ?? ""
   );
 
   // The filter bar / archive toggle can remove the currently-active lane
-  // from `visibleLanes` out from under us (e.g. a search that no longer
-  // matches its cards) — fall back to the first remaining lane rather than
-  // pointing the nav's active pill at a lane that no longer renders.
+  // from `navLanes` out from under us (e.g. a search that no longer matches
+  // its cards, or the active lane's last card leaves it empty) — fall back
+  // to the first remaining NON-EMPTY lane rather than pointing the nav's
+  // active pill at a lane the strip no longer shows an icon for.
   useEffect(() => {
-    if (visibleLanes.length === 0) return;
-    if (!visibleLanes.some((lane) => lane.key === activeLaneKey)) {
-      setActiveLaneKey(visibleLanes[0].key);
+    if (navLanes.length === 0) return;
+    if (!navLanes.some((lane) => lane.key === activeLaneKey)) {
+      setActiveLaneKey(navLanes[0].key);
     }
-  }, [visibleLanes, activeLaneKey]);
+  }, [navLanes, activeLaneKey]);
 
   // Scroll-sync: on every scroll of the lane track, find whichever
   // `[data-lane-key]` pane's centre sits nearest the track's own centre and
   // make that the active lane. Cheap enough (≤11 lanes) to run unthrottled
-  // on scroll — no rAF/debounce needed at this scale.
+  // on scroll — no rAF/debounce needed at this scale. Only panes the nav
+  // actually shows an icon for are candidates (`navLaneKeys`) — an empty
+  // lane can still be nearest-centre mid-swipe (it's a thin sliver, not a
+  // snap-stop), but it must never become the active key since no nav icon
+  // exists to light up for it.
+  const navLaneKeys = useMemo(
+    () => new Set(navLanes.map((lane) => lane.key)),
+    [navLanes]
+  );
+
   const handleTrackScroll = useCallback(() => {
     const track = trackRef.current;
     if (!track) return;
@@ -143,19 +160,21 @@ function Board({
     let nearestKey: string | null = null;
     let nearestDistance = Infinity;
     track.querySelectorAll<HTMLElement>("[data-lane-key]").forEach((el) => {
+      const key = el.dataset.laneKey;
+      if (!key || !navLaneKeys.has(key)) return;
       const rect = el.getBoundingClientRect();
       const center = rect.left + rect.width / 2;
       const distance = Math.abs(center - trackCenter);
       if (distance < nearestDistance) {
         nearestDistance = distance;
-        nearestKey = el.dataset.laneKey ?? null;
+        nearestKey = key;
       }
     });
 
     if (nearestKey && nearestKey !== activeLaneKey) {
       setActiveLaneKey(nearestKey);
     }
-  }, [activeLaneKey]);
+  }, [activeLaneKey, navLaneKeys]);
 
   // Nav-jump: tapping an icon both sets the active pill immediately (no
   // waiting on the scroll-settle above) and scrolls that lane's pane to
