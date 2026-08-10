@@ -454,6 +454,29 @@ function CardDetailDrawer({
                 <div className="card-drawer__locked">
                   <DependencyBadge card={detail} />
                 </div>
+
+                {/* Read-only Links section (F8, WF-065) — plain reference
+                    links (label/path), NOT the LinkEditor above (that
+                    manages parent/depends_on card relationships). Renders
+                    nothing when the card has none. */}
+                {detail.links && detail.links.length > 0 && (
+                  <section className="card-drawer__links">
+                    <h3 className="card-drawer__section-heading">Links</h3>
+                    <ul className="card-drawer__links-list">
+                      {detail.links.map((l, i) => (
+                        <li key={i}>
+                          <a
+                            href={l.path}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {l.label}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
               </>
             )}
 

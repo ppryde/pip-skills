@@ -62,6 +62,7 @@ function cardDetail(
     updated: "",
     checklist: [],
     labels: [],
+    links: [],
     sections: {},
     body: "",
     ...overrides,
@@ -219,6 +220,62 @@ describe("<CardDetailDrawer/>", () => {
     expect(chips).toHaveLength(2);
     expect(chips[0]).toHaveTextContent("policy");
     expect(chips[1]).toHaveTextContent("architecture");
+  });
+
+  it("renders a read-only link per entry in a Links section (F8, WF-065)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-A",
+        links: [
+          { label: "Design doc", path: "https://example.com/design" },
+          { label: "PR", path: "https://example.com/pr/1" },
+        ],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(screen.getByText("Links")).toBeInTheDocument();
+    const links = container.querySelectorAll(".card-drawer__links-list a");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveTextContent("Design doc");
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "https://example.com/design"
+    );
+    expect(links[0]).toHaveAttribute("target", "_blank");
+    expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(links[1]).toHaveTextContent("PR");
+    expect(links[1]).toHaveAttribute("href", "https://example.com/pr/1");
+  });
+
+  it("renders nothing for Links when the card carries no links", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(screen.queryByText("Links")).toBeNull();
+    expect(container.querySelector(".card-drawer__links")).toBeNull();
   });
 
   it("renders the label editor with no chips (just the add-input) when the card carries no labels", async () => {

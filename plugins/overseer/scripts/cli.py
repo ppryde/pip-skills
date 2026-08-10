@@ -1234,6 +1234,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         "touches": card.touches,
         "depends_on": card.depends_on,
         "labels": card.labels,
+        "links": card.links,
         "budget": {
             "estimate": card.budget_estimate,
             "actual": card.budget_actual,

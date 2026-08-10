@@ -32,6 +32,7 @@ const cardDetail: CardDetail = {
   updated: "2026-07-01T10:00",
   checklist: [],
   labels: [],
+  links: [],
   sections: { "## Goal": "Ship it" },
   body: "full markdown body",
 };

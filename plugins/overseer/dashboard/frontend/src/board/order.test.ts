@@ -24,6 +24,7 @@ function card(id: string, order: number): BoardCard {
     checklist: [],
     labels: [],
     body: "",
+    links: [],
   };
 }
 

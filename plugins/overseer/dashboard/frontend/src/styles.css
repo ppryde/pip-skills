@@ -2511,6 +2511,32 @@ body {
   margin-bottom: 0.75rem;
 }
 
+/* Read-only Links panel (F8, WF-065) — same white-card treatment as the
+   Sub-quests panel above, just a plain list of external references. */
+.card-drawer__links {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem 1rem;
+  border: 2px solid var(--qb-line-dashed-2);
+  border-radius: var(--qb-radius-panel);
+  background: var(--legacy-color-fff);
+}
+
+.card-drawer__links-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.card-drawer__links-list a {
+  font-size: 0.85rem;
+  color: var(--qb-ink-700);
+  text-decoration: underline;
+  word-break: break-word;
+}
+
 /* Quest log timeline (WF-030 chunk 9, stretch — HANDOFF: "vertical
    timeline, 2px dashed #D8C39A left rule, colored dots, entry text +
    Silkscreen day stamp"). Dot colour rotates through the 7 guild accent
