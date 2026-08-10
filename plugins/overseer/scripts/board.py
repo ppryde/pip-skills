@@ -71,6 +71,7 @@ def board_data(repo_root: Path) -> dict:
             {
                 "id": card.id,
                 "title": card.title,
+                "body": card.body,
                 "status": card.status,
                 "stage": card.stage,
                 "complexity": card.complexity,
