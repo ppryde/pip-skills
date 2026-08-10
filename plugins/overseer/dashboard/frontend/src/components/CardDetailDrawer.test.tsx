@@ -703,10 +703,62 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText(`Title WF-O`);
-    expect(container.querySelectorAll(".card-drawer__star").length).toBe(3);
+    expect(container.querySelectorAll(".card-drawer__star").length).toBe(4);
     expect(
       container.querySelectorAll(".card-drawer__star--filled").length
     ).toBe(2);
+  });
+
+  it("renders 4 filled stars for an XL card — 4-band scale, distinct from L (D2)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-XL", complexity: "XL" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-XL"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-XL`);
+    expect(container.querySelectorAll(".card-drawer__star").length).toBe(4);
+    expect(
+      container.querySelectorAll(".card-drawer__star--filled").length
+    ).toBe(4);
+    expect(
+      container.querySelectorAll(".card-drawer__star--empty").length
+    ).toBe(0);
+  });
+
+  it("renders 3 filled + 1 empty star for an L card", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-LL", complexity: "L" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-LL"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-LL`);
+    expect(container.querySelectorAll(".card-drawer__star").length).toBe(4);
+    expect(
+      container.querySelectorAll(".card-drawer__star--filled").length
+    ).toBe(3);
+    expect(
+      container.querySelectorAll(".card-drawer__star--empty").length
+    ).toBe(1);
   });
 
   it("renders no stars row when the card has no complexity", async () => {

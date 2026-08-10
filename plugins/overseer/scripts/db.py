@@ -171,7 +171,11 @@ def migrate_from_workflow(
 
     Returns ``(imported, skipped)``: the count of successfully imported
     cards, and a list of ``(path, reason)`` for every card that failed to
-    parse — mirroring ``store.load_live_cards``'s ``quarantined`` list.
+    parse. This is report-only — unlike ``store.load_live_cards``'s
+    ``quarantined`` list (``list[Path]``, each entry physically moved to
+    ``archive/corrupt/`` as it's found), a skipped path here stays exactly
+    where it was on disk; the caller gets the reason string alongside it
+    but nothing is moved.
     """
     from scripts.store import workflow_root  # local import: avoid cycle
     source_root = derive_repo_root(repo_root) or repo_root
