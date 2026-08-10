@@ -8,6 +8,7 @@ import { formatTokens } from "../board/formatTokens";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ChecklistRows from "./ChecklistRows";
+import LabelChips from "./LabelChips";
 import { StarIcon, CheckIcon } from "./icons";
 
 export interface TileShellProps {
@@ -238,6 +239,12 @@ function TileShell({
             {card.title}
           </div>
         )}
+        {/* Label chips (F1, WF-058) — self-gates to nothing when the card
+            carries no labels, so a label-less tile's layout is unchanged.
+            Sits below the title/before the checklist, its own compact,
+            wrapping row (`.card-tile__labels` caps height and scrolls a
+            long label set — see styles.css). */}
+        <LabelChips labels={card.labels} className="card-tile__labels" />
         {/*
           Inert (no button/a/role) — see ChecklistRows's doc comment. It
           lives inside the plain body div above, so it must never introduce

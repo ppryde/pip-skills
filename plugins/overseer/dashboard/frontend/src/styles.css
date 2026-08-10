@@ -260,6 +260,39 @@
   --qb-branch-chip-border: #b7c9dc;
   --qb-spotlight-ring: var(--qb-gold-chip-border);
 
+  /* F1 label-chip palette (WF-058) — a curated, fixed 9-colour set that
+     board/labelColor.ts's stable hash indexes into (never random, never
+     per-project configuration — that's the deferred F10 editable colour
+     registry, WF-067). Each key follows the same three-value pastel formula
+     as --qb-branch-chip-* above: pale bg, saturated text, medium border. */
+  --qb-label-slate-bg: #e2e9f2;
+  --qb-label-slate-text: #3d5875;
+  --qb-label-slate-border: #b7c9dc;
+  --qb-label-sage-bg: #e3ecdd;
+  --qb-label-sage-text: #47643a;
+  --qb-label-sage-border: #b9d2ab;
+  --qb-label-plum-bg: #f0e0ea;
+  --qb-label-plum-text: #7a3f66;
+  --qb-label-plum-border: #dcb4cd;
+  --qb-label-clay-bg: #f5e4d2;
+  --qb-label-clay-text: #8a5323;
+  --qb-label-clay-border: #e0bd94;
+  --qb-label-sky-bg: #dcebf2;
+  --qb-label-sky-text: #2f6b8a;
+  --qb-label-sky-border: #a9d0e0;
+  --qb-label-violet-bg: #e8e0f5;
+  --qb-label-violet-text: #5a3f8a;
+  --qb-label-violet-border: #c7b4e8;
+  --qb-label-olive-bg: #eef0d8;
+  --qb-label-olive-text: #64712a;
+  --qb-label-olive-border: #cdd6a0;
+  --qb-label-terracotta-bg: #f5ddd6;
+  --qb-label-terracotta-text: #8a3f2f;
+  --qb-label-terracotta-border: #e0aa9a;
+  --qb-label-teal-bg: #dcefe9;
+  --qb-label-teal-text: #2a7a63;
+  --qb-label-teal-border: #a8dcc8;
+
   /* Font stacks */
   --qb-font-display: "Baloo 2", Quicksand, Fredoka, sans-serif;
   --qb-font-body: "Patrick Hand", Gaegu, "Comic Neue", cursive;
@@ -1410,6 +1443,99 @@ body {
   background: var(--qb-parchment-muted-2);
   color: var(--qb-ink-500);
   border: 1px solid var(--qb-line-dashed);
+}
+
+/* Label chips (F1, WF-058) — shared by the tile (`.card-tile__labels`) and
+   the drawer (`.card-drawer__labels`) wrappers below. Colour is ALWAYS the
+   per-label `.label-chip--<key>` modifier (board/labelColor.ts's stable
+   hash -> palette key), never an inline style — same chip-formula shape as
+   `.branch-chip` (pale bg / saturated text / medium border) so a label chip
+   reads as a sibling of the other tile chips, not a foreign element. */
+.label-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.1rem 0 0.35rem;
+}
+
+.label-chip {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 9rem;
+}
+
+.label-chip--slate {
+  background: var(--qb-label-slate-bg);
+  color: var(--qb-label-slate-text);
+  border: 1px solid var(--qb-label-slate-border);
+}
+
+.label-chip--sage {
+  background: var(--qb-label-sage-bg);
+  color: var(--qb-label-sage-text);
+  border: 1px solid var(--qb-label-sage-border);
+}
+
+.label-chip--plum {
+  background: var(--qb-label-plum-bg);
+  color: var(--qb-label-plum-text);
+  border: 1px solid var(--qb-label-plum-border);
+}
+
+.label-chip--clay {
+  background: var(--qb-label-clay-bg);
+  color: var(--qb-label-clay-text);
+  border: 1px solid var(--qb-label-clay-border);
+}
+
+.label-chip--sky {
+  background: var(--qb-label-sky-bg);
+  color: var(--qb-label-sky-text);
+  border: 1px solid var(--qb-label-sky-border);
+}
+
+.label-chip--violet {
+  background: var(--qb-label-violet-bg);
+  color: var(--qb-label-violet-text);
+  border: 1px solid var(--qb-label-violet-border);
+}
+
+.label-chip--olive {
+  background: var(--qb-label-olive-bg);
+  color: var(--qb-label-olive-text);
+  border: 1px solid var(--qb-label-olive-border);
+}
+
+.label-chip--terracotta {
+  background: var(--qb-label-terracotta-bg);
+  color: var(--qb-label-terracotta-text);
+  border: 1px solid var(--qb-label-terracotta-border);
+}
+
+.label-chip--teal {
+  background: var(--qb-label-teal-bg);
+  color: var(--qb-label-teal-text);
+  border: 1px solid var(--qb-label-teal-border);
+}
+
+/* Tile placement: a compact row under the title, capped and scrollable
+   rather than pushing the footer down when a card carries many labels (see
+   TileShell.test.tsx's "many labels" coverage — every chip still RENDERS,
+   this only bounds the box's own height). */
+.card-tile__labels {
+  max-height: 3.2rem;
+  overflow-y: auto;
+}
+
+/* Drawer placement: its own row below the facts line, never sharing that
+   row's `gap` with the priority/budget/hero chips. */
+.card-drawer__labels {
+  margin-top: 0.5rem;
 }
 
 .badge--blocked {
