@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { editCard, getCard, setLabels } from "../api/client";
+import { editCard, getCard, pullChildren, setLabels } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -221,6 +221,21 @@ function CardDetailDrawer({
     }
   };
 
+  // Pull children (F9, WF-066) — confirm-gated, epics only (rendered below).
+  // Routes through the SAME `mutate` prop as every sibling control
+  // (StatusMenu/LinkEditor/ClaimControl/LabelEditor's onSave/saveEdit above)
+  // so the board's own state updates immediately, then `refetchDetail` — the
+  // same counter-guarded closure those siblings pass as `onMutated` —
+  // refreshes the drawer's own detail view.
+  const handlePullChildren = async () => {
+    if (!detail) return;
+    if (!window.confirm("Pull all live children into this epic's column?")) {
+      return;
+    }
+    await mutate(() => pullChildren(detail.id));
+    refetchDetail();
+  };
+
   useEffect(() => {
     if (cardId === null) return;
     function handleKeyDown(e: KeyboardEvent) {
@@ -401,6 +416,19 @@ function CardDetailDrawer({
                 inFlight={inFlight}
                 onMutated={refetchDetail}
               />
+              {/* Pull children (F9, WF-066) — epics only; confirm-gated
+                  because it mutates every live child's stage/status at
+                  once. */}
+              {detail.is_epic && (
+                <button
+                  type="button"
+                  className="card-drawer__pull-children-btn"
+                  onClick={() => void handlePullChildren()}
+                  disabled={inFlight}
+                >
+                  Pull children
+                </button>
+              )}
             </div>
 
             {/* Journey progress + Sub-quests panel + Locked-behind pill:

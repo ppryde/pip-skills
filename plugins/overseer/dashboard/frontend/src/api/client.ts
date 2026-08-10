@@ -186,6 +186,15 @@ export function unpark(id: string): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/unpark`));
 }
 
+/** Pulls all live children of an epic into the epic's own column (F9,
+ * WF-066) — token-gated backend endpoint added in Task 5. */
+export function pullChildren(id: string): Promise<BoardResponse> {
+  return request<BoardResponse>(
+    "POST",
+    withRoot(`/api/card/${id}/pull-children`)
+  );
+}
+
 export function move(id: string, body: MoveBody): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/move`), body);
 }

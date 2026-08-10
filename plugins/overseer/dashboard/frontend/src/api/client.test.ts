@@ -269,6 +269,17 @@ describe("api/client", () => {
     expect(init.method).toBe("POST");
   });
 
+  it("pullChildren(id) POSTs to /api/card/{id}/pull-children (F9, WF-066)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
+
+    const result = await client.pullChildren("WF-1");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/card/WF-1/pull-children");
+    expect(init.method).toBe("POST");
+    expect(result).toEqual(boardResponse);
+  });
+
   it("move(id, {stage}) POSTs {stage} to /api/card/{id}/move", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(boardResponse));
 
