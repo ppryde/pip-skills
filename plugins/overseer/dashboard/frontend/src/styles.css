@@ -3731,7 +3731,7 @@ a.card-drawer__pr-chip:hover {
 /* Quest holding page (WF-032) — App.tsx renders this INSTEAD OF <Board/>
    when the selected repo has no board.db yet (`has_board:false`) but
    census sees live agents there. A centred parchment panel with a dashed
-   border — the same "on hold" read as the Parked/Archive lanes (muted
+   border — the same "on hold" read as the Parked/Abandoned lanes (muted
    parchment + dashed edge) rather than an error/danger treatment, since
    nothing here is actually wrong. */
 .unbegun-holding {

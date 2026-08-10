@@ -55,7 +55,7 @@ class TestInitAndNewCard:
         card = _card(repo)
         assert card.complexity == "XL"
 
-    def test_new_card_updates_index(self, repo):
+    def test_new_card_persists(self, repo):
         run(repo, "new-card", "--title", "Fix the thing")
         assert _card(repo).title == "Fix the thing"
 
