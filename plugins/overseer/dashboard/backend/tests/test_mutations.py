@@ -250,3 +250,26 @@ def test_gate_accepts_correct_token(root: Path) -> None:
 def test_gate_leaves_reads_open(root: Path) -> None:
     gc = _gated_client(root)
     assert gc.get("/api/board").status_code == 200  # no token, still 200
+
+
+def test_create_card(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/card", json={"title": "Fresh card", "complexity": "M"})
+    assert resp.status_code == 200
+    new_id = resp.json()["card_id"]
+    assert new_id  # minted id echoed
+    assert _show(root, new_id)["title"] == "Fresh card"
+    assert new_id in {c["id"] for c in resp.json()["board"]["cards"]}
+
+
+def test_create_card_with_labels(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/card", json={"title": "Tagged", "labels": ["policy", "arch"]})
+    assert resp.status_code == 200
+    assert _show(root, resp.json()["card_id"])["labels"] == ["policy", "arch"]
+
+
+def test_create_card_missing_title(client: TestClient, root: Path) -> None:
+    assert client.post("/api/card", json={"complexity": "S"}).status_code == 422  # pydantic required
+
+
+def test_create_card_empty_title(client: TestClient, root: Path) -> None:
+    assert client.post("/api/card", json={"title": "  "}).status_code == 400

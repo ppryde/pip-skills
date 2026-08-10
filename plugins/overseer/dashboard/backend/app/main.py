@@ -87,6 +87,13 @@ class ClearBody(BaseModel):
     root: str | None = None
 
 
+class CreateBody(BaseModel):
+    title: str
+    complexity: str | None = None
+    labels: list[str] = []
+    goal: str | None = None
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
@@ -439,6 +446,25 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def get_sessions(root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
         return {"sessions": _sessions_list(effective)}
+
+    @app.post("/api/card", dependencies=[Depends(require_token)])
+    def create_card(body: CreateBody, root: str | None = None) -> dict[str, Any]:
+        if not body.title.strip():
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        args = ["new-card", "--title", body.title]
+        if body.complexity:
+            args += ["--complexity", body.complexity]
+        if body.labels:
+            args += ["--labels", ",".join(body.labels)]
+        if body.goal:
+            args += ["--goal", body.goal]
+        try:
+            out = run_overseer(effective, *args)
+        except CliError as exc:
+            raise _mutation_error(exc) from exc
+        card_id = out.strip()
+        return {"card_id": card_id, **_board_response(effective)}
 
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str, root: str | None = None) -> Any:
