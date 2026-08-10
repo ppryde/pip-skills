@@ -8,6 +8,7 @@ import type { PartyMember } from "../board/party";
 // StatusMenu) import, even though most tests here never trigger them.
 vi.mock("../api/client", () => ({
   getCard: vi.fn(),
+  editCard: vi.fn(),
   setPriority: vi.fn(),
   setParent: vi.fn(),
   setDepends: vi.fn(),
@@ -17,9 +18,10 @@ vi.mock("../api/client", () => ({
   getSessions: vi.fn(),
   claimCard: vi.fn(),
   unclaimCard: vi.fn(),
+  setLabels: vi.fn(),
 }));
 
-import { getCard, getSessions, setPriority } from "../api/client";
+import { getCard, getSessions, setPriority, setLabels, editCard } from "../api/client";
 import CardDetailDrawer from "./CardDetailDrawer";
 
 const BOARD_RESPONSE = {} as BoardResponse;
@@ -196,7 +198,7 @@ describe("<CardDetailDrawer/>", () => {
     expect(container.querySelector(".repo-chip")).toBeNull();
   });
 
-  it("renders a chip for each of the card's labels (F1, WF-058)", async () => {
+  it("renders a chip for each of the card's labels via the editable LabelEditor (F1, WF-058)", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({ id: "WF-A", labels: ["policy", "architecture"] })
     );
@@ -213,13 +215,13 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText(`Title WF-A`);
-    const chips = container.querySelectorAll(".label-chip");
+    const chips = container.querySelectorAll(".label-editor__chip");
     expect(chips).toHaveLength(2);
     expect(chips[0]).toHaveTextContent("policy");
     expect(chips[1]).toHaveTextContent("architecture");
   });
 
-  it("renders no label chips (no layout break) when the card carries no labels", async () => {
+  it("renders the label editor with no chips (just the add-input) when the card carries no labels", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
 
     const { container } = render(
@@ -234,8 +236,224 @@ describe("<CardDetailDrawer/>", () => {
     );
 
     await screen.findByText(`Title WF-A`);
-    expect(container.querySelector(".label-chips")).toBeNull();
-    expect(container.querySelector(".label-chip")).toBeNull();
+    expect(container.querySelector(".label-editor__chip")).toBeNull();
+    expect(screen.getByPlaceholderText(/add label/i)).toBeInTheDocument();
+  });
+
+  it("saves an added label through mutate() (board tiles) AND re-fetches the open card (refetchDetail), same as the sibling controls", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-LBL", title: "Label me", labels: ["policy"] })
+    );
+    vi.mocked(setLabels).mockResolvedValueOnce(BOARD_RESPONSE);
+    // The refetch after the save returns updated content — proves it's a
+    // REAL second `getCard` call, not just a re-render of stale state.
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-LBL",
+        title: "Label me",
+        labels: ["policy", "arch"],
+      })
+    );
+
+    // liveMutate() actually invokes the function it's given (unlike
+    // noopMutate) — needed here because the fix under test is that the
+    // label save is routed THROUGH `mutate`, exactly like PrioritySelect/
+    // LinkEditor/ClaimControl, not called directly.
+    const mutate = liveMutate();
+    render(
+      <CardDetailDrawer
+        cardId="WF-LBL"
+        onClose={() => {}}
+        mutate={mutate}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Label me");
+    expect(getCard).toHaveBeenCalledTimes(1);
+
+    const input = screen.getByPlaceholderText(/add label/i);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "arch" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    // The mutate path is exercised — this is the SAME `mutate` prop
+    // PrioritySelect/LinkEditor/ClaimControl call, and it's what keeps the
+    // board's own state (and thus TileShell's tiles) in sync; bypassing it
+    // was the bug being fixed here.
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function));
+    expect(setLabels).toHaveBeenCalledWith("WF-LBL", ["policy", "arch"]);
+    await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
+  });
+
+  it("edits title and body and saves via editCard, routed through mutate() (board tiles) AND re-fetches the open card (refetchDetail), same as the label save", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-1", title: "Old", body: "old body" })
+    );
+    vi.mocked(editCard).mockResolvedValueOnce(BOARD_RESPONSE);
+    // The refetch after the save returns updated content — proves it's a
+    // REAL second `getCard` call, not just a re-render of stale state.
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-1", title: "New title", body: "new body" })
+    );
+
+    // liveMutate() actually invokes the function it's given — needed here
+    // because the save must be routed THROUGH `mutate`, exactly like
+    // PrioritySelect/LinkEditor/ClaimControl/LabelEditor, not called
+    // directly (Task 7 review finding).
+    const mutate = liveMutate();
+    render(
+      <CardDetailDrawer
+        cardId="WF-1"
+        onClose={() => {}}
+        mutate={mutate}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Old");
+    expect(getCard).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "new body" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function), { rethrow: true });
+    expect(editCard).toHaveBeenCalledWith("WF-1", {
+      title: "New title",
+      body: "new body",
+    });
+    await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
+    await screen.findByText("New title");
+  });
+
+  it("keeps edit mode open, preserves the draft, and shows an inline error when the save rejects — no silent draft loss on failure (fix-up, PR3 dual review)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-1E", title: "Old title", body: "old body" })
+    );
+    vi.mocked(editCard).mockRejectedValueOnce(new Error("save failed"));
+
+    // liveMutate() forwards fn()'s rejection unconditionally (see its doc
+    // comment) — the same shape a rethrowing `useBoard.mutate` has for a
+    // caller that always passes `{ rethrow: true }`, which is what
+    // `saveEdit` does.
+    const mutate = liveMutate();
+    render(
+      <CardDetailDrawer
+        cardId="WF-1E"
+        onClose={() => {}}
+        mutate={mutate}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Old title");
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Draft title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "draft body" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function), { rethrow: true });
+    // Edit mode did NOT fall through to the read view, and both drafts
+    // survive exactly as typed — this is the bug being fixed.
+    expect(screen.getByLabelText(/title/i)).toHaveValue("Draft title");
+    expect(screen.getByLabelText(/body/i)).toHaveValue("draft body");
+    expect(screen.getByRole("alert")).toHaveTextContent(/save failed/i);
+    // No refetch fired for a failed save — getCard only ran once, at open.
+    expect(getCard).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Save when the title draft is empty, and Cancel restores the read view without saving", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-2", title: "Keep me", body: "keep body" })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-2"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Keep me");
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "   " },
+    });
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Changed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(editCard).not.toHaveBeenCalled();
+    expect(screen.getByText("Keep me")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/title/i)).not.toBeInTheDocument();
+  });
+
+  it("resets edit drafts and exits edit mode when switching to a different card", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-3", title: "Card three", body: "three body" })
+    );
+
+    const { rerender } = render(
+      <CardDetailDrawer
+        cardId="WF-3"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Card three");
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Leaked draft" },
+    });
+
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-4", title: "Card four", body: "four body" })
+    );
+    rerender(
+      <CardDetailDrawer
+        cardId="WF-4"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText("Card four");
+    // Not in edit mode any more, and no leaked draft from the prior card.
+    expect(screen.queryByLabelText(/title/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Leaked draft")).not.toBeInTheDocument();
   });
 
   it("renders unknown section headings too — no hardcoded fixed set", async () => {

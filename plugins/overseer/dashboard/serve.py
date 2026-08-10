@@ -15,6 +15,8 @@ Usage (from the repo root):
 from __future__ import annotations
 
 import argparse
+import os
+import secrets
 import sys
 import threading
 import webbrowser
@@ -29,9 +31,25 @@ _BACKEND_DIR = Path(__file__).resolve().parent / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from app.main import create_app  # noqa: E402  (must follow the sys.path setup above)
+from app.main import create_app, LOOPBACK_HOSTS  # noqa: E402 (after sys.path setup above)
 
 DEFAULT_PORT = 8770
+
+
+def resolve_token(host: str) -> str | None:
+    """The dashboard token in effect for this bind, or None (gate off).
+
+    Explicit ``OVERSEER_DASHBOARD_TOKEN`` always wins. Otherwise a token is
+    auto-generated ONLY for a non-loopback bind — exposing the mutation
+    surface beyond localhost must not be tokenless. A pure loopback bind with
+    no env var stays token-free (the common single-user case).
+    """
+    env = os.environ.get("OVERSEER_DASHBOARD_TOKEN")
+    if env:
+        return env
+    if host not in LOOPBACK_HOSTS:
+        return secrets.token_urlsafe(24)
+    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -76,9 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     """Build the dashboard app and serve it. Returns a process exit code."""
     args = parse_args(argv)
     root = Path(args.root).resolve()
-    app = create_app(root, host=args.host)
+    token = resolve_token(args.host)
+    app = create_app(root, host=args.host, token=token)
     url = f"http://{args.host}:{args.port}/"
     print(f"overseer dashboard serving {root} at {url}")
+    if token:
+        print(f"dashboard token (send as X-Overseer-Token header): {token}")
 
     if not args.no_browser:
         threading.Timer(1.0, _open_browser, args=(url,)).start()

@@ -7,11 +7,28 @@ import type {
   BoardResponse,
   CardDetail,
   ClearResponse,
+  CreateCardBody,
+  CreateCardResponse,
   DependsBody,
+  EditCardBody,
   MoveBody,
   ReposResponse,
   SessionsResponse,
 } from "./types";
+
+/** localStorage key holding the operator-pasted dashboard auth token
+ * (see `authHeaders`/`request` below) — gated backend deployments 401
+ * until this is set; ungated deployments (the default) never 401, so
+ * this key stays empty and every request below is header-free. */
+const TOKEN_KEY = "overseer_dashboard_token";
+
+/** `X-Overseer-Token` header, present only when a token has been stored —
+ * the ungated-by-default backend never requires it, so the happy path
+ * (empty localStorage) sends no auth header at all. */
+function authHeaders(): Record<string, string> {
+  const tok = localStorage.getItem(TOKEN_KEY);
+  return tok ? { "X-Overseer-Token": tok } : {};
+}
 
 /**
  * The repo root threaded into every board/card/mutation call below (the
@@ -47,19 +64,38 @@ function withRoot(url: string): string {
  * response, and on a non-2xx status throws an Error carrying the backend's
  * `detail` string (falling back to `res.statusText` when `detail` is
  * absent/unparsable) so callers can surface it to a toast.
+ *
+ * Auth (WF-... token gate): every request carries `X-Overseer-Token` when
+ * one is stored (`authHeaders`), which is a no-op header-wise on the
+ * ungated-by-default backend. On a 401 (gate active, no/expired token) we
+ * prompt once via `window.prompt`, store whatever the operator pastes, and
+ * retry the SAME request exactly once; a cancelled prompt (`null`) falls
+ * through to the normal non-ok handling below without a second fetch.
  */
 async function request<T>(
   method: "GET" | "POST",
   url: string,
   body?: unknown
 ): Promise<T> {
-  const init: RequestInit = { method };
-  if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
-  }
+  const send = async (): Promise<Response> => {
+    const headers: Record<string, string> = { ...authHeaders() };
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+    return fetch(url, init);
+  };
 
-  const res = await fetch(url, init);
+  let res = await send();
+
+  if (res.status === 401) {
+    const tok = window.prompt("This dashboard requires a token. Paste it:");
+    if (tok) {
+      localStorage.setItem(TOKEN_KEY, tok);
+      res = await send();
+    }
+  }
 
   if (!res.ok) {
     let detail: string | undefined;
@@ -94,6 +130,17 @@ export function getSessions(): Promise<SessionsResponse> {
 
 export function getCard(id: string): Promise<CardDetail> {
   return request<CardDetail>("GET", withRoot(`/api/card/${id}`));
+}
+
+/** Creates a new card. Returns the usual board payload plus the new card's
+ * id (`card_id`) so callers can e.g. navigate straight to it. */
+export function createCard(body: CreateCardBody): Promise<CreateCardResponse> {
+  return request<CreateCardResponse>("POST", withRoot("/api/card"), body);
+}
+
+/** Edits an existing card's title and/or body markdown. */
+export function editCard(id: string, body: EditCardBody): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}`), body);
 }
 
 export function setOrder(id: string, order: number): Promise<BoardResponse> {

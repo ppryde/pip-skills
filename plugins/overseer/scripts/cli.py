@@ -382,7 +382,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
     card_id = args.jira or args.linear or db.mint_id(conn)
     card = Card(
         id=card_id,
-        title=args.title,
+        title=args.title.strip(),
         status="planned",
         jira=args.jira,
         linear=args.linear,
@@ -489,6 +489,13 @@ def cmd_set_field(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 return 1
             card.parent = args.parent
+    if args.title is not None:
+        if not args.title.strip():
+            print("error: title cannot be empty", file=sys.stderr)
+            return 1
+        card.title = args.title.strip()
+    if args.body is not None:
+        card.body = args.body
     card.updated = _now()
     _sync(args.root, card)
     print(f"{card.id} updated")
@@ -1466,6 +1473,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--order", type=int)
     p.add_argument("--priority")
     p.add_argument("--repo", help="empty string clears")
+    p.add_argument("--title", help="new card title (non-empty)")
+    p.add_argument("--body", help="new card body (markdown); empty string clears")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("depends")

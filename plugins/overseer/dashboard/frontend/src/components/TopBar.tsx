@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -9,6 +10,7 @@ import { CoinIcon, CheckIcon } from "./icons";
 import ThresholdControl from "./ThresholdControl";
 import RepoSelector from "./RepoSelector";
 import BranchFilter from "./BranchFilter";
+import NewCardDialog from "./NewCardDialog";
 
 export interface TopBarProps {
   projectName: string;
@@ -118,6 +120,12 @@ function TopBar({
   questingCountOverride,
   onClear,
 }: TopBarProps) {
+  // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
+  // (unlike the Clear control, which is App-owned since App also needs to
+  // know when to show its post-clear toast). NewCardDialog is handed
+  // TopBar's own `mutate` prop straight through, so the create routes
+  // through the same single mutation entrypoint as every other control.
+  const [newCardOpen, setNewCardOpen] = useState(false);
   const threshold = context?.threshold ?? null;
   const gold = goldTotal(cards);
   const { done, total } = vanquishedStats(cards);
@@ -136,103 +144,120 @@ function TopBar({
   const questingCount = questingCountOverride ?? fleet.questing;
 
   return (
-    <header className="topbar">
-      <div className="topbar__identity">
-        <span className="topbar__crest" aria-hidden="true" />
-        <div className="topbar__titles">
-          <h1>Adventurers&rsquo; Guild Board</h1>
-          <p className="topbar__subtitle">
-            {formatSubtitle(projectName, lastRefreshedAt)}
-          </p>
+    <>
+      <header className="topbar">
+        <div className="topbar__identity">
+          <span className="topbar__crest" aria-hidden="true" />
+          <div className="topbar__titles">
+            <h1>Adventurers&rsquo; Guild Board</h1>
+            <p className="topbar__subtitle">
+              {formatSubtitle(projectName, lastRefreshedAt)}
+            </p>
+          </div>
         </div>
-      </div>
 
-      <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
-      {onClear && (
+        <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
         <button
           type="button"
-          className="topbar-clear danger"
-          onClick={onClear}
-          title="Clear this repo's data"
+          className="topbar__new-card"
+          onClick={() => setNewCardOpen(true)}
         >
-          Clear…
+          ＋ New card
         </button>
-      )}
-      <BranchFilter
-        branches={branches}
-        activeBranch={activeBranch}
-        onSelect={onSelectBranch}
-      />
-
-      <div className="topbar__threshold">
-        <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
-      </div>
-
-      {limits?.five_hour?.used_percentage !== undefined && (
-        <span className="topbar__pill" title="5h window">
-          ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
-        </span>
-      )}
-      {limits?.seven_day?.used_percentage !== undefined && (
-        <span className="topbar__pill" title="7d window">
-          ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
-        </span>
-      )}
-
-      <button
-        type="button"
-        className="topbar__refresh"
-        onClick={onRefresh}
-        disabled={refreshing}
-      >
-        {refreshing ? "Refreshing…" : "Refresh"}
-      </button>
-
-      <label className="topbar__archive-toggle">
-        <input
-          type="checkbox"
-          checked={showArchive}
-          onChange={onToggleArchive}
-        />
-        Archive
-      </label>
-
-      {quarantinedCount > 0 && (
-        <span className="topbar__quarantine-banner">
-          {quarantinedCount} quarantined — see archive/corrupt
-        </span>
-      )}
-
-      <span className="topbar__gold-pill" title={`${gold} tokens total`}>
-        <CoinIcon aria-hidden="true" />
-        {formatTokens(gold)}
-      </span>
-
-      <span className="topbar__vanquished-pill">
-        <CheckIcon aria-hidden="true" />
-        {done} / {total} vanquished
-      </span>
-
-      {/* WF-042 fleet-health line — replaces the old dedicated questing
-          pill (Decisions: single live-count source, folded in rather than
-          duplicated). `topCtx`/`nearThreshold` segments are omitted
-          gracefully when there's no pct data to report — never a
-          "top ctx null%" or a noisy "0 near threshold". */}
-      <button
-        type="button"
-        className="topbar__fleet-pill"
-        onClick={onOpenParty}
-      >
-        <span className="topbar__fleet-icon" aria-hidden="true">
-          ⚔
-        </span>
-        {questingCount} questing
-        {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
-        {fleet.nearThreshold > 0 && (
-          <> · {fleet.nearThreshold} near threshold</>
+        {onClear && (
+          <button
+            type="button"
+            className="topbar-clear danger"
+            onClick={onClear}
+            title="Clear this repo's data"
+          >
+            Clear…
+          </button>
         )}
-      </button>
-    </header>
+        <BranchFilter
+          branches={branches}
+          activeBranch={activeBranch}
+          onSelect={onSelectBranch}
+        />
+
+        <div className="topbar__threshold">
+          <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
+        </div>
+
+        {limits?.five_hour?.used_percentage !== undefined && (
+          <span className="topbar__pill" title="5h window">
+            ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
+          </span>
+        )}
+        {limits?.seven_day?.used_percentage !== undefined && (
+          <span className="topbar__pill" title="7d window">
+            ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
+          </span>
+        )}
+
+        <button
+          type="button"
+          className="topbar__refresh"
+          onClick={onRefresh}
+          disabled={refreshing}
+        >
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+
+        <label className="topbar__archive-toggle">
+          <input
+            type="checkbox"
+            checked={showArchive}
+            onChange={onToggleArchive}
+          />
+          Archive
+        </label>
+
+        {quarantinedCount > 0 && (
+          <span className="topbar__quarantine-banner">
+            {quarantinedCount} quarantined — see archive/corrupt
+          </span>
+        )}
+
+        <span className="topbar__gold-pill" title={`${gold} tokens total`}>
+          <CoinIcon aria-hidden="true" />
+          {formatTokens(gold)}
+        </span>
+
+        <span className="topbar__vanquished-pill">
+          <CheckIcon aria-hidden="true" />
+          {done} / {total} vanquished
+        </span>
+
+        {/* WF-042 fleet-health line — replaces the old dedicated questing
+            pill (Decisions: single live-count source, folded in rather than
+            duplicated). `topCtx`/`nearThreshold` segments are omitted
+            gracefully when there's no pct data to report — never a
+            "top ctx null%" or a noisy "0 near threshold". */}
+        <button
+          type="button"
+          className="topbar__fleet-pill"
+          onClick={onOpenParty}
+        >
+          <span className="topbar__fleet-icon" aria-hidden="true">
+            ⚔
+          </span>
+          {questingCount} questing
+          {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
+          {fleet.nearThreshold > 0 && (
+            <> · {fleet.nearThreshold} near threshold</>
+          )}
+        </button>
+      </header>
+      {/* Task 10: NewCardDialog is a sibling of `<header>`, not nested
+          inside it — same "modal is App/TopBar state, rendered outside the
+          layout element it was opened from" precedent as ClearDialog. */}
+      <NewCardDialog
+        open={newCardOpen}
+        onClose={() => setNewCardOpen(false)}
+        mutate={mutate}
+      />
+    </>
   );
 }
 

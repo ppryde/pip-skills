@@ -11,6 +11,7 @@ directly below to compute the launch root's OWN main-repo root, matching how
 """
 from __future__ import annotations
 
+import hmac
 import os
 import re
 import sys
@@ -18,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -84,6 +85,18 @@ class ClaimBody(BaseModel):
 class ClearBody(BaseModel):
     scope: str = "repo"
     root: str | None = None
+
+
+class CreateBody(BaseModel):
+    title: str
+    complexity: str | None = None
+    labels: list[str] = []
+    goal: str | None = None
+
+
+class EditBody(BaseModel):
+    title: str | None = None
+    body: str | None = None
 
 
 def _context_pct(root: Path) -> int | None:
@@ -347,17 +360,37 @@ def _mutation_error(exc: CliError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# Public (fix-up, PR3 dual review): the launcher (`serve.py`) needs this SAME
+# set to decide whether a bind is tokenless — it used to keep its own
+# identical copy, a duplicate-source-of-truth risk for the auth boundary.
+# `serve.py` imports this constant rather than redefining it.
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _is_loopback(host: str) -> bool:
-    return host in _LOOPBACK_HOSTS
+    return host in LOOPBACK_HOSTS
 
 
-def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None) -> FastAPI:
+def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None,
+               token: str | None = None) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
     launch_host = host
+
+    def require_token(x_overseer_token: str | None = Header(default=None)) -> None:
+        """Gate mutating routes when a token is in effect.
+
+        Inactive when ``token`` is None (default: loopback bind, no env var) —
+        preserves the pre-auth open behaviour and every existing test. When a
+        token exists, the request must carry a matching ``X-Overseer-Token``
+        header (constant-time compare) or the mutation is refused 401. Reads
+        never depend on this.
+        """
+        if token is None:
+            return
+        supplied = x_overseer_token or ""
+        if not hmac.compare_digest(supplied, token):
+            raise HTTPException(status_code=401, detail="missing or invalid dashboard token")
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -423,6 +456,25 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         effective = _resolve_root(launch_root, _derived_launch_root, root)
         return {"sessions": _sessions_list(effective)}
 
+    @app.post("/api/card", dependencies=[Depends(require_token)])
+    def create_card(body: CreateBody, root: str | None = None) -> dict[str, Any]:
+        if not body.title.strip():
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        args = ["new-card", "--title", body.title]
+        if body.complexity:
+            args += ["--complexity", body.complexity]
+        if body.labels:
+            args += ["--labels", ",".join(body.labels)]
+        if body.goal:
+            args += ["--goal", body.goal]
+        try:
+            out = run_overseer(effective, *args)
+        except CliError as exc:
+            raise _mutation_error(exc) from exc
+        card_id = out.strip()
+        return {"card_id": card_id, **_board_response(effective)}
+
     @app.get("/api/card/{card_id}")
     def get_card(card_id: str, root: str | None = None) -> Any:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
@@ -432,7 +484,26 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         except CliError as exc:
             raise _show_error(exc) from exc
 
-    @app.post("/api/card/{card_id}/order")
+    @app.post("/api/card/{card_id}", dependencies=[Depends(require_token)])
+    def edit_card(card_id: str, body: EditBody, root: str | None = None) -> dict[str, Any]:
+        if body.title is None and body.body is None:
+            raise HTTPException(status_code=400, detail="title or body required")
+        if body.title is not None and not body.title.strip():
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            args = ["set-field", card_id]
+            if body.title is not None:
+                args += ["--title", body.title]
+            if body.body is not None:
+                args += ["--body", body.body]
+            run_overseer(effective, *args)
+
+        return _mutate(do, effective)
+
+    @app.post("/api/card/{card_id}/order", dependencies=[Depends(require_token)])
     def set_order(card_id: str, body: OrderBody, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -442,7 +513,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/priority")
+    @app.post("/api/card/{card_id}/priority", dependencies=[Depends(require_token)])
     def set_priority(card_id: str, body: PriorityBody, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -453,7 +524,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/labels")
+    @app.post("/api/card/{card_id}/labels", dependencies=[Depends(require_token)])
     def set_labels(card_id: str, body: LabelsBody, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -463,7 +534,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/parent")
+    @app.post("/api/card/{card_id}/parent", dependencies=[Depends(require_token)])
     def set_parent(card_id: str, body: ParentBody, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -476,7 +547,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/depends")
+    @app.post("/api/card/{card_id}/depends", dependencies=[Depends(require_token)])
     def set_depends(card_id: str, body: DependsBody, root: str | None = None) -> dict[str, Any]:
         if body.on is None and body.off is None:
             raise HTTPException(status_code=400, detail="on or off required")
@@ -495,7 +566,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/park")
+    @app.post("/api/card/{card_id}/park", dependencies=[Depends(require_token)])
     def park_card(card_id: str, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -505,7 +576,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/unpark")
+    @app.post("/api/card/{card_id}/unpark", dependencies=[Depends(require_token)])
     def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -515,7 +586,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/claim")
+    @app.post("/api/card/{card_id}/claim", dependencies=[Depends(require_token)])
     def claim_card(card_id: str, body: ClaimBody, root: str | None = None) -> dict[str, Any]:
         session_id = body.session_id
         if not session_id:
@@ -528,7 +599,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/unclaim")
+    @app.post("/api/card/{card_id}/unclaim", dependencies=[Depends(require_token)])
     def unclaim_card(card_id: str, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -538,7 +609,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/card/{card_id}/move")
+    @app.post("/api/card/{card_id}/move", dependencies=[Depends(require_token)])
     def move_card(card_id: str, body: MoveBody, root: str | None = None) -> dict[str, Any]:
         """Dispatch table — overseer has no unified set-status verb.
 
@@ -578,7 +649,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do_status, effective)
 
-    @app.post("/api/config/threshold")
+    @app.post("/api/config/threshold", dependencies=[Depends(require_token)])
     def set_threshold(body: ThresholdBody, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
@@ -587,7 +658,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
-    @app.post("/api/repo/clear")
+    @app.post("/api/repo/clear", dependencies=[Depends(require_token)])
     def clear_repo(body: ClearBody) -> dict[str, Any]:
         if body.scope not in ("cards", "repo"):
             raise HTTPException(status_code=400, detail=f"unknown clear scope: {body.scope!r}")

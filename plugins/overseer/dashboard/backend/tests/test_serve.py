@@ -60,6 +60,7 @@ def test_parse_args_help_exits_cleanly(capsys: pytest.CaptureFixture[str]) -> No
 def test_main_builds_app_from_resolved_root_and_runs_uvicorn(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.delenv("OVERSEER_DASHBOARD_TOKEN", raising=False)
     sentinel_app = object()
     fake_create_app = MagicMock(return_value=sentinel_app)
     fake_run = MagicMock()
@@ -70,11 +71,14 @@ def test_main_builds_app_from_resolved_root_and_runs_uvicorn(
     rc = serve.main(["--root", str(tmp_path), "--port", "9001", "--no-browser"])
 
     assert rc == 0
-    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="127.0.0.1")
+    # loopback bind, no env token → token stays None (no friction for the
+    # common single-user case)
+    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="127.0.0.1", token=None)
     fake_run.assert_called_once_with(sentinel_app, host="127.0.0.1", port=9001)
 
 
 def test_main_passes_through_custom_host(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("OVERSEER_DASHBOARD_TOKEN", raising=False)
     fake_create_app = MagicMock(return_value=object())
     fake_run = MagicMock()
     monkeypatch.setattr(serve, "create_app", fake_create_app)
@@ -83,7 +87,13 @@ def test_main_passes_through_custom_host(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     serve.main(["--root", str(tmp_path), "--host", "0.0.0.0", "--port", "8080", "--no-browser"])
 
-    fake_create_app.assert_called_once_with(tmp_path.resolve(), host="0.0.0.0")
+    # non-loopback bind, no env token → a token is auto-generated (never
+    # tokenless off localhost)
+    assert fake_create_app.call_count == 1
+    args, kwargs = fake_create_app.call_args
+    assert args == (tmp_path.resolve(),)
+    assert kwargs["host"] == "0.0.0.0"
+    assert kwargs["token"]
     fake_run.assert_called_once_with(fake_run.call_args.args[0], host="0.0.0.0", port=8080)
 
 
@@ -134,3 +144,36 @@ def test_open_browser_swallows_exceptions(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(serve.webbrowser, "open", _raise)
 
     serve._open_browser("http://127.0.0.1:8770/")  # must not raise
+
+
+# --- token resolution ---------------------------------------------------
+
+
+def test_resolve_token_none_on_loopback_without_env(monkeypatch) -> None:
+    monkeypatch.delenv("OVERSEER_DASHBOARD_TOKEN", raising=False)
+    assert serve.resolve_token("127.0.0.1") is None
+
+
+def test_resolve_token_env_wins(monkeypatch) -> None:
+    monkeypatch.setenv("OVERSEER_DASHBOARD_TOKEN", "fixed-tok")
+    assert serve.resolve_token("127.0.0.1") == "fixed-tok"
+
+
+def test_resolve_token_autogen_on_non_loopback(monkeypatch) -> None:
+    monkeypatch.delenv("OVERSEER_DASHBOARD_TOKEN", raising=False)
+    tok = serve.resolve_token("0.0.0.0")
+    assert tok and len(tok) >= 20
+
+
+def test_main_passes_token_to_create_app(monkeypatch) -> None:
+    monkeypatch.setenv("OVERSEER_DASHBOARD_TOKEN", "abc123")
+    captured = {}
+
+    def fake_create_app(root, *, host, token=None):
+        captured["token"] = token
+        return MagicMock()
+
+    monkeypatch.setattr(serve, "create_app", fake_create_app)
+    monkeypatch.setattr(serve.uvicorn, "run", MagicMock())
+    serve.main(["--no-browser"])
+    assert captured["token"] == "abc123"

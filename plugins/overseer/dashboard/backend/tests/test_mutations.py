@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.cli_client import run_overseer
+from app.main import create_app
 
 
 def _new_card(root: Path, title: str = "T") -> str:
@@ -14,6 +16,10 @@ def _new_card(root: Path, title: str = "T") -> str:
 
 def _show(root: Path, card_id: str) -> dict:
     return run_overseer(root, "show", card_id, "--json", json_out=True)  # type: ignore[no-any-return]
+
+
+def _gated_client(root: Path, token: str = "s3cret") -> TestClient:
+    return TestClient(create_app(root, token=token))
 
 
 def test_order(client: TestClient, root: Path) -> None:
@@ -213,3 +219,131 @@ def test_move_status_dispatch_parked_and_abandoned(client: TestClient, root: Pat
     # abandon archives the card; the board still lists it, now "abandoned".
     cards = {c["id"]: c for c in resp.json()["board"]["cards"]}
     assert cards[abandoned_id]["status"] == "abandoned"
+
+
+def test_gate_open_when_no_token(client: TestClient, root: Path) -> None:
+    card_id = _new_card(root)
+    # default `client` fixture builds create_app(root) with token=None
+    assert client.post(f"/api/card/{card_id}/park").status_code == 200
+
+
+def test_gate_rejects_missing_token(root: Path) -> None:
+    card_id = _new_card(root)
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{card_id}/park")
+    assert resp.status_code == 401
+
+
+def test_gate_rejects_wrong_token(root: Path) -> None:
+    card_id = _new_card(root)
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{card_id}/park", headers={"X-Overseer-Token": "nope"})
+    assert resp.status_code == 401
+
+
+def test_gate_accepts_correct_token(root: Path) -> None:
+    card_id = _new_card(root)
+    gc = _gated_client(root)
+    resp = gc.post(f"/api/card/{card_id}/park", headers={"X-Overseer-Token": "s3cret"})
+    assert resp.status_code == 200
+
+
+def test_gate_leaves_reads_open(root: Path) -> None:
+    gc = _gated_client(root)
+    assert gc.get("/api/board").status_code == 200  # no token, still 200
+
+
+def test_create_card(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/card", json={"title": "Fresh card", "complexity": "M"})
+    assert resp.status_code == 200
+    new_id = resp.json()["card_id"]
+    assert new_id  # minted id echoed
+    assert _show(root, new_id)["title"] == "Fresh card"
+    assert new_id in {c["id"] for c in resp.json()["board"]["cards"]}
+
+
+def test_create_card_with_labels(client: TestClient, root: Path) -> None:
+    resp = client.post("/api/card", json={"title": "Tagged", "labels": ["policy", "arch"]})
+    assert resp.status_code == 200
+    assert _show(root, resp.json()["card_id"])["labels"] == ["policy", "arch"]
+
+
+def test_create_card_missing_title(client: TestClient, root: Path) -> None:
+    assert client.post("/api/card", json={"complexity": "S"}).status_code == 422  # pydantic required
+
+
+def test_create_card_empty_title(client: TestClient, root: Path) -> None:
+    assert client.post("/api/card", json={"title": "  "}).status_code == 400
+
+
+def test_edit_title(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    resp = client.post(f"/api/card/{cid}", json={"title": "Renamed"})
+    assert resp.status_code == 200
+    assert _show(root, cid)["title"] == "Renamed"
+
+
+def test_edit_body(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    resp = client.post(f"/api/card/{cid}", json={"body": "## Goal\nnew body"})
+    assert resp.status_code == 200
+    assert _show(root, cid)["body"] == "## Goal\nnew body"
+
+
+def test_edit_title_and_body(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    resp = client.post(f"/api/card/{cid}", json={"title": "Both", "body": "x"})
+    assert resp.status_code == 200
+    detail = _show(root, cid)
+    assert detail["title"] == "Both" and detail["body"] == "x"
+
+
+def test_edit_empty_title_rejected(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    assert client.post(f"/api/card/{cid}", json={"title": ""}).status_code == 400
+
+
+def test_edit_requires_a_field(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    assert client.post(f"/api/card/{cid}", json={}).status_code == 400
+
+
+def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -> None:
+    """Meta-test / safety net (fix-up, PR3 dual review): walks the app's OWN
+    route table rather than a hardcoded route list, so it also covers routes
+    added AFTER this test was written. Every mutating ``POST /api/...`` route
+    must be gated by ``require_token`` (see ``create_app``'s inner
+    ``require_token`` closure), and no ``GET`` route may carry that gate
+    (reads stay open even when a token is configured — see
+    ``test_gate_leaves_reads_open`` above). ``require_token`` is a closure
+    defined inside ``create_app`` (a fresh function object per app instance),
+    so a dependency can't be matched by identity/import — matching by
+    ``__name__`` is the only stable way to recognize it from outside.
+
+    This passes today because every existing POST route is already gated;
+    it exists to FAIL the day a new route (or an edit to an existing one)
+    drops the dependency.
+    """
+    app = create_app(root, token="s3cret")
+
+    checked_post = 0
+    checked_get = 0
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or not route.path.startswith("/api"):
+            continue
+        gated = any(
+            getattr(dep.call, "__name__", None) == "require_token"
+            for dep in route.dependant.dependencies
+        )
+        if "POST" in route.methods:
+            checked_post += 1
+            assert gated, f"POST {route.path} is missing the require_token gate"
+        if "GET" in route.methods:
+            checked_get += 1
+            assert not gated, f"GET {route.path} unexpectedly carries the require_token gate"
+
+    # Sanity: the walk actually found routes on both sides — an empty
+    # app.routes (or a routing regression that dropped everything under
+    # /api) would make every assertion above vacuously true.
+    assert checked_post >= 14
+    assert checked_get >= 4

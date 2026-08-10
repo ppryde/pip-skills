@@ -61,13 +61,22 @@ describe("<StatusMenu/>", () => {
     expect(move).toHaveBeenCalledWith("WF-1", { status: "done" });
   });
 
-  it("abandon calls move(id, {status:'abandoned'})", () => {
+  it("abandon asks for confirmation before calling move(id, {status:'abandoned'})", () => {
     vi.mocked(move).mockResolvedValue(BOARD_RESPONSE);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     const mutate = makeMutate();
     render(
       <StatusMenu cardId="WF-1" status="planned" mutate={mutate} inFlight={false} />
     );
     // WF-046 item 4: abandon's button now reads "Forsake" (themed relabel).
+    // Destructive archive — declining the confirm is a true no-op.
+    fireEvent.click(screen.getByRole("button", { name: /^forsake$/i }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
+
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: /^forsake$/i }));
 
     expect(move).toHaveBeenCalledWith("WF-1", { status: "abandoned" });

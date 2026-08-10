@@ -26,7 +26,19 @@ export interface UseBoardResult {
   error: string | null;
   inFlight: boolean;
   refresh: () => Promise<void>;
-  mutate: (fn: () => Promise<BoardResponse>) => Promise<void>;
+  /** `opts.rethrow` (Task 10 fix-up): DEFAULT false — swallows a rejection
+   *  from `fn()` into `error` (the global banner) exactly as before, never
+   *  rejects the returned promise. `rethrow: true` is opt-in for callers
+   *  that show their OWN inline error (e.g. NewCardDialog): on rejection it
+   *  skips `setError` (avoids double-surfacing the same failure in both an
+   *  inline message and the global banner) and rethrows so the caller's own
+   *  `catch` fires. The in-flight lock still clears unconditionally in
+   *  `finally` either way, and the success path (`applyResponse`) is
+   *  unchanged by this option. */
+  mutate: (
+    fn: () => Promise<BoardResponse>,
+    opts?: { rethrow?: boolean }
+  ) => Promise<void>;
   /** Board wires this from dnd-kit's onDragStart/onDragEnd/onDragCancel so
    *  the poll loop pauses for the duration of a drag. Ref-backed (not
    *  state) so the setInterval tick always reads the latest value without
@@ -161,7 +173,8 @@ export function useBoard(
   }, [load]);
 
   const mutate = useCallback(
-    async (fn: () => Promise<BoardResponse>) => {
+    async (fn: () => Promise<BoardResponse>, opts?: { rethrow?: boolean }) => {
+      const rethrow = opts?.rethrow ?? false;
       const id = ++requestIdRef.current;
       inFlightRef.current = true;
       setInFlight(true);
@@ -173,6 +186,11 @@ export function useBoard(
           setError(null);
         }
       } catch (e) {
+        if (rethrow) {
+          // Caller owns error display (e.g. an inline dialog message) —
+          // don't ALSO set the global banner for the same failure.
+          throw e;
+        }
         if (id === requestIdRef.current) {
           setError(e instanceof Error ? e.message : String(e));
         }

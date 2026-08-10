@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCard } from "../api/client";
+import { editCard, getCard, setLabels } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -16,7 +16,7 @@ import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
 import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
-import LabelChips from "./LabelChips";
+import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
 
 export interface CardDetailDrawerProps {
@@ -98,6 +98,22 @@ function CardDetailDrawer({
   // never carries the previous card's "source" toggle forward.
   const [view, setView] = useState<"rendered" | "source">("rendered");
 
+  // Title/body edit mode (Task 8) — local drafts, seeded from `detail` and
+  // reset (below) whenever the shown card changes, so switching cards never
+  // leaks a draft from the previous card into the new one.
+  const [editing, setEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [bodyDraft, setBodyDraft] = useState("");
+  // Fix-up (dual review, PR3): `busy` + `editError` mirror NewCardDialog's
+  // own local state — `mutate`'s default swallow-and-refresh behavior would
+  // otherwise exit edit mode and drop the draft on a FAILED save (see
+  // `saveEdit` below). `busy` is a synchronous in-flight guard distinct from
+  // the `inFlight` prop (which only updates once `mutate` has set React
+  // state), so a rapid double-click of Save can't fire two overlapping
+  // `editCard` calls.
+  const [busy, setBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   // Monotonic counter, same pattern as useBoard's requestIdRef: a response is
   // only applied if its id is still the latest issued when it resolves.
   const requestIdRef = useRef(0);
@@ -149,6 +165,61 @@ function CardDetailDrawer({
       fetchDetail(cardId);
     }
   }, [cardId, fetchDetail]);
+
+  // Reset the title/body edit drafts (and exit edit mode) whenever the
+  // shown card changes — a switch to a different card, or a refetch that
+  // brings back updated content after a save, both land here so a draft
+  // never leaks across cards and a completed save falls back to the read
+  // view once the refreshed detail arrives.
+  useEffect(() => {
+    if (!detail) return;
+    setTitleDraft(detail.title);
+    setBodyDraft(detail.body);
+    setEditing(false);
+    setEditError(null);
+  }, [detail?.id, detail?.title, detail?.body]);
+
+  const cancelEdit = () => {
+    if (detail) {
+      setTitleDraft(detail.title);
+      setBodyDraft(detail.body);
+    }
+    setEditing(false);
+    setEditError(null);
+  };
+
+  // Same routing as every other drawer control (PrioritySelect/LinkEditor/
+  // ClaimControl/LabelEditor's onSave above): the save goes THROUGH
+  // `useBoard().mutate` — never a direct `editCard` call — so the shared
+  // board state (and thus TileShell's tiles) updates immediately, then
+  // `refetchDetail` (the SAME counter-guarded closure those siblings pass
+  // as `onMutated`) refreshes the drawer's own detail.
+  //
+  // Fix-up (dual review, PR3): `{ rethrow: true }`, same as NewCardDialog's
+  // `submit()` — DEFAULT `mutate` swallows a rejection into the global error
+  // banner and still resolves, which used to mean a FAILED save fell through
+  // to `setEditing(false)` + `refetchDetail()` unconditionally: edit mode
+  // silently closed and the user's unsaved draft was discarded. Now a
+  // rejection is caught here, edit mode stays open, both drafts are left
+  // exactly as the user typed them, and an inline error renders below the
+  // textarea — success is the only path that closes edit mode.
+  const saveEdit = async () => {
+    if (!detail || !titleDraft.trim() || busy) return;
+    setBusy(true);
+    setEditError(null);
+    try {
+      await mutate(
+        () => editCard(detail.id, { title: titleDraft.trim(), body: bodyDraft }),
+        { rethrow: true }
+      );
+      setEditing(false);
+      refetchDetail();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (cardId === null) return;
@@ -229,7 +300,26 @@ function CardDetailDrawer({
                   </span>
                 )}
               </div>
-              <h2 className="card-drawer__title">{detail.title}</h2>
+              {editing ? (
+                <input
+                  aria-label="title"
+                  className="card-drawer__title-input"
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                />
+              ) : (
+                <div className="card-drawer__title-row">
+                  <h2 className="card-drawer__title">{detail.title}</h2>
+                  <button
+                    type="button"
+                    className="card-drawer__edit-btn"
+                    onClick={() => setEditing(true)}
+                    disabled={inFlight}
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
               <div className="card-drawer__facts">
                 <span
                   className={`card-drawer__status-fact card-drawer__status-fact--${accentKey}`}
@@ -268,10 +358,23 @@ function CardDetailDrawer({
                   </span>
                 )}
               </div>
-              {/* Label chips (F1, WF-058) — self-gates to nothing when the
-                  card carries no labels. Its own row below the facts line so
-                  it never crowds the priority/budget/hero chips there. */}
-              <LabelChips labels={detail.labels} className="card-drawer__labels" />
+              {/* Editable labels (F1, WF-058) — its own row below the facts
+                  line so it never crowds the priority/budget/hero chips
+                  there. Routes through `useBoard().mutate` (the SAME
+                  single-mutation-entrypoint `mutate` prop PrioritySelect/
+                  LinkEditor/ClaimControl use — see wf005-context.md) so the
+                  shared board state updates instantly, same as every other
+                  drawer control, then calls `refetchDetail` — the SAME
+                  counter-guarded closure those siblings pass as their own
+                  `onMutated` — so the drawer's own detail view refreshes
+                  too. */}
+              <LabelEditor
+                labels={detail.labels ?? []}
+                onSave={async (labels) => {
+                  await mutate(() => setLabels(detail.id, labels));
+                  refetchDetail();
+                }}
+              />
             </header>
 
             <div className="card-drawer__controls">
@@ -354,30 +457,68 @@ function CardDetailDrawer({
               </>
             )}
 
-            {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
-                view state stays "rendered"/"source" (aria-pressed/state
-                mechanics byte-identical); only the VISIBLE labels changed. */}
-            <div
-              className="card-drawer__viewtoggle"
-              role="group"
-              aria-label="Body view"
-            >
-              <button
-                type="button"
-                aria-pressed={view === "rendered"}
-                onClick={() => setView("rendered")}
-              >
-                Quest
-              </button>
-              <button
-                type="button"
-                aria-pressed={view === "source"}
-                onClick={() => setView("source")}
-              >
-                Scroll <span className="card-drawer__md-badge">MD</span>
-              </button>
-            </div>
-            <div className="card-drawer__body">
+            {/* Title/body edit mode (Task 8) — replaces the Quest|Scroll tab
+                bar + body panel with a raw-markdown textarea + Save/Cancel
+                while editing; the read views below render unchanged
+                otherwise. Save routes through `mutate` (see `saveEdit`
+                above), exactly like every other drawer control. */}
+            {editing ? (
+              <div className="card-drawer__edit-body">
+                <textarea
+                  aria-label="body"
+                  className="card-drawer__body-textarea"
+                  value={bodyDraft}
+                  onChange={(e) => setBodyDraft(e.target.value)}
+                  rows={14}
+                />
+                {editError && (
+                  <p className="card-drawer__edit-error" role="alert">
+                    {editError}
+                  </p>
+                )}
+                <div className="card-drawer__edit-actions">
+                  <button
+                    type="button"
+                    onClick={() => void saveEdit()}
+                    disabled={busy || inFlight || !titleDraft.trim()}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelEdit}
+                    disabled={busy || inFlight}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
+                    view state stays "rendered"/"source" (aria-pressed/state
+                    mechanics byte-identical); only the VISIBLE labels changed. */}
+                <div
+                  className="card-drawer__viewtoggle"
+                  role="group"
+                  aria-label="Body view"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={view === "rendered"}
+                    onClick={() => setView("rendered")}
+                  >
+                    Quest
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={view === "source"}
+                    onClick={() => setView("source")}
+                  >
+                    Scroll <span className="card-drawer__md-badge">MD</span>
+                  </button>
+                </div>
+                <div className="card-drawer__body">
               {view === "source" ? (
                 <pre className="card-drawer__source" data-testid="card-source">{detail.body}</pre>
               ) : sectionEntries.length > 0 ? (
@@ -430,7 +571,9 @@ function CardDetailDrawer({
               ) : (
                 <MarkdownView text={detail.body} />
               )}
-            </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </aside>

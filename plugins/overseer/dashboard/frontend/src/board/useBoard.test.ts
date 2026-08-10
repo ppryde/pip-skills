@@ -80,6 +80,103 @@ describe("useBoard.mutate() in-flight lock", () => {
   });
 });
 
+describe("useBoard.mutate() rethrow option (Task 10 fix-up)", () => {
+  it("default (no opts) swallows a rejection: sets the global error, resolves (does not reject), clears inFlight", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      // No throw expected — mutate() must resolve normally even though
+      // fn() rejected, exactly as before this option existed.
+      await result.current.mutate(() => Promise.reject(new Error("boom")));
+    });
+
+    expect(result.current.error).toBe("boom");
+    expect(result.current.inFlight).toBe(false);
+  });
+
+  it("rethrow: false behaves identically to the default (explicit opt-out is a no-op)", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.mutate(
+        () => Promise.reject(new Error("boom")),
+        { rethrow: false }
+      );
+    });
+
+    expect(result.current.error).toBe("boom");
+    expect(result.current.inFlight).toBe(false);
+  });
+
+  it("rethrow: true propagates the rejection to the caller AND does NOT set the global error state", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.mutate(
+          () => Promise.reject(new Error("boom")),
+          { rethrow: true }
+        );
+      } catch (e) {
+        caught = e;
+      }
+    });
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("boom");
+    // The caller owns error display for a rethrown failure — no
+    // double-surfacing in the global banner too.
+    expect(result.current.error).toBeNull();
+  });
+
+  it("rethrow: true still clears the in-flight lock on rejection (finally runs regardless)", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current
+        .mutate(() => Promise.reject(new Error("boom")), { rethrow: true })
+        .catch(() => {});
+    });
+
+    expect(result.current.inFlight).toBe(false);
+  });
+
+  it("rethrow: true leaves the success path unchanged — applies the returned board and clears error", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValueOnce(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.mutate(() => Promise.resolve(boardResponse(42)), {
+        rethrow: true,
+      });
+    });
+
+    expect(result.current.context?.pct).toBe(42);
+    expect(result.current.error).toBeNull();
+    expect(result.current.inFlight).toBe(false);
+  });
+});
+
 describe("useBoard background polling (5s, paused during drag/mutation)", () => {
   beforeEach(() => {
     vi.resetAllMocks();

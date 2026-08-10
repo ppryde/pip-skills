@@ -160,6 +160,25 @@ export interface ClaimBody {
   session_id: string;
 }
 
+/** POST /api/card body — creates a new card. */
+export interface CreateCardBody {
+  title: string;
+  complexity?: string | null;
+  labels?: string[];
+  goal?: string | null;
+}
+
+/** POST /api/card/{id} body — edits an existing card's title/body markdown. */
+export interface EditCardBody {
+  title?: string;
+  body?: string;
+}
+
+/** POST /api/card response — the usual board payload plus the new card's id. */
+export interface CreateCardResponse extends BoardResponse {
+  card_id: string;
+}
+
 /** POST /api/card/{id}/labels body (F1, WF-058). */
 export interface LabelsBody {
   labels: string[];

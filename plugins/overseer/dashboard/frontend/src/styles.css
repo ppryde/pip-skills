@@ -638,6 +638,36 @@ body {
   box-shadow: none;
 }
 
+/* Task 10: "＋ New card" control, beside the repo selector. Same Role-A
+   wobble shape/paint as `.topbar__refresh` — a positive, non-destructive
+   action, so no recolor (contrast `.topbar-clear.danger` below). */
+.topbar__new-card {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.topbar__new-card:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.topbar__new-card:active {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
 /* Task 7: Clear-data control, beside the repo selector. Same Role-A wobble
    shape as `.topbar__refresh` above, but recolored red — `.danger` alone
    only reaches inside `.clear-dialog` (see `.clear-dialog .danger`), so this
@@ -1445,10 +1475,12 @@ body {
   border: 1px solid var(--qb-line-dashed);
 }
 
-/* Label chips (F1, WF-058) — shared by the tile (`.card-tile__labels`) and
-   the drawer (`.card-drawer__labels`) wrappers below. Colour is ALWAYS the
-   per-label `.label-chip--<key>` modifier (board/labelColor.ts's stable
-   hash -> palette key), never an inline style — same chip-formula shape as
+/* Label chips (F1, WF-058) — the base pill shared by the read-only tile
+   wrapper (`.card-tile__labels`, below) and the drawer's editable
+   `.label-editor__chip` (further down, alongside `.label-editor`'s other
+   rules) — both apply `.label-chip--<key>`. Colour is ALWAYS the per-label
+   `.label-chip--<key>` modifier (board/labelColor.ts's stable hash ->
+   palette key), never an inline style — same chip-formula shape as
    `.branch-chip` (pale bg / saturated text / medium border) so a label chip
    reads as a sibling of the other tile chips, not a foreign element. */
 .label-chips {
@@ -1532,10 +1564,82 @@ body {
   overflow-y: auto;
 }
 
-/* Drawer placement: its own row below the facts line, never sharing that
-   row's `gap` with the priority/budget/hero chips. */
-.card-drawer__labels {
+/* Editable label control (F1 fold-in, WF-058) — drawer-only, replaces the
+   read-only `.card-drawer__labels` wrapper that used to sit here (now
+   removed — `LabelEditor` is the sole drawer label renderer). Its own row
+   below the facts line, never sharing that row's `gap` with the
+   priority/budget/hero chips (same placement the old wrapper had). Each
+   chip keeps the base `.label-chip--<key>` palette (above) — only the
+   layout needed for the inline remove glyph, and the add-input, are new
+   here. The remove glyph reuses `.link-editor__deps-list button`'s
+   currentColor + color-mix trick so it tints itself to whichever palette
+   key the chip landed on, without a rule per key. */
+.label-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
   margin-top: 0.5rem;
+}
+
+.label-editor__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  /* .label-chip's ellipsis-and-clip sizing is tuned for a bare text pill;
+     override it here so the remove glyph never gets clipped. */
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.label-editor__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-weight: 700;
+  font-size: 0.65rem;
+  line-height: 1;
+  border: none;
+  border-radius: var(--qb-radius-circle);
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
+  cursor: pointer;
+  transition: background-color var(--qb-motion-hover) ease;
+}
+
+.label-editor__remove:hover {
+  background: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.label-editor__remove:active {
+  background: color-mix(in srgb, currentColor 44%, transparent);
+}
+
+.label-editor__input {
+  font: inherit;
+  font-size: 0.75rem;
+  border: 1.5px dashed var(--qb-line-dashed);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.05rem 0.4rem;
+  background: transparent;
+  color: var(--qb-ink-500);
+  min-width: 6rem;
+}
+
+.label-editor__input:hover,
+.label-editor__input:focus {
+  border-color: var(--qb-btn-ink-hover);
+  outline: none;
+}
+
+.label-editor__input::placeholder {
+  color: var(--qb-ink-400);
 }
 
 .badge--blocked {
@@ -1739,6 +1843,113 @@ body {
   font-weight: 800;
   font-size: 30px;
   color: var(--qb-ink-900);
+}
+
+/* Title/body edit mode (Task 8) — the title row pairs the read-only <h2>
+   with its Edit button; the input replaces the row entirely while editing
+   (see CardDetailDrawer's `editing` conditional). */
+.card-drawer__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.card-drawer__title-input {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0 0.5rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.1rem 0.4rem;
+}
+
+.card-drawer__title-input:focus {
+  outline: none;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+/* Same Role A button system as `.claim-control button` (task-12) — the
+   Edit/Save/Cancel controls are just another drawer action, not a new
+   button style. */
+.card-drawer__edit-btn,
+.card-drawer__edit-actions button {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-3);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.card-drawer__edit-btn:hover:not(:disabled),
+.card-drawer__edit-actions button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.card-drawer__edit-btn:active:not(:disabled),
+.card-drawer__edit-actions button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.card-drawer__edit-btn:disabled,
+.card-drawer__edit-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+.card-drawer__edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card-drawer__body-textarea {
+  width: 100%;
+  min-height: 14rem;
+  font-family: var(--qb-font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-line-dashed);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.6rem;
+  resize: vertical;
+}
+
+.card-drawer__body-textarea:focus {
+  outline: none;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.card-drawer__edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Same danger-red exception as .card-drawer__status--error above — a failed
+   saveEdit() keeps edit mode open and surfaces inline here (fix-up, PR3
+   dual review) rather than silently discarding the draft. */
+.card-drawer__edit-error {
+  color: var(--legacy-color-b3261e);
+  font-size: 0.85rem;
+  margin: 0;
 }
 
 .card-drawer__facts {
@@ -2673,6 +2884,95 @@ body {
   border-color: #b00020;
 }
 
+/* "＋ New card" modal (Task 10) — rides the same .party-overlay/.party-sheet
+   backdrop as ClearDialog/the Party page; these rules only cover the bits
+   specific to its create form. */
+.new-card-dialog__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 24px;
+  color: var(--qb-party-text);
+}
+
+.new-card-field {
+  display: block;
+  margin: 0.75rem 0;
+  color: var(--qb-party-text);
+}
+
+.new-card-field input,
+.new-card-field select,
+.new-card-field textarea {
+  display: block;
+  margin-top: 0.35rem;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.new-card-field textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.new-card-error {
+  color: #b00020;
+}
+
+.new-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+
+/* Modal action buttons (NewCardDialog create/cancel + ClearDialog back/cancel)
+   adopt the shared Role A button system (see the --qb-btn-* tokens) — same as
+   the drawer edit / threshold / claim controls. Bare <button>s otherwise fall
+   back to raw browser default, visibly out of step with the rest of the board.
+   The destructive `.clear-dialog .danger` primary keeps its red fill (higher
+   specificity wins bg/color/border-color); here it only gains the shared
+   Role A shape so it lines up with its sibling. */
+.new-card-actions button,
+.clear-actions button {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-3);
+  border: 1.5px solid var(--qb-btn-ink);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.new-card-actions button,
+.clear-actions button:not(.danger) {
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+}
+
+.new-card-actions button:hover:not(:disabled),
+.clear-actions button:not(.danger):hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.new-card-actions button:active:not(:disabled),
+.clear-actions button:not(.danger):active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.new-card-actions button:disabled,
+.clear-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Hero card (HANDOFF: light card floating inside the dark sheet). */
 .hero-card {
   background: var(--qb-hero-card-bg);
@@ -3238,7 +3538,8 @@ body {
     height: 18px;
   }
 
-  .link-editor__deps-list button {
+  .link-editor__deps-list button,
+  .label-editor__remove {
     min-width: 32px;
     min-height: 32px;
   }
@@ -3253,7 +3554,8 @@ body {
   .priority-select,
   .claim-control select,
   .link-editor select,
-  .link-editor input {
+  .link-editor input,
+  .label-editor__input {
     font-size: 16px;
     min-height: 38px;
   }

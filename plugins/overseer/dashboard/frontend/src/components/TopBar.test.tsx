@@ -373,4 +373,20 @@ describe("<TopBar/>", () => {
     fireEvent.click(button);
     expect(onClear).toHaveBeenCalledTimes(1);
   });
+
+  // Task 10: "＋ New card" — TopBar owns the dialog's open state itself
+  // (no App-level prop needed) and hands it TopBar's own `mutate` prop.
+  it("renders no New card dialog until the New card button is clicked", () => {
+    render(<TopBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: /new card/i })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /new card/i })).not.toBeInTheDocument();
+  });
+
+  it("clicking the New card button opens NewCardDialog", () => {
+    render(<TopBar {...baseProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /new card/i }));
+
+    expect(screen.getByRole("dialog", { name: /new card/i })).toBeInTheDocument();
+  });
 });
