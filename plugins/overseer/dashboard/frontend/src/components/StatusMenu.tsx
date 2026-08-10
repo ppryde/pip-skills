@@ -52,6 +52,13 @@ function StatusMenu({
   }
 
   async function handleAbandon() {
+    // Destructive archive — guard with a confirm; declining sends NOTHING.
+    if (
+      !window.confirm(
+        "Forsake this card? It will be archived (reversible via unblock)."
+      )
+    )
+      return;
     await mutate(() => move(cardId, { status: "abandoned" }));
     onMutated?.();
   }
