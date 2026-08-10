@@ -14,14 +14,23 @@ const CREATE_RESPONSE = {
   limits: null,
 } as unknown as BoardResponse;
 
-// Same "live mutate double" shape as ThresholdControl.test.tsx/TopBar.test.tsx
-// — actually invokes the fn passed to it (unlike real useBoard.mutate, this
-// double lets a rejection inside fn() propagate out of mutate() itself, so
-// the dialog's own error handling is genuinely exercised).
+// Live mutate double, same family as ThresholdControl.test.tsx/TopBar.test.tsx
+// but honoring `{ rethrow }` exactly like the real useBoard.mutate (see
+// board/useBoard.ts): a rejection from fn() propagates out of mutate() ONLY
+// when the caller opted in with `{ rethrow: true }` — which is what
+// NewCardDialog always passes — so this double no longer diverges from
+// production behavior on the path under test.
 function makeMutate() {
-  return vi.fn(async (fn: () => Promise<BoardResponse>) => {
-    await fn();
-  });
+  return vi.fn(
+    async (fn: () => Promise<BoardResponse>, opts?: { rethrow?: boolean }) => {
+      try {
+        await fn();
+      } catch (e) {
+        if (opts?.rethrow) throw e;
+        // default: swallow, same as the real mutate()'s non-rethrow path.
+      }
+    }
+  );
 }
 
 function open(mutate = makeMutate()) {
@@ -52,14 +61,16 @@ describe("<NewCardDialog/>", () => {
     expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
   });
 
-  it("submitting a title routes the create through mutate, which invokes createCard, then closes", async () => {
+  it("submitting a title routes the create through mutate with rethrow:true, which invokes createCard, then closes on success", async () => {
     vi.mocked(createCard).mockResolvedValue(CREATE_RESPONSE as never);
     const { onClose, mutate } = open();
 
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Fresh" } });
     fireEvent.click(screen.getByRole("button", { name: /create/i }));
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledWith(expect.any(Function)));
+    await waitFor(() =>
+      expect(mutate).toHaveBeenCalledWith(expect.any(Function), { rethrow: true })
+    );
     expect(createCard).toHaveBeenCalledWith({ title: "Fresh" });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
@@ -98,16 +109,19 @@ describe("<NewCardDialog/>", () => {
     await waitFor(() => expect(createCard).toHaveBeenCalledWith({ title: "Fresh" }));
   });
 
-  it("shows an inline error and keeps the dialog open when mutate/createCard rejects", async () => {
+  it("shows a REAL inline error and keeps the dialog open (with the user's input intact) when createCard rejects — production behavior via mutate's rethrow:true", async () => {
     vi.mocked(createCard).mockRejectedValue(new Error("boom"));
-    const { onClose } = open();
+    const { onClose, mutate } = open();
 
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Fresh" } });
     fireEvent.click(screen.getByRole("button", { name: /create/i }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/boom/i));
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function), { rethrow: true });
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: /new card/i })).toBeInTheDocument();
+    // The user's input is preserved, not blown away by the failed submit.
+    expect(screen.getByLabelText(/title/i)).toHaveValue("Fresh");
   });
 
   it("Cancel closes without calling mutate", () => {

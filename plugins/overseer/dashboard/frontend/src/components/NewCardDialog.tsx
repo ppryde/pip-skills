@@ -11,8 +11,11 @@ export interface NewCardDialogProps {
    *  comment / wf005-context.md "Single mutation entrypoint"). No bare
    *  `createCard` call outside `mutate`, and no separate `onCreated`
    *  refresh callback: `createCard`'s response extends `BoardResponse`, so
-   *  `mutate(() => createCard(body))` both creates the card and applies the
-   *  refreshed board tiles in one round trip. */
+   *  `mutate(() => createCard(body), { rethrow: true })` both creates the
+   *  card and applies the refreshed board tiles in one round trip. The
+   *  `rethrow: true` (Task 10 fix-up) is this dialog's whole reason for
+   *  needing its own local `error`/`catch` — see `submit()` below and
+   *  `useBoard.mutate`'s doc comment for why this is opt-in. */
   mutate: UseBoardResult["mutate"];
 }
 
@@ -61,7 +64,12 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
       if (labelList.length > 0) body.labels = labelList;
       if (goal.trim()) body.goal = goal.trim();
 
-      await mutate(() => createCard(body));
+      // Task 10 fix-up: `rethrow: true` — a create failure must surface
+      // INLINE here (with the user's input still in the form), not just in
+      // App's global error banner. mutate() skips its own setError when
+      // rethrow is set (see useBoard.ts), so this is the ONLY place the
+      // failure gets shown — no double-surfacing.
+      await mutate(() => createCard(body), { rethrow: true });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
