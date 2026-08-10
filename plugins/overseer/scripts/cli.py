@@ -1420,7 +1420,7 @@ def build_parser() -> argparse.ArgumentParser:
     ref = p.add_mutually_exclusive_group()
     ref.add_argument("--jira")
     ref.add_argument("--linear")
-    p.add_argument("--complexity", choices=["S", "M", "L"])
+    p.add_argument("--complexity", choices=["S", "M", "L", "XL"])
     p.add_argument("--sprint")
     p.add_argument("--estimate")
     p.add_argument("--goal")

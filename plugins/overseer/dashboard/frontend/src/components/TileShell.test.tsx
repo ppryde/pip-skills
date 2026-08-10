@@ -504,3 +504,36 @@ describe("TileShell in-flight progress bar (WF-028 chunk 5)", () => {
     ).toHaveAttribute("data-progress-pct", "100");
   });
 });
+
+describe("TileShell rarity stars (D2 — XL complexity)", () => {
+  function renderWithComplexity(complexity: string | null) {
+    const c = card({ id: "WF-XL", complexity });
+    return render(
+      <DndContext>
+        <SortableContext items={[c.id]}>
+          <TileShell card={c} />
+        </SortableContext>
+      </DndContext>
+    );
+  }
+
+  it("no complexity set renders no stars row at all", () => {
+    const { container } = renderWithComplexity(null);
+    expect(container.querySelector(".card-tile__stars")).toBeNull();
+  });
+
+  it("L renders exactly 3 filled stars", () => {
+    const { container } = renderWithComplexity("L");
+    expect(
+      container.querySelectorAll(".card-tile__star--filled")
+    ).toHaveLength(3);
+  });
+
+  it("XL renders 4 filled stars — visually distinct from both L (3) and unset (0)", () => {
+    const { container } = renderWithComplexity("XL");
+    const filled = container.querySelectorAll(".card-tile__star--filled");
+    expect(filled).toHaveLength(4);
+    // Distinct from unset: the stars row itself is present.
+    expect(container.querySelector(".card-tile__stars")).not.toBeNull();
+  });
+});

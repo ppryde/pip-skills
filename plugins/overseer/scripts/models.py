@@ -16,7 +16,8 @@ STAGES = [
     "verification",
     "awaiting-merge",
 ]
-PRIORITIES = {"P0", "P1", "P2", "P3"}
+PRIORITIES = {"P0", "P1", "P2", "P3", "P4"}
+COMPLEXITIES = {"S", "M", "L", "XL"}
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kM])?")
@@ -158,6 +159,13 @@ class Card:
                 raise CardParseError(f"unknown priority: {priority!r}")
         else:
             priority = None
+        complexity_raw = meta.get("complexity")
+        if complexity_raw is not None:
+            complexity = str(complexity_raw)
+            if complexity not in COMPLEXITIES:
+                raise CardParseError(f"unknown complexity: {complexity!r}")
+        else:
+            complexity = None
         checklist_raw = meta.get("checklist")
         checklist: list[dict] = []
         if isinstance(checklist_raw, list):
@@ -183,7 +191,7 @@ class Card:
             status=status,
             stage=stage,
             order=order,
-            complexity=meta.get("complexity"),
+            complexity=complexity,
             priority=priority,
             jira=meta.get("jira"),
             linear=meta.get("linear"),

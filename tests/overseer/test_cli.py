@@ -47,6 +47,13 @@ class TestInitAndNewCard:
         run(repo, "new-card", "--title", "Webhooks", "--jira", "PROJ-142")
         assert "PROJ-142" in capsys.readouterr().out
 
+    def test_new_card_accepts_xl_complexity(self, repo, capsys):
+        """D2 — XL is a real complexity band; argparse must accept it like S/M/L."""
+        assert run(repo, "new-card", "--title", "Big one",
+                   "--complexity", "XL", "--estimate", "1M") == 0
+        card = _card(repo)
+        assert card.complexity == "XL"
+
     def test_new_card_updates_index(self, repo):
         run(repo, "new-card", "--title", "Fix the thing")
         assert "WF-001" in (state_root(repo) / "ledger.md").read_text()

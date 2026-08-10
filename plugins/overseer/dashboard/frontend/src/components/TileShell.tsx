@@ -145,11 +145,13 @@ function TileShell({
       >
         <div className="card-tile__header">
           <span className="card-tile__id">{card.id}</span>
-          {/* Rarity stars (HANDOFF): complexity S/M/L -> 1-3 filled pips.
+          {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
+              (D2 — XL added a 4th slot so an XL card renders visibly
+              distinct from L, not clipped to the same 3 pips).
               Reserves no space at all when 0 (no complexity set). */}
           {stars > 0 && (
             <span className="card-tile__stars" aria-hidden="true">
-              {[0, 1, 2].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <StarIcon
                   key={i}
                   filled={i < stars}

@@ -23,7 +23,7 @@ export type Stage =
   | "verification"
   | "awaiting-merge";
 
-export type Priority = "P0" | "P1" | "P2" | "P3";
+export type Priority = "P0" | "P1" | "P2" | "P3" | "P4";
 
 export interface Budget {
   estimate: number | null;

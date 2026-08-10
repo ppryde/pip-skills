@@ -13,10 +13,10 @@ export interface PrioritySelectProps {
   onMutated?: () => void;
 }
 
-const PRIORITIES: Priority[] = ["P0", "P1", "P2", "P3"];
+const PRIORITIES: Priority[] = ["P0", "P1", "P2", "P3", "P4"];
 
 /**
- * P0..P3 + a "clear" option. Routes through `useBoard().mutate` — this
+ * P0..P4 + a "clear" option. Routes through `useBoard().mutate` — this
  * component NEVER calls the api client + setState itself (see
  * wf005-context.md "Single mutation entrypoint").
  */

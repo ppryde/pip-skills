@@ -14,12 +14,16 @@ describe("rarityStars", () => {
     expect(rarityStars("L")).toBe(3);
   });
 
+  it("maps XL to 4 stars", () => {
+    expect(rarityStars("XL")).toBe(4);
+  });
+
   it("maps null to 0 stars", () => {
     expect(rarityStars(null)).toBe(0);
   });
 
   it("maps an unrecognised value to 0 stars rather than guessing", () => {
-    expect(rarityStars("XL")).toBe(0);
+    expect(rarityStars("XXL")).toBe(0);
     expect(rarityStars("")).toBe(0);
     expect(rarityStars("s")).toBe(0);
   });
