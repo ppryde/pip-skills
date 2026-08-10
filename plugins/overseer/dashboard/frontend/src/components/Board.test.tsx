@@ -154,6 +154,50 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     expect(screen.getByText(/1 quarantined/)).toBeInTheDocument();
   });
 
+  it("(WF-085) the card count no longer renders in the lane header — it lives only in the icon-nav", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Backlog");
+
+    // `.lane__count` is gone from every lane header, on every viewport
+    // (the count-removal isn't gated to mobile).
+    expect(container.querySelector(".lane__count")).not.toBeInTheDocument();
+
+    // ...but the same counts now surface in the mobile icon-nav (always
+    // rendered in the DOM — CSS is what hides the strip above 720px).
+    // Backlog: WF-EPIC + WF-WAITING. Implementation: WF-EPIC-C2. Parked:
+    // WF-OVERBUDGET. Done: WF-EPIC-C1 + WF-SHIPPED.
+    expect(screen.getByLabelText("Backlog, 2 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("Implementation, 1 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("Parked, 1 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("Done, 2 cards")).toBeInTheDocument();
+    // An empty stage lane still gets a nav icon (mirrors the swipe track,
+    // which still renders empty lanes as thin strips).
+    expect(screen.getByLabelText("Bootstrap, 0 cards")).toBeInTheDocument();
+  });
+
+  it("(WF-085) tapping an icon-nav entry marks it active and jumps the matching lane pane into view", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    // jsdom doesn't implement scrollIntoView at all — polyfill it so
+    // Board's guarded call has something to invoke and assert on.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<App />);
+    await screen.findByText("Backlog");
+
+    const doneIcon = screen.getByLabelText("Done, 2 cards");
+    expect(doneIcon).not.toHaveClass("lane-icon-nav__item--active");
+
+    fireEvent.click(doneIcon);
+
+    expect(doneIcon).toHaveClass("lane-icon-nav__item--active");
+    expect(scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ inline: "center" })
+    );
+  });
+
   it("(Chunk 5) clicking a card BODY opens the drawer via the full App→Board→Lane→tile prop chain", async () => {
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);
     vi.mocked(getCard).mockResolvedValueOnce(

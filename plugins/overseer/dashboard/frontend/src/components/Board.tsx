@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   useSensor,
@@ -9,10 +9,12 @@ import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
 import { groupIntoLanes } from "../board/layout";
+import { laneIconKey } from "../board/laneIcons";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
 import { locateDropTarget, resolveDrop } from "../board/dragPlan";
 import { runDropPlan } from "../board/runDropPlan";
 import Lane from "./Lane";
+import LaneIconNav from "./LaneIconNav";
 import PartyColumn from "./PartyColumn";
 
 export interface BoardProps {
@@ -95,6 +97,82 @@ function Board({
     (lane) => lane.kind !== "archive" || showArchive
   );
 
+  // WF-085: mobile icon-nav (LaneIconNav) + swipe-lane active-sync. The nav
+  // mirrors `visibleLanes` 1:1 (same set, same order, same `.key`) so a tap
+  // and a scroll-settle can never point at different lanes. Always rendered
+  // — CSS (`@media (max-width:720px)`) is what actually shows the strip /
+  // turns `.board` into a snap-scroller; on desktop the listener below just
+  // never fires because `.board` itself never scrolls there.
+  const navLanes = useMemo(
+    () =>
+      visibleLanes.map((lane) => ({
+        key: lane.key,
+        label: lane.label,
+        count: lane.cards.length,
+        accent: laneIconKey(lane),
+      })),
+    [visibleLanes]
+  );
+
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [activeLaneKey, setActiveLaneKey] = useState<string>(
+    visibleLanes[0]?.key ?? ""
+  );
+
+  // The filter bar / archive toggle can remove the currently-active lane
+  // from `visibleLanes` out from under us (e.g. a search that no longer
+  // matches its cards) — fall back to the first remaining lane rather than
+  // pointing the nav's active pill at a lane that no longer renders.
+  useEffect(() => {
+    if (visibleLanes.length === 0) return;
+    if (!visibleLanes.some((lane) => lane.key === activeLaneKey)) {
+      setActiveLaneKey(visibleLanes[0].key);
+    }
+  }, [visibleLanes, activeLaneKey]);
+
+  // Scroll-sync: on every scroll of the lane track, find whichever
+  // `[data-lane-key]` pane's centre sits nearest the track's own centre and
+  // make that the active lane. Cheap enough (≤11 lanes) to run unthrottled
+  // on scroll — no rAF/debounce needed at this scale.
+  const handleTrackScroll = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const trackRect = track.getBoundingClientRect();
+    const trackCenter = trackRect.left + trackRect.width / 2;
+
+    let nearestKey: string | null = null;
+    let nearestDistance = Infinity;
+    track.querySelectorAll<HTMLElement>("[data-lane-key]").forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      const distance = Math.abs(center - trackCenter);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestKey = el.dataset.laneKey ?? null;
+      }
+    });
+
+    if (nearestKey && nearestKey !== activeLaneKey) {
+      setActiveLaneKey(nearestKey);
+    }
+  }, [activeLaneKey]);
+
+  // Nav-jump: tapping an icon both sets the active pill immediately (no
+  // waiting on the scroll-settle above) and scrolls that lane's pane to
+  // the track's centre — mirrors the approved prototype's tap-to-jump.
+  const handleNavJump = useCallback((key: string) => {
+    setActiveLaneKey(key);
+    const target = trackRef.current?.querySelector<HTMLElement>(
+      `[data-lane-key="${key}"]`
+    );
+    // Guarded rather than a bare optional call: jsdom (unlike every real
+    // browser) doesn't implement `scrollIntoView` at all — see Element.
+    // prototype in test envs — so an unguarded call would throw in tests.
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, []);
+
   const handleDragStart = useCallback(() => {
     setDragActive(true);
   }, [setDragActive]);
@@ -159,7 +237,11 @@ function Board({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="board">
+      {/* WF-085: mobile-only icon-nav strip, rendered above the lane track.
+          Desktop hides it entirely via CSS — see `.lane-icon-nav` in
+          styles.css, gated at `@media (max-width:720px)`. */}
+      <LaneIconNav lanes={navLanes} activeKey={activeLaneKey} onJump={handleNavJump} />
+      <div className="board" ref={trackRef} onScroll={handleTrackScroll}>
         {dragToast && (
           <div className="board-toast" role="status">
             {dragToast}

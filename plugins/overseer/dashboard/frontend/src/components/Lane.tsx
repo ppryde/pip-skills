@@ -66,9 +66,13 @@ function Lane({
 
   return (
     <div className={className} data-lane-key={lane.key} ref={setNodeRef}>
+      {/* WF-085: the card count no longer duplicates here — it lives only
+          in the mobile icon-nav strip (LaneIconNav), which reads
+          `lane.cards.length` itself. Desktop had no other consumer of
+          `.lane__count`, so this is a straight removal, not a move of
+          markup. */}
       <div className={`lane__header lane__header--${accentKey}`}>
         <span className="lane__label">{lane.label}</span>
-        <span className="lane__count">{lane.cards.length}</span>
       </div>
       <SortableContext
         items={lane.cards.map((c) => c.id)}

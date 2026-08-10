@@ -1019,14 +1019,6 @@ body {
   z-index: 1;
 }
 
-.lane__count {
-  font-weight: 400;
-  color: inherit;
-  background: var(--qb-chip-translucent);
-  border-radius: var(--qb-radius-chip-sm);
-  padding: 0.05rem 0.4rem;
-}
-
 /* Per-column accent fills (HANDOFF §Design Tokens "Column accents") — the
    three sky lanes (Planning/Plan Review/Verification) and the two orange
    lanes (Implementation/Impl Review) share one accent group each; Archive
@@ -1096,6 +1088,16 @@ body {
   gap: 0.35rem;
   height: 100%;
   border-bottom: none;
+}
+
+/* Mobile icon-nav strip (WF-085 — LaneIconNav) — always in the DOM (see
+   Board.tsx) so it's testable/measurable at any width, but only ever shown
+   on mobile: the `@media (max-width:720px)` block near the bottom of this
+   file is what flips it to `display:flex` and does the rest of its layout
+   (icon/count sizing, the active accent pill + lift). Desktop keeps this
+   hidden and unchanged. */
+.lane-icon-nav {
+  display: none;
 }
 
 /* Per-accent custom properties (WF-028 chunk 3) — each `.card-tile--accent-*`
@@ -3863,19 +3865,118 @@ a.card-drawer__pr-chip:hover {
     margin-left: 0;
   }
 
-  /* --- Board: lane-pager with scroll-snap ------------------------------- */
-  .board-region {
-    padding: 0.75rem 0.75rem 1rem;
-    scroll-snap-type: x mandatory;
-    scroll-padding-inline: 0.75rem;
+  /* --- Icon-nav strip (WF-085 — LaneIconNav): one transparent RPG icon +
+     count per lane, above the swipe track. Inactive icons render at full
+     strength (no fade/opacity reduction) — only the active lane gets an
+     accent-coloured pill + a slight lift. -------------------------------- */
+  .lane-icon-nav {
+    display: flex;
+    gap: 0.3rem;
+    overflow-x: auto;
+    padding: 0.1rem 0.75rem 0.6rem;
   }
 
-  /* A lane is a ledger page: ~84vw leaves the next lane's pennant peeking
-     in as the swipe affordance; capped so small tablets don't get comically
-     wide pages. */
+  .lane-icon-nav__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    flex: 0 0 auto;
+    padding: 0.3rem 0.4rem;
+    border: none;
+    background: transparent;
+    border-radius: var(--legacy-radius-6px);
+    color: var(--qb-ink-500);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  }
+
+  .lane-icon-nav__icon {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+  }
+
+  .lane-icon-nav__count {
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  /* Active lane: a lifted, accent-coloured pill. Same per-accent fill
+     custom properties as `.lane__header--<key>` above (WF-028 §Design
+     Tokens) — one lane, one colour, everywhere it shows up. */
+  .lane-icon-nav__item--active {
+    color: var(--legacy-color-fff);
+    transform: translateY(-3px) scale(1.08);
+  }
+
+  .lane-icon-nav__item--backlog.lane-icon-nav__item--active {
+    background: var(--qb-accent-forest-fill);
+  }
+
+  .lane-icon-nav__item--bootstrap.lane-icon-nav__item--active {
+    background: var(--qb-accent-amber-fill);
+  }
+
+  .lane-icon-nav__item--planning.lane-icon-nav__item--active,
+  .lane-icon-nav__item--plan-review.lane-icon-nav__item--active,
+  .lane-icon-nav__item--verification.lane-icon-nav__item--active {
+    background: var(--qb-accent-sky-fill);
+  }
+
+  .lane-icon-nav__item--implementation.lane-icon-nav__item--active,
+  .lane-icon-nav__item--impl-review.lane-icon-nav__item--active {
+    background: var(--qb-accent-orange-fill);
+  }
+
+  .lane-icon-nav__item--awaiting-merge.lane-icon-nav__item--active {
+    background: var(--qb-accent-rose-fill);
+  }
+
+  .lane-icon-nav__item--done.lane-icon-nav__item--active {
+    background: var(--qb-accent-umber-fill);
+  }
+
+  .lane-icon-nav__item--parked.lane-icon-nav__item--active {
+    background: var(--qb-accent-taupe-fill);
+  }
+
+  .lane-icon-nav__item--abandoned.lane-icon-nav__item--active {
+    background: var(--qb-accent-ash-fill);
+  }
+
+  /* --- Board: swipe-snap lane track (WF-085) -----------------------------
+     `.board` (not `.board-region`) is now the horizontal scroller — one
+     lane centred per snap stop — so the icon-nav strip above can sit
+     outside it while still visually "above the track". `.board-region`
+     switches to a vertical scroller instead: with the per-lane vertical
+     trap gone (below), a tall lane's overflow is the PAGE's to scroll, not
+     a fixed-height column's (this is what fixes WF-075's "one card visible
+     at a time" pain — swiping down now reveals every card in the lane). */
+  .board-region {
+    padding: 0.75rem 0.75rem 1rem;
+    overflow-y: auto;
+  }
+
+  .board {
+    overflow-x: auto;
+    overflow-y: visible;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.75rem;
+    height: auto;
+  }
+
+  /* A lane is a ledger page: 88vw leaves the next lane's pennant peeking in
+     as the swipe affordance, centred (not left-aligned) as its snap stop. */
   .lane {
-    flex-basis: min(84vw, 340px);
-    scroll-snap-align: start;
+    flex: 0 0 88vw;
+    scroll-snap-align: center;
+    /* Drop the desktop per-lane vertical-scroll trap (base `.lane` rule:
+       max-height:100%; overflow-y:auto) — a mobile lane sizes to its own
+       content instead of being clipped to the viewport height. */
+    max-height: none;
+    overflow-y: visible;
   }
 
   /* Empty lanes stay thin vertical spines — and are NOT snap stops, so
@@ -3890,8 +3991,8 @@ a.card-drawer__pr-chip:hover {
   }
 
   .party-column {
-    flex-basis: min(84vw, 340px);
-    scroll-snap-align: start;
+    flex: 0 0 88vw;
+    scroll-snap-align: center;
   }
 
   /* --- Drag-mismatch toast: full-width strip, not an off-screen pin ----- */
