@@ -19,7 +19,9 @@ loopback.
 In scope:
 - CLI: `set-field --title` / `--body` (the only new CLI surface).
 - Backend: `POST /api/card` (create), `POST /api/card/{id}` (edit title/body),
-  `POST /api/card/{id}/abandon`, and a token gate over all mutating routes.
+  abandon via the existing `POST /api/card/{id}/move {status: "abandoned"}`
+  (see Decision #3 — no new endpoint), and a token gate over all mutating
+  routes.
 - Frontend: create control, drawer title/body edit, drawer abandon (with
   confirm), drawer label editor, and client-side token handling.
 
@@ -37,9 +39,16 @@ registry, ledger scale, archived-parent epics (PR5). No hard-delete verb —
    exists (non-loopback bind, or opt-in via env) *all* clients, loopback
    included, must present it. Simpler and coherent; does not leak trust to any
    local process.
-3. **`abandon` gets its own endpoint** rather than reusing `/move
-   status=abandoned` — reads clearly, mirrors the `/park`, `/unpark` sibling
-   pattern.
+3. **Abandon reuses the existing `POST /api/card/{id}/move {status:
+   "abandoned"}` path — no dedicated `/abandon` endpoint.** The original plan
+   below called for a standalone endpoint mirroring `/park`/`/unpark`; during
+   implementation that was dropped as needless duplication — `/move` already
+   dispatches `status: "abandoned"` to the `abandon` verb (see
+   `_MOVE_STATUS_VERBS` in `dashboard/backend/app/main.py`, exercised by
+   `test_move_status_dispatch_parked_and_abandoned`), so a second endpoint
+   would just be two request paths to the same effect. DRYer; kept the
+   frontend to one abandon call site (`move(id, {status: "abandoned"})`, no
+   separate `client.abandonCard`).
 
 ## Architecture
 
@@ -91,12 +100,13 @@ New endpoints (all token-gated — see Layer B auth):
     (`"title or body required"`).
   - `title` present but empty → 400 (`"title cannot be empty"`), before shelling.
   - Shells `set-field {id}` with `--title`/`--body` for whichever were provided.
-- `POST /api/card/{id}/abandon`:
-  - Shells `abandon {id}`. No body. Returns `_board_response`. (Confirm is
-    client-side.)
+- Abandon: no new route. The existing `POST /api/card/{id}/move` already
+  dispatches `{"status": "abandoned"}` to the `abandon` verb via
+  `_MOVE_STATUS_VERBS` (see Decision #3) — shells `abandon {id}`, returns
+  `_board_response`. Confirm is client-side.
 
-All three reuse the existing `check_id`, `_resolve_root`, `_mutate`, and
-`_mutation_error` machinery.
+Create and edit reuse the existing `check_id`, `_resolve_root`, `_mutate`, and
+`_mutation_error` machinery — same as abandon's pre-existing `/move` path.
 
 **Auth gate.** `create_app(root, *, host="127.0.0.1", dist_dir=None,
 token: str | None = None)` gains `token`. A FastAPI dependency —
@@ -140,8 +150,10 @@ posture; it is stated plainly here rather than implied away.
   (inline or an edit toggle) with an explicit Save → `client.editCard(id,
   {title?, body?})` → `POST /api/card/{id}`.
 - **Abandon control** — in the drawer, a destructive action behind a confirm
-  ("Abandon this card? It will be archived.") → `client.abandonCard(id)` →
-  `POST /api/card/{id}/abandon`.
+  ("Abandon this card? It will be archived.") → the existing `client.move(id,
+  {status: "abandoned"})` → `POST /api/card/{id}/move`. No dedicated
+  `abandonCard` client function or endpoint (Decision #3) — DRYer to route
+  through the move client that already exists for park/unpark/etc.
 - **Label editor (F1 fold-in)** — in the drawer, an editable labels control
   wired to the *existing* `client.setLabels(id, labels)` →
   `POST /api/card/{id}/labels`. No backend change; this is the deferred F1
@@ -150,6 +162,17 @@ posture; it is stated plainly here rather than implied away.
   `localStorage` on every mutation when present. On a mutation `401`, prompt once
   for the token, store it in `localStorage`, and retry the request. Default local
   use (gate inactive) never triggers a prompt.
+- **`useBoard.mutate` opt-in `{ rethrow: true }`** (user-adjudicated addition,
+  not in the original plan) — `mutate`'s default behaviour swallows a
+  rejection into the shared board-level error banner and still resolves,
+  which is wrong for the new create/edit forms: a failed create or edit needs
+  to surface INLINE, next to the form, with the user's input still intact,
+  not just as a global banner while the dialog/drawer silently closes and
+  drops the draft. Callers opt in per call — `NewCardDialog.submit()` and
+  `CardDetailDrawer.saveEdit()` both pass `{ rethrow: true }` and own a local
+  `try/catch` + inline error state; every other mutation (priority, labels,
+  move, claim, …) keeps the default swallow-into-global-banner behaviour
+  unchanged.
 
 ## Data flow
 
