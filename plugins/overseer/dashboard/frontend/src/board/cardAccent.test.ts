@@ -56,9 +56,13 @@ describe("accentKeyForCard / bannerLabelForCard", () => {
     expect(bannerLabelForCard(card("done"))).toBe("Done");
   });
 
-  it("abandoned -> accent key 'parked' (taupe reuse) but label 'Archive' (key/label diverge)", () => {
-    expect(accentKeyForCard(card("abandoned"))).toBe("parked");
-    expect(bannerLabelForCard(card("abandoned"))).toBe("Archive");
+  it("abandoned -> its own accent key 'abandoned' (ash, no longer borrows parked) and label 'Abandoned'", () => {
+    expect(accentKeyForCard(card("abandoned"))).toBe("abandoned");
+    expect(bannerLabelForCard(card("abandoned"))).toBe("Abandoned");
+  });
+
+  it("parked and abandoned yield DIFFERENT accent keys (WF-076: no longer visually identical)", () => {
+    expect(accentKeyForCard(card("parked"))).not.toBe(accentKeyForCard(card("abandoned")));
   });
 
   it("defensive fallback: in-flight with no stage (contract violation) -> backlog, mirrors layout.ts", () => {

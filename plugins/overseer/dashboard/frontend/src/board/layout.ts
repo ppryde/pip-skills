@@ -176,7 +176,7 @@ export function groupIntoLanes(cards: BoardCard[]): Lane[] {
     })),
     { key: "parked", label: "Parked", kind: "parked", cards: sortLane(parked) },
     { key: "done", label: "Done", kind: "done", cards: sortLane(done) },
-    { key: "archive", label: "Archive", kind: "archive", cards: sortLane(archive) },
+    { key: "archive", label: "Abandoned", kind: "archive", cards: sortLane(archive) },
   ];
 
   return lanes;

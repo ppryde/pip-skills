@@ -54,14 +54,12 @@ function Lane({
     .join(" ");
 
   // Guild banner/card accent key (WF-028): mirrors HANDOFF's per-column
-  // accent table. Archive maps explicitly onto "parked" — there are 11
-  // lanes but only 10 `--qb-col-*` tokens (Archive reuses the taupe/Parked
-  // accent group, an adjudicated off-board/shelved semantic — no HANDOFF
-  // row exists for Archive). A literal "archive" key would resolve a
-  // phantom token and silently drop the banner fill.
+  // accent table. Archive (labelled "Abandoned") gets its own muted
+  // "abandoned"/ash accent group (WF-076) — it used to borrow "parked"'s
+  // taupe, which made abandoned and parked cards visually identical.
   const accentKey =
     lane.kind === "archive"
-      ? "parked"
+      ? "abandoned"
       : lane.kind === "stage"
         ? lane.stage!
         : lane.kind;
