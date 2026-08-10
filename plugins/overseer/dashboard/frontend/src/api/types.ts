@@ -85,6 +85,9 @@ export interface BoardCard {
    * the F10 editable colour registry (WF-067, deferred) — no per-project
    * colour configuration, just a stable curated-palette mapping. */
   labels: string[];
+  /** Card body markdown — included in the board payload for client-side
+   * search (F2). Always present (possibly ""). */
+  body: string;
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */

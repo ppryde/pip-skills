@@ -22,6 +22,7 @@ function card(actual: number): BoardCard {
     updated: "",
     checklist: [],
     labels: [],
+    body: "",
   };
 }
 
