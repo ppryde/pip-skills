@@ -138,6 +138,10 @@ class TestCardParse:
             "---\nid: WF-001\ntitle: T\nstatus: planned\norder: notanumber\n---\nbody\n",
             "order", id="bad-order",
         ),
+        pytest.param(
+            "---\nid: WF-001\ntitle: T\nstatus: planned\ncomplexity: ZZ\n---\nbody\n",
+            "complexity", id="bad-complexity",
+        ),
     ])
     def test_from_text_raises(self, text, match):
         with pytest.raises(CardParseError, match=match):
@@ -414,6 +418,30 @@ class TestOrderAndPriority:
         card.order = 0
         again = Card.from_text(card.to_text())
         assert again.order == 0
+
+    def test_p4_priority_accepted(self):
+        """P4 is a real priority band (D2 — was rejected as unknown)."""
+        text = "---\nid: WF-001\ntitle: T\nstatus: planned\npriority: P4\n---\nbody\n"
+        card = Card.from_text(text)
+        assert card.priority == "P4"
+
+    def test_xl_and_p4_round_trip(self):
+        """priority: P4 + complexity: XL survive a from_text -> to_text -> from_text
+        round trip (D2 — XL previously imported but had no validation home)."""
+        text = (
+            "---\nid: WF-001\ntitle: T\nstatus: planned\n"
+            "complexity: XL\npriority: P4\n---\nbody\n"
+        )
+        card = Card.from_text(text)
+        assert card.complexity == "XL"
+        assert card.priority == "P4"
+        again = Card.from_text(card.to_text())
+        assert again.complexity == "XL"
+        assert again.priority == "P4"
+
+    def test_complexity_defaults_to_none(self):
+        card = Card.from_text("---\nid: WF-001\ntitle: T\nstatus: planned\n---\nbody\n")
+        assert card.complexity is None
 
 
 class TestChecklist:

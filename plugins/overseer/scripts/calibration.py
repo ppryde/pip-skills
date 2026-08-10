@@ -5,7 +5,7 @@ from statistics import mean, median
 
 from scripts.models import Card
 
-BANDS = ("S", "M", "L")
+BANDS = ("S", "M", "L", "XL")
 _DRIFT = 0.25
 
 

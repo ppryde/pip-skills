@@ -213,7 +213,7 @@ function CardDetailDrawer({
                 <span className="card-drawer__id">{detail.id}</span>
                 {stars > 0 && (
                   <span className="card-drawer__stars" aria-hidden="true">
-                    {[0, 1, 2].map((i) => (
+                    {[0, 1, 2, 3].map((i) => (
                       <StarIcon
                         key={i}
                         filled={i < stars}

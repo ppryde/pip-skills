@@ -39,3 +39,13 @@ class TestCalibrate:
         assert out["bands"]["S"] == {
             "count": 0, "median": None, "mean": None, "multiplier": None
         }
+
+    def test_xl_band_calibrates_and_is_not_skipped(self):
+        # D2's premise is that XL is first-class alongside S/M/L — a fully
+        # populated XL done-card (estimate + actual both set) must
+        # contribute a band sample, not fall into the "skipped" bucket
+        # reserved for cards missing an estimate or actual.
+        out = calibrate([done("WF-006", "XL", 200_000, 300_000)])
+        assert out["bands"]["XL"]["count"] == 1
+        assert out["bands"]["XL"]["median"] == 1.5
+        assert out["skipped"] == 0

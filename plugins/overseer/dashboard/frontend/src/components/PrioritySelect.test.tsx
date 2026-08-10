@@ -42,6 +42,29 @@ describe("<PrioritySelect/>", () => {
     expect(mutate).toHaveBeenCalledWith(expect.any(Function));
   });
 
+  it("offers P4 as a selectable option (D2 — priority band extended)", () => {
+    render(
+      <PrioritySelect cardId="WF-1" value={null} mutate={makeMutate()} inFlight={false} />
+    );
+    expect(
+      screen.getByRole("option", { name: "P4" })
+    ).toBeInTheDocument();
+  });
+
+  it("choosing P4 calls setPriority(id, 'P4') via mutate", () => {
+    vi.mocked(setPriority).mockResolvedValue(BOARD_RESPONSE);
+    const mutate = makeMutate();
+
+    render(
+      <PrioritySelect cardId="WF-1" value={null} mutate={mutate} inFlight={false} />
+    );
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "P4" },
+    });
+
+    expect(setPriority).toHaveBeenCalledWith("WF-1", "P4");
+  });
+
   it("clearing the priority sends null", () => {
     vi.mocked(setPriority).mockResolvedValue(BOARD_RESPONSE);
     const mutate = makeMutate();

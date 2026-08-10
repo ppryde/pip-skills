@@ -1,9 +1,9 @@
 /**
- * Maps a card's `complexity` (backend enum "S" | "M" | "L", see
- * plugins/overseer/scripts/cli.py's `--complexity` choices) onto the
- * HANDOFF rarity-star count (1-3 filled pips). Any other value — null,
- * unset, or an unrecognised string — renders zero stars rather than
- * guessing; TileShell only reserves the stars row when this is > 0.
+ * Maps a card's `complexity` (backend enum "S" | "M" | "L" | "XL", see
+ * plugins/overseer/scripts/models.py's `COMPLEXITIES`) onto the HANDOFF
+ * rarity-star count (1-4 filled pips). Any other value — null, unset, or
+ * an unrecognised string — renders zero stars rather than guessing;
+ * TileShell only reserves the stars row when this is > 0.
  */
 export function rarityStars(complexity: string | null): number {
   switch (complexity) {
@@ -13,6 +13,8 @@ export function rarityStars(complexity: string | null): number {
       return 2;
     case "L":
       return 3;
+    case "XL":
+      return 4;
     default:
       return 0;
   }
