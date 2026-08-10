@@ -1687,11 +1687,22 @@ body {
   margin: 0.1rem 0 0.35rem;
 }
 
+/* WF-079: hand-drawn wobble to match Role A's illustrated system — a fixed
+   wobble radius (reusing `--qb-btn-wobble-3`, distinct from the neighbouring
+   filter-bar/label-editor controls' own -2/-4 picks so chips don't read as
+   the same stamped shape) plus a subtle ink ring layered OVER each palette's
+   own coloured border via box-shadow (not the `border` property) — the
+   9-colour `.label-chip--<key>` modifiers below still own background/color/
+   border in full and are declared after this rule, so their colours are
+   untouched and stay legible. `.label-filter-chip` (pill shape) and its
+   `--include`/`--exclude` box-shadow rings still override both properties
+   for the filter popover, unchanged from before this chunk. */
 .label-chip {
   font-size: 0.65rem;
   font-weight: 500;
   padding: 0.05rem 0.4rem;
-  border-radius: var(--legacy-radius-3px);
+  border-radius: var(--qb-btn-wobble-3);
+  box-shadow: 0 0 0 1px rgba(74, 56, 38, 0.12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
