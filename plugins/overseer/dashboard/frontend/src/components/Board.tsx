@@ -34,6 +34,11 @@ export interface BoardProps {
    * for its per-row near-threshold cue — App.tsx's single source, no
    * re-derivation here. */
   threshold: number | null;
+  /** F3/WF-061: the filter bar's live result — every card id that survives
+   * `visibleCardIds(board.cards, filter)` in App. Applied before lane
+   * placement below; sprints/quarantined/party are untouched by it (the
+   * filter bar only ever curates cards). */
+  visibleIds: Set<string>;
 }
 
 /**
@@ -60,8 +65,17 @@ function Board({
   party,
   activeBranch,
   threshold,
+  visibleIds,
 }: BoardProps) {
-  const lanes = useMemo(() => groupIntoLanes(board.cards), [board.cards]);
+  // Filtered once, up front — every lane/epic-grouping consumer below reads
+  // this instead of `board.cards` directly. `visibleCardIds` (cardFilter.ts)
+  // already resolves epic/children membership (a matched epic pulls its
+  // children in with it), so this is a plain id-set filter, not a re-derive.
+  const visibleCards = useMemo(
+    () => board.cards.filter((c) => visibleIds.has(c.id)),
+    [board.cards, visibleIds]
+  );
+  const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
     null
   );

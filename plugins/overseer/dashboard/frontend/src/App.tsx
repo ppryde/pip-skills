@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import TopBar from "./components/TopBar";
 import Board from "./components/Board";
+import FilterBar from "./components/FilterBar";
 import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
 import UnbegunHolding from "./components/UnbegunHolding";
@@ -8,8 +9,10 @@ import ClearDialog from "./components/ClearDialog";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
+import { useCardFilter } from "./board/useCardFilter";
 import { buildParty } from "./board/party";
 import { distinctBranches } from "./board/branches";
+import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilter";
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
@@ -22,6 +25,15 @@ function readStoredRoot(): string | null {
     // choice, fall back to the launch-root default.
     return null;
   }
+}
+
+/** Order-insensitive equality for the filter's two label arrays — used only
+ * to decide whether `filter` still equals `DEFAULT_FILTER` (gates the
+ * FilterBar's Clear button). */
+function sameLabelSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sorted = [...b].sort();
+  return [...a].sort().every((label, i) => label === sorted[i]);
 }
 
 function writeStoredRoot(root: string): void {
@@ -88,6 +100,14 @@ function App() {
   // 400s `/api/sessions` exactly like it 400s `/api/board`, so this fetch
   // (mount AND poll) must be hard-skipped for it too.
   const { sessions } = useSessions(activeRoot, !isUnbegun);
+  // F3/WF-061: the card filter bar's state (search/labels/priority/
+  // complexity) — App-owned like every other cross-cutting UI concern here
+  // (party/branch/clear), persisted via localStorage inside the hook
+  // itself. `useCardFilter()` returns a fresh object literal every render,
+  // so destructure the pieces used below rather than depending on the
+  // whole-object reference.
+  const { filter, setQuery, setPriority, setComplexity, clear, cycleLabel } =
+    useCardFilter();
   const [showArchive, setShowArchive] = useState(false);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   // HANDOFF §State Management assigns this App-level, alongside the
@@ -141,6 +161,25 @@ function App() {
   // the exact same value `context` carries.
   const threshold = context?.threshold ?? null;
 
+  // F3/WF-061: filter bar wiring. `allCards` is the single source both the
+  // labels list and the visible-id set derive from — same "compute once,
+  // hand to every consumer" precedent as `party`/`branches` above.
+  const allCards = board?.cards ?? [];
+  const labels = useMemo(() => distinctLabels(allCards), [allCards]);
+  const visibleIds = useMemo(
+    () => visibleCardIds(allCards, filter),
+    [allCards, filter]
+  );
+  // Deep-equal against DEFAULT_FILTER (field-by-field; the two label arrays
+  // compared order-insensitively) — only gates the FilterBar's Clear button,
+  // so this only needs to be right, not fast.
+  const isDefaultFilter =
+    filter.query === DEFAULT_FILTER.query &&
+    filter.priority === DEFAULT_FILTER.priority &&
+    filter.complexity === DEFAULT_FILTER.complexity &&
+    sameLabelSet(filter.includeLabels, DEFAULT_FILTER.includeLabels) &&
+    sameLabelSet(filter.excludeLabels, DEFAULT_FILTER.excludeLabels);
+
   return (
     <div className="app-shell">
       <TopBar
@@ -182,6 +221,27 @@ function App() {
         // means TopBar renders no Clear control at all until then.
         onClear={selectedRepo ? () => setClearOpen(true) : undefined}
       />
+      {/* F3/WF-061: only shown once a real board exists — an unbegun repo
+          (holding page) or a still-loading/errored board has nothing for it
+          to filter, so it renders exactly alongside <Board/> below. `board`
+          alone isn't enough: useBoard() never clears its last-good `board`
+          state when `enabled` flips false (WF-032), so a stale board can
+          outlive a switch to an unbegun repo — the same `!isUnbegun` guard
+          gating <Board/> in `.board-region` below must gate this too. */}
+      {!isUnbegun && board && (
+        <FilterBar
+          filter={filter}
+          labels={labels}
+          visibleCount={visibleIds.size}
+          totalCount={allCards.length}
+          isDefault={isDefaultFilter}
+          onQuery={setQuery}
+          onCycleLabel={cycleLabel}
+          onPriority={setPriority}
+          onComplexity={setComplexity}
+          onClear={clear}
+        />
+      )}
       <main className="board-region">
         {isUnbegun && selectedRepo ? (
           <UnbegunHolding
@@ -205,6 +265,7 @@ function App() {
                 party={party}
                 activeBranch={activeBranch}
                 threshold={threshold}
+                visibleIds={visibleIds}
               />
             )}
           </>
