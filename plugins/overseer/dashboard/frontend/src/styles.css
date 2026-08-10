@@ -1815,6 +1815,104 @@ body {
   color: var(--qb-ink-900);
 }
 
+/* Title/body edit mode (Task 8) — the title row pairs the read-only <h2>
+   with its Edit button; the input replaces the row entirely while editing
+   (see CardDetailDrawer's `editing` conditional). */
+.card-drawer__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.card-drawer__title-input {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0 0.5rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.1rem 0.4rem;
+}
+
+.card-drawer__title-input:focus {
+  outline: none;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+/* Same Role A button system as `.claim-control button` (task-12) — the
+   Edit/Save/Cancel controls are just another drawer action, not a new
+   button style. */
+.card-drawer__edit-btn,
+.card-drawer__edit-actions button {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-3);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.card-drawer__edit-btn:hover:not(:disabled),
+.card-drawer__edit-actions button:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.card-drawer__edit-btn:active:not(:disabled),
+.card-drawer__edit-actions button:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.card-drawer__edit-btn:disabled,
+.card-drawer__edit-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+.card-drawer__edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card-drawer__body-textarea {
+  width: 100%;
+  min-height: 14rem;
+  font-family: var(--qb-font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-line-dashed);
+  border-radius: var(--legacy-radius-3px);
+  padding: 0.6rem;
+  resize: vertical;
+}
+
+.card-drawer__body-textarea:focus {
+  outline: none;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.card-drawer__edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .card-drawer__facts {
   display: flex;
   align-items: center;

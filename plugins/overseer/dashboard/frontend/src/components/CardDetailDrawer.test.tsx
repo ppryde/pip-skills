@@ -8,6 +8,7 @@ import type { PartyMember } from "../board/party";
 // StatusMenu) import, even though most tests here never trigger them.
 vi.mock("../api/client", () => ({
   getCard: vi.fn(),
+  editCard: vi.fn(),
   setPriority: vi.fn(),
   setParent: vi.fn(),
   setDepends: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock("../api/client", () => ({
   setLabels: vi.fn(),
 }));
 
-import { getCard, getSessions, setPriority, setLabels } from "../api/client";
+import { getCard, getSessions, setPriority, setLabels, editCard } from "../api/client";
 import CardDetailDrawer from "./CardDetailDrawer";
 
 const BOARD_RESPONSE = {} as BoardResponse;
@@ -285,6 +286,130 @@ describe("<CardDetailDrawer/>", () => {
     expect(mutate).toHaveBeenCalledWith(expect.any(Function));
     expect(setLabels).toHaveBeenCalledWith("WF-LBL", ["policy", "arch"]);
     await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
+  });
+
+  it("edits title and body and saves via editCard, routed through mutate() (board tiles) AND re-fetches the open card (refetchDetail), same as the label save", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-1", title: "Old", body: "old body" })
+    );
+    vi.mocked(editCard).mockResolvedValueOnce(BOARD_RESPONSE);
+    // The refetch after the save returns updated content — proves it's a
+    // REAL second `getCard` call, not just a re-render of stale state.
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-1", title: "New title", body: "new body" })
+    );
+
+    // liveMutate() actually invokes the function it's given — needed here
+    // because the save must be routed THROUGH `mutate`, exactly like
+    // PrioritySelect/LinkEditor/ClaimControl/LabelEditor, not called
+    // directly (Task 7 review finding).
+    const mutate = liveMutate();
+    render(
+      <CardDetailDrawer
+        cardId="WF-1"
+        onClose={() => {}}
+        mutate={mutate}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Old");
+    expect(getCard).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "New title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "new body" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function));
+    expect(editCard).toHaveBeenCalledWith("WF-1", {
+      title: "New title",
+      body: "new body",
+    });
+    await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
+    await screen.findByText("New title");
+  });
+
+  it("disables Save when the title draft is empty, and Cancel restores the read view without saving", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-2", title: "Keep me", body: "keep body" })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-2"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Keep me");
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "   " },
+    });
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Changed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(editCard).not.toHaveBeenCalled();
+    expect(screen.getByText("Keep me")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/title/i)).not.toBeInTheDocument();
+  });
+
+  it("resets edit drafts and exits edit mode when switching to a different card", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-3", title: "Card three", body: "three body" })
+    );
+
+    const { rerender } = render(
+      <CardDetailDrawer
+        cardId="WF-3"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Card three");
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Leaked draft" },
+    });
+
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-4", title: "Card four", body: "four body" })
+    );
+    rerender(
+      <CardDetailDrawer
+        cardId="WF-4"
+        onClose={() => {}}
+        mutate={liveMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText("Card four");
+    // Not in edit mode any more, and no leaked draft from the prior card.
+    expect(screen.queryByLabelText(/title/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Leaked draft")).not.toBeInTheDocument();
   });
 
   it("renders unknown section headings too — no hardcoded fixed set", async () => {
