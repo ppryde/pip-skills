@@ -29,6 +29,11 @@ export interface CardDetailDrawerProps {
   /** All card ids on the board — threaded down to LinkEditor for its
    * parent/dependency option lists (see wf005-c6-brief.md). */
   allCardIds: string[];
+  /** id -> title lookup (WF-081) for the same board `allCardIds` draws
+   * from — threaded straight through to LinkEditor so its depends-on
+   * picker can show each candidate's title alongside its id. Optional:
+   * omitting it just falls back to id-only display, same as before. */
+  cardTitles?: Record<string, string>;
   /** The shared session<->card join (App.tsx) — the drawer is a fourth
    * CONSUMER of this one array, never its own poll (WF-030 Decisions).
    * Resolved against `detail.claimed_by` to render the hero chip's
@@ -92,6 +97,7 @@ function CardDetailDrawer({
   mutate,
   inFlight,
   allCardIds,
+  cardTitles,
   party,
   colorRegistry,
 }: CardDetailDrawerProps) {
@@ -430,6 +436,7 @@ function CardDetailDrawer({
                 parent={detail.parent}
                 dependsOn={detail.depends_on}
                 allCardIds={allCardIds}
+                cardTitles={cardTitles}
                 mutate={mutate}
                 inFlight={inFlight}
                 onMutated={refetchDetail}

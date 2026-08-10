@@ -9,6 +9,10 @@ export interface LinkEditorProps {
   /** All card ids on the board — used to build the parent/dep option lists.
    * Self is excluded here regardless of whether the caller already did so. */
   allCardIds: string[];
+  /** id -> title lookup (WF-081) for the same board `allCardIds` draws from.
+   * Optional/best-effort: an id missing from the map (or the map itself
+   * being omitted) just falls back to showing the bare id, same as before. */
+  cardTitles?: Record<string, string>;
   mutate: UseBoardResult["mutate"];
   inFlight: boolean;
   /** Called after any mutation settles — the drawer wires this to its
@@ -28,6 +32,7 @@ function LinkEditor({
   parent,
   dependsOn,
   allCardIds,
+  cardTitles,
   mutate,
   inFlight,
   onMutated,
@@ -82,6 +87,12 @@ function LinkEditor({
           {dependsOn.map((depId) => (
             <li key={depId}>
               {depId}
+              {cardTitles?.[depId] ? (
+                <span style={{ opacity: 0.65, fontSize: "0.85em" }}>
+                  {" "}
+                  — {cardTitles[depId]}
+                </span>
+              ) : null}
               <button
                 type="button"
                 aria-label={`Remove dependency ${depId}`}
@@ -100,11 +111,18 @@ function LinkEditor({
           disabled={inFlight}
         >
           <option value="">— select —</option>
-          {depOptions.map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
+          {depOptions.map((id) => {
+            const title = cardTitles?.[id];
+            // `<option>` is text-only content in HTML — it cannot hold a
+            // nested `<span>` (browsers won't apply per-substring styling
+            // inside a native select popup regardless), so the title is
+            // appended as plain text rather than a styled child element.
+            return (
+              <option key={id} value={id}>
+                {title ? `${id} — ${title}` : id}
+              </option>
+            );
+          })}
         </select>
         <button
           type="button"

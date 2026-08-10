@@ -135,6 +135,31 @@ describe("<CardDetailDrawer/>", () => {
     expect(getCard).not.toHaveBeenCalled();
   });
 
+  it("threads cardTitles through to LinkEditor's depends-on picker (WF-081)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-B", title: "Card B", depends_on: [] })
+    );
+
+    render(
+      <CardDetailDrawer
+        cardId="WF-B"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={["WF-B", "WF-Z"]}
+        cardTitles={{ "WF-Z": "Zap the thing" }}
+        party={[]}
+      />
+    );
+
+    await screen.findByText("Card B");
+    const options = Array.from(
+      screen.getByLabelText("Add dependency").querySelectorAll("option")
+    ) as HTMLOptionElement[];
+    const wfZ = options.find((o) => o.value === "WF-Z");
+    expect(wfZ?.textContent).toBe("WF-Z — Zap the thing");
+  });
+
   it("fetches the card lazily and renders its sections + header facts once resolved", async () => {
     vi.mocked(getCard).mockResolvedValueOnce(
       cardDetail({
