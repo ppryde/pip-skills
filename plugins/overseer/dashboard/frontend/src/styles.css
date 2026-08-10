@@ -489,9 +489,14 @@ body {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--qb-radius-pill);
-  background: var(--qb-parchment-muted);
+  /* De-bulked (WF-078 follow-up): this used to be a filled, fully-rounded
+     pill WRAPPING the inner bordered `select` below — two stacked chrome
+     layers read much taller/heavier than the Role-A buttons beside it. The
+     chip itself now carries no box at all (no fill, no radius, no vertical
+     padding) — it's just a label + select in a row; the `select` alone is
+     the single visible box, sized to match `.topbar__new-card`. */
+  padding: 0 0.5rem;
+  background: transparent;
   color: var(--qb-ink-500);
   /* WF-085: lets the chip itself shrink below its content's natural width
      inside the topbar's flex row — required for the child `select`'s own
@@ -519,7 +524,9 @@ body {
   background: transparent;
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble);
-  padding: 0.15rem 0.3rem;
+  /* Matches the Role A button box (`.topbar__new-card`) so the select's own
+     border is the ONLY box the control shows — no more outer pill. */
+  padding: 0.3rem 0.7rem;
   max-width: 40vw;
   /* WF-085: a long repo root/label truncates with an ellipsis instead of
      wrapping the native <select> onto a second line — `min-width: 0`
@@ -559,9 +566,13 @@ body {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--qb-radius-pill);
-  background: var(--qb-branch-chip-bg);
+  /* De-bulked (WF-078 follow-up): dropped the filled, fully-rounded pill —
+     see `.topbar__repo-select` above for the full rationale. The branch's
+     blue coding survives as a thin left tint border + the label's own
+     colour, rather than a full filled chip. */
+  padding: 0 0.5rem;
+  border-left: 2px solid var(--qb-branch-chip-border);
+  background: transparent;
   color: var(--qb-branch-chip-text);
   /* WF-085: same shrink-to-allow-ellipsis rationale as `.topbar__repo-select`
      above. */
@@ -586,7 +597,9 @@ body {
   background: transparent;
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
-  padding: 0.15rem 0.3rem;
+  /* Matches the Role A button box (`.topbar__new-card`) — see
+     `.topbar__repo-select select` above for the full rationale. */
+  padding: 0.3rem 0.7rem;
   max-width: 40vw;
   /* WF-085: same ellipsis-truncation treatment as `.topbar__repo-select
      select` above — a long branch name never wraps to a second line. */
@@ -872,7 +885,8 @@ body {
   background: var(--qb-btn-face);
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
-  padding: 0.25rem 0.5rem;
+  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
+  padding: 0.3rem 0.7rem;
 }
 
 .filter-bar__select select:hover,
@@ -2808,7 +2822,8 @@ a.card-drawer__pr-chip:hover {
   line-height: 1;
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-3);
-  padding: 0.25rem 0.5rem;
+  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
+  padding: 0.3rem 0.7rem;
   background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
@@ -2972,7 +2987,8 @@ a.card-drawer__pr-chip:hover {
   line-height: 1;
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-4);
-  padding: 0.25rem 0.5rem;
+  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
+  padding: 0.3rem 0.7rem;
   background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
@@ -3044,7 +3060,8 @@ a.card-drawer__pr-chip:hover {
   line-height: 1;
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble);
-  padding: 0.25rem 0.5rem;
+  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
+  padding: 0.3rem 0.7rem;
   background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
