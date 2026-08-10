@@ -53,6 +53,15 @@ export interface TopBarProps {
    * `selectedRepo`), so there is never a Clear control with nothing to
    * target. */
   onClear?: () => void;
+  /** WF-085b: mobile-only "Controls ▾" collapse state — App-owned (lifted
+   * out of TopBar) so the ONE toggle can drive both TopBar's own
+   * `#topbar-controls-group` AND the separate `<FilterBar/>` App renders as
+   * a sibling below it. TopBar still renders the button and wraps its own
+   * group with `hidden={!controlsOpen}` — it just no longer holds the
+   * `useState` itself. */
+  controlsOpen: boolean;
+  /** Flips `controlsOpen` in App.tsx. */
+  onToggleControls: () => void;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * threaded straight through to `LabelSettingsDialog` when it's open.
    * Optional (defaults to `{}`, same "undefined indistinguishable from
@@ -128,6 +137,8 @@ function TopBar({
   questingCountOverride,
   onClear,
   labelColors,
+  controlsOpen,
+  onToggleControls,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -138,12 +149,6 @@ function TopBar({
   // F10 (WF-067): the label-colors settings dialog — same TopBar-owned
   // open-state pattern as NewCardDialog above (no App-level prop needed).
   const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
-  // WF-085: mobile-only secondary-controls collapse. Collapsed by default —
-  // the group only ever hides on a ≤720px viewport (styles.css scopes the
-  // `[hidden]` override to that media query; desktop always renders the
-  // group via `display: contents` regardless of this flag), so defaulting
-  // to "collapsed" here has zero effect on desktop's always-open group.
-  const [controlsOpen, setControlsOpen] = useState(false);
   const threshold = context?.threshold ?? null;
   const gold = goldTotal(cards);
   const { done, total } = vanquishedStats(cards);
@@ -199,18 +204,21 @@ function TopBar({
           </span>
         )}
 
-        {/* WF-085: mobile-only "Controls ▾" toggle — collapses the
-            secondary-controls group below behind one tap on a ≤720px
+        {/* WF-085/085b: mobile-only "Controls ▾" toggle — collapses the
+            secondary-controls group below AND the separate <FilterBar/>
+            App.tsx renders as its own sibling, behind one tap on a ≤720px
             viewport (styles.css hides this button entirely above that
             breakpoint, so desktop never shows it). `aria-expanded` +
-            `aria-controls` wire it to the group it drives, per WAI-ARIA
-            disclosure-pattern conventions. */}
+            `aria-controls` wire it to BOTH regions it drives — a
+            space-separated id list is valid per WAI-ARIA. `controlsOpen`/
+            `onToggleControls` are now App-owned (lifted out of TopBar) so
+            the same flag reaches FilterBar too. */}
         <button
           type="button"
           className="topbar__controls-toggle"
           aria-expanded={controlsOpen}
-          aria-controls="topbar-controls-group"
-          onClick={() => setControlsOpen((open) => !open)}
+          aria-controls="topbar-controls-group filter-bar"
+          onClick={onToggleControls}
         >
           Controls {controlsOpen ? "▴" : "▾"}
         </button>

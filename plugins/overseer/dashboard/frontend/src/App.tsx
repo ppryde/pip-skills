@@ -123,6 +123,15 @@ function App() {
   // this state never lives on TopBar itself).
   const [clearOpen, setClearOpen] = useState(false);
   const [clearToast, setClearToast] = useState<string | null>(null);
+  // WF-085b: mobile-only "Controls ▾" collapse state, lifted here from
+  // TopBar so ONE toggle drives BOTH TopBar's own secondary-controls group
+  // AND the separate <FilterBar/> below (previously TopBar-local state only
+  // reached its own group, leaving FilterBar always visible on mobile —
+  // see the mobile-v2 brief). Collapsed by default; desktop (>720px) always
+  // shows both groups regardless of this flag (styles.css confines the
+  // `[hidden]` override to the ≤720px media query, same pattern as the
+  // pre-existing `#topbar-controls-group`).
+  const [controlsOpen, setControlsOpen] = useState(false);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -221,6 +230,11 @@ function App() {
         // actually selected — `undefined` (rather than a no-op closure)
         // means TopBar renders no Clear control at all until then.
         onClear={selectedRepo ? () => setClearOpen(true) : undefined}
+        // WF-085b: App-owned collapse state (see comment above) — TopBar
+        // still renders the "Controls ▾" button/group, it just no longer
+        // owns whether they're open.
+        controlsOpen={controlsOpen}
+        onToggleControls={() => setControlsOpen((open) => !open)}
       />
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
@@ -242,6 +256,10 @@ function App() {
           onComplexity={setComplexity}
           onClear={clear}
           colorRegistry={board.label_colors}
+          // WF-085b: folds FilterBar under the SAME "Controls ▾" toggle as
+          // TopBar's own secondary-controls group on mobile — see the
+          // `controlsOpen` state comment in App.tsx above.
+          controlsOpen={controlsOpen}
         />
       )}
       <main className="board-region">

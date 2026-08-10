@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -11,7 +12,27 @@ import type {
   RepoEntry,
 } from "../api/types";
 import type { PartyMember } from "../board/party";
-import TopBar from "./TopBar";
+import TopBar, { type TopBarProps } from "./TopBar";
+
+// WF-085b: `controlsOpen` moved from TopBar-local state up to App.tsx, so
+// TopBar is now a fully controlled component — it renders the "Controls ▾"
+// button/group but doesn't own whether they're open. Every test in this
+// file needs a `controlsOpen`/`onToggleControls` pair; this harness
+// reproduces App's own `useState` + toggle callback locally so tests that
+// click the toggle and expect the group to actually show/hide keep working
+// without each test hand-rolling its own state.
+function StatefulTopBar(
+  props: Omit<TopBarProps, "controlsOpen" | "onToggleControls">
+) {
+  const [controlsOpen, setControlsOpen] = useState(false);
+  return (
+    <TopBar
+      {...props}
+      controlsOpen={controlsOpen}
+      onToggleControls={() => setControlsOpen((open) => !open)}
+    />
+  );
+}
 
 function makeMutate() {
   return vi.fn(async (fn: () => Promise<BoardResponse>) => {
@@ -98,7 +119,7 @@ function openControls() {
 describe("<TopBar/>", () => {
   it("the subtitle does NOT contain 'as of last refresh'", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
       />
@@ -111,7 +132,7 @@ describe("<TopBar/>", () => {
 
   it("formats the subtitle as project name + updated HH:MM when lastRefreshedAt is set", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         projectName="pip-skills"
         lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
@@ -122,14 +143,14 @@ describe("<TopBar/>", () => {
   });
 
   it("falls back to just the project name when lastRefreshedAt is null", () => {
-    render(<TopBar {...baseProps()} projectName="pip-skills" lastRefreshedAt={null} />);
+    render(<StatefulTopBar {...baseProps()} projectName="pip-skills" lastRefreshedAt={null} />);
 
     expect(screen.getByText("pip-skills")).toBeInTheDocument();
   });
 
   it("renders the gold-total pill summed from budget.actual across cards", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         cards={[card({ id: "WF-1", budget: { estimate: null, actual: 500 } }), card({ id: "WF-2", budget: { estimate: null, actual: 250 } })]}
       />
@@ -140,7 +161,7 @@ describe("<TopBar/>", () => {
 
   it("renders the N / M vanquished pill from done-count over total", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         cards={[
           card({ id: "WF-1", status: "done" }),
@@ -155,7 +176,7 @@ describe("<TopBar/>", () => {
 
   it("the fleet-health pill's questing count includes only live (non-stale) party members", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         party={[
           partyMember({ id: "s1", stale: false }),
@@ -171,7 +192,7 @@ describe("<TopBar/>", () => {
   it("clicking the fleet-health pill calls onOpenParty", () => {
     const onOpenParty = vi.fn();
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         party={[partyMember({ id: "s1" })]}
         onOpenParty={onOpenParty}
@@ -187,7 +208,7 @@ describe("<TopBar/>", () => {
   // facts now live per-agent on the Party's hero cards instead.
   it("no longer renders context.model, context.pr, or a single ctx% value", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         context={{
           pct: 42,
@@ -206,7 +227,7 @@ describe("<TopBar/>", () => {
 
   it("renders the fleet-health line with top ctx and near-threshold segments derived from live party sessions", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         context={{ pct: null, threshold: 80 }}
         party={[
@@ -224,7 +245,7 @@ describe("<TopBar/>", () => {
 
   it("omits the top-ctx and near-threshold segments gracefully when there's no pct data (never NaN/null)", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         context={{ pct: null, threshold: 80 }}
         party={[partyMember({ id: "s1" }), partyMember({ id: "s2" })]}
@@ -237,14 +258,14 @@ describe("<TopBar/>", () => {
   });
 
   it("keeps the threshold control, relabeled as the fleet's default", () => {
-    render(<TopBar {...baseProps()} context={{ pct: null, threshold: 65 }} />);
+    render(<StatefulTopBar {...baseProps()} context={{ pct: null, threshold: 65 }} />);
 
     expect(screen.getByLabelText("Threshold")).toHaveValue(65);
     expect(screen.getByText(/default threshold/i)).toBeInTheDocument();
   });
 
   it("renders no Sessions toggle — the old sessions dropdown retired, the fleet-health pill replaces it", () => {
-    render(<TopBar {...baseProps()} />);
+    render(<StatefulTopBar {...baseProps()} />);
     expect(
       screen.queryByRole("button", { name: /^sessions$/i })
     ).not.toBeInTheDocument();
@@ -256,7 +277,7 @@ describe("<TopBar/>", () => {
   // `onToggleArchive`, `topbar__archive-toggle`) stay as-is; only the
   // user-visible text must read "Abandoned".
   it("renders the abandoned-lane toggle labelled 'Abandoned'", () => {
-    render(<TopBar {...baseProps()} />);
+    render(<StatefulTopBar {...baseProps()} />);
 
     const toggle = document.querySelector(".topbar__archive-toggle");
     expect(toggle).not.toBeNull();
@@ -265,13 +286,13 @@ describe("<TopBar/>", () => {
   });
 
   it("renders no repo selector when no boards are discoverable", () => {
-    render(<TopBar {...baseProps()} repos={[]} />);
+    render(<StatefulTopBar {...baseProps()} repos={[]} />);
     expect(screen.queryByLabelText("Repo")).not.toBeInTheDocument();
   });
 
   it("renders the repo selector with every discovered repo as an option", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         repos={[
           { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
@@ -291,7 +312,7 @@ describe("<TopBar/>", () => {
   it("selecting a different repo calls onSelectRepo with its root", () => {
     const onSelectRepo = vi.fn();
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         repos={[
           { label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 },
@@ -310,13 +331,13 @@ describe("<TopBar/>", () => {
   });
 
   it("renders no branch filter when there are no distinct branches", () => {
-    render(<TopBar {...baseProps()} branches={[]} />);
+    render(<StatefulTopBar {...baseProps()} branches={[]} />);
     expect(screen.queryByLabelText("Branch")).not.toBeInTheDocument();
   });
 
   it("renders the branch filter with every distinct branch as an option", () => {
     render(
-      <TopBar {...baseProps()} branches={["feat/a", "feat/b"]} activeBranch="feat/a" />
+      <StatefulTopBar {...baseProps()} branches={["feat/a", "feat/b"]} activeBranch="feat/a" />
     );
 
     const select = screen.getByLabelText("Branch") as HTMLSelectElement;
@@ -329,7 +350,7 @@ describe("<TopBar/>", () => {
   it("selecting a different branch calls onSelectBranch with its name", () => {
     const onSelectBranch = vi.fn();
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         branches={["feat/a", "feat/b"]}
         activeBranch="feat/a"
@@ -346,7 +367,7 @@ describe("<TopBar/>", () => {
 
   it("renders the Short Rest pill with the rounded 5h usage and a '5h window' tooltip", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         limits={{
           five_hour: { used_percentage: 28.000000000000004 } as RateWindow,
@@ -361,7 +382,7 @@ describe("<TopBar/>", () => {
 
   it("renders the Long Rest pill with the rounded 7d usage and a '7d window' tooltip", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         limits={{
           seven_day: { used_percentage: 63.4 } as RateWindow,
@@ -375,7 +396,7 @@ describe("<TopBar/>", () => {
   });
 
   it("omits the Short Rest / Long Rest pills when their window is absent from limits", () => {
-    render(<TopBar {...baseProps()} limits={{}} />);
+    render(<StatefulTopBar {...baseProps()} limits={{}} />);
 
     expect(screen.queryByText(/Short Rest/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Long Rest/)).not.toBeInTheDocument();
@@ -385,7 +406,7 @@ describe("<TopBar/>", () => {
   // App.tsx can withhold it when no repo is selected (see App.tsx's
   // `selectedRepo ? () => setClearOpen(true) : undefined`).
   it("renders no Clear button when onClear is not provided", () => {
-    render(<TopBar {...baseProps()} />);
+    render(<StatefulTopBar {...baseProps()} />);
     expect(
       screen.queryByRole("button", { name: /clear/i })
     ).not.toBeInTheDocument();
@@ -393,7 +414,7 @@ describe("<TopBar/>", () => {
 
   it("renders a Clear button beside the repo selector when onClear is provided, and clicking it calls onClear", () => {
     const onClear = vi.fn();
-    render(<TopBar {...baseProps()} onClear={onClear} />);
+    render(<StatefulTopBar {...baseProps()} onClear={onClear} />);
 
     // WF-085: Clear… lives in the collapsed-by-default Controls group now.
     openControls();
@@ -406,13 +427,13 @@ describe("<TopBar/>", () => {
   // Task 10: "＋ New card" — TopBar owns the dialog's open state itself
   // (no App-level prop needed) and hands it TopBar's own `mutate` prop.
   it("renders no New card dialog until the New card button is clicked", () => {
-    render(<TopBar {...baseProps()} />);
+    render(<StatefulTopBar {...baseProps()} />);
     expect(screen.getByRole("button", { name: /new card/i })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /new card/i })).not.toBeInTheDocument();
   });
 
   it("clicking the New card button opens NewCardDialog", () => {
-    render(<TopBar {...baseProps()} />);
+    render(<StatefulTopBar {...baseProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /new card/i }));
 
@@ -422,7 +443,7 @@ describe("<TopBar/>", () => {
   // Task 10 (F10, WF-067): the Labels settings control — TopBar owns the
   // dialog's open state itself, same pattern as "＋ New card" above.
   it("renders no Label colors dialog until the Labels settings button is clicked", () => {
-    render(<TopBar {...baseProps()} />);
+    render(<StatefulTopBar {...baseProps()} />);
     // WF-085: Labels… lives in the collapsed-by-default Controls group now.
     openControls();
     expect(screen.getByRole("button", { name: /labels/i })).toBeInTheDocument();
@@ -433,7 +454,7 @@ describe("<TopBar/>", () => {
 
   it("clicking the Labels settings button opens LabelSettingsDialog with the board's distinct labels", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         cards={[
           card({ id: "WF-1", labels: ["policy"] }),
@@ -466,11 +487,17 @@ describe("<TopBar/>", () => {
 // content assertions further down).
 describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
   it("collapses the secondary controls by default, hiding them from the accessibility tree", () => {
-    render(<TopBar {...baseProps()} onClear={() => {}} />);
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
 
     const toggle = screen.getByRole("button", { name: /^controls/i });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveAttribute("aria-controls", "topbar-controls-group");
+    // WF-085b: the toggle now drives BOTH TopBar's own group AND the
+    // separate <FilterBar/> App.tsx renders as a sibling — a
+    // space-separated id list in aria-controls is valid WAI-ARIA.
+    expect(toggle).toHaveAttribute(
+      "aria-controls",
+      "topbar-controls-group filter-bar"
+    );
 
     expect(screen.queryByRole("button", { name: /^clear/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^labels/i })).not.toBeInTheDocument();
@@ -482,7 +509,7 @@ describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
   });
 
   it("clicking the toggle expands the group, flips aria-expanded, and surfaces every collapsed control", () => {
-    render(<TopBar {...baseProps()} onClear={() => {}} />);
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
 
     const toggle = screen.getByRole("button", { name: /^controls/i });
     fireEvent.click(toggle);
@@ -496,7 +523,7 @@ describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
   });
 
   it("clicking the toggle a second time re-collapses the group", () => {
-    render(<TopBar {...baseProps()} onClear={() => {}} />);
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
 
     const toggle = screen.getByRole("button", { name: /^controls/i });
     fireEvent.click(toggle);
@@ -509,7 +536,7 @@ describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
 
   it("keeps repo · branch · ＋New card and the status glance pills outside the collapsed group, always accessible", () => {
     render(
-      <TopBar
+      <StatefulTopBar
         {...baseProps()}
         repos={[{ label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 }]}
         activeRoot="/a"
