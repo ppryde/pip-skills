@@ -118,6 +118,18 @@ def test_board_carries_labels_passthrough(client: TestClient, root: Path) -> Non
     assert cards[card_id]["labels"] == ["policy", "architecture"]
 
 
+def test_board_carries_label_colors_passthrough(client: TestClient, root: Path) -> None:
+    """`board_data` (overseer core) gained a top-level `label_colors` registry
+    (F10, WF-067). Same passthrough contract as `repo`/`checklist` above: no
+    dashboard backend transform."""
+    run_overseer(root, "label-color", "set", "policy", "sky")
+
+    resp = client.get("/api/board")
+
+    assert resp.status_code == 200
+    assert resp.json()["board"]["label_colors"] == {"policy": "sky"}
+
+
 def test_board_carries_created_updated_passthrough(client: TestClient, root: Path) -> None:
     """`board_data` (overseer core) gained `created`/`updated` fields on cards
     (recency-first lane ordering, dashboard frontend). Same passthrough

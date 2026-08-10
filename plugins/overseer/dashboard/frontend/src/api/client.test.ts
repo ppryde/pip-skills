@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 const boardResponse: BoardResponse = {
-  board: { project: {}, cards: [], sprints: [], quarantined: [] },
+  board: { project: {}, cards: [], sprints: [], quarantined: [], label_colors: {} },
   context: { pct: 42, threshold: 80 },
   limits: null,
 };

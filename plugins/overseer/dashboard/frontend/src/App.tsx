@@ -240,6 +240,7 @@ function App() {
           onPriority={setPriority}
           onComplexity={setComplexity}
           onClear={clear}
+          colorRegistry={board.label_colors}
         />
       )}
       <main className="board-region">
@@ -278,6 +279,7 @@ function App() {
         inFlight={inFlight}
         allCardIds={board?.cards.map((c) => c.id) ?? []}
         party={party}
+        colorRegistry={board?.label_colors}
       />
       {partyOpen && (
         <PartyOverlay

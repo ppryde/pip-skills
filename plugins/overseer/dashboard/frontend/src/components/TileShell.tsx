@@ -36,6 +36,9 @@ export interface TileShellProps {
   children?: ReactNode;
   /** Chunk 5: clicking the tile BODY (outside the drag handle) opens the detail drawer. */
   onOpen?: (id: string) => void;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * passed straight through to `LabelChips`. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -62,6 +65,7 @@ function TileShell({
   headerExtra,
   children,
   onOpen,
+  colorRegistry,
 }: TileShellProps) {
   const dragSource = isDragSource(card);
   const sortableDisabled = dragDisabled || !dragSource;
@@ -244,7 +248,11 @@ function TileShell({
             Sits below the title/before the checklist, its own compact,
             wrapping row (`.card-tile__labels` caps height and scrolls a
             long label set — see styles.css). */}
-        <LabelChips labels={card.labels} className="card-tile__labels" />
+        <LabelChips
+          labels={card.labels}
+          className="card-tile__labels"
+          colorRegistry={colorRegistry}
+        />
         {/*
           Inert (no button/a/role) — see ChecklistRows's doc comment. It
           lives inside the plain body div above, so it must never introduce

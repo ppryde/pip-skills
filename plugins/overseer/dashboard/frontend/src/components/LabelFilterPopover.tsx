@@ -14,6 +14,10 @@ export interface LabelFilterPopoverProps {
    * pattern as `LabelEditor`/`StatusMenu`. */
   onCycle: (label: string) => void;
   onClose: () => void;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * threaded through to `labelColor` so a filter chip keeps its
+   * registry-chosen colour, not just the hash-palette fallback. */
+  colorRegistry?: Record<string, string>;
 }
 
 type ChipState = "include" | "exclude" | "neutral";
@@ -49,6 +53,7 @@ function LabelFilterPopover({
   excludeLabels,
   onCycle,
   onClose,
+  colorRegistry,
 }: LabelFilterPopoverProps) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -80,7 +85,8 @@ function LabelFilterPopover({
               key={label}
               type="button"
               className={`label-filter-chip label-filter-chip--${state} label-chip--${labelColor(
-                label
+                label,
+                colorRegistry
               )}`}
               aria-label={`${label}: ${state}`}
               onClick={() => onCycle(label)}

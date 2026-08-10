@@ -101,6 +101,11 @@ export interface Board {
   cards: BoardCard[];
   sprints: unknown[];
   quarantined: unknown[];
+  /** F10, WF-067: the editable label-colour registry — `{label: color_key}`.
+   * A registry hit wins over `labelColor`'s hash-palette fallback (see
+   * `board/labelColor.ts`). Always present (possibly `{}`), same
+   * blank-tolerant contract as `labels`/`checklist` on `BoardCard`. */
+  label_colors: Record<string, string>;
 }
 
 export interface PrWindow {

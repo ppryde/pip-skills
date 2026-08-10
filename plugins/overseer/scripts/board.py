@@ -53,6 +53,7 @@ def board_data(repo_root: Path) -> dict:
                 ...
             ],
             "quarantined": [str],  # Paths to quarantined cards and sprints
+            "label_colors": {str: str},  # F10, WF-067: {label: color_key} registry
         }
     """
     conn = db.connect(repo_root)
@@ -122,4 +123,8 @@ def board_data(repo_root: Path) -> dict:
         "cards": cards_data,
         "sprints": sprints_data,
         "quarantined": quarantined_paths,
+        # F10, WF-067: the editable label-colour registry — a registry hit
+        # wins over LabelChips' hash-palette fallback client-side (see
+        # board/labelColor.ts).
+        "label_colors": db.load_label_colors(conn),
     }

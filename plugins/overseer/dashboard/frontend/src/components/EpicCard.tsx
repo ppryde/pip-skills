@@ -17,6 +17,9 @@ export interface EpicCardProps {
   dragDisabled?: boolean;
   /** Chunk 5: clicking the tile body opens the detail drawer for this card. */
   onOpen?: (id: string) => void;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * threaded through to `TileShell`'s `LabelChips`. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -38,6 +41,7 @@ function EpicCard({
   branchSpotlight = false,
   dragDisabled = false,
   onOpen,
+  colorRegistry,
 }: EpicCardProps) {
   const rollup = card.rollup;
 
@@ -52,6 +56,7 @@ function EpicCard({
       branchSpotlight={branchSpotlight}
       dragDisabled={dragDisabled}
       onOpen={onOpen}
+      colorRegistry={colorRegistry}
       headerExtra={
         <button
           type="button"

@@ -258,6 +258,19 @@ Test sprint."""
         ids = [c["id"] for c in data["cards"]]
         assert ids == ["WF-001", "WF-002", "WF-003"]
 
+    def test_empty_label_colors_registry(self, repo):
+        from scripts.board import board_data
+        data = board_data(repo)
+        assert data["label_colors"] == {}
+
+    def test_label_colors_registry_reflects_set_colors(self, repo, conn):
+        from scripts.board import board_data
+        db.set_label_color(conn, "policy", "sky")
+        db.set_label_color(conn, "architecture", "plum")
+
+        data = board_data(repo)
+        assert data["label_colors"] == {"policy": "sky", "architecture": "plum"}
+
     def test_budget_raw_ints_not_formatted(self, repo, conn):
         from scripts.board import board_data
         card = make_card(

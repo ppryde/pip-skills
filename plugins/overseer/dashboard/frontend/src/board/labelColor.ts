@@ -39,7 +39,16 @@ function hashString(s: string): number {
   return Math.abs(h);
 }
 
-/** Deterministically maps `label` to one of the curated palette keys above. */
-export function labelColor(label: string): LabelSwatchKey {
-  return PALETTE_KEYS[hashString(label) % PALETTE_KEYS.length];
+/**
+ * Deterministically maps `label` to a swatch key. When `registry` (the F10
+ * editable colour registry, WF-067 — board payload's `label_colors`) has an
+ * entry for `label`, that user-chosen key wins; otherwise falls back to the
+ * curated-palette hash above, byte-identical to the no-registry behaviour
+ * this function always had.
+ */
+export function labelColor(
+  label: string,
+  registry?: Record<string, string>
+): string {
+  return registry?.[label] ?? PALETTE_KEYS[hashString(label) % PALETTE_KEYS.length];
 }

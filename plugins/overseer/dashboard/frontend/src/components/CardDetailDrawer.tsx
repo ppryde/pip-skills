@@ -33,6 +33,9 @@ export interface CardDetailDrawerProps {
    * Resolved against `detail.claimed_by` to render the hero chip's
    * PartyAvatar + class; ClaimControl's independent poll is unrelated. */
   party: PartyMember[];
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * passed straight through to `LabelEditor`. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -89,6 +92,7 @@ function CardDetailDrawer({
   inFlight,
   allCardIds,
   party,
+  colorRegistry,
 }: CardDetailDrawerProps) {
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -389,6 +393,7 @@ function CardDetailDrawer({
                   await mutate(() => setLabels(detail.id, labels));
                   refetchDetail();
                 }}
+                colorRegistry={colorRegistry}
               />
             </header>
 
