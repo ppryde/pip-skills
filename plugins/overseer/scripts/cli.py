@@ -813,9 +813,19 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
     each child is stamped into that same stage via `set_stage` (which also
     flips status to "in-flight" and clears any `blocked_on`, same as
     `set-stage` does for one card). If the parent has NO stage, there is no
-    stage to copy, so children are cleared back to stage=None — landing
-    them in the same planned/backlog lane as a stage-less parent, mirroring
-    the `unblock`/`unpark` "in-flight if stage else planned" idiom.
+    stage to copy — but the parent's STATUS still determines the lane, and
+    is copied onto the child rather than hardcoded. This matters because a
+    stage-less parent isn't always "planned": `park()` has no stage
+    precondition, so a parent can be `parked` (or `blocked`) with
+    `stage=None` too, and a hardcoded "planned" would silently strand
+    children in Backlog while the parent sits in a different lane
+    (board `layout.ts` places stage-less cards by status: planned/blocked
+    → Backlog, parked → Parked, independently).
+
+    Defensive-only fallback: `_load` doesn't restrict to live cards, so a
+    caller invoking this against an already-archived (done/abandoned)
+    parent must not propagate a terminal status onto still-live children —
+    falls back to "planned" in that case instead.
 
     Archived cards (done/abandoned) never appear in `load_live_cards`, so
     they're skipped without any special-casing. Batches the writes (one
@@ -835,8 +845,11 @@ def cmd_pull_children(args: argparse.Namespace) -> int:
             child.set_stage(parent.stage, now)
         else:
             child.stage = None
-            child.status = "planned"
-            child.blocked_on = None
+            child.status = (
+                parent.status if parent.status not in ("done", "abandoned")
+                else "planned"
+            )
+            child.blocked_on = parent.blocked_on if child.status == "blocked" else None
             child.updated = now
         db.save_card(_conn(args.root), child)
     quarantined = rebuild_index(args.root, args.root.resolve().name, now)

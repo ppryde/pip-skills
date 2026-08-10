@@ -695,6 +695,20 @@ class TestPullChildren:
         run(repo, "new-card", "--title", "Solo")
         assert run(repo, "pull-children", "WF-001") == 0
 
+    def test_pull_children_stageless_parked_parent_moves_child_to_parked(self, repo):
+        # A parent can be `parked` with stage=None (park() has no stage
+        # precondition) — children must land in Parked too, not Backlog.
+        run(repo, "new-card", "--title", "Epic")   # WF-001
+        run(repo, "new-card", "--title", "K1")     # WF-002
+        run(repo, "set-field", "WF-002", "--parent", "WF-001")
+        run(repo, "park", "WF-001")
+        assert _card(repo, "WF-001").stage is None
+        assert _card(repo, "WF-001").status == "parked"
+        assert run(repo, "pull-children", "WF-001") == 0
+        child = _card(repo, "WF-002")
+        assert child.status == "parked"
+        assert child.stage is None
+
 
 class TestRelationsArchivedRollup:
     def test_done_child_counts_in_rollup_and_readiness(self, repo):
