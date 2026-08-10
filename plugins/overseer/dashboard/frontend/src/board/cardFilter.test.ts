@@ -9,7 +9,7 @@ const card = (o: Partial<BoardCard> & { id: string }): BoardCard => ({
   sprint: null, parent: o.parent ?? null, depends_on: [], order: 0,
   budget: { estimate: null, actual: 0 }, is_epic: false, ready: true,
   rollup: null, created: "", updated: "", checklist: [], labels: o.labels ?? [],
-  links: [],
+  links: [], pr: null,
 });
 const ids = (cards: BoardCard[], s: FilterState) => [...visibleCardIds(cards, s)].sort();
 const F = (o: Partial<FilterState>): FilterState => ({ ...DEFAULT_FILTER, excludeLabels: [], ...o });

@@ -5,6 +5,7 @@ import { isDragSource } from "../board/dragPlan";
 import { checklistWindow } from "../board/checklistWindow";
 import { rarityStars } from "../board/rarityStars";
 import { formatTokens } from "../board/formatTokens";
+import { HTTP_URL_RE } from "../board/httpUrl";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ChecklistRows from "./ChecklistRows";
@@ -173,6 +174,28 @@ function TileShell({
               {card.priority}
             </span>
           )}
+          {/* PR chip (WF-073): the card's stored `pr` (a plain string set via
+              `overseer set-field --pr`) — placed right after the priority
+              chip, ahead of the quieter repo/branch provenance chips, so it
+              reads as front-and-center. NOT the census-derived `Context.pr`
+              (`PrWindow`) — that's live session data, unrelated to this
+              card's own field. `stopPropagation` keeps a click on the link
+              from also firing the tile body's `onOpen` (drawer-open) click
+              handler above. */}
+          {card.pr &&
+            (HTTP_URL_RE.test(card.pr) ? (
+              <a
+                href={card.pr}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pr-chip"
+                onClick={(e) => e.stopPropagation()}
+              >
+                PR
+              </a>
+            ) : (
+              <span className="pr-chip pr-chip--text">{card.pr}</span>
+            ))}
           {card.repo && <span className="repo-chip">{card.repo}</span>}
           {/* Branch chip (WF-031): distinct from the repo-chip's quiet grey
               provenance label — this one flags WHICH branch the card's

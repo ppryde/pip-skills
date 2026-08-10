@@ -24,6 +24,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     labels: [],
     body: "",
     links: [],
+    pr: null,
     ...overrides,
   };
 }

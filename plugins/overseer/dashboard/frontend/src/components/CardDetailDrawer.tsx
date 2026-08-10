@@ -7,6 +7,7 @@ import { accentKeyForCard, bannerLabelForCard } from "../board/cardAccent";
 import { rarityStars } from "../board/rarityStars";
 import { parseProgressLog } from "../board/progressLog";
 import { ACCENT_GROUPS } from "../board/avatarAccent";
+import { HTTP_URL_RE } from "../board/httpUrl";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ClaimControl from "./ClaimControl";
@@ -18,14 +19,6 @@ import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
 import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
-
-/** Defense-in-depth scheme allowlist for card link `path` values (F8/PR5
- * final-review Fix 1). `Card.from_text` already drops non-http(s) link
- * entries at parse time, but existing DBs may still hold rows written before
- * that guard existed — so the drawer re-checks before ever rendering a
- * `path` as a clickable `href`, to close the `javascript:`/`data:` URI XSS
- * vector on click. */
-const HTTP_URL_RE = /^https?:\/\//i;
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -355,6 +348,25 @@ function CardDetailDrawer({
                   {detail.stage ? ` · ${detail.stage}` : ""}
                 </span>
                 {detail.repo && <span className="repo-chip">{detail.repo}</span>}
+                {/* Card's stored PR ref/URL (WF-073) — Card.pr, a plain
+                    string set via `overseer set-field --pr`. NOT the same
+                    thing as the hero chip's live census PrWindow data below
+                    (that's the CLAIMING SESSION's currently-open PR, not
+                    this card's). Same http(s)->anchor / bare-text render
+                    rule as the Links section further down. */}
+                {detail.pr &&
+                  (HTTP_URL_RE.test(detail.pr) ? (
+                    <a
+                      href={detail.pr}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="card-drawer__pr-chip"
+                    >
+                      PR
+                    </a>
+                  ) : (
+                    <span className="card-drawer__pr-chip">{detail.pr}</span>
+                  ))}
                 <PrioritySelect
                   cardId={detail.id}
                   value={detail.priority}

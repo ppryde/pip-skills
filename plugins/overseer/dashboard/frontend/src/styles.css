@@ -1555,6 +1555,38 @@ body {
   color: var(--legacy-color-4338ca);
 }
 
+/* PR chip (WF-073): the card's own stored `pr` ref/URL — deliberately the
+   loudest chip in the header row after priority (sky accent + solid border,
+   vs. the repo/branch chips' quieter provenance tones) since a card's PR is
+   exactly the kind of thing an orchestrator scanning the board wants to spot
+   at a glance. The link variant (`<a>`, http(s) values) and the text-only
+   `--text` variant (bare refs, no href) share this base; `--text` only drops
+   the underline affordance a non-clickable badge shouldn't imply. */
+.pr-chip {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-accent-sky-cardshadow);
+  color: var(--qb-accent-sky-shadow);
+  border: 1px solid var(--qb-accent-sky-border);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pr-chip:hover {
+  text-decoration: underline;
+}
+
+.pr-chip--text {
+  cursor: default;
+}
+
+.pr-chip--text:hover {
+  text-decoration: none;
+}
+
 /* Quiet, muted label — the card's origin repo. Deliberately low-contrast
    next to the priority chip: this is provenance metadata, not a signal that
    should compete for attention on the tile. */
@@ -2272,6 +2304,26 @@ body {
   border-radius: var(--qb-radius-pill);
   background: var(--qb-parchment-muted);
   color: var(--qb-ink-700);
+}
+
+/* Card's own PR ref/URL (WF-073) — same sky accent as the tile's `.pr-chip`
+   so the drawer and the board tile read as the same signal, just inline
+   with the other fact chips (status/repo/priority/budget) here instead of
+   the header badge row. */
+.card-drawer__pr-chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-accent-sky-cardshadow);
+  color: var(--qb-accent-sky-shadow);
+  border: 1px solid var(--qb-accent-sky-border);
+  text-decoration: none;
+}
+
+a.card-drawer__pr-chip:hover {
+  text-decoration: underline;
 }
 
 .card-drawer__hero-name {

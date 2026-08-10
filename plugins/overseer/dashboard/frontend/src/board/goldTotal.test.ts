@@ -24,6 +24,7 @@ function card(actual: number): BoardCard {
     labels: [],
     body: "",
     links: [],
+    pr: null,
   };
 }
 

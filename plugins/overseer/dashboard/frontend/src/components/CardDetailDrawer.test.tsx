@@ -71,6 +71,7 @@ function cardDetail(
     checklist: [],
     labels: [],
     links: [],
+    pr: null,
     sections: {},
     body: "",
     ...overrides,
@@ -205,6 +206,74 @@ describe("<CardDetailDrawer/>", () => {
 
     await screen.findByText(`Title WF-A`);
     expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+
+  it("renders a clickable, safely-attributed PR anchor for an http(s) pr (WF-073)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-A", pr: "https://github.com/org/repo/pull/42" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    const chip = container.querySelector("a.card-drawer__pr-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveAttribute(
+      "href",
+      "https://github.com/org/repo/pull/42"
+    );
+    expect(chip).toHaveAttribute("target", "_blank");
+    expect(chip).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("renders non-link PR badge text for a bare (non-http) pr ref (WF-073)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-A", pr: "#42" })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(container.querySelector("a.card-drawer__pr-chip")).toBeNull();
+    const chip = container.querySelector("span.card-drawer__pr-chip");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent("#42");
+  });
+
+  it("renders no PR chip when the card carries no pr (WF-073)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(container.querySelector(".card-drawer__pr-chip")).toBeNull();
   });
 
   it("renders a chip for each of the card's labels via the editable LabelEditor (F1, WF-058)", async () => {
