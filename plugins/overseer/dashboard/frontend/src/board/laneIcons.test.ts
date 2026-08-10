@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Lane } from "./layout";
-import { laneIcon, laneIconKey } from "./laneIcons";
+import { laneIcon, laneIconKey, stageIcon } from "./laneIcons";
 
 function lane(overrides: Partial<Lane> & Pick<Lane, "key" | "kind">): Lane {
   return { label: "", cards: [], ...overrides };
@@ -72,5 +72,22 @@ describe("laneIcon", () => {
     expect(laneIcon("in-progress")).toEqual(expect.any(String));
     expect(laneIcon("in-progress")).not.toBe(laneIcon("backlog"));
     expect(laneIcon("in-progress")).not.toBe(laneIcon("implementation"));
+  });
+});
+
+describe("stageIcon", () => {
+  it("resolves a stage to the SAME icon its stage:<S> lane would use", () => {
+    const stages = [
+      "bootstrap",
+      "planning",
+      "plan-review",
+      "implementation",
+      "impl-review",
+      "verification",
+      "awaiting-merge",
+    ] as const;
+    stages.forEach((stage) => {
+      expect(stageIcon(stage)).toBe(laneIcon(stage));
+    });
   });
 });

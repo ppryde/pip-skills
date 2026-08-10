@@ -658,6 +658,20 @@ describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
     ).toBeNull();
   });
 
+  it("mobile: each in-flight card in the merged lane gets its own stage icon", async () => {
+    stubViewport(true);
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Backlog");
+
+    const tile = container.querySelector('[data-card-id="WF-EPIC-C2"]');
+    expect(tile).not.toBeNull();
+    const icon = tile!.querySelector("img.card-tile__stage-icon");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("alt", "Implementation");
+  });
+
   it("desktop (matchMedia reports not-mobile): full 11-lane nav is untouched — stage tabs present, no In Progress tab", async () => {
     stubViewport(false);
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);

@@ -13,6 +13,7 @@
  * can never disagree about which lane a colour/icon belongs to.
  */
 import type { Lane } from "./layout";
+import type { Stage } from "../api/types";
 
 import backlog from "../assets/lane-icons/backlog.png";
 import bootstrap from "../assets/lane-icons/bootstrap.png";
@@ -60,4 +61,13 @@ export function laneIconKey(lane: Lane): string {
  * happen in practice since `laneIconKey` only ever emits a known key. */
 export function laneIcon(key: string): string {
   return ICONS[key] ?? backlog;
+}
+
+/** Part B (WF-085 in-progress lane, mobile card stage icon): a card's own
+ * `Stage` maps to the SAME icon its `stage:<S>` lane would use on desktop
+ * (a `Stage` string IS already one of `ICONS`' keys — see `laneIconKey`'s
+ * `kind === "stage"` branch) — one lookup table, never two icons drifting
+ * for the same stage. */
+export function stageIcon(stage: Stage): string {
+  return laneIcon(stage);
 }

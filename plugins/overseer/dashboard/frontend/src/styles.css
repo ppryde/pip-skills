@@ -1409,6 +1409,16 @@ body {
   color: var(--legacy-color-6b7280);
 }
 
+/* WF-085 in-progress lane, Part B (mobile-only — see CardTile.tsx's
+   `showStage`): a small per-card stage badge, sat in the header row
+   alongside the id, replacing the "which lane am I in" cue the card loses
+   once its stage lane is merged away on a phone. */
+.card-tile__stage-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
 /*
   Shared by the plain-<div> title (read-only tiles) AND the <button> title
   that is the keyboard-reachable "open drawer" control on openable tiles. The
