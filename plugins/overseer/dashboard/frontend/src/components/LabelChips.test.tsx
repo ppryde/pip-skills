@@ -19,6 +19,13 @@ describe("LabelChips", () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it("renders nothing and does not crash when labels is undefined", () => {
+    const { container } = render(
+      <LabelChips labels={undefined as unknown as string[]} />
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
   it("gives each chip a colour class matching labelColor's stable mapping", () => {
     const { container } = render(<LabelChips labels={["policy"]} />);
     const chip = container.querySelector(".label-chip")!;

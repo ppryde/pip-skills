@@ -19,11 +19,14 @@ export interface LabelChipsProps {
  * component existed — see TileShell/CardDetailDrawer call sites.
  */
 function LabelChips({ labels, className }: LabelChipsProps) {
-  if (labels.length === 0) return null;
+  // Defensive guard: the contract guarantees `labels` is always present, but
+  // treat a missing/undefined value as `[]` rather than crashing.
+  const list = labels ?? [];
+  if (list.length === 0) return null;
 
   return (
     <div className={"label-chips" + (className ? ` ${className}` : "")}>
-      {labels.map((label) => (
+      {list.map((label) => (
         <span
           key={label}
           className={`label-chip label-chip--${labelColor(label)}`}

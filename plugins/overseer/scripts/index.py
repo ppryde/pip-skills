@@ -40,7 +40,7 @@ def _epic_child_line(card: Card, cards: list[Card]) -> str:
     ready = _readiness(card, cards)
     if ready:
         parts.append(ready)
-    return f"    - {card.id}  {card.title}  " + " · ".join(parts)
+    return f"    - {card.id}  {card.title}{_labels_suffix(card)}  " + " · ".join(parts)
 
 
 def _in_flight_row(card: Card, cards: list[Card]) -> str:
@@ -84,7 +84,7 @@ def generate_index(
             est = format_tokens(r["estimate"]) or "0"
             act = format_tokens(r["actual"]) or "0"
             lines.append(
-                f"- {e.id} — {e.title}  ({r['done']}/{r['total']} done · {act}/{est})"
+                f"- {e.id} — {e.title}{_labels_suffix(e)}  ({r['done']}/{r['total']} done · {act}/{est})"
             )
             for kid in sorted(children(pool, e.id), key=lambda c: c.id):
                 lines.append(_epic_child_line(kid, pool))
@@ -118,7 +118,7 @@ def generate_index(
         lines += ["", "## Parked"]
         for c in parked:
             day = c.updated[:10] if c.updated else "?"
-            lines.append(f"- {c.id} — {c.title} (shelved {day})")
+            lines.append(f"- {c.id} — {c.title}{_labels_suffix(c)} (shelved {day})")
 
     lines += ["", "## Recently done"]
     if recently_done:

@@ -73,6 +73,14 @@ class TestGenerateIndex:
         out = generate_index("p", [c], [], NOW)
         assert "[ops]" in out
 
+    def test_no_labels_on_recently_done_line(self):
+        # Recently-done lines are terse (id/status/day only, no title) --
+        # labels are intentionally not rendered here.
+        c = card("WF-019", status="done", updated="2026-07-07T18:00",
+                  labels=["ops"])
+        out = generate_index("p", [], [c], NOW)
+        assert "[ops]" not in out
+
 
 class TestEpicsAndParked:
     def _gen(self, cards):
@@ -115,6 +123,29 @@ class TestEpicsAndParked:
         cards = [make_card("WF-005", status="parked", title="Legacy", updated="2026-07-09T10:00")]
         out = self._gen(cards)
         assert "## Parked" in out and "WF-005" in out and "shelved" in out
+
+    def test_labels_shown_on_epic_line(self):
+        from factories import make_card
+        cards = [make_card("WF-010", status="in-flight", title="Auth", labels=["security"])]
+        out = self._gen(cards)
+        assert "[security]" in out
+
+    def test_labels_shown_on_epic_child_line(self):
+        from factories import make_card
+        cards = [
+            make_card("WF-010", status="in-flight", title="Auth"),
+            make_card("WF-011", parent="WF-010", status="in-flight", stage="implementation",
+                      labels=["backend"]),
+        ]
+        out = self._gen(cards)
+        assert "[backend]" in out
+
+    def test_labels_shown_on_parked_line(self):
+        from factories import make_card
+        cards = [make_card("WF-005", status="parked", title="Legacy",
+                            updated="2026-07-09T10:00", labels=["legacy"])]
+        out = self._gen(cards)
+        assert "[legacy]" in out
 
 
 class TestRebuildIndex:
