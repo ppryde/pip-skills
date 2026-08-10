@@ -1943,6 +1943,15 @@ body {
   gap: 0.5rem;
 }
 
+/* Same danger-red exception as .card-drawer__status--error above — a failed
+   saveEdit() keeps edit mode open and surfaces inline here (fix-up, PR3
+   dual review) rather than silently discarding the draft. */
+.card-drawer__edit-error {
+  color: var(--legacy-color-b3261e);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 .card-drawer__facts {
   display: flex;
   align-items: center;

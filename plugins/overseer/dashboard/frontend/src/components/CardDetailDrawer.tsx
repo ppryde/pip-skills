@@ -104,6 +104,15 @@ function CardDetailDrawer({
   const [editing, setEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [bodyDraft, setBodyDraft] = useState("");
+  // Fix-up (dual review, PR3): `busy` + `editError` mirror NewCardDialog's
+  // own local state — `mutate`'s default swallow-and-refresh behavior would
+  // otherwise exit edit mode and drop the draft on a FAILED save (see
+  // `saveEdit` below). `busy` is a synchronous in-flight guard distinct from
+  // the `inFlight` prop (which only updates once `mutate` has set React
+  // state), so a rapid double-click of Save can't fire two overlapping
+  // `editCard` calls.
+  const [busy, setBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Monotonic counter, same pattern as useBoard's requestIdRef: a response is
   // only applied if its id is still the latest issued when it resolves.
@@ -167,6 +176,7 @@ function CardDetailDrawer({
     setTitleDraft(detail.title);
     setBodyDraft(detail.body);
     setEditing(false);
+    setEditError(null);
   }, [detail?.id, detail?.title, detail?.body]);
 
   const cancelEdit = () => {
@@ -175,6 +185,7 @@ function CardDetailDrawer({
       setBodyDraft(detail.body);
     }
     setEditing(false);
+    setEditError(null);
   };
 
   // Same routing as every other drawer control (PrioritySelect/LinkEditor/
@@ -183,11 +194,31 @@ function CardDetailDrawer({
   // board state (and thus TileShell's tiles) updates immediately, then
   // `refetchDetail` (the SAME counter-guarded closure those siblings pass
   // as `onMutated`) refreshes the drawer's own detail.
+  //
+  // Fix-up (dual review, PR3): `{ rethrow: true }`, same as NewCardDialog's
+  // `submit()` — DEFAULT `mutate` swallows a rejection into the global error
+  // banner and still resolves, which used to mean a FAILED save fell through
+  // to `setEditing(false)` + `refetchDetail()` unconditionally: edit mode
+  // silently closed and the user's unsaved draft was discarded. Now a
+  // rejection is caught here, edit mode stays open, both drafts are left
+  // exactly as the user typed them, and an inline error renders below the
+  // textarea — success is the only path that closes edit mode.
   const saveEdit = async () => {
-    if (!detail || !titleDraft.trim()) return;
-    await mutate(() => editCard(detail.id, { title: titleDraft, body: bodyDraft }));
-    setEditing(false);
-    refetchDetail();
+    if (!detail || !titleDraft.trim() || busy) return;
+    setBusy(true);
+    setEditError(null);
+    try {
+      await mutate(
+        () => editCard(detail.id, { title: titleDraft.trim(), body: bodyDraft }),
+        { rethrow: true }
+      );
+      setEditing(false);
+      refetchDetail();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -440,15 +471,24 @@ function CardDetailDrawer({
                   onChange={(e) => setBodyDraft(e.target.value)}
                   rows={14}
                 />
+                {editError && (
+                  <p className="card-drawer__edit-error" role="alert">
+                    {editError}
+                  </p>
+                )}
                 <div className="card-drawer__edit-actions">
                   <button
                     type="button"
                     onClick={() => void saveEdit()}
-                    disabled={inFlight || !titleDraft.trim()}
+                    disabled={busy || inFlight || !titleDraft.trim()}
                   >
                     Save
                   </button>
-                  <button type="button" onClick={cancelEdit} disabled={inFlight}>
+                  <button
+                    type="button"
+                    onClick={cancelEdit}
+                    disabled={busy || inFlight}
+                  >
                     Cancel
                   </button>
                 </div>

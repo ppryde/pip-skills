@@ -31,11 +31,9 @@ _BACKEND_DIR = Path(__file__).resolve().parent / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from app.main import create_app  # noqa: E402  (must follow the sys.path setup above)
+from app.main import create_app, LOOPBACK_HOSTS  # noqa: E402 (after sys.path setup above)
 
 DEFAULT_PORT = 8770
-
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def resolve_token(host: str) -> str | None:
@@ -49,7 +47,7 @@ def resolve_token(host: str) -> str | None:
     env = os.environ.get("OVERSEER_DASHBOARD_TOKEN")
     if env:
         return env
-    if host not in _LOOPBACK_HOSTS:
+    if host not in LOOPBACK_HOSTS:
         return secrets.token_urlsafe(24)
     return None
 

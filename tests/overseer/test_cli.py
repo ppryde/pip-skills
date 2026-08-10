@@ -194,6 +194,15 @@ class TestLinearAndPr:
         assert run(repo, "set-field", "WF-001", "--title", "New title") == 0
         assert _card(repo).title == "New title"
 
+    def test_set_field_title_trims_padding(self, repo):
+        """Fix-up (dual review, PR3): the empty-check already used `.strip()`
+        but the assignment stored the raw arg, so a padded title like
+        "  New  " landed with its whitespace intact — inconsistent with
+        `new-card`, which trims. Both now trim on store."""
+        run(repo, "new-card", "--title", "Old")
+        assert run(repo, "set-field", "WF-001", "--title", "  New  ") == 0
+        assert _card(repo).title == "New"
+
     def test_set_field_empty_title_rejected(self, repo, capsys):
         run(repo, "new-card", "--title", "Old")
         assert run(repo, "set-field", "WF-001", "--title", "") == 1

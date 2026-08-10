@@ -360,11 +360,15 @@ def _mutation_error(exc: CliError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.stderr)
 
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# Public (fix-up, PR3 dual review): the launcher (`serve.py`) needs this SAME
+# set to decide whether a bind is tokenless — it used to keep its own
+# identical copy, a duplicate-source-of-truth risk for the auth boundary.
+# `serve.py` imports this constant rather than redefining it.
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _is_loopback(host: str) -> bool:
-    return host in _LOOPBACK_HOSTS
+    return host in LOOPBACK_HOSTS
 
 
 def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None,

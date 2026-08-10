@@ -328,13 +328,57 @@ describe("<CardDetailDrawer/>", () => {
       fireEvent.click(screen.getByRole("button", { name: /save/i }));
     });
 
-    expect(mutate).toHaveBeenCalledWith(expect.any(Function));
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function), { rethrow: true });
     expect(editCard).toHaveBeenCalledWith("WF-1", {
       title: "New title",
       body: "new body",
     });
     await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
     await screen.findByText("New title");
+  });
+
+  it("keeps edit mode open, preserves the draft, and shows an inline error when the save rejects — no silent draft loss on failure (fix-up, PR3 dual review)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({ id: "WF-1E", title: "Old title", body: "old body" })
+    );
+    vi.mocked(editCard).mockRejectedValueOnce(new Error("save failed"));
+
+    // liveMutate() forwards fn()'s rejection unconditionally (see its doc
+    // comment) — the same shape a rethrowing `useBoard.mutate` has for a
+    // caller that always passes `{ rethrow: true }`, which is what
+    // `saveEdit` does.
+    const mutate = liveMutate();
+    render(
+      <CardDetailDrawer
+        cardId="WF-1E"
+        onClose={() => {}}
+        mutate={mutate}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+    await screen.findByText("Old title");
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Draft title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "draft body" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+
+    expect(mutate).toHaveBeenCalledWith(expect.any(Function), { rethrow: true });
+    // Edit mode did NOT fall through to the read view, and both drafts
+    // survive exactly as typed — this is the bug being fixed.
+    expect(screen.getByLabelText(/title/i)).toHaveValue("Draft title");
+    expect(screen.getByLabelText(/body/i)).toHaveValue("draft body");
+    expect(screen.getByRole("alert")).toHaveTextContent(/save failed/i);
+    // No refetch fired for a failed save — getCard only ran once, at open.
+    expect(getCard).toHaveBeenCalledTimes(1);
   });
 
   it("disables Save when the title draft is empty, and Cancel restores the read view without saving", async () => {

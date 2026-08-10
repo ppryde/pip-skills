@@ -382,7 +382,7 @@ def cmd_new_card(args: argparse.Namespace) -> int:
     card_id = args.jira or args.linear or db.mint_id(conn)
     card = Card(
         id=card_id,
-        title=args.title,
+        title=args.title.strip(),
         status="planned",
         jira=args.jira,
         linear=args.linear,
@@ -493,7 +493,7 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         if not args.title.strip():
             print("error: title cannot be empty", file=sys.stderr)
             return 1
-        card.title = args.title
+        card.title = args.title.strip()
     if args.body is not None:
         card.body = args.body
     card.updated = _now()

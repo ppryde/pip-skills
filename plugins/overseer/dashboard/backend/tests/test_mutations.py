@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.cli_client import run_overseer
@@ -305,3 +306,44 @@ def test_edit_empty_title_rejected(client: TestClient, root: Path) -> None:
 def test_edit_requires_a_field(client: TestClient, root: Path) -> None:
     cid = _new_card(root)
     assert client.post(f"/api/card/{cid}", json={}).status_code == 400
+
+
+def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -> None:
+    """Meta-test / safety net (fix-up, PR3 dual review): walks the app's OWN
+    route table rather than a hardcoded route list, so it also covers routes
+    added AFTER this test was written. Every mutating ``POST /api/...`` route
+    must be gated by ``require_token`` (see ``create_app``'s inner
+    ``require_token`` closure), and no ``GET`` route may carry that gate
+    (reads stay open even when a token is configured — see
+    ``test_gate_leaves_reads_open`` above). ``require_token`` is a closure
+    defined inside ``create_app`` (a fresh function object per app instance),
+    so a dependency can't be matched by identity/import — matching by
+    ``__name__`` is the only stable way to recognize it from outside.
+
+    This passes today because every existing POST route is already gated;
+    it exists to FAIL the day a new route (or an edit to an existing one)
+    drops the dependency.
+    """
+    app = create_app(root, token="s3cret")
+
+    checked_post = 0
+    checked_get = 0
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or not route.path.startswith("/api"):
+            continue
+        gated = any(
+            getattr(dep.call, "__name__", None) == "require_token"
+            for dep in route.dependant.dependencies
+        )
+        if "POST" in route.methods:
+            checked_post += 1
+            assert gated, f"POST {route.path} is missing the require_token gate"
+        if "GET" in route.methods:
+            checked_get += 1
+            assert not gated, f"GET {route.path} unexpectedly carries the require_token gate"
+
+    # Sanity: the walk actually found routes on both sides — an empty
+    # app.routes (or a routing regression that dropped everything under
+    # /api) would make every assertion above vacuously true.
+    assert checked_post >= 14
+    assert checked_get >= 4
