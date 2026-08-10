@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .workflow/
 .vigil/
+
+# RPG icon source library (17MB) — only the used subset is committed into the overseer dashboard bundle
+/assets/rpg-icons/
+/assets/rpg-icons-transparent/
