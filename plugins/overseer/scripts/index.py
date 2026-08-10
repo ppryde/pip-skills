@@ -17,7 +17,7 @@ def rebuild_index(repo_root: Path, project: str, now: str) -> list[Path]:
     any stale ``ledger.md`` left over from before the file was retired
     (WF-072). No longer writes a ledger — board.db is the source of truth
     and nothing reads ``ledger.md``. ``project`` and ``now`` are unused but
-    kept in the signature to avoid rippling changes through the ~13 call
+    kept in the signature to avoid rippling changes through the 9 call
     sites and the public ``rebuild-index`` CLI verb."""
     root = state_root(repo_root)
     conn = db.connect(repo_root)

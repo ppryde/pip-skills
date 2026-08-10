@@ -10,7 +10,7 @@ from scripts.models import Card, CardParseError
 
 WORKFLOW_DIRNAME = ".workflow"
 _MINTED_ID_RE = re.compile(r"\AWF-(\d+)-")
-_MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is a view
+_MIGRATE_SKIP_TOP = {"ledger.md", "cards"}  # DB owns cards; ledger.md is retired (WF-072)
 _MIGRATE_SKIP_PATHS = {("archive", "cards")}  # DB owns archived cards too
 
 
@@ -105,8 +105,8 @@ def migrate_workflow_to_central(repo_root: Path) -> int:
     from the canonical repo's .workflow/ (not a worktree's). Returns files copied.
 
     Skips top-level ``cards/`` and ``ledger.md`` (the DB owns live cards;
-    ledger.md is a generated view) and ``archive/cards/`` (the DB owns
-    archived cards too, imported by ``db.migrate_from_workflow``). Keeps
+    ledger.md was a generated view, retired in WF-072) and ``archive/cards/``
+    (the DB owns archived cards too, imported by ``db.migrate_from_workflow``). Keeps
     ``archive/corrupt/`` — quarantined files are never in the DB and would
     otherwise be lost. The skip checks are path-specific (top-level name, or
     the exact ``archive/cards`` prefix), not a basename match, so e.g. a file

@@ -205,7 +205,9 @@ def _census_session_live(session_id: str) -> bool:
 
 
 def _sync(repo_root: Path, card: Card) -> None:
-    """Write ordering per spec: card first, then the index view.
+    """Persist the card, then reconcile: surface any quarantined cards. No
+    ledger is written (WF-072 retired ``ledger.md``; board.db is the sole
+    source of truth).
 
     Known multi-session limitation (spec-accepted YAGNI, no locking):
     ``save_card`` upserts the whole card row, so a hook racing another
