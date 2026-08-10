@@ -242,25 +242,21 @@ def test_restore_corrupt_cards_is_loud(tmp_path, monkeypatch):
         backup.restore_board(repo)
 
 
-def test_restore_stamps_real_ledger_timestamp(tmp_path, monkeypatch):
-    """Regression: rebuild_index used to be called with manifest.get("created", "")
-    — a key backup_board never writes — leaving ledger.md's `Updated:` line
-    blank after every restore. restore_board must stamp a real current
-    timestamp in cli._now()'s "%Y-%m-%dT%H:%M" format instead."""
+def test_restore_calls_rebuild_index_without_error(tmp_path, monkeypatch):
+    """ledger.md is retired (WF-072): rebuild_index no longer stamps a
+    timestamp into a generated file, so the old regression this guarded
+    (a blank `Updated:` line from `manifest.get("created", "")`) can no
+    longer occur -- there's no such line left to go blank. What's still
+    load-bearing is that restore_board's post-restore rebuild_index call
+    (which now only surfaces quarantined cards + removes any stale
+    ledger.md) runs cleanly against the freshly-restored board."""
     repo = tmp_path / "r"; repo.mkdir(); _init_git(repo)
     central = _seed(repo, monkeypatch)
     backup.backup_board(repo)
     shutil.rmtree(central)
     backup.restore_board(repo)
     from scripts.store import state_root
-    ledger = (state_root(repo) / "ledger.md").read_text()
-    first_line = ledger.splitlines()[1]
-    assert first_line.startswith("Updated: ")
-    stamp = first_line.removeprefix("Updated: ")
-    assert stamp != ""
-    # must parse as a real "%Y-%m-%dT%H:%M" timestamp, not a blank/garbage string
-    from datetime import datetime
-    datetime.strptime(stamp, "%Y-%m-%dT%H:%M")
+    assert not (state_root(repo) / "ledger.md").exists()
 
 
 def test_restore_replaces_when_backup_is_newer(tmp_path, monkeypatch):

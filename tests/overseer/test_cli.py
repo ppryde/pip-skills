@@ -32,7 +32,8 @@ def _card(repo, cid: str = "WF-001"):
 class TestInitAndNewCard:
     def test_init_creates_tree_and_index(self, repo):
         root = state_root(repo)
-        assert (root / "ledger.md").exists()
+        # ledger.md is retired (WF-072) -- board.db is the source of truth.
+        assert not (root / "ledger.md").exists()
         assert (root / "cards").is_dir()
 
     def test_new_card_minted_id(self, repo, capsys):
@@ -56,7 +57,7 @@ class TestInitAndNewCard:
 
     def test_new_card_updates_index(self, repo):
         run(repo, "new-card", "--title", "Fix the thing")
-        assert "WF-001" in (state_root(repo) / "ledger.md").read_text()
+        assert _card(repo).title == "Fix the thing"
 
     def test_new_card_duplicate_jira_id_rejected(self, repo, capsys):
         assert run(repo, "new-card", "--title", "A", "--jira", "PROJ-142") == 0
@@ -84,8 +85,9 @@ class TestLifecycle:
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-stage", "WF-001", "planning") == 0
         assert run(repo, "block", "WF-001", "--reason", "user: q") == 0
-        ledger = (state_root(repo) / "ledger.md").read_text()
-        assert "BLOCKED" in ledger
+        card = _card(repo)
+        assert card.status == "blocked"
+        assert card.blocked_on == "user: q"
         assert run(repo, "unblock", "WF-001") == 0
 
     def test_done_archives(self, repo):
@@ -95,7 +97,8 @@ class TestLifecycle:
         assert db.load_card(conn, "WF-001").status == "done"
         live, _ = db.load_live_cards(conn)
         assert live == []  # archiving removes it from the live set
-        assert "Recently done" in (state_root(repo) / "ledger.md").read_text()
+        archived = db.load_archived_cards(conn)
+        assert len(archived) == 1 and archived[0].id == "WF-001"
 
     def test_unknown_card_errors(self, repo, capsys):
         assert run(repo, "set-stage", "WF-999", "planning") == 1
@@ -249,8 +252,14 @@ class TestStateRootWiring:
         git_init(tmp_path)
         central = tmp_path / "central-elsewhere"
         monkeypatch.setenv("OVERSEER_CENTRAL", str(central))
+        # OVERSEER_DB (pinned by the autouse fixture) overrides board.db's
+        # location independently of OVERSEER_CENTRAL -- drop it so board.db
+        # falls through to central_root() like it would for a real user, and
+        # this test actually exercises OVERSEER_CENTRAL end-to-end via `init`
+        # rather than the OVERSEER_DB override masking it.
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
         assert main(["--root", str(tmp_path), "init"]) == 0
-        assert (central / "ledger.md").exists()
+        assert (central / "board.db").exists()
         assert not (tmp_path / ".workflow").exists()
 
     def test_new_card_lands_in_resolved_root(self, tmp_path):
@@ -414,12 +423,14 @@ class TestLabelsField:
         assert run(repo, "rebuild-index") == 0
         assert _card(repo).labels == ["policy", "architecture"]
 
-    def test_labels_appear_in_ledger(self, repo):
+    def test_labels_appear_on_board(self, repo, capsys):
         run(repo, "new-card", "--title", "T")
         run(repo, "set-field", "WF-001", "--labels", "policy,architecture")
         run(repo, "rebuild-index")
-        content = (state_root(repo) / "ledger.md").read_text()
-        assert "policy" in content and "architecture" in content
+        capsys.readouterr()
+        assert run(repo, "board", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["cards"][0]["labels"] == ["policy", "architecture"]
 
     def test_show_includes_labels(self, repo, capsys):
         run(repo, "new-card", "--title", "T", "--labels", "policy")
@@ -711,7 +722,12 @@ class TestPullChildren:
 
 
 class TestRelationsArchivedRollup:
-    def test_done_child_counts_in_rollup_and_readiness(self, repo):
+    def test_done_child_counts_in_rollup_and_readiness(self, repo, capsys):
+        def board():
+            capsys.readouterr()
+            assert run(repo, "board", "--json") == 0
+            return {c["id"]: c for c in json.loads(capsys.readouterr().out)["cards"]}
+
         run(repo, "new-card", "--title", "Epic")     # WF-001
         run(repo, "new-card", "--title", "ChildA")    # WF-002
         run(repo, "new-card", "--title", "ChildB")    # WF-003
@@ -719,13 +735,12 @@ class TestRelationsArchivedRollup:
         run(repo, "set-field", "WF-003", "--parent", "WF-001")
         run(repo, "depends", "WF-003", "--on", "WF-002")
         # before: WF-003 waits on WF-002
-        ledger = (state_root(repo) / "ledger.md").read_text()
-        assert "waiting on WF-002" in ledger
+        assert board()["WF-003"]["ready"] is False
         # complete WF-002 → archived out of live set
         assert run(repo, "done", "WF-002") == 0
-        ledger = (state_root(repo) / "ledger.md").read_text()
-        assert "1/2 done" in ledger              # rollup counts the archived done child
-        assert "WF-003" in ledger and "waiting on WF-002" not in ledger  # dep satisfied → ready
+        cards = board()
+        assert cards["WF-001"]["rollup"] == {"done": 1, "total": 2, "estimate": 0, "actual": 0}
+        assert cards["WF-003"]["ready"] is True  # dep satisfied → ready
 
 
 class TestOrderAndPriorityField:

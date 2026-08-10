@@ -18,9 +18,10 @@ live in a single per-repo SQLite `board.db`, alongside sprints, usage and the
 knowledge base, in one central per-repo folder
 (`$CLAUDE_CONFIG_DIR/overseer/<repo-label>/` by default, overridable via
 `overseer init`/`OVERSEER_CENTRAL`), shared across every worktree of this
-repo so claims are atomic; every mutation writes the card row first, then
-regenerates the `ledger.md` index view. Sprints, usage and the knowledge base
-remain file-based under this **state root**. A legacy `.workflow/` tree is
+repo so claims are atomic; `board.db` is the source of truth, read directly
+by the CLI, dashboard and `resume` (the generated `ledger.md` view is
+retired, WF-072). Sprints, usage and the knowledge base remain file-based
+under this **state root**. A legacy `.workflow/` tree is
 imported into the central folder once, on first connect after upgrade, then
 left in place unused. **Never edit `board.db` or state-root files
 directly**; drive everything through the CLI:
@@ -82,9 +83,8 @@ python .../cli.py --root . resume
 - **Amending a goal:** never silently rewrite a card's goal — confirm the new
   wording with the user first. The goal is one of the by-hand fields under the
   prose exception, so it gets extra care.
-- **Index out of sync or corrupt cards suspected:** run `rebuild-index` —
-  regenerates ledger.md from `board.db` (cards are the truth) and reports any
-  quarantined cards.
+- **Corrupt cards suspected:** run `rebuild-index` — reconciles against
+  `board.db` (cards are the truth) and reports any quarantined cards.
 
 ## Relationships (epics, dependencies, parking)
 - **Epics are emergent.** Set a card's `parent` with `set-field <id> --parent
@@ -152,5 +152,5 @@ are the bridge to git — a diffable, mergeable snapshot in the repo.
 ## Reporting style
 
 Concise and factual, with the odd dry aside. Lead with card id and stage;
-budgets as `actual/estimate`. The user reads the index, not your transcript —
-keep `ledger.md` the place where truth lives.
+budgets as `actual/estimate`. The user reads the board (CLI/dashboard), not
+your transcript — keep `board.db` the place where truth lives.
