@@ -94,6 +94,11 @@ class CreateBody(BaseModel):
     goal: str | None = None
 
 
+class EditBody(BaseModel):
+    title: str | None = None
+    body: str | None = None
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
@@ -474,6 +479,25 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             return run_overseer(effective, "show", card_id, "--json", json_out=True)
         except CliError as exc:
             raise _show_error(exc) from exc
+
+    @app.post("/api/card/{card_id}", dependencies=[Depends(require_token)])
+    def edit_card(card_id: str, body: EditBody, root: str | None = None) -> dict[str, Any]:
+        if body.title is None and body.body is None:
+            raise HTTPException(status_code=400, detail="title or body required")
+        if body.title is not None and not body.title.strip():
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            args = ["set-field", card_id]
+            if body.title is not None:
+                args += ["--title", body.title]
+            if body.body is not None:
+                args += ["--body", body.body]
+            run_overseer(effective, *args)
+
+        return _mutate(do, effective)
 
     @app.post("/api/card/{card_id}/order", dependencies=[Depends(require_token)])
     def set_order(card_id: str, body: OrderBody, root: str | None = None) -> dict[str, Any]:

@@ -273,3 +273,35 @@ def test_create_card_missing_title(client: TestClient, root: Path) -> None:
 
 def test_create_card_empty_title(client: TestClient, root: Path) -> None:
     assert client.post("/api/card", json={"title": "  "}).status_code == 400
+
+
+def test_edit_title(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    resp = client.post(f"/api/card/{cid}", json={"title": "Renamed"})
+    assert resp.status_code == 200
+    assert _show(root, cid)["title"] == "Renamed"
+
+
+def test_edit_body(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    resp = client.post(f"/api/card/{cid}", json={"body": "## Goal\nnew body"})
+    assert resp.status_code == 200
+    assert _show(root, cid)["body"] == "## Goal\nnew body"
+
+
+def test_edit_title_and_body(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    resp = client.post(f"/api/card/{cid}", json={"title": "Both", "body": "x"})
+    assert resp.status_code == 200
+    detail = _show(root, cid)
+    assert detail["title"] == "Both" and detail["body"] == "x"
+
+
+def test_edit_empty_title_rejected(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    assert client.post(f"/api/card/{cid}", json={"title": ""}).status_code == 400
+
+
+def test_edit_requires_a_field(client: TestClient, root: Path) -> None:
+    cid = _new_card(root)
+    assert client.post(f"/api/card/{cid}", json={}).status_code == 400
