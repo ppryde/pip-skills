@@ -638,6 +638,36 @@ body {
   box-shadow: none;
 }
 
+/* Task 10: "＋ New card" control, beside the repo selector. Same Role-A
+   wobble shape/paint as `.topbar__refresh` — a positive, non-destructive
+   action, so no recolor (contrast `.topbar-clear.danger` below). */
+.topbar__new-card {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.topbar__new-card:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.topbar__new-card:active {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
 /* Task 7: Clear-data control, beside the repo selector. Same Role-A wobble
    shape as `.topbar__refresh` above, but recolored red — `.danger` alone
    only reaches inside `.clear-dialog` (see `.clear-dialog .danger`), so this
@@ -2843,6 +2873,49 @@ body {
   background: #b00020;
   color: #fff;
   border-color: #b00020;
+}
+
+/* "＋ New card" modal (Task 10) — rides the same .party-overlay/.party-sheet
+   backdrop as ClearDialog/the Party page; these rules only cover the bits
+   specific to its create form. */
+.new-card-dialog__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 24px;
+  color: var(--qb-party-text);
+}
+
+.new-card-field {
+  display: block;
+  margin: 0.75rem 0;
+  color: var(--qb-party-text);
+}
+
+.new-card-field input,
+.new-card-field select,
+.new-card-field textarea {
+  display: block;
+  margin-top: 0.35rem;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.new-card-field textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.new-card-error {
+  color: #b00020;
+}
+
+.new-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
 }
 
 /* Hero card (HANDOFF: light card floating inside the dark sheet). */
