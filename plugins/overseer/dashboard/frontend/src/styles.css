@@ -493,6 +493,10 @@ body {
   border-radius: var(--qb-radius-pill);
   background: var(--qb-parchment-muted);
   color: var(--qb-ink-500);
+  /* WF-085: lets the chip itself shrink below its content's natural width
+     inside the topbar's flex row — required for the child `select`'s own
+     ellipsis truncation below to ever actually engage. */
+  min-width: 0;
 }
 
 .topbar__repo-select-label {
@@ -517,6 +521,14 @@ body {
   border-radius: var(--qb-btn-wobble);
   padding: 0.15rem 0.3rem;
   max-width: 40vw;
+  /* WF-085: a long repo root/label truncates with an ellipsis instead of
+     wrapping the native <select> onto a second line — `min-width: 0`
+     overrides the UA default of `min-width: auto` (which otherwise refuses
+     to shrink a <select> below its longest <option>'s intrinsic width). */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar__repo-select select:hover:not(:disabled) {
@@ -551,6 +563,9 @@ body {
   border-radius: var(--qb-radius-pill);
   background: var(--qb-branch-chip-bg);
   color: var(--qb-branch-chip-text);
+  /* WF-085: same shrink-to-allow-ellipsis rationale as `.topbar__repo-select`
+     above. */
+  min-width: 0;
 }
 
 .topbar__branch-select-label {
@@ -573,6 +588,12 @@ body {
   border-radius: var(--qb-btn-wobble-2);
   padding: 0.15rem 0.3rem;
   max-width: 40vw;
+  /* WF-085: same ellipsis-truncation treatment as `.topbar__repo-select
+     select` above — a long branch name never wraps to a second line. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar__branch-select select:hover:not(:disabled) {
@@ -715,6 +736,24 @@ body {
 .topbar__archive-toggle input {
   accent-color: var(--qb-btn-ink);
   cursor: pointer;
+}
+
+/* WF-085: the mobile-collapsible secondary-controls group (threshold,
+   Clear…, Labels…, Refresh, Abandoned toggle) and the "Controls ▾" button
+   that drives it. `display: contents` un-wraps the group unconditionally —
+   its children flow as direct flex items of `.topbar` exactly as they did
+   before this wrapper existed, on every viewport, REGARDLESS of the
+   `hidden` attribute TopBar.tsx toggles. Only the ≤720px block below (which
+   targets `.topbar__controls-group[hidden]` with higher specificity than
+   this bare-class rule) actually lets `hidden` hide anything — so desktop
+   is provably unaffected by the collapse state. The toggle button mirrors
+   this: hidden by default, shown only inside that same media query. */
+.topbar__controls-group {
+  display: contents;
+}
+
+.topbar__controls-toggle {
+  display: none;
 }
 
 /* Quarantine alert keeps a strong danger red rather than a guild accent —
@@ -3865,10 +3904,32 @@ a.card-drawer__pr-chip:hover {
     margin-left: 0;
   }
 
+  /* --- Top bar: "Controls ▾" collapse (WF-085/074) --- */
+  .topbar__controls-toggle {
+    display: inline-flex; align-items: center; font-size: 0.8rem;
+    padding: 0.35rem 0.75rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
+    border: 1.5px solid var(--qb-btn-ink); background: var(--qb-btn-face);
+    color: var(--qb-btn-text); cursor: pointer;
+  }
+  .topbar__controls-toggle:hover { background: var(--qb-btn-face-hover); border-color: var(--qb-btn-ink-hover); }
+  .topbar__controls-toggle:active { background: var(--qb-btn-face-active); }
+  .topbar__controls-group[hidden] { display: none; }
+  .topbar__controls-group:not([hidden]) {
+    display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem;
+  }
+  /* compact status glance shrinks so it fits a couple of wrapped rows on a phone */
+  .topbar__pill, .topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill {
+    font-size: 0.68rem; padding: 0.15rem 0.45rem;
+  }
+  /* --- Board: lane-pager with scroll-snap (WF-085) --- */
+  .board-region {
+    padding: 0.75rem 0.75rem 1rem;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.75rem;
+  }
   /* --- Icon-nav strip (WF-085 — LaneIconNav): one transparent RPG icon +
-     count per lane, above the swipe track. Inactive icons render at full
-     strength (no fade/opacity reduction) — only the active lane gets an
-     accent-coloured pill + a slight lift. -------------------------------- */
+     count per lane, above the swipe track. Inactive icons full-strength;
+     only the active lane gets an accent pill + slight lift. --- */
   .lane-icon-nav {
     display: flex;
     gap: 0.3rem;

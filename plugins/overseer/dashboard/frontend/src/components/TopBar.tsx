@@ -138,6 +138,12 @@ function TopBar({
   // F10 (WF-067): the label-colors settings dialog — same TopBar-owned
   // open-state pattern as NewCardDialog above (no App-level prop needed).
   const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
+  // WF-085: mobile-only secondary-controls collapse. Collapsed by default —
+  // the group only ever hides on a ≤720px viewport (styles.css scopes the
+  // `[hidden]` override to that media query; desktop always renders the
+  // group via `display: contents` regardless of this flag), so defaulting
+  // to "collapsed" here has zero effect on desktop's always-open group.
+  const [controlsOpen, setControlsOpen] = useState(false);
   const threshold = context?.threshold ?? null;
   const gold = goldTotal(cards);
   const { done, total } = vanquishedStats(cards);
@@ -176,37 +182,11 @@ function TopBar({
         >
           ＋ New card
         </button>
-        {onClear && (
-          <button
-            type="button"
-            className="topbar-clear danger"
-            onClick={onClear}
-            title="Clear this repo's data"
-          >
-            Clear…
-          </button>
-        )}
-        <button
-          type="button"
-          // Task 10: shares the "＋ New card" control's Role-A button paint
-          // (non-destructive positive action, same wobble shape) — see
-          // `.topbar__new-card` in styles.css, reused here rather than
-          // duplicated.
-          className="topbar__new-card topbar__labels-settings"
-          onClick={() => setLabelSettingsOpen(true)}
-          title="Edit label colors"
-        >
-          Labels…
-        </button>
         <BranchFilter
           branches={branches}
           activeBranch={activeBranch}
           onSelect={onSelectBranch}
         />
-
-        <div className="topbar__threshold">
-          <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
-        </div>
 
         {limits?.five_hour?.used_percentage !== undefined && (
           <span className="topbar__pill" title="5h window">
@@ -219,23 +199,79 @@ function TopBar({
           </span>
         )}
 
+        {/* WF-085: mobile-only "Controls ▾" toggle — collapses the
+            secondary-controls group below behind one tap on a ≤720px
+            viewport (styles.css hides this button entirely above that
+            breakpoint, so desktop never shows it). `aria-expanded` +
+            `aria-controls` wire it to the group it drives, per WAI-ARIA
+            disclosure-pattern conventions. */}
         <button
           type="button"
-          className="topbar__refresh"
-          onClick={onRefresh}
-          disabled={refreshing}
+          className="topbar__controls-toggle"
+          aria-expanded={controlsOpen}
+          aria-controls="topbar-controls-group"
+          onClick={() => setControlsOpen((open) => !open)}
         >
-          {refreshing ? "Refreshing…" : "Refresh"}
+          Controls {controlsOpen ? "▴" : "▾"}
         </button>
 
-        <label className="topbar__archive-toggle">
-          <input
-            type="checkbox"
-            checked={showArchive}
-            onChange={onToggleArchive}
-          />
-          Abandoned
-        </label>
+        {/* WF-085: the secondary-controls group — threshold, Clear…,
+            Labels…, Refresh, Abandoned toggle. `hidden` is driven by
+            `controlsOpen` (default collapsed), but styles.css only lets
+            that attribute actually hide anything inside the ≤720px media
+            query — above it `.topbar__controls-group` is unconditionally
+            `display: contents`, so desktop renders every control exactly
+            as before, unaffected by this flag. */}
+        <div
+          id="topbar-controls-group"
+          className="topbar__controls-group"
+          hidden={!controlsOpen}
+        >
+          {onClear && (
+            <button
+              type="button"
+              className="topbar-clear danger"
+              onClick={onClear}
+              title="Clear this repo's data"
+            >
+              Clear…
+            </button>
+          )}
+          <button
+            type="button"
+            // Task 10: shares the "＋ New card" control's Role-A button paint
+            // (non-destructive positive action, same wobble shape) — see
+            // `.topbar__new-card` in styles.css, reused here rather than
+            // duplicated.
+            className="topbar__new-card topbar__labels-settings"
+            onClick={() => setLabelSettingsOpen(true)}
+            title="Edit label colors"
+          >
+            Labels…
+          </button>
+
+          <div className="topbar__threshold">
+            <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
+          </div>
+
+          <button
+            type="button"
+            className="topbar__refresh"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+
+          <label className="topbar__archive-toggle">
+            <input
+              type="checkbox"
+              checked={showArchive}
+              onChange={onToggleArchive}
+            />
+            Abandoned
+          </label>
+        </div>
 
         {quarantinedCount > 0 && (
           <span className="topbar__quarantine-banner">

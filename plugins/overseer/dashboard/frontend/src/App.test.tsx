@@ -213,6 +213,10 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
 
+    // WF-085: Clear… now lives behind TopBar's collapsed-by-default
+    // "Controls ▾" toggle — open it before it's reachable by role.
+    fireEvent.click(screen.getByRole("button", { name: /^controls/i }));
+
     // Exact "Clear…" (with ellipsis) — task 6 added a second, unrelated
     // "Clear filters" button to the filter bar, so a bare /clear/i now
     // matches both.

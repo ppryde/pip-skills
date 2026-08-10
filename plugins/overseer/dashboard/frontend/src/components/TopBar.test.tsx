@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type {
   BoardCard,
   BoardResponse,
@@ -83,6 +85,14 @@ function baseProps() {
     activeBranch: null as string | null,
     onSelectBranch: () => {},
   };
+}
+
+// WF-085: threshold/Clear…/Labels…/Refresh/Abandoned now live behind the
+// mobile "Controls ▾" toggle, collapsed by default (see the describe block
+// below). Existing tests that reach into that group have to open it first —
+// this helper is that one step, shared everywhere it's needed.
+function openControls() {
+  fireEvent.click(screen.getByRole("button", { name: /^controls/i }));
 }
 
 describe("<TopBar/>", () => {
@@ -385,6 +395,8 @@ describe("<TopBar/>", () => {
     const onClear = vi.fn();
     render(<TopBar {...baseProps()} onClear={onClear} />);
 
+    // WF-085: Clear… lives in the collapsed-by-default Controls group now.
+    openControls();
     const button = screen.getByRole("button", { name: /clear/i });
     expect(button).toBeInTheDocument();
     fireEvent.click(button);
@@ -411,6 +423,8 @@ describe("<TopBar/>", () => {
   // dialog's open state itself, same pattern as "＋ New card" above.
   it("renders no Label colors dialog until the Labels settings button is clicked", () => {
     render(<TopBar {...baseProps()} />);
+    // WF-085: Labels… lives in the collapsed-by-default Controls group now.
+    openControls();
     expect(screen.getByRole("button", { name: /labels/i })).toBeInTheDocument();
     expect(
       screen.queryByRole("dialog", { name: /label colors/i })
@@ -428,6 +442,7 @@ describe("<TopBar/>", () => {
       />
     );
 
+    openControls();
     fireEvent.click(screen.getByRole("button", { name: /labels/i }));
 
     expect(
@@ -435,5 +450,127 @@ describe("<TopBar/>", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("policy")).toBeInTheDocument();
     expect(screen.getByText("architecture")).toBeInTheDocument();
+  });
+});
+
+// WF-085b: mobile (≤720px) collapses threshold+Set/Clear…/Labels…/Refresh/
+// Abandoned behind a single "Controls ▾" toggle. The collapse itself is
+// implemented with the native `hidden` attribute (see TopBar.tsx), which
+// jsdom's own accessibility-tree logic honours regardless of whether any
+// stylesheet is loaded — `getByRole` excludes descendants of a `hidden`
+// ancestor by default, and jest-dom's `toBeVisible()` checks
+// `hasAttribute('hidden')` directly. That's what lets these tests verify
+// real show/hide behaviour without styles.css ever being imported here;
+// styles.css itself additionally confines the `[hidden]` override to the
+// ≤720px media query so desktop is provably unaffected (see the CSS
+// content assertions further down).
+describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
+  it("collapses the secondary controls by default, hiding them from the accessibility tree", () => {
+    render(<TopBar {...baseProps()} onClear={() => {}} />);
+
+    const toggle = screen.getByRole("button", { name: /^controls/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", "topbar-controls-group");
+
+    expect(screen.queryByRole("button", { name: /^clear/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^labels/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^refresh/i })).not.toBeInTheDocument();
+
+    const group = document.getElementById("topbar-controls-group");
+    expect(group).not.toBeNull();
+    expect(group).not.toBeVisible();
+  });
+
+  it("clicking the toggle expands the group, flips aria-expanded, and surfaces every collapsed control", () => {
+    render(<TopBar {...baseProps()} onClear={() => {}} />);
+
+    const toggle = screen.getByRole("button", { name: /^controls/i });
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /^clear/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^labels/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^refresh/i })).toBeInTheDocument();
+    expect(screen.getByText("Abandoned")).toBeInTheDocument();
+    expect(document.getElementById("topbar-controls-group")).toBeVisible();
+  });
+
+  it("clicking the toggle a second time re-collapses the group", () => {
+    render(<TopBar {...baseProps()} onClear={() => {}} />);
+
+    const toggle = screen.getByRole("button", { name: /^controls/i });
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /^clear/i })).not.toBeInTheDocument();
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+  });
+
+  it("keeps repo · branch · ＋New card and the status glance pills outside the collapsed group, always accessible", () => {
+    render(
+      <TopBar
+        {...baseProps()}
+        repos={[{ label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 }]}
+        activeRoot="/a"
+        branches={["feat/a"]}
+        activeBranch="feat/a"
+        limits={{
+          five_hour: { used_percentage: 28 } as RateWindow,
+          seven_day: { used_percentage: 63 } as RateWindow,
+        }}
+      />
+    );
+
+    // Collapsed by default (no click) — these are still all reachable.
+    expect(screen.getByLabelText("Repo")).toBeInTheDocument();
+    expect(screen.getByLabelText("Branch")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /new card/i })).toBeInTheDocument();
+    expect(screen.getByText(/Short Rest/)).toBeInTheDocument();
+    expect(screen.getByText(/Long Rest/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /questing/i })).toBeInTheDocument();
+    expect(screen.getByText(/vanquished/)).toBeInTheDocument();
+  });
+});
+
+// WF-085b Build item 1: the repo/branch <select>s truncate a long value
+// with an ellipsis instead of wrapping, on every viewport. styles.css is
+// never imported by these component tests (only src/main.tsx imports it —
+// see the other frontend test files), so there is no computed-style
+// signal to assert on from jsdom; instead this reads the real stylesheet
+// source and asserts the specific truncation declarations are present on
+// the exact selectors TopBar's repo/branch chips render
+// (`.topbar__repo-select select` / `.topbar__branch-select select`,
+// RepoSelector.tsx / BranchFilter.tsx). This is a regression guard against
+// someone dropping the rule later, not a substitute for visual QA.
+describe("topbar repo/branch select truncation styling (WF-085b)", () => {
+  const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+
+  function ruleBodyFor(selector: string): string {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+    expect(match, `expected a CSS rule for ${selector}`).not.toBeNull();
+    return match![1];
+  }
+
+  it("truncates the repo <select> with an ellipsis instead of wrapping", () => {
+    const body = ruleBodyFor(".topbar__repo-select select");
+    expect(body).toMatch(/overflow:\s*hidden/);
+    expect(body).toMatch(/text-overflow:\s*ellipsis/);
+    expect(body).toMatch(/white-space:\s*nowrap/);
+    expect(body).toMatch(/min-width:\s*0/);
+  });
+
+  it("truncates the branch <select> with an ellipsis instead of wrapping", () => {
+    const body = ruleBodyFor(".topbar__branch-select select");
+    expect(body).toMatch(/overflow:\s*hidden/);
+    expect(body).toMatch(/text-overflow:\s*ellipsis/);
+    expect(body).toMatch(/white-space:\s*nowrap/);
+    expect(body).toMatch(/min-width:\s*0/);
+  });
+
+  it("lets the repo/branch chip wrappers shrink below their content width so the ellipsis can engage", () => {
+    expect(ruleBodyFor(".topbar__repo-select")).toMatch(/min-width:\s*0/);
+    expect(ruleBodyFor(".topbar__branch-select")).toMatch(/min-width:\s*0/);
   });
 });
