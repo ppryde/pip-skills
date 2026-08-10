@@ -10,7 +10,7 @@ export interface FilterBarProps {
   visibleCount: number;
   totalCount: number;
   /** Whether `filter` still equals `DEFAULT_FILTER` — the caller's
-   * equality check, not ours; only gates the Clear button here. */
+   * equality check, not ours; only gates the "Clear filters" button here. */
   isDefault: boolean;
   onQuery: (query: string) => void;
   onCycleLabel: (label: string) => void;
@@ -25,7 +25,7 @@ const COMPLEXITIES = ["S", "M", "L", "XL"];
 /**
  * The board's filter row (F3, WF-061): search + priority/complexity
  * dropdowns + a Labels button that folds out `LabelFilterPopover`, plus a
- * right-aligned visible/total readout and Clear. Purely presentational —
+ * right-aligned visible/total readout and Clear filters. Purely presentational —
  * `filter` is the caller's source of truth (same deferred-state pattern as
  * `LabelFilterPopover`/`LabelEditor`/`StatusMenu`); this component owns only
  * the popover's open/closed `useState`, nothing about filter values.
@@ -119,7 +119,7 @@ function FilterBar({
           onClick={onClear}
           disabled={isDefault}
         >
-          Clear
+          Clear filters
         </button>
       </div>
 

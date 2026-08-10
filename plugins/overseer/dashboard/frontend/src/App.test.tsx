@@ -212,7 +212,8 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
 
     // Exact "Clear…" (with ellipsis) — task 6 added a second, unrelated
-    // "Clear" button to the filter bar, so a bare /clear/i now matches both.
+    // "Clear filters" button to the filter bar, so a bare /clear/i now
+    // matches both.
     const clearButton = await screen.findByRole("button", { name: "Clear…" });
     fireEvent.click(clearButton);
 
@@ -234,7 +235,7 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(client.getRepos).toHaveBeenCalled());
     // Exact "Clear…" — see the sibling test above for why a bare /clear/i
     // regex is no longer specific enough post-task-6 (filter bar's own
-    // "Clear" button renders here regardless of repo selection).
+    // "Clear filters" button renders here regardless of repo selection).
     expect(
       screen.queryByRole("button", { name: "Clear…" })
     ).not.toBeInTheDocument();

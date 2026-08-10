@@ -69,6 +69,46 @@ describe("useCardFilter", () => {
     expect(result.current.filter).toEqual(DEFAULT_FILTER);
   });
 
+  it("falls back to default on a wrong-typed query (valid JSON, wrong shape)", () => {
+    localStorage.setItem("overseer_board_filter", JSON.stringify({ query: 123 }));
+
+    const { result } = renderHook(() => useCardFilter());
+    expect(result.current.filter).toEqual(DEFAULT_FILTER);
+  });
+
+  it("falls back to default on a wrong-typed priority (valid JSON, wrong shape)", () => {
+    localStorage.setItem("overseer_board_filter", JSON.stringify({ priority: ["x"] }));
+
+    const { result } = renderHook(() => useCardFilter());
+    expect(result.current.filter).toEqual(DEFAULT_FILTER);
+  });
+
+  it("merges a valid partial onto the default", () => {
+    localStorage.setItem("overseer_board_filter", JSON.stringify({ priority: "P0" }));
+
+    const { result } = renderHook(() => useCardFilter());
+    expect(result.current.filter).toEqual({ ...DEFAULT_FILTER, priority: "P0" });
+  });
+
+  it("clear() and the default load hand out independent array instances, not the shared DEFAULT_FILTER arrays", () => {
+    const { result: a } = renderHook(() => useCardFilter());
+    const { result: b } = renderHook(() => useCardFilter());
+
+    expect(a.current.filter.excludeLabels).not.toBe(DEFAULT_FILTER.excludeLabels);
+    expect(a.current.filter.excludeLabels).not.toBe(b.current.filter.excludeLabels);
+
+    act(() => {
+      a.current.cycleLabel("ui");
+      a.current.clear();
+    });
+
+    // Mutating what clear() handed back must not leak into DEFAULT_FILTER
+    // or into another hook instance's state.
+    a.current.filter.excludeLabels.push("leaked");
+    expect(DEFAULT_FILTER.excludeLabels).toEqual(["future"]);
+    expect(b.current.filter.excludeLabels).toEqual(["future"]);
+  });
+
   it("setQuery and setComplexity update filter state", () => {
     const { result } = renderHook(() => useCardFilter());
 

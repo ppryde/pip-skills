@@ -44,6 +44,17 @@ it("a search-matched epic reveals ALL its children, bypassing an active label fi
   // exclude future is active, but EPIC matches → its children (incl. future one) all show
   expect(ids(cs, F({ query: "migration", excludeLabels: ["future"] }))).toEqual(["EPIC", "K1", "K2"]);
 });
+it("a matched epic that itself carries an excluded label is still shown (with its children) — the anchor branch bypasses filters for the epic too, not just its children", () => {
+  const cs = [
+    card({ id: "EPIC", title: "Migration epic", labels: ["future"] }),
+    card({ id: "K1", parent: "EPIC" }),
+    card({ id: "OTHER", title: "unrelated" }),
+  ];
+  // EPIC itself is excluded by `excludeLabels: ["future"]`, but it's the
+  // matched parent (isMatchedParent's `matchedParentIds.has(c.id)` branch),
+  // so it must still show — same as its children.
+  expect(ids(cs, F({ query: "migration", excludeLabels: ["future"] }))).toEqual(["EPIC", "K1"]);
+});
 it("a non-parent direct match still must pass the active filters", () => {
   const cs = [card({ id: "A", title: "frob", labels: ["future"] })];
   expect(ids(cs, F({ query: "frob", excludeLabels: ["future"] }))).toEqual([]); // gated out

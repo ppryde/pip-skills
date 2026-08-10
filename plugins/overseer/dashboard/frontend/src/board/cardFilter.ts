@@ -15,6 +15,13 @@ export const DEFAULT_FILTER: FilterState = {
   priority: null,
   complexity: null,
 };
+// Frozen so nobody can mutate the shared instance in place (e.g.
+// `DEFAULT_FILTER.includeLabels.push(...)`). Consumers that need a mutable
+// copy (useCardFilter's `clear()`/`load()`) build one with `freshDefault()`
+// rather than handing out this object or its arrays by reference.
+Object.freeze(DEFAULT_FILTER);
+Object.freeze(DEFAULT_FILTER.includeLabels);
+Object.freeze(DEFAULT_FILTER.excludeLabels);
 
 export function distinctLabels(cards: BoardCard[]): string[] {
   const set = new Set<string>();

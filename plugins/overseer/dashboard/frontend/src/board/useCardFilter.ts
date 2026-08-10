@@ -3,13 +3,45 @@ import { DEFAULT_FILTER, type FilterState } from "./cardFilter";
 
 const KEY = "overseer_board_filter";
 
+/** Fresh copy of `DEFAULT_FILTER`, including its own array instances — never
+ * hand out the frozen shared object/arrays from `cardFilter.ts` directly. */
+function freshDefault(): FilterState {
+  return {
+    ...DEFAULT_FILTER,
+    includeLabels: [...DEFAULT_FILTER.includeLabels],
+    excludeLabels: [...DEFAULT_FILTER.excludeLabels],
+  };
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/** Shape guard for a value parsed from localStorage: rejects anything whose
+ * present fields don't look like `Partial<FilterState>`, so a corrupted or
+ * stale-shape stored value can't silently merge bad data (e.g. a numeric
+ * `query` that crashes `.trim()` downstream, or a non-string `priority`
+ * that hides everything) into live filter state. */
+function looksLikeFilter(v: unknown): v is Partial<FilterState> {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if ("query" in o && typeof o.query !== "string") return false;
+  if ("priority" in o && o.priority !== null && typeof o.priority !== "string") return false;
+  if ("complexity" in o && o.complexity !== null && typeof o.complexity !== "string") return false;
+  if ("includeLabels" in o && !isStringArray(o.includeLabels)) return false;
+  if ("excludeLabels" in o && !isStringArray(o.excludeLabels)) return false;
+  return true;
+}
+
 function load(): FilterState {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return DEFAULT_FILTER;
-    return { ...DEFAULT_FILTER, ...(JSON.parse(raw) as Partial<FilterState>) };
+    if (!raw) return freshDefault();
+    const parsed: unknown = JSON.parse(raw);
+    if (!looksLikeFilter(parsed)) return freshDefault();
+    return { ...freshDefault(), ...parsed };
   } catch {
-    return DEFAULT_FILTER;
+    return freshDefault();
   }
 }
 
@@ -33,7 +65,7 @@ export function useCardFilter() {
     (complexity: string | null) => setFilter((f) => ({ ...f, complexity })),
     [],
   );
-  const clear = useCallback(() => setFilter(DEFAULT_FILTER), []);
+  const clear = useCallback(() => setFilter(freshDefault()), []);
 
   const cycleLabel = useCallback(
     (label: string) =>

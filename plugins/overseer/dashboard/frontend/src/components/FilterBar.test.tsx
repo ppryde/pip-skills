@@ -55,13 +55,13 @@ describe("<FilterBar/>", () => {
   it("shows visible/total and disables Clear when default", () => {
     render(<FilterBar {...base} visibleCount={5} totalCount={20} isDefault={true} />);
     expect(screen.getByText(/5 of 20/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /clear/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /clear filters/i })).toBeDisabled();
   });
 
   it("enables Clear and calls onClear when not default", () => {
     const onClear = vi.fn();
     render(<FilterBar {...base} isDefault={false} onClear={onClear} />);
-    const clearBtn = screen.getByRole("button", { name: /clear/i });
+    const clearBtn = screen.getByRole("button", { name: /clear filters/i });
     expect(clearBtn).not.toBeDisabled();
     fireEvent.click(clearBtn);
     expect(onClear).toHaveBeenCalled();
