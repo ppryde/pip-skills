@@ -214,6 +214,46 @@ def test_migrate_imports_live_and_archived(tmp_path, monkeypatch):
     assert [c.id for c in db.load_archived_cards(conn)] == ["WF-002"]
     assert db.get_meta(conn, "migrated_from_workflow") == "1"
 
+def test_migrate_reports_skipped(tmp_path, monkeypatch):
+    """WF-056 / D1: a card that fails to parse must not vanish silently.
+    `migrate_from_workflow` returns (imported, skipped) where `skipped` is a
+    list of (path, reason) for every CardParseError encountered — mirroring
+    `store.load_live_cards`'s `quarantined` list — so a caller can detect and
+    surface the loss instead of the count alone quietly absorbing it."""
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = _seed_legacy_workflow(tmp_path)
+    file_save_card(root, Card(id="WF-001", title="live one", status="in-flight"))
+    bad_path = root / "cards" / "WF-002-broken.md"
+    bad_path.write_text("not a valid card at all")
+    conn = db.connect(tmp_path, migrate=False)
+    imported, skipped = db.migrate_from_workflow(conn, tmp_path)
+    assert imported == 1
+    assert len(skipped) == 1
+    skipped_path, reason = skipped[0]
+    assert skipped_path == bad_path
+    assert isinstance(reason, str) and reason  # non-empty CardParseError message
+
+def test_migrate_via_connect_warns_skipped_on_stderr(tmp_path, monkeypatch, capsys):
+    """The auto-import seam (`connect()` -> `_maybe_import` ->
+    `migrate_from_workflow`) is the only CLI-reachable path that triggers the
+    one-time import. Skipped cards must reach stderr as a warning there, the
+    same way the repo-root identity guard already does in this module."""
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = _seed_legacy_workflow(tmp_path)
+    file_save_card(root, Card(id="WF-001", title="live one", status="in-flight"))
+    bad_path = root / "cards" / "WF-002-broken.md"
+    bad_path.write_text("not a valid card at all")
+    capsys.readouterr()  # drain
+
+    conn = db.connect(tmp_path, migrate=True)  # triggers the one-time import
+
+    assert db.load_card(conn, "WF-001").title == "live one"
+    err = capsys.readouterr().err
+    assert "warning" in err.lower()
+    assert str(bad_path) in err
+
 def test_migrate_is_idempotent(tmp_path, monkeypatch):
     git_init(tmp_path)
     monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))

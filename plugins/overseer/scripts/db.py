@@ -129,12 +129,17 @@ def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
     return conn
 
 
-def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
+def migrate_from_workflow(
+    conn: sqlite3.Connection, repo_root: Path
+) -> tuple[int, list[tuple[Path, str]]]:
     """Import live and archived cards from .workflow/ directory tree.
 
     Reads live cards from <repo>/.workflow/cards/*.md (archived=0) and
     archived cards from <repo>/.workflow/archive/cards/*.md (archived=1).
-    Skips CardParseError. Sets meta migrated_from_workflow=1.
+    Skips CardParseError, but records every skip (path + error message) in
+    the returned ``skipped`` list rather than discarding it silently — see
+    WF-056 (D1): with hundreds of legacy cards a silent skip goes unnoticed.
+    Sets meta migrated_from_workflow=1.
 
     Sources from ``.workflow/`` (via ``workflow_root``) — the legacy,
     pre-central-storage on-disk location — NOT ``state_root``. Since Task 1,
@@ -164,12 +169,15 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
     DB is left exactly as it was before the import — no partial cards, no
     marker — and the next connect() will retry the import from scratch.
 
-    Returns count of successfully imported cards.
+    Returns ``(imported, skipped)``: the count of successfully imported
+    cards, and a list of ``(path, reason)`` for every card that failed to
+    parse — mirroring ``store.load_live_cards``'s ``quarantined`` list.
     """
     from scripts.store import workflow_root  # local import: avoid cycle
     source_root = derive_repo_root(repo_root) or repo_root
     root = workflow_root(source_root)
     imported = 0
+    skipped: list[tuple[Path, str]] = []
     live_dir = root / "cards"
     arch_dir = root / "archive" / "cards"
     try:
@@ -178,21 +186,21 @@ def migrate_from_workflow(conn: sqlite3.Connection, repo_root: Path) -> int:
                 try:
                     _upsert(conn, Card.from_text(path.read_text()), 0, commit=False)
                     imported += 1
-                except CardParseError:
-                    continue
+                except CardParseError as exc:
+                    skipped.append((path, str(exc)))
         if arch_dir.is_dir():
             for path in sorted(arch_dir.glob("*.md")):
                 try:
                     _upsert(conn, Card.from_text(path.read_text()), 1, commit=False)
                     imported += 1
-                except CardParseError:
-                    continue
+                except CardParseError as exc:
+                    skipped.append((path, str(exc)))
         set_meta(conn, "migrated_from_workflow", "1")
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    return imported
+    return imported, skipped
 
 
 def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
@@ -208,6 +216,13 @@ def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
     here. The actual import fan-out to the MAIN repo's `.workflow/` happens
     inside `migrate_from_workflow`, which `repo_root` is simply passed
     through to unchanged.
+
+    This is the only CLI-reachable seam that triggers the one-time import
+    (via `connect()`), so any card skipped as a CardParseError is reported
+    here — loudly, on stderr — the same way the repo-root identity guard
+    above prints its warning directly rather than routing through a return
+    value a caller might ignore (WF-056 / D1: a silent skip at hundreds of
+    cards would otherwise never be noticed).
     """
     if get_meta(conn, "migrated_from_workflow") == "1":
         return
@@ -216,7 +231,9 @@ def _maybe_import(conn: sqlite3.Connection, repo_root: Path) -> None:
         set_meta(conn, "migrated_from_workflow", "1")  # DB pre-seeded; don't double-import
         conn.commit()
         return
-    migrate_from_workflow(conn, repo_root)
+    _, skipped = migrate_from_workflow(conn, repo_root)
+    for path, reason in skipped:
+        print(f"warning: skipped {path} during workflow import: {reason}", file=sys.stderr)
 
 
 def card_to_params(card: Card) -> dict:
