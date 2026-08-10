@@ -675,6 +675,41 @@ class TestRelationsCommands:
         assert _card(repo).status == "planned"
 
 
+class TestPullChildren:
+    def test_pull_children_moves_live_children_to_parent_stage(self, repo):
+        run(repo, "new-card", "--title", "Epic")            # WF-001
+        run(repo, "new-card", "--title", "K1"); run(repo, "set-field", "WF-002", "--parent", "WF-001")
+        run(repo, "new-card", "--title", "K2"); run(repo, "set-field", "WF-003", "--parent", "WF-001")
+        run(repo, "set-stage", "WF-001", "implementation")   # parent in a stage
+        assert run(repo, "pull-children", "WF-001") == 0
+        assert _card(repo, "WF-002").stage == "implementation"
+        assert _card(repo, "WF-003").stage == "implementation"
+
+    def test_pull_children_skips_archived_children(self, repo):
+        run(repo, "new-card", "--title", "Epic"); run(repo, "new-card", "--title", "K1")
+        run(repo, "set-field", "WF-002", "--parent", "WF-001"); run(repo, "done", "WF-002")
+        run(repo, "set-stage", "WF-001", "implementation")
+        assert run(repo, "pull-children", "WF-001") == 0   # no crash; archived child untouched
+
+    def test_pull_children_no_live_children_is_noop(self, repo):
+        run(repo, "new-card", "--title", "Solo")
+        assert run(repo, "pull-children", "WF-001") == 0
+
+    def test_pull_children_stageless_parked_parent_moves_child_to_parked(self, repo):
+        # A parent can be `parked` with stage=None (park() has no stage
+        # precondition) — children must land in Parked too, not Backlog.
+        run(repo, "new-card", "--title", "Epic")   # WF-001
+        run(repo, "new-card", "--title", "K1")     # WF-002
+        run(repo, "set-field", "WF-002", "--parent", "WF-001")
+        run(repo, "park", "WF-001")
+        assert _card(repo, "WF-001").stage is None
+        assert _card(repo, "WF-001").status == "parked"
+        assert run(repo, "pull-children", "WF-001") == 0
+        child = _card(repo, "WF-002")
+        assert child.status == "parked"
+        assert child.stage is None
+
+
 class TestRelationsArchivedRollup:
     def test_done_child_counts_in_rollup_and_readiness(self, repo):
         run(repo, "new-card", "--title", "Epic")     # WF-001
@@ -1424,3 +1459,50 @@ class TestBackupRestoreInit:
         assert cfg["backup_dir"] == ".overseer/backups"
         assert local["central_dir"] == str(tmp_path / "c")
         assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()
+
+
+class TestLabelColorCommand:
+    """F10 registry CLI (WF-067): `label-color set|clear|list`."""
+
+    def test_set_persists(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "sky") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {"foo": "sky"}
+
+    def test_set_invalid_color_key_exits_1(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "notakey") == 1
+
+    def test_set_overwrites_existing(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "sky") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "set", "foo", "plum") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {"foo": "plum"}
+
+    def test_clear_removes(self, repo, capsys):
+        assert run(repo, "label-color", "set", "foo", "sky") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "clear", "foo") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {}
+
+    def test_clear_absent_is_noop_exit_0(self, repo, capsys):
+        assert run(repo, "label-color", "clear", "nope") == 0
+
+    def test_list_json_returns_full_map(self, repo, capsys):
+        assert run(repo, "label-color", "set", "bug", "sky") == 0
+        assert run(repo, "label-color", "set", "feature", "sage") == 0
+        capsys.readouterr()
+        assert run(repo, "label-color", "list", "--json") == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data == {"bug": "sky", "feature": "sage"}
+
+    def test_list_text_empty(self, repo, capsys):
+        assert run(repo, "label-color", "list") == 0
+        assert "No label colours registered." in capsys.readouterr().out

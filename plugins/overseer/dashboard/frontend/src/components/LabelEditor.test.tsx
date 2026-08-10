@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import LabelEditor from "./LabelEditor";
+import { labelColor } from "../board/labelColor";
 
 describe("<LabelEditor/>", () => {
   it("renders a chip for each existing label", () => {
@@ -76,5 +77,21 @@ describe("<LabelEditor/>", () => {
     fireEvent.change(input, { target: { value: "  arch  " } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(["arch"]));
+  });
+
+  it("colours a chip from the F10 registry when the label has an entry (WF-067)", () => {
+    const hashKey = labelColor("policy");
+    const overrideKey = (
+      ["slate", "sage", "plum", "clay", "sky", "violet", "olive", "terracotta", "teal"] as const
+    ).find((k) => k !== hashKey)!;
+    const { container } = render(
+      <LabelEditor
+        labels={["policy"]}
+        onSave={vi.fn()}
+        colorRegistry={{ policy: overrideKey }}
+      />
+    );
+    const chip = container.querySelector(".label-editor__chip")!;
+    expect(chip.className).toContain(`label-chip--${overrideKey}`);
   });
 });

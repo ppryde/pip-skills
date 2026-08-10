@@ -107,11 +107,69 @@ def test_migration_adds_labels_column_to_pre_existing_db(repo):
     assert row["title"] == "Legacy card"  # no data loss
     assert db.row_to_card(row).labels == []
 
+def test_migration_adds_links_column_to_pre_existing_db(repo):
+    """A board.db created before `links` existed (via `CREATE TABLE IF NOT
+    EXISTS`, `ensure_schema` never touches an already-existing table) must
+    gain the column on the next connect, with no data loss for existing
+    rows -- mirrors the `labels` migration test above, for F8/WF-065."""
+    import sqlite3
+    path = db.board_db_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = sqlite3.connect(str(path))
+    raw.executescript("""
+        CREATE TABLE cards (
+            id              TEXT PRIMARY KEY,
+            title           TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'planned',
+            stage           TEXT,
+            "order"         INTEGER NOT NULL DEFAULT 0,
+            complexity      TEXT,
+            priority        TEXT,
+            jira            TEXT,
+            linear          TEXT,
+            sprint          TEXT,
+            parent          TEXT,
+            branch          TEXT,
+            worktree        TEXT,
+            pr              TEXT,
+            touches         TEXT NOT NULL DEFAULT '[]',
+            depends_on      TEXT NOT NULL DEFAULT '[]',
+            labels          TEXT NOT NULL DEFAULT '[]',
+            budget_estimate INTEGER,
+            budget_actual   INTEGER NOT NULL DEFAULT 0,
+            created         TEXT NOT NULL DEFAULT '',
+            updated         TEXT NOT NULL DEFAULT '',
+            blocked_on      TEXT,
+            checklist       TEXT NOT NULL DEFAULT '[]',
+            repo            TEXT,
+            claimed_by      TEXT,
+            claimed_at      TEXT,
+            claim_acked     INTEGER NOT NULL DEFAULT 0,
+            claim_nudged    INTEGER NOT NULL DEFAULT 0,
+            body            TEXT NOT NULL DEFAULT '',
+            archived        INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    """)
+    raw.execute(
+        "INSERT INTO cards (id, title, status) VALUES ('WF-001', 'Legacy card', 'planned')"
+    )
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(repo, migrate=False)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cards)").fetchall()}
+    assert "links" in cols
+    row = conn.execute("SELECT * FROM cards WHERE id = 'WF-001'").fetchone()
+    assert row["title"] == "Legacy card"  # no data loss
+    assert db.row_to_card(row).links == []
+
 def _sample_card():
     return Card(
         id="WF-007", title="thing", status="in-flight", stage="implementation",
         order=3, priority="P1", sprint="2026-07-S3", parent="WF-001",
         touches=["a.py", "b.py"], depends_on=["WF-002"], labels=["policy", "architecture"],
+        links=[{"label": "PR #9", "path": "https://x/9"}],
         budget_estimate=400_000, budget_actual=120_000,
         created="2026-07-01T09:00", updated="2026-07-02T10:00",
         checklist=[{"task": "t1", "subject": "s", "status": "done"}],
@@ -269,6 +327,48 @@ def test_migrate_imports_live_and_archived(tmp_path, monkeypatch):
     assert db.load_card(conn, "WF-001").title == "live one"
     assert [c.id for c in db.load_archived_cards(conn)] == ["WF-002"]
     assert db.get_meta(conn, "migrated_from_workflow") == "1"
+
+def test_migrate_imports_preserve_links(tmp_path, monkeypatch):
+    """F8 / WF-065: a source card's `links` frontmatter must survive the
+    .workflow/ -> board.db import, exercising the full model -> DB -> model
+    round-trip (not just Card.from_text)."""
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = _seed_legacy_workflow(tmp_path)
+    file_save_card(
+        root,
+        Card(
+            id="WF-001", title="linked card", status="in-flight",
+            links=[{"label": "PR #9", "path": "https://x/9"}],
+        ),
+    )
+    conn = db.connect(tmp_path, migrate=True)
+    assert db.load_card(conn, "WF-001").links == [
+        {"label": "PR #9", "path": "https://x/9"},
+    ]
+
+def test_migrate_drops_malformed_link_entries_keeps_valid(tmp_path, monkeypatch):
+    """A malformed link entry (missing `path`) in a source card's frontmatter
+    is dropped during import while a valid sibling entry is kept -- the
+    tolerant per-entry parsing from Task 1 (`Card.from_text`) must survive
+    the importer, not just direct `from_text` calls."""
+    git_init(tmp_path)
+    monkeypatch.setenv(db.DB_ENV, str(tmp_path / "board.db"))
+    root = _seed_legacy_workflow(tmp_path)
+    (root / "cards" / "WF-001-linked.md").write_text(
+        "---\n"
+        "id: WF-001\n"
+        "title: linked card\n"
+        "status: planned\n"
+        "links:\n"
+        "  - {label: 'missing path'}\n"
+        "  - {label: 'PR #9', path: 'https://x/9'}\n"
+        "---\n\n## Goal\nx\n"
+    )
+    conn = db.connect(tmp_path, migrate=True)
+    assert db.load_card(conn, "WF-001").links == [
+        {"label": "PR #9", "path": "https://x/9"},
+    ]
 
 def test_migrate_reports_skipped(tmp_path, monkeypatch):
     """WF-056 / D1: a card that fails to parse must not vanish silently.
@@ -491,3 +591,55 @@ def test_connect_warns_on_repo_root_meta_mismatch(tmp_path, monkeypatch, capsys)
     assert str(derive_repo_root(dir_b)) in err  # now-connected-from root
     # set-if-absent preserved: original owner NOT overwritten
     assert db.get_meta(conn_b, "repo_root") == str(derive_repo_root(dir_a))
+
+
+# --- label_colors registry (F10, WF-067) ----------------------------------
+
+def test_label_colors_table_exists_on_fresh_db(repo):
+    conn = db.connect(repo, migrate=False)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "label_colors" in tables
+
+def test_label_colors_table_created_on_pre_existing_db(repo):
+    """`CREATE TABLE IF NOT EXISTS label_colors` runs on every `ensure_schema`
+    call (unlike the additive-column migration, no ALTER is needed — this is
+    a brand-new table, not a new column on an existing one), so a board.db
+    created before F10 existed still gains the table on its next connect."""
+    import sqlite3
+    path = db.board_db_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = sqlite3.connect(str(path))
+    raw.executescript("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(repo, migrate=False)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "label_colors" in tables
+
+def test_set_label_color_then_load_roundtrip(repo):
+    conn = db.connect(repo, migrate=False)
+    db.set_label_color(conn, "bug", "sky")
+    assert db.load_label_colors(conn) == {"bug": "sky"}
+
+def test_set_label_color_overwrites_existing(repo):
+    conn = db.connect(repo, migrate=False)
+    db.set_label_color(conn, "bug", "sky")
+    db.set_label_color(conn, "bug", "plum")
+    assert db.load_label_colors(conn) == {"bug": "plum"}
+
+def test_clear_label_color_removes_entry(repo):
+    conn = db.connect(repo, migrate=False)
+    db.set_label_color(conn, "bug", "sky")
+    db.set_label_color(conn, "feature", "sage")
+    db.clear_label_color(conn, "bug")
+    assert db.load_label_colors(conn) == {"feature": "sage"}
+
+def test_clear_label_color_absent_is_noop(repo):
+    conn = db.connect(repo, migrate=False)
+    db.clear_label_color(conn, "nope")  # must not raise
+    assert db.load_label_colors(conn) == {}
+
+def test_load_label_colors_empty_registry(repo):
+    conn = db.connect(repo, migrate=False)
+    assert db.load_label_colors(conn) == {}

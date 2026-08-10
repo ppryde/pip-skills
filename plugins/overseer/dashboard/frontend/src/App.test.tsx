@@ -26,7 +26,7 @@ function repo(overrides: Partial<RepoEntry> & { label: string; root: string }): 
 
 function boardResponse(): BoardResponse {
   return {
-    board: { project: "acme", cards: [], sprints: [], quarantined: [] },
+    board: { project: "acme", cards: [], sprints: [], quarantined: [], label_colors: {} },
     context: { pct: 10, threshold: 80 },
     limits: null,
   };
@@ -52,6 +52,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     checklist: [],
     labels: [],
     body: "",
+    links: [],
     ...overrides,
   };
 }
@@ -261,6 +262,7 @@ describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
         project: "acme",
         sprints: [],
         quarantined: [],
+        label_colors: {},
         cards: [
           card({ id: "WF-EPIC", title: "The great migration", is_epic: true }),
           card({ id: "WF-EPIC-C1", title: "Migration child", parent: "WF-EPIC" }),

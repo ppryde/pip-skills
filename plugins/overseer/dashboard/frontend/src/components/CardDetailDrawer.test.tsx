@@ -19,9 +19,17 @@ vi.mock("../api/client", () => ({
   claimCard: vi.fn(),
   unclaimCard: vi.fn(),
   setLabels: vi.fn(),
+  pullChildren: vi.fn(),
 }));
 
-import { getCard, getSessions, setPriority, setLabels, editCard } from "../api/client";
+import {
+  getCard,
+  getSessions,
+  setPriority,
+  setLabels,
+  editCard,
+  pullChildren,
+} from "../api/client";
 import CardDetailDrawer from "./CardDetailDrawer";
 
 const BOARD_RESPONSE = {} as BoardResponse;
@@ -62,6 +70,7 @@ function cardDetail(
     updated: "",
     checklist: [],
     labels: [],
+    links: [],
     sections: {},
     body: "",
     ...overrides,
@@ -219,6 +228,95 @@ describe("<CardDetailDrawer/>", () => {
     expect(chips).toHaveLength(2);
     expect(chips[0]).toHaveTextContent("policy");
     expect(chips[1]).toHaveTextContent("architecture");
+  });
+
+  it("renders a read-only link per entry in a Links section (F8, WF-065)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-A",
+        links: [
+          { label: "Design doc", path: "https://example.com/design" },
+          { label: "PR", path: "https://example.com/pr/1" },
+        ],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(screen.getByText("Links")).toBeInTheDocument();
+    const links = container.querySelectorAll(".card-drawer__links-list a");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveTextContent("Design doc");
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "https://example.com/design"
+    );
+    expect(links[0]).toHaveAttribute("target", "_blank");
+    expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(links[1]).toHaveTextContent("PR");
+    expect(links[1]).toHaveAttribute("href", "https://example.com/pr/1");
+  });
+
+  it("renders a non-http(s) link path as inert text, not an anchor (security fix, PR5 final review)", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(
+      cardDetail({
+        id: "WF-A",
+        links: [
+          { label: "evil js", path: "javascript:alert(1)" },
+          { label: "PR", path: "https://example.com/pr/1" },
+        ],
+      })
+    );
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    const anchors = container.querySelectorAll(".card-drawer__links-list a");
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]).toHaveTextContent("PR");
+    expect(anchors[0]).toHaveAttribute("href", "https://example.com/pr/1");
+
+    const items = container.querySelectorAll(".card-drawer__links-list li");
+    expect(items[0].querySelector("a")).toBeNull();
+    expect(items[0]).toHaveTextContent("evil js");
+  });
+
+  it("renders nothing for Links when the card carries no links", async () => {
+    vi.mocked(getCard).mockResolvedValueOnce(cardDetail({ id: "WF-A" }));
+
+    const { container } = render(
+      <CardDetailDrawer
+        cardId="WF-A"
+        onClose={() => {}}
+        mutate={noopMutate()}
+        inFlight={false}
+        allCardIds={[]}
+        party={[]}
+      />
+    );
+
+    await screen.findByText(`Title WF-A`);
+    expect(screen.queryByText("Links")).toBeNull();
+    expect(container.querySelector(".card-drawer__links")).toBeNull();
   });
 
   it("renders the label editor with no chips (just the add-input) when the card carries no labels", async () => {
@@ -1361,5 +1459,126 @@ describe("<CardDetailDrawer/>", () => {
     expect(container.querySelector(".card-drawer__journey")).not.toBeNull();
     expect(screen.getByText("Sub-quests")).toBeInTheDocument();
     expect(screen.getByText(/waiting on WF-001/)).toBeInTheDocument();
+  });
+
+  describe("Pull children control (F9, WF-066)", () => {
+    it("renders a 'Pull children' button when the card is an epic", async () => {
+      vi.mocked(getCard).mockResolvedValueOnce(
+        cardDetail({ id: "WF-EPIC", title: "Epic card", is_epic: true })
+      );
+
+      render(
+        <CardDetailDrawer
+          cardId="WF-EPIC"
+          onClose={() => {}}
+          mutate={noopMutate()}
+          inFlight={false}
+          allCardIds={[]}
+          party={[]}
+        />
+      );
+
+      await screen.findByText("Epic card");
+      expect(
+        screen.getByRole("button", { name: /pull children/i })
+      ).toBeInTheDocument();
+    });
+
+    it("renders NO 'Pull children' button when the card is not an epic", async () => {
+      vi.mocked(getCard).mockResolvedValueOnce(
+        cardDetail({ id: "WF-LEAF", title: "Leaf card", is_epic: false })
+      );
+
+      render(
+        <CardDetailDrawer
+          cardId="WF-LEAF"
+          onClose={() => {}}
+          mutate={noopMutate()}
+          inFlight={false}
+          allCardIds={[]}
+          party={[]}
+        />
+      );
+
+      await screen.findByText("Leaf card");
+      expect(
+        screen.queryByRole("button", { name: /pull children/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it("on confirm accept, routes pullChildren through mutate() then refetches the open card", async () => {
+      vi.mocked(getCard).mockResolvedValueOnce(
+        cardDetail({ id: "WF-EPIC2", title: "Epic two", is_epic: true })
+      );
+      vi.mocked(pullChildren).mockResolvedValueOnce(BOARD_RESPONSE);
+      // The refetch after the pull returns updated content — proves it's a
+      // REAL second `getCard` call, not just a re-render of stale state.
+      vi.mocked(getCard).mockResolvedValueOnce(
+        cardDetail({ id: "WF-EPIC2", title: "Epic two", is_epic: true })
+      );
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+
+      // liveMutate() actually invokes the function it's given — needed here
+      // because the control must route THROUGH `mutate`, exactly like the
+      // sibling controls, not call `pullChildren` directly.
+      const mutate = liveMutate();
+      render(
+        <CardDetailDrawer
+          cardId="WF-EPIC2"
+          onClose={() => {}}
+          mutate={mutate}
+          inFlight={false}
+          allCardIds={[]}
+          party={[]}
+        />
+      );
+      await screen.findByText("Epic two");
+      expect(getCard).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: /pull children/i })
+        );
+      });
+
+      expect(window.confirm).toHaveBeenCalledWith(
+        "Pull all live children into this epic's column?"
+      );
+      expect(mutate).toHaveBeenCalledWith(expect.any(Function));
+      expect(pullChildren).toHaveBeenCalledWith("WF-EPIC2");
+      await waitFor(() => expect(getCard).toHaveBeenCalledTimes(2));
+    });
+
+    it("on confirm decline, calls neither mutate nor pullChildren", async () => {
+      vi.mocked(getCard).mockResolvedValueOnce(
+        cardDetail({ id: "WF-EPIC3", title: "Epic three", is_epic: true })
+      );
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+
+      const mutate = liveMutate();
+      render(
+        <CardDetailDrawer
+          cardId="WF-EPIC3"
+          onClose={() => {}}
+          mutate={mutate}
+          inFlight={false}
+          allCardIds={[]}
+          party={[]}
+        />
+      );
+      await screen.findByText("Epic three");
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: /pull children/i })
+        );
+      });
+
+      expect(window.confirm).toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+      expect(pullChildren).not.toHaveBeenCalled();
+      // No refetch fired either — still just the initial open fetch.
+      expect(getCard).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -7,6 +7,10 @@ export interface LabelEditorProps {
    * (via the existing `setLabels` client call) — always called with the
    * COMPLETE new label set, never a delta. */
   onSave: (labels: string[]) => Promise<void>;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * threaded through to `labelColor` so an edited label keeps its
+   * registry-chosen colour, not just the hash-palette fallback. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -24,7 +28,7 @@ export interface LabelEditorProps {
  * styles.css only adds the layout needed to sit the remove glyph inline,
  * it never overrides the palette itself.
  */
-function LabelEditor({ labels, onSave }: LabelEditorProps) {
+function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
   const [draft, setDraft] = useState("");
 
   const remove = (label: string) => {
@@ -50,7 +54,7 @@ function LabelEditor({ labels, onSave }: LabelEditorProps) {
       {labels.map((label) => (
         <span
           key={label}
-          className={`label-editor__chip label-chip label-chip--${labelColor(label)}`}
+          className={`label-editor__chip label-chip label-chip--${labelColor(label, colorRegistry)}`}
         >
           {label}
           <button

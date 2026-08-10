@@ -194,6 +194,7 @@ function App() {
         mutate={mutate}
         inFlight={inFlight}
         cards={board?.cards ?? []}
+        labelColors={board?.label_colors}
         party={party}
         lastRefreshedAt={lastRefreshedAt}
         // WF-045: an unbegun repo has nothing real to show in the Party
@@ -240,6 +241,7 @@ function App() {
           onPriority={setPriority}
           onComplexity={setComplexity}
           onClear={clear}
+          colorRegistry={board.label_colors}
         />
       )}
       <main className="board-region">
@@ -278,6 +280,7 @@ function App() {
         inFlight={inFlight}
         allCardIds={board?.cards.map((c) => c.id) ?? []}
         party={party}
+        colorRegistry={board?.label_colors}
       />
       {partyOpen && (
         <PartyOverlay

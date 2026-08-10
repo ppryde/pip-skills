@@ -23,6 +23,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     checklist: [],
     labels: [],
     body: "",
+    links: [],
     ...overrides,
   };
 }

@@ -16,7 +16,7 @@ afterEach(() => {
 
 function boardResponse(pct: number): BoardResponse {
   return {
-    board: { project: "p", cards: [], sprints: [], quarantined: [] },
+    board: { project: "p", cards: [], sprints: [], quarantined: [], label_colors: {} },
     context: { pct, threshold: 80 },
     limits: null,
   };

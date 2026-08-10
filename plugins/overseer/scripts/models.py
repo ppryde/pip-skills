@@ -18,6 +18,21 @@ STAGES = [
 ]
 PRIORITIES = {"P0", "P1", "P2", "P3", "P4"}
 COMPLEXITIES = {"S", "M", "L", "XL"}
+# Mirrors the frontend's curated swatch palette (dashboard/frontend/src/board/
+# labelColor.ts PALETTE_KEYS) — same 9 keys, same order. That module owns the
+# label -> key hash for the un-configured default; this tuple is the set of
+# keys an F10 editable label_colors row is allowed to point at (WF-067).
+LABEL_PALETTE_KEYS = (
+    "slate",
+    "sage",
+    "plum",
+    "clay",
+    "sky",
+    "violet",
+    "olive",
+    "terracotta",
+    "teal",
+)
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kM])?")
@@ -103,6 +118,7 @@ class Card:
     touches: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
+    links: list[dict] = field(default_factory=list)
     budget_estimate: int | None = None
     budget_actual: int = 0
     created: str = ""
@@ -152,6 +168,21 @@ class Card:
             labels = [str(labels_raw)]
         else:
             labels = []
+        links_raw = meta.get("links")
+        links: list[dict] = []
+        if isinstance(links_raw, list):
+            for entry in links_raw:
+                if not isinstance(entry, dict):
+                    continue
+                if not all(k in entry for k in ("label", "path")):
+                    continue
+                path = str(entry["path"]).strip()
+                if not path.lower().startswith(("http://", "https://")):
+                    continue
+                links.append({
+                    "label": str(entry["label"]),
+                    "path": path,
+                })
         order_raw = meta.get("order")
         if order_raw is not None:
             try:
@@ -211,6 +242,7 @@ class Card:
             touches=touches,
             depends_on=depends_on,
             labels=labels,
+            links=links,
             budget_estimate=parse_tokens(budget.get("estimate")),
             budget_actual=parse_tokens(budget.get("actual")) or 0,
             created=str(meta.get("created", "")),
@@ -244,6 +276,7 @@ class Card:
             "touches": self.touches or None,
             "depends_on": self.depends_on or None,
             "labels": self.labels or None,
+            "links": self.links or None,
             "budget": {
                 "estimate": format_tokens(self.budget_estimate),
                 "actual": format_tokens(self.budget_actual),

@@ -9,7 +9,7 @@ import NewCardDialog from "./NewCardDialog";
 
 const CREATE_RESPONSE = {
   card_id: "WF-9",
-  board: { project: "acme", cards: [], sprints: [], quarantined: [] },
+  board: { project: "acme", cards: [], sprints: [], quarantined: [], label_colors: {} },
   context: { pct: null, threshold: null },
   limits: null,
 } as unknown as BoardResponse;

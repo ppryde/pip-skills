@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import LabelFilterPopover from "./LabelFilterPopover";
+import { labelColor } from "../board/labelColor";
 
 describe("<LabelFilterPopover/>", () => {
   it("renders a chip per label and cycles on click", () => {
@@ -94,5 +95,24 @@ describe("<LabelFilterPopover/>", () => {
     );
     fireEvent.click(screen.getByRole("dialog"));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("colours a chip from the F10 registry when the label has an entry (WF-067)", () => {
+    const hashKey = labelColor("ui");
+    const overrideKey = (
+      ["slate", "sage", "plum", "clay", "sky", "violet", "olive", "terracotta", "teal"] as const
+    ).find((k) => k !== hashKey)!;
+    render(
+      <LabelFilterPopover
+        labels={["ui"]}
+        includeLabels={[]}
+        excludeLabels={[]}
+        onCycle={vi.fn()}
+        onClose={vi.fn()}
+        colorRegistry={{ ui: overrideKey }}
+      />
+    );
+    const chip = screen.getByRole("button", { name: "ui: neutral" });
+    expect(chip.className).toContain(`label-chip--${overrideKey}`);
   });
 });

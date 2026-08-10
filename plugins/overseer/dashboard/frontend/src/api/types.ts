@@ -88,6 +88,11 @@ export interface BoardCard {
   /** Card body markdown — included in the board payload for client-side
    * search (F2). Always present (possibly ""). */
   body: string;
+  /** Free-form reference links (F8, WF-065) — always present (possibly []),
+   * same blank-tolerant contract as `labels`/`checklist` above. Read-only in
+   * the dashboard for now (see CardDetailDrawer's Links section); editing is
+   * not yet wired up client-side. */
+  links: { label: string; path: string }[];
 }
 
 /** Project/sprints/quarantined shapes are loose in the backend contract. */
@@ -96,6 +101,11 @@ export interface Board {
   cards: BoardCard[];
   sprints: unknown[];
   quarantined: unknown[];
+  /** F10, WF-067: the editable label-colour registry — `{label: color_key}`.
+   * A registry hit wins over `labelColor`'s hash-palette fallback (see
+   * `board/labelColor.ts`). Always present (possibly `{}`), same
+   * blank-tolerant contract as `labels`/`checklist` on `BoardCard`. */
+  label_colors: Record<string, string>;
 }
 
 export interface PrWindow {

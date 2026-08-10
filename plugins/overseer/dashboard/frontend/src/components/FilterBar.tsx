@@ -17,6 +17,9 @@ export interface FilterBarProps {
   onPriority: (priority: string | null) => void;
   onComplexity: (complexity: string | null) => void;
   onClear: () => void;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * passed straight through to `LabelFilterPopover` when it's open. */
+  colorRegistry?: Record<string, string>;
 }
 
 const PRIORITIES = ["P0", "P1", "P2", "P3", "P4"];
@@ -45,6 +48,7 @@ function FilterBar({
   onPriority,
   onComplexity,
   onClear,
+  colorRegistry,
 }: FilterBarProps) {
   const [labelsOpen, setLabelsOpen] = useState(false);
   const labelBadge = filter.includeLabels.length + filter.excludeLabels.length;
@@ -130,6 +134,7 @@ function FilterBar({
           excludeLabels={filter.excludeLabels}
           onCycle={onCycleLabel}
           onClose={() => setLabelsOpen(false)}
+          colorRegistry={colorRegistry}
         />
       )}
     </div>

@@ -25,7 +25,7 @@ from scripts.calibration import BANDS, calibrate  # noqa: E402
 from scripts.conflicts import find_conflicts  # noqa: E402
 from scripts.index import rebuild_index  # noqa: E402
 from scripts.models import (  # noqa: E402
-    Card, CardParseError, PRIORITIES, format_tokens, parse_tokens,
+    Card, CardParseError, LABEL_PALETTE_KEYS, PRIORITIES, format_tokens, parse_tokens,
 )
 from scripts.relations import would_cycle_depends, would_cycle_parent  # noqa: E402
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
@@ -804,6 +804,60 @@ def cmd_unpark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pull_children(args: argparse.Namespace) -> int:
+    """`overseer pull-children <card_id>` — F9/WF-066: moves every LIVE
+    child of an epic into the parent's board column in one shot.
+
+    "Column" here is (stage, status) together, mirroring how `set-stage`
+    and `unblock` derive it for a single card: if the parent has a stage,
+    each child is stamped into that same stage via `set_stage` (which also
+    flips status to "in-flight" and clears any `blocked_on`, same as
+    `set-stage` does for one card). If the parent has NO stage, there is no
+    stage to copy — but the parent's STATUS still determines the lane, and
+    is copied onto the child rather than hardcoded. This matters because a
+    stage-less parent isn't always "planned": `park()` has no stage
+    precondition, so a parent can be `parked` (or `blocked`) with
+    `stage=None` too, and a hardcoded "planned" would silently strand
+    children in Backlog while the parent sits in a different lane
+    (board `layout.ts` places stage-less cards by status: planned/blocked
+    → Backlog, parked → Parked, independently).
+
+    Defensive-only fallback: `_load` doesn't restrict to live cards, so a
+    caller invoking this against an already-archived (done/abandoned)
+    parent must not propagate a terminal status onto still-live children —
+    falls back to "planned" in that case instead.
+
+    Archived cards (done/abandoned) never appear in `load_live_cards`, so
+    they're skipped without any special-casing. Batches the writes (one
+    `db.save_card` per child) and runs a single `rebuild_index` at the end
+    rather than looping `_sync`, since a naive per-child `_sync` would
+    rebuild the index N times for one logical move.
+    """
+    parent = _load(args.root, args.card_id)
+    cards, _ = db.load_live_cards(_conn(args.root))
+    children = [c for c in cards if c.parent == args.card_id]
+    if not children:
+        print(f"no live children of {parent.id}")
+        return 0
+    now = _now()
+    for child in children:
+        if parent.stage:
+            child.set_stage(parent.stage, now)
+        else:
+            child.stage = None
+            child.status = (
+                parent.status if parent.status not in ("done", "abandoned")
+                else "planned"
+            )
+            child.blocked_on = parent.blocked_on if child.status == "blocked" else None
+            child.updated = now
+        db.save_card(_conn(args.root), child)
+    quarantined = rebuild_index(args.root, args.root.resolve().name, now)
+    _report_quarantined(quarantined)
+    print(f"pulled {len(children)} children into {parent.id}")
+    return 0
+
+
 def cmd_claim(args: argparse.Namespace) -> int:
     """`overseer claim <id> --session <sid> [--force]` — design spec §3.
 
@@ -1234,6 +1288,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         "touches": card.touches,
         "depends_on": card.depends_on,
         "labels": card.labels,
+        "links": card.links,
         "budget": {
             "estimate": card.budget_estimate,
             "actual": card.budget_actual,
@@ -1409,6 +1464,39 @@ def cmd_facts(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- label-color: editable colour registry (F10, WF-067) -----------------
+#
+# `color_key` validity is enforced by argparse's `choices=LABEL_PALETTE_KEYS`
+# on the `set` subparser (see build_parser) — an invalid key is a usage
+# error, which `main()` already turns into exit 1, matching every other
+# choice-validated positional in this file (e.g. `set-sprint-status`).
+
+
+def cmd_label_color_set(args: argparse.Namespace) -> int:
+    db.set_label_color(_conn(args.root), args.name, args.color_key)
+    print(f"{args.name} -> {args.color_key}")
+    return 0
+
+
+def cmd_label_color_clear(args: argparse.Namespace) -> int:
+    db.clear_label_color(_conn(args.root), args.name)
+    print(f"{args.name} cleared")
+    return 0
+
+
+def cmd_label_color_list(args: argparse.Namespace) -> int:
+    colors = db.load_label_colors(_conn(args.root))
+    if args.json:
+        print(json.dumps(colors, indent=2))
+        return 0
+    if not colors:
+        print("No label colours registered.")
+        return 0
+    for name in sorted(colors):
+        print(f"{name}: {colors[name]}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -1499,6 +1587,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("unpark")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_unpark)
+
+    p = sub.add_parser("pull-children")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_pull_children)
 
     p = sub.add_parser("claim")
     p.add_argument("card_id")
@@ -1636,6 +1728,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="emit the result as JSON (for the dashboard)")
     p.set_defaults(func=cmd_clear)
+
+    p = sub.add_parser("label-color")
+    label_color_sub = p.add_subparsers(dest="action", required=True)
+
+    lp = label_color_sub.add_parser("set")
+    lp.add_argument("name")
+    lp.add_argument("color_key", choices=LABEL_PALETTE_KEYS)
+    lp.set_defaults(func=cmd_label_color_set)
+
+    lp = label_color_sub.add_parser("clear")
+    lp.add_argument("name")
+    lp.set_defaults(func=cmd_label_color_clear)
+
+    lp = label_color_sub.add_parser("list")
+    lp.add_argument("--json", action="store_true")
+    lp.set_defaults(func=cmd_label_color_list)
 
     return parser
 

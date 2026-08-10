@@ -181,6 +181,10 @@ function Board({
             dragDisabled={inFlight}
             onOpenCard={onOpenCard}
             activeBranch={activeBranch}
+            // F10 editable colour registry (WF-067) — straight off the
+            // board payload's `label_colors`, threaded to every tile's
+            // LabelChips via Lane -> CardTile/EpicCard -> TileShell.
+            colorRegistry={board.label_colors}
           />
         ))}
         {/* Rightmost item in the scroll row (HANDOFF §Board) — the flex row

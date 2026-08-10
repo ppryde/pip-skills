@@ -99,6 +99,11 @@ class EditBody(BaseModel):
     body: str | None = None
 
 
+class LabelColorBody(BaseModel):
+    name: str
+    color: str | None = None
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
@@ -576,6 +581,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
+    @app.post("/api/card/{card_id}/pull-children", dependencies=[Depends(require_token)])
+    def pull_children(card_id: str, root: str | None = None) -> dict[str, Any]:
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            run_overseer(effective, "pull-children", card_id)
+
+        return _mutate(do, effective)
+
     @app.post("/api/card/{card_id}/unpark", dependencies=[Depends(require_token)])
     def unpark_card(card_id: str, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
@@ -655,6 +670,21 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         def do() -> None:
             run_vigil(effective, "config", "set", "context.threshold", str(body.value))
+
+        return _mutate(do, effective)
+
+    @app.post("/api/labels/colors", dependencies=[Depends(require_token)])
+    def set_label_color(body: LabelColorBody, root: str | None = None) -> dict[str, Any]:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="label name required")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            if body.color:
+                run_overseer(effective, "label-color", "set", name, body.color)
+            else:
+                run_overseer(effective, "label-color", "clear", name)
 
         return _mutate(do, effective)
 

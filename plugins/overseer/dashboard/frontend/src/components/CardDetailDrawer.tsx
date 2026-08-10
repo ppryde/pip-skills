@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { editCard, getCard, setLabels } from "../api/client";
+import { editCard, getCard, pullChildren, setLabels } from "../api/client";
 import type { CardDetail } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -19,6 +19,14 @@ import PartyAvatar from "./PartyAvatar";
 import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
 
+/** Defense-in-depth scheme allowlist for card link `path` values (F8/PR5
+ * final-review Fix 1). `Card.from_text` already drops non-http(s) link
+ * entries at parse time, but existing DBs may still hold rows written before
+ * that guard existed — so the drawer re-checks before ever rendering a
+ * `path` as a clickable `href`, to close the `javascript:`/`data:` URI XSS
+ * vector on click. */
+const HTTP_URL_RE = /^https?:\/\//i;
+
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
   cardId: string | null;
@@ -33,6 +41,9 @@ export interface CardDetailDrawerProps {
    * Resolved against `detail.claimed_by` to render the hero chip's
    * PartyAvatar + class; ClaimControl's independent poll is unrelated. */
   party: PartyMember[];
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * passed straight through to `LabelEditor`. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -89,6 +100,7 @@ function CardDetailDrawer({
   inFlight,
   allCardIds,
   party,
+  colorRegistry,
 }: CardDetailDrawerProps) {
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -219,6 +231,21 @@ function CardDetailDrawer({
     } finally {
       setBusy(false);
     }
+  };
+
+  // Pull children (F9, WF-066) — confirm-gated, epics only (rendered below).
+  // Routes through the SAME `mutate` prop as every sibling control
+  // (StatusMenu/LinkEditor/ClaimControl/LabelEditor's onSave/saveEdit above)
+  // so the board's own state updates immediately, then `refetchDetail` — the
+  // same counter-guarded closure those siblings pass as `onMutated` —
+  // refreshes the drawer's own detail view.
+  const handlePullChildren = async () => {
+    if (!detail) return;
+    if (!window.confirm("Pull all live children into this epic's column?")) {
+      return;
+    }
+    await mutate(() => pullChildren(detail.id));
+    refetchDetail();
   };
 
   useEffect(() => {
@@ -374,6 +401,7 @@ function CardDetailDrawer({
                   await mutate(() => setLabels(detail.id, labels));
                   refetchDetail();
                 }}
+                colorRegistry={colorRegistry}
               />
             </header>
 
@@ -401,6 +429,19 @@ function CardDetailDrawer({
                 inFlight={inFlight}
                 onMutated={refetchDetail}
               />
+              {/* Pull children (F9, WF-066) — epics only; confirm-gated
+                  because it mutates every live child's stage/status at
+                  once. */}
+              {detail.is_epic && (
+                <button
+                  type="button"
+                  className="card-drawer__pull-children-btn"
+                  onClick={() => void handlePullChildren()}
+                  disabled={inFlight}
+                >
+                  Pull children
+                </button>
+              )}
             </div>
 
             {/* Journey progress + Sub-quests panel + Locked-behind pill:
@@ -454,6 +495,33 @@ function CardDetailDrawer({
                 <div className="card-drawer__locked">
                   <DependencyBadge card={detail} />
                 </div>
+
+                {/* Read-only Links section (F8, WF-065) — plain reference
+                    links (label/path), NOT the LinkEditor above (that
+                    manages parent/depends_on card relationships). Renders
+                    nothing when the card has none. */}
+                {detail.links && detail.links.length > 0 && (
+                  <section className="card-drawer__links">
+                    <h3 className="card-drawer__section-heading">Links</h3>
+                    <ul className="card-drawer__links-list">
+                      {detail.links.map((l, i) => (
+                        <li key={i}>
+                          {HTTP_URL_RE.test(l.path) ? (
+                            <a
+                              href={l.path}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {l.label}
+                            </a>
+                          ) : (
+                            <span>{l.label}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
               </>
             )}
 

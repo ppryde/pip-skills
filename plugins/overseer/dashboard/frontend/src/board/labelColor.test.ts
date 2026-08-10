@@ -36,4 +36,26 @@ describe("labelColor", () => {
     expect(c).toBe(a);
     expect(a === b).toBe(labelColor("policy") === labelColor("architecture"));
   });
+
+  describe("with a registry (F10, WF-067)", () => {
+    it("returns the registry's chosen key on a hit, even if it differs from the hash palette", () => {
+      // Deliberately picks whatever the hash would NOT have picked, so a
+      // passing assertion proves the registry actually won, not that it
+      // happened to agree with the fallback.
+      const hashKey = labelColor("policy");
+      const overrideKey = PALETTE_KEYS.find((k) => k !== hashKey)!;
+      expect(labelColor("policy", { policy: overrideKey })).toBe(overrideKey);
+    });
+
+    it("falls back to the SAME hash palette key when the registry has no entry for the label", () => {
+      expect(labelColor("policy", {})).toBe(labelColor("policy"));
+      expect(labelColor("policy", { architecture: "sky" })).toBe(
+        labelColor("policy")
+      );
+    });
+
+    it("an undefined registry (no 2nd arg) behaves identically to an empty one", () => {
+      expect(labelColor("policy", undefined)).toBe(labelColor("policy", {}));
+    });
+  });
 });

@@ -18,6 +18,9 @@ export interface LaneProps {
    * state above. A card with NO branch (never started) stays neutral: it's
    * not "on another branch", it just hasn't got one yet (task 10). */
   activeBranch: string | null;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * threaded through to every CardTile/EpicCard's LabelChips. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -38,6 +41,7 @@ function Lane({
   dragDisabled,
   onOpenCard,
   activeBranch,
+  colorRegistry,
 }: LaneProps) {
   const { setNodeRef } = useDroppable({ id: lane.key });
   const isEmpty = lane.cards.length === 0;
@@ -108,6 +112,7 @@ function Lane({
                   branchSpotlight={branchSpotlight}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
+                  colorRegistry={colorRegistry}
                 />
               ) : (
                 <CardTile
@@ -120,6 +125,7 @@ function Lane({
                   branchSpotlight={branchSpotlight}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
+                  colorRegistry={colorRegistry}
                 />
               );
             })}

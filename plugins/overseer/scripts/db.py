@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS cards (
     touches         TEXT NOT NULL DEFAULT '[]',
     depends_on      TEXT NOT NULL DEFAULT '[]',
     labels          TEXT NOT NULL DEFAULT '[]',
+    links           TEXT NOT NULL DEFAULT '[]',
     budget_estimate INTEGER,
     budget_actual   INTEGER NOT NULL DEFAULT 0,
     created         TEXT NOT NULL DEFAULT '',
@@ -57,6 +58,10 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 CREATE INDEX IF NOT EXISTS idx_cards_live  ON cards(archived, status);
 CREATE INDEX IF NOT EXISTS idx_cards_claim ON cards(claimed_by);
+CREATE TABLE IF NOT EXISTS label_colors (
+    name      TEXT PRIMARY KEY,
+    color_key TEXT NOT NULL
+);
 """
 
 
@@ -91,6 +96,7 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(cards)").fetchall()}
     additive_columns = {
         "labels": "TEXT NOT NULL DEFAULT '[]'",
+        "links": "TEXT NOT NULL DEFAULT '[]'",
     }
     for column, ddl in additive_columns.items():
         if column not in existing:
@@ -108,6 +114,35 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
     )
+
+
+def set_label_color(conn: sqlite3.Connection, name: str, color_key: str) -> None:
+    """Assign ``name`` (a label string) to ``color_key`` in the editable
+    colour registry (F10, WF-067). Insert-or-replace: re-setting an
+    already-registered label overwrites its previous key rather than
+    erroring — the CLI/dashboard call site is the single writer of intent
+    here, so "set again" always means "this is now the colour"."""
+    conn.execute(
+        "INSERT OR REPLACE INTO label_colors(name, color_key) VALUES (?, ?)",
+        (name, color_key),
+    )
+    conn.commit()
+
+
+def clear_label_color(conn: sqlite3.Connection, name: str) -> None:
+    """Remove ``name``'s registry override. No-op (no error) if absent —
+    matches the file's other clear/delete verbs (e.g. checklist deletes)."""
+    conn.execute("DELETE FROM label_colors WHERE name = ?", (name,))
+    conn.commit()
+
+
+def load_label_colors(conn: sqlite3.Connection) -> dict[str, str]:
+    """The full registry as a ``{label: color_key}`` map."""
+    rows = conn.execute("SELECT name, color_key FROM label_colors").fetchall()
+    # Index-based (not row["name"]) so this works whether the connection has
+    # sqlite3.Row set as its row_factory (the normal db.connect() path) or
+    # not (a bare sqlite3.connect() in a schema-only test).
+    return {row[0]: row[1] for row in rows}
 
 
 def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
@@ -282,6 +317,7 @@ def card_to_params(card: Card) -> dict:
         "touches": json.dumps(card.touches or []),
         "depends_on": json.dumps(card.depends_on or []),
         "labels": json.dumps(card.labels or []),
+        "links": json.dumps(card.links or []),
         "budget_estimate": card.budget_estimate,
         "budget_actual": card.budget_actual,
         "created": card.created,
@@ -330,6 +366,7 @@ def row_to_card(row: sqlite3.Row) -> Card:
         touches=_json_loads_column(row, "touches"),
         depends_on=_json_loads_column(row, "depends_on"),
         labels=_json_loads_column(row, "labels"),
+        links=_json_loads_column(row, "links"),
         budget_estimate=row["budget_estimate"],
         budget_actual=row["budget_actual"] or 0,
         created=row["created"] or "",

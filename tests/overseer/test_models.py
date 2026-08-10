@@ -353,6 +353,57 @@ class TestLabels:
         assert Card.from_text(text).labels == ["policy"]
 
 
+class TestLinks:
+    def _card_text(self, links_yaml: str = "") -> str:
+        return (
+            "---\n"
+            "id: WF-001\n"
+            "title: T\n"
+            "status: planned\n"
+            f"{links_yaml}"
+            "---\n\n## Goal\nx\n"
+        )
+
+    def test_links_roundtrip(self):
+        c = Card(
+            id="WF-1", title="T", status="planned",
+            links=[{"label": "PR #9", "path": "https://x/9"}],
+        )
+        c2 = Card.from_text(c.to_text())
+        assert c2.links == [{"label": "PR #9", "path": "https://x/9"}]
+
+    def test_links_absent_defaults_empty(self):
+        card = Card.from_text(self._card_text())
+        assert card.links == []
+
+    def test_links_malformed_entries_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "links:\n"
+                "  - 'not a mapping'\n"
+                "  - {label: 'missing path'}\n"
+                "  - {path: 'missing label'}\n"
+                "  - {label: 'PR #9', path: 'https://x/9'}\n"
+            )
+        )
+        assert card.links == [
+            {"label": "PR #9", "path": "https://x/9"},
+        ]
+
+    def test_links_bad_scheme_dropped(self):
+        card = Card.from_text(
+            self._card_text(
+                "links:\n"
+                "  - {label: 'evil js', path: 'javascript:alert(1)'}\n"
+                "  - {label: 'evil data', path: 'data:text/html,<script>alert(1)</script>'}\n"
+                "  - {label: 'PR #9', path: 'https://x/9'}\n"
+            )
+        )
+        assert card.links == [
+            {"label": "PR #9", "path": "https://x/9"},
+        ]
+
+
 class TestRelationsFields:
     def _card_text(self, extra=""):
         return (

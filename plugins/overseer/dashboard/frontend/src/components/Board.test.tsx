@@ -37,6 +37,7 @@ function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
     checklist: [],
     labels: [],
     body: "",
+    links: [],
     ...overrides,
   };
 }
@@ -57,6 +58,7 @@ const fixture: BoardResponse = {
     project: "overseer-dashboard",
     sprints: [],
     quarantined: ["WF-BAD"],
+    label_colors: {},
     cards: [
       // Epic in Backlog (planned) with two children in other lanes.
       card({
@@ -318,6 +320,7 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
       project: "overseer-dashboard",
       sprints: [],
       quarantined: [],
+      label_colors: {},
       cards: [
         card({ id: "WF-A", title: "On branch a", branch: "feat/a" }),
         card({ id: "WF-B", title: "On branch b", branch: "feat/b" }),

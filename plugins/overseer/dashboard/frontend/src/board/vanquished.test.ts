@@ -23,6 +23,7 @@ function card(status: Status): BoardCard {
     checklist: [],
     labels: [],
     body: "",
+    links: [],
   };
 }
 

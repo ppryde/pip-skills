@@ -194,6 +194,19 @@ Test sprint."""
         c = data["cards"][0]
         assert c["body"] == "## Goal\n\nFind the elusive body field."
 
+    def test_links_passed_through(self, repo, conn):
+        from scripts.board import board_data
+        links = [
+            {"label": "Design doc", "path": "https://example.com/design"},
+            {"label": "PR", "path": "https://example.com/pr/1"},
+        ]
+        card = make_card("WF-001", links=links)
+        db.save_card(conn, card)
+
+        data = board_data(repo)
+        c = data["cards"][0]
+        assert c["links"] == links
+
     def test_repo_defaults_none(self, repo, conn):
         from scripts.board import board_data
         db.save_card(conn, make_card("WF-001"))
@@ -244,6 +257,19 @@ Test sprint."""
         data = board_data(repo)
         ids = [c["id"] for c in data["cards"]]
         assert ids == ["WF-001", "WF-002", "WF-003"]
+
+    def test_empty_label_colors_registry(self, repo):
+        from scripts.board import board_data
+        data = board_data(repo)
+        assert data["label_colors"] == {}
+
+    def test_label_colors_registry_reflects_set_colors(self, repo, conn):
+        from scripts.board import board_data
+        db.set_label_color(conn, "policy", "sky")
+        db.set_label_color(conn, "architecture", "plum")
+
+        data = board_data(repo)
+        assert data["label_colors"] == {"policy": "sky", "architecture": "plum"}
 
     def test_budget_raw_ints_not_formatted(self, repo, conn):
         from scripts.board import board_data

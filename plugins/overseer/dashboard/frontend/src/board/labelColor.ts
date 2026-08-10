@@ -13,7 +13,11 @@
  * (not guaranteed — it's a fixed-size hash bucket) land on different
  * swatches.
  */
-const PALETTE_KEYS = [
+/** Exported (F10, WF-067) so the settings dialog's 9-swatch picker can
+ * render exactly these keys, in this order, without a second hardcoded
+ * copy — `LabelSettingsDialog` imports this array rather than repeating
+ * the palette. */
+export const PALETTE_KEYS = [
   "slate",
   "sage",
   "plum",
@@ -39,7 +43,16 @@ function hashString(s: string): number {
   return Math.abs(h);
 }
 
-/** Deterministically maps `label` to one of the curated palette keys above. */
-export function labelColor(label: string): LabelSwatchKey {
-  return PALETTE_KEYS[hashString(label) % PALETTE_KEYS.length];
+/**
+ * Deterministically maps `label` to a swatch key. When `registry` (the F10
+ * editable colour registry, WF-067 — board payload's `label_colors`) has an
+ * entry for `label`, that user-chosen key wins; otherwise falls back to the
+ * curated-palette hash above, byte-identical to the no-registry behaviour
+ * this function always had.
+ */
+export function labelColor(
+  label: string,
+  registry?: Record<string, string>
+): string {
+  return registry?.[label] ?? PALETTE_KEYS[hashString(label) % PALETTE_KEYS.length];
 }

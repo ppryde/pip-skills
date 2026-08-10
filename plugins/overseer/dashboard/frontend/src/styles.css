@@ -2511,6 +2511,32 @@ body {
   margin-bottom: 0.75rem;
 }
 
+/* Read-only Links panel (F8, WF-065) — same white-card treatment as the
+   Sub-quests panel above, just a plain list of external references. */
+.card-drawer__links {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem 1rem;
+  border: 2px solid var(--qb-line-dashed-2);
+  border-radius: var(--qb-radius-panel);
+  background: var(--legacy-color-fff);
+}
+
+.card-drawer__links-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.card-drawer__links-list a {
+  font-size: 0.85rem;
+  color: var(--qb-ink-700);
+  text-decoration: underline;
+  word-break: break-word;
+}
+
 /* Quest log timeline (WF-030 chunk 9, stretch — HANDOFF: "vertical
    timeline, 2px dashed #D8C39A left rule, colored dots, entry text +
    Silkscreen day stamp"). Dot colour rotates through the 7 guild accent
@@ -3153,6 +3179,87 @@ body {
   gap: 0.5rem;
   justify-content: flex-end;
   margin-top: 1.25rem;
+}
+
+/* Label colors settings dialog (F10, WF-067, Task 10) — rides the same
+   .party-overlay/.party-sheet backdrop as ClearDialog/NewCardDialog; these
+   rules only cover the per-label rows and the 9-swatch picker grid. Colour
+   itself is ALWAYS the shared `.label-chip--<key>` palette (declared above)
+   applied alongside `.label-settings-swatch` — never a new colour here,
+   same rule `.label-filter-chip`/`.label-editor__chip` already follow. */
+.label-settings-dialog__title {
+  margin: 0 0 0.75rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 24px;
+  color: var(--qb-party-text);
+}
+
+.label-settings-dialog__empty {
+  color: var(--qb-party-text-muted);
+}
+
+.label-settings-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--qb-party-row-bg);
+}
+
+.label-settings-row:last-child {
+  border-bottom: none;
+}
+
+.label-settings-row__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+/* Square swatch buttons — deliberately NOT the pill shape `.label-chip`
+   uses for a read-only chip; a small fixed square reads as "pick a colour"
+   rather than "here is a label", so it can't be mistaken for one more chip
+   in the row. `aria-pressed` (LabelSettingsDialog) marks the label's
+   current registry colour with a ring, same affordance
+   `.label-filter-chip--include`'s inset ring already uses. */
+.label-settings-swatch {
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border-radius: var(--legacy-radius-3px);
+  cursor: pointer;
+  transition: box-shadow var(--qb-motion-hover) ease;
+}
+
+.label-settings-swatch:hover {
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.label-settings-swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--qb-ink-900) inset;
+}
+
+.label-settings-row__reset {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-3);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.label-settings-row__reset:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
 }
 
 /* Modal action buttons (NewCardDialog create/cancel + ClearDialog back/cancel)

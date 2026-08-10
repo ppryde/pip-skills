@@ -14,6 +14,9 @@ export interface CardTileProps {
   dragDisabled?: boolean;
   /** Chunk 5: clicking the tile body opens the detail drawer for this card. */
   onOpen?: (id: string) => void;
+  /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
+   * threaded through to `TileShell`'s `LabelChips`. */
+  colorRegistry?: Record<string, string>;
 }
 
 /**
@@ -29,6 +32,7 @@ function CardTile({
   branchSpotlight = false,
   dragDisabled = false,
   onOpen,
+  colorRegistry,
 }: CardTileProps) {
   return (
     <TileShell
@@ -40,6 +44,7 @@ function CardTile({
       branchSpotlight={branchSpotlight}
       dragDisabled={dragDisabled}
       onOpen={onOpen}
+      colorRegistry={colorRegistry}
     />
   );
 }

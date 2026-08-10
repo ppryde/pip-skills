@@ -186,6 +186,15 @@ export function unpark(id: string): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/unpark`));
 }
 
+/** Pulls all live children of an epic into the epic's own column (F9,
+ * WF-066) — token-gated backend endpoint added in Task 5. */
+export function pullChildren(id: string): Promise<BoardResponse> {
+  return request<BoardResponse>(
+    "POST",
+    withRoot(`/api/card/${id}/pull-children`)
+  );
+}
+
 export function move(id: string, body: MoveBody): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/move`), body);
 }
@@ -211,6 +220,22 @@ export function unclaimCard(id: string): Promise<BoardResponse> {
 export function setLabels(id: string, labels: string[]): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/labels`), {
     labels,
+  });
+}
+
+/** Sets (or, with `color: null`, clears) a label's entry in the F10
+ * editable colour registry (WF-067) — `board.label_colors`. `color` is one
+ * of `labelColor.ts`'s `PALETTE_KEYS`, or `null` to reset the label back to
+ * its curated-palette hash default. Root-scoped like the other card/board
+ * mutations (`setLabels`, `setThreshold`) — the backend's `/api/labels/colors`
+ * takes the same `root` query param. */
+export function setLabelColor(
+  name: string,
+  color: string | null
+): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", withRoot("/api/labels/colors"), {
+    name,
+    color,
   });
 }
 
