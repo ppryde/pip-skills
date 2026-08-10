@@ -650,8 +650,8 @@ body {
    wobble shape/paint as `.topbar__refresh` — a positive, non-destructive
    action, so no recolor (contrast `.topbar-clear.danger` below). */
 .topbar__new-card {
-  font-size: 0.8rem;
-  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
   font-weight: 700;
   border-radius: var(--qb-btn-wobble);
   border: 1.5px solid var(--qb-btn-ink);
@@ -681,8 +681,8 @@ body {
    only reaches inside `.clear-dialog` (see `.clear-dialog .danger`), so this
    button needs its own paint rather than relying on that scoped rule. */
 .topbar-clear.danger {
-  font-size: 0.8rem;
-  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
   font-weight: 700;
   border-radius: var(--qb-btn-wobble);
   border: 1.5px solid var(--legacy-color-b3261e);
