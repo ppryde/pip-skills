@@ -2927,6 +2927,52 @@ body {
   margin-top: 1.25rem;
 }
 
+/* Modal action buttons (NewCardDialog create/cancel + ClearDialog back/cancel)
+   adopt the shared Role A button system (see the --qb-btn-* tokens) — same as
+   the drawer edit / threshold / claim controls. Bare <button>s otherwise fall
+   back to raw browser default, visibly out of step with the rest of the board.
+   The destructive `.clear-dialog .danger` primary keeps its red fill (higher
+   specificity wins bg/color/border-color); here it only gains the shared
+   Role A shape so it lines up with its sibling. */
+.new-card-actions button,
+.clear-actions button {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-3);
+  border: 1.5px solid var(--qb-btn-ink);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.new-card-actions button,
+.clear-actions button:not(.danger) {
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+}
+
+.new-card-actions button:hover:not(:disabled),
+.clear-actions button:not(.danger):hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.new-card-actions button:active:not(:disabled),
+.clear-actions button:not(.danger):active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.new-card-actions button:disabled,
+.clear-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Hero card (HANDOFF: light card floating inside the dark sheet). */
 .hero-card {
   background: var(--qb-hero-card-bg);
