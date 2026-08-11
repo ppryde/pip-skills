@@ -271,7 +271,10 @@ function App() {
           controlsOpen={controlsOpen}
         />
       )}
-      <main className="board-region">
+      {/* WF-086 (view flip): keyed on `view` so toggling Board↔Atlas remounts
+          the pane and replays the coin-flip rotation (`.board-region` in
+          styles.css) — the screen turning over like the coin you clicked. */}
+      <main className="board-region" key={view}>
         {isUnbegun && selectedRepo ? (
           <UnbegunHolding
             repo={selectedRepo}
