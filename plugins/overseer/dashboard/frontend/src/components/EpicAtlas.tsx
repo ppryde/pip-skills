@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Board, BoardCard } from "../api/types";
 import { accentKeyForCard } from "../board/cardAccent";
 import { parseCalendarDate } from "../board/atlasGeometry";
@@ -9,9 +9,11 @@ import {
   orderEpicsForDisplay,
   totalWeight,
 } from "../board/atlasTrailLayout";
+import { useMediaQuery } from "../board/useMediaQuery";
 import AtlasRailCard from "./AtlasRailCard";
 import AtlasToolbar, { type TrailOrientation } from "./AtlasToolbar";
 import AtlasTrail from "./AtlasTrail";
+import AtlasTrailVertical from "./AtlasTrailVertical";
 
 export interface EpicAtlasProps {
   board: Board;
@@ -45,13 +47,19 @@ const DEFAULT_LANE_WIDTH = 600;
  * checklist can grow one row without affecting its neighbours).
  *
  * `.atlas-chart` is the page's ONE horizontal scroller (the `725ddea`
- * mobile invariant) — no extra scroll wrapper around it.
+ * mobile invariant) — no extra scroll wrapper around it. The mobile
+ * Down-mode column layout is a SEPARATE scroll axis (HANDOFF: "the two
+ * axes never fight") — see the `downMode` branch below, gated on BOTH the
+ * toolbar's orientation toggle AND the real ≤720px viewport (the toggle is
+ * inert on desktop, which always renders across).
  */
 function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
   const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set());
   const [showNames, setShowNames] = useState(true);
   const [hideVanquished, setHideVanquished] = useState(true);
   const [orientation, setOrientation] = useState<TrailOrientation>("across");
+  const isMobile = useMediaQuery("(max-width:720px)");
+  const downMode = isMobile && orientation === "down";
 
   const [laneWidth, setLaneWidth] = useState(DEFAULT_LANE_WIDTH);
   const laneWidthObserver = useRef<ResizeObserver | null>(null);
@@ -72,6 +80,13 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
     observer.observe(el);
     laneWidthObserver.current = observer;
   }, []);
+
+  // Down-mode's own scroller (a distinct element from `.atlas-chart` in
+  // across-mode — Down's columns scroll horizontally, so `.atlas-chart`
+  // itself is that scroller here too, just with a different child shape).
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const [activeColumnHeight, setActiveColumnHeight] = useState<number | null>(null);
+  const [activeColumnIndex, setActiveColumnIndex] = useState(0);
 
   const cardsById = useMemo(() => {
     const map = new Map<string, BoardCard>();
@@ -107,11 +122,71 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
   // ONE shared px-per-weight scale, recomputed each render across every
   // VISIBLE epic (HANDOFF) — a vanquished epic hidden by the toggle above
   // must never stretch/compress the scale for the epics actually on screen.
+  // Down-mode doesn't use this at all — AtlasTrailVertical has its own flat
+  // per-column scale (see that component's doc comment).
   const pxPerWeight = useMemo(() => {
     const totalWeights = epics.map((epic) => totalWeight(childrenByEpic.get(epic.id) ?? []));
     const usable = laneUsableWidth(laneWidth);
     return globalPxPerWeight(totalWeights, usable);
   }, [epics, childrenByEpic, laneWidth]);
+
+  // Port of Board.tsx's `activeLaneHeight` technique (HANDOFF explicitly
+  // calls this out) — a scroll listener finds whichever column sits
+  // nearest the scroller's own centre and pins `.atlas-chart__columns`'
+  // own box to THAT column's `scrollHeight` (`overflow-y: hidden` in CSS
+  // clips the other, off-screen, possibly-taller columns out of the
+  // scrollable region), with a ResizeObserver re-measuring if the active
+  // column's own content changes size (e.g. its checklist expands).
+  useLayoutEffect(() => {
+    if (!downMode) {
+      setActiveColumnHeight(null);
+      return;
+    }
+    const scroller = columnsRef.current;
+    if (!scroller) return;
+
+    const measure = () => {
+      const rect = scroller.getBoundingClientRect();
+      const centre = rect.left + rect.width / 2;
+      let nearestIndex = 0;
+      let nearestDistance = Infinity;
+      let nearestEl: HTMLElement | null = null;
+      scroller.querySelectorAll<HTMLElement>("[data-column-index]").forEach((el) => {
+        const r = el.getBoundingClientRect();
+        const d = Math.abs(r.left + r.width / 2 - centre);
+        if (d < nearestDistance) {
+          nearestDistance = d;
+          nearestIndex = Number(el.dataset.columnIndex);
+          nearestEl = el;
+        }
+      });
+      setActiveColumnIndex(nearestIndex);
+      if (nearestEl) setActiveColumnHeight((nearestEl as HTMLElement).scrollHeight);
+    };
+
+    measure();
+    scroller.addEventListener("scroll", measure);
+
+    // jsdom (unlike every real browser) has no ResizeObserver in every test
+    // environment — same guard as Board.tsx's own port of this technique.
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      const activeEl = scroller.querySelector<HTMLElement>(
+        `[data-column-index="${activeColumnIndex}"]`
+      );
+      if (activeEl) ro.observe(activeEl);
+    }
+
+    return () => {
+      scroller.removeEventListener("scroll", measure);
+      ro?.disconnect();
+    };
+    // Deliberately NOT depending on `activeColumnIndex` (which the effect
+    // body itself sets) — that would re-run this setup on every scroll-
+    // driven index change, tearing down and rebuilding the listener/
+    // observer instead of leaving them attached across the column swap.
+  }, [downMode, epics.length]);
 
   function toggleExpand(id: string) {
     setExpandedEpics((prev) => {
@@ -138,9 +213,48 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
           onToggleOrientation={setOrientation}
         />
       )}
-      <div className={"atlas-chart" + (orientation === "down" ? " atlas-chart--down" : "")}>
+      <div className={"atlas-chart" + (downMode ? " atlas-chart--down" : "")}>
         {epics.length === 0 ? (
           <p className="atlas-chart__empty">{EMPTY_STATE_COPY}</p>
+        ) : downMode ? (
+          <div
+            className="atlas-chart__columns"
+            ref={columnsRef}
+            style={activeColumnHeight != null ? { height: `${activeColumnHeight}px` } : undefined}
+          >
+            {epics.map((epic, i) => {
+              const childCards = childrenByEpic.get(epic.id) ?? [];
+              const accentKey = accentKeyForCard(epic);
+              const rollup = epic.rollup!;
+              return (
+                <div key={epic.id} className="atlas-chart__column" data-column-index={i}>
+                  <div className="atlas-chart__column-card">
+                    <AtlasRailCard
+                      card={epic}
+                      rollup={rollup}
+                      childCards={childCards}
+                      expanded={expandedEpics.has(epic.id)}
+                      onToggleExpand={toggleExpand}
+                      onOpen={onOpenCard}
+                      accentKey={accentKey}
+                      blockedOn={blockedOnFor(epic)}
+                      cardsById={cardsById}
+                    />
+                  </div>
+                  <div className="atlas-chart__column-lane">
+                    <AtlasTrailVertical
+                      card={epic}
+                      rollup={rollup}
+                      childCards={childCards}
+                      cardsById={cardsById}
+                      showNames={showNames}
+                      accentKey={accentKey}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div className="atlas-chart__rows">
             {epics.map((epic, i) => {

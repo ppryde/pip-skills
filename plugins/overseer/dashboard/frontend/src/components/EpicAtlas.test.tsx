@@ -192,6 +192,50 @@ describe("<EpicAtlas/>", () => {
     expect(xs[0]).toBeCloseTo(xs[1], 5);
   });
 
+  describe("mobile Down orientation (HANDOFF: shipped in production, <=720px only)", () => {
+    const originalMatchMedia = window.matchMedia;
+
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    function stubViewport(matches: boolean) {
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      })) as unknown as typeof window.matchMedia;
+    }
+
+    it("renders columns (not rows) once Down is selected on a <=720px viewport", () => {
+      stubViewport(true);
+      const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
+      const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("tab", { name: /⟱ down/i }));
+
+      expect(container.querySelector(".atlas-chart__columns")).toBeInTheDocument();
+      expect(container.querySelector(".atlas-chart__rows")).not.toBeInTheDocument();
+      expect(container.querySelector(".atlas-chart--down")).toBeInTheDocument();
+    });
+
+    it("Down stays inert on a desktop (>720px) viewport — still renders rows", () => {
+      stubViewport(false);
+      const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
+      const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("tab", { name: /⟱ down/i }));
+
+      expect(container.querySelector(".atlas-chart__rows")).toBeInTheDocument();
+      expect(container.querySelector(".atlas-chart__columns")).not.toBeInTheDocument();
+    });
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
