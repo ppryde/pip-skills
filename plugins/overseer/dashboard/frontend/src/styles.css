@@ -464,12 +464,12 @@ body {
   color: var(--qb-ink-900);
 }
 
-/* Last-refreshed time — small muted text sitting to the right of the wordmark
-   inside `.topbar__identity`; `align-items: center` on the identity row keeps
-   it baseline-centred against the taller title. The old repo subtitle line is
-   gone (the repo name lives in the repo selector directly below). */
+/* Last-refreshed time — a small muted label beside the Refresh control (moved
+   out of the header). The old repo subtitle line is gone entirely (the repo
+   name lives in the repo selector below). */
 .topbar__updated {
   margin: 0;
+  align-self: center;
   font-family: var(--qb-font-body);
   font-size: 0.75rem;
   color: var(--qb-ink-400);
@@ -4055,11 +4055,6 @@ a.card-drawer__pr-chip:hover {
    fill/border/text trio the trail's own gold coin and chips use elsewhere
    (`--qb-gold-chip-*`) — the current view reads at a glance without needing
    to compare against its sibling. */
-.topbar__view-toggle {
-  display: inline-flex;
-  gap: 0.5rem;
-}
-
 .topbar__view-toggle-btn {
   display: inline-flex;
   align-items: center;

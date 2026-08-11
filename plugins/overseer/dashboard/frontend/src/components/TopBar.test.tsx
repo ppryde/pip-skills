@@ -611,27 +611,29 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(onSelectView).toHaveBeenCalledWith("atlas");
   });
 
-  it("lives inside the always-visible .topbar__identity cluster, never in #topbar-controls-group", () => {
+  it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
-    const toggle = container.querySelector(".topbar__view-toggle");
-    expect(toggle).toBeInTheDocument();
-    // The identity cluster is always rendered (never behind the mobile
-    // "Controls ▾" collapse), so the toggle can never be hidden with it.
-    expect(toggle!.closest(".topbar__identity")).not.toBeNull();
-    expect(container.querySelector("#topbar-controls-group .topbar__view-toggle")).toBeNull();
+    const circles = container.querySelectorAll(".topbar__view-toggle-btn");
+    expect(circles).toHaveLength(2);
+    // Always-visible identity cluster — never behind the mobile "Controls ▾"
+    // collapse.
+    circles.forEach((c) => expect(c.closest(".topbar__identity")).not.toBeNull());
+    expect(container.querySelector("#topbar-controls-group .topbar__view-toggle-btn")).toBeNull();
   });
 
-  it("leads the identity cluster — circles before the wordmark; identity sits before the repo selector", () => {
+  it("flanks the wordmark — Board circle before it, Atlas circle after; identity sits before the repo selector", () => {
     const { container } = render(
       <StatefulTopBar {...baseProps()} repos={[{ root: "/r", label: "r", current: true, has_board: true, live_sessions: 0 }]} />
     );
     const identity = container.querySelector(".topbar__identity")!;
     const kids = Array.from(identity.children);
-    const toggleIndex = kids.findIndex((c) => c.classList.contains("topbar__view-toggle"));
+    const boardIndex = kids.findIndex((c) => c.getAttribute("aria-label") === "Board");
     const titleIndex = kids.findIndex((c) => c.tagName === "H1");
-    // Circles come first, the wordmark after them.
-    expect(toggleIndex).toBeGreaterThanOrEqual(0);
-    expect(toggleIndex).toBeLessThan(titleIndex);
+    const atlasIndex = kids.findIndex((c) => c.getAttribute("aria-label") === "Atlas");
+    // One circle either side of the wordmark.
+    expect(boardIndex).toBeGreaterThanOrEqual(0);
+    expect(boardIndex).toBeLessThan(titleIndex);
+    expect(atlasIndex).toBeGreaterThan(titleIndex);
     // The identity cluster itself still precedes the repo selector in the bar.
     const header = container.querySelector("header.topbar")!;
     const barKids = Array.from(header.children);
