@@ -323,7 +323,9 @@ function AtlasTrailVertical({
           type="button"
           key={`${child.id}-tag`}
           className={
-            "trail-tag trail-tag--todo trail-tag--down " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
+            "trail-tag trail-tag--todo trail-tag--down " +
+            (blocked ? "trail-tag--blocked " : "") +
+            (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
           }
           style={tierTagStyle}
           title={`${child.title} · ${weightLabel(child)}`}

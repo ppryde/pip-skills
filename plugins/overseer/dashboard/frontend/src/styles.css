@@ -4953,35 +4953,47 @@ button.trail-tag:focus-visible {
   outline-offset: 1px;
 }
 
-/* Task 1: `--qb-parchment-muted` (not the brighter `--qb-panel`) is the warm
-   label fill for BOTH todo and done tags — same token, so a done tag still
-   reads as the same label family as a todo one; only its border/text/opacity
-   below carry the "walked, settled history" de-emphasis. */
+/* Bright per-status pastels (each accent mixed 20% over white) replace the
+   old shared `--qb-parchment-muted` fill — that token sat too close to the
+   parchment PAGE background for a name-tag to read against it. Each tag
+   now pops as a near-white label tinted by its status instead. */
 .trail-tag--todo {
-  background: var(--qb-parchment-muted);
-  border: 1.5px solid var(--atlas-trail-fill, var(--qb-ink-300));
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 20%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 45%, white);
+  color: var(--qb-ink-700);
+}
+
+/* Settled history, not "ahead ground" — a green pastel instead of the todo
+   tag's sky one. The pastel fill + muted ink now carry the "walked, done"
+   de-emphasis on their own, so (unlike the old parchment version) this no
+   longer needs an `opacity` dial on top. */
+.trail-tag--done {
+  background: color-mix(in srgb, var(--qb-accent-forest-fill) 20%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 45%, white);
   color: var(--qb-ink-500);
 }
 
-/* Greyed/muted — a walked (done) quest's name is worth showing but should
-   read as settled history, not "ahead ground" like the todo tag's parchment
-   fill/accent border. Same shape (padding/radius/shadow) as the todo tag,
-   deliberately less visually loud. */
-.trail-tag--done {
-  background: var(--qb-parchment-muted);
-  border: 1.5px solid var(--qb-line-dashed-2);
-  color: var(--qb-ink-400);
-  opacity: 0.72;
+/* The way is barred — rose pastel. Placed after `--todo`/`--done` so it
+   wins the cascade when paired with `--todo` on a blocked ahead-quest's tag
+   (same class list, `--blocked` just added alongside). */
+.trail-tag--blocked {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 20%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 45%, white);
+  color: var(--qb-ink-700);
 }
 
-/* The AT HAND pennant is a status marker, not a name-tag — solid accent
-   fill (not the todo tag's parchment) so it reads as "in progress right
-   now", not "ahead ground". */
+/* The AT HAND pennant is a status marker, not a name-tag — a lightened
+   accent fill (not the todo tag's parchment) so it still reads as "in
+   progress right now", not "ahead ground", but calmer than the old solid
+   fill + bold white text (which was too intense next to the new pastel
+   tags). Dark ink on a pale tint instead. (The ink scale tops out at
+   `--qb-ink-900` — no `--qb-ink-800` token exists — so `-900` stands in as
+   the closest "dark text" tone.) */
 .atlas-trail__pennant--athand {
-  background: var(--atlas-trail-fill, var(--qb-accent-orange-fill));
-  border: 1.5px solid var(--atlas-trail-dark, var(--qb-accent-orange-shadow));
-  color: var(--legacy-color-fff);
-  font-weight: 700;
+  background: color-mix(in srgb, var(--atlas-trail-fill, var(--qb-accent-orange-fill)) 30%, white);
+  border: 1.5px solid color-mix(in srgb, var(--atlas-trail-dark, var(--qb-accent-orange-shadow)) 45%, white);
+  color: var(--qb-ink-900);
+  font-weight: 600;
 }
 
 /* Down-mode (HANDOFF: "plain horizontal text right of the trail — no

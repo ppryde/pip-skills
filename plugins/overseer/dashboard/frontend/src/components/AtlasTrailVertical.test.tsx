@@ -162,6 +162,25 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
     expect(tags).not.toContain("Faraway Quest");
   });
 
+  it("a blocked child's name-tag carries trail-tag--blocked (rose pastel) alongside trail-tag--todo", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const blocker = child({ id: "WF-DEP", status: "in-flight" });
+    const blocked = child({
+      id: "k1",
+      title: "Barred Quest",
+      status: "planned",
+      complexity: "S",
+      depends_on: ["WF-DEP"],
+      order: 1,
+    });
+    const later = child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 });
+    const { container } = renderColumn(epic, [blocked, blocker, later]);
+    const tag = Array.from(container.querySelectorAll(".trail-tag--todo")).find(
+      (el) => el.textContent === "Barred Quest"
+    );
+    expect(tag).toHaveClass("trail-tag--blocked");
+  });
+
   it("in-flight epic: when the in-progress child IS the last child, the AT-HAND pennant label is suppressed", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const prog = child({ id: "k1", status: "in-flight", complexity: "M" });

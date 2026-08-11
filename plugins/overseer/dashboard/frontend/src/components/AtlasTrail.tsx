@@ -362,7 +362,11 @@ function AtlasTrail({
         <button
           type="button"
           key={`${child.id}-tag`}
-          className={"trail-tag trail-tag--todo" + (below ? " trail-tag--below" : "")}
+          className={
+            "trail-tag trail-tag--todo" +
+            (blocked ? " trail-tag--blocked" : "") +
+            (below ? " trail-tag--below" : "")
+          }
           style={nameTagStyle(mx, my, below)}
           title={`${child.title} · ${weightLabel(child)}`}
           onClick={() => onOpenCard(child.id)}
