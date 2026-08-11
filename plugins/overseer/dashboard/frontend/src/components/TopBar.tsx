@@ -15,6 +15,9 @@ import NewCardDialog from "./NewCardDialog";
 import LabelSettingsDialog from "./LabelSettingsDialog";
 import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
+import compassIcon from "../assets/ui-icons/compass.png";
+import skullIcon from "../assets/ui-icons/skull.png";
+import scrollIcon from "../assets/ui-icons/scroll.png";
 
 /** Epic Atlas mobile trail orientation — "across" (default, every viewport)
  * or "down" (only effective at <=720px; desktop always renders across, see
@@ -352,7 +355,9 @@ function TopBar({
                 onClick={() => onToggleNames(!showNames)}
                 title="Toggle quest name-tags on the trail"
               >
-                {showNames ? "⚑ Quest names: On" : "⚑ Quest names: Off"}
+                {/* rpg-icons pack "sealed letter" — a scroll of quest names */}
+                <img src={scrollIcon} alt="" className="topbar__atlas-control-icon" />
+                {showNames ? "Quest names: On" : "Quest names: Off"}
               </button>
               <button
                 type="button"
@@ -361,7 +366,9 @@ function TopBar({
                 onClick={() => onToggleVanquished(!hideVanquished)}
                 title="Toggle vanquished (done) epics"
               >
-                {hideVanquished ? "🙈 Vanquished: Hidden" : "🏆 Vanquished: Shown"}
+                {/* rpg-icons pack "skull-crossbones" — the vanquished mark */}
+                <img src={skullIcon} alt="" className="topbar__atlas-control-icon" />
+                {hideVanquished ? "Vanquished: Hidden" : "Vanquished: Shown"}
               </button>
               <button
                 type="button"
@@ -370,7 +377,9 @@ function TopBar({
                 onClick={() => onToggleOrientation(orientation === "across" ? "down" : "across")}
                 title="Trail orientation (mobile only, <=720px)"
               >
-                {orientation === "down" ? "⟱ Down" : "⟶ Across"}
+                {/* rpg-icons pack "compass" — points wherever the trail runs */}
+                <img src={compassIcon} alt="" className="topbar__atlas-control-icon" />
+                {orientation === "down" ? "Down" : "Across"}
               </button>
             </div>
           )}

@@ -212,11 +212,11 @@ describe("<AtlasTrail/>", () => {
     expect(hidden.container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
   });
 
-  it("todo child name-tags alternate between two vertical tiers so adjacent tags never collide", () => {
+  it("todo child name-tags alternate above and below the path so adjacent tags never collide", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
-    // Three children so the tier-alternation check lands on the first TWO
+    // Three children so the alternation check lands on the first TWO
     // (non-last) tags — the third (last) child's own tag is suppressed
-    // (round 2, finding 5's beast-clearance rule) regardless of tiering.
+    // (round 2, finding 5's beast-clearance rule) regardless of alternation.
     const kids = [
       child({ id: "k1", title: "First", status: "planned", complexity: "S", order: 1 }),
       child({ id: "k2", title: "Second", status: "planned", complexity: "S", order: 2 }),
@@ -225,7 +225,35 @@ describe("<AtlasTrail/>", () => {
     const { container } = renderTrail(epic, kids, { showNames: true });
     const tags = Array.from(container.querySelectorAll(".trail-tag--todo"));
     expect(tags.length).toBe(2);
-    expect(tags[0].className).not.toBe(tags[1].className);
+    // The first (non-suppressed) tag sits above the path, the second below.
+    expect(tags[0]).not.toHaveClass("trail-tag--below");
+    expect(tags[1]).toHaveClass("trail-tag--below");
+    // Above and below anchor from opposite edges of their own box.
+    expect((tags[0] as HTMLElement).style.transform).toContain("-100%");
+    expect((tags[1] as HTMLElement).style.transform).not.toContain("-100%");
+  });
+
+  // Task 2: the above/below alternation is keyed off ONE running counter
+  // shared across the done AND todo groups (Feature 3's greyed done tags
+  // included), not two independent per-group counters — otherwise the
+  // zig-zag would reset (or collide) wherever a done stretch hands off to a
+  // todo one.
+  it("the above/below alternation uses one shared counter across the done AND todo groups, in trail order", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [
+      child({ id: "k1", title: "Cleared First", status: "done", complexity: "S", order: 1 }),
+      child({ id: "k2", title: "Todo Second", status: "planned", complexity: "S", order: 2 }),
+      child({ id: "k3", title: "Todo Third", status: "planned", complexity: "S", order: 3 }),
+    ];
+    const { container } = renderTrail(epic, kids, { showNames: true });
+    // Trail order is done -> todo -> todo (orderChildrenForTrail); k3 is the
+    // last child, so only k1 and k2's tags render.
+    const tags = Array.from(container.querySelectorAll(".trail-tag"));
+    expect(tags.length).toBe(2);
+    expect(tags[0]).toHaveClass("trail-tag--done");
+    expect(tags[0]).not.toHaveClass("trail-tag--below");
+    expect(tags[1]).toHaveClass("trail-tag--todo");
+    expect(tags[1]).toHaveClass("trail-tag--below");
   });
 
   it("blocked child (open depends_on): renders the boulder overlay with a 'the way is barred' tooltip", () => {

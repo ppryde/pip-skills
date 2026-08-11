@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
 import { formatDateStamp, parseCalendarDate, seedFor, wobblePath } from "../board/atlasGeometry";
 import {
@@ -67,16 +67,46 @@ export interface AtlasTrailProps {
   accentKey?: string;
 }
 
-/** Default lane height mirrors the design reference's `min-height: 104px`
- * lane — used until the first real ResizeObserver measurement lands. */
-const DEFAULT_LANE_HEIGHT = 104;
+/** Default lane height — used until the first real ResizeObserver
+ * measurement lands. Bumped from the design reference's original 104px
+ * (Task 2): the across-mode trail's name-tags now alternate above AND
+ * below the path, so the floor needs to clear a below tag's own box under a
+ * max-amplitude wobble crest without crowding the row's bottom divider.
+ * Mirrors `.atlas-chart__lane`'s own `min-height` in styles.css. */
+const DEFAULT_LANE_HEIGHT = 112;
 
 const MARKER_SIZE_PX = 20;
-const NAME_TAG_TIER_OFFSET_PX = 16;
+/** Vertical clearance between a marker and its name-tag's near edge — same
+ * magnitude used on both banks of the Task 2 alternation (`my - GAP` for an
+ * above tag's bottom-anchored edge, `my + GAP` for a below tag's top-anchored
+ * one), so the zig-zag sits symmetric on either side of the path. */
+const NAME_TAG_GAP_PX = 11;
 const NAME_TAG_TILT_DEG = 1.5;
 
 function weightLabel(child: BoardCard): string {
   return "★".repeat(weightOf(child));
+}
+
+/** Places a trail name-tag on one of the two alternating banks of the path
+ * (Task 2 — "signposts on both banks"). ABOVE is the original placement:
+ * bottom-anchored (`translate(-50%, -100%)`) with a small negative tilt.
+ * BELOW mirrors it top-anchored (`translate(-50%, 0)`) with the opposite
+ * tilt, so a tag hangs down from the path rather than sitting on it. Which
+ * bank a given tag lands on is the caller's call (one running counter
+ * shared across the todo AND done groups — see `tagIndex` below), not this
+ * function's. */
+function nameTagStyle(mx: number, my: number, below: boolean): CSSProperties {
+  return below
+    ? {
+        left: `${mx}px`,
+        top: `${my + NAME_TAG_GAP_PX}px`,
+        transform: `translate(-50%, 0) rotate(${NAME_TAG_TILT_DEG}deg)`,
+      }
+    : {
+        left: `${mx}px`,
+        top: `${my - NAME_TAG_GAP_PX}px`,
+        transform: `translate(-50%, -100%) rotate(${-NAME_TAG_TILT_DEG}deg)`,
+      };
 }
 
 function AtlasTrail({
@@ -166,16 +196,19 @@ function AtlasTrail({
   // tags layered OVER the SVG, not squeezed into it via <foreignObject>) —
   // one loop over `segments` builds the SVG marker for each child AND its
   // optional HTML overlay tag together, so the two never drift out of sync
-  // with each other's per-child `tier`/position math.
+  // with each other's per-child placement math.
   const svgMarkers: ReactNode[] = [];
   const overlayTags: ReactNode[] = [];
-  let todoTier = 0;
-  // Independent tier counter for done-group tags (Feature 3) — alternated
-  // the SAME way as `todoTier` so adjacent walked quests never collide, but
-  // counted separately: the done group and the todo group sit on distinct
-  // stretches of the trail, so there's no need (or benefit) to share one
-  // running counter across both.
-  let doneTier = 0;
+  // Task 2: ONE running counter across every RENDERED name-tag — both the
+  // todo group and the done group (Feature 3) — in trail order, so the
+  // above/below alternation zig-zags consistently along the whole trail
+  // rather than resetting (or colliding) where a done stretch hands off to
+  // a todo one. Only increments where a tag actually renders (inside each
+  // `showNames && !isLastChild` check below) — a suppressed last-child tag
+  // never consumes a slot in the alternation. Replaces the old two
+  // independent `todoTier`/`doneTier` counters, which only ever stacked
+  // tags ABOVE the path.
+  let tagIndex = 0;
 
   segments.forEach(({ child, end }, segmentIndex) => {
     const isLastChild = segmentIndex === segments.length - 1;
@@ -213,22 +246,14 @@ function AtlasTrail({
       // below (a done child CAN be the trail's last child — an
       // all-done/no-todo epic, or an all-done epic with nothing after).
       if (showNames && !isLastChild) {
-        const tier = doneTier % 2;
-        doneTier++;
+        const below = tagIndex % 2 === 1;
+        tagIndex++;
         overlayTags.push(
           <button
             type="button"
             key={`${child.id}-tag`}
-            className={
-              "trail-tag trail-tag--done " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
-            }
-            style={{
-              left: `${mx}px`,
-              top: `${my - 11 - tier * NAME_TAG_TIER_OFFSET_PX}px`,
-              transform: `translate(-50%, -100%) rotate(${
-                tier ? NAME_TAG_TILT_DEG : -NAME_TAG_TILT_DEG
-              }deg)`,
-            }}
+            className={"trail-tag trail-tag--done" + (below ? " trail-tag--below" : "")}
+            style={nameTagStyle(mx, my, below)}
             title={`${child.title} · ${weightLabel(child)}`}
             onClick={() => onOpenCard(child.id)}
           >
@@ -286,8 +311,6 @@ function AtlasTrail({
     // the plain waypoint dot; still ahead ground, still gets a name-tag.
     const openDeps = openDependencies(child, cardsById);
     const blocked = openDeps.length > 0;
-    const tier = todoTier % 2;
-    todoTier++;
 
     svgMarkers.push(
       <g
@@ -333,18 +356,14 @@ function AtlasTrail({
     // trail (any marker within roughly the tag's own generous max-width
     // of the beast), not just the genuinely-adjacent last one.
     if (showNames && !isLastChild) {
+      const below = tagIndex % 2 === 1;
+      tagIndex++;
       overlayTags.push(
         <button
           type="button"
           key={`${child.id}-tag`}
-          className={"trail-tag trail-tag--todo " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")}
-          style={{
-            left: `${mx}px`,
-            top: `${my - 11 - tier * NAME_TAG_TIER_OFFSET_PX}px`,
-            transform: `translate(-50%, -100%) rotate(${
-              tier ? NAME_TAG_TILT_DEG : -NAME_TAG_TILT_DEG
-            }deg)`,
-          }}
+          className={"trail-tag trail-tag--todo" + (below ? " trail-tag--below" : "")}
+          style={nameTagStyle(mx, my, below)}
           title={`${child.title} · ${weightLabel(child)}`}
           onClick={() => onOpenCard(child.id)}
         >

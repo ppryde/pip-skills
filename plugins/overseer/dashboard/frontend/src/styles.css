@@ -845,6 +845,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.3rem;
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
   font-weight: 700;
@@ -860,6 +861,19 @@ body {
     background-color var(--qb-motion-hover) ease,
     border-color var(--qb-motion-hover) ease,
     box-shadow var(--qb-motion-hover) ease;
+}
+
+/* Task 3: rpg-icons pack art leading each atlas control's own text label
+   (scroll/skull/compass — see TopBar.tsx) — same small-leading-image
+   pattern as `.topbar__view-toggle-icon`, just sized down to fit this
+   control's shorter/denser button. `alt=""` on the `<img>` keeps these
+   decorative — the button's accessible NAME stays the text label alone. */
+.topbar__atlas-control-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .topbar__atlas-control:hover {
@@ -4318,7 +4332,12 @@ a.card-drawer__pr-chip:hover {
 
 .atlas-chart__lane {
   position: relative;
-  min-height: 104px;
+  /* Task 2: bumped from 104px — the across-mode trail's name-tags now
+     alternate above AND below the path (AtlasTrail.tsx's own
+     DEFAULT_LANE_HEIGHT mirrors this), so the floor needs enough headroom
+     under a max-amplitude wobble crest for a below tag's own box, without
+     crowding the row's bottom divider. */
+  min-height: 112px;
 }
 
 /* --- Per-accent tokens (rail card + trail, one declaration each) --------
@@ -4894,7 +4913,11 @@ a.card-drawer__pr-chip:hover {
   font-weight: 600;
   padding: 0.1rem 0.4rem;
   border-radius: var(--qb-radius-pennant);
-  box-shadow: var(--qb-shadow-card) rgba(0, 0, 0, 0.18);
+  /* Task 1 polish: softer than `--qb-shadow-card`'s usual `0 3px 0` (a card
+     tile's own drop shadow) — a name-tag is a small floating label, not a
+     tile, so a lighter 2px lift with lower ink opacity keeps the shadow
+     present without it reading as heavy as the card chrome underneath it. */
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
 }
 
 /* Feature 3 (WF-086 v3): the todo/done tags render as `<button>` now
@@ -4930,6 +4953,10 @@ button.trail-tag:focus-visible {
   outline-offset: 1px;
 }
 
+/* Task 1: `--qb-parchment-muted` (not the brighter `--qb-panel`) is the warm
+   label fill for BOTH todo and done tags — same token, so a done tag still
+   reads as the same label family as a todo one; only its border/text/opacity
+   below carry the "walked, settled history" de-emphasis. */
 .trail-tag--todo {
   background: var(--qb-parchment-muted);
   border: 1.5px solid var(--atlas-trail-fill, var(--qb-ink-300));
@@ -4963,6 +4990,18 @@ button.trail-tag:focus-visible {
    (typically narrower) cross-axis. */
 .trail-tag--down {
   max-width: 130px;
+}
+
+/* Task 2 (Across mode only): the below-the-path bank of the alternating
+   name-tag zig-zag. AtlasTrail.tsx computes the actual `top`/`transform`
+   inline per-tag (same "positioned per-marker, not CSS-only" pattern as
+   every other trail-tag placement — an inline `transform` always wins over
+   a class one anyway), so this modifier's own job is just pinning the
+   rotation's pivot to the tag's OWN top edge (nearest the path) instead of
+   its default centre — the small opposite tilt then reads as hanging off
+   the path rather than spinning in place. */
+.trail-tag--below {
+  transform-origin: top center;
 }
 
 /* --- Blocked overlay: the boulder / trailhead / campfire images --------- */
