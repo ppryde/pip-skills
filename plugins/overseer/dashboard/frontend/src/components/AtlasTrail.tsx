@@ -82,10 +82,18 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
   // epic's own `updated` once parked (last touched before pitching camp),
   // or its own `updated` once done (the epic mutator stamps `updated` at
   // completion, so this doubles as "last child updated" without needing
-  // childCards to be non-empty).
+  // childCards to be non-empty). A `planned` epic (design ruling,
+  // verification round 1) hasn't sent anyone out yet — there is no walked
+  // ground, so its "walked end" is the camp itself (x1 === x0), and the
+  // uncharted-ground branch below (which starts at x1) ends up starting
+  // from the camp with no special-casing needed.
   const slain = card.status === "done";
   const parked = !slain && card.status === "parked";
-  const walkedEndDate = slain || parked ? parseCalendarDate(card.updated) : today;
+  const planned = !slain && !parked && card.status === "planned";
+  // "Marching" — the ONLY state with a live party token and a real walked
+  // trail — is everything else (in-flight/blocked).
+  const marching = !slain && !parked && !planned;
+  const walkedEndDate = slain || parked ? parseCalendarDate(card.updated) : planned ? createdDate : today;
   const x1 = (pctForDate(walkedEndDate, dateWindow) / 100) * width;
 
   const walked = wobblePath(x0, x1, laneHeight, seed);
@@ -114,13 +122,16 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
   return (
     <div className="atlas-trail" ref={laneRef}>
       <svg className={svgClassName} viewBox={`0 0 ${width} ${laneHeight}`} preserveAspectRatio="none">
-        <path className="atlas-trail__path" d={walked.d} />
+        {/* A planned epic has no walked ground to show — only the camp and
+            the faint uncharted dots below. */}
+        {!planned && <path className="atlas-trail__path" d={walked.d} />}
         {uncharted && (
           <path className="atlas-trail__path atlas-trail__path--uncharted" d={uncharted.d} />
         )}
 
         <text className="atlas-trail__camp" x={x0 - 8} y={walked.yAt(x0) + 6}>
           ⛺
+          {planned && <title>the party has not yet set out</title>}
         </text>
 
         {doneChildren.map((child) => {
@@ -137,7 +148,7 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
           );
         })}
 
-        {!slain && !parked && (
+        {marching && (
           <g className="atlas-trail__party">
             <circle cx={x1} cy={walked.yAt(x1) - 2} r={12} />
             <text x={x1} y={walked.yAt(x1) + 3} textAnchor="middle">

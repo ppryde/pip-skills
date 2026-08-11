@@ -59,6 +59,40 @@ describe("<AtlasTrail/>", () => {
     expect(tooltipTexts(container)).toContain(`${beast.name} awaits (3 quests stand between)`);
   });
 
+  // Design ruling, verification round 1: a planned (never-started) epic
+  // doesn't march — nobody has set out yet, so there is no walked ground
+  // and no live party token, only the camp and a faint pace-guessed dotted
+  // line toward the beast.
+  it("planned: renders the camp with a 'not yet set out' tooltip, faint uncharted dots FROM the camp, and NO walked path / party token", () => {
+    const epic = card({ id: "WF-090", status: "planned" });
+    const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
+    const { container } = render(
+      <AtlasTrail
+        card={epic}
+        rollup={rollup({ done: 0, total: 3 })}
+        childCards={[]}
+        today={TODAY}
+        dateWindow={dateWindow}
+      />
+    );
+    expect(
+      container.querySelector(".atlas-trail__path:not(.atlas-trail__path--uncharted)")
+    ).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__path--uncharted")).toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__party")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__camped")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__beast--alive")).toBeInTheDocument();
+    expect(tooltipTexts(container)).toContain("the party has not yet set out");
+
+    // The uncharted dots start FROM the camp (x0), not from some other
+    // walked-ground point — the path's own "M" (moveto) x-coordinate must
+    // match the camp glyph's x (camp is drawn 8px before x0).
+    const campX = Number(container.querySelector(".atlas-trail__camp")!.getAttribute("x")) + 8;
+    const unchartedD = container.querySelector(".atlas-trail__path--uncharted")!.getAttribute("d")!;
+    const unchartedStartX = Number(unchartedD.match(/^M([\d.]+)/)![1]);
+    expect(unchartedStartX).toBeCloseTo(campX, 0);
+  });
+
   it("parked: renders an alive beast, a camped marker, and NO uncharted-ground path", () => {
     const epic = card({ id: "WF-076", status: "parked", updated: "2026-07-30" });
     const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
