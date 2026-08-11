@@ -370,3 +370,90 @@ describe("<App/> mobile Controls toggle folds FilterBar together with TopBar's g
     expect(document.getElementById("filter-bar")).not.toBeVisible();
   });
 });
+
+// WF-086: TopBar's Board|Atlas toggle swaps the SAME <main class="board-region">
+// child — Board.tsx's `.board` root vs EpicAtlas.tsx's `.atlas-chart` root —
+// and the FilterBar (board-only filtering, chunk-6 handoff's explicit
+// non-goal for the Atlas) is gated on `view === "board"` alongside its
+// existing `!isUnbegun && board` guards.
+describe("<App/> — WF-086 Board|Atlas view toggle", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("shows the board and FilterBar by default", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    expect(container.querySelector(".board")).toBeInTheDocument();
+    expect(container.querySelector(".atlas-chart")).not.toBeInTheDocument();
+    expect(document.getElementById("filter-bar")).toBeInTheDocument();
+  });
+
+  it("switches to the Atlas and hides FilterBar entirely when the Atlas tab is clicked", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+
+    expect(container.querySelector(".atlas-chart")).toBeInTheDocument();
+    expect(container.querySelector(".board")).not.toBeInTheDocument();
+    // Not merely hidden — App.tsx's guard omits it entirely on the Atlas,
+    // same "never visible-but-inert" contract as the chunk-6 handoff.
+    expect(document.getElementById("filter-bar")).not.toBeInTheDocument();
+  });
+
+  it("switching back to Board restores both the board and FilterBar", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Board" }));
+
+    expect(container.querySelector(".board")).toBeInTheDocument();
+    expect(container.querySelector(".atlas-chart")).not.toBeInTheDocument();
+    expect(document.getElementById("filter-bar")).toBeInTheDocument();
+  });
+
+  it("opening a card from the Atlas rail opens the SAME CardDetailDrawer", async () => {
+    vi.mocked(client.getBoard).mockResolvedValue({
+      board: {
+        project: "acme",
+        sprints: [],
+        quarantined: [],
+        label_colors: {},
+        cards: [
+          card({
+            id: "WF-EPIC",
+            title: "The great migration",
+            is_epic: true,
+            rollup: { done: 1, total: 2, estimate: null, actual: 0 },
+          }),
+        ],
+      },
+      context: { pct: 10, threshold: 80 },
+      limits: null,
+    });
+
+    const { container } = render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    fireEvent.click(container.querySelector('[data-card-id="WF-EPIC"]') as HTMLElement);
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+});

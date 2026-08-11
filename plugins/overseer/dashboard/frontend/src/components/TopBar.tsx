@@ -13,6 +13,8 @@ import RepoSelector from "./RepoSelector";
 import BranchFilter from "./BranchFilter";
 import NewCardDialog from "./NewCardDialog";
 import LabelSettingsDialog from "./LabelSettingsDialog";
+import journalIcon from "../assets/ui-icons/journal.png";
+import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 
 export interface TopBarProps {
   projectName: string;
@@ -76,6 +78,13 @@ export interface TopBarProps {
    * OVERRIDES the party-derived count so both readouts agree; `undefined`
    * (every other repo) keeps the normal live-party-member count below. */
   questingCountOverride?: number;
+  /** WF-086: which page the app is showing — the board or the Epic Atlas.
+   * App-owned, session-local state, threaded straight through like
+   * `activeBranch`. Required — App.tsx has owned and passed this since
+   * its own chunk landed; the standalone-compile rationale for making it
+   * optional expired the moment that wiring existed. */
+  view: "board" | "atlas";
+  onSelectView: (view: "board" | "atlas") => void;
 }
 
 function formatPct(value: number): string {
@@ -139,6 +148,8 @@ function TopBar({
   labelColors,
   controlsOpen,
   onToggleControls,
+  view,
+  onSelectView,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -195,6 +206,46 @@ function TopBar({
         <span className="topbar__row-break topbar__row-break--r2" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
+
+        {/* WF-086: Board|Atlas view toggle — the always-visible chip row, a
+            SIBLING of #topbar-controls-group (not nested inside it), so the
+            mobile "Controls ▾" collapse never hides it. DOM position here
+            (desktop reads it) is right after identity, ahead of the repo
+            selector; mobile re-sequences it onto its own row via `order`
+            (see styles.css's R2-R5 scheme — this is row R1b, order 6, one
+            of the scheme's intentional 10s-apart gaps).
+
+            Polish pass (user: "a couple of nice circles"): two circular
+            icon buttons under `.topbar__view-toggle-btn` (styled in
+            styles.css) — same aria-pressed mechanics as before, `aria-label`/
+            `title` carry the accessible name now that the visible label is
+            an icon, not text (kept identical to the old button TEXT —
+            "Board"/"Atlas" — so existing name-based test/a11y queries still
+            resolve the same element). */}
+        <div className="topbar__view-toggle" role="group" aria-label="View">
+          <button
+            type="button"
+            className="topbar__view-toggle-btn"
+            aria-pressed={view === "board"}
+            aria-label="Board"
+            title="Board"
+            onClick={() => onSelectView("board")}
+          >
+            {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
+            <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
+          </button>
+          <button
+            type="button"
+            className="topbar__view-toggle-btn"
+            aria-pressed={view === "atlas"}
+            aria-label="Atlas"
+            title="Atlas"
+            onClick={() => onSelectView("atlas")}
+          >
+            {/* rpg-icons pack "treasure map" — dashed trail and all */}
+            <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
+          </button>
+        </div>
 
         <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
         <button
