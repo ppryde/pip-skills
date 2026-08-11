@@ -34,12 +34,19 @@ const PRIORITIES = ["P0", "P1", "P2", "P3", "P4"];
 const COMPLEXITIES = ["S", "M", "L", "XL"];
 
 /**
- * The board's filter row (F3, WF-061): search + priority/complexity
- * dropdowns + a Labels button that folds out `LabelFilterPopover`, plus a
- * right-aligned visible/total readout and Clear filters. Purely presentational —
- * `filter` is the caller's source of truth (same deferred-state pattern as
- * `LabelFilterPopover`/`LabelEditor`/`StatusMenu`); this component owns only
- * the popover's open/closed `useState`, nothing about filter values.
+ * The board's filter row (F3, WF-061): a "Muster" eyebrow, then search +
+ * priority/complexity dropdowns + a Labels button that folds out
+ * `LabelFilterPopover`, plus a right-aligned visible/total readout and Clear
+ * filters. Purely presentational — `filter` is the caller's source of truth
+ * (same deferred-state pattern as `LabelFilterPopover`/`LabelEditor`/
+ * `StatusMenu`); this component owns only the popover's open/closed
+ * `useState`, nothing about filter values.
+ *
+ * WF-092: priority/complexity no longer carry a standalone visible label —
+ * the field name is the select's own `value=""` placeholder option (e.g.
+ * "Priority"), so the wrapper is a plain `<div className="filter-bar__select">`
+ * rather than a `<label>` around visible text. Each `<select>` keeps its own
+ * `aria-label` for accessibility.
  *
  * `LabelFilterPopover` renders as a full-backdrop overlay (`PartyOverlay`
  * convention), so toggling it needs no anchor/positioning math here — just a
@@ -72,6 +79,8 @@ function FilterBar({
 
   return (
     <div id="filter-bar" className="filter-bar" hidden={!controlsOpen}>
+      <span className="filter-bar__eyebrow">Muster</span>
+
       <input
         className="filter-bar__search"
         aria-label="search"
@@ -81,37 +90,35 @@ function FilterBar({
         onChange={(e) => onQuery(e.target.value)}
       />
 
-      <label className="filter-bar__select">
-        Priority
+      <div className="filter-bar__select">
         <select
           aria-label="priority"
           value={filter.priority ?? ""}
           onChange={handlePriorityChange}
         >
-          <option value="">None</option>
+          <option value="">Priority</option>
           {PRIORITIES.map((p) => (
             <option key={p} value={p}>
               {p}
             </option>
           ))}
         </select>
-      </label>
+      </div>
 
-      <label className="filter-bar__select">
-        Complexity
+      <div className="filter-bar__select">
         <select
           aria-label="complexity"
           value={filter.complexity ?? ""}
           onChange={handleComplexityChange}
         >
-          <option value="">None</option>
+          <option value="">Complexity</option>
           {COMPLEXITIES.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
           ))}
         </select>
-      </label>
+      </div>
 
       <button
         type="button"

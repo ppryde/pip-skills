@@ -31,7 +31,7 @@ describe("<FilterBar/>", () => {
     expect(onQuery).toHaveBeenCalledWith("frob");
   });
 
-  it("choosing a priority calls onPriority with the value (null for None)", () => {
+  it("choosing a priority calls onPriority with the value (null for the placeholder)", () => {
     const onPriority = vi.fn();
     render(<FilterBar {...base} onPriority={onPriority} />);
     fireEvent.change(screen.getByLabelText(/priority/i), {
@@ -44,7 +44,7 @@ describe("<FilterBar/>", () => {
     expect(onPriority).toHaveBeenCalledWith(null);
   });
 
-  it("choosing a complexity calls onComplexity with the value (null for None)", () => {
+  it("choosing a complexity calls onComplexity with the value (null for the placeholder)", () => {
     const onComplexity = vi.fn();
     render(<FilterBar {...base} onComplexity={onComplexity} />);
     fireEvent.change(screen.getByLabelText(/complexity/i), {
@@ -94,6 +94,29 @@ describe("<FilterBar/>", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  // WF-092: priority/complexity dropped their standalone visible label in
+  // favour of the field name as the select's own default-option
+  // placeholder — accessibility now rides solely on each select's
+  // `aria-label` ("priority"/"complexity"), not adjacent text.
+  it("shows the field name as the unset placeholder option, not a standalone label", () => {
+    render(<FilterBar {...base} />);
+    const prioritySelect = screen.getByLabelText(/priority/i) as HTMLSelectElement;
+    const complexitySelect = screen.getByLabelText(/complexity/i) as HTMLSelectElement;
+    expect(prioritySelect.options[0]).toHaveTextContent("Priority");
+    expect(complexitySelect.options[0]).toHaveTextContent("Complexity");
+    // No standalone <label> wrapping visible "Priority"/"Complexity" text —
+    // the only place those words appear is inside each select's own
+    // placeholder <option> (asserted above), never as a sibling text node.
+    expect(document.querySelector("label")).toBeNull();
+    expect(screen.queryByText("None")).toBeNull();
+  });
+
+  // WF-092: a small on-theme eyebrow opens the row, ahead of search.
+  it("shows the Muster eyebrow at the start of the row", () => {
+    render(<FilterBar {...base} />);
+    expect(screen.getByText("Muster")).toBeInTheDocument();
   });
 });
 

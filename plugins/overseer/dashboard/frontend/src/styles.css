@@ -892,12 +892,30 @@ body {
   border-bottom: 1.5px dashed var(--qb-line-dashed);
 }
 
+/* WF-092: a small quest-board eyebrow opening the row, ahead of search —
+   same quiet caption treatment as `.topbar__repo-select-label`/
+   `-branch-select-label` (uppercase, 0.65rem, tracked out), just recast as
+   a standalone heading instead of a select's adjacent label. */
+.filter-bar__eyebrow {
+  flex: 0 0 auto;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--qb-ink-400);
+}
+
+/* WF-092: shrunk from a 22rem max (it dominated the row) to a compact
+   ~12.5rem so search reads as one control among several rather than the
+   row's anchor. Still comfortably usable; the ≤720px block only toggles
+   this bar's visibility (`.filter-bar[hidden]`), not its children's
+   widths, so this size carries through unchanged on mobile too. */
 .filter-bar__search {
   font: inherit;
   font-size: 0.8rem;
-  flex: 0 1 22rem;
+  flex: 0 1 12.5rem;
   min-width: 8rem;
-  max-width: 22rem;
+  max-width: 12.5rem;
   box-sizing: border-box;
   padding: 0.3rem 0.6rem;
   border: 1.5px solid var(--qb-btn-ink);
@@ -916,14 +934,13 @@ body {
   color: var(--qb-ink-400);
 }
 
+/* WF-092: the visible "Priority"/"Complexity" caption that used to sit
+   beside the select moved INTO the select as its placeholder option (see
+   FilterBar.tsx) — this is now just a plain wrapper `<div>`, not a
+   `<label>` around text, so it carries only layout, no type styling. */
 .filter-bar__select {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--qb-ink-500);
 }
 
 .filter-bar__select select {
@@ -1086,11 +1103,14 @@ body {
   color: var(--legacy-color-dcfce7);
 }
 
+/* WF-092: no swim-lane fill — cards sit on the plain board background,
+   the lane's border/radius/header/layout carry the column shape alone.
+   `.lane--parked`/`--done`/`--archive` below keep their own tinted fill;
+   that's a deliberate status distinction, not this generic panel fill. */
 .lane {
   flex: 0 0 260px;
   display: flex;
   flex-direction: column;
-  background: var(--qb-panel);
   border: 1px solid var(--qb-card-border);
   border-radius: var(--legacy-radius-6px);
   max-height: 100%;
