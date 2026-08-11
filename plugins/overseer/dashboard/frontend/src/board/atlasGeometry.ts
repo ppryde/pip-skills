@@ -17,10 +17,20 @@
 /** Parses any `created`/`updated`-shaped string to that calendar day's
  * UTC midnight, ignoring any time-of-day component. This is the ONLY
  * place in the module allowed to construct a `Date` from a raw string —
- * every other export takes a `Date` (or routes a string through this). */
+ * every other export takes a `Date` (or routes a string through this).
+ *
+ * A blank or garbage value falls back to epoch 0, never `NaN` — same
+ * blank-tolerant contract as `layout.ts`'s `parseRecency` (KB-013). An
+ * un-guarded `NaN` here would poison every downstream computation that
+ * touches it (`computeWindow`'s `span <= 0` guard doesn't catch `NaN` —
+ * `NaN <= 0` is `false`), corrupting the whole shared axis from one bad
+ * card. `computeWindow` additionally treats this epoch sentinel as "no
+ * signal" and excludes it from its min/max aggregation, so the bad card
+ * degrades only its own row, never every other row's shared window. */
 export function parseCalendarDate(value: string): Date {
   const [y, m, d] = value.slice(0, 10).split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
+  const parsed = Date.UTC(y, m - 1, d);
+  return new Date(Number.isNaN(parsed) ? 0 : parsed);
 }
 
 export interface AtlasWindow {
@@ -57,13 +67,32 @@ export function computeWindow(epics: WindowEpic[], today: Date): AtlasWindow {
   let minCreated = Infinity;
   let maxUpdated = today.getTime();
 
+  // `parseCalendarDate`'s epoch-0 fallback (blank/garbage input) is a
+  // sentinel for "no signal", not a real 1970 date — feeding it into
+  // Math.min/max would let one malformed card's epoch reading win against
+  // every genuine 2020s+ card date and drag the whole shared axis back to
+  // 1970. Skipping it here is what actually confines a bad card's damage
+  // to its own row instead of every row's shared window.
+  const isRealSignal = (ms: number) => ms !== 0;
+
   for (const epic of epics) {
-    minCreated = Math.min(minCreated, parseCalendarDate(epic.created).getTime());
-    maxUpdated = Math.max(maxUpdated, parseCalendarDate(epic.updated).getTime());
+    const createdMs = parseCalendarDate(epic.created).getTime();
+    if (isRealSignal(createdMs)) minCreated = Math.min(minCreated, createdMs);
+
+    const updatedMs = parseCalendarDate(epic.updated).getTime();
+    if (isRealSignal(updatedMs)) maxUpdated = Math.max(maxUpdated, updatedMs);
+
     for (const child of epic.children ?? []) {
-      maxUpdated = Math.max(maxUpdated, parseCalendarDate(child.updated).getTime());
+      const childMs = parseCalendarDate(child.updated).getTime();
+      if (isRealSignal(childMs)) maxUpdated = Math.max(maxUpdated, childMs);
     }
   }
+
+  // Every epic's `created` was invalid — nothing real left to anchor the
+  // window's start, so fall back to the same "centred on today" treatment
+  // as the empty-epic-list branch above, rather than leaving `Infinity`
+  // to poison the subtraction below into `-Infinity`.
+  if (minCreated === Infinity) minCreated = today.getTime();
 
   return {
     start: new Date(minCreated - WINDOW_PAD_MS),
@@ -73,10 +102,19 @@ export function computeWindow(epics: WindowEpic[], today: Date): AtlasWindow {
 
 /** Maps `date` onto the window's 0–100 horizontal axis. A zero-length
  * window (defensive only — `computeWindow` always pads) reports 0 rather
- * than dividing by zero. */
+ * than dividing by zero. `!(span > 0)` (not `span <= 0`) is deliberate: a
+ * `NaN` span (an Invalid Date on either end of `window`) fails BOTH
+ * comparisons — `NaN <= 0` and `NaN > 0` are both `false` in JS — so
+ * `span <= 0` alone silently falls through to the division below and
+ * returns `NaN`, which then poisons every SVG x/y/cx/cy attribute a
+ * caller computes from it (React logs "Received NaN for the ... attribute"
+ * for each one). `computeWindow` (this module) already keeps its OWN
+ * output NaN-free, but `pctForDate` is exported and callers such as
+ * AtlasTrail take a `window` prop directly — this guard makes the
+ * function itself safe regardless of how well-behaved its caller is. */
 export function pctForDate(date: Date, window: AtlasWindow): number {
   const span = window.end.getTime() - window.start.getTime();
-  if (span <= 0) return 0;
+  if (!(span > 0)) return 0;
   return ((date.getTime() - window.start.getTime()) / span) * 100;
 }
 
@@ -156,7 +194,12 @@ export function projectedEnd(
   windowEnd: Date
 ): Date {
   const pace = done > 0 ? (walkedEndDate.getTime() - startDate.getTime()) / done : FALLBACK_PACE_MS;
-  const remaining = total - done || 2;
+  // `total - done || 2` would treat a LEGITIMATE zero (every quest done,
+  // epic just not yet marked done) the same as the empty-epic fallback
+  // sentinel — `0 || 2` is truthy-coerced to 2, projecting phantom
+  // uncharted ground past a fully-cleared trail. Only an actually-empty
+  // epic (no quests to ever have "remaining") gets the 2-quest guess.
+  const remaining = total > 0 ? total - done : 2;
   const projected = walkedEndDate.getTime() + pace * remaining;
   // Ceiling first (never past the window), then floor (never before the
   // walked end) — the floor wins if a pathological windowEnd predates

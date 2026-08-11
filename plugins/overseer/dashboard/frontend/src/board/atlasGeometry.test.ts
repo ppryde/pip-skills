@@ -32,6 +32,21 @@ describe("parseCalendarDate", () => {
       parseCalendarDate("2026-07-14").getTime()
     );
   });
+
+  // impl-review finding: an un-guarded NaN here (blank/garbage `created`/
+  // `updated`, e.g. a hand-built test fixture or a pre-this-field card)
+  // poisons every downstream computation that touches it — computeWindow's
+  // `span <= 0` guard doesn't catch NaN (NaN <= 0 is false), so ONE bad
+  // card corrupts the WHOLE shared axis, not just its own row. Same
+  // blank-tolerant contract as layout.ts's `parseRecency` (KB-013): falls
+  // back to epoch 0, never NaN.
+  it("falls back to epoch 0 for a blank value, instead of NaN", () => {
+    expect(parseCalendarDate("").getTime()).toBe(0);
+  });
+
+  it("falls back to epoch 0 for a garbage value, instead of NaN", () => {
+    expect(parseCalendarDate("not-a-date").getTime()).toBe(0);
+  });
 });
 
 describe("computeWindow + pctForDate — same-day regression", () => {
@@ -90,6 +105,48 @@ describe("computeWindow", () => {
     expect(window.start.getTime()).toBeLessThan(today.getTime());
     expect(window.end.getTime()).toBeGreaterThan(today.getTime());
   });
+
+  // impl-review finding: parseCalendarDate's epoch-0 NaN fallback keeps
+  // computeWindow from crashing on a blank/garbage date, but epoch (1970)
+  // is still a REAL number that would otherwise win every Math.min/max
+  // comparison against genuine 2020s+ card dates — a single malformed card
+  // would drag the whole shared axis back to 1970 instead of just failing
+  // to contribute to it. computeWindow treats epoch as "no signal" and
+  // excludes it from the aggregation, so one bad card degrades only
+  // whatever tries to plot IT (its own row), never the shared window every
+  // other row's axis math depends on.
+  it("one epic with a blank created date doesn't poison the shared window's start", () => {
+    const today = parseCalendarDate("2026-08-01");
+    const window = computeWindow(
+      [
+        { created: "", updated: "2026-08-01" }, // malformed — must not win the min
+        { created: "2026-07-10", updated: "2026-07-20" },
+      ],
+      today
+    );
+    const PAD_MS = 2 * 86400000;
+    expect(window.start.getTime()).toBe(parseCalendarDate("2026-07-10").getTime() - PAD_MS);
+  });
+
+  it("one epic with a garbage updated date doesn't poison the shared window's end", () => {
+    const today = parseCalendarDate("2026-07-01"); // predates every real updated below
+    const window = computeWindow(
+      [
+        { created: "2026-07-01", updated: "not-a-date" }, // malformed — must not win the max
+        { created: "2026-07-01", updated: "2026-07-20" },
+      ],
+      today
+    );
+    const PAD_MS = 2 * 86400000;
+    expect(window.end.getTime()).toBe(parseCalendarDate("2026-07-20").getTime() + PAD_MS);
+  });
+
+  it("falls back sanely (anchored on today) when EVERY epic's created date is invalid", () => {
+    const today = parseCalendarDate("2026-08-01");
+    const window = computeWindow([{ created: "", updated: "2026-08-01" }], today);
+    const PAD_MS = 2 * 86400000;
+    expect(window.start.getTime()).toBe(today.getTime() - PAD_MS);
+  });
 });
 
 describe("pctForDate", () => {
@@ -102,6 +159,20 @@ describe("pctForDate", () => {
   it("maps the window midpoint to 50", () => {
     const window = { start: parseCalendarDate("2026-07-01"), end: parseCalendarDate("2026-07-11") };
     expect(pctForDate(parseCalendarDate("2026-07-06"), window)).toBe(50);
+  });
+
+  // impl-review finding (root cause of the AtlasTrail NaN-attribute
+  // warning): `span <= 0` does NOT catch a NaN span — `NaN <= 0` is
+  // `false` in JS, so the guard falls through and
+  // `(date - start) / NaN * 100` returns NaN. computeWindow (finding #6)
+  // now excludes invalid dates from its own aggregation, but pctForDate is
+  // a public export other callers can (and, via AtlasTrail's `dateWindow`
+  // prop, effectively do) reach directly with an unvalidated window — it
+  // needs its own guard, not just a well-behaved caller.
+  it("never returns NaN for a NaN-spanned window (Invalid Date on one end) — falls back to 0, same as a zero-length window", () => {
+    const window = { start: new Date(NaN), end: parseCalendarDate("2026-08-01") };
+    expect(pctForDate(parseCalendarDate("2026-07-15"), window)).toBe(0);
+    expect(Number.isNaN(pctForDate(parseCalendarDate("2026-07-15"), window))).toBe(false);
   });
 });
 
@@ -213,6 +284,29 @@ describe("projectedEnd", () => {
     const windowEnd = parseCalendarDate("2026-06-01"); // pathological: before walkedEnd
     const end = projectedEnd(start, walkedEnd, 1, 2, windowEnd);
     expect(end.getTime()).toBe(walkedEnd.getTime());
+  });
+
+  // impl-review finding: `total - done || 2` treats a LEGITIMATE zero
+  // remaining (every child done, epic just not yet marked done) the same
+  // as the falsy-fallback sentinel, projecting 2 phantom quests of
+  // uncharted ground past a fully-cleared trail. Only an actually-empty
+  // epic (total === 0, no children to have ever been "remaining") should
+  // hit the 2-quest fallback.
+  it("projects zero remaining — not the 2-quest fallback — once every quest is done but the epic isn't yet closed", () => {
+    const start = parseCalendarDate("2026-07-01");
+    const walkedEnd = parseCalendarDate("2026-07-11");
+    const windowEnd = parseCalendarDate("2027-01-01");
+    const end = projectedEnd(start, walkedEnd, 4, 4, windowEnd);
+    expect(end.getTime()).toBe(walkedEnd.getTime());
+  });
+
+  it("still falls back to the 2-quest guess for a genuinely empty epic (total 0)", () => {
+    const start = parseCalendarDate("2026-07-01");
+    const walkedEnd = parseCalendarDate("2026-07-01");
+    const windowEnd = parseCalendarDate("2027-01-01");
+    // done=0, total=0 => fallback pace 5 days/quest * 2 (empty-epic fallback) = +10 days
+    const end = projectedEnd(start, walkedEnd, 0, 0, windowEnd);
+    expect(end.getTime()).toBe(walkedEnd.getTime() + 10 * 86400000);
   });
 });
 
