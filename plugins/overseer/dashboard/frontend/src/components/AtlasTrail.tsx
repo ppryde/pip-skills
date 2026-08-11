@@ -40,6 +40,13 @@ interface LaneSize {
  * lane — used until the first real ResizeObserver measurement lands. */
 const DEFAULT_LANE_HEIGHT = 104;
 
+/** Fixed pixel clearance between a parked epic's camp (x1) and its waiting
+ * beast — sized for the "camped — on hold" label's own rendered width
+ * (`.atlas-trail__camped-label`, Patrick Hand ~13px, starts at x1+14), not
+ * a fraction of the lane's width (which doesn't track the label's size at
+ * all — a verification-round finding). */
+const PARKED_BEAST_CLEARANCE_PX = 130;
+
 function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: AtlasTrailProps) {
   const laneRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<LaneSize>({ width: 0, height: DEFAULT_LANE_HEIGHT });
@@ -103,9 +110,15 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
 
   if (parked) {
     // A camped party has no pace to project (HANDOFF: "Parked: no
-    // projection") — the beast just waits a fixed sliver past the camp,
-    // no faded "uncharted ground" path drawn at all (that's in-flight only).
-    beastX = x1 + width * 0.05;
+    // projection") — the beast just waits past the camp, no faded
+    // "uncharted ground" path drawn at all (that's in-flight only).
+    // Verification-round finding: a PERCENTAGE-of-lane-width offset (the
+    // former `width * 0.05`) doesn't track the "camped — on hold" label's
+    // own rendered width at all, so at typical/wide lane widths the beast
+    // sat close enough to visibly overlap the label. A fixed pixel
+    // clearance does — it's sized for the label's own text regardless of
+    // how wide the lane happens to be.
+    beastX = x1 + PARKED_BEAST_CLEARANCE_PX;
   } else if (!slain) {
     const projected = projectedEnd(createdDate, walkedEndDate, rollup.done, rollup.total, dateWindow.end);
     const x2 = (pctForDate(projected, dateWindow) / 100) * width;

@@ -106,6 +106,46 @@ describe("<AtlasTrail/>", () => {
     expect(container.querySelector(".atlas-trail__path--uncharted")).not.toBeInTheDocument();
   });
 
+  // Verification-round finding: a 5%-of-lane-width offset gave the parked
+  // beast too little clearance from the "camped — on hold" label (jsdom
+  // can't measure real text extents, but a WIDE lane makes the old
+  // percentage-based offset trivially provable as too small: 5% of even a
+  // generous 1200px lane is only 60px, nowhere near enough for a ~13px
+  // Patrick Hand label reading "camped — on hold").
+  it("parked: gives the beast a fixed clearance from the camped label, wide enough to survive a generous lane width", () => {
+    let capturedCallback: ResizeObserverCallback | null = null;
+    class MockResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        capturedCallback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+    const epic = card({ id: "WF-076", status: "parked", updated: "2026-07-30" });
+    const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
+    const { container } = render(
+      <AtlasTrail card={epic} rollup={rollup({ done: 1, total: 4 })} childCards={[]} today={TODAY} dateWindow={dateWindow} />
+    );
+    act(() => {
+      capturedCallback!(
+        [{ contentRect: { width: 1200, height: 104 } } as ResizeObserverEntry],
+        {} as ResizeObserver
+      );
+    });
+
+    const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
+    const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
+    const labelX = Number(container.querySelector(".atlas-trail__camped-label")!.getAttribute("x"));
+
+    // Old behaviour (x1 + width*0.05) would put the beast only ~60px past
+    // the label's start on a 1200px lane — nowhere near enough room for
+    // "camped — on hold" to render without colliding with it.
+    expect(beastX - labelX).toBeGreaterThanOrEqual(100);
+  });
+
   it("done: renders a slain beast, gold text, and NO party token / uncharted path", () => {
     const epic = card({ id: "WF-027", status: "done", updated: "2026-08-01" });
     const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
