@@ -100,10 +100,17 @@ function AtlasRailCard({
           see HANDOFF's "Responsive (required)" section. */}
       <div className="atlas-rail-card__vs">vs {beast.name}</div>
 
+      {/* The n/m count is a SIBLING of, not nested inside, `.atlas-rail-
+          card__chips` — HANDOFF's condensed mobile set explicitly keeps
+          "progress track + n/m count" visible and hides only the gold/lock
+          chips, so the count needs its own place the mobile
+          `.atlas-rail-card__chips { display: none }` rule can never reach
+          by being its ancestor. */}
+      <span className="atlas-rail-card__count">
+        {rollup.done}/{rollup.total} quests
+      </span>
+
       <div className="atlas-rail-card__chips">
-        <span className="atlas-rail-card__count">
-          {rollup.done}/{rollup.total} quests
-        </span>
         <span className="atlas-rail-card__gold">🪙 {formatTokens(rollup.actual)}</span>
         {blockedOn.length > 0 && (
           <span className="atlas-rail-card__lock" title={`Locked behind ${blockedOn.join(", ")}`}>

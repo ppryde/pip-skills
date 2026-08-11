@@ -215,6 +215,30 @@ describe("<AtlasRailCard/>", () => {
     expect(container.querySelector(".atlas-rail-card__chips")).toBeInTheDocument();
   });
 
+  // impl-review finding: HANDOFF's condensed mobile set keeps "progress
+  // track + n/m count" visible and hides only the "vs beast" line and the
+  // gold/lock chips — but styles.css hides `.atlas-rail-card__chips` as a
+  // whole with `display:none`, so a count nested INSIDE that wrapper would
+  // vanish right along with it. The count must be a class the mobile hide
+  // rule never reaches — i.e. NOT a descendant of `.atlas-rail-card__chips`.
+  it("renders the n/m count OUTSIDE the chips wrapper, so the mobile chips hide rule can never take it with it", () => {
+    const { container } = render(
+      <AtlasRailCard
+        card={card({ id: "WF-085" })}
+        rollup={rollup({ done: 3, total: 7 })}
+        childCards={[]}
+        expanded={false}
+        onToggleExpand={vi.fn()}
+        onOpen={vi.fn()}
+      />
+    );
+    const chips = container.querySelector(".atlas-rail-card__chips");
+    const count = container.querySelector(".atlas-rail-card__count");
+    expect(count).toBeInTheDocument();
+    expect(chips).toBeInTheDocument();
+    expect(chips!.contains(count)).toBe(false);
+  });
+
   it("renders the expanded sub-quest checklist sorted by updated, with done state and date stamps", () => {
     const { container } = render(
       <AtlasRailCard
