@@ -85,7 +85,6 @@ function partyMember(
 
 function baseProps() {
   return {
-    projectName: "acme",
     context: null as Context | null,
     limits: null as Limits,
     quarantinedCount: 0,
@@ -122,7 +121,7 @@ function openControls() {
 }
 
 describe("<TopBar/>", () => {
-  it("the subtitle does NOT contain 'as of last refresh'", () => {
+  it("shows the last-refreshed time as small '.topbar__updated' text when set", () => {
     render(
       <StatefulTopBar
         {...baseProps()}
@@ -130,27 +129,19 @@ describe("<TopBar/>", () => {
       />
     );
 
-    const subtitle = document.querySelector(".topbar__subtitle");
-    expect(subtitle).not.toBeNull();
-    expect(subtitle!.textContent).not.toMatch(/as of last refresh/i);
+    const updated = screen.getByText("updated 14:32");
+    expect(updated).toBeInTheDocument();
+    expect(updated).toHaveClass("topbar__updated");
+    // The repo name that used to share this line is gone — it now lives only
+    // in the repo selector below, so no "name · updated …" middot here.
+    expect(updated.textContent).not.toMatch(/·/);
   });
 
-  it("formats the subtitle as project name + updated HH:MM when lastRefreshedAt is set", () => {
-    render(
-      <StatefulTopBar
-        {...baseProps()}
-        projectName="pip-skills"
-        lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
-      />
-    );
+  it("renders no last-updated text when lastRefreshedAt is null", () => {
+    render(<StatefulTopBar {...baseProps()} lastRefreshedAt={null} />);
 
-    expect(screen.getByText("pip-skills · updated 14:32")).toBeInTheDocument();
-  });
-
-  it("falls back to just the project name when lastRefreshedAt is null", () => {
-    render(<StatefulTopBar {...baseProps()} projectName="pip-skills" lastRefreshedAt={null} />);
-
-    expect(screen.getByText("pip-skills")).toBeInTheDocument();
+    expect(document.querySelector(".topbar__updated")).toBeNull();
+    expect(screen.queryByText(/updated/i)).toBeNull();
   });
 
   it("renders the gold-total pill summed from budget.actual across cards", () => {
@@ -620,36 +611,34 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(onSelectView).toHaveBeenCalledWith("atlas");
   });
 
-  it("places the toggle in the always-visible chip row — a sibling of, NOT nested inside, #topbar-controls-group", () => {
+  it("lives inside the always-visible .topbar__identity cluster, never in #topbar-controls-group", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
     const toggle = container.querySelector(".topbar__view-toggle");
     expect(toggle).toBeInTheDocument();
+    // The identity cluster is always rendered (never behind the mobile
+    // "Controls ▾" collapse), so the toggle can never be hidden with it.
+    expect(toggle!.closest(".topbar__identity")).not.toBeNull();
     expect(container.querySelector("#topbar-controls-group .topbar__view-toggle")).toBeNull();
-    // Same parent (<header class="topbar">) as the controls group, not a
-    // descendant of it — the mobile "Controls ▾" collapse must never hide it.
-    expect(toggle!.parentElement).toBe(
-      container.querySelector("#topbar-controls-group")!.parentElement
-    );
   });
 
-  it("sits after topbar__identity and before the repo selector (invisible-on-desktop mobile row-break spacers may sit between)", () => {
+  it("leads the identity cluster — circles before the wordmark; identity sits before the repo selector", () => {
     const { container } = render(
       <StatefulTopBar {...baseProps()} repos={[{ root: "/r", label: "r", current: true, has_board: true, live_sessions: 0 }]} />
     );
+    const identity = container.querySelector(".topbar__identity")!;
+    const kids = Array.from(identity.children);
+    const toggleIndex = kids.findIndex((c) => c.classList.contains("topbar__view-toggle"));
+    const titleIndex = kids.findIndex((c) => c.tagName === "H1");
+    // Circles come first, the wordmark after them.
+    expect(toggleIndex).toBeGreaterThanOrEqual(0);
+    expect(toggleIndex).toBeLessThan(titleIndex);
+    // The identity cluster itself still precedes the repo selector in the bar.
     const header = container.querySelector("header.topbar")!;
-    const children = Array.from(header.children);
-    const identityIndex = children.findIndex((c) => c.classList.contains("topbar__identity"));
-    const toggleIndex = children.findIndex((c) => c.classList.contains("topbar__view-toggle"));
-    const repoIndex = children.findIndex((c) => c.classList.contains("topbar__repo-select"));
+    const barKids = Array.from(header.children);
+    const identityIndex = barKids.indexOf(identity);
+    const repoIndex = barKids.findIndex((c) => c.classList.contains("topbar__repo-select"));
     expect(identityIndex).toBeGreaterThanOrEqual(0);
-    // Not necessarily the VERY next sibling — the mobile row-break spacers
-    // (.topbar__row-break--r2/r3/r4, `display:none` outside the ≤720px
-    // media query) are grouped right after identity too, DOM-adjacent
-    // purely to keep their own diff small; they carry no desktop visual
-    // weight, so "after identity, before the repo selector" is the actual
-    // contract, not byte-adjacent.
-    expect(toggleIndex).toBeGreaterThan(identityIndex);
-    expect(toggleIndex).toBeLessThan(repoIndex);
+    expect(identityIndex).toBeLessThan(repoIndex);
   });
 });
 

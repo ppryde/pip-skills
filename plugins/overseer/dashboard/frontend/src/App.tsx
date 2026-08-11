@@ -143,12 +143,6 @@ function App() {
   // same precedent as `activeBranch`), reset to "board" on reload.
   const [view, setView] = useState<"board" | "atlas">("board");
 
-  // `board.project` is a loose/`unknown` shape per the frozen contract (see
-  // api/types.ts) — the backend currently sends the repo root name as a
-  // plain string. Fall back gracefully if that ever changes.
-  const projectName =
-    typeof board?.project === "string" ? board.project : "overseer";
-
   // Single shared join, computed once and handed to every consumer (TopBar's
   // questing pill, PartyColumn, PartyOverlay) — see Decisions: "consumers
   // render, never join".
@@ -202,7 +196,6 @@ function App() {
   return (
     <div className="app-shell">
       <TopBar
-        projectName={projectName}
         context={context}
         limits={limits}
         quarantinedCount={board?.quarantined.length ?? 0}

@@ -454,23 +454,6 @@ body {
   gap: 0.6rem;
 }
 
-/* Irregular-radius crest (HANDOFF: "50px circular crest, irregular radius
-   50% 48% 52% 50%"). Purely decorative — no image asset. */
-.topbar__crest {
-  flex: 0 0 auto;
-  width: 50px;
-  height: 50px;
-  border-radius: 50% 48% 52% 50%;
-  border: 2px solid var(--qb-ink-700);
-  background: var(--qb-gold-chip-bg);
-}
-
-.topbar__titles {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
 .topbar h1 {
   margin: 0;
   font-family: var(--qb-font-display);
@@ -481,11 +464,16 @@ body {
   color: var(--qb-ink-900);
 }
 
-.topbar__subtitle {
+/* Last-refreshed time — small muted text sitting to the right of the wordmark
+   inside `.topbar__identity`; `align-items: center` on the identity row keeps
+   it baseline-centred against the taller title. The old repo subtitle line is
+   gone (the repo name lives in the repo selector directly below). */
+.topbar__updated {
   margin: 0;
   font-family: var(--qb-font-body);
-  font-size: clamp(14px, 3.6vw, 17px);
+  font-size: 0.75rem;
   color: var(--qb-ink-400);
+  white-space: nowrap;
 }
 
 /* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
@@ -4916,7 +4904,7 @@ a.card-drawer__pr-chip:hover {
    is untouched by everything below.
    ========================================================================== */
 @media (max-width: 720px) {
-  /* --- Top bar: crest row, then a wrapping chip shelf ------------------- */
+  /* --- Top bar: identity row, then a wrapping chip shelf ---------------- */
   .topbar {
     padding: 12px 14px 10px;
     gap: 0.4rem 0.5rem;
@@ -4928,13 +4916,8 @@ a.card-drawer__pr-chip:hover {
     flex-basis: 100%;
   }
 
-  .topbar__crest {
-    width: 38px;
-    height: 38px;
-  }
-
   /* The default-threshold control gets its own "scribe's line" under the
-     crest, same as the old ctx+threshold row it replaced (WF-042). */
+     header, same as the old ctx+threshold row it replaced (WF-042). */
   .topbar__threshold {
     flex-basis: 100%;
     flex-wrap: wrap;
@@ -5020,15 +5003,6 @@ a.card-drawer__pr-chip:hover {
      after identity, ahead of R2, so it never crowds into the repo/branch
      row when present. */
   .topbar__quarantine-banner { order: 5; flex-basis: 100%; }
-
-  /* R1b (WF-086): Board|Atlas view toggle — its own full-width row right
-     after identity/the (rare) quarantine banner, ahead of R2's repo/branch
-     row. `order: 6` sits in the gap the R2-R5 scheme deliberately left
-     between the quarantine banner's 5 and R2's 10 (see that scheme's own
-     "gaps... leave room to slot a future chip" comment above) — it's an
-     always-visible chip, so it earns an early row of its own rather than
-     folding into an existing one or waiting behind Controls ▾. */
-  .topbar__view-toggle { order: 6; flex-basis: 100%; }
 
   /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
      `order` pairs the toggle with ＋New card on R5 (right end of that row,

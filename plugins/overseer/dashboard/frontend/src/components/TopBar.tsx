@@ -17,7 +17,6 @@ import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 
 export interface TopBarProps {
-  projectName: string;
   context: Context | null;
   limits: Limits;
   quarantinedCount: number;
@@ -94,11 +93,10 @@ function formatPct(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-function formatSubtitle(projectName: string, lastRefreshedAt: Date | null): string {
-  if (lastRefreshedAt === null) return projectName;
+function formatUpdated(lastRefreshedAt: Date): string {
   const hh = String(lastRefreshedAt.getHours()).padStart(2, "0");
   const mm = String(lastRefreshedAt.getMinutes()).padStart(2, "0");
-  return `${projectName} · updated ${hh}:${mm}`;
+  return `updated ${hh}:${mm}`;
 }
 
 /**
@@ -115,15 +113,15 @@ function formatSubtitle(projectName: string, lastRefreshedAt: Date | null): stri
  * override is a deferred follow-up). `context.threshold` itself is still
  * read from here — it's the one board/account-level fact this bar keeps.
  *
- * Parchment sticky bar (HANDOFF §Board "Top bar"): crest + branded title +
- * subtitle, then Refresh/Archive/threshold-default/fleet-health, then the
+ * Parchment sticky bar (HANDOFF §Board "Top bar"): the Board|Atlas view-toggle
+ * circles + branded title + a small last-updated time, then
+ * Refresh/Archive/threshold-default/fleet-health, then the
  * two remaining guild pills (gold, vanquished). The old Sessions dropdown
  * toggle is gone, and the old dedicated questing pill is folded into the
  * fleet-health line below (same live-count source, no duplicate readout,
  * still opens the Party overlay on click).
  */
 function TopBar({
-  projectName,
   context,
   limits,
   quarantinedCount,
@@ -181,13 +179,44 @@ function TopBar({
     <>
       <header className="topbar">
         <div className="topbar__identity">
-          <span className="topbar__crest" aria-hidden="true" />
-          <div className="topbar__titles">
-            <h1>Adventurers&rsquo; Guild Board</h1>
-            <p className="topbar__subtitle">
-              {formatSubtitle(projectName, lastRefreshedAt)}
-            </p>
+          {/* WF-086 (moved): the Board|Atlas view toggle now LEADS the header
+              in place of the old crest — two flat circles, left-aligned. It
+              lives INSIDE `.topbar__identity` (always visible, full first row
+              on mobile) so the "Controls ▾" collapse can never hide it. The
+              accessible name lives on `aria-label`/`title` since the visible
+              content is an icon (kept identical to the old button TEXT —
+              "Board"/"Atlas" — so name-based test/a11y queries still resolve). */}
+          <div className="topbar__view-toggle" role="group" aria-label="View">
+            <button
+              type="button"
+              className="topbar__view-toggle-btn"
+              aria-pressed={view === "board"}
+              aria-label="Board"
+              title="Board"
+              onClick={() => onSelectView("board")}
+            >
+              {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
+              <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
+            </button>
+            <button
+              type="button"
+              className="topbar__view-toggle-btn"
+              aria-pressed={view === "atlas"}
+              aria-label="Atlas"
+              title="Atlas"
+              onClick={() => onSelectView("atlas")}
+            >
+              {/* rpg-icons pack "treasure map" — dashed trail and all */}
+              <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
+            </button>
           </div>
+          <h1>Adventurers&rsquo; Guild Board</h1>
+          {/* Last-refreshed time as small text to the right of the wordmark —
+              the repo name that used to share this subtitle line is gone (it's
+              in the repo selector directly below). */}
+          {lastRefreshedAt !== null && (
+            <span className="topbar__updated">{formatUpdated(lastRefreshedAt)}</span>
+          )}
         </div>
 
         {/* Mobile row layout: the topbar is one wrapping flex row and every
@@ -206,46 +235,6 @@ function TopBar({
         <span className="topbar__row-break topbar__row-break--r2" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
-
-        {/* WF-086: Board|Atlas view toggle — the always-visible chip row, a
-            SIBLING of #topbar-controls-group (not nested inside it), so the
-            mobile "Controls ▾" collapse never hides it. DOM position here
-            (desktop reads it) is right after identity, ahead of the repo
-            selector; mobile re-sequences it onto its own row via `order`
-            (see styles.css's R2-R5 scheme — this is row R1b, order 6, one
-            of the scheme's intentional 10s-apart gaps).
-
-            Polish pass (user: "a couple of nice circles"): two circular
-            icon buttons under `.topbar__view-toggle-btn` (styled in
-            styles.css) — same aria-pressed mechanics as before, `aria-label`/
-            `title` carry the accessible name now that the visible label is
-            an icon, not text (kept identical to the old button TEXT —
-            "Board"/"Atlas" — so existing name-based test/a11y queries still
-            resolve the same element). */}
-        <div className="topbar__view-toggle" role="group" aria-label="View">
-          <button
-            type="button"
-            className="topbar__view-toggle-btn"
-            aria-pressed={view === "board"}
-            aria-label="Board"
-            title="Board"
-            onClick={() => onSelectView("board")}
-          >
-            {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
-            <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
-          </button>
-          <button
-            type="button"
-            className="topbar__view-toggle-btn"
-            aria-pressed={view === "atlas"}
-            aria-label="Atlas"
-            title="Atlas"
-            onClick={() => onSelectView("atlas")}
-          >
-            {/* rpg-icons pack "treasure map" — dashed trail and all */}
-            <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
-          </button>
-        </div>
 
         <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
         <button
