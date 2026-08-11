@@ -113,7 +113,9 @@ the hash.
 ## Interactions & Behavior
 - **Reach the page**: a view toggle in the topbar (Board | Atlas) using the existing Role-B
   tab treatment (`--qb-tab-*` T1 gold underline). The Atlas respects the topbar's repo/branch
-  selection and the filter bar where applicable.
+  selection. The FilterBar does **not** apply to the Atlas in v1: it is hidden while the Atlas
+  is active (its filters affect only the board view), so it never sits visible-but-inert.
+  Wiring card filters into the Atlas is an explicit non-goal of this card.
 - **Expand sub-quests**: rail-card button toggles the child checklist; the row grows, trail
   re-centres. Multiple epics may be expanded at once (`expandedEpics: Set<string>` — the page's
   only new state; everything else derives from the existing board payload).
