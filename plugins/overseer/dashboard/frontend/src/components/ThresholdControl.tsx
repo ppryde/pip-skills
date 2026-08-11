@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { setThreshold } from "../api/client";
 import type { UseBoardResult } from "../board/useBoard";
+import lastOrders from "../assets/last-orders.png";
+import InfoTooltip from "./InfoTooltip";
 
 export interface ThresholdControlProps {
   /** Current `context.threshold` — mutate applies the whole board-response,
@@ -16,12 +18,14 @@ export interface ThresholdControlProps {
  * wf005-context.md "Single mutation entrypoint"). Reflects the returned
  * `context.threshold` since `mutate` applies the whole board-response.
  *
- * WF-042: this is a single GLOBAL value, applied fleet-wide — the label
- * reads "default threshold" (not just "threshold") so it's clear it's the
- * fleet's default, not a per-agent setting (per-agent override is a
- * deferred follow-up, see the WF-042 spec's Non-goals). `aria-label`
- * stays "Threshold" — untouched, so existing `getByLabelText("Threshold")`
- * lookups keep working.
+ * WF-042: this is a single GLOBAL value, applied fleet-wide. The
+ * user-visible label reads "Last Orders" (the fleet's hand-over cue, with
+ * a tankard glyph + an `InfoTooltip` explaining what it means) rather than
+ * "default threshold" — but `aria-label="Threshold"` on the input is left
+ * UNCHANGED so existing `getByLabelText("Threshold")` lookups keep working.
+ * The title/input/button can't nest inside one `<label>` any more (a
+ * `<button>` — the InfoTooltip's trigger — inside a `<label>` is invalid
+ * HTML), so the label text is now a plain `<span>` sibling of the input.
  */
 function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
   const [draft, setDraft] = useState(value !== null ? String(value) : "");
@@ -41,16 +45,28 @@ function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
 
   return (
     <form className="threshold-control" onSubmit={(e) => void handleSubmit(e)}>
-      <label className="threshold-control__label">
-        default threshold
-        <input
-          aria-label="Threshold"
-          type="number"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={inFlight}
+      <span className="threshold-control__title">
+        <img
+          src={lastOrders}
+          className="threshold-control__icon"
+          alt=""
+          aria-hidden="true"
         />
-      </label>
+        Last Orders
+        <InfoTooltip label="What is Last Orders?">
+          <strong>Last Orders</strong> — the fleet&rsquo;s default hand-over
+          line. When a session&rsquo;s context fills past this %, that&rsquo;s
+          the cue to wrap up and hand over before it runs dry. Set once here;
+          applies to every quest.
+        </InfoTooltip>
+      </span>
+      <input
+        aria-label="Threshold"
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={inFlight}
+      />
       <button type="submit" disabled={inFlight}>
         Set
       </button>

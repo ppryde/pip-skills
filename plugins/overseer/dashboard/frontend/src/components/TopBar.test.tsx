@@ -261,7 +261,7 @@ describe("<TopBar/>", () => {
     render(<StatefulTopBar {...baseProps()} context={{ pct: null, threshold: 65 }} />);
 
     expect(screen.getByLabelText("Threshold")).toHaveValue(65);
-    expect(screen.getByText(/default threshold/i)).toBeInTheDocument();
+    expect(screen.getByText(/last orders/i)).toBeInTheDocument();
   });
 
   it("renders no Sessions toggle — the old sessions dropdown retired, the fleet-health pill replaces it", () => {
