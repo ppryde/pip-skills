@@ -127,11 +127,16 @@ the hash.
 - **Empty state**: no epics → parchment invitation, e.g. "No sagas yet — give a quest children
   and it becomes a campaign." (plain, directive, in-world).
 - **Responsive (required)**: the page must work down to phone widths, following the board's
-  mobile conventions (WF-085): the chart region stays the page's ONE horizontal scroller; at
-  ≤720px the fixed rail must not force the layout wider than the viewport — collapse the rail
-  into the flow (e.g. condensed card above its trail) rather than shrinking rail + lane into an
-  unreadable grid; the TODAY signpost and axis remain usable; touch targets ≥44px. The exact
-  mechanism is the implementer's choice within these outcomes.
+  mobile conventions (WF-085): the chart region stays the page's ONE horizontal scroller (the
+  `725ddea` invariant); at ≤720px the rail must neither force the layout wider than the viewport
+  nor shrink its full desktop content into an unreadable column. v1 resolves this pair with a
+  **sticky-pinned condensed rail**: each rail card pins (`position: sticky; left: 0`) inside the
+  single chart scroller at a reduced width (~150–170px, tunable) and renders a **defined
+  condensed content set** — WF-id, title (2-line clamp), progress track + n/m count, and a
+  ≥44px expand affordance; the "vs beast" line and the gold/lock chips are hidden at this width
+  (restructured via CSS visibility, not merely shrunk). The TODAY signpost paints beneath the
+  sticky rail (rail above, signpost visible in the lane region); signpost and axis remain
+  usable; touch targets ≥44px.
 
 ## Data mapping (all from the existing board payload — no new endpoints)
 - Epics: `cards` where `is_epic`; children: `cards` where `parent === epic.id`.
