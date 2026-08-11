@@ -147,6 +147,53 @@ describe("computeWindow", () => {
     const PAD_MS = 2 * 86400000;
     expect(window.start.getTime()).toBe(today.getTime() - PAD_MS);
   });
+
+  // Verification-round finding: a brand-new board where every epic was
+  // created today has a real (pre-pad) span of 0 — every trail huddles on
+  // the TODAY line with no room to spread. A floor gives a young board
+  // enough axis to actually look like a chart. Widens the END only (never
+  // the START, which stays the true earliest `created`), so `today` —
+  // always <= the pre-floor end — stays inside the widened window too.
+  const MIN_WINDOW_SPAN_MS = 14 * 86400000;
+
+  it("floors a same-day board's span to MIN_WINDOW_SPAN_MS instead of huddling on today", () => {
+    const today = parseCalendarDate("2026-08-11");
+    const window = computeWindow(
+      [{ created: "2026-08-11", updated: "2026-08-11" }],
+      today
+    );
+    const PAD_MS = 2 * 86400000;
+    // Start is untouched — the true created date, padded as normal.
+    expect(window.start.getTime()).toBe(parseCalendarDate("2026-08-11").getTime() - PAD_MS);
+    // End is stretched out to the floor, not just today+pad.
+    expect(window.end.getTime()).toBe(
+      parseCalendarDate("2026-08-11").getTime() + MIN_WINDOW_SPAN_MS + PAD_MS
+    );
+    // Today (always inside [start, pre-floor end]) stays inside the floored window.
+    expect(today.getTime()).toBeGreaterThanOrEqual(window.start.getTime());
+    expect(today.getTime()).toBeLessThanOrEqual(window.end.getTime());
+  });
+
+  it("leaves a board already wider than the floor unchanged", () => {
+    const today = parseCalendarDate("2026-08-01");
+    const window = computeWindow(
+      [
+        {
+          created: "2026-07-14",
+          updated: "2026-07-14",
+          children: [{ updated: "2026-07-20" }, { updated: "2026-09-01" }],
+        },
+        { created: "2026-07-05", updated: "2026-07-05" },
+      ],
+      today
+    );
+    const PAD_MS = 2 * 86400000;
+    // Same expectations as the "multiple epics" test above — the floor
+    // never engages because this board's real span (07-05 to 09-01, ~58
+    // days) already exceeds MIN_WINDOW_SPAN_MS.
+    expect(window.start.getTime()).toBe(parseCalendarDate("2026-07-05").getTime() - PAD_MS);
+    expect(window.end.getTime()).toBe(parseCalendarDate("2026-09-01").getTime() + PAD_MS);
+  });
 });
 
 describe("pctForDate", () => {

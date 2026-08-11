@@ -50,12 +50,21 @@ export interface WindowEpic {
 }
 
 const WINDOW_PAD_MS = 2 * 86400000;
+/** Verification-round finding: a brand-new board (every epic created
+ * today) has a real pre-pad span of 0 — every trail huddles on the TODAY
+ * line with nowhere to spread. Widening only the END (never the START,
+ * which stays the true earliest `created`) keeps `today` — always inside
+ * [minCreated, pre-floor maxUpdated] by construction — inside the floored
+ * window too, without needing a special-case anchor. */
+const MIN_WINDOW_SPAN_MS = 14 * 86400000;
 
 /** The atlas's shared date axis: min(epic created) .. max(today, every
  * child's updated), padded ~2 days each side so trailheads/beasts never
- * sit flush against the chart edge. Never crashes on an empty epic list —
- * falls back to a window centred on `today` so an empty board still
- * renders a sane (if empty) axis. */
+ * sit flush against the chart edge, and floored to MIN_WINDOW_SPAN_MS so a
+ * young board (every epic created today) still has room to spread its
+ * trails instead of huddling on the TODAY line. Never crashes on an empty
+ * epic list — falls back to a window centred on `today` so an empty board
+ * still renders a sane (if empty) axis. */
 export function computeWindow(epics: WindowEpic[], today: Date): AtlasWindow {
   if (epics.length === 0) {
     return {
@@ -93,6 +102,10 @@ export function computeWindow(epics: WindowEpic[], today: Date): AtlasWindow {
   // as the empty-epic-list branch above, rather than leaving `Infinity`
   // to poison the subtraction below into `-Infinity`.
   if (minCreated === Infinity) minCreated = today.getTime();
+
+  if (maxUpdated - minCreated < MIN_WINDOW_SPAN_MS) {
+    maxUpdated = minCreated + MIN_WINDOW_SPAN_MS;
+  }
 
   return {
     start: new Date(minCreated - WINDOW_PAD_MS),
