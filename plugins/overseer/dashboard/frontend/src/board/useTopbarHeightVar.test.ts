@@ -64,4 +64,55 @@ describe("useTopbarHeightVar", () => {
     renderHook(() => useTopbarHeightVar());
     expect(document.documentElement.style.getPropertyValue(CSS_VAR)).toBe(`${DEFAULT_TOPBAR_HEIGHT_PX}px`);
   });
+
+  // Impl-review round 2, finding 4: a residual gap was observed in the real
+  // browser, suspected to be the topbar's height caught BEFORE its wrapped
+  // rows fully settled (e.g. async content pushing it to another row,
+  // right after the very first synchronous layout pass this hook's
+  // initial measurement runs in).
+  it("re-measures once more after the next paint (requestAnimationFrame), catching a topbar that hadn't finished wrapping yet", async () => {
+    const topbar = document.createElement("div");
+    topbar.className = "topbar";
+    document.body.appendChild(topbar);
+    const heightSpy = vi.spyOn(topbar, "getBoundingClientRect");
+    heightSpy.mockReturnValue({ height: 107 } as DOMRect); // mid-layout, not yet fully wrapped
+
+    renderHook(() => useTopbarHeightVar());
+    expect(document.documentElement.style.getPropertyValue(CSS_VAR)).toBe("107px");
+
+    // The topbar finishes wrapping to its real height between the initial
+    // synchronous measurement and the next paint.
+    heightSpy.mockReturnValue({ height: 187 } as DOMRect);
+
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(document.documentElement.style.getPropertyValue(CSS_VAR)).toBe("187px");
+  });
+
+  it("re-measures fresh when remeasureKey changes (a breakpoint crossing) rather than relying on the observer's own timing", () => {
+    const topbar = document.createElement("div");
+    topbar.className = "topbar";
+    document.body.appendChild(topbar);
+    const heightSpy = vi.spyOn(topbar, "getBoundingClientRect");
+    heightSpy.mockReturnValue({ height: 64 } as DOMRect); // desktop, single row
+
+    const { rerender } = renderHook(({ isMobile }) => useTopbarHeightVar(isMobile), {
+      initialProps: { isMobile: false },
+    });
+    expect(document.documentElement.style.getPropertyValue(CSS_VAR)).toBe("64px");
+
+    // Crossing into mobile wraps the topbar to a taller, multi-row height —
+    // simulated here as an already-settled measurement (the CSS media
+    // query has already taken effect by the time isMobile flips), which
+    // this hook must re-measure immediately rather than wait on its
+    // ResizeObserver to notice.
+    heightSpy.mockReturnValue({ height: 187 } as DOMRect);
+    act(() => {
+      rerender({ isMobile: true });
+    });
+
+    expect(document.documentElement.style.getPropertyValue(CSS_VAR)).toBe("187px");
+  });
 });
