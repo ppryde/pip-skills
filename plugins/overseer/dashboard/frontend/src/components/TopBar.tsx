@@ -13,6 +13,8 @@ import RepoSelector from "./RepoSelector";
 import BranchFilter from "./BranchFilter";
 import NewCardDialog from "./NewCardDialog";
 import LabelSettingsDialog from "./LabelSettingsDialog";
+import journalIcon from "../assets/ui-icons/journal.png";
+import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 
 export interface TopBarProps {
   projectName: string;
@@ -229,7 +231,8 @@ function TopBar({
             title="Board"
             onClick={() => onSelectView("board")}
           >
-            <span aria-hidden="true">🗂️</span>
+            {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
+            <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
           </button>
           <button
             type="button"
@@ -239,7 +242,8 @@ function TopBar({
             title="Atlas"
             onClick={() => onSelectView("atlas")}
           >
-            <span aria-hidden="true">🗺️</span>
+            {/* rpg-icons pack "treasure map" — dashed trail and all */}
+            <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
           </button>
         </div>
 

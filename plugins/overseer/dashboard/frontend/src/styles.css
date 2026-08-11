@@ -3980,6 +3980,15 @@ a.card-drawer__pr-chip:hover {
   color: var(--qb-gold-chip-text);
 }
 
+/* rpg-icons pack art inside the view-toggle circles (journal / treasure map) */
+.topbar__view-toggle-icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
 /* --- Atlas chart: page shell, toolbar, rows -----------------------------
    WF-086 v2 (progress-trail revision): the v1 date axis / TODAY signpost /
    legend / honesty footnote are KILLED (HANDOFF's "Killed from v1") — dates
