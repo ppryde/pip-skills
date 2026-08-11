@@ -3949,7 +3949,7 @@ a.card-drawer__pr-chip:hover {
   border-radius: 50%;
   border: 2px solid var(--qb-ink-700);
   background: var(--qb-parchment-muted);
-  box-shadow: var(--qb-shadow-card) var(--qb-ink-700);
+  /* no drop shadow — user preference (flat circles read cleaner in the topbar) */
   font-size: 1.15rem;
   line-height: 1;
   color: var(--qb-ink-500);
