@@ -72,6 +72,29 @@ describe("<EpicAtlas/>", () => {
     expect(container.querySelectorAll(".atlas-rail-card").length).toBe(1);
   });
 
+  // WF-086 chunk 10: the mobile responsive layer makes `.atlas-chart` the
+  // ONE horizontal scroller (styles.css's `725ddea` invariant, same one the
+  // board itself encodes). This is a structural regression guard, not a CSS
+  // test (jsdom has no real layout) — it fails the moment any future change
+  // gives a per-row/lane element its own independent scroll class, which is
+  // exactly the bug 725ddea fixed on the board.
+  it("is the sole scroll-classed element in its subtree (725ddea one-scroller invariant)", () => {
+    const cards = [
+      card({ id: "WF-A", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
+      card({ id: "WF-B", is_epic: true, rollup: { done: 0, total: 3, estimate: null, actual: 0 } }),
+    ];
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
+
+    expect(container.querySelectorAll(".atlas-chart").length).toBe(1);
+
+    for (const el of Array.from(container.querySelectorAll<HTMLElement>("*"))) {
+      if (el.classList.contains("atlas-chart")) continue;
+      for (const cls of Array.from(el.classList)) {
+        expect(cls).not.toMatch(/scroll/i);
+      }
+    }
+  });
+
   it("renders the empty-state invitation when there are no epics", () => {
     render(<EpicAtlas board={board([])} onOpenCard={vi.fn()} today={TODAY} />);
     expect(

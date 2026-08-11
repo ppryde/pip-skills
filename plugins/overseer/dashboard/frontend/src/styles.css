@@ -4938,6 +4938,63 @@ a.card-drawer__pr-chip:hover {
   .party-sheet__title {
     font-size: 24px;
   }
+
+  /* --- Epic Atlas: sticky-pinned condensed rail (WF-086, HANDOFF's
+     "Responsive (required)" section, R3 adjudication) -------------------
+     `.atlas-chart` becomes the ONE mobile horizontal scroller — same
+     `min-width:0; width:100%; max-width:100vw; overflow-x:auto` shape as
+     `.board`'s own mobile override a few lines up, in spirit and in the
+     725ddea invariant it encodes: exactly one scroller, everything else
+     (rail, lane, row) scrolls WITH the chart, never independently. */
+  .atlas-chart {
+    --rail: 160px;
+    min-width: 0;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: auto;
+    padding: 0.5rem 0.5rem 1rem;
+  }
+
+  /* Legibility floor for the SVG trail lane — tunable, not a promise; a
+     narrower value starts crowding the camp/waypoints/beast together. */
+  .atlas-chart__lane {
+    min-width: 460px;
+  }
+
+  /* Condensed rail pins in place while the chart scrolls beneath it — the
+     trail passes UNDER the rail, never the reverse, hence the opaque
+     background (a flat approximation of the page's own radial-gradient
+     backdrop, close enough for a 160px strip) and the z-index above the
+     TODAY signpost's `z-index: 1` (desktop rule, unchanged) so the rose
+     line visibly passes beneath the sticky rail by design, not by accident. */
+  .atlas-chart__rail {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--qb-bg-page);
+    padding: 0.5rem 0.4rem;
+  }
+
+  .atlas-rail-card {
+    padding: 8px;
+  }
+
+  /* Condensed content set (HANDOFF): "vs beast" and the gold/lock chips
+     are hidden via `display:none` — NOT merely shrunk — so the mobile rail
+     never renders a squeezed, unreadable version of the desktop card. */
+  .atlas-rail-card__vs,
+  .atlas-rail-card__chips {
+    display: none;
+  }
+
+  /* 2-line clamp keeps a long epic title from pushing the condensed card
+     past a readable height on a 160px-wide rail. */
+  .atlas-rail-card__title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 
 /* ==========================================================================
@@ -5006,6 +5063,25 @@ a.card-drawer__pr-chip:hover {
   .label-editor__input {
     font-size: 16px;
     min-height: 38px;
+  }
+
+  /* Epic Atlas (WF-086): the condensed-rail expand affordance needs a real
+     touch target — HANDOFF's spec sets a 44px floor here, stricter than
+     the board's own 32px `.epic-card__expand` precedent a few lines up.
+     Deliberate, not a drift: the rail card is already reduced to its
+     condensed set at this width, so its one remaining interactive control
+     gets the full floor rather than the board's smaller one.
+
+     The sub-quest checkbox (`.atlas-rail-card__checkbox`) is deliberately
+     NOT given a matching floor here, despite HANDOFF listing it alongside
+     the expand button: it's a decorative `aria-hidden` span with no click
+     handler (AtlasRailCard.tsx) — nothing to tap. Forcing its visible 14px
+     box to 44px would only distort the sticker design for a touch target
+     that receives no interaction; if a future card makes the sub-quest row
+     itself tappable, the target belongs on the `<li>`, not the checkbox. */
+  .atlas-rail-card__expand {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 
