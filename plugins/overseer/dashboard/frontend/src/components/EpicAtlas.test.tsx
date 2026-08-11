@@ -135,28 +135,6 @@ describe("<EpicAtlas/>", () => {
     }
   });
 
-  // Impl-review round 1, finding 4 (HANDOFF's epic-lane snap): the
-  // scroll-margin-top on `.atlas-chart__row` reads a CSS custom property
-  // (`--atlas-topbar-height`, styles.css) that `useTopbarHeightVar` keeps
-  // in sync with the real, wrap-dependent topbar height. This is the
-  // jsdom-assertable half of that wiring (the actual snap FEEL needs a
-  // real browser — flagged in the report).
-  it("publishes the measured .topbar height as the --atlas-topbar-height CSS var on mount (epic-lane snap's scroll-margin-top source)", () => {
-    const topbar = document.createElement("div");
-    topbar.className = "topbar";
-    document.body.appendChild(topbar);
-    const heightSpy = vi.spyOn(topbar, "getBoundingClientRect").mockReturnValue({ height: 88 } as DOMRect);
-
-    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
-    render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} />);
-
-    expect(document.documentElement.style.getPropertyValue("--atlas-topbar-height")).toBe("88px");
-
-    heightSpy.mockRestore();
-    document.documentElement.style.removeProperty("--atlas-topbar-height");
-    topbar.remove();
-  });
-
   describe("vanquished-epics toggle", () => {
     function vanquishedBoard() {
       return board([

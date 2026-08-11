@@ -4095,11 +4095,16 @@ a.card-drawer__pr-chip:hover {
   grid-template-columns: var(--rail) 1fr;
   border-bottom: 1.5px dashed var(--qb-line-dashed-2);
   scroll-snap-align: start;
-  /* Topbar-height-aware (HANDOFF) — `useTopbarHeightVar` (EpicAtlas.tsx)
-     measures the real, wrap-dependent topbar height and keeps this custom
-     property current; the literal px is only the pre-measurement/no-JS
-     fallback. */
-  scroll-margin-top: var(--atlas-topbar-height, 64px);
+  /* Impl-review round 2, finding 4 (browser diagnostic): HANDOFF assumed
+     the snap needed to "clear the sticky topbar", but `.topbar` sits
+     ABOVE `.board-region` in normal flow here — it does NOT overlay the
+     scroller (confirmed: region clientHeight == viewport height minus the
+     topbar's own height; the region's top edge already IS the topbar's
+     bottom edge). A topbar-height-aware margin double-counted that
+     clearance, pushing a snapped row roughly a topbar's-height below
+     where it should land. Rows snap flush to the region's own (already
+     topbar-clear) top, plus a small fixed breathing-room margin. */
+  scroll-margin-top: 8px;
 }
 
 .atlas-chart__rail {
@@ -5187,17 +5192,12 @@ a.card-drawer__pr-chip:hover {
 
   /* Epic-lane snap tightens to mandatory at mobile widths (HANDOFF) — a
      deliberate swipe/scroll-driven "one row settles at a time" feel,
-     versus desktop's gentler proximity snap. The mobile topbar wraps
-     considerably taller (WF-085's R2-R5 row scheme) than the fallback
-     literal below assumes — `useTopbarHeightVar`'s measured
-     `--atlas-topbar-height` is what actually keeps `scroll-margin-top`
-     correct here; the literal is only the pre-measurement/no-JS floor. */
+     versus desktop's gentler proximity snap. No topbar-height-aware
+     margin needed here either (see the base `.atlas-chart__row` rule's
+     own comment) — `.board-region`'s top is already clear of `.topbar`
+     at every width, mobile's wrapped topbar included. */
   .board-region:has(.atlas-chart) {
     scroll-snap-type: y mandatory;
-  }
-
-  .atlas-chart__row {
-    scroll-margin-top: var(--atlas-topbar-height, 160px);
   }
 
   /* Verification-round finding: `position: sticky` on a CSS GRID item is
