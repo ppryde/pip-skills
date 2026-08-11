@@ -817,19 +817,19 @@ body {
   display: none;
 }
 
-/* Task 4: `#topbar-controls-group`'s own small header — a dotted rule +
+/* Task 4: `#topbar-controls-group`'s own small header — a divider rule +
    muted eyebrow title, opening the group before ThresholdControl. Same
    "quiet caption" idea as `.filter-bar__eyebrow` above the filter row, just
    paired with a divider instead of sitting inline. `flex-basis: 100%`
    self-forces a line break in the `display: contents`-unwrapped group (same
    trick as `.topbar__quarantine-banner`/mobile's `.topbar__threshold`) so
    ThresholdControl and everything after it in the group starts underneath
-   this header, on every viewport. */
+   this header, on every viewport. The divider itself (margin/padding/
+   background-image band) is declared jointly with `.filter-bar__eyebrow-row`
+   below (Task A) — the "Scry" and "Provisions" section rules share one rule
+   so they can't drift apart. */
 .topbar__controls-header {
   flex-basis: 100%;
-  margin-top: 0.3rem;
-  padding-top: 0.4rem;
-  border-top: 1.5px dotted var(--qb-line-dashed);
 }
 
 .topbar__controls-eyebrow {
@@ -861,10 +861,13 @@ body {
    needed to exist at all ≤720px). Both toggles now show on every viewport,
    so this is the always-on box/paint — same Role-A metrics as
    `.topbar__new-card` (0.75rem / 0.3rem 0.7rem), no mobile-specific
-   override needed any more. */
+   override needed any more. `gap` spaces the "Controls" button's leading
+   gear icon (task C) from its text — a no-op for "Filters ▾", which has no
+   icon (no matching funnel/filter asset in the rpg-icons library). */
 .topbar__controls-toggle {
   display: inline-flex;
   align-items: center;
+  gap: 0.3rem;
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
   font-weight: 700;
@@ -881,6 +884,18 @@ body {
 .topbar__controls-toggle:hover {
   background: var(--qb-btn-face-hover);
   border-color: var(--qb-btn-ink-hover);
+}
+
+/* Task C: small gear icon leading the "Controls ▾" button's text — same
+   decorative-icon convention as `.topbar__atlas-control-icon`/
+   `.topbar__view-toggle-icon` (`alt=""`, accessible name stays the text
+   alone). ~14px keeps it modest against this button's 0.75rem type. */
+.topbar__toggle-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .topbar__controls-toggle:active {
@@ -1050,13 +1065,26 @@ body {
 }
 
 /* The "Scry" eyebrow now opens its OWN full-width row above search/
-   selects/Labels/count — `flex-basis: 100%` on this wrapper forces the wrap
+   selects/Labels — `flex-basis: 100%` on this wrapper forces the wrap
    (same "self-forcing full-width flex item" trick used elsewhere, e.g.
    `.topbar__quarantine-banner`), and `.filter-bar__row` below holds
-   everything that used to sit inline with the eyebrow. */
+   everything that used to sit inline with the eyebrow. Task B: the
+   visible/total count (+ Clear filters) now lives at the OTHER end of this
+   same row — `justify-content: space-between` puts "Scry" left, "N of M …
+   Clear filters" right, so the row reads as one section-header line rather
+   than the count being buried down in the filter controls. */
 .filter-bar__eyebrow-row {
   flex-basis: 100%;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+/* Icon + "Scry" text, grouped so `justify-content: space-between` above has
+   exactly two children to split apart (this group vs. `.filter-bar__count`). */
+.filter-bar__eyebrow-title {
+  display: inline-flex;
   align-items: center;
   gap: 0.3rem;
 }
@@ -1079,6 +1107,30 @@ body {
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--qb-ink-400);
+}
+
+/* Task A: Scry's own header rule and Provisions' (`.topbar__controls-header`,
+   declared earlier in this file) render the EXACT same divider — grouped
+   selector so the two rules
+   can never drift apart. A `repeating-linear-gradient` background band reads
+   as clearly chunkier dashes (9px dash / 6px gap) than the flat 1.5px
+   dashed/dotted borders used elsewhere in this file; painted as a
+   `background-image` rather than `border-top` because a gradient has no
+   intrinsic size to slice against `border-image` predictably, while a
+   `background-size: 100% 2px` band sits in exactly the same visual spot a
+   2px top border would. */
+.filter-bar__eyebrow-row,
+.topbar__controls-header {
+  margin-top: 0.3rem;
+  padding-top: 0.5rem;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--qb-line-dashed) 0 9px,
+    transparent 9px 15px
+  );
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 2px;
 }
 
 /* Task 1: the search/selects/Labels/count row, wrapped separately from the
@@ -1221,11 +1273,14 @@ body {
   border: 1px solid var(--qb-line-dashed);
 }
 
+/* Task B: now the right-hand child of `.filter-bar__eyebrow-row` (was
+   `margin-left: auto` inside `.filter-bar__row` below, pushed right among
+   the search/select controls) — `justify-content: space-between` on the
+   parent row now does that positioning job instead. */
 .filter-bar__count {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-left: auto;
   font-size: 0.75rem;
   color: var(--qb-ink-500);
   white-space: nowrap;

@@ -18,6 +18,7 @@ import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 import compassIcon from "../assets/ui-icons/compass.png";
 import skullIcon from "../assets/ui-icons/skull.png";
 import scrollIcon from "../assets/ui-icons/scroll.png";
+import settingsIcon from "../assets/ui-icons/settings.png";
 
 /** Epic Atlas mobile trail orientation — "across" (default, every viewport)
  * or "down" (only effective at <=720px; desktop always renders across, see
@@ -336,6 +337,11 @@ function TopBar({
             aria-controls="topbar-controls-group"
             onClick={onToggleControls}
           >
+            {/* rpg-icons pack "settings" gear — decorative only (`alt=""`),
+                so the button's accessible name stays plain "Controls" (task
+                C: no equivalent funnel/filter asset exists for the
+                "Filters ▾" button beside this one, so that stays text-only). */}
+            <img src={settingsIcon} alt="" className="topbar__toggle-icon" />
             Controls {controlsOpen ? "▴" : "▾"}
           </button>
           {/* "＋ New card" is now icon-only — `aria-label`/`title` keep it

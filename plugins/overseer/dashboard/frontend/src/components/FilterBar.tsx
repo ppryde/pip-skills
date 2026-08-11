@@ -35,13 +35,14 @@ const PRIORITIES = ["P0", "P1", "P2", "P3", "P4"];
 const COMPLEXITIES = ["S", "M", "L", "XL"];
 
 /**
- * The board's filter row (F3, WF-061): a "Scry" eyebrow on its own line,
- * then search + priority/complexity dropdowns + a Labels button that folds
- * out `LabelFilterPopover`, plus a right-aligned visible/total readout and
- * Clear filters. Purely presentational — `filter` is the caller's source of
- * truth (same deferred-state pattern as `LabelFilterPopover`/`LabelEditor`/
- * `StatusMenu`); this component owns only the popover's open/closed
- * `useState`, nothing about filter values.
+ * The board's filter row (F3, WF-061): a "Scry" eyebrow header line — "Scry"
+ * on the left, the visible/total readout + Clear filters on the right
+ * (`.filter-bar__eyebrow-row`, `justify-content: space-between`) — then a
+ * second row of search + priority/complexity dropdowns + a Labels button
+ * that folds out `LabelFilterPopover`. Purely presentational — `filter` is
+ * the caller's source of truth (same deferred-state pattern as
+ * `LabelFilterPopover`/`LabelEditor`/`StatusMenu`); this component owns only
+ * the popover's open/closed `useState`, nothing about filter values.
  *
  * WF-092: priority/complexity no longer carry a standalone visible label —
  * the field name is the select's own `value=""` placeholder option (e.g.
@@ -81,11 +82,30 @@ function FilterBar({
   return (
     <div id="filter-bar" className="filter-bar" hidden={!filtersOpen}>
       {/* Own line above the row below (`.filter-bar__eyebrow-row`'s
-          `flex-basis: 100%` forces the wrap) — was inline before search. */}
-      <span className="filter-bar__eyebrow-row">
-        <img src={scryIcon} alt="" className="filter-bar__eyebrow-icon" />
-        <span className="filter-bar__eyebrow">Scry</span>
-      </span>
+          `flex-basis: 100%` forces the wrap) — was inline before search.
+          Task B: the visible/total count + Clear filters now sit at the
+          RIGHT-HAND end of this same line (`justify-content: space-between`
+          on the row), so it reads as one section-header line: "Scry" …
+          "N of M · Clear filters" — rather than the count being buried down
+          among the filter controls below. */}
+      <div className="filter-bar__eyebrow-row">
+        <span className="filter-bar__eyebrow-title">
+          <img src={scryIcon} alt="" className="filter-bar__eyebrow-icon" />
+          <span className="filter-bar__eyebrow">Scry</span>
+        </span>
+
+        <div className="filter-bar__count">
+          {visibleCount} of {totalCount}
+          <button
+            type="button"
+            className="filter-bar__clear-btn"
+            onClick={onClear}
+            disabled={isDefault}
+          >
+            Clear filters
+          </button>
+        </div>
+      </div>
 
       <div className="filter-bar__row">
         <input
@@ -137,18 +157,6 @@ function FilterBar({
             <span className="filter-bar__labels-badge">{labelBadge}</span>
           )}
         </button>
-
-        <div className="filter-bar__count">
-          {visibleCount} of {totalCount}
-          <button
-            type="button"
-            className="filter-bar__clear-btn"
-            onClick={onClear}
-            disabled={isDefault}
-          >
-            Clear filters
-          </button>
-        </div>
       </div>
 
       {labelsOpen && (

@@ -34,10 +34,11 @@ function boardResponse(): BoardResponse {
 
 // Task 2/3: `controlsOpen`/`filtersOpen` are two INDEPENDENT App-owned
 // flags now (previously one shared `controlsOpen` drove BOTH TopBar's own
-// `#topbar-controls-group` AND the separate <FilterBar/> below it). Both
-// default OPEN (Task 3: the board looks unchanged on load), so most tests
-// below no longer need to open anything first — these helpers are kept for
-// the tests that specifically exercise collapsing/reopening either region.
+// `#topbar-controls-group` AND the separate <FilterBar/> below it). Follow-up:
+// both now default CLOSED (was: both OPEN so the board looked unchanged on
+// load) — most tests below that reach into either region now click the
+// relevant toggle first via these helpers, same as the tests that already
+// exercised collapsing/reopening.
 function toggleControls() {
   fireEvent.click(screen.getByRole("button", { name: /^controls/i }));
 }
@@ -227,11 +228,12 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
 
-    // Controls (and Clear… inside it) default OPEN now — reachable without
-    // any click (Task 3).
+    // Controls (and Clear… inside it) default CLOSED now (follow-up) —
+    // open it first.
     // Exact "Clear…" (with ellipsis) — task 6 added a second, unrelated
     // "Clear filters" button to the filter bar, so a bare /clear/i now
     // matches both.
+    toggleControls();
     const clearButton = await screen.findByRole("button", { name: "Clear…" });
     fireEvent.click(clearButton);
 
@@ -295,8 +297,9 @@ describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     expect(await screen.findByText("Totally unrelated card")).toBeInTheDocument();
 
-    // FilterBar (search included) defaults open now (Task 3) — reachable
-    // without any click.
+    // FilterBar (search included) defaults CLOSED now (follow-up) — open it
+    // first.
+    toggleFilters();
     fireEvent.change(screen.getByLabelText("search"), {
       target: { value: "migration" },
     });
@@ -311,13 +314,15 @@ describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
 
 // Task 2/3: "Controls ▾" and "Filters ▾" are two INDEPENDENT App-owned
 // toggles now (previously one shared "Controls ▾" folded BOTH TopBar's own
-// `#topbar-controls-group` AND the separate `<FilterBar/>` together). Both
-// default OPEN (board looks unchanged on load), and `hidden={!controlsOpen}`/
-// `hidden={!filtersOpen}` take effect on every viewport, not just ≤720px —
-// jsdom honours the native `hidden` attribute in its accessibility tree the
-// same way regardless of any stylesheet (see TopBar.test.tsx's own describe
-// blocks for the same rationale); styles.css's own `[hidden]` rules are
-// covered directly there, not re-asserted here.
+// `#topbar-controls-group` AND the separate `<FilterBar/>` together).
+// Follow-up: both now default CLOSED (was: both OPEN so the board looked
+// unchanged on load) — each region only shows once its own toggle is
+// clicked. `hidden={!controlsOpen}`/`hidden={!filtersOpen}` take effect on
+// every viewport, not just ≤720px — jsdom honours the native `hidden`
+// attribute in its accessibility tree the same way regardless of any
+// stylesheet (see TopBar.test.tsx's own describe blocks for the same
+// rationale); styles.css's own `[hidden]` rules are covered directly there,
+// not re-asserted here.
 describe("<App/> Controls/Filters toggles are independent (Task 2/3)", () => {
   beforeEach(() => {
     vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
@@ -332,7 +337,7 @@ describe("<App/> Controls/Filters toggles are independent (Task 2/3)", () => {
     localStorage.clear();
   });
 
-  it("shows both TopBar's controls group and FilterBar by default", async () => {
+  it("hides both TopBar's controls group and FilterBar by default, until each toggle is clicked", async () => {
     render(<App />);
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     await screen.findByLabelText("Repo");
@@ -340,7 +345,13 @@ describe("<App/> Controls/Filters toggles are independent (Task 2/3)", () => {
     // `hidden`-attributed elements stay in the DOM (jsdom's `toBeVisible()`
     // checks the attribute directly); `getByLabelText` itself doesn't
     // filter by visibility the way `getByRole` does, so the visibility
-    // assertions above are the actual collapse proof, not a presence check.
+    // assertions below are the actual collapse proof, not a presence check.
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+    expect(document.getElementById("filter-bar")).not.toBeVisible();
+
+    toggleControls();
+    toggleFilters();
+
     expect(document.getElementById("topbar-controls-group")).toBeVisible();
     expect(document.getElementById("filter-bar")).toBeVisible();
   });
@@ -349,6 +360,13 @@ describe("<App/> Controls/Filters toggles are independent (Task 2/3)", () => {
     render(<App />);
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     await screen.findByLabelText("Repo");
+
+    // Both default closed — open both first, so the second (collapsing)
+    // click below has something to prove independence against.
+    toggleControls();
+    toggleFilters();
+    expect(document.getElementById("topbar-controls-group")).toBeVisible();
+    expect(document.getElementById("filter-bar")).toBeVisible();
 
     toggleControls();
 
@@ -364,6 +382,12 @@ describe("<App/> Controls/Filters toggles are independent (Task 2/3)", () => {
     render(<App />);
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     await screen.findByLabelText("Repo");
+
+    // Both default closed — open both first (see the sibling test above).
+    toggleControls();
+    toggleFilters();
+    expect(document.getElementById("filter-bar")).toBeVisible();
+    expect(document.getElementById("topbar-controls-group")).toBeVisible();
 
     toggleFilters();
 
@@ -381,6 +405,14 @@ describe("<App/> Controls/Filters toggles are independent (Task 2/3)", () => {
     render(<App />);
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     await screen.findByLabelText("Repo");
+
+    // Both default closed — open both first (opposite click order from the
+    // two tests above, proving the two toggles genuinely don't interact),
+    // then collapse both again.
+    toggleFilters();
+    toggleControls();
+    expect(document.getElementById("filter-bar")).toBeVisible();
+    expect(document.getElementById("topbar-controls-group")).toBeVisible();
 
     toggleControls();
     toggleFilters();

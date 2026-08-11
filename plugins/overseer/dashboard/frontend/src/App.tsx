@@ -133,12 +133,14 @@ function App() {
   // Task 2/3: "Controls ▾" and "Filters ▾" are now two INDEPENDENT collapse
   // toggles (previously one shared `controlsOpen` drove both TopBar's own
   // secondary-controls group AND the separate <FilterBar/> below it — see
-  // git history for that WF-085b arrangement). Both default OPEN so the
-  // board looks unchanged on load; `hidden={!controlsOpen}`/`hidden={
-  // !filtersOpen}` now take effect on every viewport, not just ≤720px
-  // (styles.css), so either button can collapse its own region anywhere.
-  const [controlsOpen, setControlsOpen] = useState(true);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  // git history for that WF-085b arrangement). Follow-up: both now default
+  // CLOSED (was: both OPEN so the board looked unchanged on load) — the
+  // board opens tidier, with Filters ▾/Controls ▾ revealing each region on
+  // demand. `hidden={!controlsOpen}`/`hidden={!filtersOpen}` take effect on
+  // every viewport, not just ≤720px (styles.css), so either button can
+  // collapse/reveal its own region anywhere.
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // WF-086: Board|Atlas view toggle — session-local (no localStorage,
   // same precedent as `activeBranch`), reset to "board" on reload.
   const [view, setView] = useState<"board" | "atlas">("board");
