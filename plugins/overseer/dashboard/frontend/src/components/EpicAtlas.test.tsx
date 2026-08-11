@@ -182,8 +182,13 @@ describe("<EpicAtlas/>", () => {
   describe("quest-names toggle", () => {
     it("defaults to shown — a todo child's name-tag is visible", () => {
       const cards = [
-        card({ id: "WF-EPIC", is_epic: true, status: "in-flight", rollup: { done: 0, total: 1, estimate: null, actual: 0 } }),
-        card({ id: "WF-EPIC-1", parent: "WF-EPIC", status: "planned", title: "Faraway Quest", complexity: "S" }),
+        card({ id: "WF-EPIC", is_epic: true, status: "in-flight", rollup: { done: 0, total: 2, estimate: null, actual: 0 } }),
+        card({ id: "WF-EPIC-1", parent: "WF-EPIC", status: "planned", title: "Faraway Quest", complexity: "S", order: 1 }),
+        // A second, LATER todo child — WF-086 v2 impl-review round 2,
+        // finding 5: the trail's LAST child's own tag is suppressed
+        // (crowds the beast), so this fixture needs a non-last child to
+        // actually exercise "a todo child's name-tag is visible".
+        card({ id: "WF-EPIC-2", parent: "WF-EPIC", status: "planned", title: "Later Quest", complexity: "S", order: 2 }),
       ];
       const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
       expect(container.querySelector(".trail-tag--todo")).toBeInTheDocument();

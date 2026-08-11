@@ -152,7 +152,8 @@ function AtlasTrail({
   const overlayTags: ReactNode[] = [];
   let todoTier = 0;
 
-  for (const { child, end } of segments) {
+  segments.forEach(({ child, end }, segmentIndex) => {
+    const isLastChild = segmentIndex === segments.length - 1;
     const group = statusGroupOf(child);
     const mx = end;
     const my = t.yAt(end);
@@ -181,7 +182,7 @@ function AtlasTrail({
           </g>
         );
       }
-      continue;
+      return;
     }
 
     if (group === "in-progress") {
@@ -217,7 +218,7 @@ function AtlasTrail({
           </span>
         );
       }
-      continue;
+      return;
     }
 
     // "todo" — the ahead trail: real, faded, at-weight named quests. A
@@ -258,7 +259,20 @@ function AtlasTrail({
       </g>
     );
 
-    if (showNames) {
+    // Impl-review round 2, finding 5: the trail's LAST child's marker sits
+    // exactly at the trail's true end by construction (its segment's own
+    // `end` IS `trailEnd`) — only BEAST_ANCHOR_OFFSET_PX(26px) away from
+    // the beast's own left edge, guaranteed on every trail regardless of
+    // length. A centred name-tag there routinely crowds/overlaps the
+    // beast doodle, so it's suppressed rather than shifted — the marker
+    // itself and its full-name+weight tooltip still work fine without the
+    // on-trail label. Deliberately keyed on "is this literally the last
+    // child" (not a distance-from-beast estimate): an early prototype of
+    // this fix used a conservative `TAG_HALF_WIDTH_PX` distance check
+    // instead, which over-suppressed EVERY tag on a short/low-weight
+    // trail (any marker within roughly the tag's own generous max-width
+    // of the beast), not just the genuinely-adjacent last one.
+    if (showNames && !isLastChild) {
       overlayTags.push(
         <span
           key={`${child.id}-tag`}
@@ -276,7 +290,7 @@ function AtlasTrail({
         </span>
       );
     }
-  }
+  });
 
   return (
     <div className="atlas-trail" ref={laneRef}>

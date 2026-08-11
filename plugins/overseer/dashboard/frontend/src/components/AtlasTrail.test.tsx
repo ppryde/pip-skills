@@ -145,24 +145,44 @@ describe("<AtlasTrail/>", () => {
     expect(tooltipTexts(container)).toContain("the party — 2/5 quests cleared");
   });
 
-  it("todo child: renders a faded hollow waypoint, and a name-tag only when showNames is true", () => {
+  it("todo child: renders a faded hollow waypoint regardless of its name-tag's own visibility", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
+    // A SOLE todo child is, by construction, also the trail's LAST child —
+    // see the round 2 finding 5 tests below for why that means its own
+    // name-tag is suppressed (clearance from the beast); the WAYPOINT
+    // marker itself is unaffected by that and always renders.
     const todo = child({ id: "k1", title: "Faraway Quest", status: "planned", complexity: "S" });
 
     const shown = renderTrail(epic, [todo], { showNames: true });
     expect(shown.container.querySelector(".atlas-trail__waypoint--todo")).toBeInTheDocument();
-    expect(shown.container.querySelector(".trail-tag--todo")).toHaveTextContent("Faraway Quest");
 
     const hidden = renderTrail(epic, [todo], { showNames: false });
     expect(hidden.container.querySelector(".atlas-trail__waypoint--todo")).toBeInTheDocument();
     expect(hidden.container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
   });
 
+  it("a NON-last todo child's name-tag shows normally when showNames is true", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [
+      child({ id: "k1", title: "Faraway Quest", status: "planned", complexity: "S", order: 1 }),
+      child({ id: "k2", title: "Last One", status: "planned", complexity: "S", order: 2 }), // last -> suppressed, see finding 5
+    ];
+    const shown = renderTrail(epic, kids, { showNames: true });
+    expect(shown.container.querySelector(".trail-tag--todo")).toHaveTextContent("Faraway Quest");
+
+    const hidden = renderTrail(epic, kids, { showNames: false });
+    expect(hidden.container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
+  });
+
   it("todo child name-tags alternate between two vertical tiers so adjacent tags never collide", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
+    // Three children so the tier-alternation check lands on the first TWO
+    // (non-last) tags — the third (last) child's own tag is suppressed
+    // (round 2, finding 5's beast-clearance rule) regardless of tiering.
     const kids = [
       child({ id: "k1", title: "First", status: "planned", complexity: "S", order: 1 }),
       child({ id: "k2", title: "Second", status: "planned", complexity: "S", order: 2 }),
+      child({ id: "k3", title: "Third", status: "planned", complexity: "S", order: 3 }),
     ];
     const { container } = renderTrail(epic, kids, { showNames: true });
     const tags = Array.from(container.querySelectorAll(".trail-tag--todo"));
@@ -316,6 +336,41 @@ describe("<AtlasTrail/>", () => {
     const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
     const firstPathStartX = Number(firstPathD.match(/^M([\d.]+)/)![1]);
     expect(firstPathStartX).toBeGreaterThan(34 + 6); // clear of the 12px campfire gap's near edge
+  });
+
+  // Impl-review round 2, finding 5: the LAST-ordered child's marker sits
+  // exactly at the trail's true end by construction (its segment's own
+  // `end` IS `trailEnd`) — only BEAST_ANCHOR_OFFSET_PX(26) away from the
+  // beast's own left edge. A centred name-tag on that marker routinely
+  // crowds/overlaps the beast doodle; earlier (non-last) children have no
+  // such constraint. This is true on every trail — "short trails" in the
+  // review's own observation was just where it happened to be noticed.
+  it("suppresses the LAST todo child's name-tag (it would crowd the beast) but keeps an earlier todo child's tag", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [
+      child({ id: "k1", title: "Earlier Quest", status: "planned", complexity: "S", order: 1 }),
+      child({ id: "k2", title: "Final Quest", status: "planned", complexity: "S", order: 2 }),
+    ];
+    const { container } = renderTrail(epic, kids, { showNames: true });
+
+    const tags = Array.from(container.querySelectorAll(".trail-tag--todo")).map((el) => el.textContent);
+    expect(tags).toContain("Earlier Quest");
+    expect(tags).not.toContain("Final Quest");
+
+    // The suppressed child's own WAYPOINT marker and full-name tooltip
+    // still render fine — only the on-trail label is dropped.
+    expect(container.querySelectorAll(".atlas-trail__waypoint--todo").length).toBe(2);
+    expect(tooltipTexts(container).some((t) => t.startsWith("Final Quest —"))).toBe(true);
+  });
+
+  it("an in-flight epic where the LAST child is a todo (nothing done/at-hand) still suppresses only that last tag", () => {
+    // A degenerate but real case: an epic that's marching (in-flight) but
+    // whose only children so far are todo — the "last" child is also the
+    // FIRST/only one, same geometry as the single-child case above.
+    const epic = card({ id: "WF-090", status: "in-flight" });
+    const solo = child({ id: "k1", title: "Only Quest", status: "planned", complexity: "M" });
+    const { container } = renderTrail(epic, [solo], { showNames: true });
+    expect(container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
   });
 
   afterEach(() => {
