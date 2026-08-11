@@ -76,13 +76,13 @@ export interface TopBarProps {
    * OVERRIDES the party-derived count so both readouts agree; `undefined`
    * (every other repo) keeps the normal live-party-member count below. */
   questingCountOverride?: number;
-  /** WF-086: which page the app is showing — the board (default) or the
-   * Epic Atlas. App-owned, session-local state, threaded straight through
-   * like `activeBranch`. Optional (defaults to "board"/no-op) so this
-   * chunk's TopBar wiring compiles standalone, ahead of App.tsx actually
-   * owning the `view` state in a later chunk. */
-  view?: "board" | "atlas";
-  onSelectView?: (view: "board" | "atlas") => void;
+  /** WF-086: which page the app is showing — the board or the Epic Atlas.
+   * App-owned, session-local state, threaded straight through like
+   * `activeBranch`. Required — App.tsx has owned and passed this since
+   * its own chunk landed; the standalone-compile rationale for making it
+   * optional expired the moment that wiring existed. */
+  view: "board" | "atlas";
+  onSelectView: (view: "board" | "atlas") => void;
 }
 
 function formatPct(value: number): string {
@@ -146,8 +146,8 @@ function TopBar({
   labelColors,
   controlsOpen,
   onToggleControls,
-  view = "board",
-  onSelectView = () => {},
+  view,
+  onSelectView,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to

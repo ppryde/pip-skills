@@ -606,7 +606,7 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     );
   });
 
-  it("sits immediately after topbar__identity, before the repo selector", () => {
+  it("sits after topbar__identity and before the repo selector (invisible-on-desktop mobile row-break spacers may sit between)", () => {
     const { container } = render(
       <StatefulTopBar {...baseProps()} repos={[{ root: "/r", label: "r", current: true, has_board: true, live_sessions: 0 }]} />
     );
@@ -616,7 +616,13 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     const toggleIndex = children.findIndex((c) => c.classList.contains("topbar__view-toggle"));
     const repoIndex = children.findIndex((c) => c.classList.contains("topbar__repo-select"));
     expect(identityIndex).toBeGreaterThanOrEqual(0);
-    expect(toggleIndex).toBe(identityIndex + 1);
+    // Not necessarily the VERY next sibling — the mobile row-break spacers
+    // (.topbar__row-break--r2/r3/r4, `display:none` outside the ≤720px
+    // media query) are grouped right after identity too, DOM-adjacent
+    // purely to keep their own diff small; they carry no desktop visual
+    // weight, so "after identity, before the repo selector" is the actual
+    // contract, not byte-adjacent.
+    expect(toggleIndex).toBeGreaterThan(identityIndex);
     expect(toggleIndex).toBeLessThan(repoIndex);
   });
 });
