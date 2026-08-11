@@ -1205,10 +1205,11 @@ body {
   margin-left: 1.5rem;
 }
 
-/* Pennant banner header (WF-028 chunk 2) — HANDOFF's column banner: an
-   asymmetric-radius pennant shape, white text, hard offset shadow. Fill
-   colour is per accent key (`.lane__header--<key>` below); the header
-   itself only owns shape/spacing/text-colour, not colour. */
+/* Rectangular sketch label header (WF-093) — matches the Epic Atlas trail's
+   `.trail-tag` name-tags: a hand-inked rectangular wobble (not the old
+   pennant/flag shape), dark ink text, and a soft lift shadow. Fill colour
+   is per accent key (`.lane__header--<key>` below); the header itself only
+   owns shape/spacing/text-colour, not colour. */
 .lane__header {
   flex: 0 0 auto;
   display: flex;
@@ -1217,8 +1218,10 @@ body {
   padding: 7px 14px;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--legacy-color-fff);
-  border-radius: var(--qb-radius-pennant);
+  color: var(--qb-ink-900);
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-ink-300);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1229,48 +1232,54 @@ body {
    lanes (Implementation/Impl Review) share one accent group each; Archive
    (labelled "Abandoned") gets its own muted ash accent (WF-076) — no
    HANDOFF row of its own, so this is a new, deliberately desaturated
-   addition rather than a borrowed group. */
+   addition rather than a borrowed group.
+   WF-093: each is now a pastel wash of its accent (mixed over white, same
+   recipe as `.trail-tag--*`) with an inked border, not the old saturated
+   banner fill — the base `.lane__header` rule above now owns the shared
+   lift shadow, so these only ever set background + border. Held a touch
+   stronger than the trail tags' 30%/55% (38%/60%) since a lane header
+   anchors a whole column rather than floating over parchment. */
 .lane__header--backlog {
-  background: var(--qb-accent-forest-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-forest-shadow);
+  background: color-mix(in srgb, var(--qb-accent-forest-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 60%, white);
 }
 
 .lane__header--bootstrap {
-  background: var(--qb-accent-amber-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-amber-fill) 60%, white);
 }
 
 .lane__header--planning,
 .lane__header--plan-review,
 .lane__header--verification {
-  background: var(--qb-accent-sky-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-sky-shadow);
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 60%, white);
 }
 
 .lane__header--implementation,
 .lane__header--impl-review {
-  background: var(--qb-accent-orange-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-orange-shadow);
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-orange-fill) 60%, white);
 }
 
 .lane__header--awaiting-merge {
-  background: var(--qb-accent-rose-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-rose-shadow);
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 60%, white);
 }
 
 .lane__header--done {
-  background: var(--qb-accent-umber-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-umber-shadow);
+  background: color-mix(in srgb, var(--qb-accent-umber-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-umber-fill) 60%, white);
 }
 
 .lane__header--parked {
-  background: var(--qb-accent-taupe-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-taupe-shadow);
+  background: color-mix(in srgb, var(--qb-accent-taupe-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-taupe-fill) 60%, white);
 }
 
 .lane__header--abandoned {
-  background: var(--qb-accent-ash-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-ash-shadow);
+  background: color-mix(in srgb, var(--qb-accent-ash-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-ash-fill) 60%, white);
 }
 
 /* WF-085 in-progress lane (mobile-only — `collapseStagesForMobile`'s
@@ -1278,8 +1287,8 @@ body {
    rather than inventing a new one, since it's the umbrella over all 7
    stages this lane replaces on a phone. */
 .lane__header--in-progress {
-  background: var(--qb-accent-amber-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-amber-fill) 60%, white);
 }
 
 /* WF-092: light lane fill — the same per-accent groups as the header banners
