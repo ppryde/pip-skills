@@ -270,7 +270,18 @@ function AtlasTrail({
       // pulsing ring or the pennant.
       const atHand = !parked;
       svgMarkers.push(
-        <g key={child.id} className="atlas-trail__waypoint atlas-trail__waypoint--athand">
+        <g
+          key={child.id}
+          className="atlas-trail__waypoint atlas-trail__waypoint--athand"
+          // The pennant (below) is suppressed on the trail's last child —
+          // when that happens, this marker is the ONLY AT HAND affordance,
+          // so it opens the same card detail drawer directly (see the
+          // `.atlas-trail__waypoint--athand` cursor/hover rules in
+          // styles.css). Only this in-progress marker gets a click handler
+          // — the done/todo markers stay tooltip-only, their own name-tags
+          // already cover the click affordance.
+          onClick={() => onOpenCard(child.id)}
+        >
           {atHand && <circle cx={mx} cy={my} r={14} className="at-hand-ring" />}
           <circle cx={mx} cy={my} r={10} className="atlas-trail__athand-dot" />
           <text x={mx} y={my + 3.5} textAnchor="middle" className="atlas-trail__athand-glyph">
@@ -294,13 +305,15 @@ function AtlasTrail({
       // only the floating pennant label suppresses.
       if (atHand && !isLastChild) {
         overlayTags.push(
-          <span
+          <button
+            type="button"
             key={`${child.id}-pennant`}
             className="trail-tag atlas-trail__pennant--athand"
             style={{ left: `${mx}px`, top: `${my - 16}px`, transform: "translate(-50%, -100%)" }}
+            onClick={() => onOpenCard(child.id)}
           >
             ◆ AT HAND
-          </span>
+          </button>
         );
       }
       return;

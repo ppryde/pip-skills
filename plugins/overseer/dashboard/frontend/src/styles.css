@@ -4807,6 +4807,19 @@ a.card-drawer__pr-chip:hover {
   opacity: 0.8;
 }
 
+/* The AT HAND marker opens the card detail drawer directly (it's the only
+   affordance to do so when the pennant itself is suppressed — see
+   AtlasTrail.tsx/AtlasTrailVertical.tsx's last-child pennant gate). Subtle
+   hover feedback on the dot itself, echoing `button.trail-tag:hover`'s
+   underline without fighting the pulsing ring's own opacity animation. */
+.atlas-trail__waypoint--athand {
+  cursor: pointer;
+}
+
+.atlas-trail__waypoint--athand:hover .atlas-trail__athand-dot {
+  stroke-width: 3.5;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .at-hand-ring {
     animation: atlas-at-hand-pulse 1.8s ease-out infinite;

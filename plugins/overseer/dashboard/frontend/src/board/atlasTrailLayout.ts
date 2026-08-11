@@ -13,11 +13,12 @@
 import type { BoardCard, Status } from "../api/types";
 import { rarityStars } from "./rarityStars";
 
-/** The walled-village trailhead icon's own rendered size — HANDOFF (user
- * amendment): "~28-32px ... it is a town after all", deliberately GRANDER
- * than the other ~20px trail markers (`MARKER_SIZE_PX` in AtlasTrail.tsx/
- * AtlasTrailVertical.tsx). */
-export const TRAILHEAD_ICON_SIZE_PX = 30;
+/** The walled-village trailhead icon's own rendered size — doubled (user
+ * amendment) from the original HANDOFF tuning of "~28-32px ... it is a
+ * town after all" (30px) to read as unmistakably a town; deliberately
+ * GRANDER than the other ~20px trail markers (`MARKER_SIZE_PX` in
+ * AtlasTrail.tsx/AtlasTrailVertical.tsx). */
+export const TRAILHEAD_ICON_SIZE_PX = 60;
 /** Clearance beyond the trailhead icon before the trail's first segment
  * starts — keeps the icon clear of the rail/card on one side and the
  * trail's own content on the other. */

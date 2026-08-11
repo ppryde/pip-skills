@@ -520,6 +520,29 @@ describe("<AtlasTrail/>", () => {
       tag.click();
       expect(onOpenCard).toHaveBeenCalledWith("k1");
     });
+
+    it("clicking the AT HAND pennant calls onOpenCard with the in-progress child's id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const prog = child({ id: "k1", status: "in-flight", complexity: "M", order: 1 });
+      const todoAfter = child({ id: "k2", status: "planned", complexity: "S", order: 2 });
+      const { container } = renderTrail(epic, [prog, todoAfter], { onOpenCard });
+      const pennant = container.querySelector(".atlas-trail__pennant--athand") as HTMLButtonElement;
+      expect(pennant.tagName).toBe("BUTTON");
+      pennant.click();
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
+
+    it("when the in-progress child is the trail's last child (pennant suppressed), clicking its marker calls onOpenCard with that id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
+      const { container } = renderTrail(epic, [prog], { onOpenCard });
+      expect(container.querySelector(".atlas-trail__pennant--athand")).not.toBeInTheDocument();
+      const marker = container.querySelector(".atlas-trail__waypoint--athand") as SVGGElement;
+      marker.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
   });
 
   afterEach(() => {

@@ -241,7 +241,14 @@ function AtlasTrailVertical({
     if (group === "in-progress") {
       const atHand = !parked;
       svgMarkers.push(
-        <g key={child.id} className="atlas-trail__waypoint atlas-trail__waypoint--athand">
+        <g
+          key={child.id}
+          className="atlas-trail__waypoint atlas-trail__waypoint--athand"
+          // Mirrors AtlasTrail.tsx's own marker click — the pennant below
+          // is suppressed on the trail's last child, leaving this marker as
+          // the only AT HAND affordance in that case.
+          onClick={() => onOpenCard(child.id)}
+        >
           {atHand && <circle cx={mx} cy={my} r={14} className="at-hand-ring" />}
           <circle cx={mx} cy={my} r={10} className="atlas-trail__athand-dot" />
           <text x={mx} y={my + 3.5} textAnchor="middle" className="atlas-trail__athand-glyph">
@@ -264,13 +271,15 @@ function AtlasTrailVertical({
       // the floating pennant label suppresses.
       if (atHand && !isLastChild) {
         overlayTags.push(
-          <span
+          <button
+            type="button"
             key={`${child.id}-pennant`}
             className="trail-tag atlas-trail__pennant--athand trail-tag--down"
             style={tagStyle}
+            onClick={() => onOpenCard(child.id)}
           >
             ◆ AT HAND
-          </span>
+          </button>
         );
       }
       return;

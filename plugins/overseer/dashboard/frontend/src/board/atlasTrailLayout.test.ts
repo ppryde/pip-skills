@@ -141,9 +141,9 @@ describe("TRAILHEAD_RESERVE_PX", () => {
     expect(TRAILHEAD_RESERVE_PX).toBe(TRAILHEAD_ICON_SIZE_PX + TRAILHEAD_PADDING_PX);
   });
 
-  it("the icon is visibly grander than the ~20px trail markers, per HANDOFF's 28-32px tuned range", () => {
-    expect(TRAILHEAD_ICON_SIZE_PX).toBeGreaterThanOrEqual(28);
-    expect(TRAILHEAD_ICON_SIZE_PX).toBeLessThanOrEqual(32);
+  it("the icon is visibly grander than the ~20px trail markers — doubled to 60px (user amendment) from HANDOFF's original 28-32px tuning", () => {
+    expect(TRAILHEAD_ICON_SIZE_PX).toBe(60);
+    expect(TRAILHEAD_ICON_SIZE_PX).toBeGreaterThan(20);
   });
 });
 
