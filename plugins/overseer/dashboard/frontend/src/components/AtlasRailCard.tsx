@@ -1,8 +1,16 @@
+import { useState } from "react";
+import type { UIEvent } from "react";
 import type { BoardCard, Rollup } from "../api/types";
 import { rarityStars } from "../board/rarityStars";
 import { formatTokens } from "../board/formatTokens";
 import { beastFor } from "../board/beastName";
 import { formatDateStamp, parseCalendarDate } from "../board/atlasGeometry";
+import {
+  openDependencies,
+  orderChildrenForTrail,
+  statusGroupOf,
+  weightOf,
+} from "../board/atlasTrailLayout";
 import { StarIcon } from "./icons";
 
 export interface AtlasRailCardProps {
@@ -21,11 +29,28 @@ export interface AtlasRailCardProps {
    * threaded through as a stable class hook; the later styling chunk owns
    * the actual colour. */
   accentKey?: string;
-  /** Unmet `depends_on` target ids — the page computes doneness across the
-   * whole board, this component just renders whatever it's given (same
-   * "dumb component" contract as `DependencyBadge`). */
+  /** Unmet `depends_on` target ids for the EPIC itself — the page computes
+   * doneness across the whole board, this component just renders whatever
+   * it's given (same "dumb component" contract as `DependencyBadge`). */
   blockedOn?: string[];
+  /** Every card on the board, keyed by id — needed to resolve each CHILD's
+   * own `depends_on` for the checklist row's blocked (⛔) styling. Defaults
+   * to empty so existing call sites that never pass it just render every
+   * child as never-blocked, rather than crashing. */
+  cardsById?: Map<string, BoardCard>;
 }
+
+function weightLabel(child: BoardCard): string {
+  return "★".repeat(weightOf(child));
+}
+
+/** ~5 rows of the checklist wheel (HANDOFF: "~132px desktop / ~224px
+ * mobile") — mobile's own cap is a pure CSS override
+ * (`.atlas-rail-card__subquests` inside the `@media (max-width: 720px)`
+ * block), this constant only drives the desktop default and the
+ * overflow-detection math below (both caps land on the SAME element, so
+ * either is a valid "does this list currently overflow" probe). */
+const WHEEL_MAX_HEIGHT_PX = 132;
 
 /**
  * Left-rail quest card for one epic in the Epic Atlas (WF-086) — the
@@ -44,18 +69,17 @@ function AtlasRailCard({
   onOpen,
   accentKey,
   blockedOn = [],
+  cardsById = new Map(),
 }: AtlasRailCardProps) {
   const stars = rarityStars(card.complexity);
   const beast = beastFor(card.id);
   const hasChildren = childCards.length > 0;
 
-  // Sub-quest list order matches the trail's own waypoint order (`updated`,
-  // TZ-normalized) rather than the children's raw board order.
-  const sortedChildren = hasChildren
-    ? [...childCards].sort(
-        (a, b) => parseCalendarDate(a.updated).getTime() - parseCalendarDate(b.updated).getTime()
-      )
-    : [];
+  // Sub-quest list order matches the TRAIL's own order (WF-086 v2: done ->
+  // in-progress -> todo, by board `order` within each group) — not the old
+  // date-sorted order — so the rail card's checklist and its own trail row
+  // never disagree about sequence.
+  const orderedChildren = hasChildren ? orderChildrenForTrail(childCards) : [];
 
   const progressPct = rollup.total > 0 ? (rollup.done / rollup.total) * 100 : 0;
 
@@ -67,6 +91,33 @@ function AtlasRailCard({
   ]
     .filter(Boolean)
     .join(" ");
+
+  // Checklist wheel (HANDOFF): real scroll-position-driven fade masks
+  // (`.fade-top`/`.fade-bottom` in the prototype) rather than the
+  // prototype's own imperative `dataset`-guarded DOM listener wiring —
+  // React's `onScroll` prop is already idempotent (React itself owns
+  // attaching/detaching the single listener across re-renders; there's no
+  // manual `querySelectorAll` + guard-flag re-wiring step to port). State
+  // starts at "no fade either side" and both `useState` initial reads AND
+  // every `onScroll` firing run the exact same `computeFades` — jsdom (no
+  // real layout) reports 0/0/0 for scrollHeight/clientHeight/scrollTop
+  // unless a test stubs them, so both fades correctly stay off by default
+  // there.
+  const [fadeTop, setFadeTop] = useState(false);
+  const [fadeBottom, setFadeBottom] = useState(false);
+
+  function computeFades(el: HTMLElement) {
+    setFadeTop(el.scrollTop > 1);
+    setFadeBottom(el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+  }
+
+  function handleSubquestsRef(el: HTMLUListElement | null) {
+    if (el) computeFades(el);
+  }
+
+  function handleSubquestsScroll(e: UIEvent<HTMLUListElement>) {
+    computeFades(e.currentTarget);
+  }
 
   return (
     <div className={className} data-card-id={card.id} onClick={() => onOpen(card.id)}>
@@ -141,28 +192,58 @@ function AtlasRailCard({
       )}
 
       {expanded && hasChildren && (
-        <ul className="atlas-rail-card__subquests">
-          {sortedChildren.map((child) => {
+        <ul
+          className={
+            "atlas-rail-card__subquests" +
+            (fadeTop ? " atlas-rail-card__subquests--fade-top" : "") +
+            (fadeBottom ? " atlas-rail-card__subquests--fade-bottom" : "")
+          }
+          style={{ maxHeight: WHEEL_MAX_HEIGHT_PX }}
+          ref={handleSubquestsRef}
+          onScroll={handleSubquestsScroll}
+        >
+          {orderedChildren.map((child) => {
             const done = child.status === "done";
+            const abandoned = child.status === "abandoned";
+            const group = statusGroupOf(child);
+            // A done child can't meaningfully still be "blocked" — stale
+            // depends_on data on finished work shouldn't paint a rose
+            // border over a quest that's already cleared.
+            const blocked = group !== "done" && openDependencies(child, cardsById).length > 0;
+
+            const rowClassName = [
+              "atlas-rail-card__subquest",
+              done ? "atlas-rail-card__subquest--done" : "",
+              abandoned ? "atlas-rail-card__subquest--abandoned" : "",
+              blocked ? "atlas-rail-card__subquest--blocked" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            const checkboxGlyph = done ? "✓" : abandoned ? "†" : blocked ? "⛔" : "";
+
+            const titleClassName = [
+              "atlas-rail-card__subquest-title",
+              done ? "atlas-rail-card__subquest-title--done" : "",
+              abandoned ? "atlas-rail-card__subquest-title--abandoned" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            // Done/abandoned work has a real date; a todo (or in-progress,
+            // or blocked-overlay) child has no honest date to show — the
+            // ledger keeps no due dates, so showing one would imply a
+            // deadline that was never made (HANDOFF).
+            const stamp =
+              done || abandoned ? formatDateStamp(parseCalendarDate(child.updated)) : weightLabel(child);
+
             return (
-              <li
-                key={child.id}
-                className={"atlas-rail-card__subquest" + (done ? " atlas-rail-card__subquest--done" : "")}
-              >
+              <li key={child.id} className={rowClassName}>
                 <span className="atlas-rail-card__checkbox" aria-hidden="true">
-                  {done ? "✓" : ""}
+                  {checkboxGlyph}
                 </span>
-                <span
-                  className={
-                    "atlas-rail-card__subquest-title" +
-                    (done ? " atlas-rail-card__subquest-title--done" : "")
-                  }
-                >
-                  {child.title}
-                </span>
-                <span className="atlas-rail-card__subquest-date">
-                  {child.updated ? formatDateStamp(parseCalendarDate(child.updated)) : ""}
-                </span>
+                <span className={titleClassName}>{child.title}</span>
+                <span className="atlas-rail-card__subquest-date">{stamp}</span>
               </li>
             );
           })}

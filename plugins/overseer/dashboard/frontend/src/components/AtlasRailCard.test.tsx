@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { BoardCard, Rollup } from "../api/types";
 import { beastFor } from "../board/beastName";
 import AtlasRailCard from "./AtlasRailCard";
@@ -239,15 +239,19 @@ describe("<AtlasRailCard/>", () => {
     expect(chips!.contains(count)).toBe(false);
   });
 
-  it("renders the expanded sub-quest checklist sorted by updated, with done state and date stamps", () => {
+  // WF-086 v2: the checklist order now matches the TRAIL's own order
+  // (done -> in-progress -> todo, by board `order` within each group) —
+  // not the old date-sorted order — so the rail card's expanded list and
+  // its own trail row never disagree about sequence.
+  it("orders the expanded checklist done -> in-progress -> todo, by board `order` within each group", () => {
     const { container } = render(
       <AtlasRailCard
         card={card({ id: "WF-085" })}
         rollup={rollup()}
         childCards={[
-          card({ id: "WF-085-2", title: "Second", status: "done", updated: "2026-08-06" }),
-          card({ id: "WF-085-1", title: "First", status: "done", updated: "2026-07-31" }),
-          card({ id: "WF-085-3", title: "Third", status: "in-flight", updated: "2026-08-10" }),
+          card({ id: "WF-085-3", title: "Todo", status: "planned", order: 1 }),
+          card({ id: "WF-085-2", title: "Second Done", status: "done", updated: "2026-08-06", order: 2 }),
+          card({ id: "WF-085-1", title: "First Done", status: "done", updated: "2026-07-31", order: 1 }),
         ]}
         expanded={true}
         onToggleExpand={vi.fn()}
@@ -255,12 +259,12 @@ describe("<AtlasRailCard/>", () => {
       />
     );
     const rows = container.querySelectorAll(".atlas-rail-card__subquest");
-    expect(rows.length).toBe(3);
-    expect(rows[0]).toHaveTextContent("First");
-    expect(rows[1]).toHaveTextContent("Second");
-    expect(rows[2]).toHaveTextContent("Third");
+    expect(Array.from(rows).map((r) => r.textContent)).toEqual([
+      expect.stringContaining("First Done"),
+      expect.stringContaining("Second Done"),
+      expect.stringContaining("Todo"),
+    ]);
     expect(rows[0]).toHaveClass("atlas-rail-card__subquest--done");
-    expect(rows[2]).not.toHaveClass("atlas-rail-card__subquest--done");
     expect(rows[0]).toHaveTextContent("31 JUL");
   });
 
@@ -276,5 +280,158 @@ describe("<AtlasRailCard/>", () => {
       />
     );
     expect(container.querySelector(".atlas-rail-card__subquests")).not.toBeInTheDocument();
+  });
+
+  describe("checklist row styling per status (HANDOFF's checklist wheel)", () => {
+    it("done: accent ✓ checkbox and the real date stamp", () => {
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={[card({ id: "k1", title: "Cleared", status: "done", updated: "2026-08-06" })]}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+        />
+      );
+      const row = container.querySelector(".atlas-rail-card__subquest")!;
+      expect(row.querySelector(".atlas-rail-card__checkbox")).toHaveTextContent("✓");
+      expect(row.querySelector(".atlas-rail-card__subquest-date")).toHaveTextContent("6 AUG");
+    });
+
+    it("abandoned: dark box '†' glyph, struck-through title, real date — excluded from the done modifier", () => {
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={[card({ id: "k1", title: "Fallen", status: "abandoned", updated: "2026-07-20" })]}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+        />
+      );
+      const row = container.querySelector(".atlas-rail-card__subquest")!;
+      expect(row).toHaveClass("atlas-rail-card__subquest--abandoned");
+      expect(row).not.toHaveClass("atlas-rail-card__subquest--done");
+      expect(row.querySelector(".atlas-rail-card__checkbox")).toHaveTextContent("†");
+      expect(row.querySelector(".atlas-rail-card__subquest-title")).toHaveClass(
+        "atlas-rail-card__subquest-title--abandoned"
+      );
+      expect(row.querySelector(".atlas-rail-card__subquest-date")).toHaveTextContent("20 JUL");
+    });
+
+    it("blocked (open depends_on): rose border + ⛔ checkbox glyph", () => {
+      const cardsById = new Map([
+        ["WF-DEP", card({ id: "WF-DEP", status: "in-flight" })],
+      ]);
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={[card({ id: "k1", title: "Barred", status: "planned", depends_on: ["WF-DEP"] })]}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+          cardsById={cardsById}
+        />
+      );
+      const row = container.querySelector(".atlas-rail-card__subquest")!;
+      expect(row).toHaveClass("atlas-rail-card__subquest--blocked");
+      expect(row.querySelector(".atlas-rail-card__checkbox")).toHaveTextContent("⛔");
+    });
+
+    it("todo: no honest date — the stamp shows ★weight instead", () => {
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={[
+            card({ id: "k1", title: "Ahead", status: "planned", complexity: "L", updated: "2026-08-06" }),
+          ]}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+        />
+      );
+      const row = container.querySelector(".atlas-rail-card__subquest")!;
+      expect(row.querySelector(".atlas-rail-card__checkbox")).toHaveTextContent("");
+      expect(row.querySelector(".atlas-rail-card__subquest-date")).toHaveTextContent("★★★");
+      expect(row.querySelector(".atlas-rail-card__subquest-date")).not.toHaveTextContent("AUG");
+    });
+  });
+
+  describe("checklist wheel scroll fades", () => {
+    function stubScrollMetrics(scrollHeight: number, clientHeight: number, scrollTop = 0) {
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(scrollHeight);
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(clientHeight);
+      vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockReturnValue(scrollTop);
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function manyChildren(n: number) {
+      return Array.from({ length: n }, (_, i) =>
+        card({ id: `k${i}`, title: `Quest ${i}`, status: "planned", order: i })
+      );
+    }
+
+    it("shows a bottom fade (not a top fade) when content overflows and is scrolled to the top", () => {
+      stubScrollMetrics(400, 132, 0);
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={manyChildren(10)}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+        />
+      );
+      const list = container.querySelector(".atlas-rail-card__subquests")!;
+      expect(list).toHaveClass("atlas-rail-card__subquests--fade-bottom");
+      expect(list).not.toHaveClass("atlas-rail-card__subquests--fade-top");
+    });
+
+    it("shows both fades mid-scroll, and only the top fade once scrolled to the bottom", () => {
+      stubScrollMetrics(400, 132, 50);
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={manyChildren(10)}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+        />
+      );
+      const list = container.querySelector(".atlas-rail-card__subquests")!;
+      fireEvent.scroll(list);
+      expect(list).toHaveClass("atlas-rail-card__subquests--fade-top");
+      expect(list).toHaveClass("atlas-rail-card__subquests--fade-bottom");
+
+      stubScrollMetrics(400, 132, 268); // 268 + 132 === 400 -> scrolled to true bottom
+      fireEvent.scroll(list);
+      expect(list).toHaveClass("atlas-rail-card__subquests--fade-top");
+      expect(list).not.toHaveClass("atlas-rail-card__subquests--fade-bottom");
+    });
+
+    it("shows neither fade when the content doesn't overflow the cap", () => {
+      stubScrollMetrics(80, 132, 0);
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={manyChildren(2)}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+        />
+      );
+      const list = container.querySelector(".atlas-rail-card__subquests")!;
+      expect(list).not.toHaveClass("atlas-rail-card__subquests--fade-top");
+      expect(list).not.toHaveClass("atlas-rail-card__subquests--fade-bottom");
+    });
   });
 });

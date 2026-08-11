@@ -159,6 +159,7 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
                       onOpen={onOpenCard}
                       accentKey={accentKey}
                       blockedOn={blockedOnFor(epic)}
+                      cardsById={cardsById}
                     />
                   </div>
                   <div className="atlas-chart__lane" ref={i === 0 ? firstLaneRef : undefined}>
