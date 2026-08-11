@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   DndContext,
   useSensor,
@@ -211,6 +218,55 @@ function Board({
     }
   }, []);
 
+  // Item 8: on mobile, `.board-region`'s page-scroll length must follow the
+  // ACTIVE lane's own content height, not the tallest lane in the row.
+  // `.board` is a single-line flex row of lanes (`align-items: flex-start`,
+  // base rule) — that stops SHORTER lanes being visually stretched, but the
+  // flex LINE's own auto height (and so `.board`'s) is still the max of
+  // every lane in it regardless of align-items, since the line has to be
+  // tall enough to contain its tallest item. So `.board-region`'s vertical
+  // scroll range stayed pinned to the tallest lane even while swiped to a
+  // short one — you could scroll the page down into visually empty space
+  // below a short lane's last card. Measuring the currently-active lane's
+  // pane and pinning `.board`'s OWN height to it (mobile only — see the
+  // inline style below, and `overflow-y: hidden` on `.board` in the mobile
+  // CSS block that actually clips the other, now-taller siblings so they
+  // stop contributing to the scrollable region) makes a short lane's page
+  // scroll stop exactly at its own last card, and a tall lane's full card
+  // list stays reachable via the same page scroll as before. Desktop never
+  // sets this (gated on `isMobile`), so `.board`'s CSS `height: 100%` there
+  // is untouched.
+  const [activeLaneHeight, setActiveLaneHeight] = useState<number | null>(
+    null
+  );
+
+  useLayoutEffect(() => {
+    if (!isMobile) {
+      setActiveLaneHeight(null);
+      return;
+    }
+    const track = trackRef.current;
+    if (!track) return;
+
+    const pane = track.querySelector<HTMLElement>(
+      `[data-lane-key="${activeLaneKey}"]`
+    );
+    if (!pane) return;
+
+    const measure = () => setActiveLaneHeight(pane.scrollHeight);
+    measure();
+
+    // Re-measure when the active lane's OWN content changes size (a card
+    // added/removed/expanded) without needing the active lane to change —
+    // jsdom (unlike every real browser) has no ResizeObserver, so this is
+    // a no-op (not a crash) under the component tests, same guard pattern
+    // as the `scrollIntoView` check in `handleNavJump` above.
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(pane);
+    return () => ro.disconnect();
+  }, [isMobile, activeLaneKey, displayLanes]);
+
   const handleDragStart = useCallback(() => {
     setDragActive(true);
   }, [setDragActive]);
@@ -288,7 +344,23 @@ function Board({
           Desktop hides it entirely via CSS — see `.lane-icon-nav` in
           styles.css, gated at `@media (max-width:720px)`. */}
       <LaneIconNav lanes={navLanes} activeKey={activeLaneKey} onJump={handleNavJump} />
-      <div className="board" ref={trackRef} onScroll={handleTrackScroll}>
+      <div
+        className="board"
+        ref={trackRef}
+        onScroll={handleTrackScroll}
+        // Item 8 (mobile only — see the `activeLaneHeight` effect above):
+        // pins `.board`'s box to the active lane's own content height so
+        // `.board-region`'s page scroll can't run past it. `undefined`
+        // whenever not mobile/not yet measured leaves the CSS `height`
+        // rule (desktop's `100%`, or mobile's `auto` fallback before the
+        // first layout effect run) in full control — never an empty
+        // style attribute on desktop.
+        style={
+          isMobile && activeLaneHeight != null
+            ? { height: `${activeLaneHeight}px` }
+            : undefined
+        }
+      >
         {dragToast && (
           <div className="board-toast" role="status">
             {dragToast}

@@ -108,7 +108,13 @@ function App() {
   // whole-object reference.
   const { filter, setQuery, setPriority, setComplexity, clear, cycleLabel } =
     useCardFilter();
-  const [showArchive, setShowArchive] = useState(false);
+  // WF-0XX item 6: the Abandoned lane is opt-OUT now, not opt-in — it used
+  // to default hidden (`false`) so a fresh load never showed it, but that
+  // made the lane (and its nav icon) invisible unless a user discovered the
+  // Controls-group checkbox first. Defaulting `true` shows it (empty →
+  // faded "0" icon via the existing empty-lane treatment when there's
+  // nothing abandoned) on both viewports; the checkbox still toggles it off.
+  const [showArchive, setShowArchive] = useState(true);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   // HANDOFF §State Management assigns this App-level, alongside the
   // existing openCardId precedent — PartyOverlay renders as a sibling of

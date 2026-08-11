@@ -179,6 +179,23 @@ function TopBar({
           </div>
         </div>
 
+        {/* Mobile row layout: the topbar is one wrapping flex row and every
+            child below is a direct flex item of it — desktop relies on
+            natural DOM order (unchanged), mobile re-sequences everything
+            with `order` inside the `@media (max-width:720px)` block in
+            styles.css. Real width-based wrapping alone isn't reliable
+            across phone widths (e.g. repo+branch together could still be
+            narrow enough to share a line with the rest pills on a wider
+            phone), so these three zero-height spacers force hard row
+            boundaries regardless of width — `aria-hidden` (not real
+            content), `display:none` outside the mobile block so desktop
+            never sees them at all. Their DOM position here is arbitrary
+            (CSS `order` places them, not sibling adjacency) — grouped
+            together right after identity to keep this diff small. */}
+        <span className="topbar__row-break topbar__row-break--r2" aria-hidden="true" />
+        <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
+        <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
+
         <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
         <button
           type="button"
@@ -310,11 +327,22 @@ function TopBar({
           <span className="topbar__fleet-icon" aria-hidden="true">
             ⚔
           </span>
-          {questingCount} questing
-          {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
-          {fleet.nearThreshold > 0 && (
-            <> · {fleet.nearThreshold} near threshold</>
-          )}
+          {/* Mobile-only (styles.css): the full "N questing · top ctx N% ·
+              N near threshold" line can be wider than R4's remaining row
+              space next to the gold/vanquished pills — wrapping it in its
+              own span gives ellipsis-truncation a real box to clip (a bare
+              text run inside a flex container becomes an anonymous flex
+              item CSS can't target), so the pill's OWN height stays a
+              single line/matches its neighbours instead of growing to fit
+              a wrapped second line. Desktop is untouched (no width cap
+              there), so the full line still always shows in full. */}
+          <span className="topbar__fleet-label">
+            {questingCount} questing
+            {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
+            {fleet.nearThreshold > 0 && (
+              <> · {fleet.nearThreshold} near threshold</>
+            )}
+          </span>
         </button>
       </header>
       {/* Task 10: NewCardDialog is a sibling of `<header>`, not nested

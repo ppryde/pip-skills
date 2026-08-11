@@ -3947,13 +3947,88 @@ a.card-drawer__pr-chip:hover {
     margin-left: 0;
   }
 
+  /* --- Top bar: explicit row sequencing (rows R2-R5) ---
+     DOM order stays exactly as TopBar.tsx renders it (desktop reads that
+     order unmodified — no `order` applies above 720px) — only `order`
+     numbers here re-sequence the same elements into full-width mobile
+     rows: R2 repo+branch, R3 the two rest pills, R4 gold+vanquished+
+     questing, R5 New-card/Controls. `.topbar__row-break--rN` spacers (see
+     TopBar.tsx) force each row boundary regardless of viewport width
+     within 320-720px — real wrap-on-overflow alone isn't reliable there
+     (e.g. repo+branch could still be narrow enough to share a line with
+     the rest pills on a wider phone without an explicit break). Gaps in
+     the numbering (10s apart) leave room to slot a future chip into a row
+     without renumbering everything else. */
+  .topbar__row-break { display: none; }
+  .topbar__row-break--r2,
+  .topbar__row-break--r3,
+  .topbar__row-break--r4 {
+    display: block;
+    flex-basis: 100%;
+    height: 0;
+  }
+  .topbar__row-break--r2 { order: 12; }
+  .topbar__row-break--r3 { order: 22; }
+  .topbar__row-break--r4 { order: 33; }
+
+  /* R2: repo + branch selects, side by side, sharing the row evenly.
+     `flex: 1 1 0; min-width: 0` on each CHIP (not just the `<select>`
+     inside) is what actually keeps both on one line at any width down to
+     320px — same "flex-basis:0 never overflows the line-breaking pass"
+     mechanism as the fleet-pill further down: `flex-basis: auto` here
+     would use the chip's natural (unclamped) content width to decide
+     line-fitting, which for a long branch name is wide enough alone to
+     wrap BRANCH onto its own second line before any shrinking is even
+     considered. The `<select>`s' own `max-width: 40vw` (base rule) is
+     dropped to `none` below — that cap assumed a full-width single-select
+     row (WF-046); pinned to a shared row, min-width:0 + the chip's own
+     flex-basis:0 is what constrains them now, and the select's existing
+     `overflow:hidden;text-overflow:ellipsis;white-space:nowrap` (base
+     rule, unchanged) still ellipsis-truncates the collapsed control's
+     text when the row is tight — the native dropdown's OPEN option list
+     is never truncated, only the closed control's label. */
+  .topbar__repo-select,
+  .topbar__branch-select {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .topbar__repo-select select,
+  .topbar__branch-select select {
+    max-width: none;
+    width: 100%;
+  }
+  .topbar__repo-select { order: 10; }
+  .topbar__branch-select { order: 11; }
+
+  /* R3: Short Rest + Long Rest pills, alone on their own row (both share
+     `.topbar__pill` — DOM order between them, Short before Long, already
+     matches the target left-to-right reading, so one shared order value
+     is enough). */
+  .topbar__pill { order: 20; }
+
+  /* R4: gold total, vanquished, questing/fleet pill. */
+  .topbar__gold-pill { order: 30; }
+  .topbar__vanquished-pill { order: 31; }
+  .topbar__fleet-pill { order: 32; }
+
+  /* R5: ＋New card on the left, Controls ▾ pinned right via the toggle's
+     own `margin-left: auto` (unchanged) — the two are the only items
+     between the r4 and (self-forcing, flex-basis:100%) controls-group
+     breaks, so that auto margin has the whole row's slack to push into. */
+  .topbar__new-card { order: 40; }
+
+  /* Rare/optional (`quarantinedCount > 0`) — own full-width row right
+     after identity, ahead of R2, so it never crowds into the repo/branch
+     row when present. */
+  .topbar__quarantine-banner { order: 5; flex-basis: 100%; }
+
   /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
-     `order` pins the toggle to the bottom-right of the wrapping shelf (after
-     every always-visible chip incl. the questing/fleet pill) and drops its
-     revealed group — plus the separate <FilterBar/> below the topbar — into one
-     block beneath the questing label, rather than wedged mid-shelf. */
+     `order` pairs the toggle with ＋New card on R5 (right end of that row,
+     via `margin-left: auto`) and drops its revealed group — plus the
+     separate <FilterBar/> below the topbar — into one block beneath
+     everything else, rather than wedged mid-shelf. */
   .topbar__controls-toggle {
-    order: 90; margin-left: auto;
+    order: 41; margin-left: auto;
     display: inline-flex; align-items: center; font-size: 0.8rem;
     padding: 0.35rem 0.75rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
     border: 1.5px solid var(--qb-btn-ink); background: var(--qb-btn-face);
@@ -3976,6 +4051,55 @@ a.card-drawer__pr-chip:hover {
   /* compact status glance shrinks so it fits a couple of wrapped rows on a phone */
   .topbar__pill, .topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill {
     font-size: 0.68rem; padding: 0.15rem 0.45rem;
+  }
+
+  /* R4: the fleet/questing pill's text ("N questing · top ctx N% · N near
+     threshold") is the longest of the three R4 pills by far — sharing a
+     row with the gold + vanquished pills leaves it little width, and
+     without a truncation escape hatch the text would wrap to a second
+     line, growing the pill taller than its neighbours (breaks the "same
+     height" requirement below, independent of the button-height fix
+     lower in this file). `min-width: 0` on the pill lets the flex item
+     itself shrink below its content's natural width (the flex default
+     `min-width: auto` refuses to, same rationale as the repo/branch
+     selects elsewhere); the label span is the thing that actually clips +
+     ellipsises, since a bare text run inside a flex container becomes an
+     anonymous flex item CSS can't target directly. */
+  .topbar__fleet-pill {
+    /* `flex-basis: 0` (not `auto`) is what actually keeps it on R4's row
+       with gold/vanquished: flex-wrap decides line breaks using each
+       item's HYPOTHETICAL (pre-shrink) main size, which for `auto` is the
+       full unclamped label text width — wide enough alone to overflow the
+       row and get pushed to its own line before shrinking is ever
+       considered. A `0` basis has nothing to overflow with, so the browser
+       always keeps it on the current line, then `flex-grow: 1` claims
+       whatever width gold+vanquished leave behind and the label's own
+       ellipsis (above) clips whatever doesn't fit. */
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .topbar__fleet-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* The actual cause of the pill reading taller than its neighbours: NOT
+     wrapping/the button-vs-span box model (both addressed above/below,
+     neither moved the needle) but the ⚔ glyph itself — `.topbar__fleet-
+     icon`'s base font-size is a fixed 0.85rem (desktop-sized) regardless
+     of the pill's own 0.68rem mobile override on its text, so the emoji's
+     own `line-height: normal` line box (~18px, against the bigger font)
+     was TALLER than the label text's (~14px) — `align-items: center`
+     sizes the whole pill to its tallest child, so the icon alone was
+     stretching it past the gold/vanquished pills. Matching its font-size
+     to the label (both left on `line-height: normal`, same as every
+     sibling pill — forcing `line-height: 1` here instead overcorrected,
+     making the pill a couple px SHORTER than its neighbours) collapses
+     the icon back down to the same line-box height as the text beside
+     it. */
+  .topbar__fleet-icon {
+    font-size: 0.68rem;
   }
   /* --- Icon-nav strip (mobile-v2 — LaneIconNav): one hand-drawn wobble box
      (RPG icon + count) per lane, evenly spaced above the swipe track,
@@ -4008,7 +4132,14 @@ a.card-drawer__pr-chip:hover {
     gap: 0.15rem;
     flex: 1 1 0;
     min-width: 38px;
-    max-width: 68px;
+    /* Item 7: was capped at 68px, which left visible empty gap in the
+       strip on any viewport wide enough that ~5 lanes' even share
+       exceeded that cap (e.g. the collapsed mobile lane set nearing
+       720px) — `flex:1 1 0` was already set up to grow evenly to fill
+       the row, the cap alone was fighting it. Removed outright: with
+       room to spare the boxes now grow to fill the strip; the `min-width`
+       floor plus the strip's own `overflow-x:auto` above still take over
+       once enough lanes are present to need it. */
     padding: 0.3rem 0.25rem;
     border: 1.5px solid var(--qb-btn-ink);
     border-radius: var(--qb-btn-wobble);
@@ -4117,10 +4248,27 @@ a.card-drawer__pr-chip:hover {
     width: 100%;
     max-width: 100vw;
     overflow-x: auto;
-    overflow-y: visible;
+    /* Item 8: was `visible` — Board.tsx now pins this box's height to the
+       ACTIVE lane's own content height (inline style, `activeLaneHeight`
+       effect) so `.board-region`'s page scroll can't run past it, but
+       that only works if the OTHER (now-taller, off-screen-at-this-swipe-
+       stop) lane siblings are actually clipped to it — `visible` would
+       let a taller neighbour's box keep contributing to the scrollable
+       region regardless of `.board`'s own declared height, defeating the
+       whole point. `hidden` here is safe because `.board`'s height is
+       always sized to fully fit whichever lane IS currently active (never
+       smaller), so nothing about the active lane itself is ever clipped —
+       only its taller, currently-swiped-away siblings are. */
+    overflow-y: hidden;
     scroll-snap-type: x mandatory;
     scroll-padding-inline: 0.75rem;
+    /* Fallback for the instant before the first `activeLaneHeight`
+       layout-effect measurement lands (and if JS is ever unavailable) —
+       the old "stretches to tallest lane" behaviour, never a 0-height
+       collapse. The JS-set inline `height` (Board.tsx) overrides this
+       once it has a real measurement. */
     height: auto;
+    transition: height 0.18s ease;
   }
 
   /* A lane is a ledger page: 88vw leaves the next lane's pennant peeking in
@@ -4263,5 +4411,41 @@ a.card-drawer__pr-chip:hover {
   .label-editor__input {
     font-size: 16px;
     min-height: 38px;
+  }
+}
+
+/* ==========================================================================
+   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
+   touch-target layer above so it wins the cascade (same specificity, later
+   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
+   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
+   match) that 44px floor left the questing/fleet pill visibly taller than
+   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
+   though all three already share identical padding/font-size/border via the
+   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
+   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
+   three (the other two are plain `<span>`s) — a bare button doesn't inherit
+   the guild body font from the UA stylesheet the way inline elements do, so
+   its `line-height: normal` resolves against a different font's metrics;
+   pinning its `font-family` here (line-height was already the shared
+   `normal` keyword on both — the mismatch was that keyword resolving
+   against two different fonts' metrics) makes all three pills
+   byte-for-byte the same box on mobile, not just coincidentally close.
+   NB: `font-family` only, never the `font` shorthand — that resets
+   font-size/weight too, which would fight the shared 0.68rem override
+   above (same specificity, later in the cascade would win and blow the
+   pill back up to the body's default size). */
+@media (max-width: 720px) {
+  .topbar__fleet-pill {
+    min-height: 0;
+    font-family: inherit;
+    /* Defensive, not load-bearing here (measured with/without: no height
+       change once the icon font-size fix below is in) — strips whatever
+       native form-control chrome Chromium might otherwise reserve room
+       for on a plain `<button>`, same "don't rely on the platform ever
+       agreeing with custom padding/border" instinct as every other
+       hand-styled button in this file. */
+    appearance: none;
+    -webkit-appearance: none;
   }
 }
