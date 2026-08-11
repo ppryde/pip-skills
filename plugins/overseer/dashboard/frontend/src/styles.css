@@ -437,15 +437,30 @@ body {
 }
 
 /* Parchment sticky top bar (WF-029 chunk 5, HANDOFF §Board "Top bar"). */
+/* Section-seam divider: the same chunky 9px-dash band that used to be
+   painted (twice, inset) inside the "Scry"/"Provisions" header rows now
+   sits once here, full-width, on this panel's own bottom edge — the seam
+   between `.topbar` and whatever follows (the filter/control section when
+   open, the board when closed). `background-color` + `background-image`
+   split (rather than the `background` shorthand) so this fill and the
+   dash band can layer independently; `.filter-bar` below renders the
+   identical band on its own bottom edge — keep the two byte-identical. */
 .topbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 18px 26px;
-  background: var(--qb-panel);
+  background-color: var(--qb-panel);
   color: var(--qb-ink-700);
-  border-bottom: 2px dashed var(--qb-line-dashed);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--qb-line-dashed) 0 9px,
+    transparent 9px 15px
+  );
+  background-repeat: no-repeat;
+  background-position: bottom left;
+  background-size: 100% 2px;
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
   position: sticky;
@@ -817,17 +832,14 @@ body {
   display: none;
 }
 
-/* Task 4: `#topbar-controls-group`'s own small header — a divider rule +
-   muted eyebrow title, opening the group before ThresholdControl. Same
-   "quiet caption" idea as `.filter-bar__eyebrow` above the filter row, just
-   paired with a divider instead of sitting inline. `flex-basis: 100%`
+/* Task 4: `#topbar-controls-group`'s own small header — muted eyebrow title,
+   opening the group before ThresholdControl. Same "quiet caption" idea as
+   `.filter-bar__eyebrow` above the filter row. `flex-basis: 100%`
    self-forces a line break in the `display: contents`-unwrapped group (same
    trick as `.topbar__quarantine-banner`/mobile's `.topbar__threshold`) so
    ThresholdControl and everything after it in the group starts underneath
-   this header, on every viewport. The divider itself (margin/padding/
-   background-image band) is declared jointly with `.filter-bar__eyebrow-row`
-   below (Task A) — the "Scry" and "Provisions" section rules share one rule
-   so they can't drift apart. */
+   this header, on every viewport. The section divider itself lives on
+   `.topbar`'s own bottom edge (full-width seam), not inset inside this row. */
 .topbar__controls-header {
   flex-basis: 100%;
 }
@@ -1046,14 +1058,24 @@ body {
    (`.topbar__repo-select select`); the Labels/Clear buttons are the shared
    Role A button system (`--qb-btn-*`, see `.card-drawer__edit-actions
    button`) — no new button style. */
+/* Section-seam divider: the seam between this block and `.board-region`
+   below — same chunky 9px-dash band as `.topbar`'s bottom edge above,
+   byte-identical, so the two full-width dividers match exactly. */
 .filter-bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.6rem;
   padding: 0.6rem 1rem;
-  background: var(--qb-parchment-muted);
-  border-bottom: 1.5px dashed var(--qb-line-dashed);
+  background-color: var(--qb-parchment-muted);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--qb-line-dashed) 0 9px,
+    transparent 9px 15px
+  );
+  background-repeat: no-repeat;
+  background-position: bottom left;
+  background-size: 100% 2px;
 }
 
 /* Task 3: makes the `hidden` attribute (driven by `filtersOpen`) actually
@@ -1110,30 +1132,6 @@ body {
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--qb-ink-400);
-}
-
-/* Task A: Scry's own header rule and Provisions' (`.topbar__controls-header`,
-   declared earlier in this file) render the EXACT same divider — grouped
-   selector so the two rules
-   can never drift apart. A `repeating-linear-gradient` background band reads
-   as clearly chunkier dashes (9px dash / 6px gap) than the flat 1.5px
-   dashed/dotted borders used elsewhere in this file; painted as a
-   `background-image` rather than `border-top` because a gradient has no
-   intrinsic size to slice against `border-image` predictably, while a
-   `background-size: 100% 2px` band sits in exactly the same visual spot a
-   2px top border would. */
-.filter-bar__eyebrow-row,
-.topbar__controls-header {
-  margin-top: 0.3rem;
-  padding-top: 0.5rem;
-  background-image: repeating-linear-gradient(
-    to right,
-    var(--qb-line-dashed) 0 9px,
-    transparent 9px 15px
-  );
-  background-repeat: no-repeat;
-  background-position: top left;
-  background-size: 100% 2px;
 }
 
 /* Task 1: the search/selects/Labels/count row, wrapped separately from the
