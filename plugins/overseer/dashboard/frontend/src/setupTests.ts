@@ -23,3 +23,20 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
     } as unknown as MediaQueryList;
   };
 }
+
+// jsdom doesn't implement `ResizeObserver` at all — without this, the Epic
+// Atlas's `AtlasTrail` (WF-086), which measures its own lane box to size the
+// SVG trail, would throw in every component test that renders it. This is a
+// no-op default (never fires a callback) so every test keeps a stable,
+// zero-size initial measurement without touching this file; tests that
+// specifically exercise the re-measure path stub their own `ResizeObserver`
+// (via `vi.stubGlobal`) to capture and fire the callback — same pattern as
+// Board.test.tsx's "mobile" describe block overriding `matchMedia` above.
+if (typeof window !== "undefined" && typeof window.ResizeObserver !== "function") {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
