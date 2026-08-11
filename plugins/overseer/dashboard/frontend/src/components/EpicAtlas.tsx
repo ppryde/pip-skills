@@ -10,6 +10,7 @@ import {
   totalWeight,
 } from "../board/atlasTrailLayout";
 import { useMediaQuery } from "../board/useMediaQuery";
+import { useTopbarHeightVar } from "../board/useTopbarHeightVar";
 import AtlasRailCard from "./AtlasRailCard";
 import AtlasToolbar, { type TrailOrientation } from "./AtlasToolbar";
 import AtlasTrail from "./AtlasTrail";
@@ -60,6 +61,11 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
   const [orientation, setOrientation] = useState<TrailOrientation>("across");
   const isMobile = useMediaQuery("(max-width:720px)");
   const downMode = isMobile && orientation === "down";
+  // Impl-review round 1, finding 4 (HANDOFF's epic-lane snap) — publishes
+  // the topbar's real, wrap-dependent height as a CSS custom property so
+  // `.atlas-chart__row`'s `scroll-margin-top` (styles.css) always clears
+  // it, at any viewport width.
+  useTopbarHeightVar();
 
   const [laneWidth, setLaneWidth] = useState(DEFAULT_LANE_WIDTH);
   const laneWidthObserver = useRef<ResizeObserver | null>(null);

@@ -4072,10 +4072,34 @@ a.card-drawer__pr-chip:hover {
   flex-direction: column;
 }
 
+/* Epic-lane snap (HANDOFF's Mobile/Across section — impl-review round 1,
+   finding 4). `.board-region` is the shared page-scroll container for
+   BOTH the Board and Atlas views (App.tsx) and defaults to
+   `overflow-y: hidden` (Board's own lanes handle their own internal
+   vertical scroll instead — see `.lane`'s `max-height:100%;
+   overflow-y:auto`) — Atlas has no per-row equivalent, so its row list
+   needs `.board-region` itself to actually scroll vertically. `:has()`
+   scopes this to ONLY the Atlas view (a `.board-region` with `.atlas-chart`
+   somewhere inside it) so Board's own `overflow-y: hidden` is completely
+   untouched in every other case — this rule can never fire while `view
+   === "board"` (EpicAtlas, the only place `.atlas-chart` is ever rendered,
+   isn't mounted then). `y proximity` here (desktop); the ≤720px mobile
+   layer below tightens this to `y mandatory`. */
+.board-region:has(.atlas-chart) {
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+}
+
 .atlas-chart__row {
   display: grid;
   grid-template-columns: var(--rail) 1fr;
   border-bottom: 1.5px dashed var(--qb-line-dashed-2);
+  scroll-snap-align: start;
+  /* Topbar-height-aware (HANDOFF) — `useTopbarHeightVar` (EpicAtlas.tsx)
+     measures the real, wrap-dependent topbar height and keeps this custom
+     property current; the literal px is only the pre-measurement/no-JS
+     fallback. */
+  scroll-margin-top: var(--atlas-topbar-height, 64px);
 }
 
 .atlas-chart__rail {
@@ -5161,6 +5185,21 @@ a.card-drawer__pr-chip:hover {
     padding: 0.5rem 0.5rem 1rem;
   }
 
+  /* Epic-lane snap tightens to mandatory at mobile widths (HANDOFF) — a
+     deliberate swipe/scroll-driven "one row settles at a time" feel,
+     versus desktop's gentler proximity snap. The mobile topbar wraps
+     considerably taller (WF-085's R2-R5 row scheme) than the fallback
+     literal below assumes — `useTopbarHeightVar`'s measured
+     `--atlas-topbar-height` is what actually keeps `scroll-margin-top`
+     correct here; the literal is only the pre-measurement/no-JS floor. */
+  .board-region:has(.atlas-chart) {
+    scroll-snap-type: y mandatory;
+  }
+
+  .atlas-chart__row {
+    scroll-margin-top: var(--atlas-topbar-height, 160px);
+  }
+
   /* Verification-round finding: `position: sticky` on a CSS GRID item is
      constrained to stick only within ITS OWN grid track's width as its
      containing block — the desktop rail's `var(--rail)` (160px) track
@@ -5201,6 +5240,11 @@ a.card-drawer__pr-chip:hover {
     background: var(--qb-bg-page);
     padding: 0.5rem 0.4rem;
     margin-bottom: 0.3rem;
+    /* Impl-review round 1, finding 8 (HANDOFF: "soft right-edge shadow") —
+       a soft ink shadow bleeding off the rail's right edge, so the trail
+       passing beneath it (opaque background, above) reads as sliding UNDER
+       a physically raised strip rather than just stopping at a hard line. */
+    box-shadow: 6px 0 10px -6px rgba(58, 42, 24, 0.35);
   }
 
   .atlas-rail-card {
