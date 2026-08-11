@@ -49,6 +49,16 @@ export const BEAST_RESERVE_PX = BEAST_ANCHOR_OFFSET_PX + BEAST_ICON_SIZE_PX;
 /** Usable trail width never collapses below this, however narrow the lane
  * gets (matches the prototype's floor). */
 export const MIN_USABLE_PX = 40;
+/** Minimum arc px per complexity point on the shared scale — a cramped
+ * board (many/heavy visible epics competing for one lane width) floors
+ * HERE rather than compressing every card indefinitely tighter together.
+ * Once this floor dominates, the heaviest epic's trail exceeds the lane's
+ * own (viewport-constrained) width — `EpicAtlas.tsx` derives a shared
+ * `trailWidth` from this same floor and hands it to `AtlasTrail.tsx`,
+ * which lets its SVG OVERFLOW the lane rather than resizing the lane
+ * itself (`.atlas-chart` scrolls horizontally); see that component's own
+ * doc comment for why the lane must never be resized to match. */
+export const MIN_PX_PER_WEIGHT = 64;
 /** Gap the dotted line leaves on each side of a waypoint/boundary marker
  * (HANDOFF: "~15px gaps"). */
 export const WAYPOINT_GAP_PX = 15;
@@ -122,10 +132,15 @@ export function totalWeight(children: BoardCard[]): number {
 /** The ONE shared px-per-weight scalar (HANDOFF: "recomputed each render")
  * — usable width divided by the HEAVIEST epic's total weight, across every
  * currently-visible epic. Floors the heaviest weight at 1 so an
- * all-childless board never divides by zero. */
+ * all-childless board never divides by zero. Also floors the RESULT at
+ * `MIN_PX_PER_WEIGHT` — a cramped board (small `usable` relative to the
+ * heaviest epic) would otherwise compress every trail arbitrarily tight;
+ * once this floor wins, the heaviest epic's trail deliberately exceeds
+ * `usable` and the lane overspills+scrolls instead (see that constant's
+ * own doc comment). */
 export function globalPxPerWeight(totalWeights: number[], usable: number): number {
   const heaviest = Math.max(1, ...totalWeights);
-  return usable / heaviest;
+  return Math.max(usable / heaviest, MIN_PX_PER_WEIGHT);
 }
 
 export interface TrailSegment {

@@ -3,11 +3,13 @@ import type { Board, BoardCard } from "../api/types";
 import { accentKeyForCard } from "../board/cardAccent";
 import { parseCalendarDate } from "../board/atlasGeometry";
 import {
+  BEAST_RESERVE_PX,
   globalPxPerWeight,
   laneUsableWidth,
   openDependencies,
   orderEpicsForDisplay,
   totalWeight,
+  trailEndX,
 } from "../board/atlasTrailLayout";
 import { useMediaQuery } from "../board/useMediaQuery";
 import AtlasRailCard from "./AtlasRailCard";
@@ -133,6 +135,26 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
     const usable = laneUsableWidth(laneWidth);
     return globalPxPerWeight(totalWeights, usable);
   }, [epics, childrenByEpic, laneWidth]);
+
+  // Feature 1 (WF-086 v3, wide-view overspill): the SVG content width EVERY
+  // Across-mode lane renders at — deliberately NOT `laneWidth`. Once
+  // `MIN_PX_PER_WEIGHT` floors `pxPerWeight` above (a cramped board), the
+  // heaviest visible epic's true end can exceed the lane's own
+  // viewport-constrained width; `trailWidth` is that heaviest epic's own
+  // trailEnd + beast reserve, shared by EVERY row so they all stay
+  // column-aligned (the same "one shared scale" discipline as `pxPerWeight`
+  // itself). `AtlasTrail.tsx` renders its SVG at this width and lets it
+  // OVERFLOW the (still laneWidth-sized) lane rather than the lane growing
+  // to match — see that component's doc comment for why the lane must
+  // never be resized here (a resize would re-feed `laneWidth`'s own
+  // ResizeObserver and runaway).
+  const trailWidth = useMemo(() => {
+    const maxTotalWeight = Math.max(
+      1,
+      ...epics.map((epic) => totalWeight(childrenByEpic.get(epic.id) ?? []))
+    );
+    return trailEndX(maxTotalWeight, pxPerWeight) + BEAST_RESERVE_PX;
+  }, [epics, childrenByEpic, pxPerWeight]);
 
   // Port of Board.tsx's `activeLaneHeight` technique (HANDOFF explicitly
   // calls this out) — a scroll listener finds whichever column sits
@@ -263,6 +285,7 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
                       childCards={childCards}
                       cardsById={cardsById}
                       showNames={showNames}
+                      onOpenCard={onOpenCard}
                       accentKey={accentKey}
                     />
                   </div>
@@ -298,8 +321,9 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
                       childCards={childCards}
                       cardsById={cardsById}
                       pxPerWeight={pxPerWeight}
-                      laneWidth={laneWidth}
+                      trailWidth={trailWidth}
                       showNames={showNames}
+                      onOpenCard={onOpenCard}
                       accentKey={accentKey}
                     />
                   </div>

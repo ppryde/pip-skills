@@ -36,6 +36,9 @@ export interface AtlasTrailVerticalProps {
   childCards: BoardCard[];
   cardsById: Map<string, BoardCard>;
   showNames: boolean;
+  /** Opens the existing card detail drawer for a clicked trail name-tag
+   * (todo or done) — mirrors AtlasTrail.tsx's own prop of the same name. */
+  onOpenCard: (id: string) => void;
   accentKey?: string;
 }
 
@@ -70,7 +73,15 @@ function weightLabel(child: BoardCard): string {
  * different enough that folding them into one component would trade a
  * little duplication for a lot of conditional plumbing.
  */
-function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, accentKey }: AtlasTrailVerticalProps) {
+function AtlasTrailVertical({
+  card,
+  rollup,
+  childCards,
+  cardsById,
+  showNames,
+  onOpenCard,
+  accentKey,
+}: AtlasTrailVerticalProps) {
   const colRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(DEFAULT_COLUMN_WIDTH);
 
@@ -155,6 +166,11 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   const svgMarkers: ReactNode[] = [];
   const overlayTags: ReactNode[] = [];
   let todoTier = 0;
+  // Independent tier counter for done-group tags (Feature 3) — same
+  // rationale as AtlasTrail.tsx's own `doneTier`: the done and todo groups
+  // sit on distinct stretches of the trail, so each alternates its own tags
+  // off its own counter rather than sharing one running tally.
+  let doneTier = 0;
 
   segments.forEach(({ child, end }, segmentIndex) => {
     const isLastChild = segmentIndex === segments.length - 1;
@@ -189,6 +205,34 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
             </text>
             <title>{`${child.title} — cleared · ${cleared}`}</title>
           </g>
+        );
+      }
+      // Feature 3: a greyed name-tag for a done (or abandoned) child, same
+      // side-flip/tiering mechanism as the todo tag below (and the same
+      // last-child beast-clearance suppression — an all-done/no-todo epic
+      // can end its trail on a done child).
+      if (showNames && !isLastChild) {
+        const tier = doneTier % 2;
+        doneTier++;
+        const doneTagStyle: CSSProperties = {
+          ...sideOffset(side, mx, tier * NAME_TAG_TIER_OFFSET_PX),
+          top: `${my}px`,
+          transform: "translateY(-50%)",
+        };
+        overlayTags.push(
+          <button
+            type="button"
+            key={`${child.id}-tag`}
+            className={
+              "trail-tag trail-tag--done trail-tag--down " +
+              (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
+            }
+            style={doneTagStyle}
+            title={`${child.title} · ${weightLabel(child)}`}
+            onClick={() => onOpenCard(child.id)}
+          >
+            {child.title}
+          </button>
         );
       }
       return;
@@ -275,16 +319,18 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
         ...sideOffset(side, mx, tier * NAME_TAG_TIER_OFFSET_PX),
       };
       overlayTags.push(
-        <span
+        <button
+          type="button"
           key={`${child.id}-tag`}
           className={
             "trail-tag trail-tag--todo trail-tag--down " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
           }
           style={tierTagStyle}
           title={`${child.title} · ${weightLabel(child)}`}
+          onClick={() => onOpenCard(child.id)}
         >
           {child.title}
-        </span>
+        </button>
       );
     }
   });

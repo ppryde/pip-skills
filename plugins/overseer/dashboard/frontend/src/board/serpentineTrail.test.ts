@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ARC_PX_PER_UNIT_SERPENTINE,
+  SERPENTINE_CLAMP_MAX_FRACTION,
+  SERPENTINE_CLAMP_MIN_FRACTION,
   SERPENTINE_SWEEP_MAX_FRACTION,
   SERPENTINE_SWEEP_MIN_FRACTION,
   serpentineTrail,
@@ -33,14 +35,22 @@ describe("ARC_PX_PER_UNIT_SERPENTINE / average vertical advance", () => {
   // constant is an ARC-length rate, not a literal vertical one — the
   // vertical-advance target now holds as an AVERAGE, calibrated at
   // AtlasTrailVertical.tsx's own DEFAULT_COLUMN_WIDTH.
-  it("the average vertical advance per weight unit lands within HANDOFF's 36-44px/unit tuned range", () => {
+  //
+  // Re-amended (round 3, loopier meander): a wider, tighter-period sweep
+  // past `LOOP_START_Y` travels appreciably more SIDEWAYS per unit of arc
+  // length, so the average vertical rate now swings more per weight (a
+  // light epic that never reaches the loop stage sits nearer the old
+  // 36-44 band; a heavy one that spends real arc length looping sits
+  // lower) — widened to the actually-measured range rather than the old
+  // flat band, per HANDOFF's own "compute it and set a sane band" ask.
+  it("the average vertical advance per weight unit lands within the widened (loopier-meander) tuned range", () => {
     const DEFAULT_COLUMN_WIDTH = 280;
     const { pointAt } = serpentineTrail(DEFAULT_COLUMN_WIDTH, 0.4);
     for (const weight of [2, 4, 7, 14, 28]) {
       const y = pointAt(weight * ARC_PX_PER_UNIT_SERPENTINE).y;
       const avgRate = y / weight;
-      expect(avgRate).toBeGreaterThanOrEqual(34); // small slack either side of
-      expect(avgRate).toBeLessThanOrEqual(46); // the tuned range for wobble/curvature noise
+      expect(avgRate).toBeGreaterThanOrEqual(28); // small slack either side of the
+      expect(avgRate).toBeLessThanOrEqual(58); // measured ~35-53px/unit range
     }
   });
 
@@ -53,7 +63,7 @@ describe("ARC_PX_PER_UNIT_SERPENTINE / average vertical advance", () => {
 });
 
 describe("serpentineTrail", () => {
-  it("sweeps x between ~15% and ~85% of the column width (wobble aside)", () => {
+  it("sweeps x between ~15% and ~85% of the column width before the loop stage engages (wobble aside)", () => {
     const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0);
     for (let a = 0; a <= 1000; a += 15) {
       const { x } = pointAt(a);
@@ -62,6 +72,29 @@ describe("serpentineTrail", () => {
       expect(x).toBeGreaterThanOrEqual(min);
       expect(x).toBeLessThanOrEqual(max);
     }
+  });
+
+  // Re-amended (round 3, "loops after a certain length"): a sufficiently
+  // long trail ramps toward the much wider `SERPENTINE_CLAMP_MIN/MAX_FRACTION`
+  // band (~4%-96% of the column) rather than staying inside the gentler
+  // ~15%-85% base band above — x is HARD-clamped there by construction
+  // (see `serpentineTrail.ts`'s own `rawPointAtY`), so this is an exact
+  // bound, not an empirically-tuned tolerance.
+  it("once the loop stage engages (long arc lengths), x still never leaves the wider SERPENTINE_CLAMP_MIN/MAX_FRACTION band", () => {
+    const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0);
+    const clampMin = COLUMN_WIDTH * SERPENTINE_CLAMP_MIN_FRACTION;
+    const clampMax = COLUMN_WIDTH * SERPENTINE_CLAMP_MAX_FRACTION;
+    let sawNearClampFloor = false;
+    for (let a = 0; a <= 4000; a += 20) {
+      const { x } = pointAt(a);
+      expect(x).toBeGreaterThanOrEqual(clampMin - 0.01);
+      expect(x).toBeLessThanOrEqual(clampMax + 0.01);
+      if (x <= clampMin + 5) sawNearClampFloor = true;
+    }
+    // Sanity: the loop stage actually gets exercised over this range (the
+    // wide band is really reached), not just trivially satisfied because
+    // the sample never got that far out.
+    expect(sawNearClampFloor).toBe(true);
   });
 
   it("alternates sweep direction across several meanders as arc length grows", () => {

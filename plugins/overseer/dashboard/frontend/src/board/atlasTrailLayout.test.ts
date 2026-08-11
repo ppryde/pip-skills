@@ -20,6 +20,7 @@ import {
   BEAST_ICON_SIZE_PX,
   BEAST_RESERVE_PX,
   CAMPFIRE_FRACTION,
+  MIN_PX_PER_WEIGHT,
   TRAILHEAD_ICON_SIZE_PX,
   TRAILHEAD_PADDING_PX,
   TRAILHEAD_RESERVE_PX,
@@ -183,8 +184,10 @@ describe("totalWeight", () => {
 });
 
 describe("globalPxPerWeight", () => {
+  // usable=1000, heaviest=10 => natural ratio 100, comfortably above
+  // MIN_PX_PER_WEIGHT(64) so these exercise the un-floored division path.
   it("divides usable width by the heaviest epic's total weight", () => {
-    expect(globalPxPerWeight([4, 10, 2], 200)).toBeCloseTo(20, 5);
+    expect(globalPxPerWeight([4, 10, 2], 1000)).toBeCloseTo(100, 5);
   });
 
   it("floors the heaviest weight at 1 so an all-childless board never divides by zero", () => {
@@ -192,10 +195,21 @@ describe("globalPxPerWeight", () => {
   });
 
   it("same weight means same on-screen length on every row — a downstream invariant", () => {
-    const pxPerWeight = globalPxPerWeight([4, 10], 200);
-    expect(4 * pxPerWeight).toBeCloseTo(80, 5);
+    const pxPerWeight = globalPxPerWeight([4, 10], 1000);
+    expect(4 * pxPerWeight).toBeCloseTo(400, 5);
     // The heaviest epic (10) spans the full usable width.
-    expect(10 * pxPerWeight).toBeCloseTo(200, 5);
+    expect(10 * pxPerWeight).toBeCloseTo(1000, 5);
+  });
+
+  // MIN_PX_PER_WEIGHT(64) — a cramped board (small usable relative to the
+  // heaviest epic's total weight) floors here instead of compressing
+  // further: usable/heaviest = 200/50 = 4, well under the floor, so the
+  // heaviest epic's trail deliberately overspills `usable` by design
+  // (EpicAtlas.tsx's `trailWidth` then lets `.atlas-chart` scroll to it).
+  it("floors at MIN_PX_PER_WEIGHT when the natural ratio undershoots it — cards keep breathing room and the trail overspills instead of compressing further", () => {
+    expect(globalPxPerWeight([50], 200)).toBe(MIN_PX_PER_WEIGHT);
+    // The floor wins over the (much smaller) natural division result.
+    expect(MIN_PX_PER_WEIGHT).toBeGreaterThan(200 / 50);
   });
 });
 

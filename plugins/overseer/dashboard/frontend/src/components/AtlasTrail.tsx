@@ -44,14 +44,23 @@ export interface AtlasTrailProps {
    * recomputed each render across every visible epic) — NOT re-derived per
    * lane, that's what makes cross-row length comparisons real. */
   pxPerWeight: number;
-  /** The shared lane width (EpicAtlas measures this ONCE, off any lane —
-   * every lane renders at the same CSS width). Drives the SVG viewBox
-   * width; this component only self-measures its own HEIGHT (see the
-   * ResizeObserver effect below) — "only the width scale is shared". */
-  laneWidth: number;
-  /** Quest-names toolbar toggle (HANDOFF, default on) — hides the todo
+  /** The shared SVG content width (EpicAtlas computes this ONCE, from the
+   * HEAVIEST visible epic's own trailEnd + beast reserve on the shared
+   * `pxPerWeight` scale — every lane renders its SVG at this same width,
+   * deliberately NOT the lane's own (viewport-constrained) box width, so a
+   * cramped board overspills+scrolls instead of compressing further; see
+   * `MIN_PX_PER_WEIGHT`'s doc comment in atlasTrailLayout.ts). Drives the
+   * SVG's own width/viewBox-width and the beast-x clamp; this component
+   * only self-measures its own HEIGHT (see the ResizeObserver effect
+   * below) — "only the width scale is shared". */
+  trailWidth: number;
+  /** Quest-names toolbar toggle (HANDOFF, default on) — hides the todo/done
    * name-tags only; tooltips and the AT HAND pennant are unaffected. */
   showNames: boolean;
+  /** Opens the existing card detail drawer for a clicked trail name-tag
+   * (todo or done) — same drawer AtlasRailCard's own click already opens,
+   * reused rather than a new modal (HANDOFF chunk 5 precedent). */
+  onOpenCard: (id: string) => void;
   /** Lane-computed guild accent key — stable class hook only; colour
    * resolution is the later styling chunk's job (see BeastFace's
    * `--qb-beast-ink` precedent). */
@@ -76,8 +85,9 @@ function AtlasTrail({
   childCards,
   cardsById,
   pxPerWeight,
-  laneWidth,
+  trailWidth,
   showNames,
+  onOpenCard,
   accentKey,
 }: AtlasTrailProps) {
   const laneRef = useRef<HTMLDivElement>(null);
@@ -87,7 +97,7 @@ function AtlasTrail({
   // the sibling rail card expands/collapses its sub-quest list and grows
   // the row. Width is deliberately NOT re-measured here (HANDOFF: "sample
   // each lane's own height for its SVG viewBox — only the width scale is
-  // shared") — it comes from the `laneWidth` prop, one shared measurement
+  // shared") — it comes from the `trailWidth` prop, one shared measurement
   // EpicAtlas makes for every row, so a per-lane remeasurement can never
   // desync a row's pxPerWeight from what EpicAtlas actually used to compute it.
   useEffect(() => {
@@ -104,7 +114,7 @@ function AtlasTrail({
   }, []);
 
   const laneHeight = height || DEFAULT_LANE_HEIGHT;
-  const width = Number.isFinite(laneWidth) && laneWidth > 0 ? laneWidth : 0;
+  const width = Number.isFinite(trailWidth) && trailWidth > 0 ? trailWidth : 0;
   const seed = seedFor(card.id);
   const beast = beastFor(card.id);
 
@@ -132,15 +142,23 @@ function AtlasTrail({
   // actually gets drawn, floating it off the line. ONE clamp, derived from
   // BEAST_ICON_SIZE_PX (the beast's own rendered width), used for both the
   // draw position and the y-sample now — by construction of
-  // laneUsableWidth/globalPxPerWeight/BEAST_RESERVE_PX, the heaviest epic's
-  // un-clamped beastXRaw already lands at exactly `width - BEAST_ICON_SIZE_PX`,
-  // so this clamp is a defensive floor, not the normal path.
+  // laneUsableWidth/globalPxPerWeight/BEAST_RESERVE_PX (now folded into
+  // EpicAtlas's shared `trailWidth`), the heaviest epic's un-clamped
+  // beastXRaw already lands at exactly `width - BEAST_ICON_SIZE_PX`, so this
+  // clamp is a defensive floor, not the normal path.
   const beastXRaw = beastAnchorX(trailEnd);
   const beastXClamped = Math.min(beastXRaw, width - BEAST_ICON_SIZE_PX);
   const beastY = t.yAt(beastXClamped) - BEAST_ICON_SIZE_PX / 2;
 
+  // `--across` renders the SVG at its OWN intrinsic pixel size (the
+  // `width`/`height` attributes below), never stretched/squeezed to fill
+  // its parent `.atlas-trail` box (which stays lane-width-sized) — that's
+  // what lets a wide trail overflow the lane instead of being compressed
+  // back into it (Feature 1 / MIN_PX_PER_WEIGHT; see styles.css). Mirrors
+  // AtlasTrailVertical's own `height: auto` trick for the opposite axis.
   const svgClassName =
-    "atlas-trail__svg" + (accentKey ? ` atlas-trail__svg--accent-${accentKey}` : "");
+    "atlas-trail__svg atlas-trail__svg--across" +
+    (accentKey ? ` atlas-trail__svg--accent-${accentKey}` : "");
 
   // Built imperatively (rather than three separate JSX .map passes) because
   // the AT-HAND pennant and the todo name-tags are plain positioned HTML
@@ -152,6 +170,12 @@ function AtlasTrail({
   const svgMarkers: ReactNode[] = [];
   const overlayTags: ReactNode[] = [];
   let todoTier = 0;
+  // Independent tier counter for done-group tags (Feature 3) — alternated
+  // the SAME way as `todoTier` so adjacent walked quests never collide, but
+  // counted separately: the done group and the todo group sit on distinct
+  // stretches of the trail, so there's no need (or benefit) to share one
+  // running counter across both.
+  let doneTier = 0;
 
   segments.forEach(({ child, end }, segmentIndex) => {
     const isLastChild = segmentIndex === segments.length - 1;
@@ -181,6 +205,35 @@ function AtlasTrail({
             </text>
             <title>{`${child.title} — cleared · ${cleared}`}</title>
           </g>
+        );
+      }
+      // Feature 3: a greyed name-tag for a done (or abandoned) child too —
+      // same overlay-tag mechanism, same tier-alternation/tilt pattern, and
+      // the same last-child beast-clearance suppression as the todo tag
+      // below (a done child CAN be the trail's last child — an
+      // all-done/no-todo epic, or an all-done epic with nothing after).
+      if (showNames && !isLastChild) {
+        const tier = doneTier % 2;
+        doneTier++;
+        overlayTags.push(
+          <button
+            type="button"
+            key={`${child.id}-tag`}
+            className={
+              "trail-tag trail-tag--done " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
+            }
+            style={{
+              left: `${mx}px`,
+              top: `${my - 11 - tier * NAME_TAG_TIER_OFFSET_PX}px`,
+              transform: `translate(-50%, -100%) rotate(${
+                tier ? NAME_TAG_TILT_DEG : -NAME_TAG_TILT_DEG
+              }deg)`,
+            }}
+            title={`${child.title} · ${weightLabel(child)}`}
+            onClick={() => onOpenCard(child.id)}
+          >
+            {child.title}
+          </button>
         );
       }
       return;
@@ -281,7 +334,8 @@ function AtlasTrail({
     // of the beast), not just the genuinely-adjacent last one.
     if (showNames && !isLastChild) {
       overlayTags.push(
-        <span
+        <button
+          type="button"
           key={`${child.id}-tag`}
           className={"trail-tag trail-tag--todo " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")}
           style={{
@@ -292,9 +346,10 @@ function AtlasTrail({
             }deg)`,
           }}
           title={`${child.title} · ${weightLabel(child)}`}
+          onClick={() => onOpenCard(child.id)}
         >
           {child.title}
-        </span>
+        </button>
       );
     }
   });
@@ -303,6 +358,8 @@ function AtlasTrail({
     <div className="atlas-trail" ref={laneRef}>
       <svg
         className={svgClassName}
+        width={width}
+        height={laneHeight}
         viewBox={`0 0 ${width} ${laneHeight}`}
         preserveAspectRatio="none"
       >

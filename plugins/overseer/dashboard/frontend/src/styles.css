@@ -4683,6 +4683,24 @@ a.card-drawer__pr-chip:hover {
   height: 100%;
 }
 
+/* Feature 1 (wide-view overspill): AtlasTrail.tsx (Across mode) sets the
+   `width`/`height` SVG attributes to the shared `trailWidth`/laneHeight —
+   `width:auto;height:auto` here means the SVG uses THOSE intrinsic
+   dimensions instead of the base rule's `100%` (which would stretch/
+   compress it back down to its parent `.atlas-trail` box, i.e. back to the
+   lane's own viewport-constrained width, defeating the whole point). The
+   parent chain (`.atlas-trail`, `.atlas-chart__lane`, `.atlas-chart__row`,
+   `.atlas-chart__rows`) is deliberately never `overflow: hidden`, so a
+   wider-than-the-lane SVG here overflows visibly up to `.atlas-chart`
+   (mobile) / `.board-region` (desktop), both `overflow-x: auto` — same
+   "render at intrinsic size, let CSS auto pick up the ratio" trick as
+   Down-mode's own `.atlas-trail--down .atlas-trail__svg { height: auto }`
+   below, just on the opposite axis. */
+.atlas-trail__svg--across {
+  width: auto;
+  height: auto;
+}
+
 .atlas-trail__path {
   fill: none;
   stroke: var(--atlas-trail-fill, var(--qb-ink-300));
@@ -4857,10 +4875,54 @@ a.card-drawer__pr-chip:hover {
   box-shadow: var(--qb-shadow-card) rgba(0, 0, 0, 0.18);
 }
 
+/* Feature 3 (WF-086 v3): the todo/done tags render as `<button>` now
+   (clickable — opens the existing card detail drawer); the AT HAND
+   pennant stays a plain `<span>` (a status marker, never clickable).
+   Scoping the button-chrome reset to the ELEMENT itself, rather than
+   folding it into the base `.trail-tag` rule above, keeps the pennant
+   completely untouched. The font-family/-size/-weight lines are repeated
+   here (not just left to the base rule) because this selector's extra
+   `button` qualifier gives it higher specificity than the base rule — a
+   bare `font: inherit` here would otherwise beat the base rule's font-*
+   longhands and fall back to the browser's own default button font. */
+button.trail-tag {
+  appearance: none;
+  border: none;
+  background: none;
+  font: inherit;
+  font-family: var(--qb-font-body);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Subtle clickable affordance — an underline on hover (not a colour/scale
+   change, which would fight the tier tilt/rotation already on these). */
+button.trail-tag:hover {
+  text-decoration: underline;
+}
+
+button.trail-tag:focus-visible {
+  outline: 2px solid var(--atlas-trail-dark, var(--qb-ink-500));
+  outline-offset: 1px;
+}
+
 .trail-tag--todo {
   background: var(--qb-parchment-muted);
   border: 1.5px solid var(--atlas-trail-fill, var(--qb-ink-300));
   color: var(--qb-ink-500);
+}
+
+/* Greyed/muted — a walked (done) quest's name is worth showing but should
+   read as settled history, not "ahead ground" like the todo tag's parchment
+   fill/accent border. Same shape (padding/radius/shadow) as the todo tag,
+   deliberately less visually loud. */
+.trail-tag--done {
+  background: var(--qb-parchment-muted);
+  border: 1.5px solid var(--qb-line-dashed-2);
+  color: var(--qb-ink-400);
+  opacity: 0.72;
 }
 
 /* The AT HAND pennant is a status marker, not a name-tag — solid accent

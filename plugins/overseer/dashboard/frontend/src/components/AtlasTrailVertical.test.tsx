@@ -49,7 +49,12 @@ function rollup(overrides: Partial<Rollup> = {}): Rollup {
   return { done: 1, total: 3, estimate: 100000, actual: 42000, ...overrides };
 }
 
-function renderColumn(epic: BoardCard, childCards: BoardCard[], showNames = true) {
+function renderColumn(
+  epic: BoardCard,
+  childCards: BoardCard[],
+  showNames = true,
+  onOpenCard: (id: string) => void = vi.fn()
+) {
   const cardsById = new Map<string, BoardCard>([epic, ...childCards].map((c) => [c.id, c]));
   return render(
     <AtlasTrailVertical
@@ -58,6 +63,7 @@ function renderColumn(epic: BoardCard, childCards: BoardCard[], showNames = true
       childCards={childCards}
       cardsById={cardsById}
       showNames={showNames}
+      onOpenCard={onOpenCard}
     />
   );
 }
@@ -352,6 +358,62 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
     expect(tag2.style.left).not.toBe("");
     expect(tag2.style.right).toBe("");
     expect(parseFloat(tag2.style.left)).toBeGreaterThan(mx2);
+  });
+
+  // Feature 3 (WF-086 v3): Down-mode's mirror of AtlasTrail.tsx's own done
+  // name-tag / clickable-tag coverage.
+  describe("done child name-tags (Feature 3)", () => {
+    it("a NON-last done child's name-tag shows, greyed, when showNames is true", () => {
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const kids = [
+        child({ id: "k1", title: "Cleared Quest", status: "done", complexity: "S", order: 1 }),
+        child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 }),
+      ];
+      const shown = renderColumn(epic, kids, true);
+      const tag = shown.container.querySelector(".trail-tag--done");
+      expect(tag).toHaveTextContent("Cleared Quest");
+
+      const hidden = renderColumn(epic, kids, false);
+      expect(hidden.container.querySelector(".trail-tag--done")).not.toBeInTheDocument();
+    });
+
+    it("suppresses the LAST done child's name-tag (all-done epic, no todos after)", () => {
+      const epic = card({ id: "WF-027", status: "in-flight" });
+      const solo = child({ id: "k1", title: "Only Cleared Quest", status: "done", complexity: "S" });
+      const { container } = renderColumn(epic, [solo], true);
+      expect(container.querySelector(".trail-tag--done")).not.toBeInTheDocument();
+      expect(container.querySelector(".atlas-trail__waypoint--done")).toBeInTheDocument();
+    });
+  });
+
+  describe("clickable trail name-tags open the card detail drawer (Feature 3)", () => {
+    it("clicking a todo child's name-tag calls onOpenCard with that child's id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const kids = [
+        child({ id: "k1", title: "Earlier Quest", status: "planned", complexity: "S", order: 1 }),
+        child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 }),
+      ];
+      const { container } = renderColumn(epic, kids, true, onOpenCard);
+      const tag = container.querySelector(".trail-tag--todo") as HTMLButtonElement;
+      expect(tag.tagName).toBe("BUTTON");
+      tag.click();
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
+
+    it("clicking a done child's name-tag calls onOpenCard with that child's id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const kids = [
+        child({ id: "k1", title: "Cleared Quest", status: "done", complexity: "S", order: 1 }),
+        child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 }),
+      ];
+      const { container } = renderColumn(epic, kids, true, onOpenCard);
+      const tag = container.querySelector(".trail-tag--done") as HTMLButtonElement;
+      expect(tag.tagName).toBe("BUTTON");
+      tag.click();
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
   });
 
   afterEach(() => {
