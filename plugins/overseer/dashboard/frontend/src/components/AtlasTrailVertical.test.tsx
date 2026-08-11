@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import type { BoardCard, Rollup } from "../api/types";
+import { seedFor } from "../board/atlasGeometry";
+import {
+  TRAILHEAD_RESERVE_PX,
+  beastAnchorX,
+  computeSegments,
+  orderChildrenForTrail,
+  totalWeight,
+  trailEndX,
+} from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
+import { V_PX_PER_UNIT_SERPENTINE, serpentineTrail } from "../board/serpentineTrail";
 import AtlasTrailVertical from "./AtlasTrailVertical";
 
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
@@ -138,6 +148,89 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
 
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("viewBox")!.split(" ")[2]).toBe("280");
+  });
+
+  // Impl-review round 1, finding 5's explicit test ask: "marker positions
+  // on the curve" — a rendered marker's (cx, cy) must land EXACTLY where
+  // the serpentine geometry module itself says that Y should be, not on
+  // some flat/straight x.
+  it("a waypoint marker's (cx, cy) matches serpentineTrail's own pointAt for that child's cumulative-weight position", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    // Two children so the second one's marker lands past band 0's turn —
+    // a genuinely swept (non-trivial) x, not just the trailhead's own x.
+    const kids = [
+      child({ id: "k1", status: "done", complexity: "L", order: 1 }), // weight 3
+      child({ id: "k2", status: "done", complexity: "L", order: 2 }), // weight 3
+    ];
+    const { container } = renderColumn(epic, kids);
+
+    // Reproduce the component's own geometry independently, off the same
+    // pure modules, at the DEFAULT_COLUMN_WIDTH it renders at pre-measurement.
+    const ordered = orderChildrenForTrail(kids);
+    const segments = computeSegments(ordered, V_PX_PER_UNIT_SERPENTINE);
+    const trail = serpentineTrail(280, seedFor("WF-085"));
+    const expected = segments.map((s) => trail.pointAt(s.end));
+
+    const markers = Array.from(container.querySelectorAll(".atlas-trail__waypoint--done circle"));
+    expect(markers.length).toBe(2);
+    markers.forEach((el, i) => {
+      expect(Number(el.getAttribute("cx"))).toBeCloseTo(expected[i].x, 3);
+      expect(Number(el.getAttribute("cy"))).toBeCloseTo(expected[i].y, 3);
+    });
+  });
+
+  // Impl-review round 1, finding 5: "vertical advance per complexity point
+  // reduced to roughly half the old flat scale" — a component-level sanity
+  // check that the rendered content height actually reflects the NEW
+  // (smaller) V_PX_PER_UNIT_SERPENTINE scale, not the superseded flat 72.
+  it("renders at the new (roughly-halved) V_PX_PER_UNIT_SERPENTINE scale, not the old flat 72", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [child({ id: "k1", status: "done", complexity: "XL" })]; // weight 4
+    const { container } = renderColumn(epic, kids);
+
+    const svg = container.querySelector("svg")!;
+    const height = Number(svg.getAttribute("viewBox")!.split(" ")[3]);
+    const totalWeightUnits = totalWeight(kids);
+
+    const newTrailEnd = trailEndX(totalWeightUnits, V_PX_PER_UNIT_SERPENTINE);
+    const oldFlatTrailEnd = trailEndX(totalWeightUnits, 72); // the superseded flat scale
+
+    expect(newTrailEnd).toBeLessThan(oldFlatTrailEnd); // ~roughly halved, per HANDOFF
+    // The rendered height matches the NEW scale's own beast-anchor formula
+    // exactly, and is well short of what the OLD flat scale would have needed.
+    expect(height).toBeGreaterThanOrEqual(beastAnchorX(newTrailEnd));
+    expect(height).toBeLessThan(TRAILHEAD_RESERVE_PX + oldFlatTrailEnd);
+  });
+
+  // Impl-review round 1, finding 1's explicit test ask: "assert Down-mode
+  // beast bottom <= viewBox height" — the beast's own footprint
+  // (BEAST_ICON_SIZE_PX) must fit inside the content height the reserve
+  // was sized for, never clipped by the SVG's own viewBox.
+  it("the beast's own footprint never overflows the SVG's viewBox height", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [child({ id: "k1", status: "done", complexity: "XL" })];
+    const { container } = renderColumn(epic, kids);
+
+    const svg = container.querySelector("svg")!;
+    const viewBoxHeight = Number(svg.getAttribute("viewBox")!.split(" ")[3]);
+    const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
+    const beastY = Number(beastTransform.split(",")[1].trim().replace(")", ""));
+
+    expect(beastY + 48).toBeLessThanOrEqual(viewBoxHeight); // 48 = BeastFace's rendered footprint
+  });
+
+  // Impl-review round 1, finding 3 (Down-mode half): a parked epic with
+  // zero done and zero in-progress children — campfireX falls all the way
+  // back to boundaryX — still cuts a gap in the line at that position.
+  it("parked, all-todo epic (no done/in-progress children): the campfire still cuts a gap in the line", () => {
+    const epic = card({ id: "WF-076", status: "parked" });
+    const todo = child({ id: "k1", status: "planned", complexity: "M" });
+    const { container } = renderColumn(epic, [todo]);
+
+    expect(container.querySelector(".atlas-trail__campfire")).toBeInTheDocument();
+    const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
+    const firstPathStartY = Number(firstPathD.match(/^M[\d.]+\s([\d.]+)/)![1]);
+    expect(firstPathStartY).toBeGreaterThan(TRAILHEAD_RESERVE_PX + 6); // clear of the 12px campfire gap's near edge
   });
 
   afterEach(() => {

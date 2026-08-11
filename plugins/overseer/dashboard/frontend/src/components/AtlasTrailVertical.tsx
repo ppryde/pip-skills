@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
-import { formatDateStamp, parseCalendarDate, seedFor, wobblePathVertical } from "../board/atlasGeometry";
+import { formatDateStamp, parseCalendarDate, seedFor } from "../board/atlasGeometry";
 import {
+  BEAST_ICON_SIZE_PX,
   BEAST_RESERVE_PX,
   CAMPFIRE_GAP_PX,
   TRAILHEAD_RESERVE_PX,
@@ -11,7 +12,6 @@ import {
   boundaryX,
   campfireX,
   computeSegments,
-  frozenSegment,
   openDependencies,
   orderChildrenForTrail,
   statusGroupOf,
@@ -20,6 +20,7 @@ import {
   trimSegmentForMarkers,
   weightOf,
 } from "../board/atlasTrailLayout";
+import { V_PX_PER_UNIT_SERPENTINE, serpentineTrail } from "../board/serpentineTrail";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import BeastFace from "./BeastFace";
@@ -38,16 +39,6 @@ export interface AtlasTrailVerticalProps {
   accentKey?: string;
 }
 
-/** Mobile Down orientation (HANDOFF): each epic is a column, the trail
- * marches top -> bottom on a FLAT per-complexity scale — deliberately NOT
- * the shared-across-rows `pxPerWeight` Across mode uses (HANDOFF: "no
- * fit-to-container — the page scrolls; same weight = same length across
- * columns" — flat already gives that property, no cross-column
- * measurement needed). This is why AtlasTrailVertical takes no
- * `pxPerWeight`/`laneWidth` props the way AtlasTrail does: every column is
- * geometrically independent. */
-const V_PX_PER_WEIGHT = 72;
-
 const DEFAULT_COLUMN_WIDTH = 280;
 const MARKER_SIZE_PX = 20;
 const NAME_TAG_TIER_OFFSET_PX = 16;
@@ -59,11 +50,23 @@ function weightLabel(child: BoardCard): string {
 /**
  * Down-mode's mirror of `AtlasTrail.tsx` — same per-status marker language
  * (done ✓, abandoned skull, AT HAND ring+pennant, faded todo + name-tags,
- * blocked boulder, campfire, party token, trailhead, beast), rotated onto a
- * vertical axis via `wobblePathVertical`. Kept as its own component rather
- * than an orientation branch inside AtlasTrail — the two scales (shared vs.
- * flat) and axes are different enough that folding them into one component
- * would trade a little duplication for a lot of conditional plumbing.
+ * blocked boulder, campfire, party token, trailhead, beast), but marching
+ * top->bottom as a wide SERPENTINE (HANDOFF's Down-mode user amendment,
+ * 2026-08-11) rather than a flat straight drop — see `serpentineTrail.ts`
+ * for the curve geometry and why "same weight = same length" holds in
+ * path-arc terms there. `atlasTrailLayout.ts`'s scalar functions
+ * (computeSegments/boundaryX/campfireX/trailEndX/beastAnchorX/
+ * trimSegmentForMarkers) are reused UNCHANGED — they operate on a generic
+ * "distance along the trail" scalar that's now a Y coordinate instead of
+ * an X one, fed `V_PX_PER_UNIT_SERPENTINE` instead of Across mode's shared
+ * `pxPerWeight`; only the FINAL (x,y) screen position (via
+ * `serpentineTrail(width, seed).pointAt`) differs from Across mode's
+ * straight `wobblePath`.
+ *
+ * Kept as its own component rather than an orientation branch inside
+ * AtlasTrail — the two scales (shared vs. flat-per-column) and axes are
+ * different enough that folding them into one component would trade a
+ * little duplication for a lot of conditional plumbing.
  */
 function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, accentKey }: AtlasTrailVerticalProps) {
   const colRef = useRef<HTMLDivElement>(null);
@@ -86,11 +89,10 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   const beast = beastFor(card.id);
 
   const ordered = orderChildrenForTrail(childCards);
-  const segments = computeSegments(ordered, V_PX_PER_WEIGHT);
+  const segments = computeSegments(ordered, V_PX_PER_UNIT_SERPENTINE);
   const epicTotalWeight = totalWeight(childCards);
-  const trailEnd = trailEndX(epicTotalWeight, V_PX_PER_WEIGHT);
+  const trailEnd = trailEndX(epicTotalWeight, V_PX_PER_UNIT_SERPENTINE);
   const boundary = boundaryX(segments);
-  const frozen = frozenSegment(segments);
   const campY = campfireX(segments);
   const contentHeight = trailEnd + BEAST_RESERVE_PX;
 
@@ -98,12 +100,20 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   const parked = !slain && card.status === "parked";
   const marching = card.status === "in-flight";
 
-  const t = wobblePathVertical(0, Math.max(contentHeight, 1), Math.max(width, 1), seed);
+  const t = serpentineTrail(Math.max(width, 1), seed);
 
   const beastYRaw = beastAnchorX(trailEnd);
-  const beastX = t.xAt(beastYRaw) - 24;
+  const beastPoint = t.pointAt(beastYRaw);
+  const beastX = beastPoint.x - BEAST_ICON_SIZE_PX / 2;
 
   const svgClassName = "atlas-trail__svg" + (accentKey ? ` atlas-trail__svg--accent-${accentKey}` : "");
+
+  // "Flipping to whichever side has room on the current sweep" (HANDOFF) —
+  // a point on the left half of the column has more room to its right
+  // (before the sweep's own left turn-back), and vice versa.
+  function roomySide(x: number): "left" | "right" {
+    return x < width / 2 ? "right" : "left";
+  }
 
   const svgMarkers: ReactNode[] = [];
   const overlayTags: ReactNode[] = [];
@@ -112,8 +122,14 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   for (const { child, end } of segments) {
     const group = statusGroupOf(child);
     const my = end;
-    const mx = t.xAt(end);
+    const { x: mx } = t.pointAt(end);
     const cleared = formatDateStamp(parseCalendarDate(child.updated));
+    const side = roomySide(mx);
+    const tagStyle = {
+      [side]: side === "right" ? `${width - mx + 16}px` : `${mx + 16}px`,
+      top: `${my}px`,
+      transform: "translateY(-50%)",
+    } as const;
 
     if (group === "done") {
       if (child.status === "abandoned") {
@@ -162,7 +178,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
           <span
             key={`${child.id}-pennant`}
             className="trail-tag atlas-trail__pennant--athand trail-tag--down"
-            style={{ left: `${mx + 16}px`, top: `${my}px`, transform: "translateY(-50%)" }}
+            style={tagStyle}
           >
             ◆ AT HAND
           </span>
@@ -205,13 +221,20 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
     );
 
     if (showNames) {
+      const tierTagStyle = {
+        ...tagStyle,
+        [side]:
+          side === "right"
+            ? `${width - mx + 16 + tier * NAME_TAG_TIER_OFFSET_PX}px`
+            : `${mx + 16 + tier * NAME_TAG_TIER_OFFSET_PX}px`,
+      };
       overlayTags.push(
         <span
           key={`${child.id}-tag`}
           className={
             "trail-tag trail-tag--todo trail-tag--down " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")
           }
-          style={{ left: `${mx + 16 + tier * NAME_TAG_TIER_OFFSET_PX}px`, top: `${my}px`, transform: "translateY(-50%)" }}
+          style={tierTagStyle}
           title={`${child.title} · ${weightLabel(child)}`}
         >
           {child.title}
@@ -229,14 +252,18 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
             const faded = group === "todo";
             const cuts = [{ at: end, radius: WAYPOINT_GAP_PX }];
             if (i > 0) cuts.push({ at: start, radius: WAYPOINT_GAP_PX });
-            if (parked && frozen && child === frozen.child) {
-              cuts.push({ at: campY, radius: CAMPFIRE_GAP_PX });
-            }
+            // Cut a gap at the campfire's position on EVERY segment when
+            // parked (not just the frozen in-progress child's own segment)
+            // — trimSegmentForMarkers is a no-op wherever the cut doesn't
+            // overlap a given segment, so this also correctly covers the
+            // zero-done/zero-in-progress fallback (campY === boundaryX,
+            // which can land on any segment, or before all of them).
+            if (parked) cuts.push({ at: campY, radius: CAMPFIRE_GAP_PX });
             return trimSegmentForMarkers(start, end, cuts).map(([a, b], j) => (
               <path
                 key={`${child.id}-${j}`}
                 className={"atlas-trail__path" + (faded ? " atlas-trail__path--faded" : "")}
-                d={wobblePathVertical(a, b, width, seed).d}
+                d={t.d(a, b)}
               />
             ));
           })}
@@ -244,7 +271,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
 
         <g
           className="atlas-trail__trailhead"
-          transform={`translate(${t.xAt(TRAILHEAD_RESERVE_PX) - 9}, 0) scale(0.85)`}
+          transform={`translate(${t.pointAt(TRAILHEAD_RESERVE_PX).x - 9}, 0) scale(0.85)`}
         >
           <image href={trailheadIcon} x={0} y={0} width={MARKER_SIZE_PX} height={MARKER_SIZE_PX} />
           <title>where the saga began</title>
@@ -254,8 +281,8 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
 
         {marching && (
           <g className="atlas-trail__party">
-            <circle cx={t.xAt(boundary)} cy={boundary} r={12} />
-            <text x={t.xAt(boundary)} y={boundary + 4} textAnchor="middle">
+            <circle cx={t.pointAt(boundary).x} cy={boundary} r={12} />
+            <text x={t.pointAt(boundary).x} y={boundary + 4} textAnchor="middle">
               ⚔
             </text>
             <title>{`the party — ${rollup.done}/${rollup.total} quests cleared`}</title>
@@ -267,12 +294,12 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
             <image
               className="atlas-trail__campfire"
               href={campfireIcon}
-              x={t.xAt(campY) - MARKER_SIZE_PX - 4}
+              x={t.pointAt(campY).x - MARKER_SIZE_PX - 4}
               y={campY - MARKER_SIZE_PX / 2}
               width={MARKER_SIZE_PX}
               height={MARKER_SIZE_PX}
             />
-            <text className="atlas-trail__camped-label" x={t.xAt(campY) + 8} y={campY + 5}>
+            <text className="atlas-trail__camped-label" x={t.pointAt(campY).x + 8} y={campY + 5}>
               camped — on hold
             </text>
           </g>
