@@ -11,7 +11,7 @@ export interface FilterBarProps {
   visibleCount: number;
   totalCount: number;
   /** Whether `filter` still equals `DEFAULT_FILTER` — the caller's
-   * equality check, not ours; only gates the "Clear filters" button here. */
+   * equality check, not ours; only gates the "Clear" button here. */
   isDefault: boolean;
   onQuery: (query: string) => void;
   onCycleLabel: (label: string) => void;
@@ -36,10 +36,12 @@ const COMPLEXITIES = ["S", "M", "L", "XL"];
 
 /**
  * The board's filter row (F3, WF-061): a "Scry" eyebrow header line — "Scry"
- * on the left, the visible/total readout + Clear filters on the right
- * (`.filter-bar__eyebrow-row`, `justify-content: space-between`) — then a
- * second row of search + priority/complexity dropdowns + a Labels button
- * that folds out `LabelFilterPopover`. Purely presentational — `filter` is
+ * on the left, the visible/total readout on the right
+ * (`.filter-bar__eyebrow-row`, `justify-content: space-between`) — then
+ * search on its own line, then priority/complexity dropdowns + a Labels
+ * button (that folds out `LabelFilterPopover`) + a "Clear" button, grouped
+ * together on the line below that (`.filter-bar__facets`; "Clear" sits at
+ * the far end, after Labels). Purely presentational — `filter` is
  * the caller's source of truth (same deferred-state pattern as
  * `LabelFilterPopover`/`LabelEditor`/`StatusMenu`); this component owns only
  * the popover's open/closed `useState`, nothing about filter values.
@@ -83,28 +85,19 @@ function FilterBar({
     <div id="filter-bar" className="filter-bar" hidden={!filtersOpen}>
       {/* Own line above the row below (`.filter-bar__eyebrow-row`'s
           `flex-basis: 100%` forces the wrap) — was inline before search.
-          Task B: the visible/total count + Clear filters now sit at the
-          RIGHT-HAND end of this same line (`justify-content: space-between`
-          on the row), so it reads as one section-header line: "Scry" …
-          "N of M · Clear filters" — rather than the count being buried down
-          among the filter controls below. */}
+          Task B: the visible/total count sits at the RIGHT-HAND end of this
+          same line (`justify-content: space-between` on the row), so it
+          reads as one section-header line: "Scry" … "N of M" — rather than
+          the count being buried down among the filter controls below.
+          Coordinator follow-up: "Clear" (was "Clear filters") no longer
+          lives here — it moved to the end of `.filter-bar__facets` below. */}
       <div className="filter-bar__eyebrow-row">
         <span className="filter-bar__eyebrow-title">
           <img src={scryIcon} alt="" className="filter-bar__eyebrow-icon" />
           <span className="filter-bar__eyebrow">Scry</span>
         </span>
 
-        <div className="filter-bar__count">
-          {visibleCount} of {totalCount}
-          <button
-            type="button"
-            className="filter-bar__clear-btn"
-            onClick={onClear}
-            disabled={isDefault}
-          >
-            Clear filters
-          </button>
-        </div>
+        <div className="filter-bar__count">{visibleCount} of {totalCount}</div>
       </div>
 
       <div className="filter-bar__row">
@@ -117,46 +110,67 @@ function FilterBar({
           onChange={(e) => onQuery(e.target.value)}
         />
 
-        <div className="filter-bar__select">
-          <select
-            aria-label="priority"
-            value={filter.priority ?? ""}
-            onChange={handlePriorityChange}
-          >
-            <option value="">Priority</option>
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Priority/Complexity/Labels/Clear grouped onto their own line
+            below search — `.filter-bar__facets`'s `flex-basis: 100%` forces
+            the wrap inside `.filter-bar__row` (same trick as
+            `.filter-bar__eyebrow-row` above it), leaving search alone on the
+            line above. */}
+        <div className="filter-bar__facets">
+          <div className="filter-bar__select">
+            <select
+              aria-label="priority"
+              value={filter.priority ?? ""}
+              onChange={handlePriorityChange}
+            >
+              <option value="">Priority</option>
+              {PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="filter-bar__select">
-          <select
-            aria-label="complexity"
-            value={filter.complexity ?? ""}
-            onChange={handleComplexityChange}
-          >
-            <option value="">Complexity</option>
-            {COMPLEXITIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </div>
+          <div className="filter-bar__select">
+            <select
+              aria-label="complexity"
+              value={filter.complexity ?? ""}
+              onChange={handleComplexityChange}
+            >
+              <option value="">Complexity</option>
+              {COMPLEXITIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <button
-          type="button"
-          className="filter-bar__labels-btn"
-          onClick={() => setLabelsOpen((open) => !open)}
-        >
-          Labels
-          {labelBadge > 0 && (
-            <span className="filter-bar__labels-badge">{labelBadge}</span>
-          )}
-        </button>
+          <button
+            type="button"
+            className="filter-bar__labels-btn"
+            onClick={() => setLabelsOpen((open) => !open)}
+          >
+            Labels
+            {labelBadge > 0 && (
+              <span className="filter-bar__labels-badge">{labelBadge}</span>
+            )}
+          </button>
+
+          {/* Moved off the Scry eyebrow line onto the end of this row
+              (coordinator follow-up) — same class/onClick/disabled as
+              before, just relocated + shortened to "Clear" (exact-match,
+              distinct from the topbar's own "Clear…"/ClearDialog button —
+              see FilterBar.test.tsx/App.test.tsx). */}
+          <button
+            type="button"
+            className="filter-bar__clear-btn"
+            onClick={onClear}
+            disabled={isDefault}
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
       {labelsOpen && (

@@ -231,8 +231,8 @@ describe("<App/> — task 7: Clear control wiring", () => {
     // Controls (and Clear… inside it) default CLOSED now (follow-up) —
     // open it first.
     // Exact "Clear…" (with ellipsis) — task 6 added a second, unrelated
-    // "Clear filters" button to the filter bar, so a bare /clear/i now
-    // matches both.
+    // "Clear" button to the filter bar (was "Clear filters", shortened by a
+    // coordinator follow-up), so a bare /clear/i now matches both.
     toggleControls();
     const clearButton = await screen.findByRole("button", { name: "Clear…" });
     fireEvent.click(clearButton);
@@ -255,7 +255,7 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(client.getRepos).toHaveBeenCalled());
     // Exact "Clear…" — see the sibling test above for why a bare /clear/i
     // regex is no longer specific enough post-task-6 (filter bar's own
-    // "Clear filters" button renders here regardless of repo selection).
+    // "Clear" button renders here regardless of repo selection).
     expect(
       screen.queryByRole("button", { name: "Clear…" })
     ).not.toBeInTheDocument();

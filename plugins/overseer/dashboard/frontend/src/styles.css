@@ -1040,11 +1040,12 @@ body {
    overrides win the cascade over every base rule above. */
 
 /* Filter bar (F3, WF-061) — search + priority/complexity + a Labels button
-   (which folds out `LabelFilterPopover`) + a visible/total readout + Clear,
-   sitting between the topbar and `.board-region`. Search/selects borrow the
-   topbar chip's hand-inked select treatment (`.topbar__repo-select select`);
-   the Labels/Clear buttons are the shared Role A button system (`--qb-btn-*`,
-   see `.card-drawer__edit-actions button`) — no new button style. */
+   (which folds out `LabelFilterPopover`) + a "Clear" button + a visible/
+   total readout, sitting between the topbar and `.board-region`. Search/
+   selects borrow the topbar chip's hand-inked select treatment
+   (`.topbar__repo-select select`); the Labels/Clear buttons are the shared
+   Role A button system (`--qb-btn-*`, see `.card-drawer__edit-actions
+   button`) — no new button style. */
 .filter-bar {
   display: flex;
   align-items: center;
@@ -1069,10 +1070,12 @@ body {
    (same "self-forcing full-width flex item" trick used elsewhere, e.g.
    `.topbar__quarantine-banner`), and `.filter-bar__row` below holds
    everything that used to sit inline with the eyebrow. Task B: the
-   visible/total count (+ Clear filters) now lives at the OTHER end of this
-   same row — `justify-content: space-between` puts "Scry" left, "N of M …
-   Clear filters" right, so the row reads as one section-header line rather
-   than the count being buried down in the filter controls. */
+   visible/total count now lives at the OTHER end of this same row —
+   `justify-content: space-between` puts "Scry" left, "N of M" right, so the
+   row reads as one section-header line rather than the count being buried
+   down in the filter controls. Coordinator follow-up: "Clear" (was "Clear
+   filters", read `.filter-bar__count`) no longer shares this row — it moved
+   to the end of `.filter-bar__facets` below, alongside Labels. */
 .filter-bar__eyebrow-row {
   flex-basis: 100%;
   display: flex;
@@ -1149,6 +1152,22 @@ body {
    row's anchor. Still comfortably usable; the ≤720px block only toggles
    this bar's visibility (`.filter-bar[hidden]`), not its children's
    widths, so this size carries through unchanged on mobile too. */
+/* Priority/Complexity/Labels/Clear grouped onto their own line below
+   search — `flex-basis: 100%` forces the wrap inside `.filter-bar__row`
+   (same self-forcing full-width flex item trick as
+   `.filter-bar__eyebrow-row`), leaving search alone on the line above; its
+   own `flex-wrap` still lets the controls fold onto extra lines if the
+   viewport is too narrow for them side by side. "Clear" (`.filter-bar__clear-btn`)
+   sits last, after Labels — a coordinator follow-up moved it off the Scry
+   eyebrow row. */
+.filter-bar__facets {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
 .filter-bar__search {
   font: inherit;
   font-size: 0.8rem;

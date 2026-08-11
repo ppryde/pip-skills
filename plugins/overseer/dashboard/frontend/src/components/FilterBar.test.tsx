@@ -60,13 +60,15 @@ describe("<FilterBar/>", () => {
   it("shows visible/total and disables Clear when default", () => {
     render(<FilterBar {...base} visibleCount={5} totalCount={20} isDefault={true} />);
     expect(screen.getByText(/5 of 20/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /clear filters/i })).toBeDisabled();
+    // Exact "Clear" (no ellipsis) — distinguishes this from the topbar's
+    // own "Clear…"/ClearDialog button (see App.test.tsx).
+    expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
   });
 
   it("enables Clear and calls onClear when not default", () => {
     const onClear = vi.fn();
     render(<FilterBar {...base} isDefault={false} onClear={onClear} />);
-    const clearBtn = screen.getByRole("button", { name: /clear filters/i });
+    const clearBtn = screen.getByRole("button", { name: "Clear" });
     expect(clearBtn).not.toBeDisabled();
     fireEvent.click(clearBtn);
     expect(onClear).toHaveBeenCalled();
