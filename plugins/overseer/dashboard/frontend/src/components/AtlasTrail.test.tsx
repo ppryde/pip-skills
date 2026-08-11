@@ -263,6 +263,61 @@ describe("<AtlasTrail/>", () => {
     }
   });
 
+  // Impl-review round 1, finding 1: the heaviest epic's beast must land
+  // exactly on the HANDOFF anchor formula (trailEnd + BEAST_ANCHOR_OFFSET_PX),
+  // not drift off it via an undersized/mismatched ad-hoc clamp — and its
+  // Y-sample must come from the SAME x it's drawn at (never floating off
+  // the wobble line).
+  it("the heaviest epic's beast lands exactly on the HANDOFF anchor formula, un-clamped", () => {
+    const epic = card({ id: "WF-HEAVY", status: "in-flight" });
+    // laneWidth 600, pxPerWeight 20 => usable-scale headroom is generous;
+    // pick a weight that keeps the raw anchor comfortably short of any
+    // defensive clamp so this asserts the NORMAL (unclamped) path.
+    const kid = child({ id: "k1", status: "done", complexity: "M" }); // weight 2
+    const { container } = renderTrail(epic, [kid], { laneWidth: 600, pxPerWeight: 20 });
+
+    const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
+    const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
+    // trailEnd = TRAILHEAD_RESERVE_PX(34) + 2*20 = 74; anchor = 74 + 26 = 100.
+    expect(beastX).toBeCloseTo(100, 5);
+  });
+
+  it("never lets the beast's own footprint overflow a lane whose heaviest epic exactly saturates the shared scale", () => {
+    // usable = laneWidth - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX; a
+    // pxPerWeight computed so THIS epic's total weight * pxPerWeight ==
+    // usable exactly reproduces "the heaviest epic spans the lane" — the
+    // beast's right edge (beastX + 48) must still land at/under laneWidth.
+    const laneWidth = 300;
+    const usable = laneWidth - 74 - 34; // BEAST_RESERVE_PX(74) + TRAILHEAD_RESERVE_PX(34)
+    const totalWeightUnits = 4; // one XL child
+    const pxPerWeight = usable / totalWeightUnits;
+    const epic = card({ id: "WF-SATURATED", status: "in-flight" });
+    const kid = child({ id: "k1", status: "done", complexity: "XL" });
+    const { container } = renderTrail(epic, [kid], { laneWidth, pxPerWeight });
+
+    const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
+    const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
+    expect(beastX + 48).toBeLessThanOrEqual(laneWidth + 0.01);
+  });
+
+  // Impl-review round 1, finding 3: a parked epic with ZERO done and ZERO
+  // in-progress children falls all the way back to campfireX === boundaryX
+  // === TRAILHEAD_RESERVE_PX — the campfire must still cut a gap in the
+  // dotted line at that position, not sit on top of an un-trimmed dot.
+  it("parked, all-todo epic (no done/in-progress children): the campfire still cuts a gap in the line", () => {
+    const epic = card({ id: "WF-076", status: "parked" });
+    const todo = child({ id: "k1", status: "planned", complexity: "M" });
+    const { container } = renderTrail(epic, [todo]);
+
+    expect(container.querySelector(".atlas-trail__campfire")).toBeInTheDocument();
+    // TRAILHEAD_RESERVE_PX(34) is both the campfire's fallback position and
+    // the first segment's own start — a real cut there means the first
+    // rendered path segment starts measurably AFTER 34, not exactly at it.
+    const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
+    const firstPathStartX = Number(firstPathD.match(/^M([\d.]+)/)![1]);
+    expect(firstPathStartX).toBeGreaterThan(34 + 6); // clear of the 12px campfire gap's near edge
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

@@ -206,10 +206,16 @@ function AtlasRailCard({
             const done = child.status === "done";
             const abandoned = child.status === "abandoned";
             const group = statusGroupOf(child);
-            // A done child can't meaningfully still be "blocked" — stale
-            // depends_on data on finished work shouldn't paint a rose
-            // border over a quest that's already cleared.
-            const blocked = group !== "done" && openDependencies(child, cardsById).length > 0;
+            // Impl-review round 1, finding 6: restricted to the "todo"
+            // group specifically (not "in-progress" too, as a bare
+            // `group !== "done"` let through) — an ACTIVELY-WORKED quest
+            // isn't "barred", it's already underway (the trail renders it
+            // AT HAND, not as a boulder), so the checklist must agree.
+            // Stale depends_on data on already-finished work is excluded
+            // for the same "can't meaningfully still be blocked" reason.
+            // The card's own 🔒 "locked behind" chip already communicates
+            // the dependency regardless of this row-level styling.
+            const blocked = group === "todo" && openDependencies(child, cardsById).length > 0;
 
             const rowClassName = [
               "atlas-rail-card__subquest",

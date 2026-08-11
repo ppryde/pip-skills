@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
 import { formatDateStamp, parseCalendarDate, seedFor, wobblePath } from "../board/atlasGeometry";
 import {
+  BEAST_ICON_SIZE_PX,
   CAMPFIRE_GAP_PX,
   TRAILHEAD_RESERVE_PX,
   WAYPOINT_GAP_PX,
@@ -10,7 +11,6 @@ import {
   boundaryX,
   campfireX,
   computeSegments,
-  frozenSegment,
   openDependencies,
   orderChildrenForTrail,
   statusGroupOf,
@@ -112,7 +112,6 @@ function AtlasTrail({
   const epicTotalWeight = totalWeight(childCards);
   const trailEnd = trailEndX(epicTotalWeight, pxPerWeight);
   const boundary = boundaryX(segments);
-  const frozen = frozenSegment(segments);
   const campX = campfireX(segments);
 
   const slain = card.status === "done";
@@ -125,9 +124,19 @@ function AtlasTrail({
 
   const t = wobblePath(0, Math.max(width, 1), laneHeight, seed);
 
+  // Impl-review round 1, finding 1: the draw-x clamp and the y-SAMPLE-x used
+  // to be two different ad-hoc numbers (`width - 52` vs `width - 30`), which
+  // (a) pulled the heaviest epic's beast off the HANDOFF anchor formula and
+  // (b) sampled the wobble line's y at a DIFFERENT x than where the beast
+  // actually gets drawn, floating it off the line. ONE clamp, derived from
+  // BEAST_ICON_SIZE_PX (the beast's own rendered width), used for both the
+  // draw position and the y-sample now — by construction of
+  // laneUsableWidth/globalPxPerWeight/BEAST_RESERVE_PX, the heaviest epic's
+  // un-clamped beastXRaw already lands at exactly `width - BEAST_ICON_SIZE_PX`,
+  // so this clamp is a defensive floor, not the normal path.
   const beastXRaw = beastAnchorX(trailEnd);
-  const beastXClamped = Math.min(beastXRaw, width - 52);
-  const beastY = t.yAt(Math.min(beastXRaw, width - 30)) - 24;
+  const beastXClamped = Math.min(beastXRaw, width - BEAST_ICON_SIZE_PX);
+  const beastY = t.yAt(beastXClamped) - BEAST_ICON_SIZE_PX / 2;
 
   const svgClassName =
     "atlas-trail__svg" + (accentKey ? ` atlas-trail__svg--accent-${accentKey}` : "");
@@ -282,9 +291,16 @@ function AtlasTrail({
             const faded = group === "todo";
             const cuts = [{ at: end, radius: WAYPOINT_GAP_PX }];
             if (i > 0) cuts.push({ at: start, radius: WAYPOINT_GAP_PX });
-            if (parked && frozen && child === frozen.child) {
-              cuts.push({ at: campX, radius: CAMPFIRE_GAP_PX });
-            }
+            // Impl-review round 1, finding 3: cutting the campfire gap ONLY
+            // on the frozen in-progress child's own segment missed the
+            // fallback case (a parked epic with zero done AND zero
+            // in-progress children — campfireX falls all the way back to
+            // boundaryX, which can land on ANY segment, or before all of
+            // them). Cutting at campX on every segment unconditionally is
+            // safe — trimSegmentForMarkers is a no-op wherever campX falls
+            // outside a given segment's own range, so this never trims
+            // ground the campfire doesn't actually sit on.
+            if (parked) cuts.push({ at: campX, radius: CAMPFIRE_GAP_PX });
             return trimSegmentForMarkers(start, end, cuts).map(([a, b], j) => (
               <path
                 key={`${child.id}-${j}`}

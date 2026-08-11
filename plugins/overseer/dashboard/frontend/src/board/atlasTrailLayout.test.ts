@@ -5,7 +5,6 @@ import {
   boundaryX,
   campfireX,
   computeSegments,
-  doneCount,
   frozenSegment,
   globalPxPerWeight,
   laneUsableWidth,
@@ -17,6 +16,8 @@ import {
   trailEndX,
   trimSegmentForMarkers,
   weightOf,
+  BEAST_ANCHOR_OFFSET_PX,
+  BEAST_ICON_SIZE_PX,
   BEAST_RESERVE_PX,
   CAMPFIRE_FRACTION,
   TRAILHEAD_RESERVE_PX,
@@ -118,12 +119,37 @@ describe("orderChildrenForTrail", () => {
 });
 
 describe("laneUsableWidth", () => {
-  it("subtracts the beast reserve (64) and trailhead reserve (34)", () => {
+  it("subtracts the beast reserve and trailhead reserve (34)", () => {
     expect(laneUsableWidth(500)).toBe(500 - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX);
   });
 
   it("floors at 40 for a very narrow lane", () => {
     expect(laneUsableWidth(50)).toBe(40);
+  });
+});
+
+// Impl-review round 1, finding 1: HANDOFF's plain "64" beast reserve
+// undersizes the beast's own footprint — BEAST_ANCHOR_OFFSET_PX(26) +
+// BEAST_ICON_SIZE_PX(48, BeastFace's actual rendered size) = 74, so a 64px
+// reserve clips 10px off the bottom of every Down-mode beast. The reserve
+// must be DERIVED from those two constants, never a bare literal, so every
+// caller's clamp/content-height math (AtlasTrail.tsx, AtlasTrailVertical.tsx)
+// can never silently drift out of sync with the beast's real size again.
+describe("BEAST_RESERVE_PX", () => {
+  it("is derived from BEAST_ANCHOR_OFFSET_PX + BEAST_ICON_SIZE_PX, not a bare literal", () => {
+    expect(BEAST_RESERVE_PX).toBe(BEAST_ANCHOR_OFFSET_PX + BEAST_ICON_SIZE_PX);
+  });
+
+  it("is large enough that a beast anchored at the reserve's own edge never overflows it", () => {
+    // The heaviest epic's trail end sits at exactly `laneWidth - BEAST_RESERVE_PX`
+    // (by construction of laneUsableWidth/globalPxPerWeight) — its beast
+    // anchor is then trailEnd + BEAST_ANCHOR_OFFSET_PX, and the beast's own
+    // footprint extends BEAST_ICON_SIZE_PX further. All of that must still
+    // fit inside `laneWidth`.
+    const laneWidth = 500;
+    const trailEnd = laneWidth - BEAST_RESERVE_PX;
+    const beastAnchor = beastAnchorX(trailEnd);
+    expect(beastAnchor + BEAST_ICON_SIZE_PX).toBeLessThanOrEqual(laneWidth);
   });
 });
 
@@ -242,18 +268,6 @@ describe("trimSegmentForMarkers", () => {
   it("returns the whole segment unchanged when no cuts fall inside it", () => {
     const out = trimSegmentForMarkers(0, 100, [{ at: 500, radius: 10 }]);
     expect(out).toEqual([[0, 100]]);
-  });
-});
-
-describe("doneCount", () => {
-  it("counts only status === done — abandoned is excluded (user-confirmed)", () => {
-    const kids = [
-      child({ id: "a", status: "done" }),
-      child({ id: "b", status: "abandoned" }),
-      child({ id: "c", status: "done" }),
-      child({ id: "d", status: "planned" }),
-    ];
-    expect(doneCount(kids)).toBe(2);
   });
 });
 

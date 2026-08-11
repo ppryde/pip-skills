@@ -86,7 +86,11 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
   // itself is that scroller here too, just with a different child shape).
   const columnsRef = useRef<HTMLDivElement>(null);
   const [activeColumnHeight, setActiveColumnHeight] = useState<number | null>(null);
-  const [activeColumnIndex, setActiveColumnIndex] = useState(0);
+  // Only the setter is used (retargeting the ResizeObserver below reads a
+  // local closure variable, not this state — see that effect's own
+  // comment) — kept for a future active-column highlight affordance, not
+  // read anywhere yet.
+  const [, setActiveColumnIndex] = useState(0);
 
   const cardsById = useMemo(() => {
     const map = new Map<string, BoardCard>();
@@ -137,6 +141,21 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
   // clips the other, off-screen, possibly-taller columns out of the
   // scrollable region), with a ResizeObserver re-measuring if the active
   // column's own content changes size (e.g. its checklist expands).
+  //
+  // Impl-review round 1, finding 2: the observer used to attach ONCE, to
+  // whichever column `activeColumnIndex` (a stale render-time closure over
+  // React state) named when the effect last RAN — swiping to a different
+  // column fires the scroll listener (which updates the STATE) but never
+  // re-runs this effect, so the observer kept watching the column that was
+  // active back when the effect was set up, not whichever one actually is
+  // now. Expanding a swiped-to column's checklist (no scroll event at all)
+  // then left `.atlas-chart__columns` pinned at a stale height with
+  // `overflow-y: hidden` clipping the real content. Fixed by re-pointing
+  // the SAME observer instance at the newly-nearest element from directly
+  // inside `measure()` (a local closure variable, not React state — no
+  // extra render/effect churn needed to keep it current) every time
+  // `measure()` runs, whether triggered by scroll OR by the observer
+  // itself firing on the currently-watched column's own resize.
   useLayoutEffect(() => {
     if (!downMode) {
       setActiveColumnHeight(null);
@@ -145,13 +164,18 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
     const scroller = columnsRef.current;
     if (!scroller) return;
 
-    const measure = () => {
-      const rect = scroller.getBoundingClientRect();
+    // jsdom (unlike every real browser) has no ResizeObserver in every test
+    // environment — same guard as Board.tsx's own port of this technique.
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : undefined;
+    let observedEl: HTMLElement | null = null;
+
+    function measure() {
+      const rect = scroller!.getBoundingClientRect();
       const centre = rect.left + rect.width / 2;
       let nearestIndex = 0;
       let nearestDistance = Infinity;
       let nearestEl: HTMLElement | null = null;
-      scroller.querySelectorAll<HTMLElement>("[data-column-index]").forEach((el) => {
+      scroller!.querySelectorAll<HTMLElement>("[data-column-index]").forEach((el) => {
         const r = el.getBoundingClientRect();
         const d = Math.abs(r.left + r.width / 2 - centre);
         if (d < nearestDistance) {
@@ -162,30 +186,21 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
       });
       setActiveColumnIndex(nearestIndex);
       if (nearestEl) setActiveColumnHeight((nearestEl as HTMLElement).scrollHeight);
-    };
+
+      if (ro && nearestEl !== observedEl) {
+        if (observedEl) ro.unobserve(observedEl);
+        if (nearestEl) ro.observe(nearestEl);
+        observedEl = nearestEl;
+      }
+    }
 
     measure();
     scroller.addEventListener("scroll", measure);
-
-    // jsdom (unlike every real browser) has no ResizeObserver in every test
-    // environment — same guard as Board.tsx's own port of this technique.
-    let ro: ResizeObserver | undefined;
-    if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(measure);
-      const activeEl = scroller.querySelector<HTMLElement>(
-        `[data-column-index="${activeColumnIndex}"]`
-      );
-      if (activeEl) ro.observe(activeEl);
-    }
 
     return () => {
       scroller.removeEventListener("scroll", measure);
       ro?.disconnect();
     };
-    // Deliberately NOT depending on `activeColumnIndex` (which the effect
-    // body itself sets) — that would re-run this setup on every scroll-
-    // driven index change, tearing down and rebuilding the listener/
-    // observer instead of leaving them attached across the column swap.
   }, [downMode, epics.length]);
 
   function toggleExpand(id: string) {

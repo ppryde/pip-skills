@@ -16,11 +16,24 @@ import { rarityStars } from "./rarityStars";
 /** H_LEFT_PAD in the prototype — reserve at the lane's left edge for the
  * trailhead (walled-village) icon, clear of the rail column. */
 export const TRAILHEAD_RESERVE_PX = 34;
-/** Reserve at the lane's right edge for the beast doodle. */
-export const BEAST_RESERVE_PX = 64;
 /** Fixed offset from a trail's true end (H_LEFT_PAD + totalWeight *
  * pxPerWeight) to the beast's anchor point. */
 export const BEAST_ANCHOR_OFFSET_PX = 26;
+/** BeastFace's actual rendered footprint (viewBox 0 0 50 50, drawn at
+ * width={48} height={48} — see BeastFace.tsx) — the beast's own doodle
+ * extends this far past whichever point it's anchored/translated to. */
+export const BEAST_ICON_SIZE_PX = 48;
+/** Reserve at the lane's far edge (right in Across mode, bottom in Down
+ * mode) for the beast doodle. Impl-review round 1 finding: HANDOFF's plain
+ * "64" undersizes this — BEAST_ANCHOR_OFFSET_PX(26) + the beast's own
+ * BEAST_ICON_SIZE_PX(48) = 74 > 64, so a 64px reserve clips the bottom of
+ * every Down-mode beast by 10px and forces Across mode into ad-hoc
+ * per-caller clamps that drift the heaviest epic's beast off the HANDOFF
+ * anchor formula. Deriving this from the two other named constants (not a
+ * bare literal) is what makes every clamp/content-height computed from it
+ * — AtlasTrail.tsx's `width - BEAST_ICON_SIZE_PX` clamp, AtlasTrailVertical
+ * .tsx's content-height sizing — actually agree with each other. */
+export const BEAST_RESERVE_PX = BEAST_ANCHOR_OFFSET_PX + BEAST_ICON_SIZE_PX;
 /** Usable trail width never collapses below this, however narrow the lane
  * gets (matches the prototype's floor). */
 export const MIN_USABLE_PX = 40;
@@ -184,12 +197,6 @@ export function trimSegmentForMarkers(x0: number, x1: number, cuts: MarkerCut[])
     });
   }
   return ranges.filter(([a, b]) => b - a > 0.5);
-}
-
-/** HANDOFF: abandoned is "excluded from doneCount/progress-bar fill" — a
- * fallen quest doesn't count as cleared. */
-export function doneCount(children: BoardCard[]): number {
-  return children.filter((c) => c.status === "done").length;
 }
 
 /** `depends_on` targets that are not (yet) done — the same underlying

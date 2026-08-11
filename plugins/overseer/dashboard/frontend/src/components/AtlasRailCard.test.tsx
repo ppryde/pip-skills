@@ -340,6 +340,32 @@ describe("<AtlasRailCard/>", () => {
       expect(row.querySelector(".atlas-rail-card__checkbox")).toHaveTextContent("⛔");
     });
 
+    // Impl-review round 1, finding 6: an in-progress child with an open
+    // depends_on used to ALSO get the blocked/rose styling here (a bare
+    // `group !== "done"` let "in-progress" through), disagreeing with the
+    // trail's own AT HAND marker for the same child. RULING: an actively-
+    // worked quest isn't "barred" — restrict blocked styling to the todo
+    // group only, so the checklist and the trail always agree.
+    it("an in-progress child with an open depends_on is NOT styled blocked — it's actively worked, not barred (agrees with the trail's AT HAND marker)", () => {
+      const cardsById = new Map([["WF-DEP", card({ id: "WF-DEP", status: "in-flight" })]]);
+      const { container } = render(
+        <AtlasRailCard
+          card={card({ id: "WF-085" })}
+          rollup={rollup()}
+          childCards={[
+            card({ id: "k1", title: "At hand", status: "in-flight", depends_on: ["WF-DEP"] }),
+          ]}
+          expanded={true}
+          onToggleExpand={vi.fn()}
+          onOpen={vi.fn()}
+          cardsById={cardsById}
+        />
+      );
+      const row = container.querySelector(".atlas-rail-card__subquest")!;
+      expect(row).not.toHaveClass("atlas-rail-card__subquest--blocked");
+      expect(row.querySelector(".atlas-rail-card__checkbox")).not.toHaveTextContent("⛔");
+    });
+
     it("todo: no honest date — the stamp shows ★weight instead", () => {
       const { container } = render(
         <AtlasRailCard

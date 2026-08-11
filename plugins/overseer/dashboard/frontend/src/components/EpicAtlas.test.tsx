@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { Board, BoardCard } from "../api/types";
 import EpicAtlas from "./EpicAtlas";
 
@@ -197,6 +197,7 @@ describe("<EpicAtlas/>", () => {
 
     afterEach(() => {
       window.matchMedia = originalMatchMedia;
+      vi.restoreAllMocks();
     });
 
     function stubViewport(matches: boolean) {
@@ -233,6 +234,91 @@ describe("<EpicAtlas/>", () => {
 
       expect(container.querySelector(".atlas-chart__rows")).toBeInTheDocument();
       expect(container.querySelector(".atlas-chart__columns")).not.toBeInTheDocument();
+    });
+
+    // Impl-review round 1, finding 2: the ResizeObserver used to attach
+    // once to whichever column was active when the effect last RAN (a
+    // stale closure), and never re-pointed itself after a swipe — content
+    // growth on the NEWLY active column, with no accompanying scroll
+    // event, left the pinned height stale. This locks in the fix: after a
+    // swipe (a scroll event moves the nearest-to-centre column), the
+    // observer is re-targeted at the new active column, and a resize on
+    // THAT column (fired with no scroll at all) updates the pinned height.
+    it("re-targets the ResizeObserver to the new active column after a swipe — content growth with no scroll still updates the pinned height", () => {
+      stubViewport(true);
+
+      // AtlasTrailVertical.tsx constructs its OWN ResizeObserver instances
+      // too (unrelated column-width self-measurement) — tracking
+      // observe/unobserve PER INSTANCE (not one shared array/callback) is
+      // what lets the test find and fire specifically the instance this
+      // effect owns, rather than accidentally firing an unrelated one.
+      const instances: { el: HTMLElement | null; cb: ResizeObserverCallback }[] = [];
+      class MockResizeObserver {
+        private entry: { el: HTMLElement | null; cb: ResizeObserverCallback };
+        constructor(cb: ResizeObserverCallback) {
+          this.entry = { el: null, cb };
+          instances.push(this.entry);
+        }
+        observe(el: HTMLElement) {
+          this.entry.el = el;
+        }
+        unobserve() {
+          this.entry.el = null;
+        }
+        disconnect() {}
+      }
+      vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+      const observedColumnEls = () =>
+        instances.map((i) => i.el).filter((el): el is HTMLElement => el != null && el.dataset.columnIndex != null);
+
+      let nearestIndex = 0;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: HTMLElement
+      ) {
+        const base = { top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
+        if (!this.dataset.columnIndex) {
+          return { left: 0, right: 100, width: 100, ...base } as DOMRect;
+        }
+        const isNearest = this.dataset.columnIndex === String(nearestIndex);
+        return { left: isNearest ? 0 : 1000, right: isNearest ? 100 : 1100, width: 100, ...base } as DOMRect;
+      });
+
+      const scrollHeights: Record<string, number> = { "0": 300, "1": 300 };
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return scrollHeights[this.dataset.columnIndex ?? ""] ?? 0;
+      });
+
+      const cards = [
+        card({ id: "WF-A", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
+        card({ id: "WF-B", is_epic: true, rollup: { done: 0, total: 3, estimate: null, actual: 0 } }),
+      ];
+      const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
+      fireEvent.click(screen.getByRole("tab", { name: /⟱ down/i }));
+
+      const columnsEl = container.querySelector(".atlas-chart__columns") as HTMLElement;
+      expect(columnsEl.style.height).toBe("300px");
+      expect(observedColumnEls().map((el) => el.dataset.columnIndex)).toEqual(["0"]);
+
+      // Swipe: column 1 becomes nearest-to-centre.
+      nearestIndex = 1;
+      fireEvent.scroll(columnsEl);
+
+      const nowObserved = observedColumnEls();
+      expect(nowObserved.map((el) => el.dataset.columnIndex)).toEqual(["1"]);
+
+      // Column 1's checklist expands — no scroll event, only the
+      // (re-targeted) ResizeObserver firing on the instance that's
+      // specifically watching column 1.
+      scrollHeights["1"] = 480;
+      const activeInstance = instances.find((i) => i.el === nowObserved[0])!;
+      act(() => {
+        activeInstance.cb([], {} as ResizeObserver);
+      });
+
+      expect(columnsEl.style.height).toBe("480px");
     });
   });
 
