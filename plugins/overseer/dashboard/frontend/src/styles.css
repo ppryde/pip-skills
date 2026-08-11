@@ -437,11 +437,18 @@ body {
 }
 
 /* Parchment sticky top bar (WF-029 chunk 5, HANDOFF §Board "Top bar"). */
-/* Topbar↔content seam: a small dotted full-width line, deliberately
-   quieter than the chunky inset dash bands on `.topbar__controls-header`/
-   `.filter-bar__eyebrow-row` below (Task A) — this reads as the shell's
-   own edge, those read as section headers. `.filter-bar` carries no
-   matching bottom divider (nothing separates Scry from the board). */
+/* Header↔content seam has moved off `.topbar`'s own bottom edge — the
+   filter bar (`.filter-bar`, below) now shares this same `--qb-panel`
+   surface and renders BELOW this block, so a divider here would land
+   mid-header whenever filters are open, not at the header's true bottom.
+   The one seam that separates the whole header stack (topbar + control +
+   filter, whichever are open) from the board now lives on `.board-region`'s
+   own top edge instead (see that rule) — it's the header's ACTUAL bottom
+   edge in every toggle state, unlike a fixed spot on this block. The
+   chunky inset dash bands on `.topbar__controls-header`/
+   `.filter-bar__eyebrow-row` below (Task A) are unrelated — those read as
+   section headers between the header's own sub-parts, not as the header's
+   outer edge. */
 .topbar {
   flex: 0 0 auto;
   display: flex;
@@ -450,7 +457,6 @@ body {
   padding: 18px 26px;
   background: var(--qb-panel);
   color: var(--qb-ink-700);
-  border-bottom: 1.5px dotted var(--qb-line-dashed);
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
   position: sticky;
@@ -1050,15 +1056,22 @@ body {
    selects borrow the topbar chip's hand-inked select treatment
    (`.topbar__repo-select select`); the Labels/Clear buttons are the shared
    Role A button system (`--qb-btn-*`, see `.card-drawer__edit-actions
-   button`) — no new button style. No divider on this block's own bottom
-   edge — nothing separates Scry from the board below. */
+   button`) — no new button style. Background is `--qb-panel` (was the
+   `--qb-parchment-muted` block colour) — this bar sits BELOW `.topbar` in
+   normal flow (App.tsx: TopBar, then FilterBar, then `.board-region`), so
+   a distinct block colour here read as a separate parchment strip detached
+   from the header rather than a continuation of it; matching `.topbar`'s
+   own surface makes topbar + control + filter read as one header unit.
+   No divider on this block's own bottom edge — the header↔content seam
+   lives on `.board-region`'s top edge instead (see that rule), clear of
+   Scry regardless of which header rows are open. */
 .filter-bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.6rem;
   padding: 0.6rem 1rem;
-  background: var(--qb-parchment-muted);
+  background: var(--qb-panel);
 }
 
 /* Task 3: makes the `hidden` attribute (driven by `filtersOpen`) actually
@@ -1311,11 +1324,27 @@ body {
   white-space: nowrap;
 }
 
+/* Header↔content seam (moved off `.topbar`'s own bottom edge — see that
+   rule's comment). `.board-region` is the scroll container for both Board
+   and Atlas (App.tsx renders it as the one sibling below TopBar/FilterBar),
+   so its own top edge is the header stack's TRUE bottom in every toggle
+   state — topbar alone, topbar+control, topbar+filter, or all three —
+   without needing to track which header rows are currently open. Being
+   the scroll container's own border (not a child inside its scrolling
+   content) also means the line never scrolls away with the board/atlas
+   content. `2px dashed` renders ~5-6px dashes — a deliberate MEDIUM step
+   between the old `1.5px dotted` seam this replaces and the chunky 9px-
+   dash/6px-gap inset bands on `.topbar__controls-header`/
+   `.filter-bar__eyebrow-row` above (those are a `repeating-linear-gradient`
+   background band, not a border — see that rule's comment); this stays a
+   plain full-bleed `border-top` since it's the header's outer edge, not
+   another section-header seam. */
 .board-region {
   flex: 1 1 auto;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 1rem;
+  border-top: 2px dashed var(--qb-line-dashed);
 }
 
 .board-placeholder {
@@ -5607,7 +5636,10 @@ button.trail-tag:focus-visible {
      switches to a vertical scroller instead: with the per-lane vertical
      trap gone (below), a tall lane's overflow is the PAGE's to scroll, not
      a fixed-height column's (this is what fixes WF-075's "one card visible
-     at a time" pain — swiping down now reveals every card in the lane). */
+     at a time" pain — swiping down now reveals every card in the lane).
+     Only padding/overflow are overridden here — the base rule's
+     `border-top` (the header↔content seam) isn't touched, so it still
+     applies at every mobile width without needing to be repeated. */
   .board-region {
     padding: 0.75rem 0.75rem 1rem;
     overflow-x: visible;
