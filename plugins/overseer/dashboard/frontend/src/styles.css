@@ -573,10 +573,9 @@ body {
   font-size: 0.75rem;
   /* De-bulked (WF-078 follow-up): dropped the filled, fully-rounded pill —
      see `.topbar__repo-select` above for the full rationale. The branch's
-     blue coding survives as a thin left tint border + the label's own
-     colour, rather than a full filled chip. */
-  padding: 0 0.5rem;
-  border-left: 2px solid var(--qb-branch-chip-border);
+     blue coding now survives purely as the label's own colour — the thin
+     left tint bar was dropped per user request. */
+  padding: 0;
   background: transparent;
   color: var(--qb-branch-chip-text);
   /* WF-085: same shrink-to-allow-ellipsis rationale as `.topbar__repo-select`
@@ -589,6 +588,9 @@ body {
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   color: var(--qb-branch-chip-text);
+  /* Keep the ⑃ glyph and "branch" on one line — the narrow chip could
+     otherwise wrap them onto separate lines. */
+  white-space: nowrap;
 }
 
 /* WF-046 item 3 — same treatment as `.topbar__repo-select select` above,
