@@ -3947,8 +3947,13 @@ a.card-drawer__pr-chip:hover {
     margin-left: 0;
   }
 
-  /* --- Top bar: "Controls ▾" collapse (WF-085/074) --- */
+  /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
+     `order` pins the toggle to the bottom-right of the wrapping shelf (after
+     every always-visible chip incl. the questing/fleet pill) and drops its
+     revealed group — plus the separate <FilterBar/> below the topbar — into one
+     block beneath the questing label, rather than wedged mid-shelf. */
   .topbar__controls-toggle {
+    order: 90; margin-left: auto;
     display: inline-flex; align-items: center; font-size: 0.8rem;
     padding: 0.35rem 0.75rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
     border: 1.5px solid var(--qb-btn-ink); background: var(--qb-btn-face);
@@ -3958,6 +3963,7 @@ a.card-drawer__pr-chip:hover {
   .topbar__controls-toggle:active { background: var(--qb-btn-face-active); }
   .topbar__controls-group[hidden] { display: none; }
   .topbar__controls-group:not([hidden]) {
+    order: 91;
     display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem;
   }
   /* WF-085b: same collapse driven by the SAME "Controls ▾" toggle, mirrored
@@ -4213,12 +4219,12 @@ a.card-drawer__pr-chip:hover {
     font-size: 1rem;
   }
 
-  /* Primary tappables meet ~44px. */
+  /* Primary tappables meet ~44px. NB: the repo/branch selects are deliberately
+     NOT here — WF-078 wants them sized to the Role A button box (~29px) so they
+     don't tower over ＋New card / Controls; they keep the button's own hit area. */
   .topbar__refresh,
   .topbar__fleet-pill,
   .topbar__archive-toggle,
-  .topbar__repo-select select,
-  .topbar__branch-select select,
   .threshold-control button,
   .status-menu button,
   .claim-control button,
