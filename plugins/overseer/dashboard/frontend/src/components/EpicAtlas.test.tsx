@@ -74,11 +74,16 @@ describe("<EpicAtlas/>", () => {
 
   // WF-086 chunk 10: the mobile responsive layer makes `.atlas-chart` the
   // ONE horizontal scroller (styles.css's `725ddea` invariant, same one the
-  // board itself encodes). This is a structural regression guard, not a CSS
-  // test (jsdom has no real layout) — it fails the moment any future change
-  // gives a per-row/lane element its own independent scroll class, which is
-  // exactly the bug 725ddea fixed on the board.
-  it("is the sole scroll-classed element in its subtree (725ddea one-scroller invariant)", () => {
+  // board itself encodes). jsdom has no real layout engine, so this test
+  // CANNOT assert the actual invariant (that no other element has computed
+  // `overflow-x: auto`/`scroll`) — it only checks a NAMING convention
+  // correlated with it: no element besides `.atlas-chart` carries a class
+  // whose name suggests independent scroll handling. That catches the
+  // obvious regression (a future change literally naming a per-row/lane
+  // class `.atlas-lane--scroll` or similar) but would miss overflow set
+  // via inline style or a class named without "scroll" in it — a
+  // structural smoke test, not a substitute for the real CSS/visual check.
+  it("has no per-row/lane element with a scroll-suggestively-named class, alongside .atlas-chart (725ddea naming-convention guard)", () => {
     const cards = [
       card({ id: "WF-A", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
       card({ id: "WF-B", is_epic: true, rollup: { done: 0, total: 3, estimate: null, actual: 0 } }),
