@@ -174,6 +174,22 @@ function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) 
           >
             <span className="atlas-chart__today-flag">⚑ TODAY</span>
           </div>
+
+          {/* HANDOFF's legend + honesty footnote — the ledger keeps no due
+              dates, so anything past today is explicitly a guess, never a
+              promise; this line is the one place that's said in plain
+              words rather than left to the faded-dots convention alone. */}
+          <div className="atlas-chart__legend">
+            <span>⚔ the party marches at today</span>
+            <span>faded dots = pace-projected, uncharted</span>
+            <span>beast slain = epic done</span>
+            <span>⛺ camped = parked</span>
+          </div>
+          <p className="atlas-chart__footnote">
+            Trail start = epic <b>created</b> · ✓ waypoints = child quests at their{" "}
+            <b>updated</b> dates · the beast waits at the projected trail&rsquo;s end (the
+            ledger keeps no due dates — faded ground is pace-guessed, never promised).
+          </p>
         </>
       )}
     </div>

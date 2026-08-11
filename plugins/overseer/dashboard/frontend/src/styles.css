@@ -189,6 +189,13 @@
   --qb-accent-ash-border: #b4b2aa;
   --qb-accent-ash-cardshadow: var(--qb-accent-ash-border); /* no distinct tint given, mirrors taupe/umber */
 
+  /* Epic Atlas (WF-086) — beast-doodle outline / plaque-shadow ink, from
+     the Boss Ledger family. The ONE new colour the HANDOFF calls for; every
+     other Atlas surface reuses the accent/ink/gold/locked tokens above.
+     Referenced by BeastFace.tsx (chunk 3) via var(--qb-beast-ink) — this is
+     that token's first and only declaration. */
+  --qb-beast-ink: #2c2015;
+
   /* Column-keyed aliases — original column names kept verbatim, only the
      styling is themed (HANDOFF terminology table). */
   --qb-col-backlog: var(--qb-accent-forest-fill);
@@ -3905,6 +3912,594 @@ a.card-drawer__pr-chip:hover {
   background: var(--qb-parchment-muted);
   color: var(--qb-ink-900);
   word-break: break-word;
+}
+
+/* ==========================================================================
+   Epic Atlas (WF-086) — a gantt-esque sibling page to the board, desktop
+   base layer. Reuses the board's own accent/ink/gold/locked/button tokens
+   throughout (only --qb-beast-ink above is new); the ≤720px condensed-rail
+   overrides live in the mobile layout layer below, per this file's own
+   cascade convention (that section must load last to win).
+   ========================================================================== */
+
+/* --- TopBar: Board|Atlas view toggle (chunk 7) -------------------------
+   Role B "T1 gold underline" tabs — byte-identical aria-pressed mechanics
+   to `.card-drawer__viewtoggle`, but its own class: the two toggles live in
+   unrelated parts of the tree and shouldn't share a CSS identity by
+   accident. */
+.topbar__view-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 5px;
+  background: var(--qb-tab-track);
+  border-radius: 14px;
+}
+
+.topbar__view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  border-radius: 5px 5px 2px 2px;
+  border: 0;
+  border-bottom: 2px solid var(--qb-tab-underline);
+  background: transparent;
+  color: var(--qb-tab-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    color var(--qb-motion-hover) ease;
+}
+
+.topbar__view-toggle button:hover {
+  background: var(--qb-tab-hover-bg);
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+}
+
+.topbar__view-toggle button[aria-pressed="true"] {
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+  background: var(--qb-tab-active-bg);
+}
+
+/* --- Atlas chart: page shell, axis, rows -------------------------------- */
+
+/* `--rail` is the ONE source of truth for the rail column width — the
+   axis row, every saga row, AND the TODAY signpost's `calc()` (set inline
+   by EpicAtlas.tsx, ported from the prototype) all read it, so a single
+   declaration keeps every part of the grid in lockstep. Desktop value here;
+   the ≤720px mobile layer below shrinks it for the sticky condensed rail. */
+.atlas-chart {
+  --rail: 264px;
+  position: relative;
+  /* Desktop-only floor mirroring `.board`'s own `min-width: max-content`
+     (line ~996) — both exist so the chart never squeezes narrower than its
+     content on a wide viewport. The ≤720px mobile layer explicitly
+     overrides this back to `min-width: 0` (the `725ddea` one-scroller
+     invariant) so it never fights the phone-width scroller. */
+  min-width: 1120px;
+  padding: 0.75rem 0.75rem 1.5rem;
+}
+
+.atlas-chart__empty {
+  padding: 2rem 1.5rem;
+  text-align: center;
+  font-family: var(--qb-font-prose);
+  color: var(--qb-ink-500);
+  background: var(--qb-parchment-muted);
+  border: 2px dashed var(--qb-line-dashed);
+  border-radius: var(--qb-radius-panel);
+}
+
+.atlas-chart__axis {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  border-bottom: 2px dashed var(--qb-line-dashed);
+  padding-bottom: 0.4rem;
+}
+
+.atlas-chart__axis-days {
+  position: relative;
+  min-height: 1.1rem;
+}
+
+.atlas-chart__tick {
+  position: absolute;
+  top: 0;
+  font-family: var(--qb-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--qb-ink-400);
+  white-space: nowrap;
+}
+
+.atlas-chart__rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-chart__row {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  border-bottom: 1.5px dashed var(--qb-line-dashed-2);
+}
+
+.atlas-chart__rail {
+  display: flex;
+  align-items: center;
+  padding: 0.6rem 0.75rem 0.6rem 0;
+}
+
+.atlas-chart__lane {
+  position: relative;
+  min-height: 104px;
+}
+
+/* TODAY signpost — HANDOFF's "dashed rose line + pennant", spanning the
+   whole field. Rose = --qb-accent-rose-fill/-shadow, the EXACT hexes
+   (#A8506B / #8C3E56) the HANDOFF spec calls out by literal value — no new
+   colour needed, the rose accent family already is this pairing. `left` is
+   set inline by EpicAtlas.tsx via the prototype's own calc() expression. */
+.atlas-chart__today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--qb-accent-rose-fill);
+  opacity: 0.75;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.atlas-chart__today-flag {
+  position: absolute;
+  top: -0.1rem;
+  left: 0.25rem;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--qb-font-mono);
+  font-size: 0.6rem;
+  padding: 0.15rem 0.4rem;
+  color: var(--legacy-color-fff);
+  background: var(--qb-accent-rose-fill);
+  border-radius: var(--qb-radius-pennant);
+  box-shadow: var(--qb-shadow-card) var(--qb-accent-rose-shadow);
+}
+
+.atlas-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  margin-top: 1rem;
+  font-family: var(--qb-font-body);
+  font-size: 0.75rem;
+  color: var(--qb-ink-500);
+}
+
+.atlas-chart__footnote {
+  margin-top: 0.4rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--qb-ink-400);
+}
+
+/* --- Per-accent tokens (rail card + trail, one declaration each) --------
+   Mirrors `.card-tile--accent-*`'s `--card-accent-fill/-border/-shadow`
+   trio exactly (same var names — reused, not reinvented, so the rail
+   card's CSS below reads byte-identical to `.card-tile`'s own). Also sets
+   `--atlas-trail-fill`/`-dark` for the SVG lane's stroke/fill, inherited
+   down through the whole `.atlas-trail__svg--accent-*` subtree — including
+   into the beast hue-selection rules further below, which never need to
+   repeat the accent mapping themselves. */
+.atlas-rail-card--accent-backlog,
+.atlas-trail__svg--accent-backlog {
+  --card-accent-fill: var(--qb-accent-forest-fill);
+  --card-accent-border: var(--qb-accent-forest-border);
+  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-forest-fill);
+  --atlas-trail-dark: var(--qb-accent-forest-shadow);
+}
+
+.atlas-rail-card--accent-bootstrap,
+.atlas-trail__svg--accent-bootstrap {
+  --card-accent-fill: var(--qb-accent-amber-fill);
+  --card-accent-border: var(--qb-accent-amber-border);
+  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-amber-fill);
+  --atlas-trail-dark: var(--qb-accent-amber-shadow);
+}
+
+.atlas-rail-card--accent-planning,
+.atlas-trail__svg--accent-planning,
+.atlas-rail-card--accent-plan-review,
+.atlas-trail__svg--accent-plan-review,
+.atlas-rail-card--accent-verification,
+.atlas-trail__svg--accent-verification {
+  --card-accent-fill: var(--qb-accent-sky-fill);
+  --card-accent-border: var(--qb-accent-sky-border);
+  --card-accent-shadow: var(--qb-accent-sky-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-sky-fill);
+  --atlas-trail-dark: var(--qb-accent-sky-shadow);
+}
+
+.atlas-rail-card--accent-implementation,
+.atlas-trail__svg--accent-implementation,
+.atlas-rail-card--accent-impl-review,
+.atlas-trail__svg--accent-impl-review {
+  --card-accent-fill: var(--qb-accent-orange-fill);
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-orange-fill);
+  --atlas-trail-dark: var(--qb-accent-orange-shadow);
+}
+
+.atlas-rail-card--accent-awaiting-merge,
+.atlas-trail__svg--accent-awaiting-merge {
+  --card-accent-fill: var(--qb-accent-rose-fill);
+  --card-accent-border: var(--qb-accent-rose-border);
+  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-rose-fill);
+  --atlas-trail-dark: var(--qb-accent-rose-shadow);
+}
+
+.atlas-rail-card--accent-done,
+.atlas-trail__svg--accent-done {
+  --card-accent-fill: var(--qb-accent-umber-fill);
+  --card-accent-border: var(--qb-accent-umber-border);
+  --card-accent-shadow: var(--qb-accent-umber-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-umber-fill);
+  --atlas-trail-dark: var(--qb-accent-umber-shadow);
+}
+
+.atlas-rail-card--accent-parked,
+.atlas-trail__svg--accent-parked {
+  --card-accent-fill: var(--qb-accent-taupe-fill);
+  --card-accent-border: var(--qb-accent-taupe-border);
+  --card-accent-shadow: var(--qb-accent-taupe-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-taupe-fill);
+  --atlas-trail-dark: var(--qb-accent-taupe-shadow);
+}
+
+.atlas-rail-card--accent-abandoned,
+.atlas-trail__svg--accent-abandoned {
+  --card-accent-fill: var(--qb-accent-ash-fill);
+  --card-accent-border: var(--qb-accent-ash-border);
+  --card-accent-shadow: var(--qb-accent-ash-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-ash-fill);
+  --atlas-trail-dark: var(--qb-accent-ash-shadow);
+}
+
+/* --- Rail card: board's card-tile sticker language, minus TileShell's
+   drag machinery (rail cards never move) -------------------------------- */
+.atlas-rail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  background: var(--legacy-color-fff);
+  border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  padding: 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+/* Alternating asymmetric radii by ROW parity (HANDOFF) — same
+   `:nth-child(even)` structural-selector pattern as `.lane__cards >
+   .card-tile:nth-child(even)`, scoped to `.atlas-chart__row` since that's
+   this tree's per-saga repeating unit. */
+.atlas-chart__row:nth-child(even) .atlas-rail-card {
+  border-radius: var(--qb-radius-card-b);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .atlas-rail-card {
+    transition:
+      transform var(--qb-motion-hover) ease,
+      box-shadow var(--qb-motion-hover) ease;
+  }
+
+  .atlas-rail-card:hover {
+    transform: translateY(-3px);
+  }
+}
+
+.atlas-rail-card--done {
+  background: var(--qb-parchment-muted);
+  opacity: 0.94;
+}
+
+.atlas-rail-card--parked {
+  background: var(--qb-parchment-muted-2);
+  border-style: dashed;
+}
+
+.atlas-rail-card__top {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.atlas-rail-card__id {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--legacy-color-6b7280);
+}
+
+.atlas-rail-card__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  margin-left: auto;
+}
+
+.atlas-rail-card__star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.atlas-rail-card__star--empty {
+  color: var(--qb-star-empty);
+}
+
+.atlas-rail-card__title {
+  font-family: var(--qb-font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--qb-ink-900);
+}
+
+.atlas-rail-card__title--done {
+  text-decoration: line-through;
+  color: var(--qb-ink-500);
+}
+
+.atlas-rail-card__vs {
+  font-family: var(--qb-font-body);
+  font-size: 0.75rem;
+  color: var(--qb-ink-400);
+}
+
+.atlas-rail-card__chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.atlas-rail-card__count {
+  font-size: 0.7rem;
+  color: var(--qb-ink-500);
+}
+
+.atlas-rail-card__gold {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-gold-chip-bg);
+  border: 2px solid var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+}
+
+.atlas-rail-card__lock {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-locked-chip-bg);
+  color: var(--qb-locked-chip-text);
+}
+
+/* 7px per HANDOFF — a hair thinner than the board tile's own 8px
+   `.card-tile__progress`, a deliberate visual distinction for the
+   condensed rail card, not a copy-paste drift. */
+.atlas-rail-card__progress {
+  height: 7px;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-progress-track);
+  overflow: hidden;
+}
+
+.atlas-rail-card__progress-fill {
+  height: 100%;
+  background: var(--card-accent-fill, var(--qb-ink-300));
+}
+
+/* Role A wobble button — deliberately its OWN class, not a reuse of
+   `.epic-card__expand`'s legacy paint (chunk-4 handoff). */
+.atlas-rail-card__expand {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.6rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-2);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.atlas-rail-card__expand:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.atlas-rail-card__expand:active {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+.atlas-rail-card__subquests {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  padding-top: 0.4rem;
+  border-top: 1.5px dashed var(--qb-line-dashed-2);
+}
+
+.atlas-rail-card__subquest {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+
+/* 14px rounded checkbox (HANDOFF) — done = accent fill + white ✓ (the ✓
+   glyph is the checkbox's own text content, coloured via this rule so it
+   never needs a separate icon), todo = dashed outline only. */
+.atlas-rail-card__checkbox {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--legacy-radius-4px);
+  border: 2px solid var(--qb-line-dashed);
+  font-size: 0.55rem;
+  line-height: 1;
+}
+
+.atlas-rail-card__subquest--done .atlas-rail-card__checkbox {
+  border-color: var(--card-accent-fill, var(--qb-ink-300));
+  background: var(--card-accent-fill, var(--qb-ink-300));
+  color: var(--legacy-color-fff);
+}
+
+.atlas-rail-card__subquest-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--qb-ink-700);
+}
+
+.atlas-rail-card__subquest-title--done {
+  text-decoration: line-through;
+  color: var(--qb-ink-500);
+}
+
+.atlas-rail-card__subquest-date {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: var(--qb-font-mono);
+  font-size: 0.6rem;
+  color: var(--qb-ink-300);
+}
+
+/* --- Trail lane: the SVG campaign path ----------------------------------
+   Every fill/stroke below is a CSS-level paint (no fill/stroke attribute
+   in AtlasTrail.tsx) so the per-accent custom properties above are the
+   ONLY place that ever names a colour. */
+.atlas-trail {
+  position: absolute;
+  inset: 0;
+}
+
+.atlas-trail__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.atlas-trail__path {
+  fill: none;
+  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1 9;
+}
+
+.atlas-trail__path--uncharted {
+  stroke-width: 3;
+  stroke-dasharray: 1 16;
+  opacity: 0.4;
+}
+
+.atlas-trail__camp,
+.atlas-trail__camped text:first-child {
+  font-size: 15px;
+}
+
+.atlas-trail__waypoint circle {
+  fill: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  stroke-width: 2;
+}
+
+.atlas-trail__waypoint-check {
+  fill: var(--legacy-color-fff);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.atlas-trail__party circle {
+  fill: var(--qb-gold-coin-fill);
+  stroke: var(--qb-gold-coin-stroke);
+  stroke-width: 2.5;
+}
+
+.atlas-trail__party text {
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Gentle party bob (HANDOFF: 1.6s) — opt-in like every other Atlas/board
+     motion; reduced-motion users get the party planted still at today. */
+  .atlas-trail__party {
+    animation: atlas-party-bob 1.6s ease-in-out infinite;
+  }
+
+  @keyframes atlas-party-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-3px);
+    }
+  }
+}
+
+.atlas-trail__camped-label {
+  font-family: var(--qb-font-body);
+  font-size: 13px;
+  fill: var(--qb-ink-500);
+}
+
+.atlas-trail__gold {
+  font-family: var(--qb-font-body);
+  font-size: 13px;
+  fill: var(--qb-gold-chip-text);
+}
+
+/* Beast hue selection (HANDOFF: "alive = darker accent hue ... slain =
+   accent fill") — these three rules are accent-family-AGNOSTIC: they only
+   read `--atlas-trail-fill`/`-dark`, which the per-accent blocks above
+   already set on the `.atlas-trail__svg--accent-*` ancestor and which
+   inherit straight down through the beast `<g>` into BeastFace's own
+   `fill={hue}` attribute (a `var(--qb-atlas-beast-*)` reference — see
+   BeastFace.tsx/AtlasTrail.tsx). `--hue-1` leans on the darker tone for a
+   touch of cosmetic variety between same-accent alive beasts; slain always
+   reads as the brighter accent fill, regardless of hueVariant. */
+.atlas-trail__beast--alive.atlas-trail__beast--hue-0 {
+  --qb-atlas-beast-alive: var(--atlas-trail-dark, var(--qb-ink-500));
+}
+
+.atlas-trail__beast--alive.atlas-trail__beast--hue-1 {
+  --qb-atlas-beast-alive: var(--atlas-trail-fill, var(--qb-ink-300));
+}
+
+.atlas-trail__beast--slain {
+  --qb-atlas-beast-slain: var(--atlas-trail-fill, var(--qb-ink-300));
 }
 
 /* ==========================================================================

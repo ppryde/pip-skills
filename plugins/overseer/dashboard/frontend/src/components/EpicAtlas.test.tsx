@@ -79,6 +79,23 @@ describe("<EpicAtlas/>", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the legend and an honest projection footnote once there are epics", () => {
+    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
+    const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} today={TODAY} />);
+    expect(container.querySelector(".atlas-chart__legend")).toBeInTheDocument();
+    const footnote = container.querySelector(".atlas-chart__footnote");
+    expect(footnote).toBeInTheDocument();
+    // HANDOFF's explicit honesty requirement: the ledger keeps no due
+    // dates, so uncharted ground must never read as a promise.
+    expect(footnote).toHaveTextContent(/pace-guessed, never promised/i);
+  });
+
+  it("renders no legend/footnote in the empty state", () => {
+    const { container } = render(<EpicAtlas board={board([])} onOpenCard={vi.fn()} today={TODAY} />);
+    expect(container.querySelector(".atlas-chart__legend")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-chart__footnote")).not.toBeInTheDocument();
+  });
+
   it("positions the TODAY signpost using pctForDate over the computed window", () => {
     const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 9, total: 9, estimate: null, actual: 0 }, created: "2026-07-14", updated: "2026-08-01" });
     const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} today={TODAY} />);
