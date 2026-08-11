@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
 import { formatDateStamp, parseCalendarDate, seedFor } from "../board/atlasGeometry";
 import {
   BEAST_ICON_SIZE_PX,
-  BEAST_RESERVE_PX,
   CAMPFIRE_GAP_PX,
   TRAILHEAD_RESERVE_PX,
   WAYPOINT_GAP_PX,
@@ -20,7 +19,7 @@ import {
   trimSegmentForMarkers,
   weightOf,
 } from "../board/atlasTrailLayout";
-import { V_PX_PER_UNIT_SERPENTINE, serpentineTrail } from "../board/serpentineTrail";
+import { ARC_PX_PER_UNIT_SERPENTINE, serpentineTrail } from "../board/serpentineTrail";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import BeastFace from "./BeastFace";
@@ -52,16 +51,18 @@ function weightLabel(child: BoardCard): string {
  * (done ✓, abandoned skull, AT HAND ring+pennant, faded todo + name-tags,
  * blocked boulder, campfire, party token, trailhead, beast), but marching
  * top->bottom as a wide SERPENTINE (HANDOFF's Down-mode user amendment,
- * 2026-08-11) rather than a flat straight drop — see `serpentineTrail.ts`
- * for the curve geometry and why "same weight = same length" holds in
- * path-arc terms there. `atlasTrailLayout.ts`'s scalar functions
- * (computeSegments/boundaryX/campfireX/trailEndX/beastAnchorX/
- * trimSegmentForMarkers) are reused UNCHANGED — they operate on a generic
- * "distance along the trail" scalar that's now a Y coordinate instead of
- * an X one, fed `V_PX_PER_UNIT_SERPENTINE` instead of Across mode's shared
- * `pxPerWeight`; only the FINAL (x,y) screen position (via
- * `serpentineTrail(width, seed).pointAt`) differs from Across mode's
- * straight `wobblePath`.
+ * 2026-08-11, re-amended for rounded turns) rather than a flat straight
+ * drop — see `serpentineTrail.ts` for the curve geometry and why "same
+ * weight = same length" holds in TRUE path-arc terms there.
+ * `atlasTrailLayout.ts`'s scalar functions (computeSegments/boundaryX/
+ * campfireX/trailEndX/beastAnchorX/trimSegmentForMarkers) are reused
+ * UNCHANGED — they operate on a generic "distance along the trail" scalar,
+ * which is now cumulative ARC LENGTH (fed `ARC_PX_PER_UNIT_SERPENTINE`
+ * instead of Across mode's shared `pxPerWeight`) rather than a raw Y
+ * coordinate. Every place that needs an actual SCREEN position calls
+ * `t.pointAt(scalar)` for BOTH x and y together — never treats the raw
+ * scalar as a Y coordinate directly (arc length exceeds vertical Y almost
+ * everywhere, since the path also travels sideways).
  *
  * Kept as its own component rather than an orientation branch inside
  * AtlasTrail — the two scales (shared vs. flat-per-column) and axes are
@@ -89,12 +90,11 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   const beast = beastFor(card.id);
 
   const ordered = orderChildrenForTrail(childCards);
-  const segments = computeSegments(ordered, V_PX_PER_UNIT_SERPENTINE);
+  const segments = computeSegments(ordered, ARC_PX_PER_UNIT_SERPENTINE);
   const epicTotalWeight = totalWeight(childCards);
-  const trailEnd = trailEndX(epicTotalWeight, V_PX_PER_UNIT_SERPENTINE);
-  const boundary = boundaryX(segments);
-  const campY = campfireX(segments);
-  const contentHeight = trailEnd + BEAST_RESERVE_PX;
+  const trailEnd = trailEndX(epicTotalWeight, ARC_PX_PER_UNIT_SERPENTINE);
+  const boundaryArc = boundaryX(segments);
+  const campArc = campfireX(segments);
 
   const slain = card.status === "done";
   const parked = !slain && card.status === "parked";
@@ -102,9 +102,20 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
 
   const t = serpentineTrail(Math.max(width, 1), seed);
 
-  const beastYRaw = beastAnchorX(trailEnd);
-  const beastPoint = t.pointAt(beastYRaw);
+  const beastAnchorArc = beastAnchorX(trailEnd);
+  const beastPoint = t.pointAt(beastAnchorArc);
   const beastX = beastPoint.x - BEAST_ICON_SIZE_PX / 2;
+  const beastY = beastPoint.y;
+  // The SVG's Y-extent (viewBox height) must clear the beast's own
+  // rendered FOOTPRINT — computed directly in true Y pixels
+  // (`beastY + BEAST_ICON_SIZE_PX`), not by advancing the ARC-LENGTH
+  // scalar by `BEAST_RESERVE_PX` and converting that through `pointAt`.
+  // Arc length and Y are NOT 1:1 here (`dy/d(arcLength) <= 1` almost
+  // everywhere the serpentine travels sideways, often well under 1 near
+  // the middle of a "cruise" leg) — advancing arc length by
+  // `BEAST_RESERVE_PX` would under-reserve real vertical space and clip
+  // the beast, reintroducing finding 1's original bug in arc-length form.
+  const contentHeight = beastY + BEAST_ICON_SIZE_PX;
 
   const svgClassName = "atlas-trail__svg" + (accentKey ? ` atlas-trail__svg--accent-${accentKey}` : "");
 
@@ -115,21 +126,36 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
     return x < width / 2 ? "right" : "left";
   }
 
+  // Impl-review round 2, finding 1: `side` names WHICH SIDE OF THE MARKER
+  // the tag should sit on — "right" means "render the tag to the marker's
+  // right". The CSS property that ACHIEVES that is the OPPOSITE one:
+  // anchoring via `left` grows the box rightward from that point (what a
+  // "sits to the right" tag needs); anchoring via `right` grows it
+  // leftward (what a "sits to the left" tag needs). The previous version
+  // used `side` itself as the literal CSS property key — a "right"
+  // placement set CSS `right:`, which anchors the box's RIGHT edge at the
+  // marker and grows LEFTWARD, landing the tag on the CROWDED side, the
+  // exact collision the flip exists to avoid.
+  function sideOffset(side: "left" | "right", mx: number, extraOffsetPx: number): CSSProperties {
+    return side === "right"
+      ? { left: `${mx + 16 + extraOffsetPx}px` }
+      : { right: `${width - mx + 16 + extraOffsetPx}px` };
+  }
+
   const svgMarkers: ReactNode[] = [];
   const overlayTags: ReactNode[] = [];
   let todoTier = 0;
 
   for (const { child, end } of segments) {
     const group = statusGroupOf(child);
-    const my = end;
-    const { x: mx } = t.pointAt(end);
+    const { x: mx, y: my } = t.pointAt(end);
     const cleared = formatDateStamp(parseCalendarDate(child.updated));
     const side = roomySide(mx);
-    const tagStyle = {
-      [side]: side === "right" ? `${width - mx + 16}px` : `${mx + 16}px`,
+    const tagStyle: CSSProperties = {
+      ...sideOffset(side, mx, 0),
       top: `${my}px`,
       transform: "translateY(-50%)",
-    } as const;
+    };
 
     if (group === "done") {
       if (child.status === "abandoned") {
@@ -221,12 +247,9 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
     );
 
     if (showNames) {
-      const tierTagStyle = {
+      const tierTagStyle: CSSProperties = {
         ...tagStyle,
-        [side]:
-          side === "right"
-            ? `${width - mx + 16 + tier * NAME_TAG_TIER_OFFSET_PX}px`
-            : `${mx + 16 + tier * NAME_TAG_TIER_OFFSET_PX}px`,
+        ...sideOffset(side, mx, tier * NAME_TAG_TIER_OFFSET_PX),
       };
       overlayTags.push(
         <span
@@ -243,6 +266,9 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
     }
   }
 
+  const boundaryPoint = t.pointAt(boundaryArc);
+  const campPoint = t.pointAt(campArc);
+
   return (
     <div className="atlas-trail atlas-trail--down" ref={colRef}>
       <svg className={svgClassName} viewBox={`0 0 ${width} ${contentHeight}`} preserveAspectRatio="none">
@@ -256,9 +282,9 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
             // parked (not just the frozen in-progress child's own segment)
             // — trimSegmentForMarkers is a no-op wherever the cut doesn't
             // overlap a given segment, so this also correctly covers the
-            // zero-done/zero-in-progress fallback (campY === boundaryX,
+            // zero-done/zero-in-progress fallback (campArc === boundaryX,
             // which can land on any segment, or before all of them).
-            if (parked) cuts.push({ at: campY, radius: CAMPFIRE_GAP_PX });
+            if (parked) cuts.push({ at: campArc, radius: CAMPFIRE_GAP_PX });
             return trimSegmentForMarkers(start, end, cuts).map(([a, b], j) => (
               <path
                 key={`${child.id}-${j}`}
@@ -281,8 +307,8 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
 
         {marching && (
           <g className="atlas-trail__party">
-            <circle cx={t.pointAt(boundary).x} cy={boundary} r={12} />
-            <text x={t.pointAt(boundary).x} y={boundary + 4} textAnchor="middle">
+            <circle cx={boundaryPoint.x} cy={boundaryPoint.y} r={12} />
+            <text x={boundaryPoint.x} y={boundaryPoint.y + 4} textAnchor="middle">
               ⚔
             </text>
             <title>{`the party — ${rollup.done}/${rollup.total} quests cleared`}</title>
@@ -294,12 +320,12 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
             <image
               className="atlas-trail__campfire"
               href={campfireIcon}
-              x={t.pointAt(campY).x - MARKER_SIZE_PX - 4}
-              y={campY - MARKER_SIZE_PX / 2}
+              x={campPoint.x - MARKER_SIZE_PX - 4}
+              y={campPoint.y - MARKER_SIZE_PX / 2}
               width={MARKER_SIZE_PX}
               height={MARKER_SIZE_PX}
             />
-            <text className="atlas-trail__camped-label" x={t.pointAt(campY).x + 8} y={campY + 5}>
+            <text className="atlas-trail__camped-label" x={campPoint.x + 8} y={campPoint.y + 5}>
               camped — on hold
             </text>
           </g>
@@ -311,7 +337,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
             (slain ? "atlas-trail__beast--slain" : "atlas-trail__beast--alive") +
             ` atlas-trail__beast--hue-${beast.hueVariant}`
           }
-          transform={`translate(${beastX}, ${beastYRaw})`}
+          transform={`translate(${beastX}, ${beastY})`}
         >
           <BeastFace
             hue={slain ? "var(--qb-atlas-beast-slain)" : "var(--qb-atlas-beast-alive)"}
@@ -326,7 +352,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
         </g>
 
         {slain && (
-          <text className="atlas-trail__gold" x={beastX + 54} y={beastYRaw + 30}>
+          <text className="atlas-trail__gold" x={beastX + 54} y={beastY + 30}>
             +{formatTokens(rollup.actual)} gold
           </text>
         )}

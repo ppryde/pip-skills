@@ -11,7 +11,7 @@ import {
   trailEndX,
 } from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
-import { V_PX_PER_UNIT_SERPENTINE, serpentineTrail } from "../board/serpentineTrail";
+import { ARC_PX_PER_UNIT_SERPENTINE, serpentineTrail } from "../board/serpentineTrail";
 import AtlasTrailVertical from "./AtlasTrailVertical";
 
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
@@ -167,7 +167,7 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
     // Reproduce the component's own geometry independently, off the same
     // pure modules, at the DEFAULT_COLUMN_WIDTH it renders at pre-measurement.
     const ordered = orderChildrenForTrail(kids);
-    const segments = computeSegments(ordered, V_PX_PER_UNIT_SERPENTINE);
+    const segments = computeSegments(ordered, ARC_PX_PER_UNIT_SERPENTINE);
     const trail = serpentineTrail(280, seedFor("WF-085"));
     const expected = segments.map((s) => trail.pointAt(s.end));
 
@@ -179,11 +179,16 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
     });
   });
 
-  // Impl-review round 1, finding 5: "vertical advance per complexity point
-  // reduced to roughly half the old flat scale" — a component-level sanity
-  // check that the rendered content height actually reflects the NEW
-  // (smaller) V_PX_PER_UNIT_SERPENTINE scale, not the superseded flat 72.
-  it("renders at the new (roughly-halved) V_PX_PER_UNIT_SERPENTINE scale, not the old flat 72", () => {
+  // Impl-review round 1, finding 5 / round 2, finding 2: "vertical advance
+  // per complexity point reduced to roughly half the old flat scale" — a
+  // component-level sanity check that the rendered content height
+  // actually reflects the NEW arc-length-based scale, not the superseded
+  // flat 72px/unit straight drop. Since positioning went genuinely
+  // arc-length-based (round 2), the rendered height is no longer the raw
+  // scalar directly — it's reproduced here via the same
+  // serpentineTrail+atlasTrailLayout pipeline the component itself uses,
+  // not a flat formula.
+  it("renders at the new arc-length-based scale, not the superseded flat 72 straight drop", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const kids = [child({ id: "k1", status: "done", complexity: "XL" })]; // weight 4
     const { container } = renderColumn(epic, kids);
@@ -192,14 +197,16 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
     const height = Number(svg.getAttribute("viewBox")!.split(" ")[3]);
     const totalWeightUnits = totalWeight(kids);
 
-    const newTrailEnd = trailEndX(totalWeightUnits, V_PX_PER_UNIT_SERPENTINE);
-    const oldFlatTrailEnd = trailEndX(totalWeightUnits, 72); // the superseded flat scale
+    const trail = serpentineTrail(280, seedFor("WF-085"));
+    const newTrailEnd = trailEndX(totalWeightUnits, ARC_PX_PER_UNIT_SERPENTINE);
+    const beastArc = beastAnchorX(newTrailEnd);
+    const expectedHeight = trail.pointAt(beastArc).y + 48; // + BEAST_ICON_SIZE_PX
+    expect(height).toBeCloseTo(expectedHeight, 1);
 
-    expect(newTrailEnd).toBeLessThan(oldFlatTrailEnd); // ~roughly halved, per HANDOFF
-    // The rendered height matches the NEW scale's own beast-anchor formula
-    // exactly, and is well short of what the OLD flat scale would have needed.
-    expect(height).toBeGreaterThanOrEqual(beastAnchorX(newTrailEnd));
-    expect(height).toBeLessThan(TRAILHEAD_RESERVE_PX + oldFlatTrailEnd);
+    // Well short of what the superseded flat 72px/unit scale (a straight
+    // Y computation, no curve) would have needed for the same weight.
+    const oldFlatHeight = TRAILHEAD_RESERVE_PX + totalWeightUnits * 72 + 26 + 48; // ANCHOR_OFFSET + ICON_SIZE
+    expect(height).toBeLessThan(oldFlatHeight);
   });
 
   // Impl-review round 1, finding 1's explicit test ask: "assert Down-mode
@@ -222,15 +229,76 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
   // Impl-review round 1, finding 3 (Down-mode half): a parked epic with
   // zero done and zero in-progress children — campfireX falls all the way
   // back to boundaryX — still cuts a gap in the line at that position.
+  // (Round 2 note: the rendered path's Y is no longer the raw arc-length
+  // scalar directly — arc-length parameterization means Y <= arc length
+  // almost everywhere — so this compares against the UNCUT trailhead
+  // POINT itself, via serpentineTrail, rather than a raw-pixel offset.)
   it("parked, all-todo epic (no done/in-progress children): the campfire still cuts a gap in the line", () => {
     const epic = card({ id: "WF-076", status: "parked" });
     const todo = child({ id: "k1", status: "planned", complexity: "M" });
     const { container } = renderColumn(epic, [todo]);
 
     expect(container.querySelector(".atlas-trail__campfire")).toBeInTheDocument();
+
+    const trail = serpentineTrail(280, seedFor("WF-076"));
+    const uncutStart = trail.pointAt(TRAILHEAD_RESERVE_PX);
     const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
-    const firstPathStartY = Number(firstPathD.match(/^M[\d.]+\s([\d.]+)/)![1]);
-    expect(firstPathStartY).toBeGreaterThan(TRAILHEAD_RESERVE_PX + 6); // clear of the 12px campfire gap's near edge
+    const match = firstPathD.match(/^M([\d.]+)\s([\d.]+)/)!;
+    const firstPathStart = { x: Number(match[1]), y: Number(match[2]) };
+
+    // A real cut moves the rendered path's start measurably away from the
+    // raw, uncut trailhead point.
+    const dist = Math.hypot(firstPathStart.x - uncutStart.x, firstPathStart.y - uncutStart.y);
+    expect(dist).toBeGreaterThan(4);
+  });
+
+  // Impl-review round 2, finding 1 (both reviewers, independently): the
+  // side-flip used to be INVERTED — a marker near the left wall (more room
+  // to its right) got its tag anchored via CSS `right:`, which grows the
+  // box LEFTWARD, landing the tag on the CROWDED side instead. This
+  // asserts actual POSITION relative to the marker's own x (not just which
+  // style key is present) for markers near BOTH walls.
+  it("places the tag/pennant on the ROOMY side of the marker, not the crowded one — checked for markers near both walls", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [
+      // Weight-2 (M) each; cumulative Y (34 + 2*40 = 114, then 34 + 4*40 =
+      // 194) lands one marker near the RIGHT wall (band 1, low localT,
+      // right-to-left sweep starts at xRight) and the other near the LEFT
+      // wall (band 2, low localT, left-to-right sweep starts at xLeft) —
+      // confirmed against the pure module below, not asserted blind.
+      child({ id: "k1", title: "Near right wall", status: "planned", complexity: "M", order: 1 }),
+      child({ id: "k2", title: "Near left wall", status: "planned", complexity: "M", order: 2 }),
+    ];
+    const { container } = renderColumn(epic, kids);
+
+    const trail = serpentineTrail(280, seedFor("WF-085")); // 280 = DEFAULT_COLUMN_WIDTH, pre-measurement
+    const y1 = TRAILHEAD_RESERVE_PX + 2 * ARC_PX_PER_UNIT_SERPENTINE;
+    const y2 = TRAILHEAD_RESERVE_PX + 4 * ARC_PX_PER_UNIT_SERPENTINE;
+    const mx1 = trail.pointAt(y1).x;
+    const mx2 = trail.pointAt(y2).x;
+    // Sanity-check the fixture actually exercises both walls, rather than
+    // asserting on a hand-computed number that could itself be wrong.
+    expect(mx1).toBeGreaterThan(140); // right half of a 280px column
+    expect(mx2).toBeLessThan(140); // left half
+
+    const tags = Array.from(container.querySelectorAll(".trail-tag--todo"));
+    expect(tags.length).toBe(2);
+    const [tag1, tag2] = tags as HTMLElement[];
+
+    // Marker 1 is near the right wall — the tag must sit to its LEFT
+    // (anchored via `right:`, whose implied left edge is < mx1), never
+    // anchored via `left:` (which would grow it further right, off the
+    // column or back over the marker itself with no room).
+    expect(tag1.style.right).not.toBe("");
+    expect(tag1.style.left).toBe("");
+    const tag1ImpliedLeftEdge = 280 - parseFloat(tag1.style.right);
+    expect(tag1ImpliedLeftEdge).toBeLessThan(mx1);
+
+    // Marker 2 is near the left wall — the tag must sit to its RIGHT
+    // (anchored via `left:`, whose value is > mx2).
+    expect(tag2.style.left).not.toBe("");
+    expect(tag2.style.right).toBe("");
+    expect(parseFloat(tag2.style.left)).toBeGreaterThan(mx2);
   });
 
   afterEach(() => {
