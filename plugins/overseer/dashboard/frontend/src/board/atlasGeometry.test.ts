@@ -1,14 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  computeAxisTicks,
-  computeWindow,
-  formatDateStamp,
-  parseCalendarDate,
-  pctForDate,
-  projectedEnd,
-  seedFor,
-  wobblePath,
-} from "./atlasGeometry";
+import { formatDateStamp, parseCalendarDate, seedFor, wobblePath, wobblePathVertical } from "./atlasGeometry";
 
 describe("parseCalendarDate", () => {
   it("parses a plain %Y-%m-%d date at UTC midnight", () => {
@@ -33,224 +24,12 @@ describe("parseCalendarDate", () => {
     );
   });
 
-  // impl-review finding: an un-guarded NaN here (blank/garbage `created`/
-  // `updated`, e.g. a hand-built test fixture or a pre-this-field card)
-  // poisons every downstream computation that touches it — computeWindow's
-  // `span <= 0` guard doesn't catch NaN (NaN <= 0 is false), so ONE bad
-  // card corrupts the WHOLE shared axis, not just its own row. Same
-  // blank-tolerant contract as layout.ts's `parseRecency` (KB-013): falls
-  // back to epoch 0, never NaN.
   it("falls back to epoch 0 for a blank value, instead of NaN", () => {
     expect(parseCalendarDate("").getTime()).toBe(0);
   });
 
   it("falls back to epoch 0 for a garbage value, instead of NaN", () => {
     expect(parseCalendarDate("not-a-date").getTime()).toBe(0);
-  });
-});
-
-describe("computeWindow + pctForDate — same-day regression", () => {
-  it("places a camp (epic created) at or before a same-day waypoint (child updated), never after it", () => {
-    const epics = [
-      {
-        created: "2026-07-14",
-        updated: "2026-07-14T00:05",
-        children: [{ updated: "2026-07-14T00:05" }],
-      },
-    ];
-    const today = parseCalendarDate("2026-08-11");
-    const window = computeWindow(epics, today);
-
-    const camp = parseCalendarDate("2026-07-14");
-    const waypoint = parseCalendarDate("2026-07-14T00:05");
-    expect(pctForDate(camp, window)).toBeLessThanOrEqual(pctForDate(waypoint, window));
-  });
-});
-
-describe("computeWindow", () => {
-  it("spans a single epic: start = its created (padded), end = max(today, its updated) (padded)", () => {
-    const today = parseCalendarDate("2026-08-01");
-    const window = computeWindow(
-      [{ created: "2026-07-10", updated: "2026-07-20" }],
-      today
-    );
-    const PAD_MS = 2 * 86400000;
-    expect(window.start.getTime()).toBe(parseCalendarDate("2026-07-10").getTime() - PAD_MS);
-    // today (2026-08-01) postdates the epic's own updated (2026-07-20), so it wins.
-    expect(window.end.getTime()).toBe(today.getTime() + PAD_MS);
-  });
-
-  it("takes the min created and the max(today, any child updated) across multiple epics", () => {
-    const today = parseCalendarDate("2026-08-01");
-    const window = computeWindow(
-      [
-        {
-          created: "2026-07-14",
-          updated: "2026-07-14",
-          children: [{ updated: "2026-07-20" }, { updated: "2026-09-01" }],
-        },
-        { created: "2026-07-05", updated: "2026-07-05" },
-      ],
-      today
-    );
-    const PAD_MS = 2 * 86400000;
-    expect(window.start.getTime()).toBe(parseCalendarDate("2026-07-05").getTime() - PAD_MS);
-    // a child updated (2026-09-01) postdates today — it wins.
-    expect(window.end.getTime()).toBe(parseCalendarDate("2026-09-01").getTime() + PAD_MS);
-  });
-
-  it("never crashes on an empty epic list — falls back to a window centred on today", () => {
-    const today = parseCalendarDate("2026-08-01");
-    const window = computeWindow([], today);
-    expect(window.start.getTime()).toBeLessThan(today.getTime());
-    expect(window.end.getTime()).toBeGreaterThan(today.getTime());
-  });
-
-  // impl-review finding: parseCalendarDate's epoch-0 NaN fallback keeps
-  // computeWindow from crashing on a blank/garbage date, but epoch (1970)
-  // is still a REAL number that would otherwise win every Math.min/max
-  // comparison against genuine 2020s+ card dates — a single malformed card
-  // would drag the whole shared axis back to 1970 instead of just failing
-  // to contribute to it. computeWindow treats epoch as "no signal" and
-  // excludes it from the aggregation, so one bad card degrades only
-  // whatever tries to plot IT (its own row), never the shared window every
-  // other row's axis math depends on.
-  it("one epic with a blank created date doesn't poison the shared window's start", () => {
-    const today = parseCalendarDate("2026-08-01");
-    const window = computeWindow(
-      [
-        { created: "", updated: "2026-08-01" }, // malformed — must not win the min
-        { created: "2026-07-10", updated: "2026-07-20" },
-      ],
-      today
-    );
-    const PAD_MS = 2 * 86400000;
-    expect(window.start.getTime()).toBe(parseCalendarDate("2026-07-10").getTime() - PAD_MS);
-  });
-
-  it("one epic with a garbage updated date doesn't poison the shared window's end", () => {
-    const today = parseCalendarDate("2026-07-01"); // predates every real updated below
-    const window = computeWindow(
-      [
-        { created: "2026-07-01", updated: "not-a-date" }, // malformed — must not win the max
-        { created: "2026-07-01", updated: "2026-07-20" },
-      ],
-      today
-    );
-    const PAD_MS = 2 * 86400000;
-    expect(window.end.getTime()).toBe(parseCalendarDate("2026-07-20").getTime() + PAD_MS);
-  });
-
-  it("falls back sanely (anchored on today) when EVERY epic's created date is invalid", () => {
-    const today = parseCalendarDate("2026-08-01");
-    const window = computeWindow([{ created: "", updated: "2026-08-01" }], today);
-    const PAD_MS = 2 * 86400000;
-    expect(window.start.getTime()).toBe(today.getTime() - PAD_MS);
-  });
-
-  // Verification-round finding: a brand-new board where every epic was
-  // created today has a real (pre-pad) span of 0 — every trail huddles on
-  // the TODAY line with no room to spread. A floor gives a young board
-  // enough axis to actually look like a chart. Widens the END only (never
-  // the START, which stays the true earliest `created`), so `today` —
-  // always <= the pre-floor end — stays inside the widened window too.
-  const MIN_WINDOW_SPAN_MS = 14 * 86400000;
-
-  it("floors a same-day board's span to MIN_WINDOW_SPAN_MS instead of huddling on today", () => {
-    const today = parseCalendarDate("2026-08-11");
-    const window = computeWindow(
-      [{ created: "2026-08-11", updated: "2026-08-11" }],
-      today
-    );
-    const PAD_MS = 2 * 86400000;
-    // Start is untouched — the true created date, padded as normal.
-    expect(window.start.getTime()).toBe(parseCalendarDate("2026-08-11").getTime() - PAD_MS);
-    // End is stretched out to the floor, not just today+pad.
-    expect(window.end.getTime()).toBe(
-      parseCalendarDate("2026-08-11").getTime() + MIN_WINDOW_SPAN_MS + PAD_MS
-    );
-    // Today (always inside [start, pre-floor end]) stays inside the floored window.
-    expect(today.getTime()).toBeGreaterThanOrEqual(window.start.getTime());
-    expect(today.getTime()).toBeLessThanOrEqual(window.end.getTime());
-  });
-
-  it("leaves a board already wider than the floor unchanged", () => {
-    const today = parseCalendarDate("2026-08-01");
-    const window = computeWindow(
-      [
-        {
-          created: "2026-07-14",
-          updated: "2026-07-14",
-          children: [{ updated: "2026-07-20" }, { updated: "2026-09-01" }],
-        },
-        { created: "2026-07-05", updated: "2026-07-05" },
-      ],
-      today
-    );
-    const PAD_MS = 2 * 86400000;
-    // Same expectations as the "multiple epics" test above — the floor
-    // never engages because this board's real span (07-05 to 09-01, ~58
-    // days) already exceeds MIN_WINDOW_SPAN_MS.
-    expect(window.start.getTime()).toBe(parseCalendarDate("2026-07-05").getTime() - PAD_MS);
-    expect(window.end.getTime()).toBe(parseCalendarDate("2026-09-01").getTime() + PAD_MS);
-  });
-});
-
-describe("pctForDate", () => {
-  it("maps the window start to 0 and the window end to 100", () => {
-    const window = { start: parseCalendarDate("2026-07-01"), end: parseCalendarDate("2026-08-01") };
-    expect(pctForDate(window.start, window)).toBe(0);
-    expect(pctForDate(window.end, window)).toBe(100);
-  });
-
-  it("maps the window midpoint to 50", () => {
-    const window = { start: parseCalendarDate("2026-07-01"), end: parseCalendarDate("2026-07-11") };
-    expect(pctForDate(parseCalendarDate("2026-07-06"), window)).toBe(50);
-  });
-
-  // impl-review finding (root cause of the AtlasTrail NaN-attribute
-  // warning): `span <= 0` does NOT catch a NaN span — `NaN <= 0` is
-  // `false` in JS, so the guard falls through and
-  // `(date - start) / NaN * 100` returns NaN. computeWindow (finding #6)
-  // now excludes invalid dates from its own aggregation, but pctForDate is
-  // a public export other callers can (and, via AtlasTrail's `dateWindow`
-  // prop, effectively do) reach directly with an unvalidated window — it
-  // needs its own guard, not just a well-behaved caller.
-  it("never returns NaN for a NaN-spanned window (Invalid Date on one end) — falls back to 0, same as a zero-length window", () => {
-    const window = { start: new Date(NaN), end: parseCalendarDate("2026-08-01") };
-    expect(pctForDate(parseCalendarDate("2026-07-15"), window)).toBe(0);
-    expect(Number.isNaN(pctForDate(parseCalendarDate("2026-07-15"), window))).toBe(false);
-  });
-});
-
-describe("computeAxisTicks", () => {
-  it("produces weekly ticks starting exactly at the window start", () => {
-    const window = { start: parseCalendarDate("2026-07-13"), end: parseCalendarDate("2026-08-17") };
-    const ticks = computeAxisTicks(window);
-    expect(ticks[0].getTime()).toBe(window.start.getTime());
-    for (let i = 1; i < ticks.length; i++) {
-      expect(ticks[i].getTime() - ticks[i - 1].getTime()).toBe(7 * 86400000);
-    }
-  });
-
-  it("never emits a tick past the window end", () => {
-    const window = { start: parseCalendarDate("2026-07-13"), end: parseCalendarDate("2026-08-17") };
-    const ticks = computeAxisTicks(window);
-    for (const t of ticks) {
-      expect(t.getTime()).toBeLessThanOrEqual(window.end.getTime());
-    }
-  });
-
-  it("handles a window whose span is not a multiple of 7 days — last tick stays inside, no overshoot", () => {
-    const window = { start: parseCalendarDate("2026-07-13"), end: parseCalendarDate("2026-07-19") }; // 6-day span
-    const ticks = computeAxisTicks(window);
-    expect(ticks).toEqual([window.start]);
-  });
-
-  it("still includes the start tick even for a zero-length window", () => {
-    const window = { start: parseCalendarDate("2026-07-13"), end: parseCalendarDate("2026-07-13") };
-    const ticks = computeAxisTicks(window);
-    expect(ticks).toEqual([window.start]);
   });
 });
 
@@ -287,6 +66,34 @@ describe("wobblePath", () => {
   });
 });
 
+describe("wobblePathVertical", () => {
+  it("starts the path at y0 and ends at y1, wobbling in x", () => {
+    const { d } = wobblePathVertical(0, 300, 104, 0);
+    const commands = d.split(" ");
+    // "M<x> <y>" — the first token is "M<x>", so the FIRST y (second token
+    // of the pair) must be y0.
+    const firstPair = commands.slice(0, 2).join(" ");
+    expect(firstPair.endsWith(" 0.0")).toBe(true);
+    expect(d).toContain(" L");
+  });
+
+  it("xAt oscillates around laneWidth * 0.52 with amplitude 12", () => {
+    const { xAt } = wobblePathVertical(0, 300, 100, 0);
+    const x = 100 * 0.52;
+    expect(xAt(0)).toBeCloseTo(x, 5);
+    for (let y = 0; y <= 300; y += 10) {
+      expect(xAt(y)).toBeGreaterThanOrEqual(x - 12 - 1e-9);
+      expect(xAt(y)).toBeLessThanOrEqual(x + 12 + 1e-9);
+    }
+  });
+
+  it("mirrors wobblePath's amplitude/wavelength — same yAt(x)/xAt(y) shape, axes swapped", () => {
+    const across = wobblePath(0, 300, 100, 0.5).yAt(120) - 100 * 0.52;
+    const down = wobblePathVertical(0, 300, 100, 0.5).xAt(120) - 100 * 0.52;
+    expect(down).toBeCloseTo(across, 5);
+  });
+});
+
 describe("seedFor", () => {
   it("is deterministic for the same card id", () => {
     expect(seedFor("WF-085")).toBe(seedFor("WF-085"));
@@ -295,65 +102,6 @@ describe("seedFor", () => {
   it("differs across most ids (spread)", () => {
     const seeds = new Set(["WF-1", "WF-2", "WF-3", "WF-4", "WF-5"].map(seedFor));
     expect(seeds.size).toBeGreaterThan(1);
-  });
-});
-
-describe("projectedEnd", () => {
-  it("projects forward using elapsed-so-far / done as the pace", () => {
-    const start = parseCalendarDate("2026-07-01");
-    const walkedEnd = parseCalendarDate("2026-07-11"); // 10 days elapsed
-    const windowEnd = parseCalendarDate("2027-01-01"); // far away, no clamp
-    // done=2, total=4 => pace = 10 days / 2 = 5 days/quest, 2 remaining => +10 days
-    const end = projectedEnd(start, walkedEnd, 2, 4, windowEnd);
-    expect(end.getTime()).toBe(walkedEnd.getTime() + 10 * 86400000);
-  });
-
-  it("falls back to a ~5 day/quest pace when done is 0", () => {
-    const start = parseCalendarDate("2026-07-01");
-    const walkedEnd = parseCalendarDate("2026-07-01");
-    const windowEnd = parseCalendarDate("2027-01-01");
-    // done=0, total=3 => fallback pace 5 days/quest * 3 remaining = +15 days
-    const end = projectedEnd(start, walkedEnd, 0, 3, windowEnd);
-    expect(end.getTime()).toBe(walkedEnd.getTime() + 15 * 86400000);
-  });
-
-  it("clamps the projection so it never exceeds the window end", () => {
-    const start = parseCalendarDate("2026-07-01");
-    const walkedEnd = parseCalendarDate("2026-07-11");
-    const windowEnd = parseCalendarDate("2026-07-15"); // tight window
-    const end = projectedEnd(start, walkedEnd, 1, 10, windowEnd);
-    expect(end.getTime()).toBe(windowEnd.getTime());
-  });
-
-  it("never projects before the walked end", () => {
-    const start = parseCalendarDate("2026-07-01");
-    const walkedEnd = parseCalendarDate("2026-07-11");
-    const windowEnd = parseCalendarDate("2026-06-01"); // pathological: before walkedEnd
-    const end = projectedEnd(start, walkedEnd, 1, 2, windowEnd);
-    expect(end.getTime()).toBe(walkedEnd.getTime());
-  });
-
-  // impl-review finding: `total - done || 2` treats a LEGITIMATE zero
-  // remaining (every child done, epic just not yet marked done) the same
-  // as the falsy-fallback sentinel, projecting 2 phantom quests of
-  // uncharted ground past a fully-cleared trail. Only an actually-empty
-  // epic (total === 0, no children to have ever been "remaining") should
-  // hit the 2-quest fallback.
-  it("projects zero remaining — not the 2-quest fallback — once every quest is done but the epic isn't yet closed", () => {
-    const start = parseCalendarDate("2026-07-01");
-    const walkedEnd = parseCalendarDate("2026-07-11");
-    const windowEnd = parseCalendarDate("2027-01-01");
-    const end = projectedEnd(start, walkedEnd, 4, 4, windowEnd);
-    expect(end.getTime()).toBe(walkedEnd.getTime());
-  });
-
-  it("still falls back to the 2-quest guess for a genuinely empty epic (total 0)", () => {
-    const start = parseCalendarDate("2026-07-01");
-    const walkedEnd = parseCalendarDate("2026-07-01");
-    const windowEnd = parseCalendarDate("2027-01-01");
-    // done=0, total=0 => fallback pace 5 days/quest * 2 (empty-epic fallback) = +10 days
-    const end = projectedEnd(start, walkedEnd, 0, 0, windowEnd);
-    expect(end.getTime()).toBe(walkedEnd.getTime() + 10 * 86400000);
   });
 });
 
