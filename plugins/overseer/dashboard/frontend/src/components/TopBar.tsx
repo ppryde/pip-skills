@@ -291,62 +291,98 @@ function TopBar({
           Controls {controlsOpen ? "▴" : "▾"}
         </button>
 
-        {/* WF-085: the secondary-controls group — threshold, Clear…,
-            Labels…, Refresh, Abandoned toggle. `hidden` is driven by
-            `controlsOpen` (default collapsed), but styles.css only lets
-            that attribute actually hide anything inside the ≤720px media
-            query — above it `.topbar__controls-group` is unconditionally
-            `display: contents`, so desktop renders every control exactly
-            as before, unaffected by this flag. */}
+        {/* WF-085: the secondary-controls group — Last Orders (threshold),
+            Labels…, Refresh, Abandoned toggle, Clear… (WF-090: Labels…
+            grouped with the action buttons, Clear… kept rightmost).
+            `hidden` is driven by `controlsOpen` (default collapsed), but
+            styles.css only lets that attribute actually hide anything
+            inside the ≤720px media query — above it
+            `.topbar__controls-group` is unconditionally `display: contents`,
+            so desktop renders every control exactly as before, unaffected
+            by this flag. */}
         <div
           id="topbar-controls-group"
           className="topbar__controls-group"
           hidden={!controlsOpen}
         >
-          {onClear && (
-            <button
-              type="button"
-              className="topbar-clear danger"
-              onClick={onClear}
-              title="Clear this repo's data"
-            >
-              Clear…
-            </button>
-          )}
-          <button
-            type="button"
-            // Task 10: shares the "＋ New card" control's Role-A button paint
-            // (non-destructive positive action, same wobble shape) — see
-            // `.topbar__new-card` in styles.css, reused here rather than
-            // duplicated.
-            className="topbar__new-card topbar__labels-settings"
-            onClick={() => setLabelSettingsOpen(true)}
-            title="Edit label colors"
-          >
-            Labels…
-          </button>
-
           <div className="topbar__threshold">
             <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
           </div>
 
-          <button
-            type="button"
-            className="topbar__refresh"
-            onClick={onRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
+          {/* WF-090 follow-up: Labels…/Refresh/Abandoned/Clear… wrapped in
+              their own atomic flex unit — desktop is natural-wrap (no
+              `order` above 720px), and `.topbar__refresh`'s pre-existing
+              `margin-left: auto` (hugs the right edge of WHATEVER line it
+              lands on) means the exact wrap point between these four and
+              everything before them (repo/branch/rest-pills/Last Orders)
+              shifts with viewport width and even live content width (gold
+              total digit count, timestamp, etc) — moving Labels… next to
+              Refresh in DOM order alone still let it get stranded on the
+              upper line at some widths (verified: reproducible at 1500px,
+              NOT at 1180px, same content). Wrapping all four in one
+              `.topbar__controls-actions` box makes them wrap TOGETHER as a
+              single flex item of `.topbar` — Labels… can never again land
+              on a different line than Refresh/Abandoned/Clear…, regardless
+              of width. `display: contents` on this wrapper inside the
+              ≤720px block (styles.css) fully un-wraps it back to individual
+              flex items of `.topbar__controls-group` on mobile, where the
+              existing per-child `order` resets (below) still apply
+              untouched. */}
+          <div className="topbar__controls-actions">
+            <button
+              type="button"
+              // Task 10: shares the "＋ New card" control's Role-A button paint
+              // (non-destructive positive action, same wobble shape) — see
+              // `.topbar__new-card` in styles.css, reused here rather than
+              // duplicated.
+              className="topbar__new-card topbar__labels-settings"
+              onClick={() => setLabelSettingsOpen(true)}
+              title="Edit label colors"
+            >
+              Labels…
+            </button>
 
-          <label className="topbar__archive-toggle">
-            <input
-              type="checkbox"
-              checked={showArchive}
-              onChange={onToggleArchive}
-            />
-            Abandoned
-          </label>
+            <button
+              type="button"
+              className="topbar__refresh"
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+
+            <label className="topbar__archive-toggle">
+              <input
+                type="checkbox"
+                checked={showArchive}
+                onChange={onToggleArchive}
+              />
+              Abandoned
+            </label>
+
+            {/* WF-090: moved to the END of this group (was first) — Clear is
+                the one destructive action here, so it now sits rightmost,
+                separated from the constructive controls (Labels…/Refresh/
+                Abandoned) rather than leading them. Mobile's `flex-wrap`
+                row needed a small styles.css fix alongside it: "Labels…"
+                reuses `.topbar__new-card`'s class, which carries an
+                `order: 40` meant for that button's OTHER life in the outer
+                topbar row — inside THIS group's own flex context that
+                leaked order was sorting Labels… after everything else, so
+                `.topbar-clear`/`.topbar__new-card` both get an explicit
+                reset scoped to `.topbar__controls-group` (see styles.css)
+                rather than relying on DOM order alone. */}
+            {onClear && (
+              <button
+                type="button"
+                className="topbar-clear danger"
+                onClick={onClear}
+                title="Clear this repo's data"
+              >
+                Clear…
+              </button>
+            )}
+          </div>
         </div>
 
         {quarantinedCount > 0 && (

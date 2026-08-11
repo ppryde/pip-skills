@@ -532,8 +532,18 @@ body {
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble);
   /* Matches the Role A button box (`.topbar__new-card`) so the select's own
-     border is the ONLY box the control shows — no more outer pill. */
-  padding: 0.3rem 0.7rem;
+     border is the ONLY box the control shows — no more outer pill.
+     WF-090 follow-up: a native `<select>` renders ~4-5px taller than a
+     `<button>`/`<input>` sharing the same padding (UA form-control chrome
+     inflates its intrinsic content height) — pinning an explicit `height`
+     (with `box-sizing: border-box`, so the border/padding are INSIDE it,
+     not added on top) sidesteps that instead of chasing padding numbers.
+     Vertical padding is trimmed to `0.12rem` so the box doesn't need to
+     stretch past `height` to fit the text (which would silently win over
+     `height` in a border-box layout). */
+  height: 1.65rem;
+  box-sizing: border-box;
+  padding: 0.12rem 0.7rem;
   max-width: 40vw;
   /* WF-085: a long repo root/label truncates with an ellipsis instead of
      wrapping the native <select> onto a second line — `min-width: 0`
@@ -605,8 +615,13 @@ body {
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
   /* Matches the Role A button box (`.topbar__new-card`) — see
-     `.topbar__repo-select select` above for the full rationale. */
-  padding: 0.3rem 0.7rem;
+     `.topbar__repo-select select` above for the full rationale, including
+     the explicit `height` (WF-090 follow-up) that pins this select to the
+     same box as the buttons/input beside it instead of the UA's own
+     ~4-5px-taller intrinsic form-control height. */
+  height: 1.65rem;
+  box-sizing: border-box;
+  padding: 0.12rem 0.7rem;
   max-width: 40vw;
   /* WF-085: same ellipsis-truncation treatment as `.topbar__repo-select
      select` above — a long branch name never wraps to a second line. */
@@ -689,11 +704,37 @@ body {
 
 /* Task 10: "＋ New card" control, beside the repo selector. Same Role-A
    wobble shape/paint as `.topbar__refresh` — a positive, non-destructive
-   action, so no recolor (contrast `.topbar-clear.danger` below). */
+   action, so no recolor (contrast `.topbar-clear.danger` below).
+   `height`/`box-sizing` (WF-090 follow-up): this button's own class is
+   reused verbatim for "Labels…" (`.topbar__labels-settings`, plain ASCII
+   text), but "＋ New card" leads with a FULLWIDTH PLUS SIGN (＋, U+FF0B) —
+   a code point the primary font likely doesn't cover, so the browser
+   silently substitutes a fallback font for just that glyph; that
+   fallback's own ascent/descent metrics inflated the line box, measuring
+   ~29px vs Labels…'s ~26.5px even though both share this class and
+   `line-height: normal`. First tried pinning `line-height: 1` to
+   normalize both off `font-size` alone — measured that this OVERSHRINKS
+   Labels… too (~24.5px, 2px under the Set/Clear/input baseline), so a
+   glyph-proof explicit `height` (same technique as the topbar/filter-bar
+   selects below) replaces it — both "＋ New card" and "Labels…" now land
+   on the identical pinned box regardless of either one's line-box
+   quirks. `display:flex` + `align-items/justify-content:center` (WF-090
+   follow-up #2): pinning `height` fixed the BOX but not the TEXT's
+   position inside it — baseline-positioned text still sat low within the
+   fixed height (the fallback-font glyph's oversized descent pushes the
+   baseline down), most visible on "＋ New card". Flex-centering the
+   content is immune to that for the same reason the `height` fix was:
+   it centers the line box as a whole rather than trusting any one
+   glyph's own metrics. */
 .topbar__new-card {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
   font-weight: 700;
+  height: 1.65rem;
+  box-sizing: border-box;
   border-radius: var(--qb-btn-wobble);
   border: 1.5px solid var(--qb-btn-ink);
   background: var(--qb-btn-face);
@@ -770,6 +811,22 @@ body {
    this: hidden by default, shown only inside that same media query. */
 .topbar__controls-group {
   display: contents;
+}
+
+/* WF-090 follow-up: wraps Labels…/Refresh/Abandoned/Clear… as ONE atomic
+   flex item of `.topbar` (desktop) — see the JSX comment at this wrapper's
+   call site for the full "why" (natural-wrap desktop + Refresh's own
+   `margin-left: auto` made the exact wrap point between this group and
+   Last Orders width-dependent; this guarantees the four always land on
+   the same line together, never split). `gap` matches `.topbar`'s own
+   (0.75rem) so the spacing between these four reads identically to how it
+   did as direct `.topbar` flex items pre-wrapper. Mobile un-wraps this
+   back to individual flex items of `.topbar__controls-group` — see the
+   ≤720px override below. */
+.topbar__controls-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .topbar__controls-toggle {
@@ -892,8 +949,13 @@ body {
   background: var(--qb-btn-face);
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
-  padding: 0.3rem 0.7rem;
+  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem.
+     WF-090 follow-up: explicit `height` + trimmed vertical padding — same
+     fix, same reasoning, as `.topbar__repo-select select` above (a native
+     `<select>` renders taller than its padding alone would suggest). */
+  height: 1.65rem;
+  box-sizing: border-box;
+  padding: 0.12rem 0.7rem;
 }
 
 .filter-bar__select select:hover,
@@ -2872,7 +2934,12 @@ a.card-drawer__pr-chip:hover {
   gap: 0.3rem;
 }
 
-.threshold-control__label {
+/* Last Orders (WF-090): the tankard-icon title beside the input/button —
+   was `.threshold-control__label`, wrapping a `<label>` around the input;
+   now a plain `<span>` sibling (a `<button>` — the InfoTooltip trigger —
+   can't nest inside a `<label>`), keeping the same typography so the
+   relabel doesn't change how the control reads in the topbar. */
+.threshold-control__title {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -2882,50 +2949,117 @@ a.card-drawer__pr-chip:hover {
   letter-spacing: 0.03em;
 }
 
-.threshold-control input {
-  width: 3.5rem;
-  font-size: 0.8rem;
-  padding: 0.1rem 0.3rem;
-  border-radius: var(--legacy-radius-3px);
-  border: 1px solid var(--qb-card-border);
-  background: var(--qb-panel);
+/* The pack tankard glyph — a touch bigger than the text it sits beside so
+   it reads as an icon, not a stray decoration. */
+.threshold-control__icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+/* Tap/click-to-toggle info popover (WF-090) — wraps `InfoTooltip`'s own
+   trigger + bubble. `position: relative` anchors the bubble below it.
+   `align-self: flex-start` pulls it off `.threshold-control__title`'s
+   `align-items: center` so the glyph rides at the TOP of the row next to
+   "LAST ORDERS" (superscript-style) rather than centred on the text. */
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+}
+
+/* Small and superscript-offset — standard info-glyph proportions, roughly
+   60-70% of the label's own cap-height (label is ~0.7rem) rather than
+   matching it 1:1, which read as too big/chunky next to the text. The
+   negative `margin-top` rides it up further, like a footnote marker. */
+.info-tooltip__trigger {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  line-height: 0;
+  font-size: 0.62rem;
+  margin-top: -0.1rem;
+  color: var(--qb-ink-400);
+  cursor: help;
+  transition: color var(--qb-motion-hover) ease;
+}
+
+.info-tooltip__trigger:hover,
+.info-tooltip__trigger:focus-visible {
   color: var(--qb-ink-700);
 }
 
-/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-2 wobble
-   — the Refresh button next door in the topbar keeps the default variant,
-   so the two aren't stamped from the same outline. */
-.threshold-control button {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble-2);
+.info-tooltip__trigger:focus-visible {
+  outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
+}
+
+/* Parchment bubble, pinned just under the trigger. `z-index: 50` beats
+   every sibling inside `.topbar`'s own stacking context (itself already
+   `z-index: 5`, ahead of `.board`'s `z-index: 1` lane headers) — see the
+   info-tooltip trigger's parent chain, no sibling in the topbar sets an
+   explicit z-index of its own. `max-width: min(240px, 80vw)` keeps a
+   360px phone from ever pushing the bubble past the viewport edge (no
+   horizontal-scroll risk — the bubble is `position: absolute`, out of
+   document flow, so it can't widen `.board`). */
+.info-tooltip__bubble {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: auto;
+  z-index: 50;
+  margin-top: 0.35rem;
+  width: max-content;
+  max-width: min(240px, 80vw);
+  padding: 0.5rem 0.65rem;
+  background: var(--qb-panel);
   border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
+  border-radius: var(--qb-btn-wobble);
+  box-shadow: var(--qb-shadow-card) rgba(74, 56, 38, 0.25);
+  font-size: 0.72rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.35;
+  color: var(--qb-ink-700);
 }
 
-.threshold-control button:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
+/* WF-090: Last Orders became a plain 5%-step `<select>` — no more number
+   input + Set button (the old `.threshold-control input`/`button` rules,
+   including the `:not(.info-tooltip__trigger)` scoping that used to be
+   needed to keep the InfoTooltip's own `<button>` trigger from being
+   caught by a bare `.threshold-control button` selector, are gone with
+   them). Same hand-inked recipe as `.topbar__repo-select select` above —
+   transparent bg, wobble border, pinned `height`/`box-sizing` so it lines
+   up with the buttons/selects beside it in the row. `width` is fixed
+   (rather than left to the native auto-size-to-selected-option behaviour)
+   so the box doesn't visibly resize as the user steps between "5%" and
+   "95%" — sized to fit "95%" plus the native dropdown arrow without
+   clipping. */
+.threshold-control__select {
+  width: 3.75rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--qb-ink-900);
+  background: transparent;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  height: 1.65rem;
+  box-sizing: border-box;
+  padding: 0.12rem 0.4rem;
+}
+
+.threshold-control__select:hover:not(:disabled) {
   border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
 }
 
-.threshold-control button:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.threshold-control button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
+.threshold-control__select:focus-visible {
+  outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
 }
 
 .card-drawer__controls {
@@ -4901,10 +5035,14 @@ a.card-drawer__pr-chip:hover {
      via `margin-left: auto`) and drops its revealed group — plus the
      separate <FilterBar/> below the topbar — into one block beneath
      everything else, rather than wedged mid-shelf. */
+  /* WF-090 follow-up: was `font-size: 0.8rem; padding: 0.35rem 0.75rem` —
+     visibly bigger than every neighbouring Role-A control (0.75rem /
+     0.3rem), including ＋New card right beside it on this same row.
+     Brought down to the same box as `.topbar__new-card`. */
   .topbar__controls-toggle {
     order: 41; margin-left: auto;
-    display: inline-flex; align-items: center; font-size: 0.8rem;
-    padding: 0.35rem 0.75rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
+    display: inline-flex; align-items: center; font-size: 0.75rem;
+    padding: 0.3rem 0.6rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
     border: 1.5px solid var(--qb-btn-ink); background: var(--qb-btn-face);
     color: var(--qb-btn-text); cursor: pointer;
   }
@@ -4914,6 +5052,34 @@ a.card-drawer__pr-chip:hover {
   .topbar__controls-group:not([hidden]) {
     order: 91;
     display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem;
+  }
+  /* WF-090 follow-up: the desktop-only `.topbar__controls-actions` wrapper
+     (base rule, groups Labels…/Refresh/Abandoned/Clear… as one atomic flex
+     item so they can't be split across a natural-wrap line break) is fully
+     un-wrapped here — its children become direct flex items of the group
+     above again, exactly as if the wrapper didn't exist, so the mobile
+     `order` resets just below still apply to each of them individually. */
+  .topbar__controls-actions {
+    display: contents;
+  }
+  /* WF-090: `.topbar__new-card { order: 40; }` above targets the OUTER row's
+     standalone "＋New card" button (R5) — but "Labels…" reuses that same
+     class for its paint, and once the group above goes `display: flex` on
+     expand, `order` scores every child against THAT (new, separate) flex
+     container, not the one the rule's author had in mind. The leaked 40
+     was silently sorting Labels… after every other child in the group
+     (all default `order: 0`) — including Clear…, undoing the DOM move
+     below that's supposed to put Clear… last. Reset scoped to this
+     container only, so the outer-row ＋New card keeps its order: 40
+     untouched. `.topbar-clear` gets an explicit `order: 1` alongside it —
+     rather than relying on DOM position once everything else in the group
+     is back to a tied `order: 0` — so it's guaranteed rightmost regardless
+     of any future reordering here. */
+  .topbar__controls-group .topbar__new-card {
+    order: 0;
+  }
+  .topbar__controls-group .topbar-clear {
+    order: 1;
   }
   /* WF-085b: same collapse driven by the SAME "Controls ▾" toggle, mirrored
      onto the separate <FilterBar/> App.tsx renders below the topbar — see
@@ -5429,11 +5595,14 @@ a.card-drawer__pr-chip:hover {
 
   /* Primary tappables meet ~44px. NB: the repo/branch selects are deliberately
      NOT here — WF-078 wants them sized to the Role A button box (~29px) so they
-     don't tower over ＋New card / Controls; they keep the button's own hit area. */
-  .topbar__refresh,
+     don't tower over ＋New card / Controls; they keep the button's own hit area.
+     Refresh and the threshold "Set" button join them on the same reasoning
+     (WF-085 follow-up): both sit directly beside ＋New card / Labels… / Clear…
+     / the selects in the mobile topbar shelf, so they take the Role-A box
+     (~29-31px) instead of the 44px floor below, rather than towering over
+     their neighbours. */
   .topbar__fleet-pill,
   .topbar__archive-toggle,
-  .threshold-control button,
   .status-menu button,
   .claim-control button,
   .card-drawer__viewtoggle button {
@@ -5462,8 +5631,14 @@ a.card-drawer__pr-chip:hover {
   }
 
   /* 16px minimum stops iOS Safari's auto-zoom on focused form fields —
-     which would otherwise leave the page zoomed-in mid-board. */
-  .threshold-control input,
+     which would otherwise leave the page zoomed-in mid-board.
+     WF-090: `.threshold-control input` dropped from this list — Last
+     Orders is now a `<select>` (`.threshold-control__select`), not a text
+     `<input>`, so the auto-zoom risk this guards against doesn't apply to
+     it (same reasoning that already exempts the topbar's other selects —
+     `.topbar__repo-select select`/`.topbar__branch-select select`/
+     `.filter-bar__select select` — none of which are in this list either).
+     It just inherits the base rule's `height: 1.65rem`, same as those. */
   .priority-select,
   .claim-control select,
   .link-editor select,
@@ -5490,6 +5665,42 @@ a.card-drawer__pr-chip:hover {
   .atlas-rail-card__expand {
     min-height: 44px;
     min-width: 44px;
+  }
+}
+
+/* ==========================================================================
+   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
+   touch-target layer above so it wins the cascade (same specificity, later
+   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
+   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
+   match) that 44px floor left the questing/fleet pill visibly taller than
+   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
+   though all three already share identical padding/font-size/border via the
+   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
+   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
+   three (the other two are plain `<span>`s) — a bare button doesn't inherit
+   the guild body font from the UA stylesheet the way inline elements do, so
+   its `line-height: normal` resolves against a different font's metrics;
+   pinning its `font-family` here (line-height was already the shared
+   `normal` keyword on both — the mismatch was that keyword resolving
+   against two different fonts' metrics) makes all three pills
+   byte-for-byte the same box on mobile, not just coincidentally close.
+   NB: `font-family` only, never the `font` shorthand — that resets
+   font-size/weight too, which would fight the shared 0.68rem override
+   above (same specificity, later in the cascade would win and blow the
+   pill back up to the body's default size). */
+@media (max-width: 720px) {
+  .topbar__fleet-pill {
+    min-height: 0;
+    font-family: inherit;
+    /* Defensive, not load-bearing here (measured with/without: no height
+       change once the icon font-size fix below is in) — strips whatever
+       native form-control chrome Chromium might otherwise reserve room
+       for on a plain `<button>`, same "don't rely on the platform ever
+       agreeing with custom padding/border" instinct as every other
+       hand-styled button in this file. */
+    appearance: none;
+    -webkit-appearance: none;
   }
 }
 

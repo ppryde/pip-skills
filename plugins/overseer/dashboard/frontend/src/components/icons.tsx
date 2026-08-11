@@ -159,3 +159,23 @@ export function SkullIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Info/"lower-case i in a circle" glyph — `InfoTooltip`'s trigger. */
+export function InfoIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+      {...props}
+    >
+      <circle cx="8" cy="8" r="6.25" />
+      <circle cx="8" cy="5" r="0.9" fill="currentColor" stroke="none" />
+      <path d="M8 7.3v3.7" strokeLinecap="round" />
+    </svg>
+  );
+}

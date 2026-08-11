@@ -113,7 +113,7 @@ function baseProps() {
   };
 }
 
-// WF-085: threshold/Clear…/Labels…/Refresh/Abandoned now live behind the
+// WF-085: threshold/Labels…/Refresh/Abandoned/Clear… now live behind the
 // mobile "Controls ▾" toggle, collapsed by default (see the describe block
 // below). Existing tests that reach into that group have to open it first —
 // this helper is that one step, shared everywhere it's needed.
@@ -265,8 +265,8 @@ describe("<TopBar/>", () => {
   it("keeps the threshold control, relabeled as the fleet's default", () => {
     render(<StatefulTopBar {...baseProps()} context={{ pct: null, threshold: 65 }} />);
 
-    expect(screen.getByLabelText("Threshold")).toHaveValue(65);
-    expect(screen.getByText(/default threshold/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Threshold")).toHaveValue("65");
+    expect(screen.getByText(/last orders/i)).toBeInTheDocument();
   });
 
   it("renders no Sessions toggle — the old sessions dropdown retired, the fleet-health pill replaces it", () => {
@@ -417,16 +417,42 @@ describe("<TopBar/>", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders a Clear button beside the repo selector when onClear is provided, and clicking it calls onClear", () => {
+  it("renders a Clear button when onClear is provided, and clicking it calls onClear", () => {
     const onClear = vi.fn();
     render(<StatefulTopBar {...baseProps()} onClear={onClear} />);
 
-    // WF-085: Clear… lives in the collapsed-by-default Controls group now.
+    // WF-085: Clear… lives in the collapsed-by-default Controls group now
+    // (WF-090: as its LAST/rightmost child — see the ordering test below).
     openControls();
     const button = screen.getByRole("button", { name: /clear/i });
     expect(button).toBeInTheDocument();
     fireEvent.click(button);
     expect(onClear).toHaveBeenCalledTimes(1);
+  });
+
+  // WF-090: Clear… is the one destructive action in this group — it now
+  // renders LAST (rightmost, both on desktop's plain-DOM-order flow and
+  // mobile's flex-wrap row — see styles.css), separated from the
+  // constructive controls rather than leading them.
+  // WF-090 follow-up: Labels… moved from BEFORE the threshold control to
+  // AFTER it, so it groups with the Refresh/Abandoned/Clear… action row
+  // instead of sitting up top beside Last Orders — Clear… itself stays
+  // last (see the earlier WF-090 move).
+  it("groups Labels… with the action-row buttons (before Refresh), keeping Clear… last", () => {
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+    openControls();
+
+    const group = document.getElementById("topbar-controls-group")!;
+    const buttonTexts = Array.from(group.querySelectorAll("button")).map(
+      (b) => b.textContent ?? ""
+    );
+    const labelsIndex = buttonTexts.findIndex((t) => /^labels/i.test(t));
+    const refreshIndex = buttonTexts.findIndex((t) => /^refresh/i.test(t));
+    const clearIndex = buttonTexts.findIndex((t) => /^clear/i.test(t));
+
+    expect(labelsIndex).toBeGreaterThan(-1);
+    expect(labelsIndex).toBeLessThan(refreshIndex);
+    expect(clearIndex).toBe(buttonTexts.length - 1);
   });
 
   // Task 10: "＋ New card" — TopBar owns the dialog's open state itself
@@ -479,8 +505,8 @@ describe("<TopBar/>", () => {
   });
 });
 
-// WF-085b: mobile (≤720px) collapses threshold+Set/Clear…/Labels…/Refresh/
-// Abandoned behind a single "Controls ▾" toggle. The collapse itself is
+// WF-085b: mobile (≤720px) collapses threshold/Labels…/Refresh/Abandoned/
+// Clear… behind a single "Controls ▾" toggle. The collapse itself is
 // implemented with the native `hidden` attribute (see TopBar.tsx), which
 // jsdom's own accessibility-tree logic honours regardless of whether any
 // stylesheet is loaded — `getByRole` excludes descendants of a `hidden`

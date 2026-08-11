@@ -1,6 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import type { ChangeEvent } from "react";
 import { setThreshold } from "../api/client";
 import type { UseBoardResult } from "../board/useBoard";
+import lastOrders from "../assets/last-orders.png";
+import InfoTooltip from "./InfoTooltip";
 
 export interface ThresholdControlProps {
   /** Current `context.threshold` — mutate applies the whole board-response,
@@ -10,51 +12,78 @@ export interface ThresholdControlProps {
   inFlight: boolean;
 }
 
+/** 5%-step options, 5 through 95 — the full selectable range for the
+ * fleet's hand-over threshold. */
+const STEP_OPTIONS: number[] = Array.from({ length: 19 }, (_, i) => (i + 1) * 5);
+
 /**
- * Number input + submit → `setThreshold(value)`, routed through
- * `useBoard().mutate` (never client+setState directly — see
- * wf005-context.md "Single mutation entrypoint"). Reflects the returned
- * `context.threshold` since `mutate` applies the whole board-response.
+ * A single `<select>` of 5%-step options → `setThreshold(value)` on change,
+ * routed through `useBoard().mutate` (never client+setState directly — see
+ * wf005-context.md "Single mutation entrypoint"). Applies IMMEDIATELY on
+ * selection — no draft state, no Set button, no form submit (WF-090:
+ * replaces the old number-input + Set-button pair).
  *
- * WF-042: this is a single GLOBAL value, applied fleet-wide — the label
- * reads "default threshold" (not just "threshold") so it's clear it's the
- * fleet's default, not a per-agent setting (per-agent override is a
- * deferred follow-up, see the WF-042 spec's Non-goals). `aria-label`
- * stays "Threshold" — untouched, so existing `getByLabelText("Threshold")`
- * lookups keep working.
+ * WF-042: this is a single GLOBAL value, applied fleet-wide. The
+ * user-visible label reads "Last Orders" (the fleet's hand-over cue, with
+ * a tankard glyph + an `InfoTooltip` explaining what it means) — but
+ * `aria-label="Threshold"` on the `<select>` is left UNCHANGED so existing
+ * `getByLabelText("Threshold")` lookups keep working.
+ *
+ * If the server's current `value` isn't a multiple of 5 (a legacy/manually
+ * set threshold), it's added as an extra selected option rather than
+ * silently hidden or snapped to the nearest step — the real value stays
+ * visible, never masked by opening this dropdown. `value === null` shows a
+ * disabled `—` placeholder instead of guessing a default.
  */
 function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
-  const [draft, setDraft] = useState(value !== null ? String(value) : "");
-
-  // Keep the draft in sync when the server value changes underneath us
-  // (e.g. another client updated it, or the mutation's own response lands).
-  useEffect(() => {
-    setDraft(value !== null ? String(value) : "");
-  }, [value]);
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const parsed = Number(draft);
-    if (draft.trim() === "" || !Number.isFinite(parsed)) return;
-    await mutate(() => setThreshold(parsed));
+  async function handleChange(e: ChangeEvent<HTMLSelectElement>) {
+    const v = Number(e.target.value);
+    if (Number.isFinite(v)) {
+      await mutate(() => setThreshold(v));
+    }
   }
 
+  const options =
+    value !== null && !STEP_OPTIONS.includes(value)
+      ? [...STEP_OPTIONS, value].sort((a, b) => a - b)
+      : STEP_OPTIONS;
+
   return (
-    <form className="threshold-control" onSubmit={(e) => void handleSubmit(e)}>
-      <label className="threshold-control__label">
-        default threshold
-        <input
-          aria-label="Threshold"
-          type="number"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={inFlight}
+    <div className="threshold-control">
+      <span className="threshold-control__title">
+        <img
+          src={lastOrders}
+          className="threshold-control__icon"
+          alt=""
+          aria-hidden="true"
         />
-      </label>
-      <button type="submit" disabled={inFlight}>
-        Set
-      </button>
-    </form>
+        Last Orders
+        <InfoTooltip label="What is Last Orders?">
+          <strong>Last Orders</strong> — the fleet&rsquo;s default hand-over
+          line. When a session&rsquo;s context fills past this %, that&rsquo;s
+          the cue to wrap up and hand over before it runs dry. Set once here;
+          applies to every quest.
+        </InfoTooltip>
+      </span>
+      <select
+        aria-label="Threshold"
+        className="threshold-control__select"
+        value={value !== null ? String(value) : ""}
+        onChange={(e) => void handleChange(e)}
+        disabled={inFlight}
+      >
+        {value === null && (
+          <option value="" disabled>
+            —
+          </option>
+        )}
+        {options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}%
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
