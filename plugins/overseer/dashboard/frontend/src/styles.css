@@ -1103,26 +1103,28 @@ body {
   color: var(--legacy-color-dcfce7);
 }
 
-/* WF-092: no swim-lane fill — cards sit on the plain board background,
-   the lane's border/radius/header/layout carry the column shape alone.
-   `.lane--parked`/`--done`/`--archive` below keep their own tinted fill;
-   that's a deliberate status distinction, not this generic panel fill. */
+/* WF-092: the swim-lane fill is a soft wash of each column's OWN header
+   accent (see `.lane--accent-*` below), and the old 1px border is dropped
+   (user preference — "the border's the bit I didn't like") — the tint plus
+   the radius carry the column shape now. `.lane--parked`/`--done`/`--archive`
+   keep their own parchment status fill instead; that's a deliberate
+   distinction, so no accent tint is written for those keys. */
 .lane {
   flex: 0 0 260px;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--qb-card-border);
   border-radius: var(--legacy-radius-6px);
   max-height: 100%;
   overflow-y: auto;
 }
 
-/* Parked/Done/Archive are visually distinct and right-grouped in the row. */
+/* Parked/Done/Archive are visually distinct and right-grouped in the row.
+   Border dropped alongside the base lane's (a bare `border-style` with no
+   width would otherwise render a default medium border). */
 .lane--parked,
 .lane--done,
 .lane--archive {
   background: var(--qb-parchment-muted);
-  border-style: dashed;
   margin-left: 0;
 }
 
@@ -1205,6 +1207,31 @@ body {
 .lane__header--in-progress {
   background: var(--qb-accent-amber-fill);
   box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+}
+
+/* WF-092: light lane fill — the same per-accent groups as the header banners
+   above, but the pennant colour washed down to ~15% over the board (a soft
+   tint of each column's own hue, not the old flat panel grey). Keyed on the
+   lane root's `lane--accent-<key>` (Lane.tsx). Parked/Done/Abandoned are
+   deliberately absent — they keep the parchment status fill above. */
+.lane--accent-backlog {
+  background: color-mix(in srgb, var(--qb-accent-forest-fill) 15%, transparent);
+}
+.lane--accent-bootstrap,
+.lane--accent-in-progress {
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 15%, transparent);
+}
+.lane--accent-planning,
+.lane--accent-plan-review,
+.lane--accent-verification {
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 15%, transparent);
+}
+.lane--accent-implementation,
+.lane--accent-impl-review {
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 15%, transparent);
+}
+.lane--accent-awaiting-merge {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 15%, transparent);
 }
 
 .lane__cards {
