@@ -1186,10 +1186,7 @@ body {
   flex: 0 0 260px;
   display: flex;
   flex-direction: column;
-  /* WF-093: subtly wonky, hand-drawn corners so the lane box stops reading as
-     a rigid rectangle — a few px of per-corner asymmetry (kept gentle, "not
-     too much") to break up the straight edges without distorting the column. */
-  border-radius: 10px 13px 9px 12px / 12px 9px 13px 10px;
+  border-radius: var(--legacy-radius-6px);
   max-height: 100%;
   overflow-y: auto;
 }
@@ -1222,10 +1219,12 @@ body {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--qb-ink-900);
-  /* Square-note wobble — flatter and squarer than the button wobble, so the
-     header reads as a little hand-drawn NOTE (the shape the Atlas trail tags
-     use) rather than a rounded chip. Small asymmetric corners only. */
-  border-radius: 4px 7px 5px 6px / 6px 5px 7px 4px;
+  /* Match the Atlas trail's `.trail-tag` note as closely as a lane header can:
+     the SAME pennant/torn-note radius, and hug the label text
+     (`align-self: flex-start`) so each header reads as a small hand-drawn NOTE
+     pinned to the top of its column rather than a full-width banner bar. */
+  border-radius: var(--qb-radius-pennant);
+  align-self: flex-start;
   border: 1.5px solid var(--qb-ink-300);
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
   position: sticky;
