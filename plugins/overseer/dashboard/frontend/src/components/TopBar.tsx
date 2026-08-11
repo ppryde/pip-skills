@@ -76,6 +76,13 @@ export interface TopBarProps {
    * OVERRIDES the party-derived count so both readouts agree; `undefined`
    * (every other repo) keeps the normal live-party-member count below. */
   questingCountOverride?: number;
+  /** WF-086: which page the app is showing — the board (default) or the
+   * Epic Atlas. App-owned, session-local state, threaded straight through
+   * like `activeBranch`. Optional (defaults to "board"/no-op) so this
+   * chunk's TopBar wiring compiles standalone, ahead of App.tsx actually
+   * owning the `view` state in a later chunk. */
+  view?: "board" | "atlas";
+  onSelectView?: (view: "board" | "atlas") => void;
 }
 
 function formatPct(value: number): string {
@@ -139,6 +146,8 @@ function TopBar({
   labelColors,
   controlsOpen,
   onToggleControls,
+  view = "board",
+  onSelectView = () => {},
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -195,6 +204,25 @@ function TopBar({
         <span className="topbar__row-break topbar__row-break--r2" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
+
+        {/* WF-086: Board|Atlas view toggle — the always-visible chip row, a
+            SIBLING of #topbar-controls-group (not nested inside it), so the
+            mobile "Controls ▾" collapse never hides it. Role B "T1 gold
+            underline" tabs, same aria-pressed mechanics as
+            CardDetailDrawer's `.card-drawer__viewtoggle`, under its own
+            `.topbar__view-toggle` class (styled in styles.css). DOM
+            position here (desktop reads it) is right after identity, ahead
+            of the repo selector; mobile re-sequences it onto its own row
+            via `order` (see styles.css's R2-R5 scheme — this is row R1b,
+            order 6, one of the scheme's intentional 10s-apart gaps). */}
+        <div className="topbar__view-toggle" role="group" aria-label="View">
+          <button type="button" aria-pressed={view === "board"} onClick={() => onSelectView("board")}>
+            Board
+          </button>
+          <button type="button" aria-pressed={view === "atlas"} onClick={() => onSelectView("atlas")}>
+            Atlas
+          </button>
+        </div>
 
         <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
         <button
