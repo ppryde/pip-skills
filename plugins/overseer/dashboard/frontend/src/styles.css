@@ -1027,38 +1027,11 @@ body {
   white-space: nowrap;
 }
 
-/* WF-086 (view flip): the pane is keyed on the active view in App.tsx, so
-   toggling Board↔Atlas remounts it and replays this coin-flip — the "screen"
-   turning over like the toggle coin the click came from. Self-contained
-   `perspective()` keeps it a one-element 3D effect; reduced-motion opts out
-   below. It also plays once as a gentle entrance on first load. */
-@keyframes qb-view-flip {
-  from {
-    transform: perspective(1200px) rotateY(90deg);
-    opacity: 0;
-  }
-  60% {
-    opacity: 1;
-  }
-  to {
-    transform: perspective(1200px) rotateY(0deg);
-    opacity: 1;
-  }
-}
-
 .board-region {
   flex: 1 1 auto;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 1rem;
-  transform-origin: center center;
-  animation: qb-view-flip 0.42s ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .board-region {
-    animation: none;
-  }
 }
 
 .board-placeholder {

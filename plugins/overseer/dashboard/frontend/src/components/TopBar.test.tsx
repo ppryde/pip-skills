@@ -604,11 +604,25 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(screen.getByRole("button", { name: "Atlas" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("calls onSelectView with the clicked view", () => {
+  it("switches to the other view when EITHER coin is clicked", () => {
     const onSelectView = vi.fn();
-    render(<StatefulTopBar {...baseProps()} view="board" onSelectView={onSelectView} />);
+    const { rerender } = render(
+      <StatefulTopBar {...baseProps()} view="board" onSelectView={onSelectView} />
+    );
+    // On the board, either coin takes you to the atlas — including the active
+    // Board coin (no longer a dead click).
     fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
-    expect(onSelectView).toHaveBeenCalledWith("atlas");
+    fireEvent.click(screen.getByRole("button", { name: "Board" }));
+    expect(onSelectView).toHaveBeenNthCalledWith(1, "atlas");
+    expect(onSelectView).toHaveBeenNthCalledWith(2, "atlas");
+
+    onSelectView.mockClear();
+    rerender(<StatefulTopBar {...baseProps()} view="atlas" onSelectView={onSelectView} />);
+    // On the atlas, either coin takes you back to the board.
+    fireEvent.click(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    expect(onSelectView).toHaveBeenNthCalledWith(1, "board");
+    expect(onSelectView).toHaveBeenNthCalledWith(2, "board");
   });
 
   it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {

@@ -175,18 +175,25 @@ function TopBar({
   // `questingCountOverride` (task 10) wins when set — see its doc comment.
   const questingCount = questingCountOverride ?? fleet.questing;
 
+  // The two coins are a 2-state toggle: clicking EITHER switches to the OTHER
+  // view. For the back (inactive) coin this reads naturally — its view is the
+  // other view anyway — and the front (active) coin now switches away rather
+  // than being a dead click. Only holds while there are two pages (see the
+  // JSX note); a third view would need a real segmented control.
+  const toggleView = () => onSelectView(view === "board" ? "atlas" : "board");
+
   return (
     <>
       <header className="topbar">
         {/* WF-086 (moved): the Board|Atlas toggle is a small stack of two
             overlapping "guild coins" to the LEFT of the wordmark. The active
-            view's coin sits in front; tapping the coin behind slides it forward
-            and swaps the view (`.topbar__view-toggle*` in styles.css). Both are
-            always-visible (never behind the mobile "Controls ▾" collapse) and
-            self-labelled via `aria-label`/`title`. A two-coin stack only reads
-            for two views — fine while Board|Atlas are the only pages. The
-            last-refreshed time is no longer here: it moved to a small label
-            beside the Refresh control below. */}
+            view's coin sits in front; clicking EITHER coin switches to the
+            other view, and the active one slides to the front
+            (`.topbar__view-toggle*` in styles.css). Both are always-visible
+            (never behind the mobile "Controls ▾" collapse) and self-labelled
+            via `aria-label`/`title`. A two-coin stack only reads for two views
+            — fine while Board|Atlas are the only pages. The last-refreshed time
+            is no longer here: it moved to a small label beside Refresh below. */}
         <div className="topbar__identity">
           <div className="topbar__view-toggle" role="group" aria-label="View">
             <button
@@ -195,7 +202,7 @@ function TopBar({
               aria-pressed={view === "board"}
               aria-label="Board"
               title="Board"
-              onClick={() => onSelectView("board")}
+              onClick={toggleView}
             >
               {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
               <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
@@ -206,7 +213,7 @@ function TopBar({
               aria-pressed={view === "atlas"}
               aria-label="Atlas"
               title="Atlas"
-              onClick={() => onSelectView("atlas")}
+              onClick={toggleView}
             >
               {/* rpg-icons pack "treasure map" — dashed trail and all */}
               <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
