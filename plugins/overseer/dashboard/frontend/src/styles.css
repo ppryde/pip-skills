@@ -189,6 +189,13 @@
   --qb-accent-ash-border: #b4b2aa;
   --qb-accent-ash-cardshadow: var(--qb-accent-ash-border); /* no distinct tint given, mirrors taupe/umber */
 
+  /* Epic Atlas (WF-086) — beast-doodle outline / plaque-shadow ink, from
+     the Boss Ledger family. The ONE new colour the HANDOFF calls for; every
+     other Atlas surface reuses the accent/ink/gold/locked tokens above.
+     Referenced by BeastFace.tsx (chunk 3) via var(--qb-beast-ink) — this is
+     that token's first and only declaration. */
+  --qb-beast-ink: #2c2015;
+
   /* Column-keyed aliases — original column names kept verbatim, only the
      styling is themed (HANDOFF terminology table). */
   --qb-col-backlog: var(--qb-accent-forest-fill);
@@ -4042,6 +4049,864 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* ==========================================================================
+   Epic Atlas (WF-086) — a gantt-esque sibling page to the board, desktop
+   base layer. Reuses the board's own accent/ink/gold/locked/button tokens
+   throughout (only --qb-beast-ink above is new); the ≤720px condensed-rail
+   overrides live in the mobile layout layer below, per this file's own
+   cascade convention (that section must load last to win).
+   ========================================================================== */
+
+/* --- TopBar: Board|Atlas view toggle (chunk 7; polish pass: "a couple of
+   nice circles" — user words) -------------------------------------------
+   Two circular icon buttons, board sticker language: parchment fill, 2px
+   ink border, a hard (not blurred) shadow, gentle hover lift. The button's
+   own box is 44px (border included) — meeting the ≥44px touch-target floor
+   directly, no separate hit-slop pseudo-element needed — with the border
+   eating into that box just enough that the FILLED interior reads as the
+   ~40px "nice circle" the request asked for. Active = the same gold-chip
+   fill/border/text trio the trail's own gold coin and chips use elsewhere
+   (`--qb-gold-chip-*`) — the current view reads at a glance without needing
+   to compare against its sibling. */
+.topbar__view-toggle {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.topbar__view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--qb-ink-700);
+  background: var(--qb-parchment-muted);
+  /* no drop shadow — user preference (flat circles read cleaner in the topbar) */
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--qb-ink-500);
+  opacity: 0.72;
+  cursor: pointer;
+  transition:
+    transform var(--qb-motion-hover) ease,
+    opacity var(--qb-motion-hover) ease,
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease;
+}
+
+.topbar__view-toggle-btn:hover {
+  opacity: 1;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .topbar__view-toggle-btn:hover {
+    transform: translateY(-2px);
+  }
+}
+
+.topbar__view-toggle-btn[aria-pressed="true"] {
+  opacity: 1;
+  border-color: var(--qb-gold-chip-border);
+  background: var(--qb-gold-chip-bg);
+  color: var(--qb-gold-chip-text);
+}
+
+/* rpg-icons pack art inside the view-toggle circles (journal / treasure map) */
+.topbar__view-toggle-icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* --- Atlas chart: page shell, toolbar, rows -----------------------------
+   WF-086 v2 (progress-trail revision): the v1 date axis / TODAY signpost /
+   legend / honesty footnote are KILLED (HANDOFF's "Killed from v1") — dates
+   survive only in tooltips and checklist stamps, so there's no shared axis
+   row to align a rail width against any more. */
+
+.atlas-page {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Toolbar (HANDOFF, between the topbar and the chart): a static
+   complexity-weight label plus three toggles. Polish pass: restyled off
+   the plain segmented-tab pattern onto the board's own wobble-button
+   sticker chips (`--qb-btn-*` — same family as `.atlas-rail-card__expand`'s
+   "sub-quests" chip and every card-tile button elsewhere) — asymmetric
+   hand-drawn radii, a hard resting shadow, and a clearly distinct pressed/
+   active state (the same gold-chip treatment the view-switcher circles and
+   the trail's own gold coin use) rather than the tab underline this toolbar
+   used to share with `.topbar__view-toggle` (that toggle has since gone
+   its own, circular, way — see above). Pure presentation: no change to
+   the toggles' own state/behavior. */
+.atlas-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.atlas-toolbar__label {
+  font-family: var(--qb-font-body);
+  font-size: 0.72rem;
+  color: var(--qb-ink-500);
+  margin-right: auto;
+}
+
+.atlas-toolbar__toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.atlas-toolbar__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.3rem 0.65rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: var(--qb-shadow-card) var(--qb-btn-ink);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease,
+    transform var(--qb-motion-hover) ease;
+}
+
+/* Asymmetric hand-drawn radii, alternating per button in a pair — real
+   stickers never share an identical wobble. */
+.atlas-toolbar__toggle-btn:first-child {
+  border-radius: var(--qb-btn-wobble);
+}
+
+.atlas-toolbar__toggle-btn:last-child {
+  border-radius: var(--qb-btn-wobble-3);
+}
+
+.atlas-toolbar__toggle-btn:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .atlas-toolbar__toggle-btn:hover {
+    transform: translateY(-2px);
+  }
+}
+
+.atlas-toolbar__toggle-btn[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+/* The mobile orientation toggle is inert (CSS-invisible) above 720px —
+   desktop always renders across (HANDOFF); the mobile layout layer below
+   reveals it. */
+.atlas-toolbar__toggle--orientation {
+  display: none;
+}
+
+/* `--rail` is the ONE source of truth for the rail column width — every
+   saga row reads it, so a single declaration keeps the whole grid in
+   lockstep. Desktop value here; the ≤720px mobile layer below shrinks it
+   for the sticky condensed rail. */
+.atlas-chart {
+  --rail: 264px;
+  position: relative;
+  /* Desktop-only floor mirroring `.board`'s own `min-width: max-content`
+     (line ~996) — both exist so the chart never squeezes narrower than its
+     content on a wide viewport. The ≤720px mobile layer explicitly
+     overrides this back to `min-width: 0` (the `725ddea` one-scroller
+     invariant) so it never fights the phone-width scroller. */
+  min-width: 1120px;
+  padding: 0.75rem 0.75rem 1.5rem;
+}
+
+.atlas-chart__empty {
+  padding: 2rem 1.5rem;
+  text-align: center;
+  font-family: var(--qb-font-prose);
+  color: var(--qb-ink-500);
+  background: var(--qb-parchment-muted);
+  border: 2px dashed var(--qb-line-dashed);
+  border-radius: var(--qb-radius-panel);
+}
+
+.atlas-chart__rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Epic-lane snap (HANDOFF's Mobile/Across section — impl-review round 1,
+   finding 4). `.board-region` is the shared page-scroll container for
+   BOTH the Board and Atlas views (App.tsx) and defaults to
+   `overflow-y: hidden` (Board's own lanes handle their own internal
+   vertical scroll instead — see `.lane`'s `max-height:100%;
+   overflow-y:auto`) — Atlas has no per-row equivalent, so its row list
+   needs `.board-region` itself to actually scroll vertically. `:has()`
+   scopes this to ONLY the Atlas view (a `.board-region` with `.atlas-chart`
+   somewhere inside it) so Board's own `overflow-y: hidden` is completely
+   untouched in every other case — this rule can never fire while `view
+   === "board"` (EpicAtlas, the only place `.atlas-chart` is ever rendered,
+   isn't mounted then). `y proximity` here (desktop); the ≤720px mobile
+   layer below tightens this to `y mandatory`. */
+.board-region:has(.atlas-chart) {
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+}
+
+.atlas-chart__row {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  border-bottom: 1.5px dashed var(--qb-line-dashed-2);
+  scroll-snap-align: start;
+  /* Impl-review round 2, finding 4 (browser diagnostic): HANDOFF assumed
+     the snap needed to "clear the sticky topbar", but `.topbar` sits
+     ABOVE `.board-region` in normal flow here — it does NOT overlay the
+     scroller (confirmed: region clientHeight == viewport height minus the
+     topbar's own height; the region's top edge already IS the topbar's
+     bottom edge). A topbar-height-aware margin double-counted that
+     clearance, pushing a snapped row roughly a topbar's-height below
+     where it should land. Rows snap flush to the region's own (already
+     topbar-clear) top, plus a small fixed breathing-room margin. */
+  scroll-margin-top: 8px;
+}
+
+.atlas-chart__rail {
+  display: flex;
+  align-items: center;
+  padding: 0.6rem 0.75rem 0.6rem 0;
+}
+
+.atlas-chart__lane {
+  position: relative;
+  min-height: 104px;
+}
+
+/* --- Per-accent tokens (rail card + trail, one declaration each) --------
+   Mirrors `.card-tile--accent-*`'s `--card-accent-fill/-border/-shadow`
+   trio exactly (same var names — reused, not reinvented, so the rail
+   card's CSS below reads byte-identical to `.card-tile`'s own). Also sets
+   `--atlas-trail-fill`/`-dark` for the SVG lane's stroke/fill, inherited
+   down through the whole `.atlas-trail__svg--accent-*` subtree — including
+   into the beast hue-selection rules further below, which never need to
+   repeat the accent mapping themselves. */
+.atlas-rail-card--accent-backlog,
+.atlas-trail__svg--accent-backlog {
+  --card-accent-fill: var(--qb-accent-forest-fill);
+  --card-accent-border: var(--qb-accent-forest-border);
+  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-forest-fill);
+  --atlas-trail-dark: var(--qb-accent-forest-shadow);
+}
+
+.atlas-rail-card--accent-bootstrap,
+.atlas-trail__svg--accent-bootstrap {
+  --card-accent-fill: var(--qb-accent-amber-fill);
+  --card-accent-border: var(--qb-accent-amber-border);
+  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-amber-fill);
+  --atlas-trail-dark: var(--qb-accent-amber-shadow);
+}
+
+.atlas-rail-card--accent-planning,
+.atlas-trail__svg--accent-planning,
+.atlas-rail-card--accent-plan-review,
+.atlas-trail__svg--accent-plan-review,
+.atlas-rail-card--accent-verification,
+.atlas-trail__svg--accent-verification {
+  --card-accent-fill: var(--qb-accent-sky-fill);
+  --card-accent-border: var(--qb-accent-sky-border);
+  --card-accent-shadow: var(--qb-accent-sky-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-sky-fill);
+  --atlas-trail-dark: var(--qb-accent-sky-shadow);
+}
+
+.atlas-rail-card--accent-implementation,
+.atlas-trail__svg--accent-implementation,
+.atlas-rail-card--accent-impl-review,
+.atlas-trail__svg--accent-impl-review {
+  --card-accent-fill: var(--qb-accent-orange-fill);
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-orange-fill);
+  --atlas-trail-dark: var(--qb-accent-orange-shadow);
+}
+
+.atlas-rail-card--accent-awaiting-merge,
+.atlas-trail__svg--accent-awaiting-merge {
+  --card-accent-fill: var(--qb-accent-rose-fill);
+  --card-accent-border: var(--qb-accent-rose-border);
+  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-rose-fill);
+  --atlas-trail-dark: var(--qb-accent-rose-shadow);
+}
+
+.atlas-rail-card--accent-done,
+.atlas-trail__svg--accent-done {
+  --card-accent-fill: var(--qb-accent-umber-fill);
+  --card-accent-border: var(--qb-accent-umber-border);
+  --card-accent-shadow: var(--qb-accent-umber-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-umber-fill);
+  --atlas-trail-dark: var(--qb-accent-umber-shadow);
+}
+
+.atlas-rail-card--accent-parked,
+.atlas-trail__svg--accent-parked {
+  --card-accent-fill: var(--qb-accent-taupe-fill);
+  --card-accent-border: var(--qb-accent-taupe-border);
+  --card-accent-shadow: var(--qb-accent-taupe-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-taupe-fill);
+  --atlas-trail-dark: var(--qb-accent-taupe-shadow);
+}
+
+.atlas-rail-card--accent-abandoned,
+.atlas-trail__svg--accent-abandoned {
+  --card-accent-fill: var(--qb-accent-ash-fill);
+  --card-accent-border: var(--qb-accent-ash-border);
+  --card-accent-shadow: var(--qb-accent-ash-cardshadow);
+  --atlas-trail-fill: var(--qb-accent-ash-fill);
+  --atlas-trail-dark: var(--qb-accent-ash-shadow);
+}
+
+/* --- Rail card: board's card-tile sticker language, minus TileShell's
+   drag machinery (rail cards never move) -------------------------------- */
+.atlas-rail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  background: var(--legacy-color-fff);
+  border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  padding: 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+/* Alternating asymmetric radii by ROW parity (HANDOFF) — same
+   `:nth-child(even)` structural-selector pattern as `.lane__cards >
+   .card-tile:nth-child(even)`, scoped to `.atlas-chart__row` since that's
+   this tree's per-saga repeating unit. */
+.atlas-chart__row:nth-child(even) .atlas-rail-card {
+  border-radius: var(--qb-radius-card-b);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .atlas-rail-card {
+    transition:
+      transform var(--qb-motion-hover) ease,
+      box-shadow var(--qb-motion-hover) ease;
+  }
+
+  .atlas-rail-card:hover {
+    transform: translateY(-3px);
+  }
+}
+
+.atlas-rail-card--done {
+  background: var(--qb-parchment-muted);
+  opacity: 0.94;
+}
+
+.atlas-rail-card--parked {
+  background: var(--qb-parchment-muted-2);
+  border-style: dashed;
+}
+
+.atlas-rail-card__top {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.atlas-rail-card__id {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--legacy-color-6b7280);
+}
+
+.atlas-rail-card__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  margin-left: auto;
+}
+
+.atlas-rail-card__star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.atlas-rail-card__star--empty {
+  color: var(--qb-star-empty);
+}
+
+.atlas-rail-card__title {
+  font-family: var(--qb-font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--qb-ink-900);
+}
+
+.atlas-rail-card__title--done {
+  text-decoration: line-through;
+  color: var(--qb-ink-500);
+}
+
+.atlas-rail-card__vs {
+  font-family: var(--qb-font-body);
+  font-size: 0.75rem;
+  color: var(--qb-ink-400);
+}
+
+.atlas-rail-card__chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.atlas-rail-card__count {
+  font-size: 0.7rem;
+  color: var(--qb-ink-500);
+}
+
+.atlas-rail-card__gold {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--qb-radius-pill);
+  background: var(--qb-gold-chip-bg);
+  border: 2px solid var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+}
+
+.atlas-rail-card__lock {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-locked-chip-bg);
+  color: var(--qb-locked-chip-text);
+}
+
+/* 7px per HANDOFF — a hair thinner than the board tile's own 8px
+   `.card-tile__progress`, a deliberate visual distinction for the
+   condensed rail card, not a copy-paste drift. */
+.atlas-rail-card__progress {
+  height: 7px;
+  border-radius: var(--legacy-radius-4px);
+  background: var(--qb-progress-track);
+  overflow: hidden;
+}
+
+.atlas-rail-card__progress-fill {
+  height: 100%;
+  background: var(--card-accent-fill, var(--qb-ink-300));
+}
+
+/* Role A wobble button — deliberately its OWN class, not a reuse of
+   `.epic-card__expand`'s legacy paint (chunk-4 handoff). */
+.atlas-rail-card__expand {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.6rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble-2);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.atlas-rail-card__expand:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.atlas-rail-card__expand:active {
+  background: var(--qb-btn-face-active);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+/* Checklist wheel (HANDOFF): caps at ~5 visible rows (~132px desktop,
+   ~224px mobile — the mobile override lives in the mobile layout layer
+   below) with its own internal scroll, `overscroll-behavior: contain` so a
+   flung scroll never bleeds into the page behind the rail card. The
+   `max-height` itself is set inline by AtlasRailCard.tsx (WHEEL_MAX_HEIGHT_PX)
+   so the JS overflow-detection math and the CSS cap can never drift apart;
+   this rule supplies everything else. */
+.atlas-rail-card__subquests {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  padding-top: 0.4rem;
+  border-top: 1.5px dashed var(--qb-line-dashed-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Picker-wheel fades — CSS mask gradients toggled from the list's REAL
+   scroll position (AtlasRailCard.tsx's onScroll handler), never a fade at
+   a true end (the modifier classes only apply once there's more content
+   that way). Both can apply at once (mid-scroll); the combined mask
+   handles that case explicitly rather than layering two independent
+   gradients. */
+.atlas-rail-card__subquests--fade-top {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px);
+  mask-image: linear-gradient(to bottom, transparent 0, black 18px);
+}
+
+.atlas-rail-card__subquests--fade-bottom {
+  -webkit-mask-image: linear-gradient(to top, transparent 0, black 18px);
+  mask-image: linear-gradient(to top, transparent 0, black 18px);
+}
+
+.atlas-rail-card__subquests--fade-top.atlas-rail-card__subquests--fade-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black 18px,
+    black calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
+}
+
+.atlas-rail-card__subquest {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+
+/* 14px rounded checkbox (HANDOFF) — done = accent fill + white ✓ (the ✓
+   glyph is the checkbox's own text content, coloured via this rule so it
+   never needs a separate icon), abandoned = dark box + †, blocked = rose
+   border + ⛔, todo = dashed outline only. */
+.atlas-rail-card__checkbox {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--legacy-radius-4px);
+  border: 2px solid var(--qb-line-dashed);
+  font-size: 0.55rem;
+  line-height: 1;
+}
+
+.atlas-rail-card__subquest--done .atlas-rail-card__checkbox {
+  border-color: var(--card-accent-fill, var(--qb-ink-300));
+  background: var(--card-accent-fill, var(--qb-ink-300));
+  color: var(--legacy-color-fff);
+}
+
+/* Fallen on the march — a dark box, fixed ink rather than accent-tinted
+   (same "abandonment reads as one thing across every saga" rationale as
+   the trail's own skull marker). */
+.atlas-rail-card__subquest--abandoned .atlas-rail-card__checkbox {
+  border-color: var(--qb-beast-ink);
+  background: var(--qb-beast-ink);
+  color: var(--legacy-color-fff);
+}
+
+/* The way is barred — the freed TODAY rose is available for this accent
+   (HANDOFF: "the freed TODAY rose (#a8506b) is available for the blocked
+   checklist accent"). */
+.atlas-rail-card__subquest--blocked {
+  border-left: 2px solid var(--qb-accent-rose-fill);
+  padding-left: 0.3rem;
+  margin-left: -0.3rem;
+}
+
+.atlas-rail-card__subquest--blocked .atlas-rail-card__checkbox {
+  border-color: var(--qb-accent-rose-fill);
+  color: var(--qb-accent-rose-fill);
+}
+
+.atlas-rail-card__subquest-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--qb-ink-700);
+}
+
+.atlas-rail-card__subquest-title--done,
+.atlas-rail-card__subquest-title--abandoned {
+  text-decoration: line-through;
+  color: var(--qb-ink-500);
+}
+
+.atlas-rail-card__subquest-date {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: var(--qb-font-mono);
+  font-size: 0.6rem;
+  color: var(--qb-ink-300);
+}
+
+/* --- Trail lane: the SVG campaign path ----------------------------------
+   Every fill/stroke below is a CSS-level paint (no fill/stroke attribute
+   in AtlasTrail.tsx) so the per-accent custom properties above are the
+   ONLY place that ever names a colour. */
+.atlas-trail {
+  position: absolute;
+  inset: 0;
+}
+
+.atlas-trail__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.atlas-trail__path {
+  fill: none;
+  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1 9;
+}
+
+/* Ahead (todo) ground — HANDOFF: "faded (~.68 opacity) ... trail continues
+   at 1 9 but faded" — same dasharray as walked ground, opacity is the only
+   distinction (not a different dash pattern). */
+.atlas-trail__path--faded {
+  opacity: 0.68;
+}
+
+.atlas-trail__camped text:first-child {
+  font-size: 15px;
+}
+
+/* --- Waypoints: done / abandoned / at-hand / todo / blocked ------------- */
+
+.atlas-trail__waypoint--done circle {
+  fill: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  stroke-width: 2;
+}
+
+.atlas-trail__waypoint-check {
+  fill: var(--legacy-color-fff);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.atlas-trail__waypoint--abandoned image {
+  /* The skull doodle carries its own ink — no accent tint (HANDOFF: "fixed
+     ink/cream rather than accent-tinted so abandonment reads as one thing
+     across every saga"). */
+  opacity: 1;
+}
+
+/* The quest at hand: r10 bright dot + r14 pulsing ring (reduced-motion
+   opt-in) — suppressed (plain dot only, no ring/pennant) on a parked epic,
+   see AtlasTrail.tsx's `atHand` branch. */
+.atlas-trail__athand-dot {
+  fill: var(--qb-parchment-muted);
+  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  stroke-width: 2.5;
+}
+
+.atlas-trail__athand-glyph {
+  fill: var(--atlas-trail-dark, var(--qb-ink-500));
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.at-hand-ring {
+  fill: none;
+  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .at-hand-ring {
+    animation: atlas-at-hand-pulse 1.8s ease-out infinite;
+  }
+
+  @keyframes atlas-at-hand-pulse {
+    0% {
+      opacity: 0.85;
+      r: 11px;
+    }
+    100% {
+      opacity: 0;
+      r: 19px;
+    }
+  }
+}
+
+/* Ahead (todo) hollow waypoint — dashed outline, no fill; opacity comes
+   from the SVG group's own `opacity` attribute (AtlasTrail.tsx), not here. */
+.atlas-trail__todo-dot {
+  fill: var(--qb-parchment-muted);
+  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke-width: 2;
+  stroke-dasharray: 2 3;
+}
+
+.atlas-trail__waypoint--todo {
+  opacity: 0.68;
+}
+
+/* Blocked overrides the plain todo fade — HANDOFF: "the marker becomes the
+   boulder at .85 opacity" — a bit more solid than a plain todo dot, since
+   it needs to read as an obstacle, not just quietly faded ground. */
+.atlas-trail__waypoint--blocked {
+  opacity: 0.85;
+}
+
+.atlas-trail__party circle {
+  fill: var(--qb-gold-coin-fill);
+  stroke: var(--qb-gold-coin-stroke);
+  stroke-width: 2.5;
+}
+
+.atlas-trail__party text {
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Gentle party bob (HANDOFF: 1.6s) — opt-in like every other Atlas/board
+     motion; reduced-motion users get the party planted still at the
+     done|next boundary. */
+  .atlas-trail__party {
+    animation: atlas-party-bob 1.6s ease-in-out infinite;
+  }
+
+  @keyframes atlas-party-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-3px);
+    }
+  }
+}
+
+.atlas-trail__camped-label {
+  font-family: var(--qb-font-body);
+  font-size: 13px;
+  fill: var(--qb-ink-500);
+}
+
+.atlas-trail__gold {
+  font-family: var(--qb-font-body);
+  font-size: 13px;
+  fill: var(--qb-gold-chip-text);
+}
+
+/* --- HTML overlay layer: AT HAND pennant + todo name-tags ---------------
+   Layered OVER the SVG (matching the prototype's own technique — plain
+   absolutely-positioned `<div>`/`<span>` tags, not squeezed into the SVG
+   via <foreignObject>). The SVG's viewBox is set 1:1 to the lane's actual
+   rendered pixel size (AtlasTrail.tsx), so a tag's inline `left`/`top` (in
+   px, same numbers as the SVG marker coordinates) lines up exactly with
+   its marker underneath. `pointer-events: none` on the container, `auto`
+   on each tag, so the overlay never blocks clicks reaching the rail card
+   or the SVG's own tooltips beneath the gaps between tags. */
+.atlas-trail__overlays {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.trail-tag {
+  position: absolute;
+  pointer-events: auto;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--qb-font-body);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--qb-radius-pennant);
+  box-shadow: var(--qb-shadow-card) rgba(0, 0, 0, 0.18);
+}
+
+.trail-tag--todo {
+  background: var(--qb-parchment-muted);
+  border: 1.5px solid var(--atlas-trail-fill, var(--qb-ink-300));
+  color: var(--qb-ink-500);
+}
+
+/* The AT HAND pennant is a status marker, not a name-tag — solid accent
+   fill (not the todo tag's parchment) so it reads as "in progress right
+   now", not "ahead ground". */
+.atlas-trail__pennant--athand {
+  background: var(--atlas-trail-fill, var(--qb-accent-orange-fill));
+  border: 1.5px solid var(--atlas-trail-dark, var(--qb-accent-orange-shadow));
+  color: var(--legacy-color-fff);
+  font-weight: 700;
+}
+
+/* Down-mode (HANDOFF: "plain horizontal text right of the trail — no
+   wobble tilt") — AtlasTrailVertical.tsx never sets an inline `rotate()`
+   on these, this modifier just narrows the max-width for the column's own
+   (typically narrower) cross-axis. */
+.trail-tag--down {
+  max-width: 130px;
+}
+
+/* --- Blocked overlay: the boulder / trailhead / campfire images --------- */
+.atlas-trail__trailhead image,
+.atlas-trail__boulder,
+.atlas-trail__campfire {
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Beast hue selection (HANDOFF: "alive = darker accent hue ... slain =
+   accent fill") — these three rules are accent-family-AGNOSTIC: they only
+   read `--atlas-trail-fill`/`-dark`, which the per-accent blocks above
+   already set on the `.atlas-trail__svg--accent-*` ancestor and which
+   inherit straight down through the beast `<g>` into BeastFace's own
+   `fill={hue}` attribute (a `var(--qb-atlas-beast-*)` reference — see
+   BeastFace.tsx/AtlasTrail.tsx). `--hue-1` leans on the darker tone for a
+   touch of cosmetic variety between same-accent alive beasts; slain always
+   reads as the brighter accent fill, regardless of hueVariant. */
+.atlas-trail__beast--alive.atlas-trail__beast--hue-0 {
+  --qb-atlas-beast-alive: var(--atlas-trail-dark, var(--qb-ink-500));
+}
+
+.atlas-trail__beast--alive.atlas-trail__beast--hue-1 {
+  --qb-atlas-beast-alive: var(--atlas-trail-fill, var(--qb-ink-300));
+}
+
+.atlas-trail__beast--slain {
+  --qb-atlas-beast-slain: var(--atlas-trail-fill, var(--qb-ink-300));
+}
+
+/* ==========================================================================
    Mobile layout layer (≤720px) — "the guild ledger, one page at a time".
    On a phone the corkboard becomes a ledger you leaf through: each lane is a
    near-full-width parchment page with scroll-snap, a sliver of the next
@@ -4155,6 +5020,15 @@ a.card-drawer__pr-chip:hover {
      after identity, ahead of R2, so it never crowds into the repo/branch
      row when present. */
   .topbar__quarantine-banner { order: 5; flex-basis: 100%; }
+
+  /* R1b (WF-086): Board|Atlas view toggle — its own full-width row right
+     after identity/the (rare) quarantine banner, ahead of R2's repo/branch
+     row. `order: 6` sits in the gap the R2-R5 scheme deliberately left
+     between the quarantine banner's 5 and R2's 10 (see that scheme's own
+     "gaps... leave room to slot a future chip" comment above) — it's an
+     always-visible chip, so it earns an early row of its own rather than
+     folding into an existing one or waiting behind Controls ▾. */
+  .topbar__view-toggle { order: 6; flex-basis: 100%; }
 
   /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
      `order` pairs the toggle with ＋New card on R5 (right end of that row,
@@ -4509,6 +5383,192 @@ a.card-drawer__pr-chip:hover {
   .party-sheet__title {
     font-size: 24px;
   }
+
+  /* --- Epic Atlas: sticky-pinned condensed rail (WF-086, HANDOFF's
+     "Responsive (required)" section, R3 adjudication) -------------------
+     `.atlas-chart` becomes the ONE mobile horizontal scroller — same
+     `min-width:0; width:100%; max-width:100vw; overflow-x:auto` shape as
+     `.board`'s own mobile override a few lines up, in spirit and in the
+     725ddea invariant it encodes: exactly one scroller, everything else
+     (rail, lane, row) scrolls WITH the chart, never independently. */
+  .atlas-chart {
+    --rail: 160px;
+    min-width: 0;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: auto;
+    padding: 0.5rem 0.5rem 1rem;
+  }
+
+  /* Epic-lane snap tightens to mandatory at mobile widths (HANDOFF) — a
+     deliberate swipe/scroll-driven "one row settles at a time" feel,
+     versus desktop's gentler proximity snap. No topbar-height-aware
+     margin needed here either (see the base `.atlas-chart__row` rule's
+     own comment) — `.board-region`'s top is already clear of `.topbar`
+     at every width, mobile's wrapped topbar included. */
+  .board-region:has(.atlas-chart) {
+    scroll-snap-type: y mandatory;
+  }
+
+  /* Verification-round finding: `position: sticky` on a CSS GRID item is
+     constrained to stick only within ITS OWN grid track's width as its
+     containing block — the desktop rail's `var(--rail)` (160px) track
+     meant the sticky rail ran out of room and started sliding with the
+     content after ~160px of scroll (measured with Playwright: rail.x held
+     at a constant 20px for scrollLeft 0-150, then began decreasing).
+     Dropping the grid here and stacking rail ABOVE lane in normal block
+     flow gives the sticky rail a containing block as wide as the whole
+     ROW (which itself grows to the lane's overflow width) — verified with
+     the same Playwright measurement to hold constant across the FULL
+     scrollLeft range, not just the first ~160px. This also converges on
+     HANDOFF's own "condensed card above its trail" framing. */
+  .atlas-chart__row {
+    display: block;
+  }
+
+  /* Legibility floor for the SVG trail lane — tunable, not a promise; a
+     narrower value starts crowding the trailhead/waypoints/beast together. */
+  .atlas-chart__lane {
+    min-width: 460px;
+  }
+
+  /* Condensed rail pins in place while the chart scrolls beneath it — the
+     trail passes UNDER the rail, never the reverse, hence the opaque
+     background (a flat approximation of the page's own radial-gradient
+     backdrop, close enough for a 160px strip) and a z-index above the
+     trail's own overlay layer (`.atlas-trail__overlays`, z-index: 2) so a
+     name-tag/pennant visibly passes beneath the sticky rail, never over
+     it. `width` is now load-bearing (chunk 10 didn't need it — the
+     grid track supplied it): a block-level sticky element with no width
+     of its own would stretch to the row's full (now much wider) content
+     width instead of staying a compact 160px strip. */
+  .atlas-chart__rail {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    width: var(--rail);
+    background: var(--qb-bg-page);
+    padding: 0.5rem 0.4rem;
+    margin-bottom: 0.3rem;
+    /* Impl-review round 1, finding 8 (HANDOFF: "soft right-edge shadow") —
+       a soft ink shadow bleeding off the rail's right edge, so the trail
+       passing beneath it (opaque background, above) reads as sliding UNDER
+       a physically raised strip rather than just stopping at a hard line. */
+    box-shadow: 6px 0 10px -6px rgba(58, 42, 24, 0.35);
+  }
+
+  .atlas-rail-card {
+    padding: 8px;
+  }
+
+  /* Condensed content set (HANDOFF): ONLY the "vs beast" line and the
+     gold/lock chips are hidden via `display:none` — NOT merely shrunk, and
+     NOT the whole meta row — so the mobile rail never renders a squeezed,
+     unreadable version of the desktop card. The n/m count is deliberately
+     NOT covered here: HANDOFF's condensed set keeps "progress track + n/m
+     count" visible, and AtlasRailCard.tsx renders `.atlas-rail-card__count`
+     as a SIBLING of `.atlas-rail-card__chips` specifically so this rule
+     can never take it down as a side effect of hiding its old parent. */
+  .atlas-rail-card__vs,
+  .atlas-rail-card__chips {
+    display: none;
+  }
+
+  /* 2-line clamp keeps a long epic title from pushing the condensed card
+     past a readable height on a 160px-wide rail. */
+  .atlas-rail-card__title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Checklist wheel's mobile cap (HANDOFF: "~224px mobile" vs desktop's
+     ~132px) — a pure CSS override of AtlasRailCard.tsx's inline desktop
+     default; the fade-mask/overflow rules above are unchanged. */
+  .atlas-rail-card__subquests {
+    max-height: 224px !important;
+  }
+
+  /* 2-row grid per checklist item (HANDOFF): checkbox+title on row 1, the
+     stamp beneath on row 2 — the flex layout's `margin-left: auto` date
+     collides with a long title at mobile widths, this avoids that
+     entirely rather than truncating the title further. */
+  .atlas-rail-card__subquest {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.4rem;
+    row-gap: 0.1rem;
+  }
+
+  .atlas-rail-card__subquest-date {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    padding-left: 22px; /* aligns under the title, past the 14px checkbox + gap */
+  }
+
+  /* The mobile orientation toggle only matters at this width — desktop
+     hides it (base rule) since it's always Across there. */
+  .atlas-toolbar__toggle--orientation {
+    display: inline-flex;
+  }
+
+  /* --- Epic Atlas Down-mode: 86vw snap columns (HANDOFF, shipped in
+     production) --------------------------------------------------------
+     `.atlas-chart` is STILL the page's one horizontal scroller (the
+     725ddea invariant) — Down-mode just changes what scrolls inside it:
+     columns instead of rows, `scroll-snap-type: x mandatory` overriding
+     Across-mode's `overflow-x: auto` on the same element (the two
+     orientations never render at once, so there's no axis conflict). */
+  .atlas-chart--down {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.75rem;
+  }
+
+  .atlas-chart__columns {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    /* Item 8 precedent (Board.tsx's activeLaneHeight): pins this box's
+       page-scroll-relevant height to the ACTIVE column's own content
+       height (inline style, EpicAtlas.tsx) so a short column's page
+       scroll can't run past its own last marker into a taller sibling's
+       empty space. `overflow-y: hidden` is what actually clips the
+       off-screen, currently-taller siblings out of the scrollable region. */
+    overflow-y: hidden;
+    transition: height 0.18s ease;
+  }
+
+  .atlas-chart__column {
+    flex: 0 0 86vw;
+    scroll-snap-align: center;
+  }
+
+  .atlas-chart__column-card {
+    margin-bottom: 0.4rem;
+  }
+
+  .atlas-chart__column-lane {
+    position: relative;
+  }
+
+  /* Down-mode's SVG grows to its own natural content height (the page
+     scrolls; HANDOFF's flat per-complexity scale, "no fit-to-container")
+     rather than being squeezed/stretched into a fixed-height box the way
+     Across-mode's `.atlas-trail` (absolute, inset:0 over an already-sized
+     lane) is. `height: auto` + the intrinsic viewBox aspect ratio
+     (AtlasTrailVertical.tsx sets the viewBox's own width to this same
+     element's measured width) is what makes the rendered SVG height come
+     out in real CSS pixels equal to the viewBox's own height units. */
+  .atlas-trail--down {
+    position: static;
+    display: block;
+  }
+
+  .atlas-trail--down .atlas-trail__svg {
+    height: auto;
+  }
 }
 
 /* ==========================================================================
@@ -4586,6 +5646,97 @@ a.card-drawer__pr-chip:hover {
   .label-editor__input {
     font-size: 16px;
     min-height: 38px;
+  }
+
+  /* Epic Atlas (WF-086): the condensed-rail expand affordance needs a real
+     touch target — HANDOFF's spec sets a 44px floor here, stricter than
+     the board's own 32px `.epic-card__expand` precedent a few lines up.
+     Deliberate, not a drift: the rail card is already reduced to its
+     condensed set at this width, so its one remaining interactive control
+     gets the full floor rather than the board's smaller one.
+
+     The sub-quest checkbox (`.atlas-rail-card__checkbox`) is deliberately
+     NOT given a matching floor here, despite HANDOFF listing it alongside
+     the expand button: it's a decorative `aria-hidden` span with no click
+     handler (AtlasRailCard.tsx) — nothing to tap. Forcing its visible 14px
+     box to 44px would only distort the sticker design for a touch target
+     that receives no interaction; if a future card makes the sub-quest row
+     itself tappable, the target belongs on the `<li>`, not the checkbox. */
+  .atlas-rail-card__expand {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* ==========================================================================
+   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
+   touch-target layer above so it wins the cascade (same specificity, later
+   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
+   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
+   match) that 44px floor left the questing/fleet pill visibly taller than
+   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
+   though all three already share identical padding/font-size/border via the
+   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
+   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
+   three (the other two are plain `<span>`s) — a bare button doesn't inherit
+   the guild body font from the UA stylesheet the way inline elements do, so
+   its `line-height: normal` resolves against a different font's metrics;
+   pinning its `font-family` here (line-height was already the shared
+   `normal` keyword on both — the mismatch was that keyword resolving
+   against two different fonts' metrics) makes all three pills
+   byte-for-byte the same box on mobile, not just coincidentally close.
+   NB: `font-family` only, never the `font` shorthand — that resets
+   font-size/weight too, which would fight the shared 0.68rem override
+   above (same specificity, later in the cascade would win and blow the
+   pill back up to the body's default size). */
+@media (max-width: 720px) {
+  .topbar__fleet-pill {
+    min-height: 0;
+    font-family: inherit;
+    /* Defensive, not load-bearing here (measured with/without: no height
+       change once the icon font-size fix below is in) — strips whatever
+       native form-control chrome Chromium might otherwise reserve room
+       for on a plain `<button>`, same "don't rely on the platform ever
+       agreeing with custom padding/border" instinct as every other
+       hand-styled button in this file. */
+    appearance: none;
+    -webkit-appearance: none;
+  }
+}
+
+/* ==========================================================================
+   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
+   touch-target layer above so it wins the cascade (same specificity, later
+   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
+   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
+   match) that 44px floor left the questing/fleet pill visibly taller than
+   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
+   though all three already share identical padding/font-size/border via the
+   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
+   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
+   three (the other two are plain `<span>`s) — a bare button doesn't inherit
+   the guild body font from the UA stylesheet the way inline elements do, so
+   its `line-height: normal` resolves against a different font's metrics;
+   pinning its `font-family` here (line-height was already the shared
+   `normal` keyword on both — the mismatch was that keyword resolving
+   against two different fonts' metrics) makes all three pills
+   byte-for-byte the same box on mobile, not just coincidentally close.
+   NB: `font-family` only, never the `font` shorthand — that resets
+   font-size/weight too, which would fight the shared 0.68rem override
+   above (same specificity, later in the cascade would win and blow the
+   pill back up to the body's default size). */
+@media (max-width: 720px) {
+  .topbar__fleet-pill {
+    min-height: 0;
+    font-family: inherit;
+    /* Defensive, not load-bearing here (measured with/without: no height
+       change once the icon font-size fix below is in) — strips whatever
+       native form-control chrome Chromium might otherwise reserve room
+       for on a plain `<button>`, same "don't rely on the platform ever
+       agreeing with custom padding/border" instinct as every other
+       hand-styled button in this file. */
+    appearance: none;
+    -webkit-appearance: none;
   }
 }
 

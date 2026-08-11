@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import TopBar from "./components/TopBar";
 import Board from "./components/Board";
+import EpicAtlas from "./components/EpicAtlas";
 import FilterBar from "./components/FilterBar";
 import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
@@ -138,6 +139,9 @@ function App() {
   // `[hidden]` override to the ≤720px media query, same pattern as the
   // pre-existing `#topbar-controls-group`).
   const [controlsOpen, setControlsOpen] = useState(false);
+  // WF-086: Board|Atlas view toggle — session-local (no localStorage,
+  // same precedent as `activeBranch`), reset to "board" on reload.
+  const [view, setView] = useState<"board" | "atlas">("board");
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -241,6 +245,8 @@ function App() {
         // owns whether they're open.
         controlsOpen={controlsOpen}
         onToggleControls={() => setControlsOpen((open) => !open)}
+        view={view}
+        onSelectView={setView}
       />
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
@@ -248,8 +254,12 @@ function App() {
           alone isn't enough: useBoard() never clears its last-good `board`
           state when `enabled` flips false (WF-032), so a stale board can
           outlive a switch to an unbegun repo — the same `!isUnbegun` guard
-          gating <Board/> in `.board-region` below must gate this too. */}
-      {!isUnbegun && board && (
+          gating <Board/> in `.board-region` below must gate this too.
+          WF-086: also gated on `view === "board"` — the Atlas is an
+          explicit non-goal for card filtering (chunk-6 handoff), so
+          FilterBar is omitted ENTIRELY on the Atlas rather than rendered
+          hidden-but-inert. */}
+      {!isUnbegun && board && view === "board" && (
         <FilterBar
           filter={filter}
           labels={labels}
@@ -280,7 +290,7 @@ function App() {
               <p className="board-placeholder">Loading board…</p>
             )}
             {error && <p className="board-error">{error}</p>}
-            {board && (
+            {board && view === "board" && (
               <Board
                 board={board}
                 showArchive={showArchive}
@@ -293,6 +303,14 @@ function App() {
                 threshold={threshold}
                 visibleIds={visibleIds}
               />
+            )}
+            {/* WF-086: same <main class="board-region"> the board renders
+                in — a sibling page, not a re-theme, per the HANDOFF's
+                framing. CardDetailDrawer below stays the ONE shared drawer
+                for both views (App.tsx owns `openCardId` regardless of
+                which page opened it). */}
+            {board && view === "atlas" && (
+              <EpicAtlas board={board} onOpenCard={setOpenCardId} />
             )}
           </>
         )}

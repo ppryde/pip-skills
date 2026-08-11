@@ -105,6 +105,11 @@ function baseProps() {
     branches: [] as string[],
     activeBranch: null as string | null,
     onSelectBranch: () => {},
+    // WF-086: Board|Atlas view toggle — every existing test gets a stable
+    // default (board view, no-op handler) via this shared fixture so only
+    // the toggle's own describe block below needs to care about it.
+    view: "board" as "board" | "atlas",
+    onSelectView: () => {},
   };
 }
 
@@ -583,6 +588,68 @@ describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
     expect(screen.getByText(/Long Rest/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /questing/i })).toBeInTheDocument();
     expect(screen.getByText(/vanquished/)).toBeInTheDocument();
+  });
+});
+
+// WF-086: Board|Atlas view toggle. Role-B "T1 gold underline" tab pattern
+// (same aria-pressed mechanics as CardDetailDrawer's `.card-drawer__viewtoggle`
+// segmented tabs), but under its own `.topbar__view-toggle` class — this is
+// a NEW selector, not a reuse of the drawer's, since the two toggles live in
+// unrelated parts of the tree and shouldn't share a CSS identity by accident.
+describe("<TopBar/> view toggle (WF-086)", () => {
+  it("renders a Board button and an Atlas button", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Atlas" })).toBeInTheDocument();
+  });
+
+  it("marks the current view's button aria-pressed=true and the other false", () => {
+    const { rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    expect(screen.getByRole("button", { name: "Board" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Atlas" })).toHaveAttribute("aria-pressed", "false");
+
+    rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+    expect(screen.getByRole("button", { name: "Board" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Atlas" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("calls onSelectView with the clicked view", () => {
+    const onSelectView = vi.fn();
+    render(<StatefulTopBar {...baseProps()} view="board" onSelectView={onSelectView} />);
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    expect(onSelectView).toHaveBeenCalledWith("atlas");
+  });
+
+  it("places the toggle in the always-visible chip row — a sibling of, NOT nested inside, #topbar-controls-group", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} />);
+    const toggle = container.querySelector(".topbar__view-toggle");
+    expect(toggle).toBeInTheDocument();
+    expect(container.querySelector("#topbar-controls-group .topbar__view-toggle")).toBeNull();
+    // Same parent (<header class="topbar">) as the controls group, not a
+    // descendant of it — the mobile "Controls ▾" collapse must never hide it.
+    expect(toggle!.parentElement).toBe(
+      container.querySelector("#topbar-controls-group")!.parentElement
+    );
+  });
+
+  it("sits after topbar__identity and before the repo selector (invisible-on-desktop mobile row-break spacers may sit between)", () => {
+    const { container } = render(
+      <StatefulTopBar {...baseProps()} repos={[{ root: "/r", label: "r", current: true, has_board: true, live_sessions: 0 }]} />
+    );
+    const header = container.querySelector("header.topbar")!;
+    const children = Array.from(header.children);
+    const identityIndex = children.findIndex((c) => c.classList.contains("topbar__identity"));
+    const toggleIndex = children.findIndex((c) => c.classList.contains("topbar__view-toggle"));
+    const repoIndex = children.findIndex((c) => c.classList.contains("topbar__repo-select"));
+    expect(identityIndex).toBeGreaterThanOrEqual(0);
+    // Not necessarily the VERY next sibling — the mobile row-break spacers
+    // (.topbar__row-break--r2/r3/r4, `display:none` outside the ≤720px
+    // media query) are grouped right after identity too, DOM-adjacent
+    // purely to keep their own diff small; they carry no desktop visual
+    // weight, so "after identity, before the repo selector" is the actual
+    // contract, not byte-adjacent.
+    expect(toggleIndex).toBeGreaterThan(identityIndex);
+    expect(toggleIndex).toBeLessThan(repoIndex);
   });
 });
 
