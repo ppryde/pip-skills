@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import type { BoardCard, Rollup } from "../api/types";
 import { seedFor } from "../board/atlasGeometry";
 import {
+  TRAILHEAD_ICON_SIZE_PX,
   TRAILHEAD_RESERVE_PX,
   beastAnchorX,
   computeSegments,
@@ -73,6 +74,19 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
     const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
     const beastY = Number(beastTransform.split(",")[1].trim().replace(")", ""));
     expect(beastY).toBeGreaterThan(trailheadY);
+  });
+
+  // Impl-review round 2 (user amendment): "the walled-village trailhead
+  // icon is too teeny — it is a town after all" — renders visibly grander
+  // than the ~20px trail markers now, in Down mode too.
+  it("renders the trailhead icon at TRAILHEAD_ICON_SIZE_PX, visibly larger than the ~20px trail markers", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [child({ id: "k1", status: "done", complexity: "M" })];
+    const { container } = renderColumn(epic, kids);
+    const icon = container.querySelector(".atlas-trail__trailhead image")!;
+    expect(Number(icon.getAttribute("width"))).toBe(TRAILHEAD_ICON_SIZE_PX);
+    expect(Number(icon.getAttribute("height"))).toBe(TRAILHEAD_ICON_SIZE_PX);
+    expect(TRAILHEAD_ICON_SIZE_PX).toBeGreaterThan(20);
   });
 
   it("done epic: renders a slain beast", () => {
@@ -261,19 +275,19 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
   it("places the tag/pennant on the ROOMY side of the marker, not the crowded one — checked for markers near both walls", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const kids = [
-      // Weight-2 (M) each; cumulative Y (34 + 2*40 = 114, then 34 + 4*40 =
-      // 194) lands one marker near the RIGHT wall (band 1, low localT,
-      // right-to-left sweep starts at xRight) and the other near the LEFT
-      // wall (band 2, low localT, left-to-right sweep starts at xLeft) —
-      // confirmed against the pure module below, not asserted blind.
-      child({ id: "k1", title: "Near right wall", status: "planned", complexity: "M", order: 1 }),
+      // Weight 1 (S) then weight 2 (M) — cumulative arc length
+      // (TRAILHEAD_RESERVE_PX + 1/3 * ARC_PX_PER_UNIT_SERPENTINE, computed
+      // below) lands one marker near the RIGHT wall and the other near
+      // the LEFT wall — confirmed against the pure module below, not
+      // asserted blind.
+      child({ id: "k1", title: "Near right wall", status: "planned", complexity: "S", order: 1 }),
       child({ id: "k2", title: "Near left wall", status: "planned", complexity: "M", order: 2 }),
     ];
     const { container } = renderColumn(epic, kids);
 
     const trail = serpentineTrail(280, seedFor("WF-085")); // 280 = DEFAULT_COLUMN_WIDTH, pre-measurement
-    const y1 = TRAILHEAD_RESERVE_PX + 2 * ARC_PX_PER_UNIT_SERPENTINE;
-    const y2 = TRAILHEAD_RESERVE_PX + 4 * ARC_PX_PER_UNIT_SERPENTINE;
+    const y1 = TRAILHEAD_RESERVE_PX + 1 * ARC_PX_PER_UNIT_SERPENTINE;
+    const y2 = TRAILHEAD_RESERVE_PX + 3 * ARC_PX_PER_UNIT_SERPENTINE;
     const mx1 = trail.pointAt(y1).x;
     const mx2 = trail.pointAt(y2).x;
     // Sanity-check the fixture actually exercises both walls, rather than

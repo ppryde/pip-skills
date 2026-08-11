@@ -20,6 +20,8 @@ import {
   BEAST_ICON_SIZE_PX,
   BEAST_RESERVE_PX,
   CAMPFIRE_FRACTION,
+  TRAILHEAD_ICON_SIZE_PX,
+  TRAILHEAD_PADDING_PX,
   TRAILHEAD_RESERVE_PX,
 } from "./atlasTrailLayout";
 
@@ -119,12 +121,28 @@ describe("orderChildrenForTrail", () => {
 });
 
 describe("laneUsableWidth", () => {
-  it("subtracts the beast reserve and trailhead reserve (34)", () => {
+  it("subtracts the beast reserve and the trailhead reserve", () => {
     expect(laneUsableWidth(500)).toBe(500 - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX);
   });
 
   it("floors at 40 for a very narrow lane", () => {
     expect(laneUsableWidth(50)).toBe(40);
+  });
+});
+
+// Impl-review round 2 (user amendment): the trailhead village icon grew
+// from ~20px to ~28-32px ("it is a town after all") — its reserve must be
+// DERIVED from the icon's own size + padding, never a bare literal, same
+// discipline as BEAST_RESERVE_PX (round 1, finding 1), so a future icon
+// resize can never end up short of clearance again.
+describe("TRAILHEAD_RESERVE_PX", () => {
+  it("is derived from TRAILHEAD_ICON_SIZE_PX + TRAILHEAD_PADDING_PX, not a bare literal", () => {
+    expect(TRAILHEAD_RESERVE_PX).toBe(TRAILHEAD_ICON_SIZE_PX + TRAILHEAD_PADDING_PX);
+  });
+
+  it("the icon is visibly grander than the ~20px trail markers, per HANDOFF's 28-32px tuned range", () => {
+    expect(TRAILHEAD_ICON_SIZE_PX).toBeGreaterThanOrEqual(28);
+    expect(TRAILHEAD_ICON_SIZE_PX).toBeLessThanOrEqual(32);
   });
 });
 

@@ -13,9 +13,21 @@
 import type { BoardCard, Status } from "../api/types";
 import { rarityStars } from "./rarityStars";
 
+/** The walled-village trailhead icon's own rendered size — HANDOFF (user
+ * amendment): "~28-32px ... it is a town after all", deliberately GRANDER
+ * than the other ~20px trail markers (`MARKER_SIZE_PX` in AtlasTrail.tsx/
+ * AtlasTrailVertical.tsx). */
+export const TRAILHEAD_ICON_SIZE_PX = 30;
+/** Clearance beyond the trailhead icon before the trail's first segment
+ * starts — keeps the icon clear of the rail/card on one side and the
+ * trail's own content on the other. */
+export const TRAILHEAD_PADDING_PX = 14;
 /** H_LEFT_PAD in the prototype — reserve at the lane's left edge for the
- * trailhead (walled-village) icon, clear of the rail column. */
-export const TRAILHEAD_RESERVE_PX = 34;
+ * trailhead (walled-village) icon, clear of the rail column. Derived from
+ * the icon's own size + padding (same named-constant discipline as
+ * `BEAST_RESERVE_PX` below) rather than a bare literal, so a bigger icon
+ * can never end up short of clearance again. */
+export const TRAILHEAD_RESERVE_PX = TRAILHEAD_ICON_SIZE_PX + TRAILHEAD_PADDING_PX;
 /** Fixed offset from a trail's true end (H_LEFT_PAD + totalWeight *
  * pxPerWeight) to the beast's anchor point. */
 export const BEAST_ANCHOR_OFFSET_PX = 26;

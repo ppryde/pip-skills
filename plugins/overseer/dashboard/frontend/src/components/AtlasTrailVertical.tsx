@@ -5,6 +5,7 @@ import { formatDateStamp, parseCalendarDate, seedFor } from "../board/atlasGeome
 import {
   BEAST_ICON_SIZE_PX,
   CAMPFIRE_GAP_PX,
+  TRAILHEAD_ICON_SIZE_PX,
   TRAILHEAD_RESERVE_PX,
   WAYPOINT_GAP_PX,
   beastAnchorX,
@@ -297,9 +298,15 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
 
         <g
           className="atlas-trail__trailhead"
-          transform={`translate(${t.pointAt(TRAILHEAD_RESERVE_PX).x - 9}, 0) scale(0.85)`}
+          transform={`translate(${t.pointAt(TRAILHEAD_RESERVE_PX).x - TRAILHEAD_ICON_SIZE_PX / 2}, 0)`}
         >
-          <image href={trailheadIcon} x={0} y={0} width={MARKER_SIZE_PX} height={MARKER_SIZE_PX} />
+          <image
+            href={trailheadIcon}
+            x={0}
+            y={0}
+            width={TRAILHEAD_ICON_SIZE_PX}
+            height={TRAILHEAD_ICON_SIZE_PX}
+          />
           <title>where the saga began</title>
         </g>
 

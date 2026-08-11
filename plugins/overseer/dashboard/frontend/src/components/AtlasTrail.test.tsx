@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import type { BoardCard, Rollup } from "../api/types";
+import { BEAST_RESERVE_PX, TRAILHEAD_ICON_SIZE_PX, TRAILHEAD_RESERVE_PX } from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import AtlasTrail from "./AtlasTrail";
@@ -74,6 +75,19 @@ describe("<AtlasTrail/>", () => {
     expect(container.querySelector(".atlas-trail__trailhead")).toBeInTheDocument();
     expect(container.querySelector(".atlas-trail__beast--alive")).toBeInTheDocument();
     expect(container.querySelector(".atlas-trail__beast--slain")).not.toBeInTheDocument();
+  });
+
+  // Impl-review round 2 (user amendment): "the walled-village trailhead
+  // icon is too teeny — it is a town after all" — renders visibly grander
+  // than the ~20px trail markers now.
+  it("renders the trailhead icon at TRAILHEAD_ICON_SIZE_PX, visibly larger than the ~20px trail markers", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [child({ id: "k1", status: "done", complexity: "S" })];
+    const { container } = renderTrail(epic, kids);
+    const icon = container.querySelector(".atlas-trail__trailhead image")!;
+    expect(Number(icon.getAttribute("width"))).toBe(TRAILHEAD_ICON_SIZE_PX);
+    expect(Number(icon.getAttribute("height"))).toBe(TRAILHEAD_ICON_SIZE_PX);
+    expect(TRAILHEAD_ICON_SIZE_PX).toBeGreaterThan(20);
   });
 
   it("done epic: renders a slain beast and gold text", () => {
@@ -298,8 +312,9 @@ describe("<AtlasTrail/>", () => {
 
     const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
     const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
-    // trailEnd = TRAILHEAD_RESERVE_PX(34) + 2*20 = 74; anchor = 74 + 26 = 100.
-    expect(beastX).toBeCloseTo(100, 5);
+    // trailEnd = TRAILHEAD_RESERVE_PX + 2*20; anchor = trailEnd + 26.
+    const expectedTrailEnd = TRAILHEAD_RESERVE_PX + 2 * 20;
+    expect(beastX).toBeCloseTo(expectedTrailEnd + 26, 5);
   });
 
   it("never lets the beast's own footprint overflow a lane whose heaviest epic exactly saturates the shared scale", () => {
@@ -308,7 +323,7 @@ describe("<AtlasTrail/>", () => {
     // usable exactly reproduces "the heaviest epic spans the lane" — the
     // beast's right edge (beastX + 48) must still land at/under laneWidth.
     const laneWidth = 300;
-    const usable = laneWidth - 74 - 34; // BEAST_RESERVE_PX(74) + TRAILHEAD_RESERVE_PX(34)
+    const usable = laneWidth - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX;
     const totalWeightUnits = 4; // one XL child
     const pxPerWeight = usable / totalWeightUnits;
     const epic = card({ id: "WF-SATURATED", status: "in-flight" });
@@ -330,12 +345,12 @@ describe("<AtlasTrail/>", () => {
     const { container } = renderTrail(epic, [todo]);
 
     expect(container.querySelector(".atlas-trail__campfire")).toBeInTheDocument();
-    // TRAILHEAD_RESERVE_PX(34) is both the campfire's fallback position and
+    // TRAILHEAD_RESERVE_PX is both the campfire's fallback position and
     // the first segment's own start — a real cut there means the first
-    // rendered path segment starts measurably AFTER 34, not exactly at it.
+    // rendered path segment starts measurably AFTER it, not exactly at it.
     const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
     const firstPathStartX = Number(firstPathD.match(/^M([\d.]+)/)![1]);
-    expect(firstPathStartX).toBeGreaterThan(34 + 6); // clear of the 12px campfire gap's near edge
+    expect(firstPathStartX).toBeGreaterThan(TRAILHEAD_RESERVE_PX + 6); // clear of the 12px campfire gap's near edge
   });
 
   // Impl-review round 2, finding 5: the LAST-ordered child's marker sits

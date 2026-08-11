@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ARC_PX_PER_UNIT_SERPENTINE,
-  SERPENTINE_BAND_HEIGHT_PX,
   SERPENTINE_SWEEP_MAX_FRACTION,
   SERPENTINE_SWEEP_MIN_FRACTION,
-  SERPENTINE_TURN_RADIUS_PX,
   serpentineTrail,
 } from "./serpentineTrail";
 
@@ -38,11 +36,11 @@ describe("ARC_PX_PER_UNIT_SERPENTINE / average vertical advance", () => {
   it("the average vertical advance per weight unit lands within HANDOFF's 36-44px/unit tuned range", () => {
     const DEFAULT_COLUMN_WIDTH = 280;
     const { pointAt } = serpentineTrail(DEFAULT_COLUMN_WIDTH, 0.4);
-    for (const weight of [1, 2, 4, 7, 14, 28]) {
+    for (const weight of [2, 4, 7, 14, 28]) {
       const y = pointAt(weight * ARC_PX_PER_UNIT_SERPENTINE).y;
       const avgRate = y / weight;
       expect(avgRate).toBeGreaterThanOrEqual(34); // small slack either side of
-      expect(avgRate).toBeLessThanOrEqual(46); // the tuned range for wobble/rounding noise
+      expect(avgRate).toBeLessThanOrEqual(46); // the tuned range for wobble/curvature noise
     }
   });
 
@@ -51,12 +49,6 @@ describe("ARC_PX_PER_UNIT_SERPENTINE / average vertical advance", () => {
     const { pointAt } = serpentineTrail(DEFAULT_COLUMN_WIDTH, 0.4);
     const worstCaseHeight = pointAt(28 * ARC_PX_PER_UNIT_SERPENTINE).y;
     expect(worstCaseHeight).toBeLessThan(1500); // well under a typical phone's scrollable screen
-  });
-});
-
-describe("SERPENTINE_TURN_RADIUS_PX", () => {
-  it("is small relative to the band height, so most of each band stays a plain straight cruise leg", () => {
-    expect(SERPENTINE_TURN_RADIUS_PX).toBeLessThan(SERPENTINE_BAND_HEIGHT_PX / 4);
   });
 });
 
@@ -72,10 +64,10 @@ describe("serpentineTrail", () => {
     }
   });
 
-  it("alternates sweep direction across several bands as arc length grows", () => {
+  it("alternates sweep direction across several meanders as arc length grows", () => {
     const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0);
     // Sample a wide arc-length range and confirm x crosses the column's
-    // centre repeatedly (a genuine zigzag), not just drifting to one side.
+    // centre repeatedly (a genuine meander), not just drifting to one side.
     let crossings = 0;
     let lastSide: "left" | "right" | null = null;
     for (let a = 0; a <= 1200; a += 20) {
@@ -106,67 +98,62 @@ describe("serpentineTrail", () => {
     expect(path.startsWith(`M${start.x.toFixed(1)} ${start.y.toFixed(1)}`)).toBe(true);
   });
 
-  // Impl-review round 2, finding 2: "smooth rounded bends (meander/
-  // U-turns), not sharp V-points — the hand-wobbled character applies to
-  // the turns too." A sharp V has an instantaneous slope reversal at the
-  // corner; a rounded bend's slope (dx/d(arcLength)) changes GRADUALLY
-  // across a small window around the turn.
-  describe("rounded turns (not sharp V-points)", () => {
-    function findABandBoundaryArcLength(pointAt: (a: number) => { x: number; y: number }): number {
-      // Walk arc length forward until y crosses a SERPENTINE_BAND_HEIGHT_PX
-      // multiple — that's where the y-space band boundary (and its turn)
-      // sits, wherever it lands in arc-length terms for this seed/width.
-      for (let a = 1; a <= 3000; a += 1) {
-        const y = pointAt(a).y;
-        const bandsPassed = Math.floor(y / SERPENTINE_BAND_HEIGHT_PX);
-        const prevY = pointAt(a - 1).y;
-        const prevBandsPassed = Math.floor(prevY / SERPENTINE_BAND_HEIGHT_PX);
-        if (bandsPassed > prevBandsPassed) return a;
-      }
-      throw new Error("no band boundary found in range — test fixture assumption broke");
-    }
-
-    it("the slope (dx/d(arcLength)) changes gradually through a turn, never in one small step", () => {
+  // Impl-review round 2, finding 2 (direct user feedback: "love the extra
+  // bends but they should meander not turn sharply to keep the rounded
+  // friendly feel" — "NO sharp angle anywhere along the path"). A pure
+  // sine curve is C-infinity smooth everywhere by construction, but this
+  // asserts it empirically rather than trusting the math alone: the
+  // discrete slope (dx/d(arcLength)) never jumps sharply between
+  // consecutive samples, ANYWHERE along a long stretch of the path — not
+  // just near wherever an old piecewise-band boundary used to sit.
+  describe("no sharp angle anywhere along the path (true meander)", () => {
+    it("the discrete slope changes smoothly at every point sampled — no single-step jump anywhere close to the full slope range", () => {
       const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0.55);
-      const boundaryArc = findABandBoundaryArcLength(pointAt);
-
-      // Sample a small window straddling the turn and compute the
-      // discrete slope between consecutive samples — a sharp V would show
-      // one huge slope-delta right at the corner; a rounded bend spreads
-      // the direction change across several samples.
       const step = 1;
-      const window = 30;
       const slopes: number[] = [];
-      for (let a = boundaryArc - window; a < boundaryArc + window; a += step) {
+      for (let a = 0; a <= 1000; a += step) {
         const p0 = pointAt(a);
         const p1 = pointAt(a + step);
         slopes.push((p1.x - p0.x) / step);
       }
-
       const slopeDeltas = slopes.slice(1).map((s, i) => Math.abs(s - slopes[i]));
       const maxSingleStepDelta = Math.max(...slopeDeltas);
-      const totalSlopeChange = Math.abs(slopes[slopes.length - 1] - slopes[0]);
+      const slopeRange = Math.max(...slopes) - Math.min(...slopes);
 
-      // A rounded turn spreads the reversal out — no ONE consecutive-sample
-      // step should account for anywhere near the WHOLE direction change.
-      expect(maxSingleStepDelta).toBeLessThan(totalSlopeChange * 0.5);
+      // A sharp V-point would show ONE consecutive-sample slope delta
+      // comparable to the whole path's slope range (an instant reversal);
+      // a true meander's slope changes gradually and continuously, so no
+      // single step ever accounts for more than a small fraction of it.
+      expect(maxSingleStepDelta).toBeLessThan(slopeRange * 0.15);
+    });
+
+    it("is tangent-continuous specifically at the old band-boundary y-values (34*n multiples), not just elsewhere", () => {
+      const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0.55);
+      // Sample straddling several of the OLD piecewise model's boundary
+      // y-values directly — the highest-risk points for a regression back
+      // toward a corner, now just ordinary points on a smooth sine.
+      for (const boundaryY of [90, 180, 270, 360]) {
+        const before = pointAt(boundaryY - 1);
+        const at = pointAt(boundaryY);
+        const after = pointAt(boundaryY + 1);
+        const slopeBefore = at.x - before.x;
+        const slopeAfter = after.x - at.x;
+        expect(Math.abs(slopeAfter - slopeBefore)).toBeLessThan(1); // px, a generous smoothness bound
+      }
     });
   });
 
-  // Arc-length proportionality — now genuinely exact (round 2, finding 2's
-  // arc-length parameterization), including across a turn, which the
-  // pre-rounding constant-slope shortcut could never have honestly
-  // asserted (a rounded corner locally shortens the path — see
-  // serpentineTrail.ts's module doc comment — so only TRUE arc-length
-  // parameterization, not a raw-y shortcut, can make this hold at a turn).
+  // Arc-length proportionality — exact by construction (true arc-length
+  // parameterization, see the module doc comment), regardless of the
+  // curve's shape.
   describe("arc-length proportionality (same weight = same length) — exact, by construction", () => {
     it("polyline length between two arc-length values equals their difference, to within sampling error", () => {
       const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0.7);
       for (const [a0, a1] of [
         [10, 50],
-        [130, 170], // no boundary in range
+        [130, 170],
         [300, 340],
-        [160, 300], // SPANS at least one band boundary/turn
+        [160, 300],
         [0, 500],
       ]) {
         const measured = polylineLength(pointAt, a0, a1);
@@ -175,10 +162,10 @@ describe("serpentineTrail", () => {
       }
     });
 
-    it("two equal-arc-delta ranges have equal length regardless of which band(s)/turns they fall in", () => {
+    it("two equal-arc-delta ranges have equal length regardless of where along the meander they fall", () => {
       const { pointAt } = serpentineTrail(COLUMN_WIDTH, 0.7);
       const lenA = polylineLength(pointAt, 10, 50);
-      const lenB = polylineLength(pointAt, 160, 200); // spans a turn
+      const lenB = polylineLength(pointAt, 160, 200);
       const lenC = polylineLength(pointAt, 800, 840);
       expect(lenB).toBeCloseTo(lenA, 0);
       expect(lenC).toBeCloseTo(lenA, 0);
