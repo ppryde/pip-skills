@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
 import { formatDateStamp, parseCalendarDate, seedFor } from "../board/atlasGeometry";
@@ -101,7 +101,16 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   const parked = !slain && card.status === "parked";
   const marching = card.status === "in-flight";
 
-  const t = serpentineTrail(Math.max(width, 1), seed);
+  // Round 3 closing item (reviewer-d, Minor): serpentineTrail() builds a
+  // sampled arc-length lookup table (2000 samples up to MAX_TABLE_Y_PX) on
+  // every call — Down-mode's own scroll handler (EpicAtlas.tsx's
+  // activeColumnHeight effect) fires renders constantly while scrolling,
+  // so an unmemoized call here was rebuilding that table every single one
+  // of those renders for no reason: `width` only changes on a real
+  // ResizeObserver measurement and `seed` is derived from `card.id` (never
+  // changes for a mounted instance) — same "no behavior change, memoize
+  // recompute" call as `EpicAtlas.tsx`'s `useMemo`-wrapped derived values.
+  const t = useMemo(() => serpentineTrail(Math.max(width, 1), seed), [width, seed]);
 
   const beastAnchorArc = beastAnchorX(trailEnd);
   const beastPoint = t.pointAt(beastAnchorArc);
