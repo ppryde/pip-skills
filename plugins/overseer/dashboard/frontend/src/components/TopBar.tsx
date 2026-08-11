@@ -178,38 +178,41 @@ function TopBar({
   return (
     <>
       <header className="topbar">
-        {/* WF-086 (moved): one Board|Atlas view-toggle circle flanks each side
-            of the wordmark, in place of the old crest. Both live in the
-            always-visible identity cluster, so the mobile "Controls ▾" collapse
-            can never hide them. Each carries its own accessible name on
-            `aria-label`/`title` (the visible content is an icon) — kept
-            identical to the old button TEXT so name-based test/a11y queries
-            still resolve. The last-refreshed time is no longer here: it moved
-            to a small label beside the Refresh control below. */}
+        {/* WF-086 (moved): the Board|Atlas toggle is a small stack of two
+            overlapping "guild coins" to the LEFT of the wordmark. The active
+            view's coin sits in front; tapping the coin behind slides it forward
+            and swaps the view (`.topbar__view-toggle*` in styles.css). Both are
+            always-visible (never behind the mobile "Controls ▾" collapse) and
+            self-labelled via `aria-label`/`title`. A two-coin stack only reads
+            for two views — fine while Board|Atlas are the only pages. The
+            last-refreshed time is no longer here: it moved to a small label
+            beside the Refresh control below. */}
         <div className="topbar__identity">
-          <button
-            type="button"
-            className="topbar__view-toggle-btn"
-            aria-pressed={view === "board"}
-            aria-label="Board"
-            title="Board"
-            onClick={() => onSelectView("board")}
-          >
-            {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
-            <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
-          </button>
+          <div className="topbar__view-toggle" role="group" aria-label="View">
+            <button
+              type="button"
+              className="topbar__view-toggle-btn"
+              aria-pressed={view === "board"}
+              aria-label="Board"
+              title="Board"
+              onClick={() => onSelectView("board")}
+            >
+              {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
+              <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
+            </button>
+            <button
+              type="button"
+              className="topbar__view-toggle-btn"
+              aria-pressed={view === "atlas"}
+              aria-label="Atlas"
+              title="Atlas"
+              onClick={() => onSelectView("atlas")}
+            >
+              {/* rpg-icons pack "treasure map" — dashed trail and all */}
+              <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
+            </button>
+          </div>
           <h1>Adventurers&rsquo; Guild Board</h1>
-          <button
-            type="button"
-            className="topbar__view-toggle-btn"
-            aria-pressed={view === "atlas"}
-            aria-label="Atlas"
-            title="Atlas"
-            onClick={() => onSelectView("atlas")}
-          >
-            {/* rpg-icons pack "treasure map" — dashed trail and all */}
-            <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
-          </button>
         </div>
 
         {/* Mobile row layout: the topbar is one wrapping flex row and every

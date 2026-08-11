@@ -621,19 +621,20 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(container.querySelector("#topbar-controls-group .topbar__view-toggle-btn")).toBeNull();
   });
 
-  it("flanks the wordmark — Board circle before it, Atlas circle after; identity sits before the repo selector", () => {
+  it("stacks both coins in the .topbar__view-toggle group ahead of the wordmark; identity sits before the repo selector", () => {
     const { container } = render(
       <StatefulTopBar {...baseProps()} repos={[{ root: "/r", label: "r", current: true, has_board: true, live_sessions: 0 }]} />
     );
     const identity = container.querySelector(".topbar__identity")!;
+    const stack = identity.querySelector(".topbar__view-toggle")!;
+    // Both coins live together in the stack (an overlapping pair, not flanking).
+    expect(stack.querySelectorAll(".topbar__view-toggle-btn")).toHaveLength(2);
+    // The stack comes before the wordmark within the identity cluster.
     const kids = Array.from(identity.children);
-    const boardIndex = kids.findIndex((c) => c.getAttribute("aria-label") === "Board");
+    const stackIndex = kids.indexOf(stack);
     const titleIndex = kids.findIndex((c) => c.tagName === "H1");
-    const atlasIndex = kids.findIndex((c) => c.getAttribute("aria-label") === "Atlas");
-    // One circle either side of the wordmark.
-    expect(boardIndex).toBeGreaterThanOrEqual(0);
-    expect(boardIndex).toBeLessThan(titleIndex);
-    expect(atlasIndex).toBeGreaterThan(titleIndex);
+    expect(stackIndex).toBeGreaterThanOrEqual(0);
+    expect(stackIndex).toBeLessThan(titleIndex);
     // The identity cluster itself still precedes the repo selector in the bar.
     const header = container.querySelector("header.topbar")!;
     const barKids = Array.from(header.children);

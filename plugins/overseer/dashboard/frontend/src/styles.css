@@ -4044,18 +4044,30 @@ a.card-drawer__pr-chip:hover {
    cascade convention (that section must load last to win).
    ========================================================================== */
 
-/* --- TopBar: Board|Atlas view toggle (chunk 7; polish pass: "a couple of
-   nice circles" — user words) -------------------------------------------
-   Two circular icon buttons, board sticker language: parchment fill, 2px
-   ink border, a hard (not blurred) shadow, gentle hover lift. The button's
-   own box is 44px (border included) — meeting the ≥44px touch-target floor
-   directly, no separate hit-slop pseudo-element needed — with the border
-   eating into that box just enough that the FILLED interior reads as the
-   ~40px "nice circle" the request asked for. Active = the same gold-chip
-   fill/border/text trio the trail's own gold coin and chips use elsewhere
-   (`--qb-gold-chip-*`) — the current view reads at a glance without needing
-   to compare against its sibling. */
+/* --- TopBar: Board|Atlas view toggle — "guild coin" stack -----------------
+   Two circular icon coins overlapping to the LEFT of the wordmark. The active
+   view is the FRONT coin (gold-chip fill); the inactive one peeks out behind
+   and to the right, shrunk and dimmed. Tapping the coin behind slides it
+   forward and swaps the view — transform + z-index driven purely by
+   `aria-pressed` — reading as one coin shuffling in front of the other. Two
+   coins only encode two views: fine while Board|Atlas are the only pages (a
+   third would need a real segmented control, per the JSX note).
+
+   Each coin's box is 44px (border included) — meeting the ≥44px touch-target
+   floor directly. Active = the same gold-chip fill/border/text trio the
+   trail's own gold coin and chips use elsewhere (`--qb-gold-chip-*`). */
+.topbar__view-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  /* 44px front coin + 16px peek of the coin behind it */
+  width: 60px;
+  height: 44px;
+}
+
 .topbar__view-toggle-btn {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4066,38 +4078,46 @@ a.card-drawer__pr-chip:hover {
   border-radius: 50%;
   border: 2px solid var(--qb-ink-700);
   background: var(--qb-parchment-muted);
-  /* no drop shadow — user preference (flat circles read cleaner in the topbar) */
   font-size: 1.15rem;
   line-height: 1;
   color: var(--qb-ink-500);
-  opacity: 0.72;
   cursor: pointer;
-  transition:
-    transform var(--qb-motion-hover) ease,
-    opacity var(--qb-motion-hover) ease,
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease;
-}
-
-.topbar__view-toggle-btn:hover {
-  opacity: 1;
-  border-color: var(--qb-btn-ink-hover);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .topbar__view-toggle-btn:hover {
-    transform: translateY(-2px);
+  .topbar__view-toggle-btn {
+    transition:
+      transform 0.28s ease,
+      opacity 0.2s ease,
+      background-color 0.2s ease,
+      border-color 0.2s ease;
   }
 }
 
+/* Front coin — the active view: flush left, fully opaque, above its sibling. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
+  transform: translateX(0) scale(1);
+  z-index: 2;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
   color: var(--qb-gold-chip-text);
 }
 
-/* rpg-icons pack art inside the view-toggle circles (journal / treasure map) */
+/* Back coin — the inactive view: peeks out to the right, shrunk and dimmed,
+   behind the front coin. */
+.topbar__view-toggle-btn[aria-pressed="false"] {
+  transform: translateX(16px) scale(0.9);
+  z-index: 1;
+  opacity: 0.7;
+}
+
+.topbar__view-toggle-btn[aria-pressed="false"]:hover {
+  opacity: 1;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+/* rpg-icons pack art inside the view-toggle coins (journal / treasure map) */
 .topbar__view-toggle-icon {
   display: block;
   width: 26px;
