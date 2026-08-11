@@ -4617,6 +4617,15 @@ a.card-drawer__pr-chip:hover {
      row when present. */
   .topbar__quarantine-banner { order: 5; flex-basis: 100%; }
 
+  /* R1b (WF-086): Board|Atlas view toggle — its own full-width row right
+     after identity/the (rare) quarantine banner, ahead of R2's repo/branch
+     row. `order: 6` sits in the gap the R2-R5 scheme deliberately left
+     between the quarantine banner's 5 and R2's 10 (see that scheme's own
+     "gaps... leave room to slot a future chip" comment above) — it's an
+     always-visible chip, so it earns an early row of its own rather than
+     folding into an existing one or waiting behind Controls ▾. */
+  .topbar__view-toggle { order: 6; flex-basis: 100%; }
+
   /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
      `order` pairs the toggle with ＋New card on R5 (right end of that row,
      via `margin-left: auto`) and drops its revealed group — plus the
@@ -4979,9 +4988,14 @@ a.card-drawer__pr-chip:hover {
     padding: 8px;
   }
 
-  /* Condensed content set (HANDOFF): "vs beast" and the gold/lock chips
-     are hidden via `display:none` — NOT merely shrunk — so the mobile rail
-     never renders a squeezed, unreadable version of the desktop card. */
+  /* Condensed content set (HANDOFF): ONLY the "vs beast" line and the
+     gold/lock chips are hidden via `display:none` — NOT merely shrunk, and
+     NOT the whole meta row — so the mobile rail never renders a squeezed,
+     unreadable version of the desktop card. The n/m count is deliberately
+     NOT covered here: HANDOFF's condensed set keeps "progress track + n/m
+     count" visible, and AtlasRailCard.tsx renders `.atlas-rail-card__count`
+     as a SIBLING of `.atlas-rail-card__chips` specifically so this rule
+     can never take it down as a side effect of hiding its old parent. */
   .atlas-rail-card__vs,
   .atlas-rail-card__chips {
     display: none;
