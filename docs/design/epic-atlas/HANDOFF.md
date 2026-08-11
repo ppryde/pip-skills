@@ -124,9 +124,12 @@ the hash.
 - **Motion**: party bob, card hover lift — all inside `prefers-reduced-motion: no-preference`.
 - **Empty state**: no epics → parchment invitation, e.g. "No sagas yet — give a quest children
   and it becomes a campaign." (plain, directive, in-world).
-- **Responsive**: the chart region is the page's one horizontal scroller (board's mobile rule).
-  A dedicated mobile pass (rail collapse) is out of scope for the first card — note it, don't
-  build it.
+- **Responsive (required)**: the page must work down to phone widths, following the board's
+  mobile conventions (WF-085): the chart region stays the page's ONE horizontal scroller; at
+  ≤720px the fixed rail must not force the layout wider than the viewport — collapse the rail
+  into the flow (e.g. condensed card above its trail) rather than shrinking rail + lane into an
+  unreadable grid; the TODAY signpost and axis remain usable; touch targets ≥44px. The exact
+  mechanism is the implementer's choice within these outcomes.
 
 ## Data mapping (all from the existing board payload — no new endpoints)
 - Epics: `cards` where `is_epic`; children: `cards` where `parent === epic.id`.
