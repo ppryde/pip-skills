@@ -313,9 +313,14 @@
   --qb-font-mono: "Silkscreen", ui-monospace, Menlo, monospace;
   --qb-font-prose: "Nunito", sans-serif;
 
-  /* Radii scale */
-  --qb-radius-card-a: 14px 20px 14px 20px;
-  --qb-radius-card-b: 20px 14px 20px 14px;
+  /* Radii scale. The two card radii are irregular hand-inked wobbles (a
+     scaled-up cousin of the `--qb-btn-wobble*` set the buttons/chips use) so
+     the card CONTAINERS read as hand-drawn too, not just the controls —
+     different horizontal/vertical radius per corner, alternated a/b by row
+     parity so neighbouring cards never share the exact silhouette. Used only
+     by `.card-tile` and `.atlas-rail-card`. */
+  --qb-radius-card-a: 20px 26px 16px 24px / 24px 16px 26px 18px;
+  --qb-radius-card-b: 26px 16px 24px 18px / 16px 26px 18px 22px;
   --qb-radius-modal: 26px;
   --qb-radius-chip-sm: 10px;
   --qb-radius-chip-lg: 14px;
