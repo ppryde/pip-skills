@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Board, BoardCard } from "../api/types";
 import { accentKeyForCard } from "../board/cardAccent";
+import { parseCalendarDate } from "../board/atlasGeometry";
 import {
-  computeAxisTicks,
-  computeWindow,
-  formatDateStamp,
-  parseCalendarDate,
-  pctForDate,
-} from "../board/atlasGeometry";
+  globalPxPerWeight,
+  laneUsableWidth,
+  openDependencies,
+  orderEpicsForDisplay,
+  totalWeight,
+} from "../board/atlasTrailLayout";
 import AtlasRailCard from "./AtlasRailCard";
+import AtlasToolbar, { type TrailOrientation } from "./AtlasToolbar";
 import AtlasTrail from "./AtlasTrail";
 
 export interface EpicAtlasProps {
@@ -16,32 +18,60 @@ export interface EpicAtlasProps {
   /** Chunk 5 precedent (Board/EpicCard): clicking a rail card body opens
    * the existing detail drawer for that card — App's drawer, unchanged. */
   onOpenCard: (id: string) => void;
-  /** Optional override for tests/stories. Production call sites pass
-   * nothing, so `today` is genuinely "now" at this component-boundary
-   * render — see atlasGeometry's doc comment for why the pure modules
-   * beneath this page never do that themselves. */
-  today?: Date;
 }
 
 const EMPTY_STATE_COPY = "No sagas yet — give a quest children and it becomes a campaign.";
 
+/** Used for the shared px-per-weight scale until the first real
+ * ResizeObserver measurement of a lane lands — mirrors AtlasTrail's own
+ * DEFAULT_LANE_HEIGHT fallback-before-measurement convention. */
+const DEFAULT_LANE_WIDTH = 600;
+
 /**
- * Epic Atlas page (WF-086) — a gantt-esque sibling view to the board, one
- * campaign-trail row per epic. Filters `board.cards` to `is_epic` cards that
- * ALSO carry a non-null `rollup` (an epic minted without one yet has no
- * done/total to plot); every other epic/child grouping is a plain
- * `cards.filter(c => c.parent === epic.id)`, no new endpoints.
+ * Epic Atlas page (WF-086 v2, progress-trail revision) — a gantt-esque
+ * sibling view to the board, one progress-trail row per epic. Filters
+ * `board.cards` to `is_epic` cards that ALSO carry a non-null `rollup` (an
+ * epic minted without one yet has no done/total to plot); every other
+ * epic/child grouping is a plain `cards.filter(c => c.parent === epic.id)`,
+ * no new endpoints.
+ *
+ * v1's date-axis machinery (TODAY signpost, weekly ticks, pace-projection
+ * footnote, mount-scroll-to-today) is KILLED here — see HANDOFF's "Killed
+ * from v1". Trail position is now driven by cumulative child complexity on
+ * ONE shared `pxPerWeight` scale, computed once per render across every
+ * VISIBLE epic (see `atlasTrailLayout.ts`) — `laneWidth` is measured off a
+ * single representative lane (all lanes share the same CSS width; only
+ * each lane's own HEIGHT is sampled independently, since an expanded
+ * checklist can grow one row without affecting its neighbours).
  *
  * `.atlas-chart` is the page's ONE horizontal scroller (the `725ddea`
  * mobile invariant) — no extra scroll wrapper around it.
  */
-function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) {
-  // `useState(() => ...)` (lazy initializer) so a component-boundary
-  // `new Date()` is captured exactly once at mount, not re-evaluated (and
-  // silently drifting) on every render — see the `today` prop's doc comment.
-  const [today] = useState(() => todayOverride ?? new Date());
-  const chartRef = useRef<HTMLDivElement>(null);
+function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
   const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set());
+  const [showNames, setShowNames] = useState(true);
+  const [hideVanquished, setHideVanquished] = useState(true);
+  const [orientation, setOrientation] = useState<TrailOrientation>("across");
+
+  const [laneWidth, setLaneWidth] = useState(DEFAULT_LANE_WIDTH);
+  const laneWidthObserver = useRef<ResizeObserver | null>(null);
+  // A callback ref (not a plain useRef + effect) so the observer re-attaches
+  // whenever REACT swaps which DOM node is "the first lane" (e.g. the
+  // vanquished toggle removes row 0 and a different epic's lane becomes
+  // first) — a plain mount-only effect would keep observing a detached node.
+  const firstLaneRef = useCallback((el: HTMLDivElement | null) => {
+    laneWidthObserver.current?.disconnect();
+    laneWidthObserver.current = null;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const measured = entry.contentRect.width;
+      setLaneWidth(Number.isFinite(measured) && measured > 0 ? measured : DEFAULT_LANE_WIDTH);
+    });
+    observer.observe(el);
+    laneWidthObserver.current = observer;
+  }, []);
 
   const cardsById = useMemo(() => {
     const map = new Map<string, BoardCard>();
@@ -49,7 +79,7 @@ function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) 
     return map;
   }, [board.cards]);
 
-  const epics = useMemo(
+  const allEpics = useMemo(
     () =>
       board.cards
         .filter((c) => c.is_epic && c.rollup !== null)
@@ -59,43 +89,29 @@ function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) 
 
   const childrenByEpic = useMemo(() => {
     const map = new Map<string, BoardCard[]>();
-    for (const epic of epics) {
+    for (const epic of allEpics) {
       map.set(epic.id, board.cards.filter((c) => c.parent === epic.id));
     }
     return map;
-  }, [epics, board.cards]);
+  }, [allEpics, board.cards]);
 
-  const dateWindow = useMemo(
-    () =>
-      computeWindow(
-        epics.map((epic) => ({
-          created: epic.created,
-          updated: epic.updated,
-          children: (childrenByEpic.get(epic.id) ?? [])
-            .filter((c) => c.status === "done")
-            .map((c) => ({ updated: c.updated })),
-        })),
-        today
-      ),
-    [epics, childrenByEpic, today]
+  // Vanquished toggle applies AFTER the created-ascending base order (HANDOFF:
+  // hidden filters done epics out; shown, they sort last, everything else
+  // keeping its relative order) — seedFor is id-keyed, not index-keyed, so
+  // toggling this can never re-wobble a surviving trail (atlasTrailLayout.ts).
+  const epics = useMemo(
+    () => orderEpicsForDisplay(allEpics, hideVanquished),
+    [allEpics, hideVanquished]
   );
 
-  const ticks = useMemo(() => computeAxisTicks(dateWindow), [dateWindow]);
-  const todayPct = pctForDate(today, dateWindow);
-
-  // Mount-only centring (HANDOFF: the axis starts scrolled to today, not to
-  // the trailhead) — plain `scrollLeft` assignment, jsdom-safe, deliberately
-  // NOT scrollIntoView. Clamped to >= 0 so a today-near-the-window-start
-  // board never requests a negative scroll.
-  useEffect(() => {
-    const el = chartRef.current;
-    if (!el) return;
-    const target = (todayPct / 100) * el.scrollWidth - el.clientWidth / 2;
-    el.scrollLeft = Math.max(0, target);
-    // Deliberately mount-only (empty deps) — HANDOFF centres the axis on
-    // today once, at open; it isn't meant to keep re-snapping the user's
-    // own scroll position back to today on every board refresh.
-  }, []);
+  // ONE shared px-per-weight scale, recomputed each render across every
+  // VISIBLE epic (HANDOFF) — a vanquished epic hidden by the toggle above
+  // must never stretch/compress the scale for the epics actually on screen.
+  const pxPerWeight = useMemo(() => {
+    const totalWeights = epics.map((epic) => totalWeight(childrenByEpic.get(epic.id) ?? []));
+    const usable = laneUsableWidth(laneWidth);
+    return globalPxPerWeight(totalWeights, usable);
+  }, [epics, childrenByEpic, laneWidth]);
 
   function toggleExpand(id: string) {
     setExpandedEpics((prev) => {
@@ -107,32 +123,27 @@ function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) 
   }
 
   function blockedOnFor(epic: BoardCard): string[] {
-    return epic.depends_on.filter((depId) => cardsById.get(depId)?.status !== "done");
+    return openDependencies(epic, cardsById);
   }
 
   return (
-    <div className="atlas-chart" ref={chartRef}>
-      {epics.length === 0 ? (
-        <p className="atlas-chart__empty">{EMPTY_STATE_COPY}</p>
-      ) : (
-        <>
-          <div className="atlas-chart__axis">
-            <div className="atlas-chart__axis-rail" aria-hidden="true" />
-            <div className="atlas-chart__axis-days">
-              {ticks.map((tick, i) => (
-                <span
-                  key={i}
-                  className="atlas-chart__tick"
-                  style={{ left: `${pctForDate(tick, dateWindow)}%` }}
-                >
-                  {formatDateStamp(tick)}
-                </span>
-              ))}
-            </div>
-          </div>
-
+    <div className="atlas-page">
+      {epics.length > 0 && (
+        <AtlasToolbar
+          showNames={showNames}
+          onToggleNames={setShowNames}
+          hideVanquished={hideVanquished}
+          onToggleVanquished={setHideVanquished}
+          orientation={orientation}
+          onToggleOrientation={setOrientation}
+        />
+      )}
+      <div className={"atlas-chart" + (orientation === "down" ? " atlas-chart--down" : "")}>
+        {epics.length === 0 ? (
+          <p className="atlas-chart__empty">{EMPTY_STATE_COPY}</p>
+        ) : (
           <div className="atlas-chart__rows">
-            {epics.map((epic) => {
+            {epics.map((epic, i) => {
               const childCards = childrenByEpic.get(epic.id) ?? [];
               const accentKey = accentKeyForCard(epic);
               const rollup = epic.rollup!;
@@ -150,13 +161,15 @@ function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) 
                       blockedOn={blockedOnFor(epic)}
                     />
                   </div>
-                  <div className="atlas-chart__lane">
+                  <div className="atlas-chart__lane" ref={i === 0 ? firstLaneRef : undefined}>
                     <AtlasTrail
                       card={epic}
                       rollup={rollup}
                       childCards={childCards}
-                      today={today}
-                      dateWindow={dateWindow}
+                      cardsById={cardsById}
+                      pxPerWeight={pxPerWeight}
+                      laneWidth={laneWidth}
+                      showNames={showNames}
                       accentKey={accentKey}
                     />
                   </div>
@@ -164,34 +177,8 @@ function EpicAtlas({ board, onOpenCard, today: todayOverride }: EpicAtlasProps) 
               );
             })}
           </div>
-
-          {/* Spans the whole field (HANDOFF) — ported verbatim from the
-              prototype's `today.style.left` calc so it respects whatever
-              `--rail` width the later styling chunk declares. */}
-          <div
-            className="atlas-chart__today"
-            style={{ left: `calc(var(--rail) + (100% - var(--rail)) * ${todayPct / 100})` }}
-          >
-            <span className="atlas-chart__today-flag">⚑ TODAY</span>
-          </div>
-
-          {/* HANDOFF's legend + honesty footnote — the ledger keeps no due
-              dates, so anything past today is explicitly a guess, never a
-              promise; this line is the one place that's said in plain
-              words rather than left to the faded-dots convention alone. */}
-          <div className="atlas-chart__legend">
-            <span>⚔ the party marches at today</span>
-            <span>faded dots = pace-projected, uncharted</span>
-            <span>beast slain = epic done</span>
-            <span>⛺ camped = parked</span>
-          </div>
-          <p className="atlas-chart__footnote">
-            Trail start = epic <b>created</b> · ✓ waypoints = child quests at their{" "}
-            <b>updated</b> dates · the beast waits at the projected trail&rsquo;s end (the
-            ledger keeps no due dates — faded ground is pace-guessed, never promised).
-          </p>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

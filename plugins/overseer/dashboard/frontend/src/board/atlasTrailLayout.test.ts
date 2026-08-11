@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BoardCard, Status } from "../api/types";
+import type { BoardCard } from "../api/types";
 import {
   beastAnchorX,
   boundaryX,
@@ -11,6 +11,7 @@ import {
   laneUsableWidth,
   openDependencies,
   orderChildrenForTrail,
+  orderEpicsForDisplay,
   statusGroupOf,
   totalWeight,
   trailEndX,
@@ -275,5 +276,33 @@ describe("openDependencies", () => {
   it("treats a dangling dependency id (target not on the board) as open", () => {
     const c = child({ id: "WF-2", depends_on: ["WF-GONE"] });
     expect(openDependencies(c, new Map<string, BoardCard>())).toEqual(["WF-GONE"]);
+  });
+});
+
+function epic(overrides: Partial<BoardCard> & { id: string }): BoardCard {
+  return child({ parent: null, is_epic: true, ...overrides });
+}
+
+describe("orderEpicsForDisplay", () => {
+  it("filters out done epics when hideVanquished is true", () => {
+    const epics = [epic({ id: "a", status: "in-flight" }), epic({ id: "b", status: "done" })];
+    expect(orderEpicsForDisplay(epics, true).map((e) => e.id)).toEqual(["a"]);
+  });
+
+  it("sorts done epics LAST when shown, preserving the relative order of everything else", () => {
+    const epics = [
+      epic({ id: "a", status: "done" }),
+      epic({ id: "b", status: "in-flight" }),
+      epic({ id: "c", status: "parked" }),
+      epic({ id: "d", status: "done" }),
+    ];
+    expect(orderEpicsForDisplay(epics, false).map((e) => e.id)).toEqual(["b", "c", "a", "d"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const epics = [epic({ id: "a", status: "done" }), epic({ id: "b", status: "in-flight" })];
+    const original = [...epics];
+    orderEpicsForDisplay(epics, false);
+    expect(epics).toEqual(original);
   });
 });

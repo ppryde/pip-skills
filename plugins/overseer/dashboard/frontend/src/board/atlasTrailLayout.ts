@@ -203,3 +203,15 @@ export function openDependencies(
 ): string[] {
   return card.depends_on.filter((id) => cardsById.get(id)?.status !== "done");
 }
+
+/** Vanquished-epics toolbar toggle (HANDOFF): hidden (default) filters
+ * done epics out entirely; shown, they sort LAST, every other epic keeping
+ * its relative order — `Array.prototype.sort` is guaranteed stable (ES2019+),
+ * so this never needs to track original indices itself. Trail wobble seeds
+ * (`seedFor(card.id)`) are already keyed on the card's own id rather than
+ * its array position, so re-sorting here can never re-wobble a surviving
+ * trail either — no extra bookkeeping needed for that HANDOFF requirement. */
+export function orderEpicsForDisplay(epics: BoardCard[], hideVanquished: boolean): BoardCard[] {
+  if (hideVanquished) return epics.filter((e) => e.status !== "done");
+  return [...epics].sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
+}

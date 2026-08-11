@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { Board, BoardCard } from "../api/types";
-import { computeWindow, parseCalendarDate, pctForDate } from "../board/atlasGeometry";
 import EpicAtlas from "./EpicAtlas";
 
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
@@ -34,8 +33,6 @@ function board(cards: BoardCard[]): Board {
   return { project: "test", cards, sprints: [], quarantined: [], label_colors: {} };
 }
 
-const TODAY = parseCalendarDate("2026-08-11");
-
 describe("<EpicAtlas/>", () => {
   it("renders one row per is_epic card with a non-null rollup, sorted by created ascending", () => {
     const cards = [
@@ -43,7 +40,7 @@ describe("<EpicAtlas/>", () => {
       card({ id: "WF-027", is_epic: true, rollup: { done: 9, total: 9, estimate: null, actual: 210000 }, created: "2026-07-14" }),
       card({ id: "WF-058", is_epic: true, rollup: { done: 6, total: 6, estimate: null, actual: 74000 }, created: "2026-07-20" }),
     ];
-    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
     const rails = container.querySelectorAll(".atlas-rail-card");
     expect(rails.length).toBe(3);
     expect(Array.from(rails).map((r) => r.getAttribute("data-card-id"))).toEqual([
@@ -58,7 +55,7 @@ describe("<EpicAtlas/>", () => {
       card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
       card({ id: "WF-BAD", is_epic: true, rollup: null }),
     ];
-    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
     expect(container.querySelector('[data-card-id="WF-BAD"]')).not.toBeInTheDocument();
     expect(container.querySelector('[data-card-id="WF-027"]')).toBeInTheDocument();
   });
@@ -68,27 +65,65 @@ describe("<EpicAtlas/>", () => {
       card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
       card({ id: "WF-027-1", is_epic: false, parent: "WF-027" }),
     ];
-    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
     expect(container.querySelectorAll(".atlas-rail-card").length).toBe(1);
   });
 
-  // WF-086 chunk 10: the mobile responsive layer makes `.atlas-chart` the
-  // ONE horizontal scroller (styles.css's `725ddea` invariant, same one the
-  // board itself encodes). jsdom has no real layout engine, so this test
-  // CANNOT assert the actual invariant (that no other element has computed
-  // `overflow-x: auto`/`scroll`) — it only checks a NAMING convention
-  // correlated with it: no element besides `.atlas-chart` carries a class
-  // whose name suggests independent scroll handling. That catches the
-  // obvious regression (a future change literally naming a per-row/lane
-  // class `.atlas-lane--scroll` or similar) but would miss overflow set
-  // via inline style or a class named without "scroll" in it — a
-  // structural smoke test, not a substitute for the real CSS/visual check.
+  it("renders the empty-state invitation when there are no epics", () => {
+    render(<EpicAtlas board={board([])} onOpenCard={vi.fn()} />);
+    expect(
+      screen.getByText("No sagas yet — give a quest children and it becomes a campaign.")
+    ).toBeInTheDocument();
+  });
+
+  it("renders no toolbar in the empty state", () => {
+    const { container } = render(<EpicAtlas board={board([])} onOpenCard={vi.fn()} />);
+    expect(container.querySelector(".atlas-toolbar")).not.toBeInTheDocument();
+  });
+
+  // Killed from v1 (HANDOFF): date axis, weekly ticks, TODAY pennant, and
+  // the pace-projection honesty footnote must never appear in v2.
+  it("never renders the v1 date-axis / TODAY signpost / projection footnote", () => {
+    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
+    const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} />);
+    expect(container.querySelector(".atlas-chart__axis")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-chart__today")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-chart__footnote")).not.toBeInTheDocument();
+  });
+
+  it("passes an unmet depends_on target through as blockedOn on the rail card", () => {
+    const cards = [
+      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 1, estimate: null, actual: 0 }, depends_on: ["WF-085"] }),
+      card({ id: "WF-085", status: "in-flight" }),
+    ];
+    render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
+    expect(screen.getByText(/🔒/)).toBeInTheDocument();
+    expect(screen.getByText(/WF-085/, { selector: ".atlas-rail-card__lock" })).toBeInTheDocument();
+  });
+
+  it("omits blockedOn once the dependency target is done", () => {
+    const cards = [
+      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 1, estimate: null, actual: 0 }, depends_on: ["WF-085"] }),
+      card({ id: "WF-085", status: "done" }),
+    ];
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
+    expect(container.querySelector(".atlas-rail-card__lock")).not.toBeInTheDocument();
+  });
+
+  it("opens the drawer via onOpenCard when a rail card body is clicked", () => {
+    const onOpenCard = vi.fn();
+    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
+    const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={onOpenCard} />);
+    (container.querySelector('[data-card-id="WF-027"]') as HTMLElement).click();
+    expect(onOpenCard).toHaveBeenCalledWith("WF-027");
+  });
+
   it("has no per-row/lane element with a scroll-suggestively-named class, alongside .atlas-chart (725ddea naming-convention guard)", () => {
     const cards = [
       card({ id: "WF-A", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
       card({ id: "WF-B", is_epic: true, rollup: { done: 0, total: 3, estimate: null, actual: 0 } }),
     ];
-    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
 
     expect(container.querySelectorAll(".atlas-chart").length).toBe(1);
 
@@ -100,112 +135,64 @@ describe("<EpicAtlas/>", () => {
     }
   });
 
-  it("renders the empty-state invitation when there are no epics", () => {
-    render(<EpicAtlas board={board([])} onOpenCard={vi.fn()} today={TODAY} />);
-    expect(
-      screen.getByText("No sagas yet — give a quest children and it becomes a campaign.")
-    ).toBeInTheDocument();
+  describe("vanquished-epics toggle", () => {
+    function vanquishedBoard() {
+      return board([
+        card({ id: "WF-DONE", is_epic: true, status: "done", rollup: { done: 3, total: 3, estimate: null, actual: 0 }, created: "2026-07-01" }),
+        card({ id: "WF-LIVE", is_epic: true, status: "in-flight", rollup: { done: 1, total: 3, estimate: null, actual: 0 }, created: "2026-07-10" }),
+      ]);
+    }
+
+    it("defaults to HIDE — a done epic never renders", () => {
+      const { container } = render(<EpicAtlas board={vanquishedBoard()} onOpenCard={vi.fn()} />);
+      expect(container.querySelector('[data-card-id="WF-DONE"]')).not.toBeInTheDocument();
+      expect(container.querySelector('[data-card-id="WF-LIVE"]')).toBeInTheDocument();
+    });
+
+    it("Show reveals done epics, sorted LAST", () => {
+      const { container } = render(<EpicAtlas board={vanquishedBoard()} onOpenCard={vi.fn()} />);
+      fireEvent.click(screen.getByRole("tab", { name: /🏆 show/i }));
+      const rails = container.querySelectorAll(".atlas-rail-card");
+      expect(Array.from(rails).map((r) => r.getAttribute("data-card-id"))).toEqual(["WF-LIVE", "WF-DONE"]);
+    });
   });
 
-  it("renders the legend and an honest projection footnote once there are epics", () => {
-    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
-    const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} today={TODAY} />);
-    expect(container.querySelector(".atlas-chart__legend")).toBeInTheDocument();
-    const footnote = container.querySelector(".atlas-chart__footnote");
-    expect(footnote).toBeInTheDocument();
-    // HANDOFF's explicit honesty requirement: the ledger keeps no due
-    // dates, so uncharted ground must never read as a promise.
-    expect(footnote).toHaveTextContent(/pace-guessed, never promised/i);
+  describe("quest-names toggle", () => {
+    it("defaults to shown — a todo child's name-tag is visible", () => {
+      const cards = [
+        card({ id: "WF-EPIC", is_epic: true, status: "in-flight", rollup: { done: 0, total: 1, estimate: null, actual: 0 } }),
+        card({ id: "WF-EPIC-1", parent: "WF-EPIC", status: "planned", title: "Faraway Quest", complexity: "S" }),
+      ];
+      const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
+      expect(container.querySelector(".trail-tag--todo")).toBeInTheDocument();
+    });
+
+    it("Hush hides the todo name-tag", () => {
+      const cards = [
+        card({ id: "WF-EPIC", is_epic: true, status: "in-flight", rollup: { done: 0, total: 1, estimate: null, actual: 0 } }),
+        card({ id: "WF-EPIC-1", parent: "WF-EPIC", status: "planned", title: "Faraway Quest", complexity: "S" }),
+      ];
+      const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
+      fireEvent.click(screen.getByRole("tab", { name: /hush/i }));
+      expect(container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
+    });
   });
 
-  it("renders no legend/footnote in the empty state", () => {
-    const { container } = render(<EpicAtlas board={board([])} onOpenCard={vi.fn()} today={TODAY} />);
-    expect(container.querySelector(".atlas-chart__legend")).not.toBeInTheDocument();
-    expect(container.querySelector(".atlas-chart__footnote")).not.toBeInTheDocument();
-  });
-
-  it("positions the TODAY signpost using pctForDate over the computed window", () => {
-    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 9, total: 9, estimate: null, actual: 0 }, created: "2026-07-14", updated: "2026-08-01" });
-    const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} today={TODAY} />);
-
-    const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
-    const expectedPct = pctForDate(TODAY, dateWindow);
-
-    const today = container.querySelector(".atlas-chart__today") as HTMLElement;
-    expect(today).toBeInTheDocument();
-    expect(today.style.left).toBe(
-      `calc(var(--rail) + (100% - var(--rail)) * ${expectedPct / 100})`
-    );
-  });
-
-  it("passes an unmet depends_on target through as blockedOn on the rail card", () => {
+  it("shares ONE pxPerWeight scale across rows — two epics with equal total child weight end at the same beast x", () => {
     const cards = [
-      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 1, estimate: null, actual: 0 }, depends_on: ["WF-085"] }),
-      card({ id: "WF-085", status: "in-flight" }),
+      card({ id: "WF-A", is_epic: true, status: "in-flight", rollup: { done: 1, total: 1, estimate: null, actual: 0 }, created: "2026-07-01" }),
+      card({ id: "WF-A-1", parent: "WF-A", status: "done", complexity: "M" }),
+      card({ id: "WF-B", is_epic: true, status: "in-flight", rollup: { done: 1, total: 1, estimate: null, actual: 0 }, created: "2026-07-02" }),
+      card({ id: "WF-B-1", parent: "WF-B", status: "done", complexity: "M" }),
     ];
-    render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
-    expect(screen.getByText(/🔒/)).toBeInTheDocument();
-    expect(screen.getByText(/WF-085/, { selector: ".atlas-rail-card__lock" })).toBeInTheDocument();
+    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} />);
+    const beasts = Array.from(container.querySelectorAll(".atlas-trail__beast"));
+    expect(beasts.length).toBe(2);
+    const xs = beasts.map((b) => Number(b.getAttribute("transform")!.match(/translate\(([\d.-]+),/)![1]));
+    expect(xs[0]).toBeCloseTo(xs[1], 5);
   });
 
-  it("omits blockedOn once the dependency target is done", () => {
-    const cards = [
-      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 1, estimate: null, actual: 0 }, depends_on: ["WF-085"] }),
-      card({ id: "WF-085", status: "done" }),
-    ];
-    const { container } = render(<EpicAtlas board={board(cards)} onOpenCard={vi.fn()} today={TODAY} />);
-    expect(container.querySelector(".atlas-rail-card__lock")).not.toBeInTheDocument();
-  });
-
-  it("opens the drawer via onOpenCard when a rail card body is clicked", () => {
-    const onOpenCard = vi.fn();
-    const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
-    const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={onOpenCard} today={TODAY} />);
-    (container.querySelector('[data-card-id="WF-027"]') as HTMLElement).click();
-    expect(onOpenCard).toHaveBeenCalledWith("WF-027");
-  });
-
-  describe("mount scroll centring", () => {
-    let widthSpy: ReturnType<typeof vi.spyOn>;
-    let heightSpy: ReturnType<typeof vi.spyOn>;
-
-    afterEach(() => {
-      widthSpy?.mockRestore();
-      heightSpy?.mockRestore();
-    });
-
-    it("sets scrollLeft to centre today, clamped to >= 0", () => {
-      widthSpy = vi
-        .spyOn(HTMLElement.prototype, "scrollWidth", "get")
-        .mockReturnValue(2000);
-      heightSpy = vi
-        .spyOn(HTMLElement.prototype, "clientWidth", "get")
-        .mockReturnValue(500);
-
-      const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 }, created: "2026-07-14", updated: "2026-08-01" });
-      const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} today={TODAY} />);
-
-      const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
-      const pct = pctForDate(TODAY, dateWindow);
-      const expected = Math.max(0, (pct / 100) * 2000 - 500 / 2);
-
-      const chart = container.querySelector(".atlas-chart") as HTMLElement;
-      expect(chart.scrollLeft).toBe(expected);
-    });
-
-    it("clamps a negative target to 0", () => {
-      widthSpy = vi
-        .spyOn(HTMLElement.prototype, "scrollWidth", "get")
-        .mockReturnValue(100);
-      heightSpy = vi
-        .spyOn(HTMLElement.prototype, "clientWidth", "get")
-        .mockReturnValue(2000);
-
-      const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
-      const { container } = render(<EpicAtlas board={board([epic])} onOpenCard={vi.fn()} today={TODAY} />);
-
-      const chart = container.querySelector(".atlas-chart") as HTMLElement;
-      expect(chart.scrollLeft).toBe(0);
-    });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 });

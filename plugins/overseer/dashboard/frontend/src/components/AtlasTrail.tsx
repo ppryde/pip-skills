@@ -1,17 +1,32 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
+import { formatDateStamp, parseCalendarDate, seedFor, wobblePath } from "../board/atlasGeometry";
 import {
-  type AtlasWindow,
-  formatDateStamp,
-  parseCalendarDate,
-  pctForDate,
-  projectedEnd,
-  seedFor,
-  wobblePath,
-} from "../board/atlasGeometry";
+  CAMPFIRE_GAP_PX,
+  TRAILHEAD_RESERVE_PX,
+  WAYPOINT_GAP_PX,
+  beastAnchorX,
+  boundaryX,
+  campfireX,
+  computeSegments,
+  frozenSegment,
+  openDependencies,
+  orderChildrenForTrail,
+  statusGroupOf,
+  totalWeight,
+  trailEndX,
+  trimSegmentForMarkers,
+  weightOf,
+} from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import BeastFace from "./BeastFace";
+
+import trailheadIcon from "../assets/trail-icons/walled-village.svg";
+import boulderIcon from "../assets/trail-icons/boulder.svg";
+import campfireIcon from "../assets/trail-icons/campfire.png";
+import abandonedIcon from "../assets/lane-icons/abandoned.png";
 
 export interface AtlasTrailProps {
   card: BoardCard;
@@ -20,151 +35,280 @@ export interface AtlasTrailProps {
   /** The epic's own child cards — named to avoid colliding with React's
    * implicit `children` prop, same rationale as AtlasRailCard's. */
   childCards: BoardCard[];
-  today: Date;
-  /** The atlas's shared axis window (`computeWindow`). Named `dateWindow`
-   * rather than `window` so it never shadows the DOM global of the same
-   * name inside this component. */
-  dateWindow: AtlasWindow;
+  /** Every card on the board, keyed by id — needed to resolve a child's
+   * `depends_on` targets for the blocked-boulder overlay (a dependency can
+   * point outside the epic's own children). */
+  cardsById: Map<string, BoardCard>;
+  /** The ONE shared px-per-weight scalar (EpicAtlas's `globalPxPerWeight`,
+   * recomputed each render across every visible epic) — NOT re-derived per
+   * lane, that's what makes cross-row length comparisons real. */
+  pxPerWeight: number;
+  /** The shared lane width (EpicAtlas measures this ONCE, off any lane —
+   * every lane renders at the same CSS width). Drives the SVG viewBox
+   * width; this component only self-measures its own HEIGHT (see the
+   * ResizeObserver effect below) — "only the width scale is shared". */
+  laneWidth: number;
+  /** Quest-names toolbar toggle (HANDOFF, default on) — hides the todo
+   * name-tags only; tooltips and the AT HAND pennant are unaffected. */
+  showNames: boolean;
   /** Lane-computed guild accent key — stable class hook only; colour
    * resolution is the later styling chunk's job (see BeastFace's
    * `--qb-beast-ink` precedent). */
   accentKey?: string;
 }
 
-interface LaneSize {
-  width: number;
-  height: number;
-}
-
 /** Default lane height mirrors the design reference's `min-height: 104px`
  * lane — used until the first real ResizeObserver measurement lands. */
 const DEFAULT_LANE_HEIGHT = 104;
 
-/** Fixed pixel clearance between a parked epic's camp (x1) and its waiting
- * beast — sized for the "camped — on hold" label's own rendered width
- * (`.atlas-trail__camped-label`, Patrick Hand ~13px, starts at x1+14), not
- * a fraction of the lane's width (which doesn't track the label's size at
- * all — a verification-round finding). */
-const PARKED_BEAST_CLEARANCE_PX = 130;
+const MARKER_SIZE_PX = 20;
+const NAME_TAG_TIER_OFFSET_PX = 16;
+const NAME_TAG_TILT_DEG = 1.5;
 
-function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: AtlasTrailProps) {
+function weightLabel(child: BoardCard): string {
+  return "★".repeat(weightOf(child));
+}
+
+function AtlasTrail({
+  card,
+  rollup,
+  childCards,
+  cardsById,
+  pxPerWeight,
+  laneWidth,
+  showNames,
+  accentKey,
+}: AtlasTrailProps) {
   const laneRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState<LaneSize>({ width: 0, height: DEFAULT_LANE_HEIGHT });
+  const [height, setHeight] = useState(DEFAULT_LANE_HEIGHT);
 
-  // Re-measures whenever the lane's own box changes — including when the
-  // sibling rail card expands/collapses its sub-quest list and grows the
-  // row (HANDOFF: "The lane grows with its rail card ... and the trail
-  // re-centres").
+  // Re-measures whenever the lane's own box HEIGHT changes — including when
+  // the sibling rail card expands/collapses its sub-quest list and grows
+  // the row. Width is deliberately NOT re-measured here (HANDOFF: "sample
+  // each lane's own height for its SVG viewBox — only the width scale is
+  // shared") — it comes from the `laneWidth` prop, one shared measurement
+  // EpicAtlas makes for every row, so a per-lane remeasurement can never
+  // desync a row's pxPerWeight from what EpicAtlas actually used to compute it.
   useEffect(() => {
     const el = laneRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      const { width, height } = entry.contentRect;
-      // Defense-in-depth: a real browser never reports a non-finite
-      // contentRect, but every x/y/cx/cy this component computes derives
-      // from `width`/`height` directly (bypassing pctForDate's own NaN
-      // guard entirely) — never let a pathological measurement into state.
-      setSize({
-        width: Number.isFinite(width) ? width : 0,
-        height: Number.isFinite(height) ? height : DEFAULT_LANE_HEIGHT,
-      });
+      const measured = entry.contentRect.height;
+      setHeight(Number.isFinite(measured) ? measured : DEFAULT_LANE_HEIGHT);
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  const { width, height } = size;
   const laneHeight = height || DEFAULT_LANE_HEIGHT;
+  const width = Number.isFinite(laneWidth) && laneWidth > 0 ? laneWidth : 0;
   const seed = seedFor(card.id);
   const beast = beastFor(card.id);
 
-  const doneChildren = childCards.filter((c) => c.status === "done");
+  const ordered = orderChildrenForTrail(childCards);
+  const segments = computeSegments(ordered, pxPerWeight);
+  const epicTotalWeight = totalWeight(childCards);
+  const trailEnd = trailEndX(epicTotalWeight, pxPerWeight);
+  const boundary = boundaryX(segments);
+  const frozen = frozenSegment(segments);
+  const campX = campfireX(segments);
 
-  const createdDate = parseCalendarDate(card.created);
-  const x0 = (pctForDate(createdDate, dateWindow) / 100) * width;
-
-  // Walked trail end (HANDOFF's Data mapping): today while in-flight, the
-  // epic's own `updated` once parked (last touched before pitching camp),
-  // or its own `updated` once done (the epic mutator stamps `updated` at
-  // completion, so this doubles as "last child updated" without needing
-  // childCards to be non-empty). A `planned` epic (design ruling,
-  // verification round 1) hasn't sent anyone out yet — there is no walked
-  // ground, so its "walked end" is the camp itself (x1 === x0), and the
-  // uncharted-ground branch below (which starts at x1) ends up starting
-  // from the camp with no special-casing needed.
   const slain = card.status === "done";
   const parked = !slain && card.status === "parked";
-  const planned = !slain && !parked && card.status === "planned";
-  // "Marching" — the ONLY state with a live party token and a real walked
-  // trail — is everything else (in-flight/blocked).
-  const marching = !slain && !parked && !planned;
-  const walkedEndDate = slain || parked ? parseCalendarDate(card.updated) : planned ? createdDate : today;
-  const x1 = (pctForDate(walkedEndDate, dateWindow) / 100) * width;
+  // "Marching" — the only state with a live party token — mirrors the
+  // prototype's `ep.status === "in-flight"` branch exactly; a planned/
+  // blocked epic has no party token either (nothing marches until real
+  // work starts), only the trailhead + beast still render for it.
+  const marching = card.status === "in-flight";
 
-  const walked = wobblePath(x0, x1, laneHeight, seed);
+  const t = wobblePath(0, Math.max(width, 1), laneHeight, seed);
 
-  let beastX = x1 + 26;
-  let uncharted: ReturnType<typeof wobblePath> | null = null;
-
-  if (parked) {
-    // A camped party has no pace to project (HANDOFF: "Parked: no
-    // projection") — the beast just waits past the camp, no faded
-    // "uncharted ground" path drawn at all (that's in-flight only).
-    // Verification-round finding: a PERCENTAGE-of-lane-width offset (the
-    // former `width * 0.05`) doesn't track the "camped — on hold" label's
-    // own rendered width at all, so at typical/wide lane widths the beast
-    // sat close enough to visibly overlap the label. A fixed pixel
-    // clearance does — it's sized for the label's own text regardless of
-    // how wide the lane happens to be.
-    beastX = x1 + PARKED_BEAST_CLEARANCE_PX;
-  } else if (!slain) {
-    const projected = projectedEnd(createdDate, walkedEndDate, rollup.done, rollup.total, dateWindow.end);
-    const x2 = (pctForDate(projected, dateWindow) / 100) * width;
-    uncharted = wobblePath(x1, x2, laneHeight, seed);
-    beastX = x2 + 8;
-  }
-
-  const beastXClamped = Math.min(beastX, width - 52);
-  const beastY = walked.yAt(Math.min(beastX, width - 30)) - 24;
+  const beastXRaw = beastAnchorX(trailEnd);
+  const beastXClamped = Math.min(beastXRaw, width - 52);
+  const beastY = t.yAt(Math.min(beastXRaw, width - 30)) - 24;
 
   const svgClassName =
     "atlas-trail__svg" + (accentKey ? ` atlas-trail__svg--accent-${accentKey}` : "");
 
+  // Built imperatively (rather than three separate JSX .map passes) because
+  // the AT-HAND pennant and the todo name-tags are plain positioned HTML
+  // (matching the prototype's own technique: absolutely-positioned `<div>`
+  // tags layered OVER the SVG, not squeezed into it via <foreignObject>) —
+  // one loop over `segments` builds the SVG marker for each child AND its
+  // optional HTML overlay tag together, so the two never drift out of sync
+  // with each other's per-child `tier`/position math.
+  const svgMarkers: ReactNode[] = [];
+  const overlayTags: ReactNode[] = [];
+  let todoTier = 0;
+
+  for (const { child, end } of segments) {
+    const group = statusGroupOf(child);
+    const mx = end;
+    const my = t.yAt(end);
+    const cleared = formatDateStamp(parseCalendarDate(child.updated));
+
+    if (group === "done") {
+      if (child.status === "abandoned") {
+        svgMarkers.push(
+          <g
+            key={child.id}
+            className="atlas-trail__waypoint atlas-trail__waypoint--abandoned"
+            transform={`translate(${mx - MARKER_SIZE_PX / 2}, ${my - MARKER_SIZE_PX / 2})`}
+          >
+            <image href={abandonedIcon} width={MARKER_SIZE_PX} height={MARKER_SIZE_PX} />
+            <title>{`${child.title} — fell on the march · ${cleared}`}</title>
+          </g>
+        );
+      } else {
+        svgMarkers.push(
+          <g key={child.id} className="atlas-trail__waypoint atlas-trail__waypoint--done">
+            <circle cx={mx} cy={my} r={8} />
+            <text className="atlas-trail__waypoint-check" x={mx} y={my + 3.5} textAnchor="middle">
+              ✓
+            </text>
+            <title>{`${child.title} — cleared · ${cleared}`}</title>
+          </g>
+        );
+      }
+      continue;
+    }
+
+    if (group === "in-progress") {
+      // Suppressed on a parked epic — a camped party has no quest "at
+      // hand" (HANDOFF); the marker still renders, just without the
+      // pulsing ring or the pennant.
+      const atHand = !parked;
+      svgMarkers.push(
+        <g key={child.id} className="atlas-trail__waypoint atlas-trail__waypoint--athand">
+          {atHand && <circle cx={mx} cy={my} r={14} className="at-hand-ring" />}
+          <circle cx={mx} cy={my} r={10} className="atlas-trail__athand-dot" />
+          <text x={mx} y={my + 3.5} textAnchor="middle" className="atlas-trail__athand-glyph">
+            ◆
+          </text>
+          <title>
+            {atHand
+              ? `${child.title} — the quest at hand (since ${cleared})`
+              : `${child.title} — frozen mid-quest (camped ${cleared})`}
+          </title>
+        </g>
+      );
+      // The AT HAND pennant is a status marker, not a name-tag — it always
+      // shows on a marching epic's quest at hand, regardless of the
+      // names toggle (HANDOFF).
+      if (atHand) {
+        overlayTags.push(
+          <span
+            key={`${child.id}-pennant`}
+            className="trail-tag atlas-trail__pennant--athand"
+            style={{ left: `${mx}px`, top: `${my - 16}px`, transform: "translate(-50%, -100%)" }}
+          >
+            ◆ AT HAND
+          </span>
+        );
+      }
+      continue;
+    }
+
+    // "todo" — the ahead trail: real, faded, at-weight named quests. A
+    // BLOCKED quest (open depends_on) draws the barrier doodle instead of
+    // the plain waypoint dot; still ahead ground, still gets a name-tag.
+    const openDeps = openDependencies(child, cardsById);
+    const blocked = openDeps.length > 0;
+    const tier = todoTier % 2;
+    todoTier++;
+
+    svgMarkers.push(
+      <g
+        key={child.id}
+        className={
+          "atlas-trail__waypoint atlas-trail__waypoint--todo" +
+          (blocked ? " atlas-trail__waypoint--blocked" : "")
+        }
+      >
+        {blocked ? (
+          <image
+            className="atlas-trail__boulder"
+            href={boulderIcon}
+            x={mx - MARKER_SIZE_PX / 2}
+            y={my - MARKER_SIZE_PX / 2}
+            width={MARKER_SIZE_PX}
+            height={MARKER_SIZE_PX}
+          />
+        ) : (
+          <circle cx={mx} cy={my} r={6} className="atlas-trail__todo-dot" />
+        )}
+        <title>
+          {blocked
+            ? `${child.title} — the way is barred · ${
+                cardsById.get(openDeps[0])?.title ?? "blocked"
+              }`
+            : `${child.title} — ahead · ${weightLabel(child)}`}
+        </title>
+      </g>
+    );
+
+    if (showNames) {
+      overlayTags.push(
+        <span
+          key={`${child.id}-tag`}
+          className={"trail-tag trail-tag--todo " + (tier ? "trail-tag--tier-1" : "trail-tag--tier-0")}
+          style={{
+            left: `${mx}px`,
+            top: `${my - 11 - tier * NAME_TAG_TIER_OFFSET_PX}px`,
+            transform: `translate(-50%, -100%) rotate(${
+              tier ? NAME_TAG_TILT_DEG : -NAME_TAG_TILT_DEG
+            }deg)`,
+          }}
+          title={`${child.title} · ${weightLabel(child)}`}
+        >
+          {child.title}
+        </span>
+      );
+    }
+  }
+
   return (
     <div className="atlas-trail" ref={laneRef}>
-      <svg className={svgClassName} viewBox={`0 0 ${width} ${laneHeight}`} preserveAspectRatio="none">
-        {/* A planned epic has no walked ground to show — only the camp and
-            the faint uncharted dots below. */}
-        {!planned && <path className="atlas-trail__path" d={walked.d} />}
-        {uncharted && (
-          <path className="atlas-trail__path atlas-trail__path--uncharted" d={uncharted.d} />
-        )}
+      <svg
+        className={svgClassName}
+        viewBox={`0 0 ${width} ${laneHeight}`}
+        preserveAspectRatio="none"
+      >
+        <g className="atlas-trail__paths">
+          {segments.map(({ child, start, end }, i) => {
+            const group = statusGroupOf(child);
+            const faded = group === "todo";
+            const cuts = [{ at: end, radius: WAYPOINT_GAP_PX }];
+            if (i > 0) cuts.push({ at: start, radius: WAYPOINT_GAP_PX });
+            if (parked && frozen && child === frozen.child) {
+              cuts.push({ at: campX, radius: CAMPFIRE_GAP_PX });
+            }
+            return trimSegmentForMarkers(start, end, cuts).map(([a, b], j) => (
+              <path
+                key={`${child.id}-${j}`}
+                className={"atlas-trail__path" + (faded ? " atlas-trail__path--faded" : "")}
+                d={wobblePath(a, b, laneHeight, seed).d}
+              />
+            ));
+          })}
+        </g>
 
-        <text className="atlas-trail__camp" x={x0 - 8} y={walked.yAt(x0) + 6}>
-          ⛺
-          {planned && <title>the party has not yet set out</title>}
-        </text>
+        <g
+          className="atlas-trail__trailhead"
+          transform={`translate(0, ${t.yAt(TRAILHEAD_RESERVE_PX) - 9}) scale(0.85)`}
+        >
+          <image href={trailheadIcon} x={0} y={0} width={MARKER_SIZE_PX} height={MARKER_SIZE_PX} />
+          <title>where the saga began</title>
+        </g>
 
-        {doneChildren.map((child) => {
-          const wx = (pctForDate(parseCalendarDate(child.updated), dateWindow) / 100) * width;
-          const wy = walked.yAt(wx);
-          return (
-            <g key={child.id} className="atlas-trail__waypoint">
-              <circle cx={wx} cy={wy} r={8} />
-              <text className="atlas-trail__waypoint-check" x={wx} y={wy + 3.5} textAnchor="middle">
-                ✓
-              </text>
-              <title>{`quest cleared · ${formatDateStamp(parseCalendarDate(child.updated))}`}</title>
-            </g>
-          );
-        })}
+        <g className="atlas-trail__markers">{svgMarkers}</g>
 
         {marching && (
           <g className="atlas-trail__party">
-            <circle cx={x1} cy={walked.yAt(x1) - 2} r={12} />
-            <text x={x1} y={walked.yAt(x1) + 3} textAnchor="middle">
+            <circle cx={boundary} cy={t.yAt(boundary) - 18} r={12} />
+            <text x={boundary} y={t.yAt(boundary) - 13} textAnchor="middle">
               ⚔
             </text>
             <title>{`the party — ${rollup.done}/${rollup.total} quests cleared`}</title>
@@ -173,10 +317,15 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
 
         {parked && (
           <g className="atlas-trail__camped">
-            <text x={x1 - 4} y={walked.yAt(x1) - 8}>
-              ⛺
-            </text>
-            <text className="atlas-trail__camped-label" x={x1 + 14} y={walked.yAt(x1) - 8}>
+            <image
+              className="atlas-trail__campfire"
+              href={campfireIcon}
+              x={campX - MARKER_SIZE_PX / 2}
+              y={t.yAt(campX) - MARKER_SIZE_PX - 4}
+              width={MARKER_SIZE_PX}
+              height={MARKER_SIZE_PX}
+            />
+            <text className="atlas-trail__camped-label" x={campX + 14} y={t.yAt(campX) - 8}>
               camped — on hold
             </text>
           </g>
@@ -208,6 +357,8 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
           </text>
         )}
       </svg>
+
+      {overlayTags.length > 0 && <div className="atlas-trail__overlays">{overlayTags}</div>}
     </div>
   );
 }
