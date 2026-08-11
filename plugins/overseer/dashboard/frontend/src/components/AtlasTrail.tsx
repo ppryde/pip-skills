@@ -55,7 +55,14 @@ function AtlasTrail({ card, rollup, childCards, today, dateWindow, accentKey }: 
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
-      setSize({ width, height });
+      // Defense-in-depth: a real browser never reports a non-finite
+      // contentRect, but every x/y/cx/cy this component computes derives
+      // from `width`/`height` directly (bypassing pctForDate's own NaN
+      // guard entirely) — never let a pathological measurement into state.
+      setSize({
+        width: Number.isFinite(width) ? width : 0,
+        height: Number.isFinite(height) ? height : DEFAULT_LANE_HEIGHT,
+      });
     });
     observer.observe(el);
     return () => observer.disconnect();

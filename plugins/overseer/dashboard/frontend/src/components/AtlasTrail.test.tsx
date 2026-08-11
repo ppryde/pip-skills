@@ -141,6 +141,49 @@ describe("<AtlasTrail/>", () => {
     expect(svg.getAttribute("viewBox")).toBe("0 0 320 120");
   });
 
+  // impl-review finding: defense-in-depth against a pathological
+  // ResizeObserver measurement (a non-finite contentRect width/height —
+  // not something a real browser is expected to report, but AtlasTrail
+  // shouldn't trust that blindly). The primary NaN source (a malformed
+  // `dateWindow`) is closed at pctForDate itself (atlasGeometry.ts), but a
+  // non-finite SIZE measurement feeds `width`/`laneHeight` directly into
+  // every x/y/cx/cy this component computes, bypassing that guard entirely.
+  it("never emits a non-finite viewBox even if ResizeObserver reports a non-finite size", () => {
+    let capturedCallback: ResizeObserverCallback | null = null;
+    class MockResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        capturedCallback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const dateWindow = computeWindow([{ created: epic.created, updated: epic.updated }], TODAY);
+    const { container } = render(
+      <AtlasTrail card={epic} rollup={rollup()} childCards={[]} today={TODAY} dateWindow={dateWindow} />
+    );
+
+    act(() => {
+      capturedCallback!(
+        [{ contentRect: { width: NaN, height: NaN } } as ResizeObserverEntry],
+        {} as ResizeObserver
+      );
+    });
+
+    const svg = container.querySelector("svg")!;
+    const viewBox = svg.getAttribute("viewBox")!;
+    expect(viewBox).not.toContain("NaN");
+    for (const el of Array.from(container.querySelectorAll("circle, text"))) {
+      for (const attr of ["cx", "cy", "x", "y"]) {
+        const value = el.getAttribute(attr);
+        if (value !== null) expect(Number.isNaN(Number(value))).toBe(false);
+      }
+    }
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
