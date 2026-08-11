@@ -128,13 +128,47 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
 
   it("todo child renders a name-tag only when showNames is true", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
-    const todo = child({ id: "k1", title: "Faraway Quest", status: "planned", complexity: "S" });
+    // "Faraway Quest" needs a TRAILING todo sibling so it isn't the trail's
+    // last child — otherwise its own tag would be suppressed by the
+    // last-child beast-clearance rule and this test wouldn't be exercising
+    // the showNames toggle it's named for. (A preceding sibling wouldn't
+    // help: todos already sort after done/in-progress, so a todo with
+    // nothing after it stays last regardless of what precedes it.)
+    const todo = child({ id: "k1", title: "Faraway Quest", status: "planned", complexity: "S", order: 1 });
+    const later = child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 });
 
-    const shown = renderColumn(epic, [todo], true);
-    expect(shown.container.querySelector(".trail-tag--todo")).toHaveTextContent("Faraway Quest");
+    const shown = renderColumn(epic, [todo, later], true);
+    const shownTags = Array.from(shown.container.querySelectorAll(".trail-tag--todo"));
+    expect(shownTags.map((t) => t.textContent)).toContain("Faraway Quest");
 
-    const hidden = renderColumn(epic, [todo], false);
+    const hidden = renderColumn(epic, [todo, later], false);
     expect(hidden.container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
+  });
+
+  it("last todo child's name-tag is suppressed (marker sits beast-adjacent) — earlier todo tags still render", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const earlier = child({ id: "k0", title: "Earlier Quest", status: "planned", complexity: "S", order: 1 });
+    const last = child({ id: "k1", title: "Faraway Quest", status: "planned", complexity: "S", order: 2 });
+
+    const { container } = renderColumn(epic, [earlier, last], true);
+    const tags = Array.from(container.querySelectorAll(".trail-tag--todo")).map((t) => t.textContent);
+    expect(tags).toContain("Earlier Quest");
+    expect(tags).not.toContain("Faraway Quest");
+  });
+
+  it("in-flight epic: when the in-progress child IS the last child, the AT-HAND pennant label is suppressed", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
+    const { container } = renderColumn(epic, [prog]);
+    expect(container.querySelector(".atlas-trail__pennant--athand")).not.toBeInTheDocument();
+  });
+
+  it("in-flight epic: when a todo trails the in-progress child (not last), the AT-HAND pennant label renders", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const prog = child({ id: "k1", status: "in-flight", complexity: "M", order: 1 });
+    const todoAfter = child({ id: "k2", status: "planned", complexity: "S", order: 2 });
+    const { container } = renderColumn(epic, [prog, todoAfter]);
+    expect(container.querySelector(".atlas-trail__pennant--athand")).toHaveTextContent("◆ AT HAND");
   });
 
   it("re-measures its own column WIDTH on ResizeObserver callback (each column self-measures — no shared scale in down-mode)", () => {
@@ -282,6 +316,11 @@ describe("<AtlasTrailVertical/> (mobile Down orientation)", () => {
       // asserted blind.
       child({ id: "k1", title: "Near right wall", status: "planned", complexity: "S", order: 1 }),
       child({ id: "k2", title: "Near left wall", status: "planned", complexity: "M", order: 2 }),
+      // A trailing 3rd child keeps k2 from being the trail's LAST child, so
+      // its own tag isn't caught by the last-child beast-clearance
+      // suppression — that rule now falls on k3 instead, which stays out of
+      // the ".trail-tag--todo" count below (tags.length is still 2: k1 + k2).
+      child({ id: "k3", title: "Last Quest", status: "planned", complexity: "S", order: 3 }),
     ];
     const { container } = renderColumn(epic, kids);
 

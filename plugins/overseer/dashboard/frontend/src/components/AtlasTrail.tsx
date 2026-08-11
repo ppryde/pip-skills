@@ -207,8 +207,14 @@ function AtlasTrail({
       );
       // The AT HAND pennant is a status marker, not a name-tag — it always
       // shows on a marching epic's quest at hand, regardless of the
-      // names toggle (HANDOFF).
-      if (atHand) {
+      // names toggle (HANDOFF), EXCEPT the same last-child beast-clearance
+      // rule the todo name-tag gets below (round 3 closing item: the
+      // pennant has the identical geometry exposure when the trail ENDS on
+      // the in-progress child — done -> in-progress, zero todos after —
+      // its marker sits exactly BEAST_ANCHOR_OFFSET_PX from the beast, same
+      // as any other last child). Marker + tooltip still always render;
+      // only the floating pennant label suppresses.
+      if (atHand && !isLastChild) {
         overlayTags.push(
           <span
             key={`${child.id}-pennant`}

@@ -125,10 +125,27 @@ describe("<AtlasTrail/>", () => {
 
   it("in-flight epic: the in-progress child gets the pulsing AT-HAND ring and pennant", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
+    // The in-progress child needs a TRAILING todo sibling so it is NOT the
+    // trail's last child — done sorts before in-progress in trail order, so
+    // a preceding done sibling alone still leaves in-progress last; only a
+    // todo AFTER it moves it off the last-child slot. Otherwise its own
+    // AT-HAND pennant label would be suppressed by the last-child
+    // beast-clearance rule below, and this test would no longer be
+    // exercising the pennant it's named for.
+    const prog = child({ id: "k1", status: "in-flight", complexity: "M", order: 1 });
+    const todoAfter = child({ id: "k2", status: "planned", complexity: "S", order: 2 });
+    const { container } = renderTrail(epic, [prog, todoAfter]);
+    expect(container.querySelector(".at-hand-ring")).toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__pennant--athand")).toHaveTextContent("◆ AT HAND");
+    expect(tooltipTexts(container).some((t) => t.includes("the quest at hand"))).toBe(true);
+  });
+
+  it("in-flight epic: when the in-progress child IS the last child (no todos after it), the AT-HAND pennant label is suppressed — marker and tooltip still render", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
     const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
     const { container } = renderTrail(epic, [prog]);
     expect(container.querySelector(".at-hand-ring")).toBeInTheDocument();
-    expect(container.querySelector(".atlas-trail__pennant--athand")).toHaveTextContent("◆ AT HAND");
+    expect(container.querySelector(".atlas-trail__pennant--athand")).not.toBeInTheDocument();
     expect(tooltipTexts(container).some((t) => t.includes("the quest at hand"))).toBe(true);
   });
 

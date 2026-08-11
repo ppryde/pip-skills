@@ -156,7 +156,8 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
   const overlayTags: ReactNode[] = [];
   let todoTier = 0;
 
-  for (const { child, end } of segments) {
+  segments.forEach(({ child, end }, segmentIndex) => {
+    const isLastChild = segmentIndex === segments.length - 1;
     const group = statusGroupOf(child);
     const { x: mx, y: my } = t.pointAt(end);
     const cleared = formatDateStamp(parseCalendarDate(child.updated));
@@ -190,7 +191,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
           </g>
         );
       }
-      continue;
+      return;
     }
 
     if (group === "in-progress") {
@@ -209,7 +210,15 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
           </title>
         </g>
       );
-      if (atHand) {
+      // Round 3 closing item (completes round-2 finding 5 in Down mode,
+      // which previously had NO suppression at all here — reviewer-c
+      // measured 68.2% of realistic seed x weight combinations colliding
+      // tag-with-beast, majority case not edge): the trail's last child
+      // sits exactly BEAST_ANCHOR_OFFSET_PX from the beast on every trail
+      // regardless of length, same as AtlasTrail.tsx's own todo tag/
+      // pennant suppression. Marker + tooltip still always render; only
+      // the floating pennant label suppresses.
+      if (atHand && !isLastChild) {
         overlayTags.push(
           <span
             key={`${child.id}-pennant`}
@@ -220,7 +229,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
           </span>
         );
       }
-      continue;
+      return;
     }
 
     const openDeps = openDependencies(child, cardsById);
@@ -256,7 +265,11 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
       </g>
     );
 
-    if (showNames) {
+    // Round 3 closing item: same last-child beast-clearance suppression as
+    // the AT-HAND pennant above (and AtlasTrail.tsx's own todo tag) — the
+    // trail's last todo child's marker is exactly as beast-adjacent as any
+    // other last child.
+    if (showNames && !isLastChild) {
       const tierTagStyle: CSSProperties = {
         ...tagStyle,
         ...sideOffset(side, mx, tier * NAME_TAG_TIER_OFFSET_PX),
@@ -274,7 +287,7 @@ function AtlasTrailVertical({ card, rollup, childCards, cardsById, showNames, ac
         </span>
       );
     }
-  }
+  });
 
   const boundaryPoint = t.pointAt(boundaryArc);
   const campPoint = t.pointAt(campArc);
