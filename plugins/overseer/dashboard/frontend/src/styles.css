@@ -3965,13 +3965,86 @@ a.card-drawer__pr-chip:hover {
   background: var(--qb-tab-active-bg);
 }
 
-/* --- Atlas chart: page shell, axis, rows -------------------------------- */
+/* --- Atlas chart: page shell, toolbar, rows -----------------------------
+   WF-086 v2 (progress-trail revision): the v1 date axis / TODAY signpost /
+   legend / honesty footnote are KILLED (HANDOFF's "Killed from v1") — dates
+   survive only in tooltips and checklist stamps, so there's no shared axis
+   row to align a rail width against any more. */
 
-/* `--rail` is the ONE source of truth for the rail column width — the
-   axis row, every saga row, AND the TODAY signpost's `calc()` (set inline
-   by EpicAtlas.tsx, ported from the prototype) all read it, so a single
-   declaration keeps every part of the grid in lockstep. Desktop value here;
-   the ≤720px mobile layer below shrinks it for the sticky condensed rail. */
+.atlas-page {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Toolbar (HANDOFF, between the topbar and the chart): a static
+   complexity-weight label plus three Role-B segmented toggles, reusing the
+   exact tab mechanics as `.topbar__view-toggle` above (byte-identical
+   aria-pressed styling, deliberately its own class since the two toggles
+   live in unrelated parts of the tree). */
+.atlas-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.atlas-toolbar__label {
+  font-family: var(--qb-font-body);
+  font-size: 0.72rem;
+  color: var(--qb-ink-500);
+  margin-right: auto;
+}
+
+.atlas-toolbar__toggle {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 4px;
+  background: var(--qb-tab-track);
+  border-radius: 12px;
+}
+
+.atlas-toolbar__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 5px 5px 2px 2px;
+  border: 0;
+  border-bottom: 2px solid var(--qb-tab-underline);
+  background: transparent;
+  color: var(--qb-tab-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    color var(--qb-motion-hover) ease;
+}
+
+.atlas-toolbar__toggle-btn:hover {
+  background: var(--qb-tab-hover-bg);
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+}
+
+.atlas-toolbar__toggle-btn[aria-pressed="true"] {
+  border-bottom-color: var(--qb-tab-underline-active);
+  color: var(--qb-tab-text-active);
+  background: var(--qb-tab-active-bg);
+}
+
+/* The mobile orientation toggle is inert (CSS-invisible) above 720px —
+   desktop always renders across (HANDOFF); the mobile layout layer below
+   reveals it. */
+.atlas-toolbar__toggle--orientation {
+  display: none;
+}
+
+/* `--rail` is the ONE source of truth for the rail column width — every
+   saga row reads it, so a single declaration keeps the whole grid in
+   lockstep. Desktop value here; the ≤720px mobile layer below shrinks it
+   for the sticky condensed rail. */
 .atlas-chart {
   --rail: 264px;
   position: relative;
@@ -3994,28 +4067,6 @@ a.card-drawer__pr-chip:hover {
   border-radius: var(--qb-radius-panel);
 }
 
-.atlas-chart__axis {
-  display: grid;
-  grid-template-columns: var(--rail) 1fr;
-  border-bottom: 2px dashed var(--qb-line-dashed);
-  padding-bottom: 0.4rem;
-}
-
-.atlas-chart__axis-days {
-  position: relative;
-  min-height: 1.1rem;
-}
-
-.atlas-chart__tick {
-  position: absolute;
-  top: 0;
-  font-family: var(--qb-font-mono);
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--qb-ink-400);
-  white-space: nowrap;
-}
-
 .atlas-chart__rows {
   display: flex;
   flex-direction: column;
@@ -4036,71 +4087,6 @@ a.card-drawer__pr-chip:hover {
 .atlas-chart__lane {
   position: relative;
   min-height: 104px;
-}
-
-/* TODAY signpost — HANDOFF's "dashed rose line + pennant", spanning the
-   whole field. Rose = --qb-accent-rose-fill/-shadow, the EXACT hexes
-   (#A8506B / #8C3E56) the HANDOFF spec calls out by literal value — no new
-   colour needed, the rose accent family already is this pairing. `left` is
-   set inline by EpicAtlas.tsx via the prototype's own calc() expression. */
-.atlas-chart__today {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-left: 2px dashed var(--qb-accent-rose-fill);
-  opacity: 0.75;
-  z-index: 1;
-  pointer-events: none;
-}
-
-.atlas-chart__today-flag {
-  position: absolute;
-  top: -0.1rem;
-  left: 0.25rem;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-family: var(--qb-font-mono);
-  font-size: 0.6rem;
-  padding: 0.15rem 0.4rem;
-  color: var(--legacy-color-fff);
-  background: var(--qb-accent-rose-fill);
-  border-radius: var(--qb-radius-pennant);
-  box-shadow: var(--qb-shadow-card) var(--qb-accent-rose-shadow);
-}
-
-/* Verification-round finding: `.atlas-chart` scrolling shifts ALL of its
-   direct children uniformly — including these two, even though neither is
-   itself wide enough to need the chart's own horizontal scroller — so the
-   mount effect's "centre scrollLeft on today" (EpicAtlas.tsx) could push
-   informational text the user hasn't asked to hide out of the initial
-   view entirely. `position: sticky; left: 0` opts them out of that
-   uniform shift the same way the rail does (same frozen-column trick),
-   keeping them pinned to the chart's own left edge — always reachable on
-   load, at any scroll position — without a second scroller. */
-.atlas-chart__legend {
-  position: sticky;
-  left: 0;
-  width: fit-content;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem 1rem;
-  margin-top: 1rem;
-  font-family: var(--qb-font-body);
-  font-size: 0.75rem;
-  color: var(--qb-ink-500);
-}
-
-.atlas-chart__footnote {
-  position: sticky;
-  left: 0;
-  width: fit-content;
-  max-width: 100%;
-  margin-top: 0.4rem;
-  font-family: var(--qb-font-prose);
-  font-size: 0.7rem;
-  line-height: 1.5;
-  color: var(--qb-ink-400);
 }
 
 /* --- Per-accent tokens (rail card + trail, one declaration each) --------
@@ -4354,6 +4340,13 @@ a.card-drawer__pr-chip:hover {
   box-shadow: var(--qb-btn-shadow-active);
 }
 
+/* Checklist wheel (HANDOFF): caps at ~5 visible rows (~132px desktop,
+   ~224px mobile — the mobile override lives in the mobile layout layer
+   below) with its own internal scroll, `overscroll-behavior: contain` so a
+   flung scroll never bleeds into the page behind the rail card. The
+   `max-height` itself is set inline by AtlasRailCard.tsx (WHEEL_MAX_HEIGHT_PX)
+   so the JS overflow-detection math and the CSS cap can never drift apart;
+   this rule supplies everything else. */
 .atlas-rail-card__subquests {
   display: flex;
   flex-direction: column;
@@ -4361,6 +4354,35 @@ a.card-drawer__pr-chip:hover {
   margin-top: 0.2rem;
   padding-top: 0.4rem;
   border-top: 1.5px dashed var(--qb-line-dashed-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Picker-wheel fades — CSS mask gradients toggled from the list's REAL
+   scroll position (AtlasRailCard.tsx's onScroll handler), never a fade at
+   a true end (the modifier classes only apply once there's more content
+   that way). Both can apply at once (mid-scroll); the combined mask
+   handles that case explicitly rather than layering two independent
+   gradients. */
+.atlas-rail-card__subquests--fade-top {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 18px);
+  mask-image: linear-gradient(to bottom, transparent 0, black 18px);
+}
+
+.atlas-rail-card__subquests--fade-bottom {
+  -webkit-mask-image: linear-gradient(to top, transparent 0, black 18px);
+  mask-image: linear-gradient(to top, transparent 0, black 18px);
+}
+
+.atlas-rail-card__subquests--fade-top.atlas-rail-card__subquests--fade-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black 18px,
+    black calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%);
 }
 
 .atlas-rail-card__subquest {
@@ -4372,7 +4394,8 @@ a.card-drawer__pr-chip:hover {
 
 /* 14px rounded checkbox (HANDOFF) — done = accent fill + white ✓ (the ✓
    glyph is the checkbox's own text content, coloured via this rule so it
-   never needs a separate icon), todo = dashed outline only. */
+   never needs a separate icon), abandoned = dark box + †, blocked = rose
+   border + ⛔, todo = dashed outline only. */
 .atlas-rail-card__checkbox {
   flex: 0 0 auto;
   display: inline-flex;
@@ -4392,13 +4415,37 @@ a.card-drawer__pr-chip:hover {
   color: var(--legacy-color-fff);
 }
 
+/* Fallen on the march — a dark box, fixed ink rather than accent-tinted
+   (same "abandonment reads as one thing across every saga" rationale as
+   the trail's own skull marker). */
+.atlas-rail-card__subquest--abandoned .atlas-rail-card__checkbox {
+  border-color: var(--qb-beast-ink);
+  background: var(--qb-beast-ink);
+  color: var(--legacy-color-fff);
+}
+
+/* The way is barred — the freed TODAY rose is available for this accent
+   (HANDOFF: "the freed TODAY rose (#a8506b) is available for the blocked
+   checklist accent"). */
+.atlas-rail-card__subquest--blocked {
+  border-left: 2px solid var(--qb-accent-rose-fill);
+  padding-left: 0.3rem;
+  margin-left: -0.3rem;
+}
+
+.atlas-rail-card__subquest--blocked .atlas-rail-card__checkbox {
+  border-color: var(--qb-accent-rose-fill);
+  color: var(--qb-accent-rose-fill);
+}
+
 .atlas-rail-card__subquest-title {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--qb-ink-700);
 }
 
-.atlas-rail-card__subquest-title--done {
+.atlas-rail-card__subquest-title--done,
+.atlas-rail-card__subquest-title--abandoned {
   text-decoration: line-through;
   color: var(--qb-ink-500);
 }
@@ -4434,18 +4481,20 @@ a.card-drawer__pr-chip:hover {
   stroke-dasharray: 1 9;
 }
 
-.atlas-trail__path--uncharted {
-  stroke-width: 3;
-  stroke-dasharray: 1 16;
-  opacity: 0.4;
+/* Ahead (todo) ground — HANDOFF: "faded (~.68 opacity) ... trail continues
+   at 1 9 but faded" — same dasharray as walked ground, opacity is the only
+   distinction (not a different dash pattern). */
+.atlas-trail__path--faded {
+  opacity: 0.68;
 }
 
-.atlas-trail__camp,
 .atlas-trail__camped text:first-child {
   font-size: 15px;
 }
 
-.atlas-trail__waypoint circle {
+/* --- Waypoints: done / abandoned / at-hand / todo / blocked ------------- */
+
+.atlas-trail__waypoint--done circle {
   fill: var(--atlas-trail-fill, var(--qb-ink-300));
   stroke: var(--atlas-trail-dark, var(--qb-ink-500));
   stroke-width: 2;
@@ -4455,6 +4504,75 @@ a.card-drawer__pr-chip:hover {
   fill: var(--legacy-color-fff);
   font-size: 10px;
   font-weight: 700;
+}
+
+.atlas-trail__waypoint--abandoned image {
+  /* The skull doodle carries its own ink — no accent tint (HANDOFF: "fixed
+     ink/cream rather than accent-tinted so abandonment reads as one thing
+     across every saga"). */
+  opacity: 1;
+}
+
+/* The quest at hand: r10 bright dot + r14 pulsing ring (reduced-motion
+   opt-in) — suppressed (plain dot only, no ring/pennant) on a parked epic,
+   see AtlasTrail.tsx's `atHand` branch. */
+.atlas-trail__athand-dot {
+  fill: var(--qb-parchment-muted);
+  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  stroke-width: 2.5;
+}
+
+.atlas-trail__athand-glyph {
+  fill: var(--atlas-trail-dark, var(--qb-ink-500));
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.at-hand-ring {
+  fill: none;
+  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .at-hand-ring {
+    animation: atlas-at-hand-pulse 1.8s ease-out infinite;
+  }
+
+  @keyframes atlas-at-hand-pulse {
+    0% {
+      opacity: 0.85;
+      r: 11px;
+    }
+    100% {
+      opacity: 0;
+      r: 19px;
+    }
+  }
+}
+
+/* Ahead (todo) hollow waypoint — dashed outline, no fill; opacity comes
+   from the SVG group's own `opacity` attribute (AtlasTrail.tsx), not here. */
+.atlas-trail__todo-dot {
+  fill: var(--qb-parchment-muted);
+  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke-width: 2;
+  stroke-dasharray: 2 3;
+}
+
+.atlas-trail__waypoint--todo {
+  opacity: 0.68;
+}
+
+/* Blocked overrides the plain todo fade — HANDOFF: "the marker becomes the
+   boulder at .85 opacity" — a bit more solid than a plain todo dot, since
+   it needs to read as an obstacle, not just quietly faded ground. */
+.atlas-trail__waypoint--blocked {
+  opacity: 0.85;
 }
 
 .atlas-trail__party circle {
@@ -4469,7 +4587,8 @@ a.card-drawer__pr-chip:hover {
 
 @media (prefers-reduced-motion: no-preference) {
   /* Gentle party bob (HANDOFF: 1.6s) — opt-in like every other Atlas/board
-     motion; reduced-motion users get the party planted still at today. */
+     motion; reduced-motion users get the party planted still at the
+     done|next boundary. */
   .atlas-trail__party {
     animation: atlas-party-bob 1.6s ease-in-out infinite;
   }
@@ -4495,6 +4614,68 @@ a.card-drawer__pr-chip:hover {
   font-family: var(--qb-font-body);
   font-size: 13px;
   fill: var(--qb-gold-chip-text);
+}
+
+/* --- HTML overlay layer: AT HAND pennant + todo name-tags ---------------
+   Layered OVER the SVG (matching the prototype's own technique — plain
+   absolutely-positioned `<div>`/`<span>` tags, not squeezed into the SVG
+   via <foreignObject>). The SVG's viewBox is set 1:1 to the lane's actual
+   rendered pixel size (AtlasTrail.tsx), so a tag's inline `left`/`top` (in
+   px, same numbers as the SVG marker coordinates) lines up exactly with
+   its marker underneath. `pointer-events: none` on the container, `auto`
+   on each tag, so the overlay never blocks clicks reaching the rail card
+   or the SVG's own tooltips beneath the gaps between tags. */
+.atlas-trail__overlays {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.trail-tag {
+  position: absolute;
+  pointer-events: auto;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--qb-font-body);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--qb-radius-pennant);
+  box-shadow: var(--qb-shadow-card) rgba(0, 0, 0, 0.18);
+}
+
+.trail-tag--todo {
+  background: var(--qb-parchment-muted);
+  border: 1.5px solid var(--atlas-trail-fill, var(--qb-ink-300));
+  color: var(--qb-ink-500);
+}
+
+/* The AT HAND pennant is a status marker, not a name-tag — solid accent
+   fill (not the todo tag's parchment) so it reads as "in progress right
+   now", not "ahead ground". */
+.atlas-trail__pennant--athand {
+  background: var(--atlas-trail-fill, var(--qb-accent-orange-fill));
+  border: 1.5px solid var(--atlas-trail-dark, var(--qb-accent-orange-shadow));
+  color: var(--legacy-color-fff);
+  font-weight: 700;
+}
+
+/* Down-mode (HANDOFF: "plain horizontal text right of the trail — no
+   wobble tilt") — AtlasTrailVertical.tsx never sets an inline `rotate()`
+   on these, this modifier just narrows the max-width for the column's own
+   (typically narrower) cross-axis. */
+.trail-tag--down {
+  max-width: 130px;
+}
+
+/* --- Blocked overlay: the boulder / trailhead / campfire images --------- */
+.atlas-trail__trailhead image,
+.atlas-trail__boulder,
+.atlas-trail__campfire {
+  image-rendering: -webkit-optimize-contrast;
 }
 
 /* Beast hue selection (HANDOFF: "alive = darker accent hue ... slain =
@@ -4991,30 +5172,13 @@ a.card-drawer__pr-chip:hover {
      ROW (which itself grows to the lane's overflow width) — verified with
      the same Playwright measurement to hold constant across the FULL
      scrollLeft range, not just the first ~160px. This also converges on
-     HANDOFF's own "condensed card above its trail" framing. `.atlas-chart
-     __axis` gets the same block treatment (spacer hidden) so its date
-     ticks stay aligned with the now-unindented lane content beneath them
-     — both `.atlas-chart__axis-days` and `.atlas-chart__lane` share the
-     same 460px legibility floor so a given date's tick % lines up with
-     that same date's pixel position in every row's SVG. */
-  .atlas-chart__axis {
-    display: block;
-  }
-
-  .atlas-chart__axis-rail {
-    display: none;
-  }
-
-  .atlas-chart__axis-days {
-    min-width: 460px;
-  }
-
+     HANDOFF's own "condensed card above its trail" framing. */
   .atlas-chart__row {
     display: block;
   }
 
   /* Legibility floor for the SVG trail lane — tunable, not a promise; a
-     narrower value starts crowding the camp/waypoints/beast together. */
+     narrower value starts crowding the trailhead/waypoints/beast together. */
   .atlas-chart__lane {
     min-width: 460px;
   }
@@ -5022,17 +5186,17 @@ a.card-drawer__pr-chip:hover {
   /* Condensed rail pins in place while the chart scrolls beneath it — the
      trail passes UNDER the rail, never the reverse, hence the opaque
      background (a flat approximation of the page's own radial-gradient
-     backdrop, close enough for a 160px strip) and the z-index above the
-     TODAY signpost's `z-index: 1` (desktop rule, unchanged) so the rose
-     line visibly passes beneath the sticky rail by design, not by
-     accident. `width` is now load-bearing (chunk 10 didn't need it — the
+     backdrop, close enough for a 160px strip) and a z-index above the
+     trail's own overlay layer (`.atlas-trail__overlays`, z-index: 2) so a
+     name-tag/pennant visibly passes beneath the sticky rail, never over
+     it. `width` is now load-bearing (chunk 10 didn't need it — the
      grid track supplied it): a block-level sticky element with no width
      of its own would stretch to the row's full (now much wider) content
      width instead of staying a compact 160px strip. */
   .atlas-chart__rail {
     position: sticky;
     left: 0;
-    z-index: 2;
+    z-index: 3;
     width: var(--rail);
     background: var(--qb-bg-page);
     padding: 0.5rem 0.4rem;
@@ -5063,6 +5227,93 @@ a.card-drawer__pr-chip:hover {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  /* Checklist wheel's mobile cap (HANDOFF: "~224px mobile" vs desktop's
+     ~132px) — a pure CSS override of AtlasRailCard.tsx's inline desktop
+     default; the fade-mask/overflow rules above are unchanged. */
+  .atlas-rail-card__subquests {
+    max-height: 224px !important;
+  }
+
+  /* 2-row grid per checklist item (HANDOFF): checkbox+title on row 1, the
+     stamp beneath on row 2 — the flex layout's `margin-left: auto` date
+     collides with a long title at mobile widths, this avoids that
+     entirely rather than truncating the title further. */
+  .atlas-rail-card__subquest {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.4rem;
+    row-gap: 0.1rem;
+  }
+
+  .atlas-rail-card__subquest-date {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    padding-left: 22px; /* aligns under the title, past the 14px checkbox + gap */
+  }
+
+  /* The mobile orientation toggle only matters at this width — desktop
+     hides it (base rule) since it's always Across there. */
+  .atlas-toolbar__toggle--orientation {
+    display: inline-flex;
+  }
+
+  /* --- Epic Atlas Down-mode: 86vw snap columns (HANDOFF, shipped in
+     production) --------------------------------------------------------
+     `.atlas-chart` is STILL the page's one horizontal scroller (the
+     725ddea invariant) — Down-mode just changes what scrolls inside it:
+     columns instead of rows, `scroll-snap-type: x mandatory` overriding
+     Across-mode's `overflow-x: auto` on the same element (the two
+     orientations never render at once, so there's no axis conflict). */
+  .atlas-chart--down {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.75rem;
+  }
+
+  .atlas-chart__columns {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    /* Item 8 precedent (Board.tsx's activeLaneHeight): pins this box's
+       page-scroll-relevant height to the ACTIVE column's own content
+       height (inline style, EpicAtlas.tsx) so a short column's page
+       scroll can't run past its own last marker into a taller sibling's
+       empty space. `overflow-y: hidden` is what actually clips the
+       off-screen, currently-taller siblings out of the scrollable region. */
+    overflow-y: hidden;
+    transition: height 0.18s ease;
+  }
+
+  .atlas-chart__column {
+    flex: 0 0 86vw;
+    scroll-snap-align: center;
+  }
+
+  .atlas-chart__column-card {
+    margin-bottom: 0.4rem;
+  }
+
+  .atlas-chart__column-lane {
+    position: relative;
+  }
+
+  /* Down-mode's SVG grows to its own natural content height (the page
+     scrolls; HANDOFF's flat per-complexity scale, "no fit-to-container")
+     rather than being squeezed/stretched into a fixed-height box the way
+     Across-mode's `.atlas-trail` (absolute, inset:0 over an already-sized
+     lane) is. `height: auto` + the intrinsic viewBox aspect ratio
+     (AtlasTrailVertical.tsx sets the viewBox's own width to this same
+     element's measured width) is what makes the rendered SVG height come
+     out in real CSS pixels equal to the viewBox's own height units. */
+  .atlas-trail--down {
+    position: static;
+    display: block;
+  }
+
+  .atlas-trail--down .atlas-trail__svg {
+    height: auto;
   }
 }
 
