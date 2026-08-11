@@ -657,9 +657,10 @@ body {
   padding: 0.15rem 0.5rem;
   /* Path-tag note treatment (WF-093): torn-note radius + inked border,
      matching the Atlas trail tags and the lane-header notes — tried flat
-     (no lift shadow) on the topbar specifically. */
+     (no lift shadow) on the topbar specifically. Border lightened to 1px
+     (was 1.5px) — read too heavy at the original weight. */
   border-radius: var(--qb-radius-pennant);
-  border: 1.5px solid var(--qb-ink-300);
+  border: 1px solid var(--qb-ink-300);
   background: var(--qb-parchment-muted);
   color: var(--qb-ink-500);
 }
@@ -931,25 +932,26 @@ body {
   font-weight: 600;
   padding: 0.25rem 0.65rem;
   /* Path-tag note treatment (WF-093): torn-note radius, flat (no lift
-     shadow); each pill keeps its own accent fill/border below. */
+     shadow); each pill keeps its own accent fill/border below. Border
+     lightened to 1px (was 2px) — read too heavy at the original weight. */
   border-radius: var(--qb-radius-pennant);
 }
 
 .topbar__gold-pill {
   background: var(--qb-gold-chip-bg);
-  border: 2px solid var(--qb-gold-chip-border);
+  border: 1px solid var(--qb-gold-chip-border);
   color: var(--qb-gold-chip-text);
 }
 
 .topbar__vanquished-pill {
   background: var(--qb-success-chip-bg);
-  border: 2px solid var(--qb-success-chip-border);
+  border: 1px solid var(--qb-success-chip-border);
   color: var(--qb-success-chip-text);
 }
 
 .topbar__fleet-pill {
   background: var(--qb-locked-chip-bg);
-  border: 2px solid var(--qb-questing-chip-border);
+  border: 1px solid var(--qb-questing-chip-border);
   color: var(--qb-locked-chip-text);
   cursor: pointer;
 }
@@ -1222,9 +1224,10 @@ body {
 
 /* Rectangular sketch label header (WF-093) — matches the Epic Atlas trail's
    `.trail-tag` name-tags: a hand-inked rectangular wobble (not the old
-   pennant/flag shape), dark ink text, and a soft lift shadow. Fill colour
-   is per accent key (`.lane__header--<key>` below); the header itself only
-   owns shape/spacing/text-colour, not colour. */
+   pennant/flag shape) and dark ink text — tried flat here (no lift shadow,
+   unlike the trail tags). Fill colour is per accent key
+   (`.lane__header--<key>` below); the header itself only owns
+   shape/spacing/text-colour, not colour. */
 .lane__header {
   flex: 0 0 auto;
   display: flex;
@@ -1235,12 +1238,12 @@ body {
   font-weight: 600;
   color: var(--qb-ink-900);
   /* Match the Atlas trail's `.trail-tag` note as closely as a lane header
-     can: the SAME pennant/torn-note radius, border, and lift shadow — but
-     (unlike a trail tag) stretched to the lane's full width, so it reads as
-     a banner across the top of its column rather than a floating note. */
+     can: the SAME pennant/torn-note radius and border — but tried flat here
+     (no lift shadow, unlike the trail tags), and (unlike a trail tag)
+     stretched to the lane's full width, so it reads as a banner across the
+     top of its column rather than a floating note. */
   border-radius: var(--qb-radius-pennant);
   border: 1.5px solid var(--qb-ink-300);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1254,9 +1257,9 @@ body {
    addition rather than a borrowed group.
    WF-093: each is now a pastel wash of its accent (mixed over white, same
    recipe as `.trail-tag--*`) with an inked border, not the old saturated
-   banner fill — the base `.lane__header` rule above now owns the shared
-   lift shadow, so these only ever set background + border. Held a touch
-   stronger than the trail tags' 30%/55% (38%/60%) since a lane header
+   banner fill — the base `.lane__header` rule above owns the shared shape
+   (radius/border), so these only ever set background + border. Held a
+   touch stronger than the trail tags' 30%/55% (38%/60%) since a lane header
    anchors a whole column rather than floating over parchment. */
 .lane__header--backlog {
   background: color-mix(in srgb, var(--qb-accent-forest-fill) 38%, white);
