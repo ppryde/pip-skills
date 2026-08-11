@@ -71,22 +71,22 @@ function BeastFace({ hue, horns, slain }: BeastFaceProps) {
           <path
             className="beast-face__eye beast-face__eye--x"
             d="M17 20 l5 5 M22 20 l-5 5"
-            stroke="#f6ead2"
+            stroke="var(--qb-party-text)"
             strokeWidth="2.4"
             strokeLinecap="round"
           />
           <path
             className="beast-face__eye beast-face__eye--x"
             d="M28 20 l5 5 M33 20 l-5 5"
-            stroke="#f6ead2"
+            stroke="var(--qb-party-text)"
             strokeWidth="2.4"
             strokeLinecap="round"
           />
         </>
       ) : (
         <>
-          <circle className="beast-face__eye beast-face__eye--dot" cx="19" cy="22" r="2.6" fill="#f6ead2" />
-          <circle className="beast-face__eye beast-face__eye--dot" cx="31" cy="22" r="2.6" fill="#f6ead2" />
+          <circle className="beast-face__eye beast-face__eye--dot" cx="19" cy="22" r="2.6" fill="var(--qb-party-text)" />
+          <circle className="beast-face__eye beast-face__eye--dot" cx="31" cy="22" r="2.6" fill="var(--qb-party-text)" />
         </>
       )}
 
@@ -94,7 +94,7 @@ function BeastFace({ hue, horns, slain }: BeastFaceProps) {
         <path
           className="beast-face__mouth beast-face__mouth--smile"
           d="M19 33 q6 -4 12 0"
-          stroke="#f6ead2"
+          stroke="var(--qb-party-text)"
           strokeWidth="2.2"
           fill="none"
           strokeLinecap="round"
@@ -104,7 +104,7 @@ function BeastFace({ hue, horns, slain }: BeastFaceProps) {
           <path
             className="beast-face__mouth beast-face__mouth--grumpy"
             d="M19 32 q6 4 12 0"
-            stroke="#f6ead2"
+            stroke="var(--qb-party-text)"
             strokeWidth="2.2"
             fill="none"
             strokeLinecap="round"
@@ -112,14 +112,14 @@ function BeastFace({ hue, horns, slain }: BeastFaceProps) {
           <path
             className="beast-face__tooth"
             d="M22 33.5 l0 3"
-            stroke="#f6ead2"
+            stroke="var(--qb-party-text)"
             strokeWidth="2"
             strokeLinecap="round"
           />
           <path
             className="beast-face__tooth"
             d="M28 33.5 l0 3"
-            stroke="#f6ead2"
+            stroke="var(--qb-party-text)"
             strokeWidth="2"
             strokeLinecap="round"
           />

@@ -43,6 +43,25 @@ describe("<BeastFace/>", () => {
     expect(svgMarkup).not.toContain("#2C2015");
   });
 
+  // impl-review finding: the eye/mouth/teeth cream highlight was hard-coded
+  // to the literal #f6ead2 in eight places (both slain and alive branches)
+  // instead of referencing styles.css's --qb-party-text token, which is
+  // the byte-identical hex — a KB-007 violation same in spirit as the
+  // outline check above, just for the second colour this component paints.
+  it("never hard-codes the eye/mouth cream highlight — uses var(--qb-party-text) in both alive and slain states", () => {
+    const alive = render(<BeastFace hue="#5c86b0" horns={true} slain={false} />);
+    const aliveMarkup = alive.container.querySelector("svg")!.outerHTML;
+    expect(aliveMarkup).not.toContain("#f6ead2");
+    expect(aliveMarkup).not.toContain("#F6EAD2");
+    expect(aliveMarkup).toContain("var(--qb-party-text)");
+
+    const slain = render(<BeastFace hue="#5c86b0" horns={true} slain={true} />);
+    const slainMarkup = slain.container.querySelector("svg")!.outerHTML;
+    expect(slainMarkup).not.toContain("#f6ead2");
+    expect(slainMarkup).not.toContain("#F6EAD2");
+    expect(slainMarkup).toContain("var(--qb-party-text)");
+  });
+
   it("rotates the ellipse -3deg around its own centre, per the design reference", () => {
     const { container } = render(<BeastFace hue="#5c86b0" horns={false} slain={false} />);
     expect(container.querySelector("ellipse")).toHaveAttribute("transform", "rotate(-3 25 25)");
