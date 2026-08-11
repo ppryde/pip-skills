@@ -438,17 +438,19 @@ body {
 
 /* Parchment sticky top bar (WF-029 chunk 5, HANDOFF §Board "Top bar"). */
 /* Header↔content seam has moved off `.topbar`'s own bottom edge — the
-   filter bar (`.filter-bar`, below) now shares this same `--qb-panel`
-   surface and renders BELOW this block, so a divider here would land
-   mid-header whenever filters are open, not at the header's true bottom.
-   The one seam that separates the whole header stack (topbar + control +
-   filter, whichever are open) from the board now lives on `.board-region`'s
-   own top edge instead (see that rule) — it's the header's ACTUAL bottom
-   edge in every toggle state, unlike a fixed spot on this block. The
-   chunky inset dash bands on `.topbar__controls-header`/
-   `.filter-bar__eyebrow-row` below (Task A) are unrelated — those read as
-   section headers between the header's own sub-parts, not as the header's
-   outer edge. */
+   filter bar (`.filter-bar`, below) renders BELOW this block and is open
+   whenever filters are shown, so a divider here would land mid-header, not
+   at the header's true bottom. The one seam that separates the whole header
+   stack (topbar + control + filter, whichever are open) from the board now
+   lives on `.board-region`'s own top edge instead (see that rule) — it's
+   the header's ACTUAL bottom edge in every toggle state, unlike a fixed
+   spot on this block. The chunky inset dash band on `.topbar__controls-
+   header` below (Task A) is unrelated — that reads as a section header
+   between the header's own sub-parts, not as the header's outer edge; the
+   matching control↔scry seam now lives on `.filter-bar`'s own top edge
+   instead (see that rule's comment), since `.filter-bar` went back to its
+   own `--qb-parchment-muted` colour rather than sharing this block's
+   `--qb-panel`. */
 .topbar {
   flex: 0 0 auto;
   display: flex;
@@ -836,9 +838,9 @@ body {
    trick as `.topbar__quarantine-banner`/mobile's `.topbar__threshold`) so
    ThresholdControl and everything after it in the group starts underneath
    this header, on every viewport. The divider itself (margin/padding/
-   background-image band) is declared jointly with `.filter-bar__eyebrow-row`
-   below (Task A) — the "Scry" and "Provisions" section rules share one rule
-   so they can't drift apart. */
+   background-image band) is declared below (Task A) — this is Provisions'
+   own topbar↔control seam, distinct from the control↔scry seam that now
+   lives on `.filter-bar`'s own top edge. */
 .topbar__controls-header {
   flex-basis: 100%;
 }
@@ -1056,22 +1058,31 @@ body {
    selects borrow the topbar chip's hand-inked select treatment
    (`.topbar__repo-select select`); the Labels/Clear buttons are the shared
    Role A button system (`--qb-btn-*`, see `.card-drawer__edit-actions
-   button`) — no new button style. Background is `--qb-panel` (was the
-   `--qb-parchment-muted` block colour) — this bar sits BELOW `.topbar` in
-   normal flow (App.tsx: TopBar, then FilterBar, then `.board-region`), so
-   a distinct block colour here read as a separate parchment strip detached
-   from the header rather than a continuation of it; matching `.topbar`'s
-   own surface makes topbar + control + filter read as one header unit.
-   No divider on this block's own bottom edge — the header↔content seam
-   lives on `.board-region`'s top edge instead (see that rule), clear of
-   Scry regardless of which header rows are open. */
+   button`) — no new button style. Background is back to `--qb-parchment-muted`
+   (a brief detour through `--qb-panel` — matching `.topbar` — erased the
+   colour seam between Provisions/control and Scry/filter; restored so the
+   two sections read as visibly distinct blocks again). The chunky 9px-dash
+   "control↔scry" divider now rides this block's OWN top edge — see the
+   `background-image` band below — landing exactly on that colour seam
+   instead of floating inset on `.filter-bar__eyebrow-row` further down (see
+   that rule's comment). No divider on this block's own bottom edge — the
+   header↔content seam lives on `.board-region`'s top edge instead (see that
+   rule), clear of Scry regardless of which header rows are open. */
 .filter-bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.6rem;
   padding: 0.6rem 1rem;
-  background: var(--qb-panel);
+  background-color: var(--qb-parchment-muted);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--qb-line-dashed) 0 9px,
+    transparent 9px 15px
+  );
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 2px;
 }
 
 /* Task 3: makes the `hidden` attribute (driven by `filtersOpen`) actually
@@ -1093,7 +1104,10 @@ body {
    row reads as one section-header line rather than the count being buried
    down in the filter controls. Coordinator follow-up: "Clear" (was "Clear
    filters", read `.filter-bar__count`) no longer shares this row — it moved
-   to the end of `.filter-bar__facets` below, alongside Labels. */
+   to the end of `.filter-bar__facets` below, alongside Labels. No divider
+   band on this row itself — the "control↔scry" chunky divider moved to
+   `.filter-bar`'s own top edge (see that rule's comment) so it sits on the
+   colour seam rather than floating inset here, inside the parchment fill. */
 .filter-bar__eyebrow-row {
   flex-basis: 100%;
   display: flex;
@@ -1130,18 +1144,20 @@ body {
   color: var(--qb-ink-400);
 }
 
-/* Task A: Scry's own header rule and Provisions' (`.topbar__controls-header`,
-   declared earlier in this file) render the EXACT same divider — a grouped
-   selector so the two rules can never drift apart. A `repeating-linear-
-   gradient` background band reads as clearly chunkier dashes (9px dash/6px
-   gap) than the flat 1.5px dashed/dotted borders used elsewhere in this
-   file; painted as a `background-image` rather than `border-top` because a
-   gradient has no intrinsic size to slice against `border-image`
-   predictably, while a `background-size: 100% 2px` band sits in exactly the
-   same visual spot a 2px top border would. Inset (not full-width) — unlike
-   `.topbar`'s own edge-to-edge dotted seam above, these bands stop at each
-   row's own padding. */
-.filter-bar__eyebrow-row,
+/* Task A (WF-085 follow-up: split): Provisions' own topbar↔control divider.
+   Used to be a grouped selector with `.filter-bar__eyebrow-row` (Scry's
+   eyebrow row rendered the identical band) so the two could never drift
+   apart — that band has since moved onto `.filter-bar`'s own top edge (see
+   that rule's comment) to land on the control↔scry colour seam instead of
+   floating inset inside the parchment fill, so this rule now stands alone.
+   A `repeating-linear-gradient` background band reads as clearly chunkier
+   dashes (9px dash/6px gap) than the flat 1.5px dashed/dotted borders used
+   elsewhere in this file; painted as a `background-image` rather than
+   `border-top` because a gradient has no intrinsic size to slice against
+   `border-image` predictably, while a `background-size: 100% 2px` band sits
+   in exactly the same visual spot a 2px top border would. Inset (not
+   full-width) — unlike `.topbar`'s own edge-to-edge dotted seam above, this
+   band stops at the row's own padding. */
 .topbar__controls-header {
   margin-top: 0.3rem;
   padding-top: 0.5rem;
@@ -1334,11 +1350,12 @@ body {
    content) also means the line never scrolls away with the board/atlas
    content. `2px dashed` renders ~5-6px dashes — a deliberate MEDIUM step
    between the old `1.5px dotted` seam this replaces and the chunky 9px-
-   dash/6px-gap inset bands on `.topbar__controls-header`/
-   `.filter-bar__eyebrow-row` above (those are a `repeating-linear-gradient`
-   background band, not a border — see that rule's comment); this stays a
-   plain full-bleed `border-top` since it's the header's outer edge, not
-   another section-header seam. */
+   dash/6px-gap bands on `.topbar__controls-header` (inset, topbar↔control)
+   and `.filter-bar`'s own top edge (full-width, control↔scry — see that
+   rule's comment) above (those are `repeating-linear-gradient` background
+   bands, not borders — see each rule's comment); this stays a plain
+   full-bleed `border-top` since it's the header's outer edge, not another
+   section-header seam. */
 .board-region {
   flex: 1 1 auto;
   overflow-x: auto;
