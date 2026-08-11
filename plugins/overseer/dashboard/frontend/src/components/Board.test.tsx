@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BoardCard, BoardResponse, CardDetail } from "../api/types";
 
@@ -152,6 +155,75 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
     // Quarantined banner from board.quarantined.
     expect(screen.getByText(/1 quarantined/)).toBeInTheDocument();
+  });
+
+  it("(WF-085) the card count no longer renders in the lane header — it lives only in the icon-nav", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Backlog");
+
+    // `.lane__count` is gone from every lane header, on every viewport
+    // (the count-removal isn't gated to mobile).
+    expect(container.querySelector(".lane__count")).not.toBeInTheDocument();
+
+    // ...but the same counts now surface in the mobile icon-nav (always
+    // rendered in the DOM — CSS is what hides the strip above 720px).
+    // Backlog: WF-EPIC + WF-WAITING. Implementation: WF-EPIC-C2. Parked:
+    // WF-OVERBUDGET. Done: WF-EPIC-C1 + WF-SHIPPED.
+    expect(screen.getByLabelText("Backlog, 2 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("Implementation, 1 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("Parked, 1 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("Done, 2 cards")).toBeInTheDocument();
+    // mobile-v2 (reverses the WF-085a-review restriction from 9327dd8): an
+    // empty stage lane DOES get a nav icon now, for completeness/even
+    // spacing — but it's not a real tap target, since its lane is still a
+    // thin non-snapping sliver in the swipe track (no pane to jump to).
+    // The icon renders disabled/faded with its own "..., empty" aria-label
+    // rather than a plain count.
+    const bootstrapIcon = screen.getByLabelText("Bootstrap, 0 cards, empty");
+    expect(bootstrapIcon).toBeInTheDocument();
+    expect(bootstrapIcon).toBeDisabled();
+    expect(bootstrapIcon).toHaveClass("lane-icon-nav__item--empty");
+    expect(bootstrapIcon).toHaveTextContent("0");
+  });
+
+  it("(mobile-v2) an empty lane's icon-nav entry is not a jump target and never becomes active", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<App />);
+    await screen.findByText("Backlog");
+
+    const bootstrapIcon = screen.getByLabelText("Bootstrap, 0 cards, empty");
+    fireEvent.click(bootstrapIcon);
+
+    // A disabled button doesn't fire its click handler at all — no jump,
+    // no active-pill flip.
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(bootstrapIcon).not.toHaveClass("lane-icon-nav__item--active");
+  });
+
+  it("(WF-085) tapping an icon-nav entry marks it active and jumps the matching lane pane into view", async () => {
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+    // jsdom doesn't implement scrollIntoView at all — polyfill it so
+    // Board's guarded call has something to invoke and assert on.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<App />);
+    await screen.findByText("Backlog");
+
+    const doneIcon = screen.getByLabelText("Done, 2 cards");
+    expect(doneIcon).not.toHaveClass("lane-icon-nav__item--active");
+
+    fireEvent.click(doneIcon);
+
+    expect(doneIcon).toHaveClass("lane-icon-nav__item--active");
+    expect(scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ inline: "center" })
+    );
   });
 
   it("(Chunk 5) clicking a card BODY opens the drawer via the full App→Board→Lane→tile prop chain", async () => {
@@ -425,5 +497,191 @@ describe("<App/> branch filter — dim + spotlight (WF-031)", () => {
 
     expect(container.querySelector(".is-dimmed")).toBeNull();
     expect(container.querySelector(".is-spotlight")).toBeNull();
+  });
+});
+
+// WF-085 review (both final reviewers, CONFIRMED): at <=720px `.board` (not
+// `.board-region`) is the intended horizontal scroller — Board.tsx binds
+// onScroll={handleTrackScroll} directly to the `.board` div, and LaneIconNav
+// is a sibling of `.board` inside `.board-region` that must stay put while
+// `.board` scrolls. Two bugs conspired to break this: (1) the base
+// `.board { min-width: max-content }` rule was never overridden on mobile,
+// so `.board` had no internal overflow of its own — it overflowed its
+// PARENT `.board-region` instead, making `.board-region` the real
+// horizontal scroller and dragging the icon-nav off-screen on swipe; (2) a
+// duplicate/orphaned `.board-region` rule (resurrected by cherry-pick
+// 470fd6d) still declared `scroll-snap-type: x mandatory` inside the mobile
+// media query, alongside the later intentional `.board-region` rule — a
+// second, competing horizontal snap container nested around `.board`.
+// styles.css is never imported by these component tests (only main.tsx
+// imports it, and CSS imports are stubbed under vitest — see the
+// WF-082/WF-085b guards in CardDetailDrawer.test.tsx/TopBar.test.tsx for the
+// same rationale), so this reads the real stylesheet source directly.
+describe("mobile board scroll-container (WF-085 review — CSS regression guard)", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"),
+    "utf8"
+  );
+
+  // Isolate the `@media (max-width: 720px) { ... }` block by brace-depth
+  // matching (the block contains many nested rules, so a naive
+  // non-greedy `[^}]*` regex would stop at the first inner `}`).
+  function mobileBlock(): string {
+    const start = css.indexOf("@media (max-width: 720px)");
+    expect(
+      start,
+      "expected an @media (max-width: 720px) block in styles.css"
+    ).toBeGreaterThan(-1);
+    const braceStart = css.indexOf("{", start);
+    let depth = 0;
+    let i = braceStart;
+    for (; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return css.slice(braceStart + 1, i);
+  }
+
+  function ruleBodies(block: string, selector: string): string[] {
+    const escaped = selector.replace(/[.]/g, "\\.");
+    const re = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "g");
+    const bodies: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(block))) {
+      bodies.push(match[1]);
+    }
+    return bodies;
+  }
+
+  it("no mobile .board-region rule declares scroll-snap-type (the orphaned duplicate from 470fd6d is gone)", () => {
+    const bodies = ruleBodies(mobileBlock(), ".board-region");
+    expect(
+      bodies.length,
+      "expected at least one .board-region rule inside the mobile block"
+    ).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).not.toMatch(/scroll-snap-type/);
+    }
+  });
+
+  it("the mobile .board rule overrides min-width to 0, so .board (not .board-region) has real internal overflow", () => {
+    // `\.board\s*\{` (not `.board-region`/`.board-toast`/etc — those have
+    // a `-` immediately after "board", not whitespace then "{").
+    const bodies = ruleBodies(mobileBlock(), ".board");
+    expect(
+      bodies.length,
+      "expected an exact `.board { ... }` rule inside the mobile block"
+    ).toBeGreaterThan(0);
+    expect(bodies.some((body) => /min-width:\s*0\b/.test(body))).toBe(true);
+  });
+
+  // mobile-v2 refinement: empty lanes briefly became full 88vw snap panes
+  // (so an empty lane's icon-nav entry had somewhere to jump to), then got
+  // reverted — an empty lane's nav icon is disabled/faded instead, and the
+  // lane itself goes back to being a thin, non-snapping sliver. This locks
+  // that revert in so `.lane--empty` never re-grows into a swipe pane.
+  it("the mobile .lane--empty rule stays a non-snapping sliver (44px, scroll-snap-align: none) — no swipe pane for a lane with a disabled nav icon", () => {
+    const bodies = ruleBodies(mobileBlock(), ".lane--empty");
+    expect(
+      bodies.length,
+      "expected an exact `.lane--empty { ... }` rule inside the mobile block"
+    ).toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body).toMatch(/scroll-snap-align:\s*none/);
+      expect(body).not.toMatch(/88vw/);
+    }
+  });
+});
+
+// WF-085 in-progress lane: mobile (<=720px, stubbed via `window.matchMedia`
+// — jsdom itself doesn't implement it, see setupTests.ts's default polyfill)
+// collapses the 7 stage lanes into ONE "In Progress" tab/pane
+// (`collapseStagesForMobile`, board/layout.ts), and each in-flight card
+// inside that merged pane carries its own small stage icon (CardTile's
+// `showStage`, wired by Lane.tsx off `lane.kind === "in-progress"`). The
+// sibling "desktop" test below — matchMedia stubbed NOT-mobile — locks in
+// the "byte-for-byte unchanged" guardrail: same 11-lane nav every other test
+// in this file already exercises.
+describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(getRepos).mockResolvedValue({ repos: [] });
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  function stubViewport(matches: boolean) {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+
+  it("mobile: collapses the 7 stage tabs into one In Progress tab, merging their cards into one swipe pane", async () => {
+    stubViewport(true);
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Backlog");
+
+    // Merged tab present with the combined stage-lane count — only
+    // WF-EPIC-C2 (Implementation) carries a stage in this fixture.
+    expect(screen.getByLabelText("In Progress, 1 cards")).toBeInTheDocument();
+
+    // NOT the individual stage tabs (Implementation, Bootstrap, ...).
+    expect(
+      screen.queryByLabelText(/^Implementation, /)
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Bootstrap, /)).not.toBeInTheDocument();
+
+    // The swipe track has exactly one merged pane, holding the card — no
+    // leftover per-stage pane.
+    const pane = container.querySelector('[data-lane-key="in-progress"]');
+    expect(pane).not.toBeNull();
+    expect(pane!.querySelector('[data-card-id="WF-EPIC-C2"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-lane-key="stage:implementation"]')
+    ).toBeNull();
+  });
+
+  it("mobile: each in-flight card in the merged lane gets its own stage icon", async () => {
+    stubViewport(true);
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    const { container } = render(<App />);
+    await screen.findByText("Backlog");
+
+    const tile = container.querySelector('[data-card-id="WF-EPIC-C2"]');
+    expect(tile).not.toBeNull();
+    const icon = tile!.querySelector("img.card-tile__stage-icon");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("alt", "Implementation");
+  });
+
+  it("desktop (matchMedia reports not-mobile): full 11-lane nav is untouched — stage tabs present, no In Progress tab", async () => {
+    stubViewport(false);
+    vi.mocked(getBoard).mockResolvedValueOnce(fixture);
+
+    render(<App />);
+    await screen.findByText("Backlog");
+
+    expect(
+      screen.getByLabelText("Implementation, 1 cards")
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^In Progress, /)).not.toBeInTheDocument();
   });
 });

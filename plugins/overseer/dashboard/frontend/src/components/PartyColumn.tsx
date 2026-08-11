@@ -2,6 +2,13 @@ import type { PartyMember } from "../board/party";
 import { prLabel } from "../board/prLabel";
 import PartyAvatar from "./PartyAvatar";
 
+/** WF-084: short display form of a census session id — first 8 chars plus
+ * an ellipsis when the id runs longer, verbatim otherwise. The full id
+ * always stays available via the row's `title` attribute. */
+function shortSessionId(id: string): string {
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
 export interface PartyColumnProps {
   party: PartyMember[];
   /** WF-031 branch filter: `null`/absent clears it; otherwise every row
@@ -66,6 +73,13 @@ function PartyColumn({
               <div className="party-row__body">
                 <div className="party-row__name">
                   {session.session_name || session.id}
+                </div>
+                <div
+                  className="party-row__session-id"
+                  title={session.id}
+                  style={{ fontSize: "0.7em", opacity: 0.6 }}
+                >
+                  {shortSessionId(session.id)}
                 </div>
                 {session.model && (
                   <div className="party-row__class">{session.model}</div>

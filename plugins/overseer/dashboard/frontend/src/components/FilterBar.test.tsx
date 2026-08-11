@@ -14,6 +14,11 @@ const base = {
   onPriority: () => {},
   onComplexity: () => {},
   onClear: () => {},
+  // WF-085b: expanded by default here so every other test in this file (all
+  // exercising the bar's own controls, not the collapse behaviour) keeps
+  // finding a reachable/visible bar without opting in per-test — the
+  // collapse itself is covered by the dedicated describe block below.
+  controlsOpen: true,
 };
 
 describe("<FilterBar/>", () => {
@@ -89,5 +94,29 @@ describe("<FilterBar/>", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+// WF-085b: the root element carries a stable id + the native `hidden`
+// attribute driven by `controlsOpen`, mirroring TopBar's own
+// `#topbar-controls-group` so App.tsx's single "Controls ▾" toggle can fold
+// this bar away on mobile alongside it (styles.css confines the actual
+// hide/show effect to the ≤720px media query — see App.test.tsx/
+// TopBar.test.tsx for the cross-component wiring; this is just the unit
+// contract on FilterBar's own root element).
+describe("<FilterBar/> mobile collapse wiring (WF-085b)", () => {
+  it("has a stable #filter-bar id for aria-controls to reference", () => {
+    render(<FilterBar {...base} />);
+    expect(document.getElementById("filter-bar")).not.toBeNull();
+  });
+
+  it("carries the native hidden attribute when controlsOpen is false", () => {
+    render(<FilterBar {...base} controlsOpen={false} />);
+    expect(document.getElementById("filter-bar")).not.toBeVisible();
+  });
+
+  it("is visible when controlsOpen is true", () => {
+    render(<FilterBar {...base} controlsOpen={true} />);
+    expect(document.getElementById("filter-bar")).toBeVisible();
   });
 });

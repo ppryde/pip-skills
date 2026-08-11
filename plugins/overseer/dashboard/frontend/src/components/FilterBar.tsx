@@ -20,6 +20,14 @@ export interface FilterBarProps {
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * passed straight through to `LabelFilterPopover` when it's open. */
   colorRegistry?: Record<string, string>;
+  /** WF-085b: App-owned mobile "Controls ▾" collapse state (shared with
+   * TopBar's own `#topbar-controls-group`) — this component's root element
+   * carries `id="filter-bar"` + `hidden={!controlsOpen}` so ONE toggle
+   * folds search/priority/complexity/labels/Clear away on mobile alongside
+   * TopBar's group. styles.css confines the `[hidden]` override to the
+   * ≤720px media query, so desktop always renders this bar regardless of
+   * the flag (mirrors `#topbar-controls-group`'s existing pattern). */
+  controlsOpen: boolean;
 }
 
 const PRIORITIES = ["P0", "P1", "P2", "P3", "P4"];
@@ -49,6 +57,7 @@ function FilterBar({
   onComplexity,
   onClear,
   colorRegistry,
+  controlsOpen,
 }: FilterBarProps) {
   const [labelsOpen, setLabelsOpen] = useState(false);
   const labelBadge = filter.includeLabels.length + filter.excludeLabels.length;
@@ -62,7 +71,7 @@ function FilterBar({
   }
 
   return (
-    <div className="filter-bar">
+    <div id="filter-bar" className="filter-bar" hidden={!controlsOpen}>
       <input
         className="filter-bar__search"
         aria-label="search"

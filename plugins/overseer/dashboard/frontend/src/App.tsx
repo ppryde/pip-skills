@@ -108,7 +108,13 @@ function App() {
   // whole-object reference.
   const { filter, setQuery, setPriority, setComplexity, clear, cycleLabel } =
     useCardFilter();
-  const [showArchive, setShowArchive] = useState(false);
+  // WF-0XX item 6: the Abandoned lane is opt-OUT now, not opt-in — it used
+  // to default hidden (`false`) so a fresh load never showed it, but that
+  // made the lane (and its nav icon) invisible unless a user discovered the
+  // Controls-group checkbox first. Defaulting `true` shows it (empty →
+  // faded "0" icon via the existing empty-lane treatment when there's
+  // nothing abandoned) on both viewports; the checkbox still toggles it off.
+  const [showArchive, setShowArchive] = useState(true);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   // HANDOFF §State Management assigns this App-level, alongside the
   // existing openCardId precedent — PartyOverlay renders as a sibling of
@@ -123,6 +129,15 @@ function App() {
   // this state never lives on TopBar itself).
   const [clearOpen, setClearOpen] = useState(false);
   const [clearToast, setClearToast] = useState<string | null>(null);
+  // WF-085b: mobile-only "Controls ▾" collapse state, lifted here from
+  // TopBar so ONE toggle drives BOTH TopBar's own secondary-controls group
+  // AND the separate <FilterBar/> below (previously TopBar-local state only
+  // reached its own group, leaving FilterBar always visible on mobile —
+  // see the mobile-v2 brief). Collapsed by default; desktop (>720px) always
+  // shows both groups regardless of this flag (styles.css confines the
+  // `[hidden]` override to the ≤720px media query, same pattern as the
+  // pre-existing `#topbar-controls-group`).
+  const [controlsOpen, setControlsOpen] = useState(false);
 
   // `board.project` is a loose/`unknown` shape per the frozen contract (see
   // api/types.ts) — the backend currently sends the repo root name as a
@@ -221,6 +236,11 @@ function App() {
         // actually selected — `undefined` (rather than a no-op closure)
         // means TopBar renders no Clear control at all until then.
         onClear={selectedRepo ? () => setClearOpen(true) : undefined}
+        // WF-085b: App-owned collapse state (see comment above) — TopBar
+        // still renders the "Controls ▾" button/group, it just no longer
+        // owns whether they're open.
+        controlsOpen={controlsOpen}
+        onToggleControls={() => setControlsOpen((open) => !open)}
       />
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
@@ -242,6 +262,10 @@ function App() {
           onComplexity={setComplexity}
           onClear={clear}
           colorRegistry={board.label_colors}
+          // WF-085b: folds FilterBar under the SAME "Controls ▾" toggle as
+          // TopBar's own secondary-controls group on mobile — see the
+          // `controlsOpen` state comment in App.tsx above.
+          controlsOpen={controlsOpen}
         />
       )}
       <main className="board-region">
@@ -279,6 +303,7 @@ function App() {
         mutate={mutate}
         inFlight={inFlight}
         allCardIds={board?.cards.map((c) => c.id) ?? []}
+        cardTitles={Object.fromEntries((board?.cards ?? []).map((c) => [c.id, c.title]))}
         party={party}
         colorRegistry={board?.label_colors}
       />

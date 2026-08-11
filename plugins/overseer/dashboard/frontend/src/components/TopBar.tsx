@@ -53,6 +53,15 @@ export interface TopBarProps {
    * `selectedRepo`), so there is never a Clear control with nothing to
    * target. */
   onClear?: () => void;
+  /** WF-085b: mobile-only "Controls ▾" collapse state — App-owned (lifted
+   * out of TopBar) so the ONE toggle can drive both TopBar's own
+   * `#topbar-controls-group` AND the separate `<FilterBar/>` App renders as
+   * a sibling below it. TopBar still renders the button and wraps its own
+   * group with `hidden={!controlsOpen}` — it just no longer holds the
+   * `useState` itself. */
+  controlsOpen: boolean;
+  /** Flips `controlsOpen` in App.tsx. */
+  onToggleControls: () => void;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * threaded straight through to `LabelSettingsDialog` when it's open.
    * Optional (defaults to `{}`, same "undefined indistinguishable from
@@ -128,6 +137,8 @@ function TopBar({
   questingCountOverride,
   onClear,
   labelColors,
+  controlsOpen,
+  onToggleControls,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -168,6 +179,23 @@ function TopBar({
           </div>
         </div>
 
+        {/* Mobile row layout: the topbar is one wrapping flex row and every
+            child below is a direct flex item of it — desktop relies on
+            natural DOM order (unchanged), mobile re-sequences everything
+            with `order` inside the `@media (max-width:720px)` block in
+            styles.css. Real width-based wrapping alone isn't reliable
+            across phone widths (e.g. repo+branch together could still be
+            narrow enough to share a line with the rest pills on a wider
+            phone), so these three zero-height spacers force hard row
+            boundaries regardless of width — `aria-hidden` (not real
+            content), `display:none` outside the mobile block so desktop
+            never sees them at all. Their DOM position here is arbitrary
+            (CSS `order` places them, not sibling adjacency) — grouped
+            together right after identity to keep this diff small. */}
+        <span className="topbar__row-break topbar__row-break--r2" aria-hidden="true" />
+        <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
+        <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
+
         <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
         <button
           type="button"
@@ -176,37 +204,11 @@ function TopBar({
         >
           ＋ New card
         </button>
-        {onClear && (
-          <button
-            type="button"
-            className="topbar-clear danger"
-            onClick={onClear}
-            title="Clear this repo's data"
-          >
-            Clear…
-          </button>
-        )}
-        <button
-          type="button"
-          // Task 10: shares the "＋ New card" control's Role-A button paint
-          // (non-destructive positive action, same wobble shape) — see
-          // `.topbar__new-card` in styles.css, reused here rather than
-          // duplicated.
-          className="topbar__new-card topbar__labels-settings"
-          onClick={() => setLabelSettingsOpen(true)}
-          title="Edit label colors"
-        >
-          Labels…
-        </button>
         <BranchFilter
           branches={branches}
           activeBranch={activeBranch}
           onSelect={onSelectBranch}
         />
-
-        <div className="topbar__threshold">
-          <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
-        </div>
 
         {limits?.five_hour?.used_percentage !== undefined && (
           <span className="topbar__pill" title="5h window">
@@ -219,23 +221,118 @@ function TopBar({
           </span>
         )}
 
+        {/* WF-085/085b: mobile-only "Controls ▾" toggle — collapses the
+            secondary-controls group below AND the separate <FilterBar/>
+            App.tsx renders as its own sibling, behind one tap on a ≤720px
+            viewport (styles.css hides this button entirely above that
+            breakpoint, so desktop never shows it). `aria-expanded` +
+            `aria-controls` wire it to BOTH regions it drives — a
+            space-separated id list is valid per WAI-ARIA. `controlsOpen`/
+            `onToggleControls` are now App-owned (lifted out of TopBar) so
+            the same flag reaches FilterBar too. */}
         <button
           type="button"
-          className="topbar__refresh"
-          onClick={onRefresh}
-          disabled={refreshing}
+          className="topbar__controls-toggle"
+          aria-expanded={controlsOpen}
+          aria-controls="topbar-controls-group filter-bar"
+          onClick={onToggleControls}
         >
-          {refreshing ? "Refreshing…" : "Refresh"}
+          Controls {controlsOpen ? "▴" : "▾"}
         </button>
 
-        <label className="topbar__archive-toggle">
-          <input
-            type="checkbox"
-            checked={showArchive}
-            onChange={onToggleArchive}
-          />
-          Abandoned
-        </label>
+        {/* WF-085: the secondary-controls group — Last Orders (threshold),
+            Labels…, Refresh, Abandoned toggle, Clear… (WF-090: Labels…
+            grouped with the action buttons, Clear… kept rightmost).
+            `hidden` is driven by `controlsOpen` (default collapsed), but
+            styles.css only lets that attribute actually hide anything
+            inside the ≤720px media query — above it
+            `.topbar__controls-group` is unconditionally `display: contents`,
+            so desktop renders every control exactly as before, unaffected
+            by this flag. */}
+        <div
+          id="topbar-controls-group"
+          className="topbar__controls-group"
+          hidden={!controlsOpen}
+        >
+          <div className="topbar__threshold">
+            <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
+          </div>
+
+          {/* WF-090 follow-up: Labels…/Refresh/Abandoned/Clear… wrapped in
+              their own atomic flex unit — desktop is natural-wrap (no
+              `order` above 720px), and `.topbar__refresh`'s pre-existing
+              `margin-left: auto` (hugs the right edge of WHATEVER line it
+              lands on) means the exact wrap point between these four and
+              everything before them (repo/branch/rest-pills/Last Orders)
+              shifts with viewport width and even live content width (gold
+              total digit count, timestamp, etc) — moving Labels… next to
+              Refresh in DOM order alone still let it get stranded on the
+              upper line at some widths (verified: reproducible at 1500px,
+              NOT at 1180px, same content). Wrapping all four in one
+              `.topbar__controls-actions` box makes them wrap TOGETHER as a
+              single flex item of `.topbar` — Labels… can never again land
+              on a different line than Refresh/Abandoned/Clear…, regardless
+              of width. `display: contents` on this wrapper inside the
+              ≤720px block (styles.css) fully un-wraps it back to individual
+              flex items of `.topbar__controls-group` on mobile, where the
+              existing per-child `order` resets (below) still apply
+              untouched. */}
+          <div className="topbar__controls-actions">
+            <button
+              type="button"
+              // Task 10: shares the "＋ New card" control's Role-A button paint
+              // (non-destructive positive action, same wobble shape) — see
+              // `.topbar__new-card` in styles.css, reused here rather than
+              // duplicated.
+              className="topbar__new-card topbar__labels-settings"
+              onClick={() => setLabelSettingsOpen(true)}
+              title="Edit label colors"
+            >
+              Labels…
+            </button>
+
+            <button
+              type="button"
+              className="topbar__refresh"
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+
+            <label className="topbar__archive-toggle">
+              <input
+                type="checkbox"
+                checked={showArchive}
+                onChange={onToggleArchive}
+              />
+              Abandoned
+            </label>
+
+            {/* WF-090: moved to the END of this group (was first) — Clear is
+                the one destructive action here, so it now sits rightmost,
+                separated from the constructive controls (Labels…/Refresh/
+                Abandoned) rather than leading them. Mobile's `flex-wrap`
+                row needed a small styles.css fix alongside it: "Labels…"
+                reuses `.topbar__new-card`'s class, which carries an
+                `order: 40` meant for that button's OTHER life in the outer
+                topbar row — inside THIS group's own flex context that
+                leaked order was sorting Labels… after everything else, so
+                `.topbar-clear`/`.topbar__new-card` both get an explicit
+                reset scoped to `.topbar__controls-group` (see styles.css)
+                rather than relying on DOM order alone. */}
+            {onClear && (
+              <button
+                type="button"
+                className="topbar-clear danger"
+                onClick={onClear}
+                title="Clear this repo's data"
+              >
+                Clear…
+              </button>
+            )}
+          </div>
+        </div>
 
         {quarantinedCount > 0 && (
           <span className="topbar__quarantine-banner">
@@ -266,11 +363,22 @@ function TopBar({
           <span className="topbar__fleet-icon" aria-hidden="true">
             ⚔
           </span>
-          {questingCount} questing
-          {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
-          {fleet.nearThreshold > 0 && (
-            <> · {fleet.nearThreshold} near threshold</>
-          )}
+          {/* Mobile-only (styles.css): the full "N questing · top ctx N% ·
+              N near threshold" line can be wider than R4's remaining row
+              space next to the gold/vanquished pills — wrapping it in its
+              own span gives ellipsis-truncation a real box to clip (a bare
+              text run inside a flex container becomes an anonymous flex
+              item CSS can't target), so the pill's OWN height stays a
+              single line/matches its neighbours instead of growing to fit
+              a wrapped second line. Desktop is untouched (no width cap
+              there), so the full line still always shows in full. */}
+          <span className="topbar__fleet-label">
+            {questingCount} questing
+            {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
+            {fleet.nearThreshold > 0 && (
+              <> · {fleet.nearThreshold} near threshold</>
+            )}
+          </span>
         </button>
       </header>
       {/* Task 10: NewCardDialog is a sibling of `<header>`, not nested

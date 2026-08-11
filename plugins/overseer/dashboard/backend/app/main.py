@@ -382,6 +382,28 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     launch_root = root
     launch_host = host
 
+    @app.middleware("http")
+    async def _shell_cache_headers(request, call_next):
+        """Never cache the SPA shell; keep the hashed assets immutable.
+
+        `index.html` is served as `text/html` and names the current hashed
+        JS/CSS/asset bundles. If a browser caches the shell (the launcher
+        sends only etag/last-modified, so heuristic caching kicks in), a plain
+        reload keeps loading an OLD shell that points at since-removed bundles
+        — the UI silently goes stale (this repeatedly hid fresh builds during
+        the WF-085 review; a `?v=N` hack was needed each time). `no-store` on
+        the shell fixes that at the source. Everything under `/assets/` is
+        content-hashed, so its bytes never change under a given URL — mark it
+        long-lived + immutable so those DO stay cached.
+        """
+        response = await call_next(request)
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
     def require_token(x_overseer_token: str | None = Header(default=None)) -> None:
         """Gate mutating routes when a token is in effect.
 

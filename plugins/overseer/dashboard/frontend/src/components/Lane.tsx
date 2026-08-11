@@ -24,7 +24,7 @@ export interface LaneProps {
 }
 
 /**
- * A single column: header (label + count) + a vertical list of tiles.
+ * A single column: header (label) + a vertical list of tiles.
  * Placement of cards into this lane is entirely `layout.ts`'s job — this
  * component just renders whatever `lane.cards` it is given, in order.
  *
@@ -66,9 +66,13 @@ function Lane({
 
   return (
     <div className={className} data-lane-key={lane.key} ref={setNodeRef}>
+      {/* WF-085: the card count no longer duplicates here — it lives only
+          in the mobile icon-nav strip (LaneIconNav), which reads
+          `lane.cards.length` itself. Desktop had no other consumer of
+          `.lane__count`, so this is a straight removal, not a move of
+          markup. */}
       <div className={`lane__header lane__header--${accentKey}`}>
         <span className="lane__label">{lane.label}</span>
-        <span className="lane__count">{lane.cards.length}</span>
       </div>
       <SortableContext
         items={lane.cards.map((c) => c.id)}
@@ -124,6 +128,15 @@ function Lane({
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                   colorRegistry={colorRegistry}
+                  // WF-085 in-progress lane, Part B: `kind:"in-progress"`
+                  // ONLY ever exists on the mobile merged lane
+                  // (`collapseStagesForMobile` — desktop's real `kind:
+                  // "stage"` lanes never carry this kind), so gating off the
+                  // lane's own kind — rather than threading a separate
+                  // isMobile flag down from Board — already guarantees the
+                  // stage icon is mobile-only, with no desktop card face
+                  // change at all.
+                  showStage={lane.kind === "in-progress"}
                 />
               );
             })}

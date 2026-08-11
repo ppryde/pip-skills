@@ -10,7 +10,13 @@
  */
 import type { BoardCard, Stage } from "../api/types";
 
-export type LaneKind = "backlog" | "stage" | "parked" | "done" | "archive";
+export type LaneKind =
+  | "backlog"
+  | "stage"
+  | "parked"
+  | "done"
+  | "archive"
+  | "in-progress";
 
 export interface Lane {
   key: string;
@@ -180,4 +186,51 @@ export function groupIntoLanes(cards: BoardCard[]): Lane[] {
   ];
 
   return lanes;
+}
+
+/**
+ * Mobile-only view helper (WF-085): collapses the 7 `kind:"stage"` lanes
+ * `groupIntoLanes` always returns into ONE synthetic "in-progress" lane, in
+ * place of the first stage lane — so the result stays `[backlog,
+ * in-progress, parked, done, archive]`, same relative position the stage
+ * lanes occupied. Every other lane (backlog/parked/done/archive) passes
+ * through untouched, same order, same object.
+ *
+ * Pure and desktop-inert: nothing calls this unless `Board.tsx`'s
+ * `useMediaQuery` reports mobile — desktop always renders `groupIntoLanes`'s
+ * own 11-lane result directly.
+ *
+ * Card order within the merged lane is STAGES order (bootstrap first,
+ * awaiting-merge last), each stage's own internal (recency) order preserved
+ * — i.e. exactly the concatenation of each `stage:<S>` lane's `cards` in
+ * `STAGES` order, regardless of the order stage lanes appear in `lanes`.
+ */
+export function collapseStagesForMobile(lanes: Lane[]): Lane[] {
+  const stageLanesByStage = new Map<Stage, Lane>();
+  for (const lane of lanes) {
+    if (lane.kind === "stage" && lane.stage) {
+      stageLanesByStage.set(lane.stage, lane);
+    }
+  }
+
+  const inProgressLane: Lane = {
+    key: "in-progress",
+    label: "In Progress",
+    kind: "in-progress",
+    cards: STAGES.flatMap((stage) => stageLanesByStage.get(stage)?.cards ?? []),
+  };
+
+  const result: Lane[] = [];
+  let inserted = false;
+  for (const lane of lanes) {
+    if (lane.kind === "stage") {
+      if (!inserted) {
+        result.push(inProgressLane);
+        inserted = true;
+      }
+      continue;
+    }
+    result.push(lane);
+  }
+  return result;
 }

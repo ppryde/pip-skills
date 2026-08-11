@@ -179,6 +179,65 @@ describe("<LinkEditor/>", () => {
     await waitFor(() => expect(onMutated).toHaveBeenCalledTimes(1));
   });
 
+  it("shows each candidate card's title in small text alongside its id in the add-dependency picker", () => {
+    const mutate = makeMutate();
+    render(
+      <LinkEditor
+        cardId="WF-3"
+        parent={null}
+        dependsOn={[]}
+        allCardIds={["WF-1", "WF-2", "WF-3"]}
+        cardTitles={{ "WF-1": "Fix the thing", "WF-2": "Ship the other thing" }}
+        mutate={mutate}
+        inFlight={false}
+      />
+    );
+    const options = Array.from(
+      screen.getByLabelText("Add dependency").querySelectorAll("option")
+    ) as HTMLOptionElement[];
+    const wf1 = options.find((o) => o.value === "WF-1");
+    expect(wf1?.textContent).toContain("WF-1");
+    expect(wf1?.textContent).toContain("Fix the thing");
+  });
+
+  it("falls back to the bare id when a candidate has no known title", () => {
+    const mutate = makeMutate();
+    render(
+      <LinkEditor
+        cardId="WF-3"
+        parent={null}
+        dependsOn={[]}
+        allCardIds={["WF-1", "WF-2", "WF-3"]}
+        cardTitles={{ "WF-1": "Fix the thing" }}
+        mutate={mutate}
+        inFlight={false}
+      />
+    );
+    const options = Array.from(
+      screen.getByLabelText("Add dependency").querySelectorAll("option")
+    ) as HTMLOptionElement[];
+    const wf2 = options.find((o) => o.value === "WF-2");
+    expect(wf2?.textContent?.trim()).toBe("WF-2");
+  });
+
+  it("shows the title in small muted text next to the id for an existing dependency", () => {
+    const mutate = makeMutate();
+    render(
+      <LinkEditor
+        cardId="WF-3"
+        parent={null}
+        dependsOn={["WF-2"]}
+        allCardIds={["WF-1", "WF-2", "WF-3"]}
+        cardTitles={{ "WF-2": "Ship the other thing" }}
+        mutate={mutate}
+        inFlight={false}
+      />
+    );
+    const title = screen.getByText("— Ship the other thing");
+    expect(title.tagName).toBe("SPAN");
+    expect(title).toHaveStyle({ fontSize: "0.85em" });
+  });
+
   it("disables all controls while a mutation is in flight", () => {
     const mutate = makeMutate();
     render(

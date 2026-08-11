@@ -32,6 +32,15 @@ function boardResponse(): BoardResponse {
   };
 }
 
+// WF-085b: `controlsOpen` is now App-owned and drives BOTH TopBar's own
+// `#topbar-controls-group` AND the separate <FilterBar/> App renders below
+// it — collapsed by default, so any test that reaches into either group
+// (TopBar's Clear…/Labels…/Refresh/Abandoned, or FilterBar's search/
+// priority/complexity/Labels/Clear filters) has to open it first.
+function openControls() {
+  fireEvent.click(screen.getByRole("button", { name: /^controls/i }));
+}
+
 function card(overrides: Partial<BoardCard> & { id: string }): BoardCard {
   return {
     title: `Title ${overrides.id}`,
@@ -213,6 +222,10 @@ describe("<App/> — task 7: Clear control wiring", () => {
     await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
 
+    // WF-085/085b: Clear… now lives behind the collapsed-by-default
+    // "Controls ▾" toggle — open it before it's reachable by role.
+    openControls();
+
     // Exact "Clear…" (with ellipsis) — task 6 added a second, unrelated
     // "Clear filters" button to the filter bar, so a bare /clear/i now
     // matches both.
@@ -279,6 +292,9 @@ describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
     await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
     expect(await screen.findByText("Totally unrelated card")).toBeInTheDocument();
 
+    // WF-085b: FilterBar (search included) now folds under the same
+    // collapsed-by-default "Controls ▾" toggle as TopBar's own group.
+    openControls();
     fireEvent.change(screen.getByLabelText("search"), {
       target: { value: "migration" },
     });
@@ -288,5 +304,69 @@ describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
     );
     expect(screen.getByText("The great migration")).toBeInTheDocument();
     expect(screen.getByText("Migration child")).toBeInTheDocument();
+  });
+});
+
+// Mobile v2 (WF-085b): the "Controls ▾" toggle is one App-owned flag now,
+// so a single click must fold/reveal BOTH TopBar's `#topbar-controls-group`
+// AND the separate `<FilterBar/>` together — previously the toggle only
+// ever reached TopBar's own group, leaving FilterBar (search/priority/
+// complexity/labels/Clear filters) stuck always-visible on mobile. jsdom
+// honours the native `hidden` attribute in its accessibility tree the same
+// way regardless of any stylesheet (see TopBar.test.tsx's own mobile
+// describe block for the same rationale) — styles.css itself additionally
+// confines the actual show/hide effect to the ≤720px media query, so
+// desktop is unaffected; that CSS-level guarantee is covered by the
+// `[hidden]`-scoped rules in styles.css directly, not re-asserted here.
+describe("<App/> mobile Controls toggle folds FilterBar together with TopBar's group (WF-085b)", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("collapses both TopBar's controls group and FilterBar by default", async () => {
+    render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    // `hidden`-attributed elements stay in the DOM (jsdom's `toBeVisible()`
+    // checks the attribute directly); `getByLabelText` itself doesn't
+    // filter by visibility the way `getByRole` does, so the visibility
+    // assertions above are the actual collapse proof, not a presence check.
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+    expect(document.getElementById("filter-bar")).not.toBeVisible();
+  });
+
+  it("one click on Controls ▾ reveals both TopBar's group and FilterBar together", async () => {
+    render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    openControls();
+
+    expect(document.getElementById("topbar-controls-group")).toBeVisible();
+    expect(document.getElementById("filter-bar")).toBeVisible();
+    expect(screen.getByLabelText("search")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^refresh/i })).toBeInTheDocument();
+  });
+
+  it("a second click re-collapses both together", async () => {
+    render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    openControls();
+    openControls();
+
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+    expect(document.getElementById("filter-bar")).not.toBeVisible();
   });
 });

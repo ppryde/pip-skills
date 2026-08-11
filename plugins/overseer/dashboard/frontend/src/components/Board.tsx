@@ -1,4 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   DndContext,
   useSensor,
@@ -8,11 +15,14 @@ import {
 import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
-import { groupIntoLanes } from "../board/layout";
+import { collapseStagesForMobile, groupIntoLanes } from "../board/layout";
+import { laneIconKey } from "../board/laneIcons";
+import { useMediaQuery } from "../board/useMediaQuery";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
 import { locateDropTarget, resolveDrop } from "../board/dragPlan";
 import { runDropPlan } from "../board/runDropPlan";
 import Lane from "./Lane";
+import LaneIconNav from "./LaneIconNav";
 import PartyColumn from "./PartyColumn";
 
 export interface BoardProps {
@@ -76,6 +86,23 @@ function Board({
     [board.cards, visibleIds]
   );
   const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
+
+  // WF-085 in-progress lane: mobile (<=720px, same breakpoint the CSS mobile
+  // block already gates on) collapses the 7 `kind:"stage"` lanes into ONE
+  // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
+  // mostly-empty swipe panes/nav icons on a phone. `displayLanes` (NOT
+  // `lanes`) is what the swipe track and the icon-nav both render from
+  // below, so they can never disagree about which lanes exist. Desktop
+  // (`isMobile === false`) is byte-for-byte the old path: `displayLanes ===
+  // lanes`, the real 11-lane result. Drag/drop below deliberately keeps
+  // using `lanes` (the real per-stage layout), never `displayLanes` — see
+  // `handleDragEnd`'s comment.
+  const isMobile = useMediaQuery("(max-width:720px)");
+  const displayLanes = useMemo(
+    () => (isMobile ? collapseStagesForMobile(lanes) : lanes),
+    [isMobile, lanes]
+  );
+
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
     null
   );
@@ -91,9 +118,154 @@ function Board({
     setHighlightedEpicId((current) => (current === id ? null : id));
   };
 
-  const visibleLanes = lanes.filter(
+  const visibleLanes = displayLanes.filter(
     (lane) => lane.kind !== "archive" || showArchive
   );
+
+  // WF-085a/mobile-v2: mobile icon-nav (LaneIconNav) + swipe-lane
+  // active-sync. The nav lists EVERY lane in `visibleLanes` (same order,
+  // same `.key`), including empty stage lanes, for completeness/even
+  // spacing — but an empty lane's box renders `disabled`/faded and is NOT
+  // a tap target (LaneIconNav.tsx keys this off `count === 0`), because the
+  // swipe track itself does NOT give an empty lane a real pane: `.lane--
+  // empty` is a thin, non-snapping sliver (see the mobile media block) —
+  // there's nowhere for a tap-jump to land. Always rendered — CSS
+  // (`@media (max-width:720px)`) is what actually shows the strip / turns
+  // `.board` into a snap-scroller; on desktop the listener below just never
+  // fires because `.board` itself never scrolls there.
+  const navLanes = useMemo(
+    () =>
+      visibleLanes.map((lane) => ({
+        key: lane.key,
+        label: lane.label,
+        count: lane.cards.length,
+        accent: laneIconKey(lane),
+      })),
+    [visibleLanes]
+  );
+
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [activeLaneKey, setActiveLaneKey] = useState<string>(
+    navLanes.find((lane) => lane.count > 0)?.key ?? navLanes[0]?.key ?? ""
+  );
+
+  // The filter bar / archive toggle can remove the currently-active lane
+  // from `navLanes` out from under us (e.g. a search that no longer matches
+  // its cards, or the active lane's last card leaves it empty) — fall back
+  // to the first remaining NON-EMPTY lane, never an empty one: its nav icon
+  // is disabled/non-interactive (no swipe pane to sync against), so it must
+  // never be left as the "active" pill either.
+  useEffect(() => {
+    if (navLanes.length === 0) return;
+    const current = navLanes.find((lane) => lane.key === activeLaneKey);
+    if (!current || current.count === 0) {
+      const fallback = navLanes.find((lane) => lane.count > 0) ?? navLanes[0];
+      setActiveLaneKey(fallback.key);
+    }
+  }, [navLanes, activeLaneKey]);
+
+  // Scroll-sync: on every scroll of the lane track, find whichever
+  // `[data-lane-key]` pane's centre sits nearest the track's own centre and
+  // make that the active lane. Cheap enough (≤11 lanes) to run unthrottled
+  // on scroll — no rAF/debounce needed at this scale. Only NON-EMPTY lanes
+  // are candidates (`navLaneKeys`) — an empty lane's sliver can still be
+  // nearest-centre mid-swipe (it's not a snap-stop), but it must never
+  // become the active key since its nav icon is disabled/faded, not a real
+  // target to light up.
+  const navLaneKeys = useMemo(
+    () => new Set(navLanes.filter((lane) => lane.count > 0).map((lane) => lane.key)),
+    [navLanes]
+  );
+
+  const handleTrackScroll = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const trackRect = track.getBoundingClientRect();
+    const trackCenter = trackRect.left + trackRect.width / 2;
+
+    let nearestKey: string | null = null;
+    let nearestDistance = Infinity;
+    track.querySelectorAll<HTMLElement>("[data-lane-key]").forEach((el) => {
+      const key = el.dataset.laneKey;
+      if (!key || !navLaneKeys.has(key)) return;
+      const rect = el.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      const distance = Math.abs(center - trackCenter);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestKey = key;
+      }
+    });
+
+    if (nearestKey && nearestKey !== activeLaneKey) {
+      setActiveLaneKey(nearestKey);
+    }
+  }, [activeLaneKey, navLaneKeys]);
+
+  // Nav-jump: tapping an icon both sets the active pill immediately (no
+  // waiting on the scroll-settle above) and scrolls that lane's pane to
+  // the track's centre — mirrors the approved prototype's tap-to-jump.
+  const handleNavJump = useCallback((key: string) => {
+    setActiveLaneKey(key);
+    const target = trackRef.current?.querySelector<HTMLElement>(
+      `[data-lane-key="${key}"]`
+    );
+    // Guarded rather than a bare optional call: jsdom (unlike every real
+    // browser) doesn't implement `scrollIntoView` at all — see Element.
+    // prototype in test envs — so an unguarded call would throw in tests.
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, []);
+
+  // Item 8: on mobile, `.board-region`'s page-scroll length must follow the
+  // ACTIVE lane's own content height, not the tallest lane in the row.
+  // `.board` is a single-line flex row of lanes (`align-items: flex-start`,
+  // base rule) — that stops SHORTER lanes being visually stretched, but the
+  // flex LINE's own auto height (and so `.board`'s) is still the max of
+  // every lane in it regardless of align-items, since the line has to be
+  // tall enough to contain its tallest item. So `.board-region`'s vertical
+  // scroll range stayed pinned to the tallest lane even while swiped to a
+  // short one — you could scroll the page down into visually empty space
+  // below a short lane's last card. Measuring the currently-active lane's
+  // pane and pinning `.board`'s OWN height to it (mobile only — see the
+  // inline style below, and `overflow-y: hidden` on `.board` in the mobile
+  // CSS block that actually clips the other, now-taller siblings so they
+  // stop contributing to the scrollable region) makes a short lane's page
+  // scroll stop exactly at its own last card, and a tall lane's full card
+  // list stays reachable via the same page scroll as before. Desktop never
+  // sets this (gated on `isMobile`), so `.board`'s CSS `height: 100%` there
+  // is untouched.
+  const [activeLaneHeight, setActiveLaneHeight] = useState<number | null>(
+    null
+  );
+
+  useLayoutEffect(() => {
+    if (!isMobile) {
+      setActiveLaneHeight(null);
+      return;
+    }
+    const track = trackRef.current;
+    if (!track) return;
+
+    const pane = track.querySelector<HTMLElement>(
+      `[data-lane-key="${activeLaneKey}"]`
+    );
+    if (!pane) return;
+
+    const measure = () => setActiveLaneHeight(pane.scrollHeight);
+    measure();
+
+    // Re-measure when the active lane's OWN content changes size (a card
+    // added/removed/expanded) without needing the active lane to change —
+    // jsdom (unlike every real browser) has no ResizeObserver, so this is
+    // a no-op (not a crash) under the component tests, same guard pattern
+    // as the `scrollIntoView` check in `handleNavJump` above.
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(pane);
+    return () => ro.disconnect();
+  }, [isMobile, activeLaneKey, displayLanes]);
 
   const handleDragStart = useCallback(() => {
     setDragActive(true);
@@ -115,6 +287,15 @@ function Board({
       const dragged = board.cards.find((c) => c.id === draggedId);
       if (!dragged) return;
 
+      // Deliberately `lanes` (the real per-stage layout), never
+      // `displayLanes` — the mobile "in-progress" lane is a view/navigation
+      // construct only, with no single stage of its own, so it must never
+      // be wired as a stage-change drop target. Its droppable id
+      // ("in-progress") never matches any REAL lane key here, so a drop on
+      // its background resolves to `targetLane: undefined` below and
+      // no-ops harmlessly; a drop on a CARD inside it still resolves via
+      // that card's own real stage lane, same as desktop. Either way: no
+      // crash, and desktop drag/drop (the real 7 stage lanes) is untouched.
       const { lane: targetLane, index } = locateDropTarget(
         String(over.id),
         lanes
@@ -159,7 +340,27 @@ function Board({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="board">
+      {/* WF-085: mobile-only icon-nav strip, rendered above the lane track.
+          Desktop hides it entirely via CSS — see `.lane-icon-nav` in
+          styles.css, gated at `@media (max-width:720px)`. */}
+      <LaneIconNav lanes={navLanes} activeKey={activeLaneKey} onJump={handleNavJump} />
+      <div
+        className="board"
+        ref={trackRef}
+        onScroll={handleTrackScroll}
+        // Item 8 (mobile only — see the `activeLaneHeight` effect above):
+        // pins `.board`'s box to the active lane's own content height so
+        // `.board-region`'s page scroll can't run past it. `undefined`
+        // whenever not mobile/not yet measured leaves the CSS `height`
+        // rule (desktop's `100%`, or mobile's `auto` fallback before the
+        // first layout effect run) in full control — never an empty
+        // style attribute on desktop.
+        style={
+          isMobile && activeLaneHeight != null
+            ? { height: `${activeLaneHeight}px` }
+            : undefined
+        }
+      >
         {dragToast && (
           <div className="board-toast" role="status">
             {dragToast}
