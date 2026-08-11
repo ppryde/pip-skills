@@ -16,6 +16,13 @@ import LabelSettingsDialog from "./LabelSettingsDialog";
 import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 
+/** Epic Atlas mobile trail orientation — "across" (default, every viewport)
+ * or "down" (only effective at <=720px; desktop always renders across, see
+ * EpicAtlas.tsx's `downMode` gate). Lives here now that the atlas controls
+ * moved into TopBar (AtlasToolbar.tsx, which used to own this type, is
+ * retired) — App.tsx imports it from this module for its own `useState`. */
+export type TrailOrientation = "across" | "down";
+
 export interface TopBarProps {
   context: Context | null;
   limits: Limits;
@@ -84,6 +91,24 @@ export interface TopBarProps {
    * optional expired the moment that wiring existed. */
   view: "board" | "atlas";
   onSelectView: (view: "board" | "atlas") => void;
+  /** WF-091: the Epic Atlas toolbar folded into the Controls group — three
+   * single toggle buttons rendered ONLY when `view === "atlas"` (retired
+   * standalone `<AtlasToolbar>`, which sat between the topbar and the
+   * chart). App.tsx owns all three as lifted state (was EpicAtlas-local),
+   * same "App owns cross-cutting UI state" precedent as `activeBranch`/
+   * `controlsOpen`. */
+  /** Quest name-tags on the trail — default true (shown). */
+  showNames: boolean;
+  onToggleNames: (next: boolean) => void;
+  /** Vanquished (done) epics — default true (HIDDEN; the prop name is the
+   * negative-sense "hide" flag, matching EpicAtlas's original local state
+   * name so the lifted prop reads the same at both ends). */
+  hideVanquished: boolean;
+  onToggleVanquished: (next: boolean) => void;
+  /** Mobile trail orientation — see `TrailOrientation`'s own doc comment for
+   * the <=720px-only effective gate. */
+  orientation: TrailOrientation;
+  onToggleOrientation: (next: TrailOrientation) => void;
 }
 
 function formatPct(value: number): string {
@@ -148,6 +173,12 @@ function TopBar({
   onToggleControls,
   view,
   onSelectView,
+  showNames,
+  onToggleNames,
+  hideVanquished,
+  onToggleVanquished,
+  orientation,
+  onToggleOrientation,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -300,6 +331,49 @@ function TopBar({
           <div className="topbar__threshold">
             <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
           </div>
+
+          {/* WF-091: Epic Atlas's three toggles, folded into the Controls
+              group and shown ONLY on the Atlas page — retired the standalone
+              `<AtlasToolbar>` that used to sit between the topbar and the
+              chart (three segmented two-button toggles + a static
+              "weighed by complexity" label). Each control here is now a
+              SINGLE toggle button whose own label carries the current
+              state, rather than a pair of always-both-visible tab buttons —
+              `aria-pressed` still marks which state is active for screen
+              readers. The static complexity-weight label is dropped
+              entirely (informational only; the ★ weight still appears in
+              every marker tooltip — EpicAtlas.tsx). */}
+          {view === "atlas" && (
+            <div className="topbar__atlas-controls">
+              <button
+                type="button"
+                className="topbar__atlas-control"
+                aria-pressed={showNames}
+                onClick={() => onToggleNames(!showNames)}
+                title="Toggle quest name-tags on the trail"
+              >
+                {showNames ? "⚑ Quest names: On" : "⚑ Quest names: Off"}
+              </button>
+              <button
+                type="button"
+                className="topbar__atlas-control"
+                aria-pressed={!hideVanquished}
+                onClick={() => onToggleVanquished(!hideVanquished)}
+                title="Toggle vanquished (done) epics"
+              >
+                {hideVanquished ? "🙈 Vanquished: Hidden" : "🏆 Vanquished: Shown"}
+              </button>
+              <button
+                type="button"
+                className="topbar__atlas-control"
+                aria-pressed={orientation === "down"}
+                onClick={() => onToggleOrientation(orientation === "across" ? "down" : "across")}
+                title="Trail orientation (mobile only, <=720px)"
+              >
+                {orientation === "down" ? "⟱ Down" : "⟶ Across"}
+              </button>
+            </div>
+          )}
 
           {/* WF-090 follow-up: Labels…/Refresh/Abandoned/Clear… wrapped in
               their own atomic flex unit — desktop is natural-wrap (no

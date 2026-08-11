@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import TopBar from "./components/TopBar";
+import TopBar, { type TrailOrientation } from "./components/TopBar";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
 import FilterBar from "./components/FilterBar";
@@ -142,6 +142,14 @@ function App() {
   // WF-086: Board|Atlas view toggle — session-local (no localStorage,
   // same precedent as `activeBranch`), reset to "board" on reload.
   const [view, setView] = useState<"board" | "atlas">("board");
+  // WF-091: the Epic Atlas toolbar's three toggles, lifted here from
+  // EpicAtlas-local state — the controls that drive them now live in
+  // TopBar's Controls group (shown only on `view === "atlas"`), so both
+  // TopBar and EpicAtlas need the same App-owned values. Session-local, same
+  // precedent as `view`/`activeBranch` (no localStorage persistence).
+  const [showNames, setShowNames] = useState(true);
+  const [hideVanquished, setHideVanquished] = useState(true);
+  const [orientation, setOrientation] = useState<TrailOrientation>("across");
 
   // Single shared join, computed once and handed to every consumer (TopBar's
   // questing pill, PartyColumn, PartyOverlay) — see Decisions: "consumers
@@ -240,6 +248,12 @@ function App() {
         onToggleControls={() => setControlsOpen((open) => !open)}
         view={view}
         onSelectView={setView}
+        showNames={showNames}
+        onToggleNames={setShowNames}
+        hideVanquished={hideVanquished}
+        onToggleVanquished={setHideVanquished}
+        orientation={orientation}
+        onToggleOrientation={setOrientation}
       />
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
@@ -303,7 +317,13 @@ function App() {
                 for both views (App.tsx owns `openCardId` regardless of
                 which page opened it). */}
             {board && view === "atlas" && (
-              <EpicAtlas board={board} onOpenCard={setOpenCardId} />
+              <EpicAtlas
+                board={board}
+                onOpenCard={setOpenCardId}
+                showNames={showNames}
+                hideVanquished={hideVanquished}
+                orientation={orientation}
+              />
             )}
           </>
         )}

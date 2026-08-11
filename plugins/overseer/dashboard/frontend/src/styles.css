@@ -823,6 +823,58 @@ body {
   display: none;
 }
 
+/* WF-091: the Epic Atlas toggles, moved into the Controls group from the
+   retired standalone `<AtlasToolbar>` component (a static complexity-weight
+   label plus three segmented two-button toggles, previously rendered
+   between the topbar and the chart). Same wrapping-atomic-unit technique as
+   `.topbar__controls-actions` just above — these three buttons wrap
+   together rather than splitting across lines. Only rendered by TopBar.tsx
+   when `view === "atlas"`. */
+.topbar__atlas-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Role-A wobble-button treatment (`.topbar__new-card`'s box metrics) with a
+   gold-chip pressed state (matches the view-switcher circles and the
+   trail's own gold coin) — each button IS its own toggle now (a single
+   control, not a two-button pair), so the active/inactive read has to live
+   entirely in this one element's own paint. */
+.topbar__atlas-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  height: 1.65rem;
+  box-sizing: border-box;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease,
+    box-shadow var(--qb-motion-hover) ease;
+}
+
+.topbar__atlas-control:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.topbar__atlas-control[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
 /* Quarantine alert keeps a strong danger red rather than a guild accent —
    HANDOFF's happy-path mockup has no error/danger state to source a token
    from, and none of the 7 accent groups mean "danger" (misusing rose/
@@ -4175,100 +4227,21 @@ a.card-drawer__pr-chip:hover {
   pointer-events: none;
 }
 
-/* --- Atlas chart: page shell, toolbar, rows -----------------------------
+/* --- Atlas chart: page shell, rows --------------------------------------
    WF-086 v2 (progress-trail revision): the v1 date axis / TODAY signpost /
    legend / honesty footnote are KILLED (HANDOFF's "Killed from v1") — dates
    survive only in tooltips and checklist stamps, so there's no shared axis
-   row to align a rail width against any more. */
+   row to align a rail width against any more.
+
+   WF-091: the standalone toolbar that used to sit here (between the topbar
+   and the chart — a static complexity-weight label plus three segmented
+   toggles, `.atlas-toolbar*`) is retired; its three toggles moved into the
+   topbar's Controls group as single buttons (`.topbar__atlas-control*` in
+   the topbar section above), shown only on this page. */
 
 .atlas-page {
   display: flex;
   flex-direction: column;
-}
-
-/* Toolbar (HANDOFF, between the topbar and the chart): a static
-   complexity-weight label plus three toggles. Polish pass: restyled off
-   the plain segmented-tab pattern onto the board's own wobble-button
-   sticker chips (`--qb-btn-*` — same family as `.atlas-rail-card__expand`'s
-   "sub-quests" chip and every card-tile button elsewhere) — asymmetric
-   hand-drawn radii, a hard resting shadow, and a clearly distinct pressed/
-   active state (the same gold-chip treatment the view-switcher circles and
-   the trail's own gold coin use) rather than the tab underline this toolbar
-   used to share with `.topbar__view-toggle` (that toggle has since gone
-   its own, circular, way — see above). Pure presentation: no change to
-   the toggles' own state/behavior. */
-.atlas-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  padding: 0.6rem 0.75rem;
-}
-
-.atlas-toolbar__label {
-  font-family: var(--qb-font-body);
-  font-size: 0.72rem;
-  color: var(--qb-ink-500);
-  margin-right: auto;
-}
-
-.atlas-toolbar__toggle {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.atlas-toolbar__toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 0.3rem 0.65rem;
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: var(--qb-shadow-card) var(--qb-btn-ink);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease,
-    transform var(--qb-motion-hover) ease;
-}
-
-/* Asymmetric hand-drawn radii, alternating per button in a pair — real
-   stickers never share an identical wobble. */
-.atlas-toolbar__toggle-btn:first-child {
-  border-radius: var(--qb-btn-wobble);
-}
-
-.atlas-toolbar__toggle-btn:last-child {
-  border-radius: var(--qb-btn-wobble-3);
-}
-
-.atlas-toolbar__toggle-btn:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .atlas-toolbar__toggle-btn:hover {
-    transform: translateY(-2px);
-  }
-}
-
-.atlas-toolbar__toggle-btn[aria-pressed="true"] {
-  background: var(--qb-gold-chip-bg);
-  border-color: var(--qb-gold-chip-border);
-  color: var(--qb-gold-chip-text);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-/* The mobile orientation toggle is inert (CSS-invisible) above 720px —
-   desktop always renders across (HANDOFF); the mobile layout layer below
-   reveals it. */
-.atlas-toolbar__toggle--orientation {
-  display: none;
 }
 
 /* `--rail` is the ONE source of truth for the rail column width — every
@@ -5605,12 +5578,6 @@ button.trail-tag:focus-visible {
     grid-column: 1 / -1;
     margin-left: 0;
     padding-left: 22px; /* aligns under the title, past the 14px checkbox + gap */
-  }
-
-  /* The mobile orientation toggle only matters at this width — desktop
-     hides it (base rule) since it's always Across there. */
-  .atlas-toolbar__toggle--orientation {
-    display: inline-flex;
   }
 
   /* --- Epic Atlas Down-mode: 86vw snap columns (HANDOFF, shipped in

@@ -13,15 +13,25 @@ import {
 } from "../board/atlasTrailLayout";
 import { useMediaQuery } from "../board/useMediaQuery";
 import AtlasRailCard from "./AtlasRailCard";
-import AtlasToolbar, { type TrailOrientation } from "./AtlasToolbar";
 import AtlasTrail from "./AtlasTrail";
 import AtlasTrailVertical from "./AtlasTrailVertical";
+import type { TrailOrientation } from "./TopBar";
 
 export interface EpicAtlasProps {
   board: Board;
   /** Chunk 5 precedent (Board/EpicCard): clicking a rail card body opens
    * the existing detail drawer for that card — App's drawer, unchanged. */
   onOpenCard: (id: string) => void;
+  /** WF-091: the three toolbar toggles are now App-owned, lifted state
+   * (was local to this component, driven by the since-retired
+   * `<AtlasToolbar>`) — the controls themselves now live in TopBar's
+   * Controls group. Show quest name-tags on the trail; default true. */
+  showNames: boolean;
+  /** Hide vanquished (done) epics; default true. */
+  hideVanquished: boolean;
+  /** Mobile trail orientation — see `downMode` below for the <=720px-only
+   * effective gate (desktop always renders across regardless of this). */
+  orientation: TrailOrientation;
 }
 
 const EMPTY_STATE_COPY = "No sagas yet — give a quest children and it becomes a campaign.";
@@ -52,14 +62,16 @@ const DEFAULT_LANE_WIDTH = 600;
  * mobile invariant) — no extra scroll wrapper around it. The mobile
  * Down-mode column layout is a SEPARATE scroll axis (HANDOFF: "the two
  * axes never fight") — see the `downMode` branch below, gated on BOTH the
- * toolbar's orientation toggle AND the real ≤720px viewport (the toggle is
- * inert on desktop, which always renders across).
+ * `orientation` prop AND the real ≤720px viewport (the prop is inert on
+ * desktop, which always renders across).
+ *
+ * WF-091: `showNames`/`hideVanquished`/`orientation` are now PROPS —
+ * App.tsx owns them as lifted state, and the controls that drive them moved
+ * into TopBar's Controls group (the standalone `<AtlasToolbar>` that used
+ * to render here, between the topbar and the chart, is retired).
  */
-function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
+function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }: EpicAtlasProps) {
   const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set());
-  const [showNames, setShowNames] = useState(true);
-  const [hideVanquished, setHideVanquished] = useState(true);
-  const [orientation, setOrientation] = useState<TrailOrientation>("across");
   const isMobile = useMediaQuery("(max-width:720px)");
   const downMode = isMobile && orientation === "down";
 
@@ -240,16 +252,6 @@ function EpicAtlas({ board, onOpenCard }: EpicAtlasProps) {
 
   return (
     <div className="atlas-page">
-      {epics.length > 0 && (
-        <AtlasToolbar
-          showNames={showNames}
-          onToggleNames={setShowNames}
-          hideVanquished={hideVanquished}
-          onToggleVanquished={setHideVanquished}
-          orientation={orientation}
-          onToggleOrientation={setOrientation}
-        />
-      )}
       <div className={"atlas-chart" + (downMode ? " atlas-chart--down" : "")}>
         {epics.length === 0 ? (
           <p className="atlas-chart__empty">{EMPTY_STATE_COPY}</p>

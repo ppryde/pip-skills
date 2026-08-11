@@ -12,7 +12,7 @@ import type {
   RepoEntry,
 } from "../api/types";
 import type { PartyMember } from "../board/party";
-import TopBar, { type TopBarProps } from "./TopBar";
+import TopBar, { type TopBarProps, type TrailOrientation } from "./TopBar";
 
 // WF-085b: `controlsOpen` moved from TopBar-local state up to App.tsx, so
 // TopBar is now a fully controlled component — it renders the "Controls ▾"
@@ -109,6 +109,16 @@ function baseProps() {
     // the toggle's own describe block below needs to care about it.
     view: "board" as "board" | "atlas",
     onSelectView: () => {},
+    // WF-091: Epic Atlas toggle defaults — every existing test gets a
+    // stable no-op fixture (matching `view`'s own default above) via this
+    // shared helper; only the atlas-controls describe block below cares
+    // about these.
+    showNames: true,
+    onToggleNames: () => {},
+    hideVanquished: true,
+    onToggleVanquished: () => {},
+    orientation: "across" as TrailOrientation,
+    onToggleOrientation: () => {},
   };
 }
 
@@ -656,6 +666,108 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     const repoIndex = barKids.findIndex((c) => c.classList.contains("topbar__repo-select"));
     expect(identityIndex).toBeGreaterThanOrEqual(0);
     expect(identityIndex).toBeLessThan(repoIndex);
+  });
+});
+
+// WF-091: the Epic Atlas toolbar folded into the Controls group — three
+// single toggle buttons, shown ONLY on `view === "atlas"` (the retired
+// standalone `<AtlasToolbar>` used to render these, as three segmented
+// two-button pairs, between the topbar and the chart). Lives inside
+// `#topbar-controls-group`, so — like Labels…/Refresh/Abandoned/Clear… —
+// these tests open the mobile Controls collapse first via `openControls()`.
+describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
+  it("renders no atlas controls on the board view", () => {
+    render(<StatefulTopBar {...baseProps()} view="board" />);
+    openControls();
+    expect(screen.queryByRole("button", { name: /quest names/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /vanquished/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /across|down/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the three atlas controls on the atlas view", () => {
+    render(<StatefulTopBar {...baseProps()} view="atlas" />);
+    openControls();
+    expect(screen.getByRole("button", { name: /quest names/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /vanquished/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /across|down/i })).toBeInTheDocument();
+  });
+
+  it("Quest names button reflects showNames and calls onToggleNames with the flipped value", () => {
+    const onToggleNames = vi.fn();
+    const { rerender } = render(
+      <StatefulTopBar {...baseProps()} view="atlas" showNames onToggleNames={onToggleNames} />
+    );
+    openControls();
+    const btn = screen.getByRole("button", { name: /quest names/i });
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+    expect(btn).toHaveTextContent(/on/i);
+    fireEvent.click(btn);
+    expect(onToggleNames).toHaveBeenCalledWith(false);
+
+    rerender(
+      <StatefulTopBar {...baseProps()} view="atlas" showNames={false} onToggleNames={onToggleNames} />
+    );
+    const offBtn = screen.getByRole("button", { name: /quest names/i });
+    expect(offBtn).toHaveAttribute("aria-pressed", "false");
+    expect(offBtn).toHaveTextContent(/off/i);
+  });
+
+  it("Vanquished button reflects hideVanquished (default hidden) and calls onToggleVanquished with the flipped value", () => {
+    const onToggleVanquished = vi.fn();
+    const { rerender } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        view="atlas"
+        hideVanquished
+        onToggleVanquished={onToggleVanquished}
+      />
+    );
+    openControls();
+    const btn = screen.getByRole("button", { name: /vanquished/i });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    expect(btn).toHaveTextContent(/hidden/i);
+    fireEvent.click(btn);
+    expect(onToggleVanquished).toHaveBeenCalledWith(false);
+
+    rerender(
+      <StatefulTopBar
+        {...baseProps()}
+        view="atlas"
+        hideVanquished={false}
+        onToggleVanquished={onToggleVanquished}
+      />
+    );
+    const shownBtn = screen.getByRole("button", { name: /vanquished/i });
+    expect(shownBtn).toHaveAttribute("aria-pressed", "true");
+    expect(shownBtn).toHaveTextContent(/shown/i);
+  });
+
+  it("Direction button reflects orientation and calls onToggleOrientation with the flipped value", () => {
+    const onToggleOrientation = vi.fn();
+    const { rerender } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        view="atlas"
+        orientation="across"
+        onToggleOrientation={onToggleOrientation}
+      />
+    );
+    openControls();
+    const btn = screen.getByRole("button", { name: /across/i });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(btn);
+    expect(onToggleOrientation).toHaveBeenCalledWith("down");
+
+    rerender(
+      <StatefulTopBar
+        {...baseProps()}
+        view="atlas"
+        orientation="down"
+        onToggleOrientation={onToggleOrientation}
+      />
+    );
+    const downBtn = screen.getByRole("button", { name: /down/i });
+    expect(downBtn).toHaveAttribute("aria-pressed", "true");
   });
 });
 
