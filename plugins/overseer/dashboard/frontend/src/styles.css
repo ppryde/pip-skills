@@ -4931,9 +4931,13 @@ a.card-drawer__pr-chip:hover {
    bare `font: inherit` here would otherwise beat the base rule's font-*
    longhands and fall back to the browser's own default button font. */
 button.trail-tag {
+  /* `appearance: none` strips the native button chrome; the per-status
+     `.trail-tag--*` rules below own the fill + border. Deliberately NOT
+     setting `background`/`border` here — this selector (`button.trail-tag`)
+     outspecifies the single-class `.trail-tag--todo/--done/--blocked` rules,
+     so a `background: none` here would silently beat (and blank out) every
+     status pastel, which is exactly the bug this comment guards against. */
   appearance: none;
-  border: none;
-  background: none;
   font: inherit;
   font-family: var(--qb-font-body);
   font-size: 0.68rem;
@@ -4953,13 +4957,13 @@ button.trail-tag:focus-visible {
   outline-offset: 1px;
 }
 
-/* Bright per-status pastels (each accent mixed 20% over white) replace the
+/* Bright per-status pastels (each accent mixed ~30% over white) replace the
    old shared `--qb-parchment-muted` fill — that token sat too close to the
    parchment PAGE background for a name-tag to read against it. Each tag
-   now pops as a near-white label tinted by its status instead. */
+   now pops as a clearly-tinted label coloured by its status instead. */
 .trail-tag--todo {
-  background: color-mix(in srgb, var(--qb-accent-sky-fill) 20%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 45%, white);
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 30%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 55%, white);
   color: var(--qb-ink-700);
 }
 
@@ -4968,8 +4972,8 @@ button.trail-tag:focus-visible {
    de-emphasis on their own, so (unlike the old parchment version) this no
    longer needs an `opacity` dial on top. */
 .trail-tag--done {
-  background: color-mix(in srgb, var(--qb-accent-forest-fill) 20%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 45%, white);
+  background: color-mix(in srgb, var(--qb-accent-forest-fill) 30%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 55%, white);
   color: var(--qb-ink-500);
 }
 
@@ -4977,8 +4981,8 @@ button.trail-tag:focus-visible {
    wins the cascade when paired with `--todo` on a blocked ahead-quest's tag
    (same class list, `--blocked` just added alongside). */
 .trail-tag--blocked {
-  background: color-mix(in srgb, var(--qb-accent-rose-fill) 20%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 45%, white);
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 30%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 55%, white);
   color: var(--qb-ink-700);
 }
 
