@@ -64,15 +64,23 @@ export interface TopBarProps {
    * `selectedRepo`), so there is never a Clear control with nothing to
    * target. */
   onClear?: () => void;
-  /** WF-085b: mobile-only "Controls ▾" collapse state — App-owned (lifted
-   * out of TopBar) so the ONE toggle can drive both TopBar's own
-   * `#topbar-controls-group` AND the separate `<FilterBar/>` App renders as
-   * a sibling below it. TopBar still renders the button and wraps its own
-   * group with `hidden={!controlsOpen}` — it just no longer holds the
-   * `useState` itself. */
+  /** App-owned "Controls ▾" collapse state, driving ONLY TopBar's own
+   * `#topbar-controls-group` now — it used to also fold the separate
+   * `<FilterBar/>` under the same flag, but that's split into its own
+   * independent `filtersOpen`/`onToggleFilters` pair below (the "Filters ▾"
+   * button, left of "Controls ▾"). TopBar still renders the button and
+   * wraps its own group with `hidden={!controlsOpen}` — it just doesn't
+   * hold the `useState` itself. */
   controlsOpen: boolean;
   /** Flips `controlsOpen` in App.tsx. */
   onToggleControls: () => void;
+  /** App-owned "Filters ▾" collapse state — drives the separate
+   * `<FilterBar/>` App.tsx renders as a sibling below this bar
+   * (`hidden={!filtersOpen}` on its root). Independent of `controlsOpen`;
+   * TopBar only renders the toggle button itself. */
+  filtersOpen: boolean;
+  /** Flips `filtersOpen` in App.tsx. */
+  onToggleFilters: () => void;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * threaded straight through to `LabelSettingsDialog` when it's open.
    * Optional (defaults to `{}`, same "undefined indistinguishable from
@@ -174,6 +182,8 @@ function TopBar({
   labelColors,
   controlsOpen,
   onToggleControls,
+  filtersOpen,
+  onToggleFilters,
   view,
   onSelectView,
   showNames,
@@ -274,13 +284,6 @@ function TopBar({
         <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
 
         <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
-        <button
-          type="button"
-          className="topbar__new-card"
-          onClick={() => setNewCardOpen(true)}
-        >
-          ＋ New card
-        </button>
         <BranchFilter
           branches={branches}
           activeBranch={activeBranch}
@@ -297,40 +300,76 @@ function TopBar({
             ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
           </span>
         )}
+        {/* Task 5: last-refreshed moved out of the Controls group and
+            grouped here as its own note-badge pill, right beside the two
+            rest pills (same `.topbar__pill` treatment). Omitted entirely
+            until the first successful load, same as before the move. */}
+        {lastRefreshedAt !== null && (
+          <span className="topbar__pill" title="last refreshed">
+            {formatUpdated(lastRefreshedAt)}
+          </span>
+        )}
 
-        {/* WF-085/085b: mobile-only "Controls ▾" toggle — collapses the
-            secondary-controls group below AND the separate <FilterBar/>
-            App.tsx renders as its own sibling, behind one tap on a ≤720px
-            viewport (styles.css hides this button entirely above that
-            breakpoint, so desktop never shows it). `aria-expanded` +
-            `aria-controls` wire it to BOTH regions it drives — a
-            space-separated id list is valid per WAI-ARIA. `controlsOpen`/
-            `onToggleControls` are now App-owned (lifted out of TopBar) so
-            the same flag reaches FilterBar too. */}
-        <button
-          type="button"
-          className="topbar__controls-toggle"
-          aria-expanded={controlsOpen}
-          aria-controls="topbar-controls-group filter-bar"
-          onClick={onToggleControls}
-        >
-          Controls {controlsOpen ? "▴" : "▾"}
-        </button>
+        {/* Filters ▾ / Controls ▾ / ＋ — three independent controls grouped
+            as one cluster. Filters and Controls used to be ONE shared
+            "Controls ▾" toggle driving both TopBar's own group AND the
+            separate <FilterBar/>; they're now two independent toggles, each
+            wired to just its own region via `aria-controls`. `hidden={
+            !filtersOpen}`/`hidden={!controlsOpen}` take effect on every
+            viewport now, not just ≤720px (see styles.css) — both default
+            open so the board looks unchanged on load, but either can be
+            collapsed on any screen size. */}
+        <div className="topbar__toggle-cluster">
+          <button
+            type="button"
+            className="topbar__controls-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="filter-bar"
+            onClick={onToggleFilters}
+          >
+            Filters {filtersOpen ? "▴" : "▾"}
+          </button>
+          <button
+            type="button"
+            className="topbar__controls-toggle"
+            aria-expanded={controlsOpen}
+            aria-controls="topbar-controls-group"
+            onClick={onToggleControls}
+          >
+            Controls {controlsOpen ? "▴" : "▾"}
+          </button>
+          {/* "＋ New card" is now icon-only — `aria-label`/`title` keep it
+              accessible/resolvable by name exactly as the old "＋ New card"
+              text button was; opens the same NewCardDialog unchanged. */}
+          <button
+            type="button"
+            className="topbar__new-card topbar__new-card--icon"
+            onClick={() => setNewCardOpen(true)}
+            aria-label="New card"
+            title="New card"
+          >
+            ＋
+          </button>
+        </div>
 
-        {/* WF-085: the secondary-controls group — Last Orders (threshold),
-            Labels…, Refresh, Abandoned toggle, Clear… (WF-090: Labels…
-            grouped with the action buttons, Clear… kept rightmost).
-            `hidden` is driven by `controlsOpen` (default collapsed), but
-            styles.css only lets that attribute actually hide anything
-            inside the ≤720px media query — above it
-            `.topbar__controls-group` is unconditionally `display: contents`,
-            so desktop renders every control exactly as before, unaffected
-            by this flag. */}
+        {/* WF-085 (Task 2/3): the secondary-controls group — Last Orders
+            (threshold), Labels…, Refresh, Abandoned toggle, Clear… (WF-090:
+            Labels… grouped with the action buttons, Clear… kept rightmost).
+            `hidden` is driven by `controlsOpen`, defaulting OPEN (the board
+            looks unchanged on load); the Controls ▾ button above collapses
+            it on every viewport now — desktop is no longer exempt (see
+            `.topbar__controls-group[hidden]` in styles.css). */}
         <div
           id="topbar-controls-group"
           className="topbar__controls-group"
           hidden={!controlsOpen}
         >
+          {/* Task 4: a small dotted-line header opening the group — same
+              "quiet caption above a dashed rule" idea as FilterBar's own
+              "Scry" eyebrow, just recast as a divider+title here. */}
+          <div className="topbar__controls-header">
+            <span className="topbar__controls-eyebrow">Provisions</span>
+          </div>
           <div className="topbar__threshold">
             <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
           </div>
@@ -426,12 +465,6 @@ function TopBar({
               {refreshing ? "Refreshing…" : "Refresh"}
             </button>
 
-            {/* Last-refreshed time — a small label beside Refresh (moved out of
-                the header). Omitted until the first successful load. */}
-            {lastRefreshedAt !== null && (
-              <span className="topbar__updated">{formatUpdated(lastRefreshedAt)}</span>
-            )}
-
             <label className="topbar__archive-toggle">
               <input
                 type="checkbox"
@@ -444,15 +477,10 @@ function TopBar({
             {/* WF-090: moved to the END of this group (was first) — Clear is
                 the one destructive action here, so it now sits rightmost,
                 separated from the constructive controls (Labels…/Refresh/
-                Abandoned) rather than leading them. Mobile's `flex-wrap`
-                row needed a small styles.css fix alongside it: "Labels…"
-                reuses `.topbar__new-card`'s class, which carries an
-                `order: 40` meant for that button's OTHER life in the outer
-                topbar row — inside THIS group's own flex context that
-                leaked order was sorting Labels… after everything else, so
-                `.topbar-clear`/`.topbar__new-card` both get an explicit
-                reset scoped to `.topbar__controls-group` (see styles.css)
-                rather than relying on DOM order alone. */}
+                Abandoned) rather than leading them. `.topbar-clear` gets an
+                explicit `order: 1` reset scoped to `.topbar__controls-group`
+                on mobile (see styles.css) rather than relying on DOM order
+                alone. */}
             {onClear && (
               <button
                 type="button"

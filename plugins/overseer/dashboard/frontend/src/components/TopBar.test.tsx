@@ -14,22 +14,31 @@ import type {
 import type { PartyMember } from "../board/party";
 import TopBar, { type TopBarProps, type TrailOrientation } from "./TopBar";
 
-// WF-085b: `controlsOpen` moved from TopBar-local state up to App.tsx, so
-// TopBar is now a fully controlled component — it renders the "Controls ▾"
-// button/group but doesn't own whether they're open. Every test in this
-// file needs a `controlsOpen`/`onToggleControls` pair; this harness
-// reproduces App's own `useState` + toggle callback locally so tests that
-// click the toggle and expect the group to actually show/hide keep working
-// without each test hand-rolling its own state.
+// `controlsOpen`/`filtersOpen` are App-owned, so TopBar is a fully
+// controlled component — it renders the "Controls ▾"/"Filters ▾" buttons
+// but doesn't own whether either is open. Every test in this file needs
+// both pairs; this harness reproduces App's own `useState`s + toggle
+// callbacks locally so tests that click a toggle and expect its region to
+// actually show/hide (or its `aria-expanded` to flip) keep working without
+// each test hand-rolling its own state. `controlsOpen` defaults false here
+// (this file's own long-standing convention, covering the collapsed case
+// most tests below need) — independent of App.tsx's own default, which is
+// `true` (Task 3: the board looks unchanged on load).
 function StatefulTopBar(
-  props: Omit<TopBarProps, "controlsOpen" | "onToggleControls">
+  props: Omit<
+    TopBarProps,
+    "controlsOpen" | "onToggleControls" | "filtersOpen" | "onToggleFilters"
+  >
 ) {
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   return (
     <TopBar
       {...props}
       controlsOpen={controlsOpen}
       onToggleControls={() => setControlsOpen((open) => !open)}
+      filtersOpen={filtersOpen}
+      onToggleFilters={() => setFiltersOpen((open) => !open)}
     />
   );
 }
@@ -131,7 +140,10 @@ function openControls() {
 }
 
 describe("<TopBar/>", () => {
-  it("shows the last-refreshed time as small '.topbar__updated' text when set", () => {
+  // Task 5: last-refreshed moved out of the Controls group and renders as
+  // a `.topbar__pill` note-badge beside the Short/Long Rest pills instead
+  // of its own dedicated `.topbar__updated` class.
+  it("shows the last-refreshed time as a '.topbar__pill' badge when set", () => {
     render(
       <StatefulTopBar
         {...baseProps()}
@@ -141,7 +153,7 @@ describe("<TopBar/>", () => {
 
     const updated = screen.getByText("updated 14:32");
     expect(updated).toBeInTheDocument();
-    expect(updated).toHaveClass("topbar__updated");
+    expect(updated).toHaveClass("topbar__pill");
     // The repo name that used to share this line is gone — it now lives only
     // in the repo selector below, so no "name · updated …" middot here.
     expect(updated.textContent).not.toMatch(/·/);
@@ -150,7 +162,6 @@ describe("<TopBar/>", () => {
   it("renders no last-updated text when lastRefreshedAt is null", () => {
     render(<StatefulTopBar {...baseProps()} lastRefreshedAt={null} />);
 
-    expect(document.querySelector(".topbar__updated")).toBeNull();
     expect(screen.queryByText(/updated/i)).toBeNull();
   });
 
@@ -472,6 +483,17 @@ describe("<TopBar/>", () => {
     expect(screen.getByRole("dialog", { name: /new card/i })).toBeInTheDocument();
   });
 
+  // Task 2: "＋ New card" is icon-only now — the visible label text is
+  // dropped, but `aria-label`/`title="New card"` keep it resolvable by name
+  // exactly like the old "＋ New card" text button was.
+  it("renders the New card button icon-only, still accessible by name", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+    const button = screen.getByRole("button", { name: /new card/i });
+    expect(button).toHaveTextContent("＋");
+    expect(button.textContent).not.toMatch(/new card/i);
+    expect(button).toHaveAttribute("title", "New card");
+  });
+
   // Task 10 (F10, WF-067): the Labels settings control — TopBar owns the
   // dialog's open state itself, same pattern as "＋ New card" above.
   it("renders no Label colors dialog until the Labels settings button is clicked", () => {
@@ -506,30 +528,29 @@ describe("<TopBar/>", () => {
   });
 });
 
-// WF-085b: mobile (≤720px) collapses threshold/Labels…/Refresh/Abandoned/
-// Clear… behind a single "Controls ▾" toggle. The collapse itself is
-// implemented with the native `hidden` attribute (see TopBar.tsx), which
-// jsdom's own accessibility-tree logic honours regardless of whether any
-// stylesheet is loaded — `getByRole` excludes descendants of a `hidden`
+// WF-085/Task 2/3: "Controls ▾" collapses threshold/Labels…/Refresh/
+// Abandoned/Clear… — its OWN region now (`#topbar-controls-group`), split
+// from the old shared toggle that also drove <FilterBar/>. The collapse
+// itself is implemented with the native `hidden` attribute (see TopBar.tsx),
+// which jsdom's own accessibility-tree logic honours regardless of whether
+// any stylesheet is loaded — `getByRole` excludes descendants of a `hidden`
 // ancestor by default, and jest-dom's `toBeVisible()` checks
 // `hasAttribute('hidden')` directly. That's what lets these tests verify
 // real show/hide behaviour without styles.css ever being imported here;
-// styles.css itself additionally confines the `[hidden]` override to the
-// ≤720px media query so desktop is provably unaffected (see the CSS
-// content assertions further down).
+// Task 3: styles.css now lets `[hidden]` hide this group on EVERY viewport,
+// not just ≤720px (see the CSS content assertions further down and
+// styles.css itself).
 describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
   it("collapses the secondary controls by default, hiding them from the accessibility tree", () => {
     render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
 
     const toggle = screen.getByRole("button", { name: /^controls/i });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    // WF-085b: the toggle now drives BOTH TopBar's own group AND the
-    // separate <FilterBar/> App.tsx renders as a sibling — a
-    // space-separated id list in aria-controls is valid WAI-ARIA.
-    expect(toggle).toHaveAttribute(
-      "aria-controls",
-      "topbar-controls-group filter-bar"
-    );
+    // Task 2: "Controls ▾" now drives ONLY TopBar's own group — the
+    // separate <FilterBar/> App.tsx renders as a sibling is driven by its
+    // own independent "Filters ▾" toggle instead (see the describe block
+    // below).
+    expect(toggle).toHaveAttribute("aria-controls", "topbar-controls-group");
 
     expect(screen.queryByRole("button", { name: /^clear/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^labels/i })).not.toBeInTheDocument();
@@ -589,6 +610,97 @@ describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
     expect(screen.getByText(/Long Rest/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /questing/i })).toBeInTheDocument();
     expect(screen.getByText(/vanquished/)).toBeInTheDocument();
+  });
+});
+
+// Task 2: "Filters ▾" is its OWN independent toggle now (was folded into
+// the shared "Controls ▾" toggle) — wired to `filter-bar` only, entirely
+// separate from `topbar-controls-group`/`onToggleControls`.
+describe("<TopBar/> Filters toggle (Task 2)", () => {
+  it("wires aria-expanded to filtersOpen and aria-controls to filter-bar only", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+
+    const toggle = screen.getByRole("button", { name: /^filters/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", "filter-bar");
+  });
+
+  it("clicking the Filters toggle calls onToggleFilters and flips aria-expanded/the caret", () => {
+    const onToggleFilters = vi.fn();
+    const { rerender } = render(
+      <TopBar
+        {...baseProps()}
+        controlsOpen={false}
+        onToggleControls={() => {}}
+        filtersOpen={true}
+        onToggleFilters={onToggleFilters}
+      />
+    );
+
+    const toggle = screen.getByRole("button", { name: /^filters/i });
+    expect(toggle).toHaveTextContent("Filters ▴");
+    fireEvent.click(toggle);
+    expect(onToggleFilters).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TopBar
+        {...baseProps()}
+        controlsOpen={false}
+        onToggleControls={() => {}}
+        filtersOpen={false}
+        onToggleFilters={onToggleFilters}
+      />
+    );
+    expect(screen.getByRole("button", { name: /^filters/i })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    expect(screen.getByRole("button", { name: /^filters/i })).toHaveTextContent(
+      "Filters ▾"
+    );
+  });
+
+  it("toggling Filters never affects the Controls group (fully independent)", () => {
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+
+    // Controls starts collapsed (this file's StatefulTopBar default).
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^filters/i }));
+    // Filters flipped, Controls untouched.
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+  });
+
+  it("puts the toggle cluster in [Filters ▾] [Controls ▾] [＋] order", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} />);
+    const cluster = container.querySelector(".topbar__toggle-cluster")!;
+    expect(cluster).not.toBeNull();
+    const buttons = Array.from(cluster.querySelectorAll("button"));
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
+    expect(buttons[1]).toHaveAccessibleName(/^controls/i);
+    expect(buttons[2]).toHaveAccessibleName(/new card/i);
+  });
+});
+
+// Task 4: `#topbar-controls-group` opens with a small dotted-line header +
+// title, before ThresholdControl.
+describe("<TopBar/> Controls group header (Task 4)", () => {
+  it("renders a header with the group's eyebrow title before ThresholdControl", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+    openControls();
+
+    const group = document.getElementById("topbar-controls-group")!;
+    const header = group.querySelector(".topbar__controls-header");
+    expect(header).not.toBeNull();
+    expect(header!.textContent).toBe("Provisions");
+
+    const children = Array.from(group.children);
+    const headerIndex = children.indexOf(header!);
+    const thresholdIndex = children.findIndex((c) =>
+      c.classList.contains("topbar__threshold")
+    );
+    expect(headerIndex).toBeGreaterThanOrEqual(0);
+    expect(headerIndex).toBeLessThan(thresholdIndex);
   });
 });
 

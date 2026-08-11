@@ -14,11 +14,11 @@ const base = {
   onPriority: () => {},
   onComplexity: () => {},
   onClear: () => {},
-  // WF-085b: expanded by default here so every other test in this file (all
+  // Expanded by default here so every other test in this file (all
   // exercising the bar's own controls, not the collapse behaviour) keeps
   // finding a reachable/visible bar without opting in per-test — the
   // collapse itself is covered by the dedicated describe block below.
-  controlsOpen: true,
+  filtersOpen: true,
 };
 
 describe("<FilterBar/>", () => {
@@ -113,33 +113,35 @@ describe("<FilterBar/>", () => {
     expect(screen.queryByText("None")).toBeNull();
   });
 
-  // WF-092: a small on-theme eyebrow opens the row, ahead of search.
-  it("shows the Muster eyebrow at the start of the row", () => {
+  // Task 1: a small on-theme eyebrow (with a magnifying-glass icon) opens
+  // its own row, ahead of search — "Muster" was renamed "Scry".
+  it("shows the Scry eyebrow at the start of the row", () => {
     render(<FilterBar {...base} />);
-    expect(screen.getByText("Muster")).toBeInTheDocument();
+    expect(screen.getByText("Scry")).toBeInTheDocument();
+    expect(screen.queryByText("Muster")).not.toBeInTheDocument();
   });
 });
 
-// WF-085b: the root element carries a stable id + the native `hidden`
-// attribute driven by `controlsOpen`, mirroring TopBar's own
-// `#topbar-controls-group` so App.tsx's single "Controls ▾" toggle can fold
-// this bar away on mobile alongside it (styles.css confines the actual
-// hide/show effect to the ≤720px media query — see App.test.tsx/
+// Task 2: the root element carries a stable id + the native `hidden`
+// attribute driven by `filtersOpen` — its OWN independent toggle now (the
+// "Filters ▾" button in TopBar), split from the old shared `controlsOpen`
+// that used to also drive TopBar's `#topbar-controls-group`. Task 3: this
+// takes effect on every viewport, not just ≤720px (see App.test.tsx/
 // TopBar.test.tsx for the cross-component wiring; this is just the unit
 // contract on FilterBar's own root element).
-describe("<FilterBar/> mobile collapse wiring (WF-085b)", () => {
+describe("<FilterBar/> Filters collapse wiring (Task 2/3)", () => {
   it("has a stable #filter-bar id for aria-controls to reference", () => {
     render(<FilterBar {...base} />);
     expect(document.getElementById("filter-bar")).not.toBeNull();
   });
 
-  it("carries the native hidden attribute when controlsOpen is false", () => {
-    render(<FilterBar {...base} controlsOpen={false} />);
+  it("carries the native hidden attribute when filtersOpen is false", () => {
+    render(<FilterBar {...base} filtersOpen={false} />);
     expect(document.getElementById("filter-bar")).not.toBeVisible();
   });
 
-  it("is visible when controlsOpen is true", () => {
-    render(<FilterBar {...base} controlsOpen={true} />);
+  it("is visible when filtersOpen is true", () => {
+    render(<FilterBar {...base} filtersOpen={true} />);
     expect(document.getElementById("filter-bar")).toBeVisible();
   });
 });

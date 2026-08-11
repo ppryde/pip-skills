@@ -469,18 +469,6 @@ body {
   color: var(--qb-ink-900);
 }
 
-/* Last-refreshed time — a small muted label beside the Refresh control (moved
-   out of the header). The old repo subtitle line is gone entirely (the repo
-   name lives in the repo selector below). */
-.topbar__updated {
-  margin: 0;
-  align-self: center;
-  font-family: var(--qb-font-body);
-  font-size: 0.75rem;
-  color: var(--qb-ink-400);
-  white-space: nowrap;
-}
-
 /* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
    after the identity block so it wraps into the mobile chip shelf with
    everything else in this flex row; no bespoke breakpoint rules needed. */
@@ -702,9 +690,10 @@ body {
   box-shadow: none;
 }
 
-/* Task 10: "＋ New card" control, beside the repo selector. Same Role-A
-   wobble shape/paint as `.topbar__refresh` — a positive, non-destructive
-   action, so no recolor (contrast `.topbar-clear.danger` below).
+/* Task 10: "＋ New card" control (Task 2: now icon-only, in the
+   `.topbar__toggle-cluster`). Same Role-A wobble shape/paint as
+   `.topbar__refresh` — a positive, non-destructive action, so no recolor
+   (contrast `.topbar-clear.danger` below).
    `height`/`box-sizing` (WF-090 follow-up): this button's own class is
    reused verbatim for "Labels…" (`.topbar__labels-settings`, plain ASCII
    text), but "＋ New card" leads with a FULLWIDTH PLUS SIGN (＋, U+FF0B) —
@@ -758,6 +747,15 @@ body {
   box-shadow: var(--qb-btn-shadow-active);
 }
 
+/* Task 2: "＋ New card" is icon-only now (was "＋ New card" text) — square
+   up the box and drop the horizontal padding text needed; everything else
+   (border/paint/hover/active) still comes from `.topbar__new-card` above. */
+.topbar__new-card--icon {
+  width: 1.65rem;
+  padding: 0;
+  font-size: 0.95rem;
+}
+
 /* Task 7: Clear-data control, beside the repo selector. Same Role-A wobble
    shape as `.topbar__refresh` above, but recolored red — `.danger` alone
    only reaches inside `.clear-dialog` (see `.clear-dialog .danger`), so this
@@ -799,18 +797,47 @@ body {
   cursor: pointer;
 }
 
-/* WF-085: the mobile-collapsible secondary-controls group (threshold,
-   Clear…, Labels…, Refresh, Abandoned toggle) and the "Controls ▾" button
-   that drives it. `display: contents` un-wraps the group unconditionally —
-   its children flow as direct flex items of `.topbar` exactly as they did
-   before this wrapper existed, on every viewport, REGARDLESS of the
-   `hidden` attribute TopBar.tsx toggles. Only the ≤720px block below (which
-   targets `.topbar__controls-group[hidden]` with higher specificity than
-   this bare-class rule) actually lets `hidden` hide anything — so desktop
-   is provably unaffected by the collapse state. The toggle button mirrors
-   this: hidden by default, shown only inside that same media query. */
+/* WF-085 (Task 3): the collapsible secondary-controls group (threshold,
+   Clear…, Labels…, Refresh, Abandoned toggle). `display: contents` unwraps
+   the group's children into direct flex items of `.topbar` when it's NOT
+   hidden — same visual arrangement as if this wrapper didn't exist at all
+   (desktop's natural-wrap chip shelf). The `[hidden]` rule right below is
+   what actually hides it now — `.topbar__controls-group[hidden]`'s two
+   simple selectors outrank the bare `.topbar__controls-group` class alone
+   on specificity, so it wins on every viewport, not just ≤720px (the old
+   behaviour: this override used to live ONLY inside that media query, so
+   desktop was unconditionally exempt — see git history). The ≤720px block
+   below still adds its OWN `:not([hidden])` treatment (a real block-level
+   wrapped row) on top of this. */
 .topbar__controls-group {
   display: contents;
+}
+
+.topbar__controls-group[hidden] {
+  display: none;
+}
+
+/* Task 4: `#topbar-controls-group`'s own small header — a dotted rule +
+   muted eyebrow title, opening the group before ThresholdControl. Same
+   "quiet caption" idea as `.filter-bar__eyebrow` above the filter row, just
+   paired with a divider instead of sitting inline. `flex-basis: 100%`
+   self-forces a line break in the `display: contents`-unwrapped group (same
+   trick as `.topbar__quarantine-banner`/mobile's `.topbar__threshold`) so
+   ThresholdControl and everything after it in the group starts underneath
+   this header, on every viewport. */
+.topbar__controls-header {
+  flex-basis: 100%;
+  margin-top: 0.3rem;
+  padding-top: 0.4rem;
+  border-top: 1.5px dotted var(--qb-line-dashed);
+}
+
+.topbar__controls-eyebrow {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--qb-ink-400);
 }
 
 /* WF-090 follow-up: wraps Labels…/Refresh/Abandoned/Clear… as ONE atomic
@@ -829,8 +856,45 @@ body {
   gap: 0.75rem;
 }
 
+/* Task 2/3: "Filters ▾" and "Controls ▾" share this class (was mobile-only,
+   `display: none` on desktop — the old shared "Controls ▾" toggle only
+   needed to exist at all ≤720px). Both toggles now show on every viewport,
+   so this is the always-on box/paint — same Role-A metrics as
+   `.topbar__new-card` (0.75rem / 0.3rem 0.7rem), no mobile-specific
+   override needed any more. */
 .topbar__controls-toggle {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  font-weight: 700;
+  border-radius: var(--qb-btn-wobble);
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  cursor: pointer;
+  transition:
+    background-color var(--qb-motion-hover) ease,
+    border-color var(--qb-motion-hover) ease;
+}
+
+.topbar__controls-toggle:hover {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.topbar__controls-toggle:active {
+  background: var(--qb-btn-face-active);
+}
+
+/* Task 2: the [Filters ▾] [Controls ▾] [＋] cluster — one atomic flex item
+   of `.topbar` (same wrapping-together technique as
+   `.topbar__controls-actions`) so the three buttons never split across a
+   line break. */
+.topbar__toggle-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 /* WF-091: the Epic Atlas toggles, moved into the Controls group from the
@@ -976,6 +1040,34 @@ body {
   border-bottom: 1.5px dashed var(--qb-line-dashed);
 }
 
+/* Task 3: makes the `hidden` attribute (driven by `filtersOpen`) actually
+   hide this bar on EVERY viewport — previously only the ≤720px media query
+   below had a `.filter-bar[hidden]` override, so desktop ignored the
+   attribute entirely (the base rule above always won with `display: flex`).
+   Now the "Filters ▾" button genuinely collapses this bar anywhere. */
+.filter-bar[hidden] {
+  display: none;
+}
+
+/* The "Scry" eyebrow now opens its OWN full-width row above search/
+   selects/Labels/count — `flex-basis: 100%` on this wrapper forces the wrap
+   (same "self-forcing full-width flex item" trick used elsewhere, e.g.
+   `.topbar__quarantine-banner`), and `.filter-bar__row` below holds
+   everything that used to sit inline with the eyebrow. */
+.filter-bar__eyebrow-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Small magnifying-glass icon ahead of the "Scry" text — same ui-icons
+   convention as the topbar's own small glyphs (journal/compass/etc). */
+.filter-bar__eyebrow-icon {
+  width: 15px;
+  height: 15px;
+}
+
 /* WF-092: a small quest-board eyebrow opening the row, ahead of search —
    same quiet caption treatment as `.topbar__repo-select-label`/
    `-branch-select-label` (uppercase, 0.65rem, tracked out), just recast as
@@ -987,6 +1079,17 @@ body {
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--qb-ink-400);
+}
+
+/* Task 1: the search/selects/Labels/count row, wrapped separately from the
+   eyebrow above so the eyebrow can sit on its own line without disturbing
+   this row's own wrap/gap behaviour. */
+.filter-bar__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  flex: 1 1 auto;
 }
 
 /* WF-092: shrunk from a 22rem max (it dominated the row) to a compact
@@ -5134,8 +5237,9 @@ button.trail-tag:focus-visible {
      DOM order stays exactly as TopBar.tsx renders it (desktop reads that
      order unmodified — no `order` applies above 720px) — only `order`
      numbers here re-sequence the same elements into full-width mobile
-     rows: R2 repo+branch, R3 the two rest pills, R4 gold+vanquished+
-     questing, R5 New-card/Controls. `.topbar__row-break--rN` spacers (see
+     rows: R2 repo+branch, R3 the rest pills + last-refreshed badge, R4
+     gold+vanquished+questing, R5 the [Filters ▾][Controls ▾][＋] cluster.
+     `.topbar__row-break--rN` spacers (see
      TopBar.tsx) force each row boundary regardless of viewport width
      within 320-720px — real wrap-on-overflow alone isn't reliable there
      (e.g. repo+branch could still be narrow enough to share a line with
@@ -5194,36 +5298,26 @@ button.trail-tag:focus-visible {
   .topbar__vanquished-pill { order: 31; }
   .topbar__fleet-pill { order: 32; }
 
-  /* R5: ＋New card on the left, Controls ▾ pinned right via the toggle's
-     own `margin-left: auto` (unchanged) — the two are the only items
-     between the r4 and (self-forcing, flex-basis:100%) controls-group
-     breaks, so that auto margin has the whole row's slack to push into. */
-  .topbar__new-card { order: 40; }
+  /* R5: the [Filters ▾][Controls ▾][＋] cluster, pinned right via its own
+     `margin-left: auto` — it's the only item between the r4 and
+     (self-forcing, flex-basis:100%) controls-group breaks, so that auto
+     margin has the whole row's slack to push into. The three buttons
+     inside keep natural DOM order (the cluster is `inline-flex`, not
+     `contents`), so no per-button `order` is needed here. */
+  .topbar__toggle-cluster { order: 40; margin-left: auto; }
 
   /* Rare/optional (`quarantinedCount > 0`) — own full-width row right
      after identity, ahead of R2, so it never crowds into the repo/branch
      row when present. */
   .topbar__quarantine-banner { order: 5; flex-basis: 100%; }
 
-  /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
-     `order` pairs the toggle with ＋New card on R5 (right end of that row,
-     via `margin-left: auto`) and drops its revealed group — plus the
-     separate <FilterBar/> below the topbar — into one block beneath
-     everything else, rather than wedged mid-shelf. */
-  /* WF-090 follow-up: was `font-size: 0.8rem; padding: 0.35rem 0.75rem` —
-     visibly bigger than every neighbouring Role-A control (0.75rem /
-     0.3rem), including ＋New card right beside it on this same row.
-     Brought down to the same box as `.topbar__new-card`. */
-  .topbar__controls-toggle {
-    order: 41; margin-left: auto;
-    display: inline-flex; align-items: center; font-size: 0.75rem;
-    padding: 0.3rem 0.6rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
-    border: 1.5px solid var(--qb-btn-ink); background: var(--qb-btn-face);
-    color: var(--qb-btn-text); cursor: pointer;
-  }
-  .topbar__controls-toggle:hover { background: var(--qb-btn-face-hover); border-color: var(--qb-btn-ink-hover); }
-  .topbar__controls-toggle:active { background: var(--qb-btn-face-active); }
-  .topbar__controls-group[hidden] { display: none; }
+  /* --- Top bar: "Controls ▾"/"Filters ▾" collapse (WF-085/074, Task 3) ---
+     `.topbar__controls-group[hidden]` is now handled by the base rule
+     (styles.css, applies on every viewport) — only the block-level
+     "expanded" treatment is mobile-specific: on a phone the group becomes
+     its OWN full-width wrapped row (order 91, dropped beneath everything
+     else) rather than staying `display: contents` and blending into the
+     topbar's natural-wrap chip shelf like it does on desktop. */
   .topbar__controls-group:not([hidden]) {
     order: 91;
     display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem;
@@ -5233,36 +5327,18 @@ button.trail-tag:focus-visible {
      item so they can't be split across a natural-wrap line break) is fully
      un-wrapped here — its children become direct flex items of the group
      above again, exactly as if the wrapper didn't exist, so the mobile
-     `order` resets just below still apply to each of them individually. */
+     `order` reset just below still applies to each of them individually. */
   .topbar__controls-actions {
     display: contents;
   }
-  /* WF-090: `.topbar__new-card { order: 40; }` above targets the OUTER row's
-     standalone "＋New card" button (R5) — but "Labels…" reuses that same
-     class for its paint, and once the group above goes `display: flex` on
-     expand, `order` scores every child against THAT (new, separate) flex
-     container, not the one the rule's author had in mind. The leaked 40
-     was silently sorting Labels… after every other child in the group
-     (all default `order: 0`) — including Clear…, undoing the DOM move
-     below that's supposed to put Clear… last. Reset scoped to this
-     container only, so the outer-row ＋New card keeps its order: 40
-     untouched. `.topbar-clear` gets an explicit `order: 1` alongside it —
-     rather than relying on DOM position once everything else in the group
-     is back to a tied `order: 0` — so it's guaranteed rightmost regardless
-     of any future reordering here. */
-  .topbar__controls-group .topbar__new-card {
-    order: 0;
-  }
+  /* Clear… is the one destructive action in this group — pinned explicitly
+     rightmost rather than relying on DOM order alone (it already IS last
+     in DOM, but this survives any future reordering here). */
   .topbar__controls-group .topbar-clear {
     order: 1;
   }
-  /* WF-085b: same collapse driven by the SAME "Controls ▾" toggle, mirrored
-     onto the separate <FilterBar/> App.tsx renders below the topbar — see
-     `.filter-bar` base rule (always `display: flex`, so desktop is
-     unaffected by `hidden` per the origin-cascade rule the group above
-     already relies on). `[hidden]` here is what actually hides it, and
-     only inside this ≤720px block. */
-  .filter-bar[hidden] { display: none; }
+  /* Task 3: `.filter-bar[hidden]` is now handled by the base rule too (see
+     styles.css) — nothing mobile-specific left to add here. */
   /* compact status glance shrinks so it fits a couple of wrapped rows on a phone */
   .topbar__pill, .topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill {
     font-size: 0.68rem; padding: 0.15rem 0.45rem;

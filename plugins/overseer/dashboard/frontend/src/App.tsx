@@ -130,15 +130,15 @@ function App() {
   // this state never lives on TopBar itself).
   const [clearOpen, setClearOpen] = useState(false);
   const [clearToast, setClearToast] = useState<string | null>(null);
-  // WF-085b: mobile-only "Controls ▾" collapse state, lifted here from
-  // TopBar so ONE toggle drives BOTH TopBar's own secondary-controls group
-  // AND the separate <FilterBar/> below (previously TopBar-local state only
-  // reached its own group, leaving FilterBar always visible on mobile —
-  // see the mobile-v2 brief). Collapsed by default; desktop (>720px) always
-  // shows both groups regardless of this flag (styles.css confines the
-  // `[hidden]` override to the ≤720px media query, same pattern as the
-  // pre-existing `#topbar-controls-group`).
-  const [controlsOpen, setControlsOpen] = useState(false);
+  // Task 2/3: "Controls ▾" and "Filters ▾" are now two INDEPENDENT collapse
+  // toggles (previously one shared `controlsOpen` drove both TopBar's own
+  // secondary-controls group AND the separate <FilterBar/> below it — see
+  // git history for that WF-085b arrangement). Both default OPEN so the
+  // board looks unchanged on load; `hidden={!controlsOpen}`/`hidden={
+  // !filtersOpen}` now take effect on every viewport, not just ≤720px
+  // (styles.css), so either button can collapse its own region anywhere.
+  const [controlsOpen, setControlsOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   // WF-086: Board|Atlas view toggle — session-local (no localStorage,
   // same precedent as `activeBranch`), reset to "board" on reload.
   const [view, setView] = useState<"board" | "atlas">("board");
@@ -241,11 +241,13 @@ function App() {
         // actually selected — `undefined` (rather than a no-op closure)
         // means TopBar renders no Clear control at all until then.
         onClear={selectedRepo ? () => setClearOpen(true) : undefined}
-        // WF-085b: App-owned collapse state (see comment above) — TopBar
-        // still renders the "Controls ▾" button/group, it just no longer
-        // owns whether they're open.
+        // App-owned collapse state (see comment above) — TopBar still
+        // renders the "Controls ▾"/"Filters ▾" buttons/groups, it just
+        // doesn't own whether they're open.
         controlsOpen={controlsOpen}
         onToggleControls={() => setControlsOpen((open) => !open)}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((open) => !open)}
         view={view}
         onSelectView={setView}
         showNames={showNames}
@@ -279,10 +281,9 @@ function App() {
           onComplexity={setComplexity}
           onClear={clear}
           colorRegistry={board.label_colors}
-          // WF-085b: folds FilterBar under the SAME "Controls ▾" toggle as
-          // TopBar's own secondary-controls group on mobile — see the
-          // `controlsOpen` state comment in App.tsx above.
-          controlsOpen={controlsOpen}
+          // Its own independent "Filters ▾" toggle now (Task 2) — see the
+          // `filtersOpen` state comment in App.tsx above.
+          filtersOpen={filtersOpen}
         />
       )}
       <main className="board-region">

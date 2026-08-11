@@ -1,6 +1,7 @@
 import { useState, type ChangeEvent } from "react";
 import type { FilterState } from "../board/cardFilter";
 import LabelFilterPopover from "./LabelFilterPopover";
+import scryIcon from "../assets/ui-icons/scry.png";
 
 export interface FilterBarProps {
   filter: FilterState;
@@ -20,25 +21,25 @@ export interface FilterBarProps {
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * passed straight through to `LabelFilterPopover` when it's open. */
   colorRegistry?: Record<string, string>;
-  /** WF-085b: App-owned mobile "Controls ▾" collapse state (shared with
-   * TopBar's own `#topbar-controls-group`) — this component's root element
-   * carries `id="filter-bar"` + `hidden={!controlsOpen}` so ONE toggle
-   * folds search/priority/complexity/labels/Clear away on mobile alongside
-   * TopBar's group. styles.css confines the `[hidden]` override to the
-   * ≤720px media query, so desktop always renders this bar regardless of
-   * the flag (mirrors `#topbar-controls-group`'s existing pattern). */
-  controlsOpen: boolean;
+  /** App-owned "Filters ▾" collapse state (its own independent toggle now —
+   * see TopBar's `[Filters ▾] [Controls ▾] [＋]` cluster, split from the
+   * old shared "Controls ▾"). This component's root element carries
+   * `id="filter-bar"` + `hidden={!filtersOpen}`; the `hidden` override now
+   * takes effect on every viewport, not just ≤720px (desktop defaults open
+   * so the board looks unchanged on load, but the Filters button can
+   * collapse this bar there too). */
+  filtersOpen: boolean;
 }
 
 const PRIORITIES = ["P0", "P1", "P2", "P3", "P4"];
 const COMPLEXITIES = ["S", "M", "L", "XL"];
 
 /**
- * The board's filter row (F3, WF-061): a "Muster" eyebrow, then search +
- * priority/complexity dropdowns + a Labels button that folds out
- * `LabelFilterPopover`, plus a right-aligned visible/total readout and Clear
- * filters. Purely presentational — `filter` is the caller's source of truth
- * (same deferred-state pattern as `LabelFilterPopover`/`LabelEditor`/
+ * The board's filter row (F3, WF-061): a "Scry" eyebrow on its own line,
+ * then search + priority/complexity dropdowns + a Labels button that folds
+ * out `LabelFilterPopover`, plus a right-aligned visible/total readout and
+ * Clear filters. Purely presentational — `filter` is the caller's source of
+ * truth (same deferred-state pattern as `LabelFilterPopover`/`LabelEditor`/
  * `StatusMenu`); this component owns only the popover's open/closed
  * `useState`, nothing about filter values.
  *
@@ -64,7 +65,7 @@ function FilterBar({
   onComplexity,
   onClear,
   colorRegistry,
-  controlsOpen,
+  filtersOpen,
 }: FilterBarProps) {
   const [labelsOpen, setLabelsOpen] = useState(false);
   const labelBadge = filter.includeLabels.length + filter.excludeLabels.length;
@@ -78,69 +79,76 @@ function FilterBar({
   }
 
   return (
-    <div id="filter-bar" className="filter-bar" hidden={!controlsOpen}>
-      <span className="filter-bar__eyebrow">Muster</span>
+    <div id="filter-bar" className="filter-bar" hidden={!filtersOpen}>
+      {/* Own line above the row below (`.filter-bar__eyebrow-row`'s
+          `flex-basis: 100%` forces the wrap) — was inline before search. */}
+      <span className="filter-bar__eyebrow-row">
+        <img src={scryIcon} alt="" className="filter-bar__eyebrow-icon" />
+        <span className="filter-bar__eyebrow">Scry</span>
+      </span>
 
-      <input
-        className="filter-bar__search"
-        aria-label="search"
-        type="search"
-        placeholder="Search cards…"
-        value={filter.query}
-        onChange={(e) => onQuery(e.target.value)}
-      />
+      <div className="filter-bar__row">
+        <input
+          className="filter-bar__search"
+          aria-label="search"
+          type="search"
+          placeholder="Search cards…"
+          value={filter.query}
+          onChange={(e) => onQuery(e.target.value)}
+        />
 
-      <div className="filter-bar__select">
-        <select
-          aria-label="priority"
-          value={filter.priority ?? ""}
-          onChange={handlePriorityChange}
-        >
-          <option value="">Priority</option>
-          {PRIORITIES.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </div>
+        <div className="filter-bar__select">
+          <select
+            aria-label="priority"
+            value={filter.priority ?? ""}
+            onChange={handlePriorityChange}
+          >
+            <option value="">Priority</option>
+            {PRIORITIES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <div className="filter-bar__select">
-        <select
-          aria-label="complexity"
-          value={filter.complexity ?? ""}
-          onChange={handleComplexityChange}
-        >
-          <option value="">Complexity</option>
-          {COMPLEXITIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </div>
+        <div className="filter-bar__select">
+          <select
+            aria-label="complexity"
+            value={filter.complexity ?? ""}
+            onChange={handleComplexityChange}
+          >
+            <option value="">Complexity</option>
+            {COMPLEXITIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <button
-        type="button"
-        className="filter-bar__labels-btn"
-        onClick={() => setLabelsOpen((open) => !open)}
-      >
-        Labels
-        {labelBadge > 0 && (
-          <span className="filter-bar__labels-badge">{labelBadge}</span>
-        )}
-      </button>
-
-      <div className="filter-bar__count">
-        {visibleCount} of {totalCount}
         <button
           type="button"
-          className="filter-bar__clear-btn"
-          onClick={onClear}
-          disabled={isDefault}
+          className="filter-bar__labels-btn"
+          onClick={() => setLabelsOpen((open) => !open)}
         >
-          Clear filters
+          Labels
+          {labelBadge > 0 && (
+            <span className="filter-bar__labels-badge">{labelBadge}</span>
+          )}
         </button>
+
+        <div className="filter-bar__count">
+          {visibleCount} of {totalCount}
+          <button
+            type="button"
+            className="filter-bar__clear-btn"
+            onClick={onClear}
+            disabled={isDefault}
+          >
+            Clear filters
+          </button>
+        </div>
       </div>
 
       {labelsOpen && (
