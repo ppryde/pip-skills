@@ -655,7 +655,11 @@ body {
 .topbar__pill {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
-  border-radius: var(--qb-radius-pill);
+  /* Path-tag note treatment (WF-093): torn-note radius + inked border + soft
+     lift, matching the Atlas trail tags and the lane-header notes. */
+  border-radius: var(--qb-radius-pennant);
+  border: 1.5px solid var(--qb-ink-300);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
   background: var(--qb-parchment-muted);
   color: var(--qb-ink-500);
 }
@@ -904,7 +908,10 @@ body {
 .topbar__quarantine-banner {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
-  border-radius: var(--qb-radius-chip-sm);
+  /* Path-tag note treatment (WF-093) — torn-note radius + soft lift; keeps its
+     alert-red fill. */
+  border-radius: var(--qb-radius-pennant);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
   background: var(--legacy-color-7a2e2e);
   color: var(--legacy-color-ffd9d9);
 }
@@ -923,7 +930,10 @@ body {
   font-size: 0.75rem;
   font-weight: 600;
   padding: 0.25rem 0.65rem;
-  border-radius: var(--legacy-radius-999px);
+  /* Path-tag note treatment (WF-093): torn-note radius + soft lift; each pill
+     keeps its own accent fill/border below. */
+  border-radius: var(--qb-radius-pennant);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
 }
 
 .topbar__gold-pill {
