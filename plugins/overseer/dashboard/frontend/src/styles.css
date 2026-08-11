@@ -4982,18 +4982,16 @@ button.trail-tag:focus-visible {
   color: var(--qb-ink-700);
 }
 
-/* The AT HAND pennant is a status marker, not a name-tag — a lightened
-   accent fill (not the todo tag's parchment) so it still reads as "in
-   progress right now", not "ahead ground", but calmer than the old solid
-   fill + bold white text (which was too intense next to the new pastel
-   tags). Dark ink on a pale tint instead. (The ink scale tops out at
-   `--qb-ink-900` — no `--qb-ink-800` token exists — so `-900` stands in as
-   the closest "dark text" tone.) */
+/* The AT HAND pennant is a status marker, not a name-tag — solid accent
+   fill (not the todo tag's pastel/parchment) with bold white text, so it
+   reads as "in progress right now", not "ahead ground". Kept at full
+   intensity by design (user preference) — the calmer per-status pastels are
+   only for the todo/done/blocked name-tags around it. */
 .atlas-trail__pennant--athand {
-  background: color-mix(in srgb, var(--atlas-trail-fill, var(--qb-accent-orange-fill)) 30%, white);
-  border: 1.5px solid color-mix(in srgb, var(--atlas-trail-dark, var(--qb-accent-orange-shadow)) 45%, white);
-  color: var(--qb-ink-900);
-  font-weight: 600;
+  background: var(--atlas-trail-fill, var(--qb-accent-orange-fill));
+  border: 1.5px solid var(--atlas-trail-dark, var(--qb-accent-orange-shadow));
+  color: var(--legacy-color-fff);
+  font-weight: 700;
 }
 
 /* Down-mode (HANDOFF: "plain horizontal text right of the trail — no
