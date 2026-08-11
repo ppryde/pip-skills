@@ -3922,47 +3922,62 @@ a.card-drawer__pr-chip:hover {
    cascade convention (that section must load last to win).
    ========================================================================== */
 
-/* --- TopBar: Board|Atlas view toggle (chunk 7) -------------------------
-   Role B "T1 gold underline" tabs — byte-identical aria-pressed mechanics
-   to `.card-drawer__viewtoggle`, but its own class: the two toggles live in
-   unrelated parts of the tree and shouldn't share a CSS identity by
-   accident. */
+/* --- TopBar: Board|Atlas view toggle (chunk 7; polish pass: "a couple of
+   nice circles" — user words) -------------------------------------------
+   Two circular icon buttons, board sticker language: parchment fill, 2px
+   ink border, a hard (not blurred) shadow, gentle hover lift. The button's
+   own box is 44px (border included) — meeting the ≥44px touch-target floor
+   directly, no separate hit-slop pseudo-element needed — with the border
+   eating into that box just enough that the FILLED interior reads as the
+   ~40px "nice circle" the request asked for. Active = the same gold-chip
+   fill/border/text trio the trail's own gold coin and chips use elsewhere
+   (`--qb-gold-chip-*`) — the current view reads at a glance without needing
+   to compare against its sibling. */
 .topbar__view-toggle {
   display: inline-flex;
-  gap: 0.25rem;
-  padding: 5px;
-  background: var(--qb-tab-track);
-  border-radius: 14px;
+  gap: 0.5rem;
 }
 
-.topbar__view-toggle button {
+.topbar__view-toggle-btn {
   display: inline-flex;
   align-items: center;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.3rem 0.75rem;
-  border-radius: 5px 5px 2px 2px;
-  border: 0;
-  border-bottom: 2px solid var(--qb-tab-underline);
-  background: transparent;
-  color: var(--qb-tab-text);
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--qb-ink-700);
+  background: var(--qb-parchment-muted);
+  box-shadow: var(--qb-shadow-card) var(--qb-ink-700);
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--qb-ink-500);
+  opacity: 0.72;
   cursor: pointer;
   transition:
+    transform var(--qb-motion-hover) ease,
+    opacity var(--qb-motion-hover) ease,
     background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    color var(--qb-motion-hover) ease;
+    border-color var(--qb-motion-hover) ease;
 }
 
-.topbar__view-toggle button:hover {
-  background: var(--qb-tab-hover-bg);
-  border-bottom-color: var(--qb-tab-underline-active);
-  color: var(--qb-tab-text-active);
+.topbar__view-toggle-btn:hover {
+  opacity: 1;
+  border-color: var(--qb-btn-ink-hover);
 }
 
-.topbar__view-toggle button[aria-pressed="true"] {
-  border-bottom-color: var(--qb-tab-underline-active);
-  color: var(--qb-tab-text-active);
-  background: var(--qb-tab-active-bg);
+@media (prefers-reduced-motion: no-preference) {
+  .topbar__view-toggle-btn:hover {
+    transform: translateY(-2px);
+  }
+}
+
+.topbar__view-toggle-btn[aria-pressed="true"] {
+  opacity: 1;
+  border-color: var(--qb-gold-chip-border);
+  background: var(--qb-gold-chip-bg);
+  color: var(--qb-gold-chip-text);
 }
 
 /* --- Atlas chart: page shell, toolbar, rows -----------------------------
@@ -3977,10 +3992,16 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* Toolbar (HANDOFF, between the topbar and the chart): a static
-   complexity-weight label plus three Role-B segmented toggles, reusing the
-   exact tab mechanics as `.topbar__view-toggle` above (byte-identical
-   aria-pressed styling, deliberately its own class since the two toggles
-   live in unrelated parts of the tree). */
+   complexity-weight label plus three toggles. Polish pass: restyled off
+   the plain segmented-tab pattern onto the board's own wobble-button
+   sticker chips (`--qb-btn-*` — same family as `.atlas-rail-card__expand`'s
+   "sub-quests" chip and every card-tile button elsewhere) — asymmetric
+   hand-drawn radii, a hard resting shadow, and a clearly distinct pressed/
+   active state (the same gold-chip treatment the view-switcher circles and
+   the trail's own gold coin use) rather than the tab underline this toolbar
+   used to share with `.topbar__view-toggle` (that toggle has since gone
+   its own, circular, way — see above). Pure presentation: no change to
+   the toggles' own state/behavior. */
 .atlas-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -3998,40 +4019,54 @@ a.card-drawer__pr-chip:hover {
 
 .atlas-toolbar__toggle {
   display: inline-flex;
-  gap: 0.2rem;
-  padding: 4px;
-  background: var(--qb-tab-track);
-  border-radius: 12px;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .atlas-toolbar__toggle-btn {
   display: inline-flex;
   align-items: center;
   font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.25rem 0.6rem;
-  border-radius: 5px 5px 2px 2px;
-  border: 0;
-  border-bottom: 2px solid var(--qb-tab-underline);
-  background: transparent;
-  color: var(--qb-tab-text);
+  font-weight: 700;
+  padding: 0.3rem 0.65rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  background: var(--qb-btn-face);
+  color: var(--qb-btn-text);
+  box-shadow: var(--qb-shadow-card) var(--qb-btn-ink);
   cursor: pointer;
   transition:
     background-color var(--qb-motion-hover) ease,
     border-color var(--qb-motion-hover) ease,
-    color var(--qb-motion-hover) ease;
+    box-shadow var(--qb-motion-hover) ease,
+    transform var(--qb-motion-hover) ease;
+}
+
+/* Asymmetric hand-drawn radii, alternating per button in a pair — real
+   stickers never share an identical wobble. */
+.atlas-toolbar__toggle-btn:first-child {
+  border-radius: var(--qb-btn-wobble);
+}
+
+.atlas-toolbar__toggle-btn:last-child {
+  border-radius: var(--qb-btn-wobble-3);
 }
 
 .atlas-toolbar__toggle-btn:hover {
-  background: var(--qb-tab-hover-bg);
-  border-bottom-color: var(--qb-tab-underline-active);
-  color: var(--qb-tab-text-active);
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .atlas-toolbar__toggle-btn:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .atlas-toolbar__toggle-btn[aria-pressed="true"] {
-  border-bottom-color: var(--qb-tab-underline-active);
-  color: var(--qb-tab-text-active);
-  background: var(--qb-tab-active-bg);
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+  box-shadow: var(--qb-btn-shadow-active);
 }
 
 /* The mobile orientation toggle is inert (CSS-invisible) above 720px —

@@ -207,20 +207,39 @@ function TopBar({
 
         {/* WF-086: Board|Atlas view toggle — the always-visible chip row, a
             SIBLING of #topbar-controls-group (not nested inside it), so the
-            mobile "Controls ▾" collapse never hides it. Role B "T1 gold
-            underline" tabs, same aria-pressed mechanics as
-            CardDetailDrawer's `.card-drawer__viewtoggle`, under its own
-            `.topbar__view-toggle` class (styled in styles.css). DOM
-            position here (desktop reads it) is right after identity, ahead
-            of the repo selector; mobile re-sequences it onto its own row
-            via `order` (see styles.css's R2-R5 scheme — this is row R1b,
-            order 6, one of the scheme's intentional 10s-apart gaps). */}
+            mobile "Controls ▾" collapse never hides it. DOM position here
+            (desktop reads it) is right after identity, ahead of the repo
+            selector; mobile re-sequences it onto its own row via `order`
+            (see styles.css's R2-R5 scheme — this is row R1b, order 6, one
+            of the scheme's intentional 10s-apart gaps).
+
+            Polish pass (user: "a couple of nice circles"): two circular
+            icon buttons under `.topbar__view-toggle-btn` (styled in
+            styles.css) — same aria-pressed mechanics as before, `aria-label`/
+            `title` carry the accessible name now that the visible label is
+            an icon, not text (kept identical to the old button TEXT —
+            "Board"/"Atlas" — so existing name-based test/a11y queries still
+            resolve the same element). */}
         <div className="topbar__view-toggle" role="group" aria-label="View">
-          <button type="button" aria-pressed={view === "board"} onClick={() => onSelectView("board")}>
-            Board
+          <button
+            type="button"
+            className="topbar__view-toggle-btn"
+            aria-pressed={view === "board"}
+            aria-label="Board"
+            title="Board"
+            onClick={() => onSelectView("board")}
+          >
+            <span aria-hidden="true">🗂️</span>
           </button>
-          <button type="button" aria-pressed={view === "atlas"} onClick={() => onSelectView("atlas")}>
-            Atlas
+          <button
+            type="button"
+            className="topbar__view-toggle-btn"
+            aria-pressed={view === "atlas"}
+            aria-label="Atlas"
+            title="Atlas"
+            onClick={() => onSelectView("atlas")}
+          >
+            <span aria-hidden="true">🗺️</span>
           </button>
         </div>
 
