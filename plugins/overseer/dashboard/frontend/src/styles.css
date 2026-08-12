@@ -546,19 +546,19 @@
      select and a button beside it read at the same size. */
   font-size: 0.8rem;
   font-weight: 600;
-  /* The line box fills the content height (border-box height minus the vertical
-     padding + border) so the single value line centres — `line-height: 1` was
-     cropping it tight and the handwritten font's metrics then dropped the
-     glyphs to the bottom of the box. Zero vertical padding lets the line box do
-     the centring. */
-  line-height: 1.5;
+  /* A native <select> value ignores loose line-height on Android Chrome and
+     seats its text by the font's own metrics — Patrick Hand sits low, so the
+     value looked bottom-heavy in the box. Extra padding on the BOTTOM carves
+     space there and lifts the text back to centre (asymmetric padding is the
+     only lever the native value box actually respects here). */
+  line-height: 1.2;
   color: var(--qb-ink-900);
   background: var(--qb-btn-face);
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble);
   height: var(--qb-control-height);
   box-sizing: border-box;
-  padding: 0 0.7rem;
+  padding: 0 0.7rem 0.3rem;
   max-width: 40vw;
   min-width: 0;
   overflow: hidden;
