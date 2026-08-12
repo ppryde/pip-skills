@@ -133,9 +133,14 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
     render(<App />);
 
-    // Lanes are present (labels from layout.ts).
+    // Lanes are present (labels from layout.ts). WF-085 follow-up:
+    // `Board.tsx`'s `displayLanes` now runs `collapseStagesForMobile` on
+    // EVERY viewport (desktop included), so the 7 stage lanes never render
+    // individually here — the fixture's one in-flight card (stage
+    // "implementation") surfaces under the merged "In Progress" lane
+    // instead of an "Implementation" lane/header.
     expect(await screen.findByText("Backlog")).toBeInTheDocument();
-    expect(screen.getByText("Implementation")).toBeInTheDocument();
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
     expect(screen.getByText("Parked")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
 
@@ -169,23 +174,28 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
     // ...but the same counts now surface in the mobile icon-nav (always
     // rendered in the DOM — CSS is what hides the strip above 720px).
-    // Backlog: WF-EPIC + WF-WAITING. Implementation: WF-EPIC-C2. Parked:
-    // WF-OVERBUDGET. Done: WF-EPIC-C1 + WF-SHIPPED.
+    // Backlog: WF-EPIC + WF-WAITING. In Progress (WF-085 follow-up: the 7
+    // stage lanes collapse into this ONE nav entry on every viewport, not
+    // just mobile): WF-EPIC-C2. Parked: WF-OVERBUDGET. Done: WF-EPIC-C1 +
+    // WF-SHIPPED.
     expect(screen.getByLabelText("Backlog, 2 cards")).toBeInTheDocument();
-    expect(screen.getByLabelText("Implementation, 1 cards")).toBeInTheDocument();
+    expect(screen.getByLabelText("In Progress, 1 cards")).toBeInTheDocument();
     expect(screen.getByLabelText("Parked, 1 cards")).toBeInTheDocument();
     expect(screen.getByLabelText("Done, 2 cards")).toBeInTheDocument();
     // mobile-v2 (reverses the WF-085a-review restriction from 9327dd8): an
-    // empty stage lane DOES get a nav icon now, for completeness/even
-    // spacing — but it's not a real tap target, since its lane is still a
-    // thin non-snapping sliver in the swipe track (no pane to jump to).
-    // The icon renders disabled/faded with its own "..., empty" aria-label
-    // rather than a plain count.
-    const bootstrapIcon = screen.getByLabelText("Bootstrap, 0 cards, empty");
-    expect(bootstrapIcon).toBeInTheDocument();
-    expect(bootstrapIcon).toBeDisabled();
-    expect(bootstrapIcon).toHaveClass("lane-icon-nav__item--empty");
-    expect(bootstrapIcon).toHaveTextContent("0");
+    // empty lane DOES get a nav icon, for completeness/even spacing — but
+    // it's not a real tap target, since its lane is still a thin
+    // non-snapping sliver in the swipe track (no pane to jump to). The icon
+    // renders disabled/faded with its own "..., empty" aria-label rather
+    // than a plain count. The individual stage lanes (e.g. Bootstrap) no
+    // longer exist as their own nav entries post-collapse — Abandoned is
+    // this fixture's only lane with zero cards, so it's the empty-lane
+    // example here instead.
+    const abandonedIcon = screen.getByLabelText("Abandoned, 0 cards, empty");
+    expect(abandonedIcon).toBeInTheDocument();
+    expect(abandonedIcon).toBeDisabled();
+    expect(abandonedIcon).toHaveClass("lane-icon-nav__item--empty");
+    expect(abandonedIcon).toHaveTextContent("0");
   });
 
   it("(mobile-v2) an empty lane's icon-nav entry is not a jump target and never becomes active", async () => {
@@ -196,13 +206,17 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     render(<App />);
     await screen.findByText("Backlog");
 
-    const bootstrapIcon = screen.getByLabelText("Bootstrap, 0 cards, empty");
-    fireEvent.click(bootstrapIcon);
+    // Post-WF-085-follow-up collapse (every viewport, not just mobile) the
+    // individual stage lanes (e.g. Bootstrap) no longer have their own nav
+    // entries — Abandoned is this fixture's only zero-card lane, so it's
+    // the empty-lane example here instead.
+    const abandonedIcon = screen.getByLabelText("Abandoned, 0 cards, empty");
+    fireEvent.click(abandonedIcon);
 
     // A disabled button doesn't fire its click handler at all — no jump,
     // no active-pill flip.
     expect(scrollIntoView).not.toHaveBeenCalled();
-    expect(bootstrapIcon).not.toHaveClass("lane-icon-nav__item--active");
+    expect(abandonedIcon).not.toHaveClass("lane-icon-nav__item--active");
   });
 
   it("(WF-085) tapping an icon-nav entry marks it active and jumps the matching lane pane into view", async () => {
@@ -596,15 +610,17 @@ describe("mobile board scroll-container (WF-085 review — CSS regression guard)
   });
 });
 
-// WF-085 in-progress lane: mobile (<=720px, stubbed via `window.matchMedia`
-// — jsdom itself doesn't implement it, see setupTests.ts's default polyfill)
-// collapses the 7 stage lanes into ONE "In Progress" tab/pane
-// (`collapseStagesForMobile`, board/layout.ts), and each in-flight card
-// inside that merged pane carries its own small stage icon (CardTile's
-// `showStage`, wired by Lane.tsx off `lane.kind === "in-progress"`). The
-// sibling "desktop" test below — matchMedia stubbed NOT-mobile — locks in
-// the "byte-for-byte unchanged" guardrail: same 11-lane nav every other test
-// in this file already exercises.
+// WF-085 in-progress lane: `collapseStagesForMobile` (board/layout.ts)
+// merges the 7 stage lanes into ONE "In Progress" tab/pane, and each
+// in-flight card inside that merged pane carries its own small stage icon
+// (CardTile's `showStage`, wired by Lane.tsx off `lane.kind ===
+// "in-progress"`). WF-085 follow-up (per the user's "hide the additional
+// columns for now on desktop" request): `Board.tsx`'s `displayLanes` now
+// runs this collapse UNCONDITIONALLY, so it's no longer gated on
+// `window.matchMedia` reporting mobile — the sibling "desktop" test below
+// (matchMedia stubbed NOT-mobile) now locks in the OPPOSITE of the old
+// "byte-for-byte unchanged" guardrail: desktop collapses too, just like
+// mobile.
 describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
   const originalMatchMedia = window.matchMedia;
 
@@ -672,16 +688,32 @@ describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
     expect(icon).toHaveAttribute("alt", "Implementation");
   });
 
-  it("desktop (matchMedia reports not-mobile): full 11-lane nav is untouched — stage tabs present, no In Progress tab", async () => {
+  it("desktop (matchMedia reports not-mobile) now collapses the stage lanes into In Progress too (WF-085 follow-up: hide additional columns on desktop) — stage tabs are gone, one In Progress tab present instead", async () => {
     stubViewport(false);
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);
 
-    render(<App />);
+    const { container } = render(<App />);
     await screen.findByText("Backlog");
 
+    // Merged tab present with the combined stage-lane count — only
+    // WF-EPIC-C2 (Implementation) carries a stage in this fixture. Mirrors
+    // the mobile-collapse assertions above, just under a not-mobile
+    // matchMedia stub.
+    expect(screen.getByLabelText("In Progress, 1 cards")).toBeInTheDocument();
+
+    // NOT the individual stage tabs (Implementation, Bootstrap, ...).
     expect(
-      screen.getByLabelText("Implementation, 1 cards")
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText(/^In Progress, /)).not.toBeInTheDocument();
+      screen.queryByLabelText(/^Implementation, /)
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Bootstrap, /)).not.toBeInTheDocument();
+
+    // The swipe track has exactly one merged pane, holding the card — no
+    // leftover per-stage pane.
+    const pane = container.querySelector('[data-lane-key="in-progress"]');
+    expect(pane).not.toBeNull();
+    expect(pane!.querySelector('[data-card-id="WF-EPIC-C2"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-lane-key="stage:implementation"]')
+    ).toBeNull();
   });
 });

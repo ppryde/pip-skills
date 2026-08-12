@@ -87,20 +87,21 @@ function Board({
   );
   const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
 
-  // WF-085 in-progress lane: mobile (<=720px, same breakpoint the CSS mobile
-  // block already gates on) collapses the 7 `kind:"stage"` lanes into ONE
+  // WF-085 in-progress lane: collapse the 7 `kind:"stage"` lanes into ONE
   // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
-  // mostly-empty swipe panes/nav icons on a phone. `displayLanes` (NOT
-  // `lanes`) is what the swipe track and the icon-nav both render from
-  // below, so they can never disagree about which lanes exist. Desktop
-  // (`isMobile === false`) is byte-for-byte the old path: `displayLanes ===
-  // lanes`, the real 11-lane result. Drag/drop below deliberately keeps
-  // using `lanes` (the real per-stage layout), never `displayLanes` — see
-  // `handleDragEnd`'s comment.
+  // mostly-empty columns. As of the user's "hide the additional columns for
+  // now on desktop" request this is applied on EVERY viewport (was mobile-
+  // only), so desktop and mobile both show the collapsed set (Backlog / In
+  // Progress / Parked / Done / Abandoned). `displayLanes` (NOT `lanes`) is
+  // what the swipe track, the icon-nav, AND the desktop columns render from,
+  // so they can never disagree about which lanes exist. Drag/drop below
+  // deliberately keeps using `lanes` (the real per-stage layout), never
+  // `displayLanes` — see `handleDragEnd`'s comment — so the stage granularity
+  // is preserved under the hood for when the columns come back.
   const isMobile = useMediaQuery("(max-width:720px)");
   const displayLanes = useMemo(
-    () => (isMobile ? collapseStagesForMobile(lanes) : lanes),
-    [isMobile, lanes]
+    () => collapseStagesForMobile(lanes),
+    [lanes]
   );
 
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
