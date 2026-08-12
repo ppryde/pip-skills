@@ -448,10 +448,13 @@ describe("<AtlasTrail/>", () => {
     expect(tags).toContain("Earlier Quest");
     expect(tags).not.toContain("Final Quest");
 
-    // The suppressed child's own WAYPOINT marker and full-name tooltip
-    // still render fine — only the on-trail label is dropped.
-    expect(container.querySelectorAll(".atlas-trail__waypoint--todo").length).toBe(2);
-    expect(tooltipTexts(container).some((t) => t.startsWith("Final Quest —"))).toBe(true);
+    // On a MULTI-child trail the last child's bare (tagless) marker read as
+    // an extra "finish" circle jammed against the beast, so it's dropped too —
+    // only the earlier child's waypoint remains. (A single-child epic keeps
+    // its one marker; see the single-child tests above.)
+    expect(container.querySelectorAll(".atlas-trail__waypoint--todo").length).toBe(1);
+    expect(tooltipTexts(container).some((t) => t.startsWith("Earlier Quest —"))).toBe(true);
+    expect(tooltipTexts(container).some((t) => t.startsWith("Final Quest —"))).toBe(false);
   });
 
   it("an in-flight epic where the LAST child is a todo (nothing done/at-hand) still suppresses only that last tag", () => {

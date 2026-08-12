@@ -5643,6 +5643,9 @@ button.trail-tag:focus-visible {
   border: 1.5px solid var(--qb-status-in-progress-strong);
   color: var(--legacy-color-fff);
   font-weight: 700;
+  /* The AT HAND pennant marks the current quest — keep it above the other
+     name-tags (which stack by DOM order and would otherwise cover it). */
+  z-index: 5;
 }
 
 /* Down-mode (HANDOFF: "plain horizontal text right of the trail — no

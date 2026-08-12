@@ -351,7 +351,15 @@ function AtlasTrail({
     const openDeps = openDependencies(child, cardsById);
     const blocked = openDeps.length > 0;
 
-    svgMarkers.push(
+    // The last child sits right at the beast; its name-tag is already
+    // suppressed below, so on a MULTI-child trail the bare plain-todo marker
+    // read as an extra "finish" circle jammed against the monster (no tag,
+    // nothing to click). Drop that last dot — the line just runs cleanly into
+    // the boss. Exceptions that keep their marker: a single-child epic (it's
+    // the only quest, nothing else represents it) and a BLOCKED child (the
+    // boulder means "the way is barred", a real signal, not a bare dot).
+    if (!isLastChild || segments.length <= 1 || blocked)
+      svgMarkers.push(
       <g
         key={child.id}
         className={
@@ -432,17 +440,28 @@ function AtlasTrail({
           {segments.map(({ child, start, end }, i) => {
             const group = statusGroupOf(child);
             const faded = group === "todo";
+            const isLast = i === segments.length - 1;
+            // Mirror the marker loop's suppression of the last child's bare
+            // plain-todo dot: with no marker there, cutting a waypoint gap at
+            // its position just leaves a hole in the line before the boss, so
+            // skip that cut.
+            const lastTodoSuppressed =
+              isLast &&
+              segments.length > 1 &&
+              group === "todo" &&
+              openDependencies(child, cardsById).length === 0;
             // Extend only the DRAWN path (never the weight math or waypoint
             // positions): the first segment reaches back under the trailhead
             // village and the last runs out under the monster boss, so the
             // trail visibly starts and ends beneath its bookend icons instead
             // of stopping short of them.
             const drawStart = i === 0 ? TRAILHEAD_ICON_SIZE_PX / 2 : start;
-            const drawEnd =
-              i === segments.length - 1
-                ? beastXClamped + BEAST_ICON_SIZE_PX / 2
-                : end;
-            const cuts = [{ at: end, radius: WAYPOINT_GAP_PX }];
+            const drawEnd = isLast
+              ? beastXClamped + BEAST_ICON_SIZE_PX / 2
+              : end;
+            const cuts = lastTodoSuppressed
+              ? []
+              : [{ at: end, radius: WAYPOINT_GAP_PX }];
             if (i > 0) cuts.push({ at: start, radius: WAYPOINT_GAP_PX });
             // Impl-review round 1, finding 3: cutting the campfire gap ONLY
             // on the frozen in-progress child's own segment missed the
@@ -472,7 +491,7 @@ function AtlasTrail({
           // dips between the two, the line's first point floats above/below the
           // village. Now the line always emerges from under the village.
           transform={`translate(0, ${
-            t.yAt(TRAILHEAD_ICON_SIZE_PX / 2) - TRAILHEAD_ICON_SIZE_PX / 2
+            t.yAt(TRAILHEAD_ICON_SIZE_PX / 2) - TRAILHEAD_ICON_SIZE_PX / 2 - 10
           })`}
         >
           <image

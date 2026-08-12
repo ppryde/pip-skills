@@ -4,7 +4,6 @@
 import e001 from "../assets/monsters/pipoenemy001.png";
 import e002 from "../assets/monsters/pipoenemy002.png";
 import e003 from "../assets/monsters/pipoenemy003b.png";
-import e004 from "../assets/monsters/pipoenemy004.png";
 import e005 from "../assets/monsters/pipoenemy005.png";
 import e006 from "../assets/monsters/pipoenemy006.png";
 import e007 from "../assets/monsters/pipoenemy007.png";
@@ -19,7 +18,7 @@ import e016 from "../assets/monsters/pipoenemy016.png";
 import e019 from "../assets/monsters/pipoenemy019.png";
 
 export const monsterIcons: readonly string[] = [
-  e001, e002, e003, e004, e005, e006, e007, e008,
+  e001, e002, e003, e005, e006, e007, e008,
   e009, e010, e011, e012, e013, e015, e016, e019,
 ];
 
