@@ -13,8 +13,9 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * Design-library Button (v1) — a thin typed wrapper around the shared
  * `.qb-btn` Role-A button recipe. Forwards every native `<button>` prop
  * untouched; `className` composes with the primitive's own classes rather
- * than replacing them, so a caller can still layer on a control-specific
- * wobble-radius modifier (e.g. `.card-drawer__cancel-btn`) alongside it.
+ * than replacing them, so a caller can still layer on a genuinely
+ * control-specific modifier alongside it — though the drawer buttons now
+ * carry none, rendering as the bare shared button.
  * Defaults `type="button"` (a bare `.qb-btn` inside a `<form>` should never
  * accidentally submit it) — pass `type="submit"` explicitly to opt in.
  */

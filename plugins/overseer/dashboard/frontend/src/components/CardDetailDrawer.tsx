@@ -362,7 +362,6 @@ function CardDetailDrawer({
                   <h2 className="card-drawer__title">{detail.title}</h2>
                   <Button
                     variant="neutral"
-                    className="card-drawer__edit-btn"
                     onClick={() => setEditing(true)}
                     disabled={inFlight}
                   >
@@ -478,7 +477,6 @@ function CardDetailDrawer({
               {detail.is_epic && (
                 <Button
                   variant="neutral"
-                  className="card-drawer__pull-children-btn"
                   onClick={() => void handlePullChildren()}
                   disabled={inFlight}
                 >
@@ -599,7 +597,6 @@ function CardDetailDrawer({
                   </Button>
                   <Button
                     variant="neutral"
-                    className="card-drawer__cancel-btn"
                     onClick={cancelEdit}
                     disabled={busy || inFlight}
                   >

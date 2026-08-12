@@ -2964,25 +2964,13 @@ body {
   padding: 0.1rem 0.4rem;
 }
 
-/* Edit/Save/Cancel/Pull-children all build on the shared `.qb-btn` Role-A
-   base (WF-096 button consolidation — see that class's own doc comment
-   above `.topbar__refresh`); each class below only overrides the ONE thing
-   that varies per control — the wobble-radius variant, or (for Save) the
-   `--primary` gold-chip emphasis via `qb-btn--primary` on the element
-   itself, not a class here — so no drawer button re-declares the full
-   border/background/hover/active/disabled recipe. */
-.card-drawer__edit-btn {
-  border-radius: var(--qb-btn-wobble-3);
-}
-
-.card-drawer__pull-children-btn {
-  border-radius: var(--qb-btn-wobble-4);
-}
-
-.card-drawer__cancel-btn {
-  border-radius: var(--qb-btn-wobble-2);
-}
-
+/* Edit/Save/Cancel/Pull-children carry NO per-control styling — they render
+   purely as the shared design-library `.qb-btn` button (Save adds
+   `.qb-btn--primary` via the primitive's `variant="primary"`). The old
+   per-button wobble-radius overrides were removed (nobody drew a
+   `.card-drawer__edit-btn`/`--cancel-btn`/`--pull-children-btn` rule any
+   more) so every drawer button is identical in size and shape to buttons
+   elsewhere in the app — the constructed classes do the work. */
 .card-drawer__edit-body {
   display: flex;
   flex-direction: column;

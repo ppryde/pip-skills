@@ -20,10 +20,10 @@ describe("<Button/>", () => {
   });
 
   it("composes a caller-supplied className rather than replacing qb-btn", () => {
-    render(<Button className="card-drawer__cancel-btn">Cancel</Button>);
+    render(<Button className="extra-hook">Cancel</Button>);
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass(
       "qb-btn",
-      "card-drawer__cancel-btn"
+      "extra-hook"
     );
   });
 
