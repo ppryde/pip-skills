@@ -8,7 +8,12 @@ import InfoTooltip from "./InfoTooltip";
 // styles.css is slimmed to its genuine overrides (fixed width, transparent
 // background, tighter horizontal padding) now that the rest of its chrome
 // duplicates `.qb-select`.
-import { Select } from "../ui";
+//
+// Design-library eyebrow migration: the "Last Orders" title (icon + text +
+// InfoTooltip) now routes through `<Label/>` too — `.threshold-control__title`
+// in styles.css is likewise slimmed, same treatment as `.filter-bar__eyebrow`/
+// `.topbar__controls-eyebrow`.
+import { Label, Select } from "../ui";
 
 export interface ThresholdControlProps {
   /** Current `context.threshold` — mutate applies the whole board-response,
@@ -56,7 +61,7 @@ function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
 
   return (
     <div className="threshold-control">
-      <span className="threshold-control__title">
+      <Label className="threshold-control__title">
         <img
           src={lastOrders}
           className="threshold-control__icon"
@@ -70,7 +75,7 @@ function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
           the cue to wrap up and hand over before it runs dry. Set once here;
           applies to every quest.
         </InfoTooltip>
-      </span>
+      </Label>
       <Select
         aria-label="Threshold"
         className="threshold-control__select"

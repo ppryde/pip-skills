@@ -10,7 +10,12 @@ import type { UseBoardResult } from "../board/useBoard";
 // fixed square colour-picker affordance (deliberately NOT the pill/Role-A
 // shape), and the `<input type="color">`-free palette grid is intentional —
 // there is no native colour swatch here to migrate.
-import { Button } from "../ui";
+//
+// The per-row "current chip" now routes through `<Chip tone=…/>`, same
+// `tone`/`className="label-chip"` composition `LabelChips`/`LabelEditor`
+// use — `.label-chip label-chip--<key>` on the rendered element, unchanged
+// from the bare `<span>` this used to be.
+import { Button, Chip } from "../ui";
 
 export interface LabelSettingsDialogProps {
   open: boolean;
@@ -98,11 +103,9 @@ function LabelSettingsDialog({
             const current = colors[name];
             return (
               <div key={name} className="label-settings-row">
-                <span
-                  className={`label-chip label-chip--${labelColor(name, colors)}`}
-                >
+                <Chip tone={labelColor(name, colors)} className="label-chip">
                   {name}
-                </span>
+                </Chip>
                 <div className="label-settings-row__swatches">
                   {PALETTE_KEYS.map((key) => (
                     <button

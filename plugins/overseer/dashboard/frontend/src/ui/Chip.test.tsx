@@ -17,4 +17,28 @@ describe("<Chip/>", () => {
       "topbar__pill"
     );
   });
+
+  it("adds the matching label-chip--<tone> colour class when tone is given", () => {
+    render(<Chip tone="sky">ui</Chip>);
+    expect(screen.getByText("ui")).toHaveClass("qb-chip", "label-chip--sky");
+  });
+
+  it("composes tone with a caller-supplied className (the wobble shape)", () => {
+    render(
+      <Chip tone="terracotta" className="label-chip">
+        architecture
+      </Chip>
+    );
+    expect(screen.getByText("architecture")).toHaveClass(
+      "qb-chip",
+      "label-chip--terracotta",
+      "label-chip"
+    );
+  });
+
+  it("omits the tone class entirely when tone is not given", () => {
+    render(<Chip>7d window</Chip>);
+    const chip = screen.getByText("7d window");
+    expect(chip.className).toBe("qb-chip");
+  });
 });

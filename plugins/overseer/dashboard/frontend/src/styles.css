@@ -1032,12 +1032,14 @@ body {
   flex-basis: 100%;
 }
 
+/* WF-097 follow-up: renders via `<Label className="topbar__controls-eyebrow"/>`
+   now (TopBar.tsx), which applies `.qb-label` — text-transform/font-size/
+   font-weight/color were identical to `.qb-label`'s own and are gone below;
+   `letter-spacing` survives as a genuine override, 0.06em here vs.
+   `.qb-label`'s own 0.04em, same wider track `.filter-bar__eyebrow` (Scry)
+   already deliberately uses. */
 .topbar__controls-eyebrow {
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  font-weight: 600;
   letter-spacing: 0.06em;
-  color: var(--qb-ink-400);
 }
 
 /* WF-090 follow-up: wraps Labels…/Refresh/Abandoned/Clear… as ONE atomic
@@ -2338,13 +2340,15 @@ body {
 }
 
 /* Label chips (F1, WF-058) — the base pill shared by the read-only tile
-   wrapper (`.card-tile__labels`, below) and the drawer's editable
+   wrapper (`.card-tile__labels`, below), the drawer's editable
    `.label-editor__chip` (further down, alongside `.label-editor`'s other
-   rules) — both apply `.label-chip--<key>`. Colour is ALWAYS the per-label
-   `.label-chip--<key>` modifier (board/labelColor.ts's stable hash ->
-   palette key), never an inline style — same chip-formula shape as
-   `.branch-chip` (pale bg / saturated text / medium border) so a label chip
-   reads as a sibling of the other tile chips, not a foreign element. */
+   rules), and the label-colours dialog's per-row current chip
+   (`.label-settings-row`, LabelSettingsDialog.tsx) — all three apply
+   `.label-chip--<key>`. Colour is ALWAYS the per-label `.label-chip--<key>`
+   modifier (board/labelColor.ts's stable hash -> palette key), never an
+   inline style — same chip-formula shape as `.branch-chip` (pale bg /
+   saturated text / medium border) so a label chip reads as a sibling of the
+   other tile chips, not a foreign element. */
 .label-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2352,16 +2356,34 @@ body {
   margin: 0.1rem 0 0.35rem;
 }
 
-/* WF-079: hand-drawn wobble to match Role A's illustrated system — a fixed
-   wobble radius (reusing `--qb-btn-wobble-3`, distinct from the neighbouring
-   filter-bar/label-editor controls' own -2/-4 picks so chips don't read as
-   the same stamped shape) plus a subtle ink ring layered OVER each palette's
-   own coloured border via box-shadow (not the `border` property) — the
-   9-colour `.label-chip--<key>` modifiers below still own background/color/
-   border in full and are declared after this rule, so their colours are
-   untouched and stay legible. `.label-filter-chip` (pill shape) and its
-   `--include`/`--exclude` box-shadow rings still override both properties
-   for the filter popover, unchanged from before this chunk. */
+/* Design-library reconciliation: every `.label-chip` element (`LabelChips`/
+   `LabelEditor`/`LabelSettingsDialog`) now renders through `<Chip/>`
+   (`src/ui/`), so `.qb-chip` (declared above, "Design library" section) is
+   ALWAYS present as the base class too. `.qb-chip` supplies `display:
+   inline-flex; align-items: center` — genuinely shared, so it's gone from
+   here — plus a fallback font-size/padding/border-radius/border/background/
+   color for the plain neutral pill (`<Chip/>` with no `tone`). `.label-chip`
+   below is declared LATER in the cascade, so its font-size/padding/
+   border-radius win over `.qb-chip`'s for any chip carrying it — this is
+   the hand-drawn WOBBLE SHAPE layer, kept in full (nothing stripped: none
+   of its values happen to already match `.qb-chip`'s, so every property
+   here is a genuine, needed override, not dead duplication). `.label-chip`
+   itself never sets colour — that's always the `.label-chip--<key>`
+   modifiers below (also declared later, also winning over `.qb-chip`'s own
+   border/background/color) — board/labelColor.ts's stable hash -> palette
+   key, never an inline style.
+
+   WF-079: the wobble radius itself (reusing `--qb-btn-wobble-3`, distinct
+   from the neighbouring filter-bar/label-editor controls' own -2/-4 picks so
+   chips don't read as the same stamped shape) plus a subtle ink ring layered
+   OVER each palette's own coloured border via box-shadow (not the `border`
+   property) — the 9-colour `.label-chip--<key>` modifiers still own
+   background/color/border in full and are declared after this rule, so
+   their colours are untouched and stay legible. `.label-filter-chip` (pill
+   shape, LabelFilterPopover's bespoke `<button>` — never routed through
+   `<Chip/>`, see that file's own doc comment for why) and its `--include`/
+   `--exclude` box-shadow rings still override both properties for the
+   filter popover, unchanged from before this chunk. */
 .label-chip {
   font-size: 0.65rem;
   font-weight: 500;
@@ -3421,14 +3443,25 @@ a.card-drawer__pr-chip:hover {
    was `.threshold-control__label`, wrapping a `<label>` around the input;
    now a plain `<span>` sibling (a `<button>` — the InfoTooltip trigger —
    can't nest inside a `<label>`), keeping the same typography so the
-   relabel doesn't change how the control reads in the topbar. */
+   relabel doesn't change how the control reads in the topbar.
+   WF-097 follow-up: renders via `<Label className="threshold-control__title"/>`
+   now (ThresholdControl.tsx), which applies `.qb-label` — text-transform/
+   font-size (well, font-size stays overridden, see below)/color were
+   identical to `.qb-label`'s own where they matched and are gone below;
+   `display: inline-flex; align-items: center; gap: 0.3rem` (layout, for the
+   icon+text+tooltip row) and `font-size: 0.7rem`/`letter-spacing: 0.03em`
+   (genuine overrides — 0.7rem vs. `.qb-label`'s 0.65rem, 0.03em vs. its
+   0.04em) survive as real deltas. `font-weight: normal` is new here and
+   NOT a leftover: this title was never bold before this migration (no
+   font-weight rule existed), so it cancels `.qb-label`'s default 600 rather
+   than silently picking it up — same "eyebrow that was never bold" case as
+   `.topbar__repo-select-label`/`-branch-select-label` above. */
 .threshold-control__title {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   font-size: 0.7rem;
-  color: var(--qb-ink-400);
-  text-transform: uppercase;
+  font-weight: normal;
   letter-spacing: 0.03em;
 }
 
@@ -3978,7 +4011,10 @@ a.card-drawer__pr-chip:hover {
    rather than "here is a label", so it can't be mistaken for one more chip
    in the row. `aria-pressed` (LabelSettingsDialog) marks the label's
    current registry colour with a ring, same affordance
-   `.label-filter-chip--include`'s inset ring already uses. */
+   `.label-filter-chip--include`'s inset ring already uses. This 1.4rem
+   (22.4px) box is well under a comfortable touch target — the `@media
+   (pointer: coarse)` layer bumps it to 32px alongside `.label-editor__remove`
+   (same small-square-icon-button tier), unchanged here on desktop/mouse. */
 .label-settings-swatch {
   width: 1.4rem;
   height: 1.4rem;
@@ -6000,12 +6036,23 @@ button.trail-tag:focus-visible {
      The controls that DO get a touch floor land on `--qb-control-height-touch`
      (~34px) rather than a raw 44px — a comfortable tap target that stays a
      relative of the desktop button box instead of towering over it (WF-097
-     touch-layer reconciliation; see the token's `:root` comment). */
+     touch-layer reconciliation; see the token's `:root` comment).
+
+     `.label-filter-chip` (LabelFilterPopover's tri-state toggle) joins this
+     group as part of the label-chip design-library migration: it was a bare
+     `<button>` with NO touch floor at all before this pass (only its own
+     small padding/font-size), noticeably under every other tappable pill
+     here — same tier as `.status-menu button`/`.claim-control button`
+     (a small pill-shaped text button), so it takes the same token rather
+     than a bespoke size. The read-only `.label-chip` (LabelChips/
+     LabelEditor/LabelSettingsDialog's display chip) is deliberately NOT
+     here — it carries no `onClick`, so there's no tap target to grow. */
   .topbar__fleet-pill,
   .topbar__archive-toggle,
   .status-menu button,
   .claim-control button,
-  .card-drawer__viewtoggle button {
+  .card-drawer__viewtoggle button,
+  .label-filter-chip {
     min-height: var(--qb-control-height-touch);
   }
 
@@ -6021,7 +6068,8 @@ button.trail-tag:focus-visible {
   }
 
   .link-editor__deps-list button,
-  .label-editor__remove {
+  .label-editor__remove,
+  .label-settings-swatch {
     min-width: 32px;
     min-height: 32px;
   }

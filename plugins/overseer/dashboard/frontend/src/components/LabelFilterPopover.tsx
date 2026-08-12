@@ -53,6 +53,19 @@ function chipState(
  * `label-chip--<key>` colour plus an include/exclude ring modifier), not a
  * `.qb-btn` rectangular Role-A button. Forcing them onto the primitive would
  * paint over that chip shape and its per-label colour with the wrong chrome.
+ *
+ * Design-library label-chip migration: also DELIBERATELY not `<Chip/>`, for
+ * a different reason than the `<Button/>` skip above — `<Chip/>` renders a
+ * `<span>` (design-library Chips are inert badges), and this element is a
+ * real interactive toggle (click + keyboard-activatable, `aria-label`
+ * carrying its tri-state name) that every test here drives via
+ * `getByRole("button", …)`. Routing it onto `<Chip/>` would trade native
+ * button semantics (focus, Enter/Space activation, the implicit button
+ * role) for a span with a synthetic `onClick` — a real accessibility
+ * regression, not just a chrome mismatch. The `label-chip--<key>` COLOUR
+ * class is still the shared one `LabelChips`/`LabelEditor` use via `<Chip/>`
+ * — only the pill's own element type and its tri-state ring mechanics stay
+ * bespoke here.
  */
 function LabelFilterPopover({
   labels,

@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from "react";
 import { labelColor } from "../board/labelColor";
+import { Chip } from "../ui";
 
 export interface LabelEditorProps {
   labels: string[];
@@ -30,11 +31,12 @@ export interface LabelEditorProps {
  * controls (PrioritySelect/StatusMenu/LinkEditor) deferring to their own
  * props rather than tracking a shadow copy.
  *
- * Each chip carries the SAME `label-chip label-chip--<key>` classes the
- * read-only `LabelChips` uses (`board/labelColor.ts`'s stable hash), so an
- * edited label keeps its established colour — `.label-editor__chip` in
- * styles.css only adds the layout needed to sit the remove glyph inline,
- * it never overrides the palette itself.
+ * Each chip routes through the design-library `<Chip/>` (`src/ui/`), same
+ * `tone`/`className="label-chip"` composition `LabelChips` uses — so an
+ * edited label keeps the SAME `.label-chip label-chip--<key>` classes and
+ * established colour (`board/labelColor.ts`'s stable hash) it always has.
+ * `.label-editor__chip` in styles.css only adds the layout needed to sit the
+ * remove glyph inline, it never overrides the palette itself.
  */
 function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
   const [draft, setDraft] = useState("");
@@ -60,9 +62,10 @@ function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
   return (
     <div className="label-editor">
       {labels.map((label) => (
-        <span
+        <Chip
           key={label}
-          className={`label-editor__chip label-chip label-chip--${labelColor(label, colorRegistry)}`}
+          tone={labelColor(label, colorRegistry)}
+          className="label-editor__chip label-chip"
         >
           {label}
           <button
@@ -73,7 +76,7 @@ function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
           >
             ×
           </button>
-        </span>
+        </Chip>
       ))}
       <input
         type="text"

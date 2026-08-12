@@ -84,11 +84,24 @@ function DesignLibrary() {
         <p>
           <code>&lt;Chip/&gt;</code> wraps <code>.qb-chip</code>, factored
           from the topbar&apos;s torn-note pills (last-refreshed time, rest
-          windows).
+          windows). A <code>tone</code> prop (the curated label-palette key
+          from <code>board/labelColor.ts</code>) layers a
+          <code>.label-chip--&lt;key&gt;</code> colour on top — the same
+          chips a card&apos;s <code>label</code>s render as, via
+          <code>LabelChips</code>/<code>LabelEditor</code>/
+          <code>LabelSettingsDialog</code>&apos;s own
+          <code>className=&quot;label-chip&quot;</code> for the hand-drawn
+          wobble shape.
         </p>
         <div className="design-library__row">
           <Chip>last refreshed 2m ago</Chip>
           <Chip>7d window</Chip>
+          <Chip tone="sky" className="label-chip">
+            ui
+          </Chip>
+          <Chip tone="terracotta" className="label-chip">
+            architecture
+          </Chip>
         </div>
       </section>
 

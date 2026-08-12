@@ -24,7 +24,7 @@ import LabelSettingsDialog from "./LabelSettingsDialog";
 // the three onto `<Chip>` while leaving fleet-pill native would fragment
 // that shared rule for no visual gain (see styles.css's own comment on
 // `.topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill`).
-import { Button, Chip } from "../ui";
+import { Button, Chip, Label } from "../ui";
 import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 import compassIcon from "../assets/ui-icons/compass.png";
@@ -388,9 +388,15 @@ function TopBar({
         >
           {/* Task 4: a small dotted-line header opening the group — same
               "quiet caption above a dashed rule" idea as FilterBar's own
-              "Scry" eyebrow, just recast as a divider+title here. */}
+              "Scry" eyebrow, just recast as a divider+title here. Routes
+              through `<Label/>` (design-library eyebrow migration) same as
+              that "Scry" eyebrow already does — `.topbar__controls-eyebrow`
+              only carries its own 0.06em letter-spacing override now,
+              cancelling `.qb-label`'s 0.04em default (declared later in
+              styles.css, so it wins), same pattern RepoSelector/BranchFilter/
+              FilterBar's own eyebrows already follow. */}
           <div className="topbar__controls-header">
-            <span className="topbar__controls-eyebrow">Provisions</span>
+            <Label className="topbar__controls-eyebrow">Provisions</Label>
           </div>
           <div className="topbar__threshold">
             <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
