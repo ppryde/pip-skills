@@ -13,14 +13,9 @@ import {
 } from "../board/atlasTrailLayout";
 import { StarIcon } from "./icons";
 import ScrollingTitle from "./ScrollingTitle";
-// WF-097 follow-up: the sub-quests expand toggle is a genuine Role-A wobble
-// button (it already carried the full `.qb-btn` recipe — see the class's own
-// "Role A wobble button" comment in styles.css), so it now routes through
-// `<Button>` (`src/ui/`); `.atlas-rail-card__expand` is slimmed to its
-// genuine overrides (wobble-2 variant, tighter metrics, self-alignment, and
-// the mobile 44px touch floor). The `.atlas-rail-card__checkbox` sticker is
-// a decorative `aria-hidden` span with no handler — nothing to migrate.
-import { Button } from "../ui";
+// The sub-quests toggle is plain clickable text now (no button chrome) — the
+// "N sub-quests" label itself IS the affordance (styled in styles.css). It's
+// still a real `<button>` for keyboard/aria, just painted like a heading.
 
 export interface AtlasRailCardProps {
   card: BoardCard;
@@ -183,20 +178,20 @@ function AtlasRailCard({
       </div>
 
       {hasChildren && (
-        <Button
-          variant="neutral"
+        <button
+          type="button"
           className="atlas-rail-card__expand"
           aria-expanded={expanded}
           onClick={(e) => {
-            // Same stopPropagation pattern as EpicCard.tsx's expand button —
-            // expanding sub-quests is distinct from opening the drawer, even
-            // though the button lives inside the onOpen-wired card body.
+            // stopPropagation: expanding sub-quests is distinct from opening
+            // the drawer, even though the toggle lives inside the onOpen-wired
+            // card body.
             e.stopPropagation();
             onToggleExpand(card.id);
           }}
         >
-          {expanded ? "▾" : "▸"} sub-quests
-        </Button>
+          {expanded ? "▾" : "▸"} {orderedChildren.length} sub-quests
+        </button>
       )}
 
       {expanded && hasChildren && (
