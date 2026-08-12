@@ -6147,9 +6147,9 @@ button.trail-tag:focus-visible {
      725ddea invariant it encodes: exactly one scroller, everything else
      (rail, lane, row) scrolls WITH the chart, never independently. */
   .atlas-chart {
-    /* Widened from 160px so an epic's title fits without wrapping to two rows
-       on the condensed rail card. */
-    --rail: 200px;
+    /* Wider rail so the (now one-line, ellipsised) epic title has room to show
+       more before the cut. */
+    --rail: 240px;
     min-width: 0;
     width: 100%;
     max-width: 100vw;
@@ -6181,6 +6181,23 @@ button.trail-tag:focus-visible {
      HANDOFF's own "condensed card above its trail" framing. */
   .atlas-chart__row {
     display: block;
+    /* The trail SVG overflows the (viewport-width) row box, so the row's own
+       `border-bottom` divider stopped at the viewport edge. Draw the divider
+       as a pseudo-element sized to the full trail width instead (--trail-w is
+       set on `.atlas-chart` from EpicAtlas's shared `trailWidth`), so it spans
+       the whole lane as you scroll. */
+    position: relative;
+    border-bottom: none;
+  }
+
+  .atlas-chart__row::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: var(--trail-w, 100%);
+    border-top: 1.5px dashed var(--qb-line-dashed-2);
+    pointer-events: none;
   }
 
   /* Legibility floor for the SVG trail lane — tunable, not a promise; a
@@ -6230,13 +6247,12 @@ button.trail-tag:focus-visible {
     display: none;
   }
 
-  /* 2-line clamp keeps a long epic title from pushing the condensed card
-     past a readable height on a 160px-wide rail. */
+  /* One line, ellipsised — the condensed card stays a fixed, tidy height and
+     the wider rail (below) shows more of the title before the cut. */
   .atlas-rail-card__title {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Checklist wheel's mobile cap (HANDOFF: "~224px mobile" vs desktop's

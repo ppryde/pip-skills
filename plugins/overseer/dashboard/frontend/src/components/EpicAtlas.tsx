@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { Board, BoardCard } from "../api/types";
 import { accentKeyForCard } from "../board/cardAccent";
 import { parseCalendarDate } from "../board/atlasGeometry";
@@ -261,7 +262,12 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
 
   return (
     <div className="atlas-page">
-      <div className={"atlas-chart" + (downMode ? " atlas-chart--down" : "")}>
+      <div
+        className={"atlas-chart" + (downMode ? " atlas-chart--down" : "")}
+        // Shared trail width, exposed so the mobile row-divider pseudo-element
+        // (styles.css) can span the full lane the SVG overflows into.
+        style={{ ["--trail-w" as string]: `${trailWidth}px` } as CSSProperties}
+      >
         {epics.length === 0 ? (
           <p className="atlas-chart__empty">{EMPTY_STATE_COPY}</p>
         ) : downMode ? (
