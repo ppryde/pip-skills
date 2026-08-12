@@ -9,7 +9,16 @@ import type { UseBoardResult } from "../board/useBoard";
 // icon-only affordance (`.link-editor__deps-list button`, too small for a
 // rectangular Role-A outline — see that rule's own WF-046 item 2 comment),
 // not a `.qb-btn` shape, so it doesn't fit `<Button/>`.
-import { Button, Select } from "../ui";
+//
+// Label standardisation follow-up: the "Parent"/"Depends on" inline field
+// captions now route through the SAME `<Label>` as the topbar's REPO/
+// BRANCH eyebrows — `.link-editor__deps-label` in styles.css is slimmed to
+// nothing it doesn't already share with `.qb-label` (its own color was
+// already `--qb-ink-400`, `.qb-label`'s default). The outer `<label>`
+// wrapping "Parent" is unchanged — the `<Select>` right below already
+// carries an explicit `aria-label="Parent"` (unaffected by any of this),
+// so `getByLabelText("Parent")` keeps resolving exactly as before.
+import { Button, Label, Select } from "../ui";
 
 export interface LinkEditorProps {
   cardId: string;
@@ -74,7 +83,7 @@ function LinkEditor({
   return (
     <div className="link-editor">
       <label className="link-editor__field">
-        Parent
+        <Label>Parent</Label>
         <Select
           aria-label="Parent"
           value={parent ?? ""}
@@ -91,7 +100,7 @@ function LinkEditor({
       </label>
 
       <div className="link-editor__deps">
-        <span className="link-editor__deps-label">Depends on</span>
+        <Label className="link-editor__deps-label">Depends on</Label>
         <ul className="link-editor__deps-list">
           {dependsOn.map((depId) => (
             <li key={depId}>

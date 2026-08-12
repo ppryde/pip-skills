@@ -9,4 +9,11 @@ describe("<Label/>", () => {
     expect(label.tagName).toBe("SPAN");
     expect(label).toHaveClass("qb-label");
   });
+
+  it("renders as an <h3> with the same .qb-label class when as=\"h3\" (card-drawer section headings)", () => {
+    render(<Label as="h3">Sub-quests</Label>);
+    const heading = screen.getByRole("heading", { level: 3, name: "Sub-quests" });
+    expect(heading.tagName).toBe("H3");
+    expect(heading).toHaveClass("qb-label");
+  });
 });

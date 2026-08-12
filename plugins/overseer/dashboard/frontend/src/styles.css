@@ -3060,12 +3060,20 @@ a.card-drawer__pr-chip:hover {
   margin-bottom: 1rem;
 }
 
+/* Label standardisation follow-up: renders via `<Label as="h3"
+   className="card-drawer__section-heading"/>` now (CardDetailDrawer.tsx) —
+   these were the ONE genuinely semantic heading among the drawer's caption-
+   like text (real `<h3>`s: "Links", "Sub-quests", and the markdown section
+   labels), so they needed a heading TAG, not just eyebrow styling — see
+   `Label`'s own `as` prop doc comment. `text-transform`/`letter-spacing`/
+   `color` were previously a DIFFERENT recipe from `.qb-label` (0.85rem/
+   0.03em/ink-500 vs. `.qb-label`'s 0.65rem/0.04em/ink-400) — per this
+   migration's goal ("read identically to the topbar eyebrows"), that
+   distinct look is dropped rather than kept as a genuine override, so
+   these now match `.qb-label` exactly. Only `margin` survives below (a
+   real layout delta; `.qb-label` has none). */
 .card-drawer__section-heading {
   margin: 0 0 0.25rem;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--qb-ink-500);
 }
 
 .card-drawer__section-text {
@@ -3187,10 +3195,17 @@ a.card-drawer__pr-chip:hover {
   margin-bottom: 0.75rem;
 }
 
+/* Label standardisation follow-up: renders via `<Label
+   className="card-drawer__journey-label"/>` now (CardDetailDrawer.tsx) —
+   `font-weight: 600` was already identical to `.qb-label`'s own default and
+   is gone below; `font-size`/`color` (0.75rem/ink-500) were a distinct,
+   slightly bigger/darker recipe than `.qb-label`'s (0.65rem/ink-400) and
+   are dropped too, per this migration's goal of reading identically to the
+   topbar eyebrows rather than keeping the old delta. Only `margin-bottom`
+   survives — genuine layout spacing above the progress track, which
+   `.qb-label` (an inline-block eyebrow with no opinion on its neighbours)
+   doesn't provide. */
 .card-drawer__journey-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--qb-ink-500);
   margin-bottom: 0.25rem;
 }
 
@@ -3257,10 +3272,16 @@ a.card-drawer__pr-chip:hover {
   margin: 0;
 }
 
-.card-drawer__checklist-count {
-  font-size: 0.75rem;
-  color: var(--qb-ink-400);
-}
+/* Label standardisation follow-up: renders via `<Label
+   className="card-drawer__checklist-count"/>` now (CardDetailDrawer.tsx) —
+   `color: var(--qb-ink-400)` was already identical to `.qb-label`'s own
+   default and `font-size: 0.75rem` is dropped too (matches `.qb-label`'s
+   0.65rem now, per this migration's goal), so nothing genuinely distinct
+   survives — the base rule is gone entirely, same as `.topbar__pill`'s own
+   WF-097 note above. The class name lives on only as a selector hook (and
+   for `.card-drawer__checklist-header`'s flex layout, unaffected) —
+   `<Label className="card-drawer__checklist-count">` still composes it in,
+   it just carries no declarations of its own any more. */
 
 .card-drawer__checklist .checklist__row {
   font-size: 0.85rem;
@@ -3722,9 +3743,15 @@ a.card-drawer__pr-chip:hover {
   border-radius: var(--qb-btn-wobble-2);
 }
 
-.link-editor__deps-label {
-  color: var(--qb-ink-400);
-}
+/* Label standardisation follow-up: renders via `<Label
+   className="link-editor__deps-label"/>` now (LinkEditor.tsx) —
+   `color: var(--qb-ink-400)` was already identical to `.qb-label`'s own
+   default, so the base rule is gone entirely, same treatment as
+   `.card-drawer__checklist-count`/`.topbar__pill` above. The class name
+   lives on only as a selector hook — `<Label className="link-editor__deps-
+   label">` still composes it in. The sibling "Parent" caption (same
+   component, above the parent `<Select>`) needed no className at all —
+   plain `<Label>Parent</Label>`, nothing to override. */
 
 .link-editor__deps-list {
   list-style: none;

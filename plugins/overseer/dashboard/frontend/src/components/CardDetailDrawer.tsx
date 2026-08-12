@@ -27,7 +27,22 @@ import { StarIcon } from "./icons";
 // the split `.qb-input`'s own doc comment anticipates. The `.card-drawer__close`
 // "×" stays the icon-only affordance, and the Quest|Scroll viewtoggle stays on
 // its bespoke segmented `.qb-btn` pair (aria-pressed mechanics unchanged).
-import { Button, Input, Textarea } from "../ui";
+//
+// Label standardisation follow-up: every small caption/eyebrow in the drawer
+// now routes through the SAME `<Label>` the topbar's REPO/BRANCH/SCRY/
+// Provisions eyebrows use, so they read as one look app-wide —
+// `.card-drawer__section-heading` (via `<Label as="h3">`, keeping real
+// heading semantics — see Label's own doc comment), `.card-drawer__journey-
+// label`, and `.card-drawer__checklist-count`; each class below is slimmed
+// to its genuine layout delta now that `.qb-label` supplies the caption
+// look. Deliberately EXCLUDED: `.card-drawer__id` (the card's own id VALUE,
+// not a field caption), `.card-drawer__hero-class`/`.card-drawer__pr-chip`
+// (badge/chip VALUES — a session's model name or a PR ref, not label text),
+// and the status-fact pill (a filled/tinted chip, a different design
+// language from the muted eyebrow) — none of these describe another
+// element, they ARE the content, so `.qb-label`'s uppercase-eyebrow
+// treatment doesn't apply.
+import { Button, Input, Label, Textarea } from "../ui";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -486,9 +501,9 @@ function CardDetailDrawer({
                         sub-quests panel; hidden with the whole block when
                         there's no checklist). */}
                     <div className="card-drawer__journey">
-                      <div className="card-drawer__journey-label">
+                      <Label className="card-drawer__journey-label">
                         Journey progress
-                      </div>
+                      </Label>
                       <div
                         className="card-drawer__journey-track"
                         data-progress-pct={journeyPct}
@@ -501,12 +516,12 @@ function CardDetailDrawer({
                     </div>
                     <section className="card-drawer__checklist">
                       <div className="card-drawer__checklist-header">
-                        <h3 className="card-drawer__section-heading">
+                        <Label as="h3" className="card-drawer__section-heading">
                           Sub-quests
-                        </h3>
-                        <span className="card-drawer__checklist-count">
+                        </Label>
+                        <Label className="card-drawer__checklist-count">
                           {checklistDone} / {checklistTotal}
-                        </span>
+                        </Label>
                       </div>
                       <ChecklistRows entries={detail.checklist} />
                     </section>
@@ -530,7 +545,9 @@ function CardDetailDrawer({
                     nothing when the card has none. */}
                 {detail.links && detail.links.length > 0 && (
                   <section className="card-drawer__links">
-                    <h3 className="card-drawer__section-heading">Links</h3>
+                    <Label as="h3" className="card-drawer__section-heading">
+                      Links
+                    </Label>
                     <ul className="card-drawer__links-list">
                       {detail.links.map((l, i) => (
                         <li key={i}>
@@ -638,9 +655,9 @@ function CardDetailDrawer({
                       : null;
                   return (
                     <section key={heading} className="card-drawer__section">
-                      <h3 className="card-drawer__section-heading">
+                      <Label as="h3" className="card-drawer__section-heading">
                         {sectionLabel(heading)}
-                      </h3>
+                      </Label>
                       {progressEntries ? (
                         <ol className="card-drawer__quest-log">
                           {progressEntries.map((entry, i) => (
