@@ -5459,6 +5459,9 @@ a.card-drawer__pr-chip:hover {
   border-radius: var(--qb-radius-card-a);
   box-shadow: none;
   text-align: left;
+  /* A long unbroken title (e.g. a file path) must wrap inside the fixed width,
+     never widen the card off the right edge. */
+  overflow: hidden;
 }
 
 /* Plain ✕ — no circle/border/background, just the glyph. */
@@ -5486,6 +5489,8 @@ a.card-drawer__pr-chip:hover {
   font-family: var(--qb-font-mono);
   font-size: 0.58rem;
   color: var(--qb-ink-500);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .atlas-trail__preview-stars {
@@ -5512,6 +5517,7 @@ a.card-drawer__pr-chip:hover {
   font-size: 0.76rem;
   line-height: 1.15;
   color: var(--qb-ink-900);
+  overflow-wrap: anywhere;
 }
 
 .atlas-trail__preview-status {
@@ -5519,6 +5525,7 @@ a.card-drawer__pr-chip:hover {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--qb-ink-500);
+  overflow-wrap: anywhere;
 }
 
 .atlas-trail__preview-checklist {

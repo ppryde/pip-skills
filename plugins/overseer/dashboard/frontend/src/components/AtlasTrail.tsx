@@ -505,15 +505,16 @@ function AtlasTrail({
           }
           transform={`translate(${beastXClamped}, ${beastY})`}
         >
-          {/* Boss art (POC): a random monster icon, sized a touch bigger than
-              the old 48px BeastFace and centred on the same anchor to offset
-              the art's own transparent margin. Faded when vanquished. */}
+          {/* Boss art (POC): a random monster icon, doubled to 128px and
+              centred on the old 48px BeastFace anchor (offset -40 = -(128-48)/2)
+              to absorb the art's own transparent margin. Faded when
+              vanquished. */}
           <image
             href={monster}
-            x={-8}
-            y={-8}
-            width={64}
-            height={64}
+            x={-40}
+            y={-40}
+            width={128}
+            height={128}
             opacity={slain ? 0.5 : 1}
           />
           <title>
