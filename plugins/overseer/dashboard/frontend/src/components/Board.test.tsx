@@ -200,8 +200,8 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
   it("(mobile-v2) an empty lane's icon-nav entry is not a jump target and never becomes active", async () => {
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
 
     render(<App />);
     await screen.findByText("Backlog");
@@ -215,16 +215,16 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
     // A disabled button doesn't fire its click handler at all — no jump,
     // no active-pill flip.
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
     expect(abandonedIcon).not.toHaveClass("lane-icon-nav__item--active");
   });
 
   it("(WF-085) tapping an icon-nav entry marks it active and jumps the matching lane pane into view", async () => {
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);
-    // jsdom doesn't implement scrollIntoView at all — polyfill it so
-    // Board's guarded call has something to invoke and assert on.
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+    // jsdom doesn't implement scrollTo at all — polyfill it so Board's guarded
+    // horizontal-only jump has something to invoke and assert on.
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
 
     render(<App />);
     await screen.findByText("Backlog");
@@ -235,8 +235,10 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     fireEvent.click(doneIcon);
 
     expect(doneIcon).toHaveClass("lane-icon-nav__item--active");
-    expect(scrollIntoView).toHaveBeenCalledWith(
-      expect.objectContaining({ inline: "center" })
+    // Horizontal-only scroll now (no scrollIntoView) so the page's vertical
+    // position — and the tapped lane's header — stay put.
+    expect(scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "smooth" })
     );
   });
 

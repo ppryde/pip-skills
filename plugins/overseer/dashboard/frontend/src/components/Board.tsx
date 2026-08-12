@@ -204,19 +204,31 @@ function Board({
   }, [activeLaneKey, navLaneKeys]);
 
   // Nav-jump: tapping an icon both sets the active pill immediately (no
-  // waiting on the scroll-settle above) and scrolls that lane's pane to
-  // the track's centre — mirrors the approved prototype's tap-to-jump.
+  // waiting on the scroll-settle above) and centres that lane's pane in the
+  // HORIZONTAL track — mirrors the approved prototype's tap-to-jump.
   const handleNavJump = useCallback((key: string) => {
     setActiveLaneKey(key);
-    const target = trackRef.current?.querySelector<HTMLElement>(
+    const track = trackRef.current;
+    const target = track?.querySelector<HTMLElement>(
       `[data-lane-key="${key}"]`
     );
-    // Guarded rather than a bare optional call: jsdom (unlike every real
-    // browser) doesn't implement `scrollIntoView` at all — see Element.
-    // prototype in test envs — so an unguarded call would throw in tests.
-    if (target && typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-    }
+    if (!track || !target) return;
+    // Scroll ONLY the track's own horizontal position. This used to call
+    // `target.scrollIntoView({ inline: "center", block: "nearest" })`, but the
+    // `block` axis also scrolled the vertical `.board-region`, pushing the
+    // tapped lane's header up out of view (a tap "jumped past" the header to
+    // the first card). Nudging `scrollLeft` by the centre-to-centre delta
+    // leaves the page's vertical position — and the header — untouched.
+    // Guarded: jsdom doesn't implement `scrollTo` (the tests polyfill it), so
+    // an unguarded call would throw there.
+    if (typeof track.scrollTo !== "function") return;
+    const trackRect = track.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const delta =
+      targetRect.left +
+      targetRect.width / 2 -
+      (trackRect.left + trackRect.width / 2);
+    track.scrollTo({ left: track.scrollLeft + delta, behavior: "smooth" });
   }, []);
 
   // Item 8: on mobile, `.board-region`'s page-scroll length must follow the
