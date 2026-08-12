@@ -1199,7 +1199,7 @@ body {
    gone. */
 
 /* Task 3: rpg-icons pack art leading each atlas control's own text label
-   (scroll/skull/compass — see TopBar.tsx) — same small-leading-image
+   (scroll/skull — see TopBar.tsx) — same small-leading-image
    pattern as `.topbar__view-toggle-icon`, just sized down to fit this
    control's shorter/denser button. `alt=""` on the `<img>` keeps these
    decorative — the button's accessible NAME stays the text label alone. */
@@ -5267,7 +5267,7 @@ a.card-drawer__pr-chip:hover {
   overflow: visible;
 }
 
-/* Feature 1 (wide-view overspill): AtlasTrail.tsx (Across mode) sets the
+/* Feature 1 (wide-view overspill): AtlasTrail.tsx sets the
    `width`/`height` SVG attributes to the shared `trailWidth`/laneHeight —
    `width:auto;height:auto` here means the SVG uses THOSE intrinsic
    dimensions instead of the base rule's `100%` (which would stretch/
@@ -5276,10 +5276,8 @@ a.card-drawer__pr-chip:hover {
    parent chain (`.atlas-trail`, `.atlas-chart__lane`, `.atlas-chart__row`,
    `.atlas-chart__rows`) is deliberately never `overflow: hidden`, so a
    wider-than-the-lane SVG here overflows visibly up to `.atlas-chart`
-   (mobile) / `.board-region` (desktop), both `overflow-x: auto` — same
-   "render at intrinsic size, let CSS auto pick up the ratio" trick as
-   Down-mode's own `.atlas-trail--down .atlas-trail__svg { height: auto }`
-   below, just on the opposite axis. */
+   (mobile) / `.board-region` (desktop), both `overflow-x: auto` — "render
+   at intrinsic size, let CSS auto pick up the ratio". */
 .atlas-trail__svg--across {
   width: auto;
   height: auto;
@@ -5687,14 +5685,6 @@ button.trail-tag:focus-visible {
   /* The AT HAND pennant marks the current quest — keep it above the other
      name-tags (which stack by DOM order and would otherwise cover it). */
   z-index: 5;
-}
-
-/* Down-mode (HANDOFF: "plain horizontal text right of the trail — no
-   wobble tilt") — AtlasTrailVertical.tsx never sets an inline `rotate()`
-   on these, this modifier just narrows the max-width for the column's own
-   (typically narrower) cross-axis. */
-.trail-tag--down {
-  max-width: 130px;
 }
 
 /* Task 2 (Across mode only): the below-the-path bank of the alternating
@@ -6336,62 +6326,6 @@ button.trail-tag:focus-visible {
     padding-left: 22px; /* aligns under the title, past the 14px checkbox + gap */
   }
 
-  /* --- Epic Atlas Down-mode: 86vw snap columns (HANDOFF, shipped in
-     production) --------------------------------------------------------
-     `.atlas-chart` is STILL the page's one horizontal scroller (the
-     725ddea invariant) — Down-mode just changes what scrolls inside it:
-     columns instead of rows, `scroll-snap-type: x mandatory` overriding
-     Across-mode's `overflow-x: auto` on the same element (the two
-     orientations never render at once, so there's no axis conflict). */
-  .atlas-chart--down {
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scroll-padding-inline: 0.75rem;
-  }
-
-  .atlas-chart__columns {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    /* Item 8 precedent (Board.tsx's activeLaneHeight): pins this box's
-       page-scroll-relevant height to the ACTIVE column's own content
-       height (inline style, EpicAtlas.tsx) so a short column's page
-       scroll can't run past its own last marker into a taller sibling's
-       empty space. `overflow-y: hidden` is what actually clips the
-       off-screen, currently-taller siblings out of the scrollable region. */
-    overflow-y: hidden;
-    transition: height 0.18s ease;
-  }
-
-  .atlas-chart__column {
-    flex: 0 0 86vw;
-    scroll-snap-align: center;
-  }
-
-  .atlas-chart__column-card {
-    margin-bottom: 0.4rem;
-  }
-
-  .atlas-chart__column-lane {
-    position: relative;
-  }
-
-  /* Down-mode's SVG grows to its own natural content height (the page
-     scrolls; HANDOFF's flat per-complexity scale, "no fit-to-container")
-     rather than being squeezed/stretched into a fixed-height box the way
-     Across-mode's `.atlas-trail` (absolute, inset:0 over an already-sized
-     lane) is. `height: auto` + the intrinsic viewBox aspect ratio
-     (AtlasTrailVertical.tsx sets the viewBox's own width to this same
-     element's measured width) is what makes the rendered SVG height come
-     out in real CSS pixels equal to the viewBox's own height units. */
-  .atlas-trail--down {
-    position: static;
-    display: block;
-  }
-
-  .atlas-trail--down .atlas-trail__svg {
-    height: auto;
-  }
 }
 
 /* ==========================================================================

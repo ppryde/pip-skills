@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import type { Board, BoardCard } from "../api/types";
 import EpicAtlas, { type EpicAtlasProps } from "./EpicAtlas";
 
@@ -33,12 +33,12 @@ function board(cards: BoardCard[]): Board {
   return { project: "test", cards, sprints: [], quarantined: [], label_colors: {} };
 }
 
-/** WF-091: `showNames`/`hideVanquished`/`orientation` are now PROPS (lifted
+/** WF-091: `showNames`/`hideVanquished` are now PROPS (lifted
  * to App.tsx) rather than EpicAtlas-local state driven by the since-retired
  * `<AtlasToolbar>` — this helper supplies the same defaults that component
- * used to default to (`true`/`true`/`"across"`), so every existing test
+ * used to default to (`true`/`true`), so every existing test
  * that doesn't care about a specific toggle state keeps its old behaviour
- * without repeating all three props at every call site. */
+ * without repeating both props at every call site. */
 function renderAtlas(
   b: Board,
   overrides: Partial<Omit<EpicAtlasProps, "board">> = {}
@@ -49,7 +49,6 @@ function renderAtlas(
       onOpenCard={overrides.onOpenCard ?? vi.fn()}
       showNames={overrides.showNames ?? true}
       hideVanquished={overrides.hideVanquished ?? true}
-      orientation={overrides.orientation ?? "across"}
     />
   );
 }
@@ -214,137 +213,5 @@ describe("<EpicAtlas/>", () => {
     expect(beasts.length).toBe(2);
     const xs = beasts.map((b) => Number(b.getAttribute("transform")!.match(/translate\(([\d.-]+),/)![1]));
     expect(xs[0]).toBeCloseTo(xs[1], 5);
-  });
-
-  // WF-091: `orientation` is now a prop too — these render straight into
-  // Down mode via the prop rather than mounting Across and then clicking a
-  // toolbar toggle.
-  describe("mobile Down orientation (HANDOFF: shipped in production, <=720px only)", () => {
-    const originalMatchMedia = window.matchMedia;
-
-    afterEach(() => {
-      window.matchMedia = originalMatchMedia;
-      vi.restoreAllMocks();
-    });
-
-    function stubViewport(matches: boolean) {
-      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-        matches,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      })) as unknown as typeof window.matchMedia;
-    }
-
-    it("renders columns (not rows) when orientation='down' on a <=720px viewport", () => {
-      stubViewport(true);
-      const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
-      const { container } = renderAtlas(board([epic]), { orientation: "down" });
-
-      expect(container.querySelector(".atlas-chart__columns")).toBeInTheDocument();
-      expect(container.querySelector(".atlas-chart__rows")).not.toBeInTheDocument();
-      expect(container.querySelector(".atlas-chart--down")).toBeInTheDocument();
-    });
-
-    it("orientation='down' stays inert on a desktop (>720px) viewport — still renders rows", () => {
-      stubViewport(false);
-      const epic = card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } });
-      const { container } = renderAtlas(board([epic]), { orientation: "down" });
-
-      expect(container.querySelector(".atlas-chart__rows")).toBeInTheDocument();
-      expect(container.querySelector(".atlas-chart__columns")).not.toBeInTheDocument();
-    });
-
-    // Impl-review round 1, finding 2: the ResizeObserver used to attach
-    // once to whichever column was active when the effect last RAN (a
-    // stale closure), and never re-pointed itself after a swipe — content
-    // growth on the NEWLY active column, with no accompanying scroll
-    // event, left the pinned height stale. This locks in the fix: after a
-    // swipe (a scroll event moves the nearest-to-centre column), the
-    // observer is re-targeted at the new active column, and a resize on
-    // THAT column (fired with no scroll at all) updates the pinned height.
-    it("re-targets the ResizeObserver to the new active column after a swipe — content growth with no scroll still updates the pinned height", () => {
-      stubViewport(true);
-
-      // AtlasTrailVertical.tsx constructs its OWN ResizeObserver instances
-      // too (unrelated column-width self-measurement) — tracking
-      // observe/unobserve PER INSTANCE (not one shared array/callback) is
-      // what lets the test find and fire specifically the instance this
-      // effect owns, rather than accidentally firing an unrelated one.
-      const instances: { el: HTMLElement | null; cb: ResizeObserverCallback }[] = [];
-      class MockResizeObserver {
-        private entry: { el: HTMLElement | null; cb: ResizeObserverCallback };
-        constructor(cb: ResizeObserverCallback) {
-          this.entry = { el: null, cb };
-          instances.push(this.entry);
-        }
-        observe(el: HTMLElement) {
-          this.entry.el = el;
-        }
-        unobserve() {
-          this.entry.el = null;
-        }
-        disconnect() {}
-      }
-      vi.stubGlobal("ResizeObserver", MockResizeObserver);
-
-      const observedColumnEls = () =>
-        instances.map((i) => i.el).filter((el): el is HTMLElement => el != null && el.dataset.columnIndex != null);
-
-      let nearestIndex = 0;
-      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
-        this: HTMLElement
-      ) {
-        const base = { top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
-        if (!this.dataset.columnIndex) {
-          return { left: 0, right: 100, width: 100, ...base } as DOMRect;
-        }
-        const isNearest = this.dataset.columnIndex === String(nearestIndex);
-        return { left: isNearest ? 0 : 1000, right: isNearest ? 100 : 1100, width: 100, ...base } as DOMRect;
-      });
-
-      const scrollHeights: Record<string, number> = { "0": 300, "1": 300 };
-      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return scrollHeights[this.dataset.columnIndex ?? ""] ?? 0;
-      });
-
-      const cards = [
-        card({ id: "WF-A", is_epic: true, rollup: { done: 1, total: 2, estimate: null, actual: 0 } }),
-        card({ id: "WF-B", is_epic: true, rollup: { done: 0, total: 3, estimate: null, actual: 0 } }),
-      ];
-      const { container } = renderAtlas(board(cards), { orientation: "down" });
-
-      const columnsEl = container.querySelector(".atlas-chart__columns") as HTMLElement;
-      expect(columnsEl.style.height).toBe("300px");
-      expect(observedColumnEls().map((el) => el.dataset.columnIndex)).toEqual(["0"]);
-
-      // Swipe: column 1 becomes nearest-to-centre.
-      nearestIndex = 1;
-      fireEvent.scroll(columnsEl);
-
-      const nowObserved = observedColumnEls();
-      expect(nowObserved.map((el) => el.dataset.columnIndex)).toEqual(["1"]);
-
-      // Column 1's checklist expands — no scroll event, only the
-      // (re-targeted) ResizeObserver firing on the instance that's
-      // specifically watching column 1.
-      scrollHeights["1"] = 480;
-      const activeInstance = instances.find((i) => i.el === nowObserved[0])!;
-      act(() => {
-        activeInstance.cb([], {} as ResizeObserver);
-      });
-
-      expect(columnsEl.style.height).toBe("480px");
-    });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
   });
 });

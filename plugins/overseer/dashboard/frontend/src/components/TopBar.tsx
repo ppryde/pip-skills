@@ -27,17 +27,9 @@ import LabelSettingsDialog from "./LabelSettingsDialog";
 import { Button, Chip, Label } from "../ui";
 import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
-import compassIcon from "../assets/ui-icons/compass.png";
 import skullIcon from "../assets/ui-icons/skull.png";
 import scrollIcon from "../assets/ui-icons/scroll.png";
 import settingsIcon from "../assets/ui-icons/settings.png";
-
-/** Epic Atlas mobile trail orientation — "across" (default, every viewport)
- * or "down" (only effective at <=720px; desktop always renders across, see
- * EpicAtlas.tsx's `downMode` gate). Lives here now that the atlas controls
- * moved into TopBar (AtlasToolbar.tsx, which used to own this type, is
- * retired) — App.tsx imports it from this module for its own `useState`. */
-export type TrailOrientation = "across" | "down";
 
 export interface TopBarProps {
   context: Context | null;
@@ -115,10 +107,10 @@ export interface TopBarProps {
    * optional expired the moment that wiring existed. */
   view: "board" | "atlas";
   onSelectView: (view: "board" | "atlas") => void;
-  /** WF-091: the Epic Atlas toolbar folded into the Controls group — three
-   * single toggle buttons rendered ONLY when `view === "atlas"` (retired
+  /** WF-091: the Epic Atlas toolbar folded into the Controls group — single
+   * toggle buttons rendered ONLY when `view === "atlas"` (retired
    * standalone `<AtlasToolbar>`, which sat between the topbar and the
-   * chart). App.tsx owns all three as lifted state (was EpicAtlas-local),
+   * chart). App.tsx owns both as lifted state (was EpicAtlas-local),
    * same "App owns cross-cutting UI state" precedent as `activeBranch`/
    * `controlsOpen`. */
   /** Quest name-tags on the trail — default true (shown). */
@@ -129,10 +121,6 @@ export interface TopBarProps {
    * name so the lifted prop reads the same at both ends). */
   hideVanquished: boolean;
   onToggleVanquished: (next: boolean) => void;
-  /** Mobile trail orientation — see `TrailOrientation`'s own doc comment for
-   * the <=720px-only effective gate. */
-  orientation: TrailOrientation;
-  onToggleOrientation: (next: TrailOrientation) => void;
 }
 
 function formatPct(value: number): string {
@@ -203,8 +191,6 @@ function TopBar({
   onToggleNames,
   hideVanquished,
   onToggleVanquished,
-  orientation,
-  onToggleOrientation,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -402,7 +388,7 @@ function TopBar({
             <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
           </div>
 
-          {/* WF-091: Epic Atlas's three toggles, folded into the Controls
+          {/* WF-091: Epic Atlas's toggles, folded into the Controls
               group and shown ONLY on the Atlas page — retired the standalone
               `<AtlasToolbar>` that used to sit between the topbar and the
               chart (three segmented two-button toggles + a static
@@ -434,16 +420,6 @@ function TopBar({
                 {/* rpg-icons pack "skull-crossbones" — the vanquished mark */}
                 <img src={skullIcon} alt="" className="topbar__atlas-control-icon" />
                 {hideVanquished ? "Vanquished: Hidden" : "Vanquished: Shown"}
-              </Button>
-              <Button
-                className="topbar__atlas-control"
-                aria-pressed={orientation === "down"}
-                onClick={() => onToggleOrientation(orientation === "across" ? "down" : "across")}
-                title="Trail orientation (mobile only, <=720px)"
-              >
-                {/* rpg-icons pack "compass" — points wherever the trail runs */}
-                <img src={compassIcon} alt="" className="topbar__atlas-control-icon" />
-                {orientation === "down" ? "Down" : "Across"}
               </Button>
             </div>
           )}

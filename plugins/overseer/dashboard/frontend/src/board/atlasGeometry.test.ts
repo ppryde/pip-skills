@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDateStamp, parseCalendarDate, seedFor, wobblePath, wobblePathVertical } from "./atlasGeometry";
+import { formatDateStamp, parseCalendarDate, seedFor, wobblePath } from "./atlasGeometry";
 
 describe("parseCalendarDate", () => {
   it("parses a plain %Y-%m-%d date at UTC midnight", () => {
@@ -63,34 +63,6 @@ describe("wobblePath", () => {
     const a = wobblePath(0, 300, 100, 0).yAt(75);
     const b = wobblePath(0, 300, 100, Math.PI / 2).yAt(75);
     expect(a).not.toBeCloseTo(b, 3);
-  });
-});
-
-describe("wobblePathVertical", () => {
-  it("starts the path at y0 and ends at y1, wobbling in x", () => {
-    const { d } = wobblePathVertical(0, 300, 104, 0);
-    const commands = d.split(" ");
-    // "M<x> <y>" — the first token is "M<x>", so the FIRST y (second token
-    // of the pair) must be y0.
-    const firstPair = commands.slice(0, 2).join(" ");
-    expect(firstPair.endsWith(" 0.0")).toBe(true);
-    expect(d).toContain(" L");
-  });
-
-  it("xAt oscillates around laneWidth * 0.52 with amplitude 12", () => {
-    const { xAt } = wobblePathVertical(0, 300, 100, 0);
-    const x = 100 * 0.52;
-    expect(xAt(0)).toBeCloseTo(x, 5);
-    for (let y = 0; y <= 300; y += 10) {
-      expect(xAt(y)).toBeGreaterThanOrEqual(x - 12 - 1e-9);
-      expect(xAt(y)).toBeLessThanOrEqual(x + 12 + 1e-9);
-    }
-  });
-
-  it("mirrors wobblePath's amplitude/wavelength — same yAt(x)/xAt(y) shape, axes swapped", () => {
-    const across = wobblePath(0, 300, 100, 0.5).yAt(120) - 100 * 0.52;
-    const down = wobblePathVertical(0, 300, 100, 0.5).xAt(120) - 100 * 0.52;
-    expect(down).toBeCloseTo(across, 5);
   });
 });
 
