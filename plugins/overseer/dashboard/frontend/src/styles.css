@@ -4942,11 +4942,12 @@ a.card-drawer__pr-chip:hover {
   flex-direction: column;
   gap: 0.3rem;
   width: 100%;
-  background: var(--legacy-color-fff);
-  border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
-  border-radius: var(--qb-radius-card-a);
-  /* Flat — no drop shadow (per the ask); the accent border alone carries the
-     card's edge, same flat direction as the chips/buttons elsewhere. */
+  /* "Swimlane-header box" (mock A): a light wash of the epic's OWN accent, a
+     darker accent border, and the torn-note pennant radius — so an epic card
+     reads like the board's lane-header pills. Flat, no drop shadow. */
+  background: color-mix(in srgb, var(--card-accent-fill, var(--qb-accent-forest-fill)) 30%, white);
+  border: 2px solid color-mix(in srgb, var(--card-accent-fill, var(--qb-accent-forest-fill)) 72%, #2c2015);
+  border-radius: var(--qb-radius-pennant);
   box-shadow: none;
   padding: 12px;
   font-size: 0.8rem;
@@ -4958,7 +4959,9 @@ a.card-drawer__pr-chip:hover {
    .card-tile:nth-child(even)`, scoped to `.atlas-chart__row` since that's
    this tree's per-saga repeating unit. */
 .atlas-chart__row:nth-child(even) .atlas-rail-card {
-  border-radius: var(--qb-radius-card-b);
+  /* Mirror the pennant's sharp/round corners on even rows for hand-drawn
+     variety (the torn note "tears" the other way). */
+  border-radius: 10px 255px 10px 225px / 225px 10px 255px 10px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -5012,8 +5015,9 @@ a.card-drawer__pr-chip:hover {
 
 .atlas-rail-card__title {
   font-family: var(--qb-font-display);
-  font-weight: 600;
-  font-size: 1rem;
+  font-weight: 800;
+  font-size: 1.12rem;
+  line-height: 1.1;
   color: var(--qb-ink-900);
 }
 
