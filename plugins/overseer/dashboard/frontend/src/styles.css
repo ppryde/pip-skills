@@ -4945,7 +4945,9 @@ a.card-drawer__pr-chip:hover {
   background: var(--legacy-color-fff);
   border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
   border-radius: var(--qb-radius-card-a);
-  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  /* Flat — no drop shadow (per the ask); the accent border alone carries the
+     card's edge, same flat direction as the chips/buttons elsewhere. */
+  box-shadow: none;
   padding: 12px;
   font-size: 0.8rem;
   cursor: pointer;
@@ -5430,102 +5432,97 @@ a.card-drawer__pr-chip:hover {
   z-index: 2;
 }
 
-/* --- Mobile across-view POC: tap-a-child preview popup --------------------
-   A small card that pops above the tapped child's marker, rendered inside
-   `.atlas-trail__overlays` at the marker's own x (`left` set inline in
-   AtlasTrail; `translateX(-50%)` centres it over the node). Sits at the top of
-   the lane in the empty space above the wobbling path and scrolls with the
-   trail. Deliberately FLAT — no drop shadow (per the ask). Only ever rendered
-   on mobile-across (EpicAtlas passes `previewChildId` null otherwise, so no
-   popup element exists), hence no media gating here. `pointer-events: auto`
-   re-enables interaction inside the `pointer-events: none` overlay layer. */
-.atlas-trail__preview {
+/* --- Mobile across-view POC: rail-card wrapper + tap-a-child preview -------
+   `.atlas-chart__rail-slot` wraps `.atlas-rail-card`: `display: contents` on
+   desktop/down-mode (invisible to layout — the card stays the direct flex
+   child of `.atlas-chart__rail`), but a `position: relative` box on
+   mobile-across (see the @media layer) so `.atlas-preview-card` can cover
+   exactly the card. The preview itself only ever renders on mobile-across
+   (EpicAtlas gates it), so its rules need no media wrapper. Deliberately FLAT
+   — no drop shadow (per the ask). */
+.atlas-chart__rail-slot {
+  display: contents;
+}
+
+.atlas-preview-card {
   position: absolute;
-  /* `top` (the node's y) is set inline; this lifts the card fully ABOVE that
-     point so its bottom edge floats ~10px above the trail line, centred over
-     the node — the empty space above the path, not on the label. */
-  transform: translate(-50%, calc(-100% - 10px));
-  pointer-events: auto;
-  cursor: pointer;
-  z-index: 6;
-  width: 172px;
-  max-width: 62vw;
+  inset: 0;
+  z-index: 5;
   display: flex;
   flex-direction: column;
-  gap: 0.12rem;
-  padding: 7px 24px 7px 9px;
+  gap: 0.15rem;
+  padding: 8px 22px 8px 9px;
   background: var(--legacy-color-fff);
-  border: 2px solid var(--qb-ink-300);
+  border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
   border-radius: var(--qb-radius-card-a);
   box-shadow: none;
+  font-size: 0.75rem;
   text-align: left;
+  cursor: pointer;
+  overflow: hidden;
 }
 
-.atlas-trail__preview-close {
+/* Plain ✕ — no circle/border/background (per the ask), just the glyph. */
+.atlas-preview-card__close {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 19px;
-  height: 19px;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-radius-circle);
-  background: var(--qb-parchment-muted);
+  top: 2px;
+  right: 5px;
+  padding: 2px;
+  border: none;
+  background: none;
+  box-shadow: none;
   color: var(--qb-ink-500);
-  font-size: 0.62rem;
+  font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
-  box-shadow: none;
 }
 
-.atlas-trail__preview-top {
+.atlas-preview-card__top {
   display: flex;
   align-items: center;
   gap: 0.3rem;
 }
 
-.atlas-trail__preview-id {
+.atlas-preview-card__id {
   font-family: var(--qb-font-mono);
   font-size: 0.58rem;
   color: var(--qb-ink-500);
 }
 
-.atlas-trail__preview-stars {
+.atlas-preview-card__stars {
   display: inline-flex;
   gap: 0.05rem;
 }
 
-.atlas-trail__preview-star {
+.atlas-preview-card__star {
   width: 11px;
   height: 11px;
 }
 
-.atlas-trail__preview-star--filled {
+.atlas-preview-card__star--filled {
   color: var(--qb-gold-chip-border);
 }
 
-.atlas-trail__preview-star--empty {
+.atlas-preview-card__star--empty {
   color: var(--qb-star-empty);
 }
 
-.atlas-trail__preview-title {
+.atlas-preview-card__title {
   font-family: var(--qb-font-display);
   font-weight: 700;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   line-height: 1.15;
   color: var(--qb-ink-900);
 }
 
-.atlas-trail__preview-status {
+.atlas-preview-card__status {
   font-size: 0.58rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--qb-ink-500);
 }
 
-.atlas-trail__preview-checklist {
+.atlas-preview-card__checklist {
   font-size: 0.6rem;
   color: var(--qb-ink-500);
 }
@@ -6137,12 +6134,22 @@ button.trail-tag:focus-visible {
      725ddea invariant it encodes: exactly one scroller, everything else
      (rail, lane, row) scrolls WITH the chart, never independently. */
   .atlas-chart {
-    --rail: 160px;
+    /* Widened from 160px so an epic's title fits without wrapping to two rows
+       on the condensed rail card. */
+    --rail: 200px;
     min-width: 0;
     width: 100%;
     max-width: 100vw;
     overflow-x: auto;
     padding: 0.5rem 0.5rem 1rem;
+  }
+
+  /* Mobile-across only: the wrapper becomes the preview overlay's positioned
+     box, sized to the rail card it holds. (`display: contents` on desktop.) */
+  .atlas-chart__rail-slot {
+    display: block;
+    position: relative;
+    width: 100%;
   }
 
   /* Epic-lane snap tightens to mandatory at mobile widths (HANDOFF) — a

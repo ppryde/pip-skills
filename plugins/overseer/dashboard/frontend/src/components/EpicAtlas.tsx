@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Board, BoardCard } from "../api/types";
 import { accentKeyForCard } from "../board/cardAccent";
+import { rarityStars } from "../board/rarityStars";
 import { parseCalendarDate } from "../board/atlasGeometry";
 import {
   BEAST_RESERVE_PX,
@@ -15,6 +16,7 @@ import { useMediaQuery } from "../board/useMediaQuery";
 import AtlasRailCard from "./AtlasRailCard";
 import AtlasTrail from "./AtlasTrail";
 import AtlasTrailVertical from "./AtlasTrailVertical";
+import { StarIcon } from "./icons";
 import type { TrailOrientation } from "./TopBar";
 
 export interface EpicAtlasProps {
@@ -310,20 +312,111 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
               const childCards = childrenByEpic.get(epic.id) ?? [];
               const accentKey = accentKeyForCard(epic);
               const rollup = epic.rollup!;
+              // The previewed child, scoped to THIS row's epic — a child
+              // belongs to exactly one epic, so at most one row shows the
+              // overlay. A stale/deleted id resolves to undefined → no overlay.
+              const previewChild =
+                mobileAcross && previewChildId
+                  ? cardsById.get(previewChildId)
+                  : undefined;
+              const showPreview =
+                previewChild != null && previewChild.parent === epic.id;
+              const previewStars = previewChild
+                ? rarityStars(previewChild.complexity)
+                : 0;
+              const previewDone = previewChild
+                ? previewChild.checklist.filter(
+                    (e) => e.status === "completed"
+                  ).length
+                : 0;
               return (
                 <div key={epic.id} className="atlas-chart__row">
                   <div className="atlas-chart__rail">
-                    <AtlasRailCard
-                      card={epic}
-                      rollup={rollup}
-                      childCards={childCards}
-                      expanded={expandedEpics.has(epic.id)}
-                      onToggleExpand={toggleExpand}
-                      onOpen={onOpenCard}
-                      accentKey={accentKey}
-                      blockedOn={blockedOnFor(epic)}
-                      cardsById={cardsById}
-                    />
+                    {/* `.atlas-chart__rail-slot` is a plain in-flow wrapper on
+                        desktop/down-mode (`display: contents`, no rule targets
+                        it) — it only becomes the overlay's positioned box at
+                        <=720px, so the preview sits exactly over the rail
+                        card. */}
+                    <div className="atlas-chart__rail-slot">
+                      <AtlasRailCard
+                        card={epic}
+                        rollup={rollup}
+                        childCards={childCards}
+                        expanded={expandedEpics.has(epic.id)}
+                        onToggleExpand={toggleExpand}
+                        onOpen={onOpenCard}
+                        accentKey={accentKey}
+                        blockedOn={blockedOnFor(epic)}
+                        cardsById={cardsById}
+                      />
+
+                      {/* Mobile-across POC: a tapped child's preview, laid
+                          OVER the epic card in place. Body-click escalates to
+                          the real drawer; the ✕ just closes the popup back to
+                          the epic card (stopPropagation so it doesn't also open
+                          the drawer). Node taps on the trail toggle it. */}
+                      {showPreview && previewChild && (
+                        <div
+                          className={
+                            "atlas-preview-card atlas-rail-card--accent-" +
+                            accentKeyForCard(previewChild)
+                          }
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onOpenCard(previewChild.id)}
+                        >
+                          <button
+                            type="button"
+                            className="atlas-preview-card__close"
+                            aria-label="Close preview"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewChildId(null);
+                            }}
+                          >
+                            ✕
+                          </button>
+                          <div className="atlas-preview-card__top">
+                            <span className="atlas-preview-card__id">
+                              {previewChild.id}
+                            </span>
+                            {previewStars > 0 && (
+                              <span
+                                className="atlas-preview-card__stars"
+                                aria-hidden="true"
+                              >
+                                {[0, 1, 2, 3].map((s) => (
+                                  <StarIcon
+                                    key={s}
+                                    filled={s < previewStars}
+                                    className={
+                                      "atlas-preview-card__star " +
+                                      (s < previewStars
+                                        ? "atlas-preview-card__star--filled"
+                                        : "atlas-preview-card__star--empty")
+                                    }
+                                  />
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                          <div className="atlas-preview-card__title">
+                            {previewChild.title}
+                          </div>
+                          <div className="atlas-preview-card__status">
+                            {previewChild.status}
+                            {previewChild.stage
+                              ? ` · ${previewChild.stage}`
+                              : ""}
+                          </div>
+                          {previewChild.checklist.length > 0 && (
+                            <div className="atlas-preview-card__checklist">
+                              {previewDone}/{previewChild.checklist.length} done
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="atlas-chart__lane" ref={i === 0 ? firstLaneRef : undefined}>
                     <AtlasTrail
@@ -342,8 +435,6 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
                               )
                           : onOpenCard
                       }
-                      previewChildId={mobileAcross ? previewChildId : null}
-                      onOpenDrawer={onOpenCard}
                       accentKey={accentKey}
                     />
                   </div>
