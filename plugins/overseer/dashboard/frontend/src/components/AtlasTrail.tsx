@@ -433,6 +433,16 @@ function AtlasTrail({
           {segments.map(({ child, start, end }, i) => {
             const group = statusGroupOf(child);
             const faded = group === "todo";
+            // Extend only the DRAWN path (never the weight math or waypoint
+            // positions): the first segment reaches back under the trailhead
+            // village and the last runs out under the monster boss, so the
+            // trail visibly starts and ends beneath its bookend icons instead
+            // of stopping short of them.
+            const drawStart = i === 0 ? TRAILHEAD_ICON_SIZE_PX / 2 : start;
+            const drawEnd =
+              i === segments.length - 1
+                ? beastXClamped + BEAST_ICON_SIZE_PX / 2
+                : end;
             const cuts = [{ at: end, radius: WAYPOINT_GAP_PX }];
             if (i > 0) cuts.push({ at: start, radius: WAYPOINT_GAP_PX });
             // Impl-review round 1, finding 3: cutting the campfire gap ONLY
@@ -445,7 +455,7 @@ function AtlasTrail({
             // outside a given segment's own range, so this never trims
             // ground the campfire doesn't actually sit on.
             if (parked) cuts.push({ at: campX, radius: CAMPFIRE_GAP_PX });
-            return trimSegmentForMarkers(start, end, cuts).map(([a, b], j) => (
+            return trimSegmentForMarkers(drawStart, drawEnd, cuts).map(([a, b], j) => (
               <path
                 key={`${child.id}-${j}`}
                 className={"atlas-trail__path" + (faded ? " atlas-trail__path--faded" : "")}

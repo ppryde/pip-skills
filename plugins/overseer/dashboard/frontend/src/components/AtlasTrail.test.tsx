@@ -417,12 +417,16 @@ describe("<AtlasTrail/>", () => {
     const { container } = renderTrail(epic, [todo]);
 
     expect(container.querySelector(".atlas-trail__campfire")).toBeInTheDocument();
-    // TRAILHEAD_RESERVE_PX is both the campfire's fallback position and
-    // the first segment's own start — a real cut there means the first
-    // rendered path segment starts measurably AFTER it, not exactly at it.
-    const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
-    const firstPathStartX = Number(firstPathD.match(/^M([\d.]+)/)![1]);
-    expect(firstPathStartX).toBeGreaterThan(TRAILHEAD_RESERVE_PX + 6); // clear of the 12px campfire gap's near edge
+    // TRAILHEAD_RESERVE_PX is the campfire's fallback position for an all-todo
+    // parked epic. The line now starts under the trailhead village (left of
+    // TRAILHEAD_RESERVE_PX), so a real campfire cut there splits it into a
+    // lead-in piece that STARTS before that x and a resume piece that STARTS
+    // after it — the gap.
+    const startXs = Array.from(
+      container.querySelectorAll(".atlas-trail__path")
+    ).map((p) => Number(p.getAttribute("d")!.match(/^M([\d.]+)/)![1]));
+    expect(startXs.some((x) => x < TRAILHEAD_RESERVE_PX)).toBe(true); // lead-in under the village
+    expect(startXs.some((x) => x > TRAILHEAD_RESERVE_PX)).toBe(true); // resumes past the campfire gap
   });
 
   // Impl-review round 2, finding 5: the LAST-ordered child's marker sits
