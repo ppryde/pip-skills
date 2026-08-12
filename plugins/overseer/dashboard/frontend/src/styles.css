@@ -2470,11 +2470,17 @@ body {
    `--exclude` box-shadow rings still override both properties for the
    filter popover, unchanged from before this chunk. */
 .label-chip {
+  /* Displayed as the same square torn-note badge as the topbar guild pills
+     (.topbar__gold-pill/-vanquished-pill/-fleet-pill) — which is exactly what
+     the `.qb-chip` PRIMITIVE this composes onto already provides (pennant
+     radius, 1px border, flat). This class used to override that back into a
+     soft rounded pill (`--qb-btn-wobble-3`) with a ring box-shadow; those two
+     overrides are dropped so the primitive's note shape shows through. Only
+     the genuinely label-specific bits stay: smaller text, medium weight, and
+     ellipsis clipping. The tone variants below still supply each label's
+     fill/border/text colour. */
   font-size: 0.65rem;
   font-weight: 500;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--qb-btn-wobble-3);
-  box-shadow: 0 0 0 1px rgba(74, 56, 38, 0.12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
