@@ -12,6 +12,7 @@ import {
   weightOf,
 } from "../board/atlasTrailLayout";
 import { StarIcon } from "./icons";
+import ScrollingTitle from "./ScrollingTitle";
 // WF-097 follow-up: the sub-quests expand toggle is a genuine Role-A wobble
 // button (it already carried the full `.qb-btn` recipe — see the class's own
 // "Role A wobble button" comment in styles.css), so it now routes through
@@ -147,13 +148,12 @@ function AtlasRailCard({
         )}
       </div>
 
-      <div
+      <ScrollingTitle
+        text={card.title}
         className={
           "atlas-rail-card__title" + (card.status === "done" ? " atlas-rail-card__title--done" : "")
         }
-      >
-        {card.title}
-      </div>
+      />
 
       {/* Hidden (not omitted) at mobile widths — condensed-set contract,
           see HANDOFF's "Responsive (required)" section. */}

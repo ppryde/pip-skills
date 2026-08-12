@@ -5022,6 +5022,30 @@ a.card-drawer__pr-chip:hover {
   color: var(--qb-ink-500);
 }
 
+/* Marquee for a too-wide rail-card title (mobile condensed cards). Only fires
+   when ScrollingTitle has flagged `--marquee` — i.e. the inner line genuinely
+   overflows the clip — and it eases to each end and pauses (the 12%/88% stops)
+   so the text is readable, not a constant crawl. `--marquee-dist`/`--marquee-
+   dur` come from ScrollingTitle's inline style. Reduced-motion users keep the
+   static clipped title. */
+@media (prefers-reduced-motion: no-preference) {
+  .marquee-title--marquee .marquee-title__inner {
+    animation: rail-title-marquee var(--marquee-dur, 6s) ease-in-out infinite
+      alternate;
+  }
+}
+
+@keyframes rail-title-marquee {
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  88%,
+  100% {
+    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+  }
+}
+
 .atlas-rail-card__vs {
   font-family: var(--qb-font-body);
   font-size: 0.75rem;
@@ -6255,12 +6279,20 @@ button.trail-tag:focus-visible {
     display: none;
   }
 
-  /* One line, ellipsised — the condensed card stays a fixed, tidy height and
-     the wider rail (below) shows more of the title before the cut. */
+  /* One line — the condensed card stays a fixed, tidy height. Instead of an
+     ellipsis, a too-wide title marquee-scrolls (see `.marquee-title__inner`
+     below + the animation). The outer just clips; the inner is the moving
+     part. */
   .atlas-rail-card__title {
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+  }
+
+  /* Mobile-only: the title's inner span is a single nowrap line that can
+     overflow the clip. On desktop this rule doesn't apply, so the title wraps
+     to multiple lines as before and never scrolls. */
+  .marquee-title__inner {
+    display: inline-block;
+    white-space: nowrap;
   }
 
   /* Checklist wheel's mobile cap (HANDOFF: "~224px mobile" vs desktop's
