@@ -5441,9 +5441,12 @@ a.card-drawer__pr-chip:hover {
    re-enables interaction inside the `pointer-events: none` overlay layer. */
 .atlas-trail__preview {
   position: absolute;
-  top: 2px;
-  transform: translateX(-50%);
+  /* `top` (the node's y) is set inline; this lifts the card fully ABOVE that
+     point so its bottom edge floats ~10px above the trail line, centred over
+     the node — the empty space above the path, not on the label. */
+  transform: translate(-50%, calc(-100% - 10px));
   pointer-events: auto;
+  cursor: pointer;
   z-index: 6;
   width: 172px;
   max-width: 62vw;

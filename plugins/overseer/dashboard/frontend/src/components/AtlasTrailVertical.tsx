@@ -25,7 +25,7 @@ import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import BeastFace from "./BeastFace";
 
-import trailheadIcon from "../assets/trail-icons/walled-village.svg";
+import trailheadIcon from "../assets/villages/icon_7.png";
 import boulderIcon from "../assets/trail-icons/boulder.svg";
 import campfireIcon from "../assets/trail-icons/campfire.png";
 import abandonedIcon from "../assets/lane-icons/abandoned.png";

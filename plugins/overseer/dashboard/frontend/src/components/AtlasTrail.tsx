@@ -26,7 +26,7 @@ import { rarityStars } from "../board/rarityStars";
 import BeastFace from "./BeastFace";
 import { StarIcon } from "./icons";
 
-import trailheadIcon from "../assets/trail-icons/walled-village.svg";
+import trailheadIcon from "../assets/villages/icon_7.png";
 import boulderIcon from "../assets/trail-icons/boulder.svg";
 import campfireIcon from "../assets/trail-icons/campfire.png";
 import abandonedIcon from "../assets/lane-icons/abandoned.png";
@@ -69,6 +69,11 @@ export interface AtlasTrailProps {
    * node's x and scrolls with the trail). Desktop / down-mode pass null —
    * EpicAtlas gates it — so nothing renders and the drawer flow is unchanged. */
   previewChildId?: string | null;
+  /** Mobile across-view POC: opens the REAL card-detail drawer (the sidebar).
+   * Used by the preview popup's own body-click so a tapped mini-card can still
+   * escalate to the full drawer — distinct from `onOpenCard`, which on
+   * mobile-across is the toggle that opens/closes the popup itself. */
+  onOpenDrawer?: (id: string) => void;
   /** Lane-computed guild accent key — stable class hook only; colour
    * resolution is the later styling chunk's job (see BeastFace's
    * `--qb-beast-ink` precedent). */
@@ -127,6 +132,7 @@ function AtlasTrail({
   showNames,
   onOpenCard,
   previewChildId,
+  onOpenDrawer,
   accentKey,
 }: AtlasTrailProps) {
   const laneRef = useRef<HTMLDivElement>(null);
@@ -226,9 +232,9 @@ function AtlasTrail({
   // particular trail. A holder object (not a bare `let`) so TS doesn't narrow
   // it to `null` after the loop — it can't see the assignment inside the
   // `forEach` callback, but property reads aren't CFA-narrowed across it.
-  const previewAnchor: { value: { mx: number; child: BoardCard } | null } = {
-    value: null,
-  };
+  const previewAnchor: {
+    value: { mx: number; my: number; child: BoardCard } | null;
+  } = { value: null };
 
   segments.forEach(({ child, end }, segmentIndex) => {
     const isLastChild = segmentIndex === segments.length - 1;
@@ -237,7 +243,7 @@ function AtlasTrail({
     const my = t.yAt(end);
     const cleared = formatDateStamp(parseCalendarDate(child.updated));
     if (previewChildId && child.id === previewChildId) {
-      previewAnchor.value = { mx, child };
+      previewAnchor.value = { mx, my, child };
     }
 
     if (group === "done") {
@@ -538,13 +544,24 @@ function AtlasTrail({
                 "atlas-trail__preview atlas-trail__preview--" +
                 statusGroupOf(preview.child)
               }
-              style={{ left: `${preview.mx}px` }}
+              // `top: my` anchors the popup at the node; CSS translates it fully
+              // ABOVE that point (its bottom sits just above the trail line),
+              // so it floats over the empty space above the path, not on the
+              // label. A body click escalates to the real drawer (sidebar).
+              style={{ left: `${preview.mx}px`, top: `${preview.my}px` }}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenDrawer?.(preview.child.id)}
             >
               <button
                 type="button"
                 className="atlas-trail__preview-close"
                 aria-label="Close preview"
-                onClick={() => onOpenCard(preview.child.id)}
+                // Stop the card's own body-click (drawer) from also firing.
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCard(preview.child.id);
+                }}
               >
                 ✕
               </button>

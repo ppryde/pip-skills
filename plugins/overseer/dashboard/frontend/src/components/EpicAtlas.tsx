@@ -343,6 +343,7 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
                           : onOpenCard
                       }
                       previewChildId={mobileAcross ? previewChildId : null}
+                      onOpenDrawer={onOpenCard}
                       accentKey={accentKey}
                     />
                   </div>
