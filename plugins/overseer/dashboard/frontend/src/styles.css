@@ -558,7 +558,7 @@
   border-radius: var(--qb-btn-wobble);
   height: var(--qb-control-height);
   box-sizing: border-box;
-  padding: 0 0.7rem 0.3rem;
+  padding: 0 0.7rem 0.1rem;
   max-width: 40vw;
   min-width: 0;
   overflow: hidden;
