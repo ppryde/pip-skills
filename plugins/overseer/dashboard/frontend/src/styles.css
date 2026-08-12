@@ -5030,19 +5030,36 @@ a.card-drawer__pr-chip:hover {
    static clipped title. */
 @media (prefers-reduced-motion: no-preference) {
   .marquee-title--marquee .marquee-title__inner {
-    animation: rail-title-marquee var(--marquee-dur, 6s) ease-in-out infinite
-      alternate;
+    animation: rail-title-marquee var(--marquee-dur, 6s) ease-in-out infinite;
   }
 }
 
+/* Scroll to the end, hold, fade OUT, jump back to the start while invisible
+   (so there's no visible snap), then fade back IN and hold — a loop that reads
+   left-to-right every time, rather than ping-ponging backwards. */
 @keyframes rail-title-marquee {
   0%,
-  12% {
+  8% {
     transform: translateX(0);
+    opacity: 1;
+  }
+  48%,
+  60% {
+    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+    opacity: 1;
+  }
+  72% {
+    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+    opacity: 0;
+  }
+  73% {
+    transform: translateX(0);
+    opacity: 0;
   }
   88%,
   100% {
-    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+    transform: translateX(0);
+    opacity: 1;
   }
 }
 
