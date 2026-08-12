@@ -432,7 +432,7 @@ describe("<CardDetailDrawer/>", () => {
 
     await screen.findByText(`Title WF-A`);
     expect(container.querySelector(".label-editor__chip")).toBeNull();
-    expect(screen.getByPlaceholderText(/add label/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("saves an added label through mutate() (board tiles) AND re-fetches the open card (refetchDetail), same as the sibling controls", async () => {
@@ -468,7 +468,7 @@ describe("<CardDetailDrawer/>", () => {
     await screen.findByText("Label me");
     expect(getCard).toHaveBeenCalledTimes(1);
 
-    const input = screen.getByPlaceholderText(/add label/i);
+    const input = screen.getByRole("textbox");
     await act(async () => {
       fireEvent.change(input, { target: { value: "arch" } });
       fireEvent.keyDown(input, { key: "Enter" });

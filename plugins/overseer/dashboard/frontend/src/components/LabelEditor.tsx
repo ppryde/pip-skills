@@ -78,14 +78,19 @@ function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
           </button>
         </Chip>
       ))}
-      <input
-        type="text"
-        className="label-editor__input"
-        placeholder="add label…"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={handleKeyDown}
-      />
+      <label className="label-editor__add">
+        <span className="label-editor__add-plus" aria-hidden="true">
+          +
+        </span>
+        <input
+          type="text"
+          className="label-editor__input"
+          placeholder="label"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </label>
     </div>
   );
 }

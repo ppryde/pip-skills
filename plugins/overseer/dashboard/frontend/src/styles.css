@@ -2364,12 +2364,16 @@ body {
    next to the priority chip: this is provenance metadata, not a signal that
    should compete for attention on the tile. */
 .repo-chip {
+  /* Same square torn-note chip as the labels (mirrors the .qb-chip primitive):
+     a quiet grey provenance tag, reshaped from the old small-radius pill so it
+     sits in the same family as the label chips beside it. */
   font-size: 0.65rem;
   font-weight: 500;
-  padding: 0.05rem 0.35rem;
-  border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-f3f4f6);
-  color: var(--legacy-color-6b7280);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pennant);
+  border: 1px solid var(--qb-ink-300);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
 }
 
 /* Branch chip (WF-031): visually distinct from the repo-chip's grey
@@ -2719,20 +2723,43 @@ body {
   opacity: 1;
 }
 
-.label-editor__input {
-  font: inherit;
-  font-size: 0.75rem;
+/* Add-a-label affordance — an empty dotted-border note (same pennant radius as
+   the label chips) with a leading + icon, so it reads as an empty label slot
+   you fill in. The dashed border lives on this wrapper; the input inside is
+   borderless and transparent. */
+.label-editor__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0.5rem;
   border: 1.5px dashed var(--qb-line-dashed);
-  border-radius: var(--legacy-radius-3px);
-  padding: 0.05rem 0.4rem;
-  background: transparent;
-  color: var(--qb-ink-500);
-  min-width: 6rem;
+  border-radius: var(--qb-radius-pennant);
+  color: var(--qb-ink-400);
+  cursor: text;
 }
 
-.label-editor__input:hover,
-.label-editor__input:focus {
+.label-editor__add:focus-within {
   border-color: var(--qb-btn-ink-hover);
+}
+
+.label-editor__add-plus {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.label-editor__input {
+  font: inherit;
+  font-size: 0.65rem;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--qb-ink-500);
+  min-width: 3rem;
+  width: 4rem;
+}
+
+.label-editor__input:focus {
   outline: none;
 }
 
@@ -3034,9 +3061,15 @@ body {
    lighter "tinted" chip distinct from the banner pill's solid fill so the
    two don't compete for attention right next to each other. */
 .card-drawer__status-fact {
+  /* Displayed as the same square torn-note chip as the labels (pennant radius,
+     1px border, flat). Its pale accent fill + saturated accent text still come
+     from the --<accentKey> variants below; the border is derived from that
+     text colour so every variant gets a matching soft outline automatically. */
+  font-size: 0.65rem;
+  font-weight: 500;
   padding: 0.15rem 0.5rem;
-  border-radius: var(--qb-radius-chip-sm);
-  font-weight: 600;
+  border-radius: var(--qb-radius-pennant);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
 }
 
 .card-drawer__banner--backlog {
