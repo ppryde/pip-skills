@@ -19,6 +19,7 @@ import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
 import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
+import Button from "../ui/Button";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -336,14 +337,14 @@ function CardDetailDrawer({
               ) : (
                 <div className="card-drawer__title-row">
                   <h2 className="card-drawer__title">{detail.title}</h2>
-                  <button
-                    type="button"
-                    className="qb-btn card-drawer__edit-btn"
+                  <Button
+                    variant="neutral"
+                    className="card-drawer__edit-btn"
                     onClick={() => setEditing(true)}
                     disabled={inFlight}
                   >
                     Edit
-                  </button>
+                  </Button>
                 </div>
               )}
               <div className="card-drawer__facts">
@@ -452,14 +453,14 @@ function CardDetailDrawer({
                   because it mutates every live child's stage/status at
                   once. */}
               {detail.is_epic && (
-                <button
-                  type="button"
-                  className="qb-btn card-drawer__pull-children-btn"
+                <Button
+                  variant="neutral"
+                  className="card-drawer__pull-children-btn"
                   onClick={() => void handlePullChildren()}
                   disabled={inFlight}
                 >
                   Pull children
-                </button>
+                </Button>
               )}
             </div>
 
@@ -564,22 +565,21 @@ function CardDetailDrawer({
                   </p>
                 )}
                 <div className="card-drawer__edit-actions">
-                  <button
-                    type="button"
-                    className="qb-btn qb-btn--primary"
+                  <Button
+                    variant="primary"
                     onClick={() => void saveEdit()}
                     disabled={busy || inFlight || !titleDraft.trim()}
                   >
                     Save
-                  </button>
-                  <button
-                    type="button"
-                    className="qb-btn card-drawer__cancel-btn"
+                  </Button>
+                  <Button
+                    variant="neutral"
+                    className="card-drawer__cancel-btn"
                     onClick={cancelEdit}
                     disabled={busy || inFlight}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (

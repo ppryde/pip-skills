@@ -403,6 +403,159 @@
   --qb-tab-active-bg: rgba(122, 139, 69, 0.1);
 }
 
+/* ==========================================================================
+   Design library (v1, WF-097) — a small set of shared UI primitives that
+   encapsulate control shapes reused across the topbar/filter-bar/board.
+   Each `.qb-*` class below is FACTORED OUT of an already-shipped bespoke
+   class (see each rule's own "source" comment) — no new visual language is
+   invented here, just a documented, reusable name for a look several
+   call-sites already share. The existing bespoke classes are left exactly
+   as they were and keep working unchanged; nothing here migrates them.
+
+   `.qb-btn` / `.qb-btn--primary` — the button primitive — already exist
+   further down this file (see that class's own doc comment, just above
+   `.topbar__refresh`) and stay declared there rather than being moved here,
+   to avoid disturbing their surrounding cascade/specificity; treat this
+   comment as their pointer into this section's inventory.
+
+   Consumers: the typed React wrappers in `src/ui/` (Button/Select/Chip/
+   Input/Label) apply these classes 1:1, and `src/ui/DesignLibrary.tsx`
+   (reachable at the `#design` hash — see App.tsx) shows every state.
+   `CardDetailDrawer.tsx`'s Save/Cancel/Edit/Pull-children buttons are the
+   first real adopter of the React wrappers (v1) — every OTHER existing
+   call-site (topbar/filter-bar selects, the pill badges, the search input)
+   keeps its own bespoke class for now; migrating those is a future pass. */
+
+/* .qb-select — the standard native-<select> chip/dropdown look. Factored
+   from `.topbar__repo-select select` / `.topbar__branch-select select` /
+   `.filter-bar__select select` (each of which keeps its OWN copy, tuned
+   with a different wobble variant per WF-046 item 1's "no two neighbouring
+   controls read as the exact same stamped shape" rule) — this is the ONE
+   canonical version new call-sites (the `<Select/>` wrapper) build on. */
+.qb-select {
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  height: var(--qb-control-height);
+  box-sizing: border-box;
+  padding: 0.12rem 0.7rem;
+  max-width: 40vw;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.qb-select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.qb-select:focus-visible {
+  outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
+}
+
+.qb-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* .qb-chip — the small pill/badge look. Factored from `.topbar__pill` (the
+   "torn-note" badges: last-refreshed time, Short/Long Rest windows). */
+.qb-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pennant);
+  border: 1px solid var(--qb-ink-300);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+}
+
+/* .qb-input — text input / search / textarea. Factored from
+   `.filter-bar__search` (Scry's search box) + the card drawer's own
+   `.card-drawer__title-input` / `.card-drawer__body-textarea` (which keep
+   their own bespoke rules — bigger display font, monospace, resize —
+   layered on top of this same plain bordered-field base). */
+.qb-input {
+  font: inherit;
+  font-size: 0.8rem;
+  box-sizing: border-box;
+  padding: 0.3rem 0.6rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-900);
+}
+
+.qb-input:hover,
+.qb-input:focus {
+  border-color: var(--qb-btn-ink-hover);
+  outline: none;
+}
+
+.qb-input::placeholder {
+  color: var(--qb-ink-400);
+}
+
+/* .qb-label — the small uppercase eyebrow/field-label. Factored from
+   `.topbar__repo-select-label` / `.filter-bar__eyebrow` (also shared by
+   `.topbar__branch-select-label`'s near-identical recipe). */
+.qb-label {
+  display: inline-block;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+/* Showcase-only layout for `src/ui/DesignLibrary.tsx` (reachable at the
+   `#design` hash) — it is the ONE consumer of these three classes, so they
+   live here with the rest of the design-library inventory rather than
+   getting a top-level section of their own elsewhere in this file. */
+.design-library {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  color: var(--qb-ink-700);
+}
+
+.design-library h1 {
+  font-family: var(--qb-font-display);
+  color: var(--qb-ink-900);
+}
+
+.design-library section {
+  margin-top: 2rem;
+}
+
+.design-library section h2 {
+  font-family: var(--qb-font-display);
+  color: var(--qb-ink-900);
+  margin-bottom: 0.3rem;
+}
+
+.design-library__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.design-library__col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 24rem;
+}
+
 /* Minimal reset */
 *,
 *::before,

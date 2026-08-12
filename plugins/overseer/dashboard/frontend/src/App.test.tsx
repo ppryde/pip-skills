@@ -508,3 +508,57 @@ describe("<App/> — WF-086 Board|Atlas view toggle", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });
+
+// v1 design library showcase (WF-097) — reachable at the `#design` hash
+// with no router. Unlike the other describe blocks above, these tests don't
+// wait on the board fetch at all: the showcase swaps in BEFORE the normal
+// board renders, regardless of how the repos/board fetches resolve.
+describe("<App/> — design library showcase (#design hash)", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    window.location.hash = "";
+  });
+
+  it("shows the design library instead of the board when the hash is #design on mount", () => {
+    window.location.hash = "#design";
+
+    render(<App />);
+
+    expect(
+      screen.getByRole("heading", { name: /design library/i })
+    ).toBeInTheDocument();
+    expect(document.querySelector(".app-shell")).not.toBeInTheDocument();
+  });
+
+  it("swaps to the design library on a hashchange, and back again when the hash clears", async () => {
+    render(<App />);
+    await screen.findByLabelText("Repo");
+    expect(
+      screen.queryByRole("heading", { name: /design library/i })
+    ).not.toBeInTheDocument();
+
+    window.location.hash = "#design";
+    fireEvent(window, new Event("hashchange"));
+
+    expect(
+      screen.getByRole("heading", { name: /design library/i })
+    ).toBeInTheDocument();
+
+    window.location.hash = "";
+    fireEvent(window, new Event("hashchange"));
+
+    expect(
+      screen.queryByRole("heading", { name: /design library/i })
+    ).not.toBeInTheDocument();
+    expect(document.querySelector(".app-shell")).toBeInTheDocument();
+  });
+});

@@ -7,6 +7,7 @@ import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
 import UnbegunHolding from "./components/UnbegunHolding";
 import ClearDialog from "./components/ClearDialog";
+import DesignLibrary from "./ui/DesignLibrary";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
@@ -202,6 +203,28 @@ function App() {
     filter.complexity === DEFAULT_FILTER.complexity &&
     sameLabelSet(filter.includeLabels, DEFAULT_FILTER.includeLabels) &&
     sameLabelSet(filter.excludeLabels, DEFAULT_FILTER.excludeLabels);
+
+  // v1 design library showcase (`src/ui/DesignLibrary.tsx`) — reachable at
+  // the `#design` hash rather than a real route, so no router dependency is
+  // needed: read the hash once at mount, then re-derive it on every
+  // `hashchange` (covers both a user editing the URL bar and browser Back/
+  // Forward). This is a diagnostic/reference page, not a normal app view —
+  // it deliberately swaps out the ENTIRE board below rather than living
+  // alongside `view` ("board" | "atlas").
+  const [showDesignLibrary, setShowDesignLibrary] = useState(
+    () => window.location.hash === "#design"
+  );
+  useEffect(() => {
+    function handleHashChange() {
+      setShowDesignLibrary(window.location.hash === "#design");
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  if (showDesignLibrary) {
+    return <DesignLibrary />;
+  }
 
   return (
     <div className="app-shell">
