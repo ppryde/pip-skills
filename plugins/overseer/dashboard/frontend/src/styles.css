@@ -143,7 +143,11 @@
   --qb-ink-400: #9a8464; /* muted */
   --qb-ink-300: #b0a088; /* todo/disabled */
 
-  /* Column accent groups: fill (banner) / shadow (banner) / border (card) /
+  /* Lane/stage palette — the cheerful per-column accents, keyed to lane
+     STAGE. Separate namespace from the status palette below (which is keyed
+     to card STATUS); the two currently share the same base colours but are
+     kept apart so lane + status can diverge later without cross-talk.
+     Column accent groups: fill (banner) / shadow (banner) / border (card) /
      cardshadow (card's soft sticker shadow). Where HANDOFF gives no distinct
      cardshadow tint for a group, cardshadow aliases to that group's own
      border colour (documented per group below) rather than inventing a hex
@@ -188,6 +192,46 @@
   --qb-accent-ash-shadow: #55554f;
   --qb-accent-ash-border: #b4b2aa;
   --qb-accent-ash-cardshadow: var(--qb-accent-ash-border); /* no distinct tint given, mirrors taupe/umber */
+
+  /* Status palette (card status colours; separate namespace from the
+     lane/stage accents above, sharing the same colour set for now).
+     Keyed to card STATUS, not lane stage — so the two can diverge later
+     without cross-talk. Each status carries THREE steps derived from one
+     base hue with `color-mix`, matching the codebase's existing idiom:
+       -soft   = base 24% over white  → lightest; fills/washes/tag backgrounds
+       -base   = the base hue itself  → mid; borders/accents
+       -strong = base 62% over #2c2015 (dark ink) → darkest; text
+     done/in-progress/parked/abandoned reuse the lane accent tokens as their
+     base (that's "same colour set, separate namespace"); todo and blocked
+     introduce two NEW hues that no lane owns. */
+  --qb-status-done-soft: color-mix(in srgb, var(--qb-accent-forest-fill) 24%, white);
+  --qb-status-done-base: var(--qb-accent-forest-fill); /* #8fbf5e — lane forest green */
+  --qb-status-done-strong: color-mix(in srgb, var(--qb-accent-forest-fill) 62%, #2c2015);
+
+  --qb-status-in-progress-soft: color-mix(in srgb, var(--qb-accent-sky-fill) 24%, white);
+  --qb-status-in-progress-base: var(--qb-accent-sky-fill); /* #69a8dc — lane sky blue */
+  --qb-status-in-progress-strong: color-mix(in srgb, var(--qb-accent-sky-fill) 62%, #2c2015);
+
+  /* todo/planned — a NEW cheerful, inviting violet (no lane owns it). This
+     hue is deliberate: "ahead ground" should read as fun and beckoning, not
+     grey/amber "not-started-yet" drear. */
+  --qb-status-todo-soft: color-mix(in srgb, #9d86d4 24%, white);
+  --qb-status-todo-base: #9d86d4; /* NEW purple — the deliberate fun/inviting todo hue */
+  --qb-status-todo-strong: color-mix(in srgb, #9d86d4 62%, #2c2015);
+
+  /* blocked — a NEW coral-red that reads as "barred"; distinct from the rose
+     lane accent so a blocked tag never reads as an Awaiting-Merge lane note. */
+  --qb-status-blocked-soft: color-mix(in srgb, #e8776e 24%, white);
+  --qb-status-blocked-base: #e8776e; /* NEW coral-red */
+  --qb-status-blocked-strong: color-mix(in srgb, #e8776e 62%, #2c2015);
+
+  --qb-status-parked-soft: color-mix(in srgb, var(--qb-accent-taupe-fill) 24%, white);
+  --qb-status-parked-base: var(--qb-accent-taupe-fill); /* #ab9274 — lane taupe, calm */
+  --qb-status-parked-strong: color-mix(in srgb, var(--qb-accent-taupe-fill) 62%, #2c2015);
+
+  --qb-status-abandoned-soft: color-mix(in srgb, var(--qb-accent-ash-fill) 24%, white);
+  --qb-status-abandoned-base: var(--qb-accent-ash-fill); /* #6e6e68 — lane ash, muted grey */
+  --qb-status-abandoned-strong: color-mix(in srgb, var(--qb-accent-ash-fill) 62%, #2c2015);
 
   /* Epic Atlas (WF-086) — beast-doodle outline / plaque-shadow ink, from
      the Boss Ledger family. The ONE new colour the HANDOFF calls for; every
@@ -5210,33 +5254,35 @@ button.trail-tag:focus-visible {
   outline-offset: 1px;
 }
 
-/* Bright per-status pastels (each accent mixed ~30% over white) replace the
-   old shared `--qb-parchment-muted` fill — that token sat too close to the
-   parchment PAGE background for a name-tag to read against it. Each tag
-   now pops as a clearly-tinted label coloured by its status instead. */
+/* Bright per-status name-tags, now sourced from the `--qb-status-*` palette
+   (see :root) rather than ad-hoc `color-mix(<accent> 30/55%, white)` — the
+   status tokens are the single source of truth for status-coded colour.
+   soft = fill, base = border, strong = text. The visible shift from the old
+   accent-mix version: todo tags go PURPLE (was sky blue) and blocked goes
+   coral (was the rose lane accent); done stays green. */
 .trail-tag--todo {
-  background: color-mix(in srgb, var(--qb-accent-sky-fill) 30%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 55%, white);
-  color: var(--qb-ink-700);
+  background: var(--qb-status-todo-soft);
+  border: 1.5px solid var(--qb-status-todo-base);
+  color: var(--qb-status-todo-strong);
 }
 
-/* Settled history, not "ahead ground" — a green pastel instead of the todo
-   tag's sky one. The pastel fill + muted ink now carry the "walked, done"
-   de-emphasis on their own, so (unlike the old parchment version) this no
-   longer needs an `opacity` dial on top. */
+/* Settled history, not "ahead ground" — the done status green. The soft
+   fill + strong ink now carry the "walked, done" de-emphasis on their own,
+   so (unlike the old parchment version) this no longer needs an `opacity`
+   dial on top. */
 .trail-tag--done {
-  background: color-mix(in srgb, var(--qb-accent-forest-fill) 30%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 55%, white);
-  color: var(--qb-ink-500);
+  background: var(--qb-status-done-soft);
+  border: 1.5px solid var(--qb-status-done-base);
+  color: var(--qb-status-done-strong);
 }
 
-/* The way is barred — rose pastel. Placed after `--todo`/`--done` so it
-   wins the cascade when paired with `--todo` on a blocked ahead-quest's tag
-   (same class list, `--blocked` just added alongside). */
+/* The way is barred — the blocked status coral. Placed after `--todo`/
+   `--done` so it wins the cascade when paired with `--todo` on a blocked
+   ahead-quest's tag (same class list, `--blocked` just added alongside). */
 .trail-tag--blocked {
-  background: color-mix(in srgb, var(--qb-accent-rose-fill) 30%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 55%, white);
-  color: var(--qb-ink-700);
+  background: var(--qb-status-blocked-soft);
+  border: 1.5px solid var(--qb-status-blocked-base);
+  color: var(--qb-status-blocked-strong);
 }
 
 /* The AT HAND pennant is a status marker, not a name-tag — solid accent
