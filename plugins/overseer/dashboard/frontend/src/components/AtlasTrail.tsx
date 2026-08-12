@@ -22,7 +22,9 @@ import {
 } from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
+import { rarityStars } from "../board/rarityStars";
 import BeastFace from "./BeastFace";
+import { StarIcon } from "./icons";
 
 import trailheadIcon from "../assets/villages/icon_7.png";
 import boulderIcon from "../assets/trail-icons/boulder.svg";
@@ -61,6 +63,15 @@ export interface AtlasTrailProps {
    * (todo or done) — same drawer AtlasRailCard's own click already opens,
    * reused rather than a new modal (HANDOFF chunk 5 precedent). */
   onOpenCard: (id: string) => void;
+  /** Mobile across-view POC: the currently-previewed CHILD id (or null). When
+   * it matches one of this trail's own children, a preview card floats above
+   * that child's marker, high enough to clear the trail's name-tags. Desktop /
+   * down-mode pass null (EpicAtlas gates it) so nothing renders. */
+  previewChildId?: string | null;
+  /** Opens the REAL card-detail drawer (sidebar) — used by the preview's
+   * body-click; distinct from `onOpenCard`, which on mobile-across is the
+   * toggle that opens/closes the popup itself. */
+  onOpenDrawer?: (id: string) => void;
   /** Lane-computed guild accent key — stable class hook only; colour
    * resolution is the later styling chunk's job (see BeastFace's
    * `--qb-beast-ink` precedent). */
@@ -118,6 +129,8 @@ function AtlasTrail({
   trailWidth,
   showNames,
   onOpenCard,
+  previewChildId,
+  onOpenDrawer,
   accentKey,
 }: AtlasTrailProps) {
   const laneRef = useRef<HTMLDivElement>(null);
@@ -210,12 +223,23 @@ function AtlasTrail({
   // tags ABOVE the path.
   let tagIndex = 0;
 
+  // Mobile across-view POC: capture the tapped child's x during the marker
+  // loop so the preview floats over the exact node. Holder object (not a bare
+  // `let`) so TS keeps its `{...} | null` type after the loop — it can't see
+  // the assignment inside the forEach callback.
+  const previewAnchor: { value: { mx: number; child: BoardCard } | null } = {
+    value: null,
+  };
+
   segments.forEach(({ child, end }, segmentIndex) => {
     const isLastChild = segmentIndex === segments.length - 1;
     const group = statusGroupOf(child);
     const mx = end;
     const my = t.yAt(end);
     const cleared = formatDateStamp(parseCalendarDate(child.updated));
+    if (previewChildId && child.id === previewChildId) {
+      previewAnchor.value = { mx, child };
+    }
 
     if (group === "done") {
       if (child.status === "abandoned") {
@@ -390,6 +414,9 @@ function AtlasTrail({
     }
   });
 
+  const preview = previewAnchor.value;
+  const previewStars = preview ? rarityStars(preview.child.complexity) : 0;
+
   return (
     <div className="atlas-trail" ref={laneRef}>
       <svg
@@ -494,7 +521,75 @@ function AtlasTrail({
         )}
       </svg>
 
-      {overlayTags.length > 0 && <div className="atlas-trail__overlays">{overlayTags}</div>}
+      {(overlayTags.length > 0 || preview) && (
+        <div className="atlas-trail__overlays">
+          {overlayTags}
+          {/* Mobile across-view POC: a tapped child's preview, anchored to its
+              marker's x (`left: mx`) but sitting at the TOP of the lane and
+              lifted fully above it (CSS `top: 0` + translateY(-100%)), so it
+              clears the name-tags that live over the path rather than colliding
+              with them. Body-click opens the real drawer; the ✕ toggles it
+              closed. */}
+          {preview && (
+            <div
+              className={
+                "atlas-trail__preview atlas-trail__preview--" +
+                statusGroupOf(preview.child)
+              }
+              style={{ left: `${preview.mx}px` }}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenDrawer?.(preview.child.id)}
+            >
+              <button
+                type="button"
+                className="atlas-trail__preview-close"
+                aria-label="Close preview"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCard(preview.child.id);
+                }}
+              >
+                ✕
+              </button>
+              <div className="atlas-trail__preview-top">
+                <span className="atlas-trail__preview-id">{preview.child.id}</span>
+                {previewStars > 0 && (
+                  <span className="atlas-trail__preview-stars" aria-hidden="true">
+                    {[0, 1, 2, 3].map((s) => (
+                      <StarIcon
+                        key={s}
+                        filled={s < previewStars}
+                        className={
+                          "atlas-trail__preview-star " +
+                          (s < previewStars
+                            ? "atlas-trail__preview-star--filled"
+                            : "atlas-trail__preview-star--empty")
+                        }
+                      />
+                    ))}
+                  </span>
+                )}
+              </div>
+              <div className="atlas-trail__preview-title">{preview.child.title}</div>
+              <div className="atlas-trail__preview-status">
+                {preview.child.status}
+                {preview.child.stage ? ` · ${preview.child.stage}` : ""}
+              </div>
+              {preview.child.checklist.length > 0 && (
+                <div className="atlas-trail__preview-checklist">
+                  {
+                    preview.child.checklist.filter(
+                      (e) => e.status === "completed"
+                    ).length
+                  }
+                  /{preview.child.checklist.length} done
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

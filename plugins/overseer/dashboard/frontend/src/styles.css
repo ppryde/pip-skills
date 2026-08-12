@@ -5432,44 +5432,35 @@ a.card-drawer__pr-chip:hover {
   z-index: 2;
 }
 
-/* --- Mobile across-view POC: rail-card wrapper + tap-a-child preview -------
-   `.atlas-chart__rail-slot` wraps `.atlas-rail-card`: `display: contents` on
-   desktop/down-mode (invisible to layout — the card stays the direct flex
-   child of `.atlas-chart__rail`), but a `position: relative` box on
-   mobile-across (see the @media layer) so `.atlas-preview-card` can cover
-   exactly the card. The preview itself only ever renders on mobile-across
-   (EpicAtlas gates it), so its rules need no media wrapper. Deliberately FLAT
-   — no drop shadow (per the ask). */
-.atlas-chart__rail-slot {
-  display: contents;
-}
-
-.atlas-preview-card {
+/* --- Mobile across-view POC: tap-a-child preview, floated above the trail ---
+   Rendered inside `.atlas-trail__overlays` at the tapped marker's x (`left`
+   inline in AtlasTrail). Pinned to the lane's TOP and lifted fully above it
+   (`top: 0` + translateY(-100%)) so it clears the name-tags that sit over the
+   path, rather than colliding with them. Only ever rendered on mobile-across
+   (EpicAtlas gates it). Flat — no drop shadow. `pointer-events: auto`
+   re-enables interaction inside the `pointer-events: none` overlay layer. */
+.atlas-trail__preview {
   position: absolute;
-  /* Floats ON TOP of the epic card (not a full-cover replacement): pinned near
-     the card's top with auto height, so the epic card stays visible below it,
-     and a soft lift shadow so it reads as a separate popup layer sitting over
-     the card. */
-  top: 8px;
-  left: 8px;
-  right: 8px;
-  z-index: 5;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 4px));
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 7;
+  width: 172px;
+  max-width: 62vw;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  padding: 8px 22px 8px 9px;
+  gap: 0.12rem;
+  padding: 7px 24px 7px 9px;
   background: var(--legacy-color-fff);
-  border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
+  border: 2px solid var(--qb-ink-300);
   border-radius: var(--qb-radius-card-a);
-  box-shadow: 0 5px 14px -5px rgba(58, 42, 24, 0.45);
-  font-size: 0.75rem;
+  box-shadow: none;
   text-align: left;
-  cursor: pointer;
-  overflow: hidden;
 }
 
-/* Plain ✕ — no circle/border/background (per the ask), just the glyph. */
-.atlas-preview-card__close {
+/* Plain ✕ — no circle/border/background, just the glyph. */
+.atlas-trail__preview-close {
   position: absolute;
   top: 2px;
   right: 5px;
@@ -5478,57 +5469,57 @@ a.card-drawer__pr-chip:hover {
   background: none;
   box-shadow: none;
   color: var(--qb-ink-500);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   line-height: 1;
   cursor: pointer;
 }
 
-.atlas-preview-card__top {
+.atlas-trail__preview-top {
   display: flex;
   align-items: center;
   gap: 0.3rem;
 }
 
-.atlas-preview-card__id {
+.atlas-trail__preview-id {
   font-family: var(--qb-font-mono);
   font-size: 0.58rem;
   color: var(--qb-ink-500);
 }
 
-.atlas-preview-card__stars {
+.atlas-trail__preview-stars {
   display: inline-flex;
   gap: 0.05rem;
 }
 
-.atlas-preview-card__star {
+.atlas-trail__preview-star {
   width: 11px;
   height: 11px;
 }
 
-.atlas-preview-card__star--filled {
+.atlas-trail__preview-star--filled {
   color: var(--qb-gold-chip-border);
 }
 
-.atlas-preview-card__star--empty {
+.atlas-trail__preview-star--empty {
   color: var(--qb-star-empty);
 }
 
-.atlas-preview-card__title {
+.atlas-trail__preview-title {
   font-family: var(--qb-font-display);
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   line-height: 1.15;
   color: var(--qb-ink-900);
 }
 
-.atlas-preview-card__status {
+.atlas-trail__preview-status {
   font-size: 0.58rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--qb-ink-500);
 }
 
-.atlas-preview-card__checklist {
+.atlas-trail__preview-checklist {
   font-size: 0.6rem;
   color: var(--qb-ink-500);
 }
@@ -6148,14 +6139,6 @@ button.trail-tag:focus-visible {
     max-width: 100vw;
     overflow-x: auto;
     padding: 0.5rem 0.5rem 1rem;
-  }
-
-  /* Mobile-across only: the wrapper becomes the preview overlay's positioned
-     box, sized to the rail card it holds. (`display: contents` on desktop.) */
-  .atlas-chart__rail-slot {
-    display: block;
-    position: relative;
-    width: 100%;
   }
 
   /* Epic-lane snap tightens to mandatory at mobile widths (HANDOFF) — a
