@@ -2743,7 +2743,7 @@ body {
 }
 
 .label-editor__add-plus {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   font-weight: 600;
   line-height: 1;
 }
@@ -6315,13 +6315,23 @@ button.trail-tag:focus-visible {
   .priority-select,
   .claim-control select,
   .link-editor select,
-  .link-editor input,
-  .label-editor__input {
+  .link-editor input {
     /* 16px is the iOS-zoom guard (about zoom, not height) — kept as-is; the
        height floor folds onto the shared touch token so these selects/inputs
        match the migrated buttons above at ~34px instead of an ad-hoc 38px. */
     font-size: 16px;
     min-height: var(--qb-control-height-touch);
+  }
+
+  /* The add-label input is DELIBERATELY excluded from the touch floor above:
+     it now sits inside the dotted note chip (.label-editor__add), which is the
+     tap target, so a 34px min-height on the input just made the note tower over
+     the label chips beside it. It keeps the chips' own font size for a matching
+     height. (Trade-off: no 16px iOS-zoom guard on this one tiny field — the
+     note would balloon past the chips again with it.) */
+  .label-editor__input {
+    font-size: 0.65rem;
+    min-height: 0;
   }
 
   /* Epic Atlas (WF-086): the condensed-rail expand affordance ("▾ sub-quests")
