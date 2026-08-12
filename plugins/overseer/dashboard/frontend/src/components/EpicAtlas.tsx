@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Board, BoardCard } from "../api/types";
-import { accentKeyForCard, bannerLabelForCard } from "../board/cardAccent";
+import { accentKeyForCard } from "../board/cardAccent";
 import { parseCalendarDate } from "../board/atlasGeometry";
 import {
   BEAST_RESERVE_PX,
@@ -11,12 +11,10 @@ import {
   totalWeight,
   trailEndX,
 } from "../board/atlasTrailLayout";
-import { rarityStars } from "../board/rarityStars";
 import { useMediaQuery } from "../board/useMediaQuery";
 import AtlasRailCard from "./AtlasRailCard";
 import AtlasTrail from "./AtlasTrail";
 import AtlasTrailVertical from "./AtlasTrailVertical";
-import { StarIcon } from "./icons";
 import type { TrailOrientation } from "./TopBar";
 
 export interface EpicAtlasProps {
@@ -76,27 +74,14 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
   const [expandedEpics, setExpandedEpics] = useState<Set<string>>(new Set());
   const isMobile = useMediaQuery("(max-width:720px)");
   const downMode = isMobile && orientation === "down";
-  // Mobile ACROSS POC (WF-atlas-across-poc): mobile-across is "mobile, but
-  // NOT down-mode" — the only orientation where the horizontal SVG trail
-  // still renders (Down-mode swaps it for vertical columns, see the
-  // `downMode` branch below). Desktop (`isMobile` false) is completely
-  // unaffected regardless of `orientation` — the prop is inert there
-  // (EpicAtlas's own doc comment above). Every mobile-across-only behaviour
-  // in this file — the tap-to-preview overlay below, and its mirror in
-  // styles.css's `@media (max-width:720px)` layer — is gated on this one
-  // flag so desktop and down-mode stay byte-for-byte unchanged.
+  // Mobile across-view POC: on mobile + across (never desktop, never down-mode)
+  // a trail-child tap pops a small preview card up above that node — rendered
+  // inside AtlasTrail's own overlay layer so it sits at the tapped marker's x
+  // and scrolls with the trail — instead of opening the full drawer. One
+  // preview at a time; tapping the already-open child toggles it back off, and
+  // tapping a different child just moves the popup. Desktop / down-mode keep the
+  // real drawer flow (`onOpenCard`) untouched.
   const mobileAcross = isMobile && !downMode;
-
-  // Tap-to-preview state (POC): which CHILD card's trail marker/name-tag was
-  // last tapped, on mobile-across only — `null` means no preview is open.
-  // Deliberately a single id shared across every row (not per-epic state):
-  // a child belongs to exactly one epic by construction (`child.parent`),
-  // so "only one preview at a time across the whole page" falls out for
-  // free — whichever row's epic id matches `previewChild.parent` renders it,
-  // every other row's lookup below just no-ops. If the id ever points at a
-  // card that no longer exists (e.g. deleted mid-preview), `cardsById.get`
-  // returns `undefined` and the row-level guard below treats that exactly
-  // like "no preview" — no crash, no stale render.
   const [previewChildId, setPreviewChildId] = useState<string | null>(null);
 
   const [laneWidth, setLaneWidth] = useState(DEFAULT_LANE_WIDTH);
@@ -325,103 +310,20 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
               const childCards = childrenByEpic.get(epic.id) ?? [];
               const accentKey = accentKeyForCard(epic);
               const rollup = epic.rollup!;
-
-              // Mobile-across POC: a trail click sets the preview overlay
-              // instead of opening the real drawer — desktop and down-mode
-              // (`mobileAcross` false there) keep calling `onOpenCard`
-              // exactly as before, so AtlasTrail's own click behaviour is
-              // completely untouched outside this one gate.
-              const trailOnOpenCard = mobileAcross
-                ? (childId: string) => setPreviewChildId(childId)
-                : onOpenCard;
-
-              // The previewed child, scoped to THIS row's epic — a child
-              // belongs to exactly one epic, so at most one row's guard
-              // below ever passes (the "one preview at a time" contract).
-              // `cardsById.get` returning `undefined` for a stale/deleted
-              // id is handled by the same falsy check, no separate guard
-              // needed.
-              const previewChild =
-                mobileAcross && previewChildId ? cardsById.get(previewChildId) : undefined;
-              const showPreview = previewChild != null && previewChild.parent === epic.id;
-              const previewStars = previewChild ? rarityStars(previewChild.complexity) : 0;
-              const previewDone = previewChild
-                ? previewChild.checklist.filter((entry) => entry.status === "completed").length
-                : 0;
-
               return (
                 <div key={epic.id} className="atlas-chart__row">
                   <div className="atlas-chart__rail">
-                    {/* `.atlas-chart__rail-slot` is a plain in-flow wrapper
-                        on desktop/down-mode (no CSS rule targets it outside
-                        the mobile layer) — it only becomes the POC overlay's
-                        positioned ancestor at <=720px (styles.css), so the
-                        overlay sits exactly over `.atlas-rail-card`'s own
-                        box rather than the full-width sticky rail band
-                        around it. */}
-                    <div className="atlas-chart__rail-slot">
-                      <AtlasRailCard
-                        card={epic}
-                        rollup={rollup}
-                        childCards={childCards}
-                        expanded={expandedEpics.has(epic.id)}
-                        onToggleExpand={toggleExpand}
-                        onOpen={onOpenCard}
-                        accentKey={accentKey}
-                        blockedOn={blockedOnFor(epic)}
-                        cardsById={cardsById}
-                      />
-
-                      {/* Mobile-across POC overlay: covers the rail card in
-                          place so tapping a trail marker previews the child
-                          without leaving the row or opening the full
-                          drawer. */}
-                      {showPreview && previewChild && (
-                        <div
-                          className={
-                            "atlas-preview-card" +
-                            ` atlas-rail-card--accent-${accentKeyForCard(previewChild)}`
-                          }
-                        >
-                          <button
-                            type="button"
-                            className="atlas-preview-card__close"
-                            aria-label="Close preview"
-                            onClick={() => setPreviewChildId(null)}
-                          >
-                            ✕
-                          </button>
-                          <div className="atlas-preview-card__top">
-                            <span className="atlas-preview-card__id">{previewChild.id}</span>
-                            {previewStars > 0 && (
-                              <span className="atlas-preview-card__stars" aria-hidden="true">
-                                {[0, 1, 2, 3].map((s) => (
-                                  <StarIcon
-                                    key={s}
-                                    filled={s < previewStars}
-                                    className={
-                                      "atlas-preview-card__star " +
-                                      (s < previewStars
-                                        ? "atlas-preview-card__star--filled"
-                                        : "atlas-preview-card__star--empty")
-                                    }
-                                  />
-                                ))}
-                              </span>
-                            )}
-                          </div>
-                          <div className="atlas-preview-card__title">{previewChild.title}</div>
-                          <div className="atlas-preview-card__status">
-                            {bannerLabelForCard(previewChild)}
-                          </div>
-                          {previewChild.checklist.length > 0 && (
-                            <div className="atlas-preview-card__checklist">
-                              {previewDone}/{previewChild.checklist.length} done
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <AtlasRailCard
+                      card={epic}
+                      rollup={rollup}
+                      childCards={childCards}
+                      expanded={expandedEpics.has(epic.id)}
+                      onToggleExpand={toggleExpand}
+                      onOpen={onOpenCard}
+                      accentKey={accentKey}
+                      blockedOn={blockedOnFor(epic)}
+                      cardsById={cardsById}
+                    />
                   </div>
                   <div className="atlas-chart__lane" ref={i === 0 ? firstLaneRef : undefined}>
                     <AtlasTrail
@@ -432,7 +334,15 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished, orientation }
                       pxPerWeight={pxPerWeight}
                       trailWidth={trailWidth}
                       showNames={showNames}
-                      onOpenCard={trailOnOpenCard}
+                      onOpenCard={
+                        mobileAcross
+                          ? (id) =>
+                              setPreviewChildId((prev) =>
+                                prev === id ? null : id
+                              )
+                          : onOpenCard
+                      }
+                      previewChildId={mobileAcross ? previewChildId : null}
                       accentKey={accentKey}
                     />
                   </div>
