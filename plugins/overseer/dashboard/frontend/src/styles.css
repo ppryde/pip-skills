@@ -546,14 +546,19 @@
      select and a button beside it read at the same size. */
   font-size: 0.8rem;
   font-weight: 600;
-  line-height: 1;
+  /* The line box fills the content height (border-box height minus the vertical
+     padding + border) so the single value line centres — `line-height: 1` was
+     cropping it tight and the handwritten font's metrics then dropped the
+     glyphs to the bottom of the box. Zero vertical padding lets the line box do
+     the centring. */
+  line-height: 1.5;
   color: var(--qb-ink-900);
   background: var(--qb-btn-face);
   border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble);
   height: var(--qb-control-height);
   box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
+  padding: 0 0.7rem;
   max-width: 40vw;
   min-width: 0;
   overflow: hidden;
