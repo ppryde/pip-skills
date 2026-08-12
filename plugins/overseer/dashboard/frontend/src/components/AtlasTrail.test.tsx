@@ -147,12 +147,12 @@ describe("<AtlasTrail/>", () => {
     expect(tooltipTexts(container).some((t) => t.includes("the quest at hand"))).toBe(true);
   });
 
-  it("in-flight epic: when the in-progress child IS the last child (no todos after it), the AT-HAND pennant label is suppressed — marker and tooltip still render", () => {
+  it("in-flight epic: the in-progress child that is also the last child STILL gets its AT-HAND ring, pennant, and tooltip", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
     const { container } = renderTrail(epic, [prog]);
     expect(container.querySelector(".at-hand-ring")).toBeInTheDocument();
-    expect(container.querySelector(".atlas-trail__pennant--athand")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__pennant--athand")).toBeInTheDocument();
     expect(tooltipTexts(container).some((t) => t.includes("the quest at hand"))).toBe(true);
   });
 
@@ -214,9 +214,6 @@ describe("<AtlasTrail/>", () => {
 
   it("todo child name-tags alternate above and below the path so adjacent tags never collide", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
-    // Three children so the alternation check lands on the first TWO
-    // (non-last) tags — the third (last) child's own tag is suppressed
-    // (round 2, finding 5's beast-clearance rule) regardless of alternation.
     const kids = [
       child({ id: "k1", title: "First", status: "planned", complexity: "S", order: 1 }),
       child({ id: "k2", title: "Second", status: "planned", complexity: "S", order: 2 }),
@@ -224,10 +221,11 @@ describe("<AtlasTrail/>", () => {
     ];
     const { container } = renderTrail(epic, kids, { showNames: true });
     const tags = Array.from(container.querySelectorAll(".trail-tag--todo"));
-    expect(tags.length).toBe(2);
-    // The first (non-suppressed) tag sits above the path, the second below.
+    // All three show (incl. the last) and alternate above / below / above.
+    expect(tags.length).toBe(3);
     expect(tags[0]).not.toHaveClass("trail-tag--below");
     expect(tags[1]).toHaveClass("trail-tag--below");
+    expect(tags[2]).not.toHaveClass("trail-tag--below");
     // Above and below anchor from opposite edges of their own box.
     expect((tags[0] as HTMLElement).style.transform).toContain("-100%");
     expect((tags[1] as HTMLElement).style.transform).not.toContain("-100%");
@@ -246,14 +244,16 @@ describe("<AtlasTrail/>", () => {
       child({ id: "k3", title: "Todo Third", status: "planned", complexity: "S", order: 3 }),
     ];
     const { container } = renderTrail(epic, kids, { showNames: true });
-    // Trail order is done -> todo -> todo (orderChildrenForTrail); k3 is the
-    // last child, so only k1 and k2's tags render.
+    // Trail order is done -> todo -> todo (orderChildrenForTrail); all three
+    // render, alternating above / below / above off the one shared counter.
     const tags = Array.from(container.querySelectorAll(".trail-tag"));
-    expect(tags.length).toBe(2);
+    expect(tags.length).toBe(3);
     expect(tags[0]).toHaveClass("trail-tag--done");
     expect(tags[0]).not.toHaveClass("trail-tag--below");
     expect(tags[1]).toHaveClass("trail-tag--todo");
     expect(tags[1]).toHaveClass("trail-tag--below");
+    expect(tags[2]).toHaveClass("trail-tag--todo");
+    expect(tags[2]).not.toHaveClass("trail-tag--below");
   });
 
   it("blocked child (open depends_on): renders the boulder overlay with a 'the way is barred' tooltip", () => {
@@ -429,14 +429,10 @@ describe("<AtlasTrail/>", () => {
     expect(startXs.some((x) => x > TRAILHEAD_RESERVE_PX)).toBe(true); // resumes past the campfire gap
   });
 
-  // Impl-review round 2, finding 5: the LAST-ordered child's marker sits
-  // exactly at the trail's true end by construction (its segment's own
-  // `end` IS `trailEnd`) — only BEAST_ANCHOR_OFFSET_PX(26) away from the
-  // beast's own left edge. A centred name-tag on that marker routinely
-  // crowds/overlaps the beast doodle; earlier (non-last) children have no
-  // such constraint. This is true on every trail — "short trails" in the
-  // review's own observation was just where it happened to be noticed.
-  it("suppresses the LAST todo child's name-tag (it would crowd the beast) but keeps an earlier todo child's tag", () => {
+  // Every quest gets its on-trail name-tag now — including the LAST child (the
+  // one right before the beast). It used to be suppressed for beast-clearance,
+  // but that hid one label per journey; the label wins.
+  it("shows every todo child's name-tag, including the last one before the beast", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const kids = [
       child({ id: "k1", title: "Earlier Quest", status: "planned", complexity: "S", order: 1 }),
@@ -446,25 +442,18 @@ describe("<AtlasTrail/>", () => {
 
     const tags = Array.from(container.querySelectorAll(".trail-tag--todo")).map((el) => el.textContent);
     expect(tags).toContain("Earlier Quest");
-    expect(tags).not.toContain("Final Quest");
+    expect(tags).toContain("Final Quest");
 
-    // On a MULTI-child trail the last child's bare (tagless) marker read as
-    // an extra "finish" circle jammed against the beast, so it's dropped too —
-    // only the earlier child's waypoint remains. (A single-child epic keeps
-    // its one marker; see the single-child tests above.)
-    expect(container.querySelectorAll(".atlas-trail__waypoint--todo").length).toBe(1);
-    expect(tooltipTexts(container).some((t) => t.startsWith("Earlier Quest —"))).toBe(true);
-    expect(tooltipTexts(container).some((t) => t.startsWith("Final Quest —"))).toBe(false);
+    // Both waypoint markers render too.
+    expect(container.querySelectorAll(".atlas-trail__waypoint--todo").length).toBe(2);
+    expect(tooltipTexts(container).some((t) => t.startsWith("Final Quest —"))).toBe(true);
   });
 
-  it("an in-flight epic where the LAST child is a todo (nothing done/at-hand) still suppresses only that last tag", () => {
-    // A degenerate but real case: an epic that's marching (in-flight) but
-    // whose only children so far are todo — the "last" child is also the
-    // FIRST/only one, same geometry as the single-child case above.
+  it("an in-flight epic with a single todo child shows that child's name-tag", () => {
     const epic = card({ id: "WF-090", status: "in-flight" });
     const solo = child({ id: "k1", title: "Only Quest", status: "planned", complexity: "M" });
     const { container } = renderTrail(epic, [solo], { showNames: true });
-    expect(container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
+    expect(container.querySelector(".trail-tag--todo")).toBeInTheDocument();
   });
 
   // Feature 3 (WF-086 v3): a done child now ALSO gets an on-trail name-tag
@@ -486,12 +475,11 @@ describe("<AtlasTrail/>", () => {
       expect(hidden.container.querySelector(".trail-tag--done")).not.toBeInTheDocument();
     });
 
-    it("suppresses the LAST done child's name-tag (all-done epic, no todos after)", () => {
+    it("shows the LAST done child's name-tag too (all-done, single-child epic)", () => {
       const epic = card({ id: "WF-027", status: "in-flight" });
       const solo = child({ id: "k1", title: "Only Cleared Quest", status: "done", complexity: "S" });
       const { container } = renderTrail(epic, [solo], { showNames: true });
-      expect(container.querySelector(".trail-tag--done")).not.toBeInTheDocument();
-      // Marker + tooltip still render regardless.
+      expect(container.querySelector(".trail-tag--done")).toBeInTheDocument();
       expect(container.querySelector(".atlas-trail__waypoint--done")).toBeInTheDocument();
     });
   });
@@ -540,12 +528,12 @@ describe("<AtlasTrail/>", () => {
       expect(onOpenCard).toHaveBeenCalledWith("k1");
     });
 
-    it("when the in-progress child is the trail's last child (pennant suppressed), clicking its marker calls onOpenCard with that id", () => {
+    it("when the in-progress child is the trail's last child, its pennant shows and clicking its marker calls onOpenCard with that id", () => {
       const onOpenCard = vi.fn();
       const epic = card({ id: "WF-085", status: "in-flight" });
       const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
       const { container } = renderTrail(epic, [prog], { onOpenCard });
-      expect(container.querySelector(".atlas-trail__pennant--athand")).not.toBeInTheDocument();
+      expect(container.querySelector(".atlas-trail__pennant--athand")).toBeInTheDocument();
       const marker = container.querySelector(".atlas-trail__waypoint--athand") as SVGGElement;
       marker.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       expect(onOpenCard).toHaveBeenCalledWith("k1");

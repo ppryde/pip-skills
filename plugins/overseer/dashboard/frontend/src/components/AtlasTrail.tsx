@@ -233,8 +233,7 @@ function AtlasTrail({
     value: null,
   };
 
-  segments.forEach(({ child, end }, segmentIndex) => {
-    const isLastChild = segmentIndex === segments.length - 1;
+  segments.forEach(({ child, end }) => {
     const group = statusGroupOf(child);
     const mx = end;
     const my = t.yAt(end);
@@ -271,7 +270,7 @@ function AtlasTrail({
       // the same last-child beast-clearance suppression as the todo tag
       // below (a done child CAN be the trail's last child — an
       // all-done/no-todo epic, or an all-done epic with nothing after).
-      if (showNames && !isLastChild) {
+      if (showNames) {
         const below = tagIndex % 2 === 1;
         tagIndex++;
         overlayTags.push(
@@ -329,7 +328,7 @@ function AtlasTrail({
       // its marker sits exactly BEAST_ANCHOR_OFFSET_PX from the beast, same
       // as any other last child). Marker + tooltip still always render;
       // only the floating pennant label suppresses.
-      if (atHand && !isLastChild) {
+      if (atHand) {
         overlayTags.push(
           <button
             type="button"
@@ -351,15 +350,7 @@ function AtlasTrail({
     const openDeps = openDependencies(child, cardsById);
     const blocked = openDeps.length > 0;
 
-    // The last child sits right at the beast; its name-tag is already
-    // suppressed below, so on a MULTI-child trail the bare plain-todo marker
-    // read as an extra "finish" circle jammed against the monster (no tag,
-    // nothing to click). Drop that last dot — the line just runs cleanly into
-    // the boss. Exceptions that keep their marker: a single-child epic (it's
-    // the only quest, nothing else represents it) and a BLOCKED child (the
-    // boulder means "the way is barred", a real signal, not a bare dot).
-    if (!isLastChild || segments.length <= 1 || blocked)
-      svgMarkers.push(
+    svgMarkers.push(
       <g
         key={child.id}
         className={
@@ -389,20 +380,11 @@ function AtlasTrail({
       </g>
     );
 
-    // Impl-review round 2, finding 5: the trail's LAST child's marker sits
-    // exactly at the trail's true end by construction (its segment's own
-    // `end` IS `trailEnd`) — only BEAST_ANCHOR_OFFSET_PX(26px) away from
-    // the beast's own left edge, guaranteed on every trail regardless of
-    // length. A centred name-tag there routinely crowds/overlaps the
-    // beast doodle, so it's suppressed rather than shifted — the marker
-    // itself and its full-name+weight tooltip still work fine without the
-    // on-trail label. Deliberately keyed on "is this literally the last
-    // child" (not a distance-from-beast estimate): an early prototype of
-    // this fix used a conservative `TAG_HALF_WIDTH_PX` distance check
-    // instead, which over-suppressed EVERY tag on a short/low-weight
-    // trail (any marker within roughly the tag's own generous max-width
-    // of the beast), not just the genuinely-adjacent last one.
-    if (showNames && !isLastChild) {
+    // Every quest gets its on-trail name-tag, including the last one (which
+    // sits right before the boss) — previously the last child's tag was
+    // suppressed to avoid crowding the beast, but that hid one quest's label
+    // on every journey ("one card short"), so it's shown now.
+    if (showNames) {
       const below = tagIndex % 2 === 1;
       tagIndex++;
       overlayTags.push(
@@ -440,28 +422,17 @@ function AtlasTrail({
           {segments.map(({ child, start, end }, i) => {
             const group = statusGroupOf(child);
             const faded = group === "todo";
-            const isLast = i === segments.length - 1;
-            // Mirror the marker loop's suppression of the last child's bare
-            // plain-todo dot: with no marker there, cutting a waypoint gap at
-            // its position just leaves a hole in the line before the boss, so
-            // skip that cut.
-            const lastTodoSuppressed =
-              isLast &&
-              segments.length > 1 &&
-              group === "todo" &&
-              openDependencies(child, cardsById).length === 0;
             // Extend only the DRAWN path (never the weight math or waypoint
             // positions): the first segment reaches back under the trailhead
             // village and the last runs out under the monster boss, so the
             // trail visibly starts and ends beneath its bookend icons instead
             // of stopping short of them.
             const drawStart = i === 0 ? TRAILHEAD_ICON_SIZE_PX / 2 : start;
-            const drawEnd = isLast
-              ? beastXClamped + BEAST_ICON_SIZE_PX / 2
-              : end;
-            const cuts = lastTodoSuppressed
-              ? []
-              : [{ at: end, radius: WAYPOINT_GAP_PX }];
+            const drawEnd =
+              i === segments.length - 1
+                ? beastXClamped + BEAST_ICON_SIZE_PX / 2
+                : end;
+            const cuts = [{ at: end, radius: WAYPOINT_GAP_PX }];
             if (i > 0) cuts.push({ at: start, radius: WAYPOINT_GAP_PX });
             // Impl-review round 1, finding 3: cutting the campfire gap ONLY
             // on the frozen in-progress child's own segment missed the
