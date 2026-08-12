@@ -1,4 +1,9 @@
 import type { RepoEntry } from "../api/types";
+// WF-097 follow-up: the eyebrow label and the `<select>` itself now route
+// through the design-library primitives (`src/ui/`) — see the call site
+// below for which bespoke classes stay (layout/transparent-background
+// overrides only) and which were fully absorbed into `.qb-select`.
+import { Label, Select } from "../ui";
 
 export interface RepoSelectorProps {
   repos: RepoEntry[];
@@ -46,8 +51,8 @@ function RepoSelector({ repos, activeRoot, onSelect }: RepoSelectorProps) {
 
   return (
     <label className="topbar__repo-select">
-      <span className="topbar__repo-select-label">repo</span>
-      <select
+      <Label className="topbar__repo-select-label">repo</Label>
+      <Select
         aria-label="Repo"
         value={selected}
         onChange={(e) => onSelect(e.target.value)}
@@ -68,7 +73,7 @@ function RepoSelector({ repos, activeRoot, onSelect }: RepoSelectorProps) {
             {optionLabel(r)}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

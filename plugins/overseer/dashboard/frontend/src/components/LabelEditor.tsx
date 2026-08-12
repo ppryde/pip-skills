@@ -14,6 +14,14 @@ export interface LabelEditorProps {
 }
 
 /**
+ * WF-097 follow-up: the one control here that could route through the
+ * design library, the per-chip remove "×", is DELIBERATELY left as a bare
+ * `<button>` — `.label-editor__remove` is a small round icon-only glyph
+ * (border: none, transparent fill, opacity-fade hover), the same bespoke
+ * shape as `.link-editor__deps-list button` (LinkEditor.tsx), not a `.qb-btn`
+ * rectangular Role-A button. Forcing it onto `<Button/>` would paint over
+ * that shape with the wrong chrome entirely.
+ *
  * Editable label control (F1 fold-in, WF-058) — chips with a per-chip remove
  * plus an add-input that commits on Enter. Every mutation (add/remove) calls
  * `onSave` with the full new set immediately; there is no separate "save"

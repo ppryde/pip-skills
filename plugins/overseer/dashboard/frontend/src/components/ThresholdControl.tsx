@@ -3,6 +3,12 @@ import { setThreshold } from "../api/client";
 import type { UseBoardResult } from "../board/useBoard";
 import lastOrders from "../assets/last-orders.png";
 import InfoTooltip from "./InfoTooltip";
+// WF-097 follow-up: the `<select>` now routes through the design-library
+// `<Select/>` primitive (`src/ui/`) — `.threshold-control__select` in
+// styles.css is slimmed to its genuine overrides (fixed width, transparent
+// background, tighter horizontal padding) now that the rest of its chrome
+// duplicates `.qb-select`.
+import { Select } from "../ui";
 
 export interface ThresholdControlProps {
   /** Current `context.threshold` — mutate applies the whole board-response,
@@ -65,7 +71,7 @@ function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
           applies to every quest.
         </InfoTooltip>
       </span>
-      <select
+      <Select
         aria-label="Threshold"
         className="threshold-control__select"
         value={value !== null ? String(value) : ""}
@@ -82,7 +88,7 @@ function ThresholdControl({ value, mutate, inFlight }: ThresholdControlProps) {
             {opt}%
           </option>
         ))}
-      </select>
+      </Select>
     </div>
   );
 }

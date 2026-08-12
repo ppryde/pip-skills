@@ -2,6 +2,12 @@ import { useEffect, useState } from "react";
 import { claimCard, getSessions, unclaimCard } from "../api/client";
 import type { SessionSummary } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+// WF-097 follow-up: the select + Assign/Unassign buttons now route through
+// the design-library primitives (`src/ui/`) — `.claim-control select`/
+// `.claim-control button` in styles.css are slimmed to their genuine
+// overrides now that the rest of their chrome duplicates `.qb-select`/
+// `.qb-btn`.
+import { Button, Select } from "../ui";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -82,13 +88,9 @@ function ClaimControl({
         >
           claimed by {label}
         </span>
-        <button
-          type="button"
-          onClick={() => void handleUnassign()}
-          disabled={inFlight}
-        >
+        <Button onClick={() => void handleUnassign()} disabled={inFlight}>
           Unassign
-        </button>
+        </Button>
       </div>
     );
   }
@@ -97,7 +99,7 @@ function ClaimControl({
 
   return (
     <div className="claim-control">
-      <select
+      <Select
         aria-label="Assign to session"
         value={selected}
         onChange={(e) => setSelected(e.target.value)}
@@ -110,14 +112,10 @@ function ClaimControl({
             {s.model ? ` (${s.model})` : ""}
           </option>
         ))}
-      </select>
-      <button
-        type="button"
-        onClick={() => void handleAssign()}
-        disabled={inFlight || !selected}
-      >
+      </Select>
+      <Button onClick={() => void handleAssign()} disabled={inFlight || !selected}>
         Assign
-      </button>
+      </Button>
     </div>
   );
 }

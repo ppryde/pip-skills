@@ -888,11 +888,17 @@ describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
 // never imported by these component tests (only src/main.tsx imports it —
 // see the other frontend test files), so there is no computed-style
 // signal to assert on from jsdom; instead this reads the real stylesheet
-// source and asserts the specific truncation declarations are present on
-// the exact selectors TopBar's repo/branch chips render
-// (`.topbar__repo-select select` / `.topbar__branch-select select`,
-// RepoSelector.tsx / BranchFilter.tsx). This is a regression guard against
-// someone dropping the rule later, not a substitute for visual QA.
+// source and asserts the specific truncation declarations are present.
+// This is a regression guard against someone dropping the rule later, not
+// a substitute for visual QA.
+//
+// WF-097 follow-up: RepoSelector.tsx/BranchFilter.tsx's `<select>`s now
+// render via the shared `<Select/>` primitive (`.qb-select`) — the
+// truncation declarations moved there (every `<Select/>` gets them, not
+// just these two), so the guard now reads `.qb-select`'s own rule rather
+// than `.topbar__repo-select select`/`.topbar__branch-select select`
+// (which keep only their own genuine overrides — a transparent background,
+// plus the branch select's own wobble variant — nothing duplicated).
 describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
 
@@ -903,20 +909,24 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
     return match![1];
   }
 
-  it("truncates the repo <select> with an ellipsis instead of wrapping", () => {
-    const body = ruleBodyFor(".topbar__repo-select select");
+  it("truncates every <Select/>-rendered control with an ellipsis instead of wrapping", () => {
+    const body = ruleBodyFor(".qb-select");
     expect(body).toMatch(/overflow:\s*hidden/);
     expect(body).toMatch(/text-overflow:\s*ellipsis/);
     expect(body).toMatch(/white-space:\s*nowrap/);
     expect(body).toMatch(/min-width:\s*0/);
   });
 
-  it("truncates the branch <select> with an ellipsis instead of wrapping", () => {
-    const body = ruleBodyFor(".topbar__branch-select select");
-    expect(body).toMatch(/overflow:\s*hidden/);
-    expect(body).toMatch(/text-overflow:\s*ellipsis/);
-    expect(body).toMatch(/white-space:\s*nowrap/);
-    expect(body).toMatch(/min-width:\s*0/);
+  it("still renders the repo <select> with its own transparent-background override", () => {
+    expect(ruleBodyFor(".topbar__repo-select select")).toMatch(
+      /background:\s*transparent/
+    );
+  });
+
+  it("still renders the branch <select> with its own transparent-background override", () => {
+    expect(ruleBodyFor(".topbar__branch-select select")).toMatch(
+      /background:\s*transparent/
+    );
   });
 
   it("lets the repo/branch chip wrappers shrink below their content width so the ellipsis can engage", () => {

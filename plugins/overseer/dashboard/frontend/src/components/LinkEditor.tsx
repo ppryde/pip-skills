@@ -1,6 +1,15 @@
 import { useState, type ChangeEvent } from "react";
 import { setParent, setDepends } from "../api/client";
 import type { UseBoardResult } from "../board/useBoard";
+// WF-097 follow-up: the parent/add-dependency selects and the "Add" button
+// now route through the design-library primitives (`src/ui/`) —
+// `.link-editor select` in styles.css is slimmed to its genuine overrides
+// now that most of its chrome duplicates `.qb-select`. The per-dependency
+// remove "×" glyph is left as a bare `<button>` — it's a bespoke round
+// icon-only affordance (`.link-editor__deps-list button`, too small for a
+// rectangular Role-A outline — see that rule's own WF-046 item 2 comment),
+// not a `.qb-btn` shape, so it doesn't fit `<Button/>`.
+import { Button, Select } from "../ui";
 
 export interface LinkEditorProps {
   cardId: string;
@@ -66,7 +75,7 @@ function LinkEditor({
     <div className="link-editor">
       <label className="link-editor__field">
         Parent
-        <select
+        <Select
           aria-label="Parent"
           value={parent ?? ""}
           onChange={(e) => void handleParentChange(e)}
@@ -78,7 +87,7 @@ function LinkEditor({
               {id}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
 
       <div className="link-editor__deps">
@@ -104,7 +113,7 @@ function LinkEditor({
             </li>
           ))}
         </ul>
-        <select
+        <Select
           aria-label="Add dependency"
           value={addDepId}
           onChange={(e) => setAddDepId(e.target.value)}
@@ -123,14 +132,10 @@ function LinkEditor({
               </option>
             );
           })}
-        </select>
-        <button
-          type="button"
-          onClick={() => void handleAddDep()}
-          disabled={inFlight || !addDepId}
-        >
+        </Select>
+        <Button onClick={() => void handleAddDep()} disabled={inFlight || !addDepId}>
           Add
-        </button>
+        </Button>
       </div>
     </div>
   );

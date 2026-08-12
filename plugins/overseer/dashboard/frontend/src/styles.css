@@ -425,15 +425,21 @@
    first real adopters of the React wrappers (v1); a WF-097 follow-up pass
    then routed TopBar.tsx/FilterBar.tsx's own buttons, the priority/
    complexity selects, the search input, and the Short/Long Rest + last-
-   refreshed pills through the same wrappers — each migrated call site's own
-   bespoke class was slimmed to layout-only (or removed if it had nothing
-   left) once its chrome duplicated the shared `.qb-*` recipe; see each
-   rule's own comment for what survived and why. Still bespoke: the topbar's
-   repo/branch selects (own files, RepoSelector.tsx/BranchFilter.tsx, out of
-   that pass's scope), the view-toggle "coins" (a wholly different circular
-   shape, not a Role-A button), and the gold/vanquished/fleet pills (share
-   one combined selector with fleet-pill's real button semantics — splitting
-   two of three onto `<Chip>` would fragment that rule for no visual gain). */
+   refreshed pills through the same wrappers, and a second WF-097 follow-up
+   pass routed the remaining shared controls — the topbar's repo/branch
+   selects (RepoSelector.tsx/BranchFilter.tsx), Last Orders
+   (ThresholdControl.tsx), the drawer's priority select, and the drawer's
+   StatusMenu/ClaimControl/LinkEditor buttons+selects — through them too.
+   Each migrated call site's own bespoke class was slimmed to layout-only
+   (or removed if it had nothing left) once its chrome duplicated the shared
+   `.qb-*` recipe; see each rule's own comment for what survived and why.
+   Still bespoke: the view-toggle "coins" (a wholly different circular
+   shape, not a Role-A button), the gold/vanquished/fleet pills (share one
+   combined selector with fleet-pill's real button semantics — splitting
+   two of three onto `<Chip>` would fragment that rule for no visual gain),
+   and the small round icon-only glyphs (`.link-editor__deps-list button`'s
+   dependency-remove "×", `.label-editor__remove`) — too small for a
+   rectangular Role-A outline, not a `.qb-btn` shape at all. */
 
 /* .qb-select — the standard native-<select> chip/dropdown look. Factored
    from `.topbar__repo-select select` / `.topbar__branch-select select` /
@@ -682,57 +688,28 @@ body {
   min-width: 0;
 }
 
+/* WF-097 follow-up: renders via `<Label className="topbar__repo-select-label"/>`
+   now (RepoSelector.tsx), which applies `.qb-label` — text-transform/
+   font-size/letter-spacing/color were identical to `.qb-label`'s own and are
+   gone below; `font-weight: normal` survives as a genuine override — this
+   eyebrow was never bold (unlike `.filter-bar__eyebrow`, whose own
+   font-weight already matched `.qb-label`'s 600), so it cancels `.qb-label`'s
+   default weight rather than duplicating it. */
 .topbar__repo-select-label {
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  letter-spacing: 0.04em;
-  color: var(--qb-ink-400);
+  font-weight: normal;
 }
 
-/* WF-046 item 3: a hand-inked border + wobble silhouette so the native
-   control reads as individually drawn rather than the browser's stock
-   rectangle, even sitting inside the pill's own rounded chip — background
-   stays transparent so the pill's own shape still reads as the outer
-   chrome. */
+/* WF-097 follow-up: renders via `<Select/>` now (RepoSelector.tsx) — most of
+   this rule's declarations were identical to `.qb-select`'s own (font/
+   font-weight/line-height/color/border/border-radius/height/box-sizing/
+   padding/max-width/min-width/overflow/text-overflow/white-space/cursor are
+   gone below); `background: transparent` survives as the one genuine
+   override — `.qb-select`'s own default is the opaque `--qb-btn-face`, but
+   this select sits inside a chip whose own box IS the visible border, so it
+   stays see-through. The `:hover`/`:focus-visible` states below were also
+   full duplicates of `.qb-select`'s own and are gone entirely. */
 .topbar__repo-select select {
-  font: inherit;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--qb-ink-900);
   background: transparent;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  /* Matches the Role A button box (`.topbar__new-card`) so the select's own
-     border is the ONLY box the control shows — no more outer pill.
-     WF-090 follow-up: a native `<select>` renders ~4-5px taller than a
-     `<button>`/`<input>` sharing the same padding (UA form-control chrome
-     inflates its intrinsic content height) — pinning an explicit `height`
-     (with `box-sizing: border-box`, so the border/padding are INSIDE it,
-     not added on top) sidesteps that instead of chasing padding numbers.
-     Vertical padding is trimmed to `0.12rem` so the box doesn't need to
-     stretch past `height` to fit the text (which would silently win over
-     `height` in a border-box layout). */
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
-  max-width: 40vw;
-  /* WF-085: a long repo root/label truncates with an ellipsis instead of
-     wrapping the native <select> onto a second line — `min-width: 0`
-     overrides the UA default of `min-width: auto` (which otherwise refuses
-     to shrink a <select> below its longest <option>'s intrinsic width). */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topbar__repo-select select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
-}
-
-.topbar__repo-select select:focus-visible {
-  outline: 2px solid var(--qb-ink-400);
-  outline-offset: 2px;
 }
 
 /* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
@@ -766,51 +743,35 @@ body {
   min-width: 0;
 }
 
+/* WF-097 follow-up: renders via `<Label className="topbar__branch-select-label"/>`
+   now (BranchFilter.tsx), which applies `.qb-label` — text-transform/
+   font-size/letter-spacing were identical to `.qb-label`'s own and are gone
+   below. Three genuine overrides survive: `color` (the branch's own tint,
+   not `.qb-label`'s neutral ink-400), `white-space: nowrap` (layout — keeps
+   the ⑃ glyph and "branch" on one line), and `font-weight: normal` (this
+   eyebrow was never bold — same "cancel `.qb-label`'s default weight"
+   rationale as `.topbar__repo-select-label`). */
 .topbar__branch-select-label {
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  letter-spacing: 0.04em;
   color: var(--qb-branch-chip-text);
-  /* Keep the ⑃ glyph and "branch" on one line — the narrow chip could
-     otherwise wrap them onto separate lines. */
   white-space: nowrap;
+  font-weight: normal;
 }
 
-/* WF-046 item 3 — same treatment as `.topbar__repo-select select` above,
-   a different wobble variant so the two neighbouring topbar chips don't
-   read as the same stamped shape. */
+/* WF-097 follow-up: renders via `<Select/>` now (BranchFilter.tsx) — same
+   "only `background`/wobble survive" treatment as `.topbar__repo-select
+   select` above; `border-radius` keeps its own wobble-2 variant (a genuine
+   override — DIFFERENT from `.qb-select`'s default wobble, per WF-046 item
+   1's "no two neighbouring controls share a stamped shape" rule), and
+   `:focus-visible`'s outline colour survives too (the branch's own tint,
+   not `.qb-select`'s neutral ink-400) — everything else duplicated
+   `.qb-select` and is gone. */
 .topbar__branch-select select {
-  font: inherit;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--qb-ink-900);
   background: transparent;
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
-  /* Matches the Role A button box (`.topbar__new-card`) — see
-     `.topbar__repo-select select` above for the full rationale, including
-     the explicit `height` (WF-090 follow-up) that pins this select to the
-     same box as the buttons/input beside it instead of the UA's own
-     ~4-5px-taller intrinsic form-control height. */
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
-  max-width: 40vw;
-  /* WF-085: same ellipsis-truncation treatment as `.topbar__repo-select
-     select` above — a long branch name never wraps to a second line. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topbar__branch-select select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
 }
 
 .topbar__branch-select select:focus-visible {
-  outline: 2px solid var(--qb-branch-chip-border);
-  outline-offset: 2px;
+  outline-color: var(--qb-branch-chip-border);
 }
 
 /* WF-042: wraps ThresholdControl, whose own label now reads "default
@@ -3372,29 +3333,25 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* Mutation controls (Chunk 6). */
-/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, replacing
-   the plain square swatch, so it matches the button family it sits next
-   to in the card drawer. */
+/* WF-097 follow-up: renders via `<Select className="priority-select"/>` now
+   (PrioritySelect.tsx) — line-height/border/height/box-sizing/background
+   were all identical to `.qb-select`'s own and are gone below (as was
+   `:hover`'s border-color, also a full duplicate); genuine overrides
+   survive: `font-size` (`.qb-select` inherits; this control pins 0.75rem
+   explicitly), `border-radius` (a DIFFERENT wobble variant — WF-046 item 1's
+   "no two neighbouring controls share a stamped shape" rule), `padding`
+   (0.3rem vertical vs. `.qb-select`'s own 0.12rem — this drawer control
+   matches the Role-A button box), and `color`/hover-`background` (this
+   control reads at `--qb-ink-700` with a face-hover swap, not `.qb-select`'s
+   neutral ink-900 with no hover fill). */
 .priority-select {
   font-size: 0.75rem;
-  line-height: 1;
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-3);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
   padding: 0.3rem 0.7rem;
-  /* WF-096: pinned to the shared control height so this select lines up
-     with the drawer's other Role-A controls — was missing the `height`/
-     `box-sizing` pin the topbar's equivalent selects already carry (the
-     stray reference to it in the ≤720px iOS-zoom-guard rule below was
-     stale until now). */
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
 
 .priority-select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
   background: var(--qb-btn-face-hover);
 }
 
@@ -3501,35 +3458,23 @@ a.card-drawer__pr-chip:hover {
    including the `:not(.info-tooltip__trigger)` scoping that used to be
    needed to keep the InfoTooltip's own `<button>` trigger from being
    caught by a bare `.threshold-control button` selector, are gone with
-   them). Same hand-inked recipe as `.topbar__repo-select select` above —
-   transparent bg, wobble border, pinned `height`/`box-sizing` so it lines
-   up with the buttons/selects beside it in the row. `width` is fixed
-   (rather than left to the native auto-size-to-selected-option behaviour)
-   so the box doesn't visibly resize as the user steps between "5%" and
-   "95%" — sized to fit "95%" plus the native dropdown arrow without
-   clipping. */
+   them).
+   WF-097 follow-up: renders via `<Select className="threshold-control__select"/>`
+   now (ThresholdControl.tsx) — font/font-weight/line-height/color/border/
+   border-radius/height/box-sizing were all identical to `.qb-select`'s own
+   and are gone below (as were the `:hover`/`:focus-visible` states, also
+   full duplicates); three genuine overrides survive: `width` (fixed rather
+   than the native auto-size-to-selected-option behaviour, so the box
+   doesn't visibly resize as the user steps between "5%" and "95%" — sized
+   to fit "95%" plus the dropdown arrow without clipping), `font-size`
+   (`.qb-select` inherits; this control pins 0.75rem explicitly), and
+   `padding` (tighter horizontal padding than `.qb-select`'s default, to
+   suit the narrower fixed width). */
 .threshold-control__select {
   width: 3.75rem;
-  font: inherit;
   font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--qb-ink-900);
   background: transparent;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  height: var(--qb-control-height);
-  box-sizing: border-box;
   padding: 0.12rem 0.4rem;
-}
-
-.threshold-control__select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
-}
-
-.threshold-control__select:focus-visible {
-  outline: 2px solid var(--qb-ink-400);
-  outline-offset: 2px;
 }
 
 .card-drawer__controls {
@@ -3549,31 +3494,18 @@ a.card-drawer__pr-chip:hover {
   flex-wrap: wrap;
 }
 
-/* Role A (CHOSEN button system, task-12). */
-.status-menu button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
+/* WF-097 follow-up: every button here renders via `<Button/>` now
+   (StatusMenu.tsx) — the base rule's display/align-items/gap/font-size/
+   padding/font-weight/border-radius(default wobble)/border/background/
+   color/box-shadow/cursor/transition, plus the `:hover`/`:active`/
+   `:disabled` states below, all duplicated `.qb-btn`'s own exactly and are
+   gone entirely. Only the genuine per-button overrides survive: */
 
 /* WF-046 item 1: this menu is the one place where up to four Role-A
    buttons sit as direct siblings — `:nth-of-type` cycles the wobble
    variants across them (park/unpark, block/unblock, done, abandon) so
-   the row doesn't read as four copies of the same stamp. The base rule
-   above already carries the default variant for the first button. */
+   the row doesn't read as four copies of the same stamp. The first button
+   needs no override — `.qb-btn`'s own default wobble already carries it. */
 .status-menu button:nth-of-type(2) {
   border-radius: var(--qb-btn-wobble-3);
 }
@@ -3594,23 +3526,6 @@ a.card-drawer__pr-chip:hover {
   flex: 0 0 auto;
 }
 
-.status-menu button:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.status-menu button:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.status-menu button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
-}
-
 .claim-control {
   display: flex;
   align-items: center;
@@ -3618,57 +3533,34 @@ a.card-drawer__pr-chip:hover {
   flex-wrap: wrap;
 }
 
-/* WF-046 item 3: Role-A hand-inked border + wobble silhouette. */
+/* WF-097 follow-up: renders via `<Select/>` now (ClaimControl.tsx) —
+   line-height/border/background were all identical to `.qb-select`'s own
+   and are gone below (as was `:hover`'s border-color, also a full
+   duplicate); genuine overrides survive: `font-size` (`.qb-select`
+   inherits), `border-radius` (a DIFFERENT wobble variant — WF-046 item 1),
+   `padding` (0.3rem vertical vs. `.qb-select`'s own 0.12rem — matches the
+   Role-A button box), and `color`/hover-`background` (this control reads at
+   `--qb-ink-700` with a face-hover swap, not `.qb-select`'s neutral
+   ink-900 with no hover fill). */
 .claim-control select {
   font-size: 0.75rem;
-  line-height: 1;
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-4);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
   padding: 0.3rem 0.7rem;
-  background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
 
 .claim-control select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
   background: var(--qb-btn-face-hover);
 }
 
-/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-3 wobble
-   so Assign/Unassign don't share an outline with the select right next
-   to it. */
+/* WF-097 follow-up: Assign/Unassign render via `<Button/>` now
+   (ClaimControl.tsx) — font-size/padding/font-weight/border/background/
+   color/box-shadow/cursor/transition, plus `:hover`/`:active`/`:disabled`
+   below, all duplicated `.qb-btn`'s own exactly and are gone; only the
+   WF-046 item 1 wobble variant survives (variant-3, so Assign/Unassign
+   don't share an outline with the select right next to it). */
 .claim-control button {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.claim-control button:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.claim-control button:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.claim-control button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
 }
 
 .claim-control__holder {
@@ -3688,23 +3580,24 @@ a.card-drawer__pr-chip:hover {
   font-size: 0.8rem;
 }
 
-/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, shared by
-   both selects in this component (parent + add-dependency); the
-   add-dependency one gets its own variant below so the two don't match. */
+/* WF-097 follow-up: both selects in this component (parent + add-dependency)
+   render via `<Select/>` now (LinkEditor.tsx) — font/line-height/border/
+   border-radius(default wobble)/background were all identical to
+   `.qb-select`'s own and are gone below (as was `:hover`'s border-color,
+   also a full duplicate); genuine overrides survive: `font-size`
+   (`.qb-select` inherits), `padding` (0.3rem vertical vs. `.qb-select`'s own
+   0.12rem — matches the Role-A button box), and `color`/hover-`background`
+   (this control reads at `--qb-ink-700` with a face-hover swap, not
+   `.qb-select`'s neutral ink-900 with no hover fill). The add-dependency
+   select keeps its own DIFFERENT wobble variant below (WF-046 item 1) so
+   the two selects don't match. */
 .link-editor select {
-  font: inherit;
   font-size: 0.75rem;
-  line-height: 1;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
   padding: 0.3rem 0.7rem;
-  background: var(--qb-btn-face);
   color: var(--qb-ink-700);
 }
 
 .link-editor select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
   background: var(--qb-btn-face-hover);
 }
 
@@ -3714,6 +3607,11 @@ a.card-drawer__pr-chip:hover {
   gap: 0.4rem;
 }
 
+/* The "Add" button (LinkEditor.tsx) needs no rule of its own here — it
+   renders via a bare `<Button/>` (WF-097 follow-up), and `.qb-btn`'s own
+   default wobble already differs from the add-dependency select's
+   wobble-2 right beside it (WF-046 item 1), so no override is needed to
+   keep the two from reading as the same stamped shape. */
 .link-editor__deps {
   display: flex;
   align-items: center;
