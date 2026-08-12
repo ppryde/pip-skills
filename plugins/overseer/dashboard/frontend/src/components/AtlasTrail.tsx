@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { BoardCard, Rollup } from "../api/types";
 import { formatDateStamp, parseCalendarDate, seedFor, wobblePath } from "../board/atlasGeometry";
@@ -23,7 +23,7 @@ import {
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import { rarityStars } from "../board/rarityStars";
-import BeastFace from "./BeastFace";
+import { randomMonsterIcon } from "../board/monsterIcons";
 import { StarIcon } from "./icons";
 
 import trailheadIcon from "../assets/villages/icon_7.png";
@@ -135,6 +135,9 @@ function AtlasTrail({
 }: AtlasTrailProps) {
   const laneRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(DEFAULT_LANE_HEIGHT);
+  // Boss art (POC): one random monster per mount — new on a fresh page load,
+  // but stable across this epic's re-renders so it doesn't flicker.
+  const monster = useMemo(() => randomMonsterIcon(), []);
 
   // Re-measures whenever the lane's own box HEIGHT changes — including when
   // the sibling rail card expands/collapses its sub-quest list and grows
@@ -502,10 +505,16 @@ function AtlasTrail({
           }
           transform={`translate(${beastXClamped}, ${beastY})`}
         >
-          <BeastFace
-            hue={slain ? "var(--qb-atlas-beast-slain)" : "var(--qb-atlas-beast-alive)"}
-            horns={beast.horns}
-            slain={slain}
+          {/* Boss art (POC): a random monster icon, sized a touch bigger than
+              the old 48px BeastFace and centred on the same anchor to offset
+              the art's own transparent margin. Faded when vanquished. */}
+          <image
+            href={monster}
+            x={-8}
+            y={-8}
+            width={64}
+            height={64}
+            opacity={slain ? 0.5 : 1}
           />
           <title>
             {slain
@@ -521,17 +530,20 @@ function AtlasTrail({
         )}
       </svg>
 
-      {(overlayTags.length > 0 || preview) && (
-        <div className="atlas-trail__overlays">
-          {overlayTags}
-          {/* Mobile across-view POC: a tapped child's preview, anchored to its
-              marker's x (`left: mx`) but sitting at the TOP of the lane and
-              lifted fully above it (CSS `top: 0` + translateY(-100%)), so it
-              clears the name-tags that live over the path rather than colliding
-              with them. Body-click opens the real drawer; the ✕ toggles it
-              closed. */}
-          {preview && (
-            <div
+      {overlayTags.length > 0 && (
+        <div className="atlas-trail__overlays">{overlayTags}</div>
+      )}
+
+      {/* Mobile across-view POC: a tapped child's preview, anchored to its
+          marker's x (`left: mx`) but sitting at the TOP of the lane and lifted
+          fully above it (CSS `top: 0` + translateY(-100%)) so it clears the
+          name-tags. Rendered as a DIRECT child of `.atlas-trail` — NOT inside
+          the overlay layer, whose own `z-index: 2` stacking context trapped it
+          UNDER the sticky epic-card rail (z-index 3) — with a high z-index so
+          it paints above that rail. Body-click opens the real drawer; the ✕
+          toggles it closed. */}
+      {preview && (
+        <div
               className={
                 "atlas-trail__preview atlas-trail__preview--" +
                 statusGroupOf(preview.child)
@@ -588,8 +600,6 @@ function AtlasTrail({
               )}
             </div>
           )}
-        </div>
-      )}
     </div>
   );
 }

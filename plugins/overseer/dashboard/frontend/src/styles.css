@@ -5445,7 +5445,9 @@ a.card-drawer__pr-chip:hover {
   transform: translate(-50%, calc(-100% - 4px));
   pointer-events: auto;
   cursor: pointer;
-  z-index: 7;
+  /* Above the sticky epic-card rail (z-index 3) — the popup is a direct child
+     of `.atlas-trail` (outside the overlay layer's z-index-2 trap). */
+  z-index: 20;
   width: 172px;
   max-width: 62vw;
   display: flex;
