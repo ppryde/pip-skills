@@ -1735,8 +1735,8 @@ body {
   /* Richer than the 38% the other headers use: the earthy olive done-green
      lightens to a dull/muddy sage at 38%, so it gets a stronger mix to read
      as a clear, classy green (closer to the card accent). */
-  background: color-mix(in srgb, var(--qb-status-done-base) 55%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-status-done-base) 75%, white);
+  background: color-mix(in srgb, var(--qb-status-done-base) 70%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-status-done-base) 85%, white);
 }
 
 .lane__header--parked {
