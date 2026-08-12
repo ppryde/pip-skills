@@ -3589,10 +3589,11 @@ a.card-drawer__pr-chip:hover {
    control reads at `--qb-ink-700` with a face-hover swap, not `.qb-select`'s
    neutral ink-900 with no hover fill). */
 .priority-select {
-  font-size: 0.75rem;
+  /* Nothing but the wobble variant — font-size / padding / color are dropped
+     so this select renders identically to the topbar's (both are the bare
+     `.qb-select`). The old `padding: 0.3rem 0.7rem` added top padding on top of
+     the fixed height, which shoved the value text low; base padding centres it. */
   border-radius: var(--qb-btn-wobble-3);
-  padding: 0.3rem 0.7rem;
-  color: var(--qb-ink-700);
 }
 
 .priority-select:hover:not(:disabled) {
@@ -3802,10 +3803,10 @@ a.card-drawer__pr-chip:hover {
    `--qb-ink-700` with a face-hover swap, not `.qb-select`'s neutral
    ink-900 with no hover fill). */
 .claim-control select {
-  font-size: 0.75rem;
+  /* Wobble variant only — see `.priority-select` above: font/padding/color
+     dropped so it matches the topbar's bare `.qb-select` and the value text
+     centres instead of sitting low. */
   border-radius: var(--qb-btn-wobble-4);
-  padding: 0.3rem 0.7rem;
-  color: var(--qb-ink-700);
 }
 
 .claim-control select:hover:not(:disabled) {
@@ -3850,12 +3851,6 @@ a.card-drawer__pr-chip:hover {
    `.qb-select`'s neutral ink-900 with no hover fill). The add-dependency
    select keeps its own DIFFERENT wobble variant below (WF-046 item 1) so
    the two selects don't match. */
-.link-editor select {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  color: var(--qb-ink-700);
-}
-
 .link-editor select:hover:not(:disabled) {
   background: var(--qb-btn-face-hover);
 }
