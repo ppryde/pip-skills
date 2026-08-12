@@ -540,6 +540,11 @@
    canonical version new call-sites (the `<Select/>` wrapper) build on. */
 .qb-select {
   font: inherit;
+  /* Explicit size so a select doesn't fall back to the ambient 16px — that
+     overflowed the Role-A box (height: var(--qb-control-height)) and clipped
+     the handwritten glyphs top and bottom. ~matches the `.qb-btn` 0.75rem so a
+     select and a button beside it read at the same size. */
+  font-size: 0.8rem;
   font-weight: 600;
   line-height: 1;
   color: var(--qb-ink-900);
@@ -6316,16 +6321,12 @@ button.trail-tag:focus-visible {
      It just inherits the base rule's `height: var(--qb-control-height)`,
      same as those (WF-096 hoisted the old repeated `1.65rem` literal into
      that token — see `:root`). */
-  .priority-select,
-  .claim-control select,
-  .link-editor select {
-    /* 16px is the iOS-zoom guard (about zoom, not height). NO touch floor:
-       these dropdowns keep `.qb-select`'s own `height: var(--qb-control-height)`
-       (the Role-A box), so they match the topbar selects AND the drawer's
-       buttons — the old 34px floor made them tower over their button
-       neighbours, the same odd-one-out problem the drawer buttons had. */
-    font-size: 16px;
-  }
+  /* Drawer dropdowns (.priority-select / .claim-control select / .link-editor
+     select) take NO mobile override now: no touch floor (they keep
+     `.qb-select`'s Role-A box height, matching the buttons + topbar selects)
+     and no 16px bump (that overflowed the box and clipped the text — they use
+     `.qb-select`'s own 0.8rem). Trade-off: no iOS zoom-on-focus guard, same as
+     the topbar selects, which never had one. */
 
   .link-editor input {
     font-size: 16px;
