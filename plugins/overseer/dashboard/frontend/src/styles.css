@@ -5016,7 +5016,7 @@ a.card-drawer__pr-chip:hover {
 .atlas-rail-card__title {
   font-family: var(--qb-font-display);
   font-weight: 800;
-  font-size: 1.12rem;
+  font-size: 0.95rem;
   line-height: 1.1;
   color: var(--qb-ink-900);
 }
@@ -6199,9 +6199,10 @@ button.trail-tag:focus-visible {
      725ddea invariant it encodes: exactly one scroller, everything else
      (rail, lane, row) scrolls WITH the chart, never independently. */
   .atlas-chart {
-    /* Wider rail so the (now one-line, ellipsised) epic title has room to show
-       more before the cut. */
-    --rail: 288px;
+    /* Full-viewport-width epic card (minus the chart's own 0.5rem side
+       padding) — the card is a banner across the top of each row, the trail
+       scrolls beneath it. */
+    --rail: calc(100vw - 1rem);
     min-width: 0;
     width: 100%;
     max-width: 100vw;
