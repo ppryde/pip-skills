@@ -3768,8 +3768,11 @@ a.card-drawer__pr-chip:hover {
    cuter guild-flavoured label (StatusMenu.tsx) — Unpark/Unblock keep
    their plain text, they're the toggle-back state, not one of the four
    themed verbs. */
-.status-menu button svg {
+.status-menu__icon {
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
+  object-fit: contain;
 }
 
 .claim-control {
@@ -6315,11 +6318,16 @@ button.trail-tag:focus-visible {
      that token — see `:root`). */
   .priority-select,
   .claim-control select,
-  .link-editor select,
+  .link-editor select {
+    /* 16px is the iOS-zoom guard (about zoom, not height). NO touch floor:
+       these dropdowns keep `.qb-select`'s own `height: var(--qb-control-height)`
+       (the Role-A box), so they match the topbar selects AND the drawer's
+       buttons — the old 34px floor made them tower over their button
+       neighbours, the same odd-one-out problem the drawer buttons had. */
+    font-size: 16px;
+  }
+
   .link-editor input {
-    /* 16px is the iOS-zoom guard (about zoom, not height) — kept as-is; the
-       height floor folds onto the shared touch token so these selects/inputs
-       match the migrated buttons above at ~34px instead of an ad-hoc 38px. */
     font-size: 16px;
     min-height: var(--qb-control-height-touch);
   }

@@ -1,7 +1,15 @@
 import { park, unpark, move } from "../api/client";
 import type { Status } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
-import { TentIcon, BarredShieldIcon, SkullIcon, CheckIcon } from "./icons";
+// WF follow-up: the four committing verbs use the same hand-drawn asset icons
+// as the board's lane strip / atlas trail (nicer than the inline SVG glyphs) —
+// each button carries the icon of the lane/state it sends the card TO: Camp →
+// parked, Vanquished → done, Forsake → abandoned, and Barred → a trail boulder
+// (the obstacle that blocks the path). Unpark/Unblock stay bare text.
+import campIcon from "../assets/lane-icons/parked.png";
+import barredIcon from "../assets/trail-icons/boulder.svg";
+import vanquishedIcon from "../assets/lane-icons/done.png";
+import forsakeIcon from "../assets/lane-icons/abandoned.png";
 // WF-097 follow-up: every button here now routes through the design-library
 // `<Button/>` primitive (`src/ui/`) — all neutral (the default variant),
 // same as before. `.status-menu button`'s base rule/hover/active/disabled
@@ -90,7 +98,7 @@ function StatusMenu({
         </Button>
       ) : (
         <Button onClick={() => void handlePark()} disabled={inFlight}>
-          <TentIcon aria-hidden="true" />
+          <img src={campIcon} className="status-menu__icon" alt="" aria-hidden="true" />
           Camp
         </Button>
       )}
@@ -101,17 +109,17 @@ function StatusMenu({
         </Button>
       ) : (
         <Button onClick={() => void handleBlock()} disabled={inFlight}>
-          <BarredShieldIcon aria-hidden="true" />
+          <img src={barredIcon} className="status-menu__icon" alt="" aria-hidden="true" />
           Barred…
         </Button>
       )}
 
       <Button onClick={() => void handleDone()} disabled={inFlight}>
-        <CheckIcon aria-hidden="true" />
+        <img src={vanquishedIcon} className="status-menu__icon" alt="" aria-hidden="true" />
         Vanquished
       </Button>
       <Button onClick={() => void handleAbandon()} disabled={inFlight}>
-        <SkullIcon aria-hidden="true" />
+        <img src={forsakeIcon} className="status-menu__icon" alt="" aria-hidden="true" />
         Forsake
       </Button>
     </div>
