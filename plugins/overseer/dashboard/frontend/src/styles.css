@@ -151,13 +151,22 @@
      cardshadow (card's soft sticker shadow). Where HANDOFF gives no distinct
      cardshadow tint for a group, cardshadow aliases to that group's own
      border colour (documented per group below) rather than inventing a hex
-     HANDOFF doesn't specify. */
+     HANDOFF doesn't specify.
+     Fill retune: the 8 -fill hues were pulled into the same green/blue/
+     orange family as the status palette below (forest/sky/orange fills are
+     literally shared with done/todo/in-progress status already) so lanes +
+     cards read as one cohesive set. amber, rose and umber were the
+     outliers (flat amber, off-family pink, off-family caramel) and got
+     nudged toward gold, teal and golden-olive respectively — still each
+     its own distinct hue, never matching a neighbour. -shadow/-border/
+     -cardshadow were left untouched per this pass's scope. */
   --qb-accent-forest-fill: #8fbf5e; /* Backlog */
   --qb-accent-forest-shadow: #63722f;
   --qb-accent-forest-border: #c9a86a; /* HANDOFF: Backlog reuses the base card border */
   --qb-accent-forest-cardshadow: var(--qb-accent-forest-border); /* no distinct tint given */
 
-  --qb-accent-amber-fill: #e6ac4f; /* Bootstrap */
+  --qb-accent-amber-fill: #e7b74f; /* Bootstrap — warm gold, bridging the
+    forest green and orange family members (retuned off a flatter amber) */
   --qb-accent-amber-shadow: #977236;
   --qb-accent-amber-border: #ddbb7c;
   --qb-accent-amber-cardshadow: #edd9ae;
@@ -172,12 +181,21 @@
   --qb-accent-orange-border: #e0a24c;
   --qb-accent-orange-cardshadow: #f0dbae;
 
-  --qb-accent-rose-fill: #e17f9a; /* Awaiting Merge */
-  --qb-accent-rose-shadow: #8c3e56;
-  --qb-accent-rose-border: #d49aad;
-  --qb-accent-rose-cardshadow: #ebd1d9;
+  --qb-accent-rose-fill: #57b7a6; /* Awaiting Merge — teal/aqua bridge
+    between the sky-blue and forest-green lanes; retuned off a pink that
+    read outside the green/blue/orange status family (token keeps the
+    "rose" name for handoff traceability, hue is now teal) */
+  /* Retuned to the teal fill above (were pink #8c3e56/#d49aad/#ebd1d9) so
+     Awaiting-Merge card borders/shadows + stat badges don't clash with the
+     new teal lane. */
+  --qb-accent-rose-shadow: #3f8576;
+  --qb-accent-rose-border: #9fd0c6;
+  --qb-accent-rose-cardshadow: #d6ece7;
 
-  --qb-accent-umber-fill: #b98a58; /* Done */
+  --qb-accent-umber-fill: #b4a84b; /* Done — golden-olive/sage, pulled off
+    the caramel into the green/blue/orange family while staying clearly its
+    own hue from Backlog's brighter forest green (lane colour stays
+    distinct from the DONE status token by design — separate namespace) */
   --qb-accent-umber-shadow: #43331f;
   --qb-accent-umber-border: #c9b48c; /* HANDOFF: Done's muted-card border */
   --qb-accent-umber-cardshadow: var(--qb-accent-umber-border); /* no distinct tint given */
