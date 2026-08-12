@@ -395,6 +395,19 @@
      off ONE source of truth instead of a copy-pasted magic number. */
   --qb-control-height: 1.65rem;
 
+  /* The touch-device control height — a comfortable tap target that stays
+     consistent with the standard button box instead of towering over it.
+     The `@media (pointer: coarse)` layer near the end of this file folds the
+     migrated `.qb-btn`/`.qb-select`/`.qb-input` touch controls onto THIS
+     token instead of the old ad-hoc 44px/38px `min-height` floors, so every
+     text button/select/input lands on ONE comfortable ~34px box — noticeably
+     less tall than 44px, uniform across controls, and clearly a relative of
+     the desktop `--qb-control-height` standard above (not a magic number).
+     Genuinely icon-only square tap targets (drag handle, drawer/party ✕,
+     the round ×/label-remove glyphs, the archive checkbox) keep their own
+     explicit 44/32px sizing there — a finger still needs the real square. */
+  --qb-control-height-touch: 2.15rem;
+
   --qb-tab-text: #5b4632;
   --qb-tab-text-active: #4a3826;
   --qb-tab-underline: #c9a86a;
@@ -5935,14 +5948,19 @@ button.trail-tag:focus-visible {
      Refresh and the threshold "Set" button join them on the same reasoning
      (WF-085 follow-up): both sit directly beside ＋New card / Labels… / Clear…
      / the selects in the mobile topbar shelf, so they take the Role-A box
-     (~29-31px) instead of the 44px floor below, rather than towering over
-     their neighbours. */
+     (~29-31px) instead of the touch floor below, rather than towering over
+     their neighbours.
+
+     The controls that DO get a touch floor land on `--qb-control-height-touch`
+     (~34px) rather than a raw 44px — a comfortable tap target that stays a
+     relative of the desktop button box instead of towering over it (WF-097
+     touch-layer reconciliation; see the token's `:root` comment). */
   .topbar__fleet-pill,
   .topbar__archive-toggle,
   .status-menu button,
   .claim-control button,
   .card-drawer__viewtoggle button {
-    min-height: 44px;
+    min-height: var(--qb-control-height-touch);
   }
 
   .card-drawer__close,
@@ -5982,16 +6000,20 @@ button.trail-tag:focus-visible {
   .link-editor select,
   .link-editor input,
   .label-editor__input {
+    /* 16px is the iOS-zoom guard (about zoom, not height) — kept as-is; the
+       height floor folds onto the shared touch token so these selects/inputs
+       match the migrated buttons above at ~34px instead of an ad-hoc 38px. */
     font-size: 16px;
-    min-height: 38px;
+    min-height: var(--qb-control-height-touch);
   }
 
-  /* Epic Atlas (WF-086): the condensed-rail expand affordance needs a real
-     touch target — HANDOFF's spec sets a 44px floor here, stricter than
-     the board's own 32px `.epic-card__expand` precedent a few lines up.
-     Deliberate, not a drift: the rail card is already reduced to its
-     condensed set at this width, so its one remaining interactive control
-     gets the full floor rather than the board's smaller one.
+  /* Epic Atlas (WF-086): the condensed-rail expand affordance ("▾ sub-quests")
+     is a Role-A `<Button>` (AtlasRailCard.tsx), so it folds onto the shared
+     touch token like every other migrated text button above — a comfortable
+     ~34px tap target that matches its neighbours instead of the old bespoke
+     44px floor that towered over them (WF-097 touch-layer reconciliation).
+     No `min-width` floor: the label is always wider than any square minimum,
+     unlike the genuinely icon-only glyphs that keep their own square sizing.
 
      The sub-quest checkbox (`.atlas-rail-card__checkbox`) is deliberately
      NOT given a matching floor here, despite HANDOFF listing it alongside
@@ -6001,104 +6023,34 @@ button.trail-tag:focus-visible {
      that receives no interaction; if a future card makes the sub-quest row
      itself tappable, the target belongs on the `<li>`, not the checkbox. */
   .atlas-rail-card__expand {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: var(--qb-control-height-touch);
   }
 }
 
 /* ==========================================================================
    Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
    touch-target layer above so it wins the cascade (same specificity, later
-   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
-   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
-   match) that 44px floor left the questing/fleet pill visibly taller than
-   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
-   though all three already share identical padding/font-size/border via the
-   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
-   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
-   three (the other two are plain `<span>`s) — a bare button doesn't inherit
-   the guild body font from the UA stylesheet the way inline elements do, so
-   its `line-height: normal` resolves against a different font's metrics;
-   pinning its `font-family` here (line-height was already the shared
-   `normal` keyword on both — the mismatch was that keyword resolving
-   against two different fonts' metrics) makes all three pills
-   byte-for-byte the same box on mobile, not just coincidentally close.
-   NB: `font-family` only, never the `font` shorthand — that resets
-   font-size/weight too, which would fight the shared 0.68rem override
-   above (same specificity, later in the cascade would win and blow the
-   pill back up to the body's default size). */
-@media (max-width: 720px) {
-  .topbar__fleet-pill {
-    min-height: 0;
-    font-family: inherit;
-    /* Defensive, not load-bearing here (measured with/without: no height
-       change once the icon font-size fix below is in) — strips whatever
-       native form-control chrome Chromium might otherwise reserve room
-       for on a plain `<button>`, same "don't rely on the platform ever
-       agreeing with custom padding/border" instinct as every other
-       hand-styled button in this file. */
-    appearance: none;
-    -webkit-appearance: none;
-  }
-}
-
-/* ==========================================================================
-   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
-   touch-target layer above so it wins the cascade (same specificity, later
-   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
-   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
-   match) that 44px floor left the questing/fleet pill visibly taller than
-   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
-   though all three already share identical padding/font-size/border via the
-   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
-   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
-   three (the other two are plain `<span>`s) — a bare button doesn't inherit
-   the guild body font from the UA stylesheet the way inline elements do, so
-   its `line-height: normal` resolves against a different font's metrics;
-   pinning its `font-family` here (line-height was already the shared
-   `normal` keyword on both — the mismatch was that keyword resolving
-   against two different fonts' metrics) makes all three pills
-   byte-for-byte the same box on mobile, not just coincidentally close.
-   NB: `font-family` only, never the `font` shorthand — that resets
-   font-size/weight too, which would fight the shared 0.68rem override
-   above (same specificity, later in the cascade would win and blow the
-   pill back up to the body's default size). */
-@media (max-width: 720px) {
-  .topbar__fleet-pill {
-    min-height: 0;
-    font-family: inherit;
-    /* Defensive, not load-bearing here (measured with/without: no height
-       change once the icon font-size fix below is in) — strips whatever
-       native form-control chrome Chromium might otherwise reserve room
-       for on a plain `<button>`, same "don't rely on the platform ever
-       agreeing with custom padding/border" instinct as every other
-       hand-styled button in this file. */
-    appearance: none;
-    -webkit-appearance: none;
-  }
-}
-
-/* ==========================================================================
-   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
-   touch-target layer above so it wins the cascade (same specificity, later
-   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
-   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
-   match) that 44px floor left the questing/fleet pill visibly taller than
-   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
-   though all three already share identical padding/font-size/border via the
-   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
-   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
-   three (the other two are plain `<span>`s) — a bare button doesn't inherit
-   the guild body font from the UA stylesheet the way inline elements do, so
-   its `line-height: normal` resolves against a different font's metrics;
-   pinning its `font-family` here (line-height was already the shared
-   `normal` keyword on both — the mismatch was that keyword resolving
-   against two different fonts' metrics) makes all three pills
-   byte-for-byte the same box on mobile, not just coincidentally close.
-   NB: `font-family` only, never the `font` shorthand — that resets
-   font-size/weight too, which would fight the shared 0.68rem override
-   above (same specificity, later in the cascade would win and blow the
-   pill back up to the body's default size). */
+   rule wins) against that layer's `.topbar__fleet-pill` touch floor (now
+   `min-height: var(--qb-control-height-touch)`, ~34px — was a raw 44px).
+   Even at the reduced touch height the fleet pill would still read taller
+   than its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, which
+   take NO touch floor: on a touch phone (`pointer: coarse` AND
+   `max-width: 720px` both match) this drops the pill's floor back to `0` so
+   all three match the shared 0.68rem pill box (identical padding/font-size/
+   border via the combined selector above `.topbar__gold-pill,
+   .topbar__vanquished-pill, .topbar__fleet-pill`) — the pill tracks its pill
+   neighbours, not the rectangular-button touch token.
+   The fleet pill is also the only `<button>` of the three (the other two are
+   plain `<span>`s) — a bare button doesn't inherit the guild body font from
+   the UA stylesheet the way inline elements do, so its `line-height: normal`
+   resolves against a different font's metrics; pinning its `font-family` here
+   (line-height was already the shared `normal` keyword on both — the mismatch
+   was that keyword resolving against two different fonts' metrics) makes all
+   three pills byte-for-byte the same box on mobile, not just coincidentally
+   close. NB: `font-family` only, never the `font` shorthand — that resets
+   font-size/weight too, which would fight the shared 0.68rem override above
+   (same specificity, later in the cascade would win and blow the pill back
+   up to the body's default size). */
 @media (max-width: 720px) {
   .topbar__fleet-pill {
     min-height: 0;
