@@ -2754,6 +2754,12 @@ body {
   gap: 0.6rem;
 }
 
+/* WF-097 follow-up: renders via `<Input>` (CardDetailDrawer.tsx), so the
+   plain bordered-field chrome (background/border/focus border-swap) that used
+   to live here — identical to `.qb-input`'s own, which was factored FROM this
+   field — is gone. Only the drawer's bigger display-font title look survives
+   as genuine overrides layered on that base, exactly the split `.qb-input`'s
+   own doc comment anticipates. */
 .card-drawer__title-input {
   display: block;
   width: 100%;
@@ -2762,15 +2768,8 @@ body {
   font-weight: 800;
   font-size: 30px;
   color: var(--qb-ink-900);
-  background: var(--qb-btn-face);
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--legacy-radius-3px);
   padding: 0.1rem 0.4rem;
-}
-
-.card-drawer__title-input:focus {
-  outline: none;
-  border-color: var(--qb-btn-ink-hover);
 }
 
 /* Edit/Save/Cancel/Pull-children all build on the shared `.qb-btn` Role-A
@@ -2803,6 +2802,12 @@ body {
  * so this uses the same plain monospace stack as `.md-view pre`/`code`
  * instead; Silkscreen stays reserved for small badges (MD tag, hero-class
  * chip, quest-log stamp). */
+/* WF-097 follow-up: renders via `<Textarea>` (CardDetailDrawer.tsx). The
+   background and focus border-swap that duplicated `.qb-input`'s own are
+   gone; the genuine overrides layered on that base survive — real monospace
+   prose (NOT the `--qb-font-mono` pixel font, see WF-082 note above), the
+   taller min-height, vertical resize, and its OWN dashed resting border
+   (`--qb-line-dashed`, deliberately softer than `.qb-input`'s solid ink). */
 .card-drawer__body-textarea {
   width: 100%;
   min-height: 14rem;
@@ -2810,16 +2815,10 @@ body {
   font-size: 0.85rem;
   line-height: 1.5;
   color: var(--qb-ink-900);
-  background: var(--qb-btn-face);
   border: 1.5px solid var(--qb-line-dashed);
   border-radius: var(--legacy-radius-3px);
   padding: 0.6rem;
   resize: vertical;
-}
-
-.card-drawer__body-textarea:focus {
-  outline: none;
-  border-color: var(--qb-btn-ink-hover);
 }
 
 .card-drawer__edit-actions {
@@ -3940,71 +3939,47 @@ a.card-drawer__pr-chip:hover {
   box-shadow: 0 0 0 2px var(--qb-ink-900) inset;
 }
 
+/* WF-097 follow-up: renders via `<Button>` (LabelSettingsDialog.tsx) — the
+   border/background/font-weight/hover chrome it used to copy by hand was
+   identical to `.qb-btn`'s own and is gone; only its wobble-3 variant, the
+   tighter horizontal padding, and `height: auto` (to keep the natural
+   content height it had before `.qb-btn`'s fixed control-height would newly
+   apply) survive as genuine overrides. */
 .label-settings-row__reset {
-  font-size: 0.75rem;
+  height: auto;
   padding: 0.3rem 0.6rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
-.label-settings-row__reset:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-/* Modal action buttons (NewCardDialog create/cancel + ClearDialog back/cancel)
-   adopt the shared Role A button system (see the --qb-btn-* tokens) — same as
-   the drawer edit / threshold / claim controls. Bare <button>s otherwise fall
-   back to raw browser default, visibly out of step with the rest of the board.
-   The destructive `.clear-dialog .danger` primary keeps its red fill (higher
-   specificity wins bg/color/border-color); here it only gains the shared
-   Role A shape so it lines up with its sibling. */
+/* Modal action buttons (NewCardDialog Create/Cancel + ClearDialog Turn
+   back/Press on/Back/Slay it). WF-097 follow-up: all now render via
+   `<Button>` (Create = `variant="primary"` gold-chip commit; the two
+   destructive confirms keep `variant="neutral"` + `.danger`), so the full
+   border/background/hover/active/disabled recipe these element selectors used
+   to carry — identical to `.qb-btn`'s own — is gone. Only the modal size
+   recipe survives as genuine overrides `.qb-btn` doesn't make: a larger
+   font, roomier padding, the wobble-3 variant, and `height: auto` to keep the
+   natural content height these had before `.qb-btn`'s fixed control-height
+   would newly apply. (These selectors are class + element = higher
+   specificity than `.qb-btn`, so they win those four properties cleanly.) */
 .new-card-actions button,
 .clear-actions button {
+  height: auto;
   font-size: 0.85rem;
   padding: 0.4rem 0.9rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
-.new-card-actions button,
-.clear-actions button:not(.danger) {
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-}
-
-.new-card-actions button:hover:not(:disabled),
-.clear-actions button:not(.danger):hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.new-card-actions button:active:not(:disabled),
-.clear-actions button:not(.danger):active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.new-card-actions button:disabled,
-.clear-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
+/* `.qb-btn`'s neutral hover/active (face-swap + light-recess shadow, both
+   (0,3,0)) would otherwise paint over the destructive confirm's solid red on
+   hover/press — the same leak `.topbar-clear.danger:hover` guards against.
+   This (0,4,0) rule keeps the red fill+border and suppresses the shadow, so
+   the danger buttons read exactly as they did before (no hover swap). */
+.clear-dialog .danger:hover:not(:disabled),
+.clear-dialog .danger:active:not(:disabled) {
+  background: #b00020;
+  border-color: #b00020;
+  box-shadow: none;
 }
 
 /* Hero card (HANDOFF: light card floating inside the dark sheet). */
@@ -4827,33 +4802,20 @@ a.card-drawer__pr-chip:hover {
   background: var(--card-accent-fill, var(--qb-ink-300));
 }
 
-/* Role A wobble button — deliberately its OWN class, not a reuse of
-   `.epic-card__expand`'s legacy paint (chunk-4 handoff). */
+/* Role A wobble button — renders via `<Button>` (AtlasRailCard.tsx), so the
+   full border/background/hover/active recipe it used to copy by hand is gone
+   (identical to `.qb-btn`'s own — WF-097 follow-up). Only genuine overrides
+   survive: its own wobble-2 variant, the tighter condensed-rail metrics, and
+   `height: auto` to keep the natural content height it had before `.qb-btn`'s
+   fixed control-height would newly apply. Deliberately still its OWN class,
+   not a reuse of `.epic-card__expand`'s legacy indigo paint (chunk-4
+   handoff). */
 .atlas-rail-card__expand {
   align-self: flex-start;
+  height: auto;
   font-size: 0.7rem;
   padding: 0.25rem 0.6rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-2);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.atlas-rail-card__expand:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.atlas-rail-card__expand:active {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
 }
 
 /* Checklist wheel (HANDOFF): caps at ~5 visible rows (~132px desktop,

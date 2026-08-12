@@ -364,6 +364,11 @@ function Board({
         {dragToast && (
           <div className="board-toast" role="status">
             {dragToast}
+            {/* WF-097 follow-up: bare `<button>`, NOT `<Button>` —
+                `.board-toast__dismiss` is a borderless underline text-link
+                inside the toast (inherits the toast's own colour), not a
+                `.qb-btn` Role-A button; the primitive's chrome would be wrong
+                here. */}
             <button
               type="button"
               className="board-toast__dismiss"

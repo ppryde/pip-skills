@@ -46,6 +46,13 @@ function chipState(
  * idiom for a dismissible layer): the outer backdrop closes on click, the
  * inner `.label-filter-popover` sheet stops propagation so a click inside
  * never closes it, and Escape closes from anywhere while it's open.
+ *
+ * WF-097 follow-up: the label toggles are DELIBERATELY left as bare
+ * `<button>`s, not `<Button>` — each is a bespoke tri-state palette chip
+ * (`.label-filter-chip` pill shape carrying the label's own
+ * `label-chip--<key>` colour plus an include/exclude ring modifier), not a
+ * `.qb-btn` rectangular Role-A button. Forcing them onto the primitive would
+ * paint over that chip shape and its per-label colour with the wrong chrome.
  */
 function LabelFilterPopover({
   labels,

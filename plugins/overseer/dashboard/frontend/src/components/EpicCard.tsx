@@ -58,6 +58,12 @@ function EpicCard({
       onOpen={onOpen}
       colorRegistry={colorRegistry}
       headerExtra={
+        // WF-097 follow-up: deliberately left as a bare `<button>`, NOT
+        // `<Button>` — `.epic-card__expand` is a small legacy indigo toggle
+        // chip, deliberately its OWN paint (the atlas rail's Role-A expand
+        // button even calls this out as the look it does NOT reuse), so
+        // routing it through the `.qb-btn` primitive would repaint it with
+        // the wrong chrome entirely.
         <button
           type="button"
           className="epic-card__expand"

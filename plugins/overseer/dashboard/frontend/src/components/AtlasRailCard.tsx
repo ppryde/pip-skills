@@ -12,6 +12,14 @@ import {
   weightOf,
 } from "../board/atlasTrailLayout";
 import { StarIcon } from "./icons";
+// WF-097 follow-up: the sub-quests expand toggle is a genuine Role-A wobble
+// button (it already carried the full `.qb-btn` recipe — see the class's own
+// "Role A wobble button" comment in styles.css), so it now routes through
+// `<Button>` (`src/ui/`); `.atlas-rail-card__expand` is slimmed to its
+// genuine overrides (wobble-2 variant, tighter metrics, self-alignment, and
+// the mobile 44px touch floor). The `.atlas-rail-card__checkbox` sticker is
+// a decorative `aria-hidden` span with no handler — nothing to migrate.
+import { Button } from "../ui";
 
 export interface AtlasRailCardProps {
   card: BoardCard;
@@ -175,8 +183,8 @@ function AtlasRailCard({
       </div>
 
       {hasChildren && (
-        <button
-          type="button"
+        <Button
+          variant="neutral"
           className="atlas-rail-card__expand"
           aria-expanded={expanded}
           onClick={(e) => {
@@ -188,7 +196,7 @@ function AtlasRailCard({
           }}
         >
           {expanded ? "▾" : "▸"} sub-quests
-        </button>
+        </Button>
       )}
 
       {expanded && hasChildren && (

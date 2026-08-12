@@ -19,7 +19,15 @@ import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
 import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
-import Button from "../ui/Button";
+// WF-097 follow-up: the edit-mode title field and body field now route
+// through the design-library `<Input>`/`<Textarea>` primitives (`src/ui/`) —
+// `.card-drawer__title-input`/`.card-drawer__body-textarea` in styles.css are
+// slimmed to the genuine overrides they layer on the shared `.qb-input` base
+// (display font / monospace prose / dashed border / resize), which is exactly
+// the split `.qb-input`'s own doc comment anticipates. The `.card-drawer__close`
+// "×" stays the icon-only affordance, and the Quest|Scroll viewtoggle stays on
+// its bespoke segmented `.qb-btn` pair (aria-pressed mechanics unchanged).
+import { Button, Input, Textarea } from "../ui";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -328,7 +336,7 @@ function CardDetailDrawer({
                 )}
               </div>
               {editing ? (
-                <input
+                <Input
                   aria-label="title"
                   className="card-drawer__title-input"
                   value={titleDraft}
@@ -552,7 +560,7 @@ function CardDetailDrawer({
                 above), exactly like every other drawer control. */}
             {editing ? (
               <div className="card-drawer__edit-body">
-                <textarea
+                <Textarea
                   aria-label="body"
                   className="card-drawer__body-textarea"
                   value={bodyDraft}

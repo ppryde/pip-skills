@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { clearRepo } from "../api/client";
 import type { ClearResponse } from "../api/types";
+// WF-097 follow-up: the confirm buttons now route through `<Button>` and the
+// retype gate through `<Input>` (`src/ui/`). The two destructive buttons keep
+// their red look via the existing `.danger` className layered on a neutral
+// `<Button>` (see `.clear-dialog .danger` + its new hover/active suppressor
+// in styles.css) — `.qb-btn`'s neutral face-swap hover would otherwise paint
+// over the solid red. The scope radios stay bespoke (native form controls),
+// and `.party-sheet__close` stays the icon-only "×" affordance.
+import { Button, Input } from "../ui";
 
 export interface ClearDialogProps {
   repoLabel: string;
@@ -114,16 +122,16 @@ function ClearDialog({
               <code>overseer restore</code>.
             </p>
             <div className="clear-actions">
-              <button type="button" onClick={onClose}>
+              <Button variant="neutral" onClick={onClose}>
                 Turn back
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="neutral"
                 className="danger"
                 onClick={() => setStep(2)}
               >
                 Press on
-              </button>
+              </Button>
             </div>
           </>
         ) : (
@@ -135,7 +143,7 @@ function ClearDialog({
             </p>
             <label className="clear-confirm-label">
               Type the repo label
-              <input
+              <Input
                 value={typed}
                 onChange={(e) => setTyped(e.target.value)}
                 disabled={busy}
@@ -148,21 +156,21 @@ function ClearDialog({
               </p>
             )}
             <div className="clear-actions">
-              <button
-                type="button"
+              <Button
+                variant="neutral"
                 onClick={() => setStep(1)}
                 disabled={busy}
               >
                 Back
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="neutral"
                 className="danger"
                 disabled={typed !== repoLabel || busy}
                 onClick={slay}
               >
                 {busy ? "Slaying…" : "Slay it"}
-              </button>
+              </Button>
             </div>
           </>
         )}
