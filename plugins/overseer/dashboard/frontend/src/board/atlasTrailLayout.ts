@@ -31,7 +31,11 @@ export const TRAILHEAD_PADDING_PX = 14;
 export const TRAILHEAD_RESERVE_PX = TRAILHEAD_ICON_SIZE_PX + TRAILHEAD_PADDING_PX;
 /** Fixed offset from a trail's true end (H_LEFT_PAD + totalWeight *
  * pxPerWeight) to the beast's anchor point. */
-export const BEAST_ANCHOR_OFFSET_PX = 26;
+// Bumped from 26 so the last quest's name-tag has room between it and the boss
+// monster (which is drawn large and reaches left of its anchor); the trail
+// visibly runs on past the final card before the beast, rather than the label
+// overlapping the monster.
+export const BEAST_ANCHOR_OFFSET_PX = 90;
 /** BeastFace's actual rendered footprint (viewBox 0 0 50 50, drawn at
  * width={48} height={48} — see BeastFace.tsx) — the beast's own doodle
  * extends this far past whichever point it's anchored/translated to. */

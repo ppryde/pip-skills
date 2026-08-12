@@ -229,8 +229,8 @@ describe("trailEndX / beastAnchorX", () => {
     expect(trailEndX(5, 10)).toBe(TRAILHEAD_RESERVE_PX + 50);
   });
 
-  it("beastAnchorX adds the 26px beast anchor offset", () => {
-    expect(beastAnchorX(100)).toBe(126);
+  it("beastAnchorX adds the beast anchor offset", () => {
+    expect(beastAnchorX(100)).toBe(100 + BEAST_ANCHOR_OFFSET_PX);
   });
 });
 

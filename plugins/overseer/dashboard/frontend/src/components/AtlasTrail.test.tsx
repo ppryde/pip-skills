@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import type { BoardCard, Rollup } from "../api/types";
-import { BEAST_RESERVE_PX, TRAILHEAD_ICON_SIZE_PX, TRAILHEAD_RESERVE_PX } from "../board/atlasTrailLayout";
+import { BEAST_ANCHOR_OFFSET_PX, BEAST_RESERVE_PX, TRAILHEAD_ICON_SIZE_PX, TRAILHEAD_RESERVE_PX } from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import AtlasTrail from "./AtlasTrail";
@@ -383,9 +383,9 @@ describe("<AtlasTrail/>", () => {
 
     const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
     const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
-    // trailEnd = TRAILHEAD_RESERVE_PX + 2*20; anchor = trailEnd + 26.
+    // trailEnd = TRAILHEAD_RESERVE_PX + 2*20; anchor = trailEnd + offset.
     const expectedTrailEnd = TRAILHEAD_RESERVE_PX + 2 * 20;
-    expect(beastX).toBeCloseTo(expectedTrailEnd + 26, 5);
+    expect(beastX).toBeCloseTo(expectedTrailEnd + BEAST_ANCHOR_OFFSET_PX, 5);
   });
 
   it("never lets the beast's own footprint overflow a trailWidth whose heaviest epic exactly saturates the shared scale", () => {
