@@ -588,12 +588,25 @@
 
 /* .qb-label — the small uppercase eyebrow/field-label. Factored from
    `.topbar__repo-select-label` / `.filter-bar__eyebrow` (also shared by
-   `.topbar__branch-select-label`'s near-identical recipe). */
+   `.topbar__branch-select-label`'s near-identical recipe).
+
+   Eyebrow-weight unification: `font-weight` was `600` — the topbar's own
+   REPO/BRANCH labels cancelled it back to `normal` (their own rules used to
+   carry an explicit `font-weight: normal` override), while every OTHER
+   consumer left `.qb-label`'s bold default standing (SCRY/PROVISIONS/Last
+   Orders' topbar eyebrows, plus the drawer's PARENT/DEPENDS ON/GOAL/DESIGN
+   field-labels and section headings) — so the same "eyebrow" role read at
+   two different weights depending on which corner of the app it sat in.
+   Changed to `normal` here instead, to match the topbar's own lighter look,
+   and the three call sites that used to cancel `600` back to `normal`
+   (`.topbar__repo-select-label`/`.topbar__branch-select-label`/
+   `.threshold-control__title`) had that now-redundant override removed —
+   see each rule's own comment. Every eyebrow now reads at one weight. */
 .qb-label {
   display: inline-block;
   text-transform: uppercase;
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: normal;
   letter-spacing: 0.04em;
   color: var(--qb-ink-400);
 }
@@ -758,13 +771,15 @@ body {
 /* WF-097 follow-up: renders via `<Label className="topbar__repo-select-label"/>`
    now (RepoSelector.tsx), which applies `.qb-label` — text-transform/
    font-size/letter-spacing/color were identical to `.qb-label`'s own and are
-   gone below; `font-weight: normal` survives as a genuine override — this
-   eyebrow was never bold (unlike `.filter-bar__eyebrow`, whose own
-   font-weight already matched `.qb-label`'s 600), so it cancels `.qb-label`'s
-   default weight rather than duplicating it. */
-.topbar__repo-select-label {
-  font-weight: normal;
-}
+   gone below. `font-weight: normal` used to survive as a genuine override —
+   this eyebrow was never bold, so it cancelled `.qb-label`'s then-default
+   `600` rather than duplicating it — but the eyebrow-weight unification
+   pass changed `.qb-label`'s own default to `normal` (see that rule's
+   comment) specifically to match this look, so the override is gone too:
+   nothing left to cancel, and the whole rule with it. `<Label
+   className="topbar__repo-select-label">` still composes the class in
+   (RepoSelector.tsx unchanged) — it just resolves no declarations of its
+   own now, `.qb-label`'s alone. */
 
 /* WF-097 follow-up: renders via `<Select/>` now (RepoSelector.tsx) — most of
    this rule's declarations were identical to `.qb-select`'s own (font/
@@ -813,15 +828,20 @@ body {
 /* WF-097 follow-up: renders via `<Label className="topbar__branch-select-label"/>`
    now (BranchFilter.tsx), which applies `.qb-label` — text-transform/
    font-size/letter-spacing were identical to `.qb-label`'s own and are gone
-   below. Three genuine overrides survive: `color` (the branch's own tint,
-   not `.qb-label`'s neutral ink-400), `white-space: nowrap` (layout — keeps
-   the ⑃ glyph and "branch" on one line), and `font-weight: normal` (this
-   eyebrow was never bold — same "cancel `.qb-label`'s default weight"
-   rationale as `.topbar__repo-select-label`). */
+   below. `font-weight: normal` used to survive too (this eyebrow was never
+   bold — same "cancel `.qb-label`'s default weight" rationale as
+   `.topbar__repo-select-label`), but the eyebrow-weight unification pass
+   changed `.qb-label`'s own default to `normal` (see that rule's comment),
+   so it's gone — nothing left to cancel. Two genuine overrides remain:
+   `color` (the branch's own tint, not `.qb-label`'s neutral ink-400) and
+   `white-space: nowrap` (layout — keeps the ⑃ glyph and "branch" on one
+   line). `color` is left as the one deliberate exception to the weight
+   unification — the branch label is intentionally colour-coded, distinct
+   from every other now-uniform eyebrow; note this in case that, too, should
+   ever be unified. */
 .topbar__branch-select-label {
   color: var(--qb-branch-chip-text);
   white-space: nowrap;
-  font-weight: normal;
 }
 
 /* WF-097 follow-up: renders via `<Select/>` now (BranchFilter.tsx) — same
@@ -1044,13 +1064,15 @@ body {
 
 /* WF-097 follow-up: renders via `<Label className="topbar__controls-eyebrow"/>`
    now (TopBar.tsx), which applies `.qb-label` — text-transform/font-size/
-   font-weight/color were identical to `.qb-label`'s own and are gone below;
-   `letter-spacing` survives as a genuine override, 0.06em here vs.
+   font-weight/color were identical to `.qb-label`'s own and are gone below.
+   `letter-spacing` used to survive as a genuine override, 0.06em here vs.
    `.qb-label`'s own 0.04em, same wider track `.filter-bar__eyebrow` (Scry)
-   already deliberately uses. */
-.topbar__controls-eyebrow {
-  letter-spacing: 0.06em;
-}
+   deliberately used too — but a letter-spacing pass found that wider track
+   was never a deliberate design choice for either, just an un-noticed drift
+   between the two eyebrows, so both are unified back onto `.qb-label`'s own
+   0.04em and this override is dropped. This rule is now empty and kept only
+   as a selector hook — `<Label className="topbar__controls-eyebrow">` still
+   composes it in. */
 
 /* WF-090 follow-up: wraps Labels…/Refresh/Abandoned/Clear… as ONE atomic
    flex item of `.topbar` (desktop) — see the JSX comment at this wrapper's
@@ -1329,12 +1351,13 @@ body {
    WF-097 follow-up: renders via `<Label className="filter-bar__eyebrow"/>`
    now (FilterBar.tsx), which applies `.qb-label` — text-transform/font-size/
    font-weight/color were identical to `.qb-label`'s own and are gone below;
-   `flex` (layout) and `letter-spacing` survive — the latter is a genuine
-   override, 0.06em here vs. `.qb-label`'s own 0.04em (a deliberately wider
-   track for this specific eyebrow). */
+   `flex` (layout) survives. `letter-spacing` used to survive too — 0.06em
+   here vs. `.qb-label`'s own 0.04em, framed as a deliberately wider track —
+   but per `.topbar__controls-eyebrow`'s own comment, that "deliberate" track
+   was really just drift shared by these two eyebrows alone; both are now
+   unified back onto `.qb-label`'s own 0.04em and this override is dropped. */
 .filter-bar__eyebrow {
   flex: 0 0 auto;
-  letter-spacing: 0.06em;
 }
 
 /* Task A (WF-085 follow-up: split): Provisions' own topbar↔control divider.
@@ -2494,6 +2517,15 @@ body {
   box-shadow: var(--qb-shadow-modal);
 }
 
+/* A bespoke eyebrow, never routed through `<Label>`/`.qb-label` — its own
+   plain `<div className="label-filter-popover__legend">` (LabelFilterPopover.tsx).
+   Left un-migrated for now (eyebrow-weight unification pass): `font-weight`
+   was never set here at all (a bare div defaults to `normal`) and
+   `letter-spacing` already happens to match `.qb-label`'s own `0.04em`, so
+   both already read consistent with the rest of the unified eyebrows —
+   only `font-size` (0.7rem vs. `.qb-label`'s 0.65rem) is a genuine delta,
+   not trivial to drop without a visual size change, so this rule stays
+   bespoke rather than being folded onto `.qb-label`. */
 .label-filter-popover__legend {
   flex-basis: 100%;
   margin: 0 0 0.3rem;
@@ -2571,23 +2603,42 @@ body {
   margin-top: 0.5rem;
 }
 
+/* Board/drawer chip parity: this rule deliberately leaves `.label-chip`'s
+   own font-size/padding/border-radius/height untouched — those come from
+   `.label-chip` alone (declared above), so a drawer chip is the exact same
+   small pill as a board `LabelChips` tile chip, remove glyph aside. Only
+   `max-width`/`white-space`/`overflow`/`text-overflow` below are overridden
+   (`.label-chip`'s ellipsis-and-clip sizing is tuned for a bare text pill;
+   loosened here so the trailing remove glyph never gets clipped). The one
+   thing that used to break this parity was `.label-editor__remove`'s own
+   coarse-pointer touch floor forcing this chip's cross-axis height up past
+   the pill's — see that rule's own comment for the fix (an invisible hit-
+   area instead of a bigger visible button), which keeps this chip at
+   `.label-chip`'s own height on every pointer type. */
 .label-editor__chip {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  /* .label-chip's ellipsis-and-clip sizing is tuned for a bare text pill;
-     override it here so the remove glyph never gets clipped. */
   max-width: none;
   white-space: normal;
   overflow: visible;
   text-overflow: unset;
 }
 
+/* Kept compact (14px) on every pointer type, unlike the shared 32px touch
+   floor most small icon-buttons in this file get under `@media (pointer:
+   coarse)` (see that block, further down) — a 32px BUTTON box would force
+   `.label-editor__chip` (its `display: inline-flex; align-items: center`
+   parent, above) to grow to fit it, ballooning the whole chip well past the
+   board's own `.label-chip` pill height it's meant to match. `position:
+   relative` anchors the coarse-pointer `::before` hit-area added in that
+   same block below — this rule itself is unchanged across pointer types. */
 .label-editor__remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  position: relative;
   width: 14px;
   height: 14px;
   padding: 0;
@@ -3482,17 +3533,18 @@ a.card-drawer__pr-chip:hover {
    `display: inline-flex; align-items: center; gap: 0.3rem` (layout, for the
    icon+text+tooltip row) and `font-size: 0.7rem`/`letter-spacing: 0.03em`
    (genuine overrides — 0.7rem vs. `.qb-label`'s 0.65rem, 0.03em vs. its
-   0.04em) survive as real deltas. `font-weight: normal` is new here and
-   NOT a leftover: this title was never bold before this migration (no
-   font-weight rule existed), so it cancels `.qb-label`'s default 600 rather
-   than silently picking it up — same "eyebrow that was never bold" case as
-   `.topbar__repo-select-label`/`-branch-select-label` above. */
+   0.04em) survive as real deltas. `font-weight: normal` used to sit here
+   too — this title was never bold before its own migration, so it cancelled
+   `.qb-label`'s then-default `600` rather than silently picking it up, same
+   "eyebrow that was never bold" case as `.topbar__repo-select-label`/
+   `-branch-select-label` above — but the eyebrow-weight unification pass
+   changed `.qb-label`'s own default to `normal` (see that rule's comment),
+   so it's gone too: nothing left to cancel. */
 .threshold-control__title {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   font-size: 0.7rem;
-  font-weight: normal;
   letter-spacing: 0.03em;
 }
 
@@ -4050,8 +4102,13 @@ a.card-drawer__pr-chip:hover {
    current registry colour with a ring, same affordance
    `.label-filter-chip--include`'s inset ring already uses. This 1.4rem
    (22.4px) box is well under a comfortable touch target — the `@media
-   (pointer: coarse)` layer bumps it to 32px alongside `.label-editor__remove`
-   (same small-square-icon-button tier), unchanged here on desktop/mouse. */
+   (pointer: coarse)` layer bumps it to 32px (unchanged here on desktop/
+   mouse). `.label-editor__remove` used to join it in that same bump, same
+   small-square-icon-button tier, but it now gets an invisible hit-area
+   instead — this swatch isn't a flex child forced to inflate a sibling
+   chip's height the way that button was, so growing its own visible box is
+   fine here; see `.label-editor__remove`'s own coarse-pointer rule for why
+   it split off. */
 .label-settings-swatch {
   width: 1.4rem;
   height: 1.4rem;
@@ -6134,10 +6191,28 @@ button.trail-tag:focus-visible {
   }
 
   .link-editor__deps-list button,
-  .label-editor__remove,
   .label-settings-swatch {
     min-width: 32px;
     min-height: 32px;
+  }
+
+  /* `.label-editor__remove` used to join the rule above, but growing the
+     BUTTON's own box to 32px forces `.label-editor__chip` (its `display:
+     inline-flex; align-items: center` parent) to grow to fit it, ballooning
+     the whole chip well past the board's `.label-chip` pill height it's
+     meant to match (Fix 1: drawer/board label-chip parity) — unlike
+     `.link-editor__deps-list button`/`.label-settings-swatch` above, which
+     aren't flex children of a chip that has to stay pill-sized. Kept at its
+     compact 14x14px visible box here too (see the base rule, above); the
+     touch floor instead comes from an invisible `::before`, expanded 9px on
+     every side via `position: absolute` (out of flow, so it can't affect
+     the button's own box or its flex parent's height) up to the same 32px
+     square the other icon-buttons above get, just without the layout
+     cost. */
+  .label-editor__remove::before {
+    content: "";
+    position: absolute;
+    inset: -9px;
   }
 
   .epic-card__expand {
