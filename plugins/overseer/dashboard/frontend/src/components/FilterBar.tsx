@@ -2,6 +2,14 @@ import { useState, type ChangeEvent } from "react";
 import type { FilterState } from "../board/cardFilter";
 import LabelFilterPopover from "./LabelFilterPopover";
 import scryIcon from "../assets/ui-icons/scry.png";
+// WF-097 follow-up: routes the search field, priority/complexity selects,
+// the "Scry" eyebrow, and the Labels/Clear buttons through the
+// design-library primitives (`src/ui/`) — see each call site below. The
+// selects deliberately skip `<Select>`'s optional `label` prop: WF-092
+// dropped their visible caption in favour of the placeholder `<option>`
+// text, and a test in FilterBar.test.tsx pins "no `<label>` element in this
+// bar at all" — passing `label` would wrap the select in one and break it.
+import { Button, Input, Label, Select } from "../ui";
 
 export interface FilterBarProps {
   filter: FilterState;
@@ -94,14 +102,14 @@ function FilterBar({
       <div className="filter-bar__eyebrow-row">
         <span className="filter-bar__eyebrow-title">
           <img src={scryIcon} alt="" className="filter-bar__eyebrow-icon" />
-          <span className="filter-bar__eyebrow">Scry</span>
+          <Label className="filter-bar__eyebrow">Scry</Label>
         </span>
 
         <div className="filter-bar__count">{visibleCount} of {totalCount}</div>
       </div>
 
       <div className="filter-bar__row">
-        <input
+        <Input
           className="filter-bar__search"
           aria-label="search"
           type="search"
@@ -117,7 +125,7 @@ function FilterBar({
             line above. */}
         <div className="filter-bar__facets">
           <div className="filter-bar__select">
-            <select
+            <Select
               aria-label="priority"
               value={filter.priority ?? ""}
               onChange={handlePriorityChange}
@@ -128,11 +136,11 @@ function FilterBar({
                   {p}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div className="filter-bar__select">
-            <select
+            <Select
               aria-label="complexity"
               value={filter.complexity ?? ""}
               onChange={handleComplexityChange}
@@ -143,11 +151,10 @@ function FilterBar({
                   {c}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
-          <button
-            type="button"
+          <Button
             className="filter-bar__labels-btn"
             onClick={() => setLabelsOpen((open) => !open)}
           >
@@ -155,21 +162,20 @@ function FilterBar({
             {labelBadge > 0 && (
               <span className="filter-bar__labels-badge">{labelBadge}</span>
             )}
-          </button>
+          </Button>
 
           {/* Moved off the Scry eyebrow line onto the end of this row
               (coordinator follow-up) — same class/onClick/disabled as
               before, just relocated + shortened to "Clear" (exact-match,
               distinct from the topbar's own "Clear…"/ClearDialog button —
               see FilterBar.test.tsx/App.test.tsx). */}
-          <button
-            type="button"
+          <Button
             className="filter-bar__clear-btn"
             onClick={onClear}
             disabled={isDefault}
           >
             Clear
-          </button>
+          </Button>
         </div>
       </div>
 

@@ -421,10 +421,19 @@
    Consumers: the typed React wrappers in `src/ui/` (Button/Select/Chip/
    Input/Label) apply these classes 1:1, and `src/ui/DesignLibrary.tsx`
    (reachable at the `#design` hash — see App.tsx) shows every state.
-   `CardDetailDrawer.tsx`'s Save/Cancel/Edit/Pull-children buttons are the
-   first real adopter of the React wrappers (v1) — every OTHER existing
-   call-site (topbar/filter-bar selects, the pill badges, the search input)
-   keeps its own bespoke class for now; migrating those is a future pass. */
+   `CardDetailDrawer.tsx`'s Save/Cancel/Edit/Pull-children buttons were the
+   first real adopters of the React wrappers (v1); a WF-097 follow-up pass
+   then routed TopBar.tsx/FilterBar.tsx's own buttons, the priority/
+   complexity selects, the search input, and the Short/Long Rest + last-
+   refreshed pills through the same wrappers — each migrated call site's own
+   bespoke class was slimmed to layout-only (or removed if it had nothing
+   left) once its chrome duplicated the shared `.qb-*` recipe; see each
+   rule's own comment for what survived and why. Still bespoke: the topbar's
+   repo/branch selects (own files, RepoSelector.tsx/BranchFilter.tsx, out of
+   that pass's scope), the view-toggle "coins" (a wholly different circular
+   shape, not a Role-A button), and the gold/vanquished/fleet pills (share
+   one combined selector with fleet-pill's real button semantics — splitting
+   two of three onto `<Chip>` would fragment that rule for no visual gain). */
 
 /* .qb-select — the standard native-<select> chip/dropdown look. Factored
    from `.topbar__repo-select select` / `.topbar__branch-select select` /
@@ -821,18 +830,15 @@ body {
   font-size: 0.85rem;
 }
 
-.topbar__pill {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  /* Path-tag note treatment (WF-093): torn-note radius + inked border,
-     matching the Atlas trail tags and the lane-header notes — tried flat
-     (no lift shadow) on the topbar specifically. Border lightened to 1px
-     (was 1.5px) — read too heavy at the original weight. */
-  border-radius: var(--qb-radius-pennant);
-  border: 1px solid var(--qb-ink-300);
-  background: var(--qb-parchment-muted);
-  color: var(--qb-ink-500);
-}
+/* WF-097 follow-up: `.topbar__pill` now renders via `<Chip/>` (TopBar.tsx)
+   — every declaration this class used to carry (font-size/padding/wobble
+   radius/border/background/color) is IDENTICAL to `.qb-chip` (unsurprising:
+   `.qb-chip`'s own doc comment says it was factored FROM this exact class),
+   so the base rule is gone entirely. The class name lives on only as a
+   selector hook for the mobile responsive overrides below (`order`, the
+   shrunk font-size/padding at ≤720px — see the "Mobile layout layer" at the
+   end of this file) — `<Chip className="topbar__pill">` still composes it
+   in, so those rules keep matching unchanged. */
 
 /* Shared Role-A base (WF-096 button consolidation). The topbar/filter-bar
    button classes below predate this class and keep their OWN copies of the
@@ -905,148 +911,54 @@ body {
   box-shadow: var(--qb-btn-shadow-active);
 }
 
-/* Standard control height, grouped selector (WF-096): the pre-existing
-   Role-A button classes below — none of which previously pinned a height —
-   joined onto the same `--qb-control-height` box as `.qb-btn` and the
-   controls that already pinned the old `1.65rem` literal (see that token's
-   `:root` comment). One place for the shared BOX metric; each selector
-   keeps its own paint (background/border/wobble radius) in its own rule
-   below, untouched. */
-.topbar__refresh,
-.topbar__controls-toggle,
-.filter-bar__labels-btn,
-.filter-bar__clear-btn {
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Role A — "fine hand-inked, light-recess hover" (CHOSEN button system,
-   task-12). The wobble radius is fixed and does not shift on hover/active;
-   only background/border-color/box-shadow move. */
+/* WF-097 follow-up: `.topbar__refresh`/`.topbar__controls-toggle`/
+   `.filter-bar__labels-btn`/`.filter-bar__clear-btn` now all render via
+   `<Button/>` (TopBar.tsx/FilterBar.tsx) — the grouped WF-096 height rule
+   that used to live here, and each class's own border/background/wobble/
+   padding/hover/active/disabled chrome below, are IDENTICAL to `.qb-btn`'s
+   own (this WAS that class's whole point — see `.qb-btn`'s doc comment
+   above `.qb-btn--primary`), so all of it is gone. Only genuine LAYOUT (not
+   chrome) survives per class, below. */
 .topbar__refresh {
   margin-left: auto;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.topbar__refresh:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.topbar__refresh:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.topbar__refresh:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
 }
 
 /* Task 10: "＋ New card" control (Task 2: now icon-only, in the
-   `.topbar__toggle-cluster`). Same Role-A wobble shape/paint as
-   `.topbar__refresh` — a positive, non-destructive action, so no recolor
-   (contrast `.topbar-clear.danger` below).
-   `height`/`box-sizing` (WF-090 follow-up): this button's own class is
-   reused verbatim for "Labels…" (`.topbar__labels-settings`, plain ASCII
-   text), but "＋ New card" leads with a FULLWIDTH PLUS SIGN (＋, U+FF0B) —
-   a code point the primary font likely doesn't cover, so the browser
-   silently substitutes a fallback font for just that glyph; that
-   fallback's own ascent/descent metrics inflated the line box, measuring
-   ~29px vs Labels…'s ~26.5px even though both share this class and
-   `line-height: normal`. First tried pinning `line-height: 1` to
-   normalize both off `font-size` alone — measured that this OVERSHRINKS
-   Labels… too (~24.5px, 2px under the Set/Clear/input baseline), so a
-   glyph-proof explicit `height` (same technique as the topbar/filter-bar
-   selects below) replaces it — both "＋ New card" and "Labels…" now land
-   on the identical pinned box regardless of either one's line-box
-   quirks. `display:flex` + `align-items/justify-content:center` (WF-090
-   follow-up #2): pinning `height` fixed the BOX but not the TEXT's
-   position inside it — baseline-positioned text still sat low within the
-   fixed height (the fallback-font glyph's oversized descent pushes the
-   baseline down), most visible on "＋ New card". Flex-centering the
-   content is immune to that for the same reason the `height` fix was:
-   it centers the line box as a whole rather than trusting any one
-   glyph's own metrics. */
-.topbar__new-card {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.topbar__new-card:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.topbar__new-card:active {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-/* Task 2: "＋ New card" is icon-only now (was "＋ New card" text) — square
-   up the box and drop the horizontal padding text needed; everything else
-   (border/paint/hover/active) still comes from `.topbar__new-card` above. */
+   `.topbar__toggle-cluster`) and "Labels…" (`.topbar__labels-settings`,
+   reusing this same class rather than duplicating it) both render via
+   `<Button variant="neutral"/>` now — every box/paint declaration this
+   class used to carry duplicated `.qb-btn` exactly, so the base rule is
+   gone; only the icon-only size override below survives. */
 .topbar__new-card--icon {
   width: 1.65rem;
   padding: 0;
   font-size: 0.95rem;
 }
 
-/* Task 7: Clear-data control, beside the repo selector. Same Role-A wobble
-   shape as `.topbar__refresh` above, but recolored red — `.danger` alone
-   only reaches inside `.clear-dialog` (see `.clear-dialog .danger`), so this
-   button needs its own paint rather than relying on that scoped rule. */
+/* Task 7: Clear-data control, beside the repo selector. Renders via
+   `<Button className="topbar-clear danger"/>` now (TopBar.tsx) — box/
+   wobble/padding/font chrome comes from `.qb-btn`; only the red recolor
+   (border/background/text) and its hover survive here. WF-097 follow-up:
+   `box-shadow: none` was ADDED to the hover rule below (it wasn't there
+   before) — `.qb-btn:hover:not(:disabled)`'s inset light-recess shadow
+   ties on specificity with `.topbar-clear.danger:hover` (both (0,3,0)) and
+   this rule wins by coming later in the file, but a cascade tie only
+   settles PROPERTIES both rules declare; box-shadow wasn't one of those
+   until this override was added, so `.qb-btn`'s shadow would otherwise
+   silently leak onto a button whose hover is a solid red swap, not a
+   recess. `.danger` alone only reaches inside `.clear-dialog` (see
+   `.clear-dialog .danger`), so this button still needs its own paint
+   rather than relying on that scoped rule. */
 .topbar-clear.danger {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
   border: 1.5px solid var(--legacy-color-b3261e);
   background: var(--legacy-color-fff5f5);
   color: var(--legacy-color-b3261e);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease;
 }
 
 .topbar-clear.danger:hover {
   background: var(--legacy-color-b3261e);
   color: var(--legacy-color-fff);
+  box-shadow: none;
 }
 
 /* Archive is an on/off TOGGLE (checkbox + label), not an action button —
@@ -1126,32 +1038,27 @@ body {
   gap: 0.75rem;
 }
 
-/* Task 2/3: "Filters ▾" and "Controls ▾" share this class (was mobile-only,
-   `display: none` on desktop — the old shared "Controls ▾" toggle only
-   needed to exist at all ≤720px). Both toggles now show on every viewport,
-   so this is the always-on box/paint — same Role-A metrics as
-   `.topbar__new-card` (0.75rem / 0.3rem 0.7rem), no mobile-specific
-   override needed any more. `gap` spaces the "Controls" button's leading
-   gear icon (task C) from its text — a no-op for "Filters ▾", which has no
-   icon (no matching funnel/filter asset in the rpg-icons library). */
-.topbar__controls-toggle {
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease;
-}
+/* Task 2/3: "Filters ▾" and "Controls ▾" share this class — both render via
+   `<Button className="topbar__controls-toggle"/>` now (TopBar.tsx), so the
+   gap/box/wobble/padding/font/paint chrome this class used to carry
+   duplicated `.qb-btn` exactly and is gone (`gap` spaced the "Controls"
+   button's leading gear icon (task C) from its text — a no-op for
+   "Filters ▾", which has no icon; `.qb-btn`'s own `gap: 0.3rem` is the same
+   value, so that spacing survives unchanged).
 
-.topbar__controls-toggle:hover {
+   WF-097 follow-up: `:hover`/`:active` below are kept ON PURPOSE, despite
+   being value-duplicates of `.qb-btn`'s own — this class's ORIGINAL hover/
+   active never declared a `box-shadow`, so `.qb-btn`'s light-recess inset
+   shadow would otherwise newly appear on hover/press (this plain
+   `:hover`/`:active` pairing is specificity (0,2,0), lower than `.qb-btn
+   :hover:not(:disabled)`'s (0,3,0), so without a matching `:not(:disabled)`
+   guard here `.qb-btn`'s rule would win outright and the shadow WOULD leak
+   through — these are written to tie its specificity exactly, then win by
+   sitting later in the file). */
+.topbar__controls-toggle:hover:not(:disabled) {
   background: var(--qb-btn-face-hover);
   border-color: var(--qb-btn-ink-hover);
+  box-shadow: none;
 }
 
 /* Task C: small gear icon leading the "Controls ▾" button's text — same
@@ -1166,8 +1073,9 @@ body {
   pointer-events: none;
 }
 
-.topbar__controls-toggle:active {
+.topbar__controls-toggle:active:not(:disabled) {
   background: var(--qb-btn-face-active);
+  box-shadow: none;
 }
 
 /* Task 2: the [Filters ▾] [Controls ▾] [＋] cluster — one atomic flex item
@@ -1197,28 +1105,12 @@ body {
    gold-chip pressed state (matches the view-switcher circles and the
    trail's own gold coin) — each button IS its own toggle now (a single
    control, not a two-button pair), so the active/inactive read has to live
-   entirely in this one element's own paint. */
-.topbar__atlas-control {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
+   entirely in this one element's own paint.
+   WF-097 follow-up: renders via `<Button className="topbar__atlas-control"
+   aria-pressed=.../>` now (TopBar.tsx) — the box/wobble/padding/font/paint
+   this class used to carry in its OWN base rule duplicated `.qb-btn`
+   exactly, so that base rule (and its old plain `:hover`, see below) are
+   gone. */
 
 /* Task 3: rpg-icons pack art leading each atlas control's own text label
    (scroll/skull/compass — see TopBar.tsx) — same small-leading-image
@@ -1233,13 +1125,27 @@ body {
   pointer-events: none;
 }
 
-.topbar__atlas-control:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
+/* Resting pressed state — (0,2,0) already outranks `.qb-btn`'s bare (0,1,0)
+   base rule, so this alone is enough while neither hovered nor pressed. */
+.topbar__atlas-control[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+  box-shadow: var(--qb-btn-shadow-active);
 }
 
-.topbar__atlas-control[aria-pressed="true"] {
+/* WF-097 follow-up: now that this control also carries `.qb-btn`'s classes,
+   `.qb-btn:hover:not(:disabled)` / `:active:not(:disabled)` are BOTH
+   higher-specificity ((0,3,0)) than the plain-attribute rule above
+   ((0,2,0)) — left alone, a PRESSED (gold) control would flash back to
+   `.qb-btn`'s neutral hover/active paint the instant it's hovered or
+   clicked, which it never did before (the old bespoke `:hover` rule this
+   replaces tied `[aria-pressed="true"]` on specificity by ALSO being
+   (0,2,0), same fix, different mechanism). Matching `.qb-btn`'s own
+   `:hover`/`:active` pseudo-classes here ties the specificity at (0,3,0);
+   sitting later in the file is what wins the tie. */
+.topbar__atlas-control[aria-pressed="true"]:hover,
+.topbar__atlas-control[aria-pressed="true"]:active {
   background: var(--qb-gold-chip-bg);
   border-color: var(--qb-gold-chip-border);
   color: var(--qb-gold-chip-text);
@@ -1389,14 +1295,16 @@ body {
 /* WF-092: a small quest-board eyebrow opening the row, ahead of search —
    same quiet caption treatment as `.topbar__repo-select-label`/
    `-branch-select-label` (uppercase, 0.65rem, tracked out), just recast as
-   a standalone heading instead of a select's adjacent label. */
+   a standalone heading instead of a select's adjacent label.
+   WF-097 follow-up: renders via `<Label className="filter-bar__eyebrow"/>`
+   now (FilterBar.tsx), which applies `.qb-label` — text-transform/font-size/
+   font-weight/color were identical to `.qb-label`'s own and are gone below;
+   `flex` (layout) and `letter-spacing` survive — the latter is a genuine
+   override, 0.06em here vs. `.qb-label`'s own 0.04em (a deliberately wider
+   track for this specific eyebrow). */
 .filter-bar__eyebrow {
   flex: 0 0 auto;
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  font-weight: 600;
   letter-spacing: 0.06em;
-  color: var(--qb-ink-400);
 }
 
 /* Task A (WF-085 follow-up: split): Provisions' own topbar↔control divider.
@@ -1458,28 +1366,17 @@ body {
   gap: 0.6rem;
 }
 
+/* WF-097 follow-up: renders via `<Input className="filter-bar__search"/>`
+   now (FilterBar.tsx) — font/box/padding/border/wobble/background/color
+   were all identical to `.qb-input`, and both the `:hover,:focus` pairing
+   and `::placeholder` rules that used to live here matched `.qb-input`'s
+   own byte-for-byte, so all three are gone. Only the field's own SIZE
+   (flex-basis/min/max-width — nothing `.qb-input` has an opinion on)
+   survives. */
 .filter-bar__search {
-  font: inherit;
-  font-size: 0.8rem;
   flex: 0 1 12.5rem;
   min-width: 8rem;
   max-width: 12.5rem;
-  box-sizing: border-box;
-  padding: 0.3rem 0.6rem;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  background: var(--qb-btn-face);
-  color: var(--qb-ink-900);
-}
-
-.filter-bar__search:hover,
-.filter-bar__search:focus {
-  border-color: var(--qb-btn-ink-hover);
-  outline: none;
-}
-
-.filter-bar__search::placeholder {
-  color: var(--qb-ink-400);
 }
 
 /* WF-092: the visible "Priority"/"Complexity" caption that used to sit
@@ -1491,24 +1388,26 @@ body {
   align-items: center;
 }
 
+/* WF-097 follow-up: the priority/complexity `<select>`s render via
+   `<Select/>` now (FilterBar.tsx), which applies `.qb-select` — most of
+   this rule's declarations were identical to `.qb-select`'s own (color/
+   background/border/height/box-sizing/padding are gone below), but three
+   survive as genuine overrides `.qb-select` doesn't make: `font-size`
+   (`.qb-select` inherits its font-size; this bar's controls all sit at
+   0.75rem explicitly), `text-transform`/`letter-spacing` (guard against
+   `.qb-select` having none of its own to inherit stray values from), and
+   `border-radius` (a DIFFERENT wobble variant than `.qb-select`'s default —
+   WF-046 item 1's "no two neighbouring controls read as the exact same
+   stamped shape" rule, same reasoning as `.topbar__branch-select select`'s
+   own divergent wobble). This still wins the cascade over `.qb-select`
+   despite `.qb-select` being a class on the SAME element now — `.filter-
+   bar__select select` (class + element) outranks a bare `.qb-select`
+   (class alone) on specificity regardless of source order. */
 .filter-bar__select select {
-  font: inherit;
   font-size: 0.75rem;
-  line-height: 1;
   text-transform: none;
   letter-spacing: normal;
-  font-weight: 600;
-  color: var(--qb-ink-900);
-  background: var(--qb-btn-face);
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem.
-     WF-090 follow-up: explicit `height` + trimmed vertical padding — same
-     fix, same reasoning, as `.topbar__repo-select select` above (a native
-     `<select>` renders taller than its padding alone would suggest). */
-  height: var(--qb-control-height);
-  box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
 }
 
 .filter-bar__select select:hover,
@@ -1517,26 +1416,19 @@ body {
   outline: none;
 }
 
-/* Same Role A button system as `.qb-btn` (above `.topbar__refresh`) — the
-   Labels/Clear controls are just another toolbar action, not a new style.
-   `display`/`align-items`/`justify-content`/height come from the grouped
-   `--qb-control-height` rule alongside `.topbar__refresh` there — only the
-   paint (border/background/wobble radius) lives here. */
+/* WF-097 follow-up: Labels/Clear render via `<Button/>` now (FilterBar.tsx)
+   — font/padding/border/background/color/box-shadow/cursor/transition, and
+   the `:hover:not(:disabled)`/`:active:not(:disabled)`/`:disabled` states
+   below, all duplicated `.qb-btn`'s own byte-for-byte (same `:not(:disabled)`
+   guards, so no specificity gap the way `.topbar__controls-toggle`'s plain
+   `:hover`/`:active` had), so all of that is gone. Two things survive as
+   genuine overrides: `gap` (0.35rem — `.qb-btn`'s own is 0.3rem, a
+   deliberate difference for the Labels badge's spacing) and each button's
+   own divergent wobble radius (WF-046 item 1's "no two neighbouring
+   controls share a stamped shape" rule). */
 .filter-bar__labels-btn,
 .filter-bar__clear-btn {
   gap: 0.35rem;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
 .filter-bar__labels-btn {
@@ -1545,25 +1437,6 @@ body {
 
 .filter-bar__clear-btn {
   border-radius: var(--qb-btn-wobble-4);
-}
-
-.filter-bar__labels-btn:hover:not(:disabled),
-.filter-bar__clear-btn:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.filter-bar__labels-btn:active:not(:disabled),
-.filter-bar__clear-btn:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.filter-bar__clear-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
 }
 
 /* Same neutral base tokens as `.claim-badge` — a quiet count pill, no

@@ -13,6 +13,18 @@ import RepoSelector from "./RepoSelector";
 import BranchFilter from "./BranchFilter";
 import NewCardDialog from "./NewCardDialog";
 import LabelSettingsDialog from "./LabelSettingsDialog";
+// WF-097 follow-up: routes this bar's Role-A buttons + the plain rest/
+// updated pills through the design-library primitives (`src/ui/`) — see
+// each call site below for which bespoke class stays (layout-only) and
+// which was fully absorbed into `.qb-btn`/`.qb-chip`. The view-toggle
+// "coins" and the gold/vanquished/fleet pills are DELIBERATELY left as
+// bespoke markup: the coins are a wholly different circular/stacked shape
+// (not a Role-A button), and the three guild pills share one combined CSS
+// selector with (fleet-pill only) real button semantics — splitting two of
+// the three onto `<Chip>` while leaving fleet-pill native would fragment
+// that shared rule for no visual gain (see styles.css's own comment on
+// `.topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill`).
+import { Button, Chip } from "../ui";
 import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 import compassIcon from "../assets/ui-icons/compass.png";
@@ -292,23 +304,24 @@ function TopBar({
         />
 
         {limits?.five_hour?.used_percentage !== undefined && (
-          <span className="topbar__pill" title="5h window">
+          <Chip className="topbar__pill" title="5h window">
             ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
-          </span>
+          </Chip>
         )}
         {limits?.seven_day?.used_percentage !== undefined && (
-          <span className="topbar__pill" title="7d window">
+          <Chip className="topbar__pill" title="7d window">
             ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
-          </span>
+          </Chip>
         )}
         {/* Task 5: last-refreshed moved out of the Controls group and
             grouped here as its own note-badge pill, right beside the two
-            rest pills (same `.topbar__pill` treatment). Omitted entirely
+            rest pills (same `.topbar__pill` treatment — now literally
+            `.qb-chip` under the hood, WF-097 follow-up). Omitted entirely
             until the first successful load, same as before the move. */}
         {lastRefreshedAt !== null && (
-          <span className="topbar__pill" title="last refreshed">
+          <Chip className="topbar__pill" title="last refreshed">
             {formatUpdated(lastRefreshedAt)}
-          </span>
+          </Chip>
         )}
 
         {/* Filters ▾ / Controls ▾ / ＋ — three independent controls grouped
@@ -321,17 +334,15 @@ function TopBar({
             open so the board looks unchanged on load, but either can be
             collapsed on any screen size. */}
         <div className="topbar__toggle-cluster">
-          <button
-            type="button"
+          <Button
             className="topbar__controls-toggle"
             aria-expanded={filtersOpen}
             aria-controls="filter-bar"
             onClick={onToggleFilters}
           >
             Filters {filtersOpen ? "▴" : "▾"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             className="topbar__controls-toggle"
             aria-expanded={controlsOpen}
             aria-controls="topbar-controls-group"
@@ -343,19 +354,24 @@ function TopBar({
                 "Filters ▾" button beside this one, so that stays text-only). */}
             <img src={settingsIcon} alt="" className="topbar__toggle-icon" />
             Controls {controlsOpen ? "▴" : "▾"}
-          </button>
+          </Button>
           {/* "＋ New card" is now icon-only — `aria-label`/`title` keep it
               accessible/resolvable by name exactly as the old "＋ New card"
-              text button was; opens the same NewCardDialog unchanged. */}
-          <button
-            type="button"
+              text button was; opens the same NewCardDialog unchanged.
+              variant="neutral" (not "primary"): despite being a create
+              action, `.topbar__new-card`'s own chrome paints it with the
+              same PLAIN Role-A face as Refresh, not the gold `.qb-btn--
+              primary` fill — keeping it neutral here preserves that
+              existing look exactly (WF-097 follow-up). */}
+          <Button
+            variant="neutral"
             className="topbar__new-card topbar__new-card--icon"
             onClick={() => setNewCardOpen(true)}
             aria-label="New card"
             title="New card"
           >
             ＋
-          </button>
+          </Button>
         </div>
 
         {/* WF-085 (Task 2/3): the secondary-controls group — Last Orders
@@ -393,8 +409,7 @@ function TopBar({
               every marker tooltip — EpicAtlas.tsx). */}
           {view === "atlas" && (
             <div className="topbar__atlas-controls">
-              <button
-                type="button"
+              <Button
                 className="topbar__atlas-control"
                 aria-pressed={showNames}
                 onClick={() => onToggleNames(!showNames)}
@@ -403,9 +418,8 @@ function TopBar({
                 {/* rpg-icons pack "sealed letter" — a scroll of quest names */}
                 <img src={scrollIcon} alt="" className="topbar__atlas-control-icon" />
                 {showNames ? "Quest names: On" : "Quest names: Off"}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 className="topbar__atlas-control"
                 aria-pressed={!hideVanquished}
                 onClick={() => onToggleVanquished(!hideVanquished)}
@@ -414,9 +428,8 @@ function TopBar({
                 {/* rpg-icons pack "skull-crossbones" — the vanquished mark */}
                 <img src={skullIcon} alt="" className="topbar__atlas-control-icon" />
                 {hideVanquished ? "Vanquished: Hidden" : "Vanquished: Shown"}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 className="topbar__atlas-control"
                 aria-pressed={orientation === "down"}
                 onClick={() => onToggleOrientation(orientation === "across" ? "down" : "across")}
@@ -425,7 +438,7 @@ function TopBar({
                 {/* rpg-icons pack "compass" — points wherever the trail runs */}
                 <img src={compassIcon} alt="" className="topbar__atlas-control-icon" />
                 {orientation === "down" ? "Down" : "Across"}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -449,8 +462,8 @@ function TopBar({
               existing per-child `order` resets (below) still apply
               untouched. */}
           <div className="topbar__controls-actions">
-            <button
-              type="button"
+            <Button
+              variant="neutral"
               // Task 10: shares the "＋ New card" control's Role-A button paint
               // (non-destructive positive action, same wobble shape) — see
               // `.topbar__new-card` in styles.css, reused here rather than
@@ -460,16 +473,15 @@ function TopBar({
               title="Edit label colors"
             >
               Labels…
-            </button>
+            </Button>
 
-            <button
-              type="button"
+            <Button
               className="topbar__refresh"
               onClick={onRefresh}
               disabled={refreshing}
             >
               {refreshing ? "Refreshing…" : "Refresh"}
-            </button>
+            </Button>
 
             <label className="topbar__archive-toggle">
               <input
@@ -488,14 +500,13 @@ function TopBar({
                 on mobile (see styles.css) rather than relying on DOM order
                 alone. */}
             {onClear && (
-              <button
-                type="button"
+              <Button
                 className="topbar-clear danger"
                 onClick={onClear}
                 title="Clear this repo's data"
               >
                 Clear…
-              </button>
+              </Button>
             )}
           </div>
         </div>
