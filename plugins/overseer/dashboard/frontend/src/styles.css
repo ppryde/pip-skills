@@ -201,29 +201,39 @@
        -soft   = base 24% over white  → lightest; fills/washes/tag backgrounds
        -base   = the base hue itself  → mid; borders/accents
        -strong = base 62% over #2c2015 (dark ink) → darkest; text
-     done/in-progress/parked/abandoned reuse the lane accent tokens as their
-     base (that's "same colour set, separate namespace"); todo and blocked
-     introduce two NEW hues that no lane owns. */
+     done/in-progress/todo/parked/abandoned reuse the lane accent tokens as
+     their base (that's "same colour set, separate namespace"); blocked is
+     the one status that introduces a hue no lane owns.
+     REMAP (this pass): todo purple → sky blue, in-progress sky blue →
+     orange, done stays forest green; blocked/parked/abandoned unchanged
+     (blocked nudged redder — see below — to stay distinct from the new
+     in-progress orange). The old #9d86d4 todo purple is retired. */
   --qb-status-done-soft: color-mix(in srgb, var(--qb-accent-forest-fill) 24%, white);
   --qb-status-done-base: var(--qb-accent-forest-fill); /* #8fbf5e — lane forest green */
   --qb-status-done-strong: color-mix(in srgb, var(--qb-accent-forest-fill) 62%, #2c2015);
 
-  --qb-status-in-progress-soft: color-mix(in srgb, var(--qb-accent-sky-fill) 24%, white);
-  --qb-status-in-progress-base: var(--qb-accent-sky-fill); /* #69a8dc — lane sky blue */
-  --qb-status-in-progress-strong: color-mix(in srgb, var(--qb-accent-sky-fill) 62%, #2c2015);
+  /* in-progress — REMAPPED (was lane sky blue) to lane orange, so "at hand"
+     reads as a warm, active hue instead of borrowing todo's old blue. */
+  --qb-status-in-progress-soft: color-mix(in srgb, var(--qb-accent-orange-fill) 24%, white);
+  --qb-status-in-progress-base: var(--qb-accent-orange-fill); /* #ef9d52 — lane orange */
+  --qb-status-in-progress-strong: color-mix(in srgb, var(--qb-accent-orange-fill) 62%, #2c2015);
 
-  /* todo/planned — a NEW cheerful, inviting violet (no lane owns it). This
-     hue is deliberate: "ahead ground" should read as fun and beckoning, not
-     grey/amber "not-started-yet" drear. */
-  --qb-status-todo-soft: color-mix(in srgb, #9d86d4 24%, white);
-  --qb-status-todo-base: #9d86d4; /* NEW purple — the deliberate fun/inviting todo hue */
-  --qb-status-todo-strong: color-mix(in srgb, #9d86d4 62%, #2c2015);
+  /* todo/planned — REMAPPED (was a bespoke purple #9d86d4, now unused/removed)
+     to lane sky blue. "Ahead ground" now reads as calm and beckoning rather
+     than the fun-violet the old palette used. */
+  --qb-status-todo-soft: color-mix(in srgb, var(--qb-accent-sky-fill) 24%, white);
+  --qb-status-todo-base: var(--qb-accent-sky-fill); /* #69a8dc — lane sky blue */
+  --qb-status-todo-strong: color-mix(in srgb, var(--qb-accent-sky-fill) 62%, #2c2015);
 
   /* blocked — a NEW coral-red that reads as "barred"; distinct from the rose
-     lane accent so a blocked tag never reads as an Awaiting-Merge lane note. */
-  --qb-status-blocked-soft: color-mix(in srgb, #e8776e 24%, white);
-  --qb-status-blocked-base: #e8776e; /* NEW coral-red */
-  --qb-status-blocked-strong: color-mix(in srgb, #e8776e 62%, #2c2015);
+     lane accent so a blocked tag never reads as an Awaiting-Merge lane note.
+     Nudged a touch redder from the original #e8776e now that in-progress
+     sits on orange (#ef9d52) — the two warm hues were sitting too close
+     together after the remap, so blocked moved further from orange on the
+     hue wheel to stay visually distinct. */
+  --qb-status-blocked-soft: color-mix(in srgb, #df6a60 24%, white);
+  --qb-status-blocked-base: #df6a60; /* coral-red, nudged redder from #e8776e for distinctness from in-progress orange */
+  --qb-status-blocked-strong: color-mix(in srgb, #df6a60 62%, #2c2015);
 
   --qb-status-parked-soft: color-mix(in srgb, var(--qb-accent-taupe-fill) 24%, white);
   --qb-status-parked-base: var(--qb-accent-taupe-fill); /* #ab9274 — lane taupe, calm */
@@ -5062,18 +5072,28 @@ a.card-drawer__pr-chip:hover {
   height: auto;
 }
 
+/* Status-remap pass: the trail's ground now carries STATUS colour (has the
+   party walked it yet?), not the epic's LANE accent — `.atlas-trail__path`
+   is the walked stretch (done AND the in-progress child's own segment both
+   render un-faded, i.e. "ground already covered"), `--faded` below is the
+   ahead/todo stretch. Routed to `--qb-status-*` rather than
+   `--atlas-trail-fill` so a status reads in one colour everywhere it
+   appears on the trail, matching the name-tags/markers. */
 .atlas-trail__path {
   fill: none;
-  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--qb-status-done-base);
   stroke-width: 3.5;
   stroke-linecap: round;
   stroke-dasharray: 1 9;
 }
 
 /* Ahead (todo) ground — HANDOFF: "faded (~.68 opacity) ... trail continues
-   at 1 9 but faded" — same dasharray as walked ground, opacity is the only
-   distinction (not a different dash pattern). */
+   at 1 9 but faded" — same dasharray as walked ground; opacity is still the
+   fade mechanism (kept exactly as before), the stroke additionally switches
+   to the todo status hue so "ahead" reads as both blue AND faded, not just
+   faded-green. */
 .atlas-trail__path--faded {
+  stroke: var(--qb-status-todo-base);
   opacity: 0.68;
 }
 
@@ -5081,11 +5101,19 @@ a.card-drawer__pr-chip:hover {
   font-size: 15px;
 }
 
-/* --- Waypoints: done / abandoned / at-hand / todo / blocked ------------- */
+/* --- Waypoints: done / abandoned / at-hand / todo / blocked -------------
+   Status-remap pass: every waypoint below now reads its fill/stroke from
+   the `--qb-status-*` tokens (same source of truth as the trail path above
+   and the `.trail-tag--*` name-tags) rather than the epic's `--atlas-trail-
+   fill/-dark` LANE accent — a status now renders in ONE colour across its
+   tag, its marker, and the ground leading up to it. The lane accent vars
+   stay defined (still driving the rail card border + beast hue, which are
+   intentionally lane- not status-coloured) but nothing below reads them
+   anymore. */
 
 .atlas-trail__waypoint--done circle {
-  fill: var(--atlas-trail-fill, var(--qb-ink-300));
-  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  fill: var(--qb-status-done-base);
+  stroke: var(--qb-status-done-strong);
   stroke-width: 2;
 }
 
@@ -5106,13 +5134,13 @@ a.card-drawer__pr-chip:hover {
    opt-in) — suppressed (plain dot only, no ring/pennant) on a parked epic,
    see AtlasTrail.tsx's `atHand` branch. */
 .atlas-trail__athand-dot {
-  fill: var(--qb-parchment-muted);
-  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  fill: var(--qb-status-in-progress-soft);
+  stroke: var(--qb-status-in-progress-strong);
   stroke-width: 2.5;
 }
 
 .atlas-trail__athand-glyph {
-  fill: var(--atlas-trail-dark, var(--qb-ink-500));
+  fill: var(--qb-status-in-progress-strong);
   font-size: 11px;
   font-weight: 700;
   text-anchor: middle;
@@ -5120,7 +5148,7 @@ a.card-drawer__pr-chip:hover {
 
 .at-hand-ring {
   fill: none;
-  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--qb-status-in-progress-base);
   stroke-width: 2;
   transform-box: fill-box;
   transform-origin: center;
@@ -5158,10 +5186,12 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* Ahead (todo) hollow waypoint — dashed outline, no fill; opacity comes
-   from the SVG group's own `opacity` attribute (AtlasTrail.tsx), not here. */
+   from the SVG group's own `opacity` attribute (AtlasTrail.tsx), not here.
+   Fill stays the neutral parchment wash (a genuinely hollow dot, not a
+   status wash) — only the outline carries the todo status colour. */
 .atlas-trail__todo-dot {
   fill: var(--qb-parchment-muted);
-  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--qb-status-todo-base);
   stroke-width: 2;
   stroke-dasharray: 2 3;
 }
@@ -5293,9 +5323,10 @@ button.trail-tag:focus-visible {
 /* Bright per-status name-tags, now sourced from the `--qb-status-*` palette
    (see :root) rather than ad-hoc `color-mix(<accent> 30/55%, white)` — the
    status tokens are the single source of truth for status-coded colour.
-   soft = fill, base = border, strong = text. The visible shift from the old
-   accent-mix version: todo tags go PURPLE (was sky blue) and blocked goes
-   coral (was the rose lane accent); done stays green. */
+   soft = fill, base = border, strong = text. Because these three rules read
+   the tokens (not a hardcoded hue), the WF-status-remap pass — todo purple
+   → BLUE, in-progress sky blue → ORANGE — needed no edits here at all;
+   done stays green, blocked stays coral. */
 .trail-tag--todo {
   background: var(--qb-status-todo-soft);
   border: 1.5px solid var(--qb-status-todo-base);
@@ -5325,10 +5356,18 @@ button.trail-tag:focus-visible {
    fill (not the todo tag's pastel/parchment) with bold white text, so it
    reads as "in progress right now", not "ahead ground". Kept at full
    intensity by design (user preference) — the calmer per-status pastels are
-   only for the todo/done/blocked name-tags around it. */
+   only for the todo/done/blocked name-tags around it.
+   Status-remap pass: this used to deliberately pin itself to the
+   IMPLEMENTATION lane's orange accent (`--atlas-trail-fill`, falling back to
+   `--qb-accent-orange-fill`) because that happened to be the colour the user
+   wanted — a lane accent standing in for a status colour. Now that
+   in-progress status IS orange in its own right, it reads `--qb-status-in-
+   progress-*` instead: same visible orange, but sourced from the status
+   token so it can never drift from the todo/done/blocked tags and markers
+   around it (e.g. on a card whose current lane ISN'T orange). */
 .atlas-trail__pennant--athand {
-  background: var(--atlas-trail-fill, var(--qb-accent-orange-fill));
-  border: 1.5px solid var(--atlas-trail-dark, var(--qb-accent-orange-shadow));
+  background: var(--qb-status-in-progress-base);
+  border: 1.5px solid var(--qb-status-in-progress-strong);
   color: var(--legacy-color-fff);
   font-weight: 700;
 }
