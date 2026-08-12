@@ -3062,14 +3062,17 @@ body {
    two don't compete for attention right next to each other. */
 .card-drawer__status-fact {
   /* Displayed as the same square torn-note chip as the labels (pennant radius,
-     1px border, flat). Its pale accent fill + saturated accent text still come
-     from the --<accentKey> variants below; the border is derived from that
-     text colour so every variant gets a matching soft outline automatically. */
+     1px border, flat). The --<accentKey> variants below supply each chip's
+     pale accent background; text is a single dark ink (NOT the bright accent
+     fill, which read illegibly as text — e.g. green on the tan backlog tint),
+     and the border derives from that dark text so every variant gets a
+     matching soft outline automatically. */
   font-size: 0.65rem;
   font-weight: 500;
   padding: 0.15rem 0.5rem;
   border-radius: var(--qb-radius-pennant);
   border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  color: var(--qb-ink-900);
 }
 
 .card-drawer__banner--backlog {
@@ -3077,7 +3080,6 @@ body {
 }
 .card-drawer__status-fact--backlog {
   background: var(--qb-accent-forest-cardshadow);
-  color: var(--qb-accent-forest-fill);
 }
 
 .card-drawer__banner--bootstrap {
@@ -3085,7 +3087,6 @@ body {
 }
 .card-drawer__status-fact--bootstrap {
   background: var(--qb-accent-amber-cardshadow);
-  color: var(--qb-accent-amber-fill);
 }
 
 .card-drawer__banner--planning,
@@ -3097,7 +3098,6 @@ body {
 .card-drawer__status-fact--plan-review,
 .card-drawer__status-fact--verification {
   background: var(--qb-accent-sky-cardshadow);
-  color: var(--qb-accent-sky-fill);
 }
 
 .card-drawer__banner--implementation,
@@ -3107,7 +3107,6 @@ body {
 .card-drawer__status-fact--implementation,
 .card-drawer__status-fact--impl-review {
   background: var(--qb-accent-orange-cardshadow);
-  color: var(--qb-accent-orange-fill);
 }
 
 .card-drawer__banner--awaiting-merge {
@@ -3115,7 +3114,6 @@ body {
 }
 .card-drawer__status-fact--awaiting-merge {
   background: var(--qb-accent-rose-cardshadow);
-  color: var(--qb-accent-rose-fill);
 }
 
 .card-drawer__banner--done {
@@ -3123,7 +3121,6 @@ body {
 }
 .card-drawer__status-fact--done {
   background: var(--qb-accent-umber-cardshadow);
-  color: var(--qb-accent-umber-fill);
 }
 
 .card-drawer__banner--parked {
@@ -3131,7 +3128,6 @@ body {
 }
 .card-drawer__status-fact--parked {
   background: var(--qb-accent-taupe-cardshadow);
-  color: var(--qb-accent-taupe-fill);
 }
 
 .card-drawer__banner--abandoned {
@@ -3139,7 +3135,6 @@ body {
 }
 .card-drawer__status-fact--abandoned {
   background: var(--qb-accent-ash-cardshadow);
-  color: var(--qb-accent-ash-fill);
 }
 
 /* Hero chip: PartyAvatar + name + class (HANDOFF: "assigned-hero chip
@@ -6243,20 +6238,26 @@ button.trail-tag:focus-visible {
      relative of the desktop button box instead of towering over it (WF-097
      touch-layer reconciliation; see the token's `:root` comment).
 
-     `.label-filter-chip` (LabelFilterPopover's tri-state toggle) joins this
-     group as part of the label-chip design-library migration: it was a bare
-     `<button>` with NO touch floor at all before this pass (only its own
-     small padding/font-size), noticeably under every other tappable pill
-     here — same tier as `.status-menu button`/`.claim-control button`
-     (a small pill-shaped text button), so it takes the same token rather
-     than a bespoke size. The read-only `.label-chip` (LabelChips/
-     LabelEditor/LabelSettingsDialog's display chip) is deliberately NOT
-     here — it carries no `onClick`, so there's no tap target to grow. */
+     The drawer's own text buttons (`.status-menu button` / `.claim-control
+     button` / `.card-drawer__viewtoggle button`) are deliberately NOT here:
+     they render via the shared `<Button>` (`.qb-btn`), and EVERY `.qb-btn` on
+     the site — the topbar's ＋New/Controls/Filters/Refresh included — sits at
+     the Role-A box, so giving only these three a taller touch floor made them
+     the odd ones out inside the drawer. They now take the same Role-A box as
+     the rest of the site's buttons (site-wide button-size parity — the drawer
+     was the only place buttons towered above their neighbours). Trade-off:
+     these tap targets drop from ~34px to the ~29px Role-A box, matching every
+     other button rather than the 44px ideal — the same call WF-078 already
+     made for the topbar controls above.
+
+     Only genuinely non-`.qb-btn` tappables keep the ~34px floor:
+     `.topbar__fleet-pill` (a pill, not a button), `.topbar__archive-toggle`
+     (a checkbox row), and `.label-filter-chip` (LabelFilterPopover's bare-
+     `<button>` tri-state toggle, which has no `.qb-btn` box of its own). The
+     read-only `.label-chip` is not here either — no `onClick`, no tap target
+     to grow. */
   .topbar__fleet-pill,
   .topbar__archive-toggle,
-  .status-menu button,
-  .claim-control button,
-  .card-drawer__viewtoggle button,
   .label-filter-chip {
     min-height: var(--qb-control-height-touch);
   }
