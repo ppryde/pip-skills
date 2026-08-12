@@ -338,7 +338,7 @@ function CardDetailDrawer({
                   <h2 className="card-drawer__title">{detail.title}</h2>
                   <button
                     type="button"
-                    className="card-drawer__edit-btn"
+                    className="qb-btn card-drawer__edit-btn"
                     onClick={() => setEditing(true)}
                     disabled={inFlight}
                   >
@@ -454,7 +454,7 @@ function CardDetailDrawer({
               {detail.is_epic && (
                 <button
                   type="button"
-                  className="card-drawer__pull-children-btn"
+                  className="qb-btn card-drawer__pull-children-btn"
                   onClick={() => void handlePullChildren()}
                   disabled={inFlight}
                 >
@@ -566,6 +566,7 @@ function CardDetailDrawer({
                 <div className="card-drawer__edit-actions">
                   <button
                     type="button"
+                    className="qb-btn qb-btn--primary"
                     onClick={() => void saveEdit()}
                     disabled={busy || inFlight || !titleDraft.trim()}
                   >
@@ -573,6 +574,7 @@ function CardDetailDrawer({
                   </button>
                   <button
                     type="button"
+                    className="qb-btn card-drawer__cancel-btn"
                     onClick={cancelEdit}
                     disabled={busy || inFlight}
                   >
@@ -582,9 +584,12 @@ function CardDetailDrawer({
               </div>
             ) : (
               <>
-                {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
-                    view state stays "rendered"/"source" (aria-pressed/state
-                    mechanics byte-identical); only the VISIBLE labels changed. */}
+                {/* Segmented Quest | Scroll (MD) toggle (HANDOFF labels;
+                    WF-096 restyled it onto the shared `.qb-btn` Role-A
+                    recipe, matching the topbar/atlas segmented controls) —
+                    internal view state stays "rendered"/"source" and the
+                    aria-pressed/state mechanics are unchanged either way,
+                    only the paint/labels moved. */}
                 <div
                   className="card-drawer__viewtoggle"
                   role="group"
@@ -592,6 +597,7 @@ function CardDetailDrawer({
                 >
                   <button
                     type="button"
+                    className="qb-btn card-drawer__viewtoggle-btn"
                     aria-pressed={view === "rendered"}
                     onClick={() => setView("rendered")}
                   >
@@ -599,6 +605,7 @@ function CardDetailDrawer({
                   </button>
                   <button
                     type="button"
+                    className="qb-btn card-drawer__viewtoggle-btn"
                     aria-pressed={view === "source"}
                     onClick={() => setView("source")}
                   >
