@@ -5834,7 +5834,8 @@ button.trail-tag:focus-visible {
   }
 
   .lane-icon-nav__item--backlog.lane-icon-nav__item--active {
-    background: var(--qb-accent-forest-fill);
+    /* Backlog is status-coloured blue (todo) — matches the lane header/wash. */
+    background: var(--qb-accent-sky-fill);
   }
 
   .lane-icon-nav__item--bootstrap.lane-icon-nav__item--active {
@@ -5864,7 +5865,9 @@ button.trail-tag:focus-visible {
   }
 
   .lane-icon-nav__item--done.lane-icon-nav__item--active {
-    background: var(--qb-accent-umber-fill);
+    /* Done is the earthy status green (was the umber lane accent, which read
+       as a funky olive-mustard next to the green cards/header). */
+    background: var(--qb-status-done-base);
   }
 
   .lane-icon-nav__item--parked.lane-icon-nav__item--active {
