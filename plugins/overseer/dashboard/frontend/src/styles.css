@@ -5220,6 +5220,10 @@ a.card-drawer__pr-chip:hover {
   display: block;
   width: 100%;
   height: 100%;
+  /* The boss monster is taller than the lane; let it draw past the lane's top
+     and bottom into the row's empty space instead of being clipped by the
+     SVG viewport. */
+  overflow: visible;
 }
 
 /* Feature 1 (wide-view overspill): AtlasTrail.tsx (Across mode) sets the

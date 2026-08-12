@@ -6,7 +6,6 @@ import {
   BEAST_ICON_SIZE_PX,
   CAMPFIRE_GAP_PX,
   TRAILHEAD_ICON_SIZE_PX,
-  TRAILHEAD_RESERVE_PX,
   WAYPOINT_GAP_PX,
   beastAnchorX,
   boundaryX,
@@ -467,7 +466,14 @@ function AtlasTrail({
 
         <g
           className="atlas-trail__trailhead"
-          transform={`translate(0, ${t.yAt(TRAILHEAD_RESERVE_PX) - TRAILHEAD_ICON_SIZE_PX / 2})`}
+          // Anchor the village vertically to the path's ACTUAL start point
+          // (yAt at the village's own centre-x, = the line's `drawStart`), not
+          // yAt(TRAILHEAD_RESERVE_PX) — otherwise, wherever the wobble climbs or
+          // dips between the two, the line's first point floats above/below the
+          // village. Now the line always emerges from under the village.
+          transform={`translate(0, ${
+            t.yAt(TRAILHEAD_ICON_SIZE_PX / 2) - TRAILHEAD_ICON_SIZE_PX / 2
+          })`}
         >
           <image
             href={trailheadIcon}
