@@ -5446,7 +5446,13 @@ a.card-drawer__pr-chip:hover {
 
 .atlas-preview-card {
   position: absolute;
-  inset: 0;
+  /* Floats ON TOP of the epic card (not a full-cover replacement): pinned near
+     the card's top with auto height, so the epic card stays visible below it,
+     and a soft lift shadow so it reads as a separate popup layer sitting over
+     the card. */
+  top: 8px;
+  left: 8px;
+  right: 8px;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -5455,7 +5461,7 @@ a.card-drawer__pr-chip:hover {
   background: var(--legacy-color-fff);
   border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
   border-radius: var(--qb-radius-card-a);
-  box-shadow: none;
+  box-shadow: 0 5px 14px -5px rgba(58, 42, 24, 0.45);
   font-size: 0.75rem;
   text-align: left;
   cursor: pointer;
@@ -6202,11 +6208,10 @@ button.trail-tag:focus-visible {
     background: var(--qb-bg-page);
     padding: 0.5rem 0.4rem;
     margin-bottom: 0.3rem;
-    /* Impl-review round 1, finding 8 (HANDOFF: "soft right-edge shadow") —
-       a soft ink shadow bleeding off the rail's right edge, so the trail
-       passing beneath it (opaque background, above) reads as sliding UNDER
-       a physically raised strip rather than just stopping at a hard line. */
-    box-shadow: 6px 0 10px -6px rgba(58, 42, 24, 0.35);
+    /* No right-edge shadow — the epic card container reads flat (per the ask).
+       The trail still passes UNDER the rail via its opaque background + z-index
+       above the overlay layer; it just meets the rail at a clean edge now. */
+    box-shadow: none;
   }
 
   .atlas-rail-card {
