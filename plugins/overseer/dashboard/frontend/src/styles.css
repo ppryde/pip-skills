@@ -219,16 +219,22 @@
        -soft   = base 24% over white  → lightest; fills/washes/tag backgrounds
        -base   = the base hue itself  → mid; borders/accents
        -strong = base 62% over #2c2015 (dark ink) → darkest; text
-     done/in-progress/todo/parked/abandoned reuse the lane accent tokens as
-     their base (that's "same colour set, separate namespace"); blocked is
+     in-progress/todo/parked/abandoned reuse the lane accent tokens as their
+     base (that's "same colour set, separate namespace"); done now has its
+     own decoupled base (see below — no longer reuses forest); blocked is
      the one status that introduces a hue no lane owns.
      REMAP (this pass): todo purple → sky blue, in-progress sky blue →
-     orange, done stays forest green; blocked/parked/abandoned unchanged
-     (blocked nudged redder — see below — to stay distinct from the new
-     in-progress orange). The old #9d86d4 todo purple is retired. */
-  --qb-status-done-soft: color-mix(in srgb, var(--qb-accent-forest-fill) 24%, white);
-  --qb-status-done-base: var(--qb-accent-forest-fill); /* #8fbf5e — lane forest green */
-  --qb-status-done-strong: color-mix(in srgb, var(--qb-accent-forest-fill) 62%, #2c2015);
+     orange, done decoupled from forest into its own darker earthy green;
+     blocked/parked/abandoned unchanged (blocked nudged redder — see below —
+     to stay distinct from the new in-progress orange). The old #9d86d4
+     todo purple is retired. */
+  --qb-status-done-soft: color-mix(in srgb, var(--qb-status-done-base) 24%, white);
+  --qb-status-done-base: #6a9449; /* decoupled from --qb-accent-forest-fill (WF-follow-up):
+    forest's #8fbf5e read as too bright/luminous for a completed-status colour, but forest
+    is still owned by the Atlas backlog stage accent + a couple of stat badges, so DONE gets
+    its own darker, muted, earthy green instead of sharing forest's token. Soft/strong below
+    are now derived off THIS base (not forest) so the whole done ramp moves together. */
+  --qb-status-done-strong: color-mix(in srgb, var(--qb-status-done-base) 62%, #2c2015);
 
   /* in-progress — REMAPPED (was lane sky blue) to lane orange, so "at hand"
      reads as a warm, active hue instead of borrowing todo's old blue. */
@@ -1722,11 +1728,12 @@ body {
 }
 
 /* Status-coloured (green done): Done is the `done` top-level status, so
-   this now reuses the forest accent — the same hue as `--qb-status-done-*`
-   — rather than the old olive/umber. */
+   this reads `--qb-status-done-base` directly — the DONE ramp's own
+   decoupled earthy green (WF-follow-up) — rather than the brighter forest
+   lane accent it briefly reused, or the old olive/umber before that. */
 .lane__header--done {
-  background: color-mix(in srgb, var(--qb-accent-forest-fill) 38%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 60%, white);
+  background: color-mix(in srgb, var(--qb-status-done-base) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-status-done-base) 60%, white);
 }
 
 .lane__header--parked {
@@ -1769,6 +1776,13 @@ body {
    `.lane__header--in-progress` above. */
 .lane--accent-in-progress {
   background: color-mix(in srgb, var(--qb-accent-orange-fill) 20%, transparent);
+}
+/* Done lane gets a green wash like the other status lanes (overrides the
+   parchment-muted `.lane--done` fill above — declared later so it wins) so
+   the whole Done swimlane reads green, not just its header. Uses the earthy
+   `--qb-status-done-base`, matching the header/cards. */
+.lane--accent-done {
+  background: color-mix(in srgb, var(--qb-status-done-base) 20%, transparent);
 }
 .lane--accent-planning,
 .lane--accent-plan-review,
@@ -1845,11 +1859,13 @@ body {
 }
 
 /* Status-coloured (green done): Done is the `done` top-level status — see
-   `.lane__header--done` above. */
+   `.lane__header--done` above. Border/shadow are mixed off the DONE base
+   itself (not the forest border/cardshadow tokens) so the card doesn't
+   pair the new darker green fill with a mismatched bright/tan trim. */
 .card-tile--accent-done {
-  --card-accent-fill: var(--qb-accent-forest-fill);
-  --card-accent-border: var(--qb-accent-forest-border);
-  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
+  --card-accent-fill: var(--qb-status-done-base);
+  --card-accent-border: color-mix(in srgb, var(--qb-status-done-base) 70%, #2c2015);
+  --card-accent-shadow: var(--qb-status-done-strong);
 }
 
 .card-tile--accent-parked {
