@@ -1690,9 +1690,12 @@ body {
    (radius/border), so these only ever set background + border. Held a
    touch stronger than the trail tags' 30%/55% (38%/60%) since a lane header
    anchors a whole column rather than floating over parchment. */
+/* Status-coloured (blue todo): Backlog is the `planned` top-level status,
+   so this now reuses the sky accent — the same hue as `--qb-status-todo-*`
+   — rather than the old forest green. */
 .lane__header--backlog {
-  background: color-mix(in srgb, var(--qb-accent-forest-fill) 38%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 60%, white);
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 60%, white);
 }
 
 .lane__header--bootstrap {
@@ -1718,9 +1721,12 @@ body {
   border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 60%, white);
 }
 
+/* Status-coloured (green done): Done is the `done` top-level status, so
+   this now reuses the forest accent — the same hue as `--qb-status-done-*`
+   — rather than the old olive/umber. */
 .lane__header--done {
-  background: color-mix(in srgb, var(--qb-accent-umber-fill) 38%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-umber-fill) 60%, white);
+  background: color-mix(in srgb, var(--qb-accent-forest-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-forest-fill) 60%, white);
 }
 
 .lane__header--parked {
@@ -1734,12 +1740,15 @@ body {
 }
 
 /* WF-085 in-progress lane (mobile-only — `collapseStagesForMobile`'s
-   synthetic lane never exists on desktop): reuses the amber accent group
-   rather than inventing a new one, since it's the umbrella over all 7
-   stages this lane replaces on a phone. */
+   synthetic lane never exists on desktop). Status-coloured (orange
+   in-progress): this is the umbrella over all 7 stages this lane replaces
+   on a phone, and the `in-flight` top-level status is orange (the same
+   hue as `--qb-status-in-progress-*`), so every stage reads consistently
+   orange here regardless of sub-stage — no longer the amber bootstrap
+   group. */
 .lane__header--in-progress {
-  background: color-mix(in srgb, var(--qb-accent-amber-fill) 38%, white);
-  border: 1.5px solid color-mix(in srgb, var(--qb-accent-amber-fill) 60%, white);
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-orange-fill) 60%, white);
 }
 
 /* WF-092: light lane fill — the same per-accent groups as the header banners
@@ -1747,12 +1756,19 @@ body {
    tint of each column's own hue, not the old flat panel grey). Keyed on the
    lane root's `lane--accent-<key>` (Lane.tsx). Parked/Done/Abandoned are
    deliberately absent — they keep the parchment status fill above. */
+/* Status-coloured (blue todo) — see `.lane__header--backlog` above. */
 .lane--accent-backlog {
-  background: color-mix(in srgb, var(--qb-accent-forest-fill) 20%, transparent);
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 20%, transparent);
 }
-.lane--accent-bootstrap,
-.lane--accent-in-progress {
+.lane--accent-bootstrap {
   background: color-mix(in srgb, var(--qb-accent-amber-fill) 20%, transparent);
+}
+/* WF-085 in-progress lane, split out of the `.lane--accent-bootstrap` amber
+   group it used to share (desktop `.lane--accent-bootstrap` above still
+   owns that group on its own). Status-coloured (orange in-progress) — see
+   `.lane__header--in-progress` above. */
+.lane--accent-in-progress {
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 20%, transparent);
 }
 .lane--accent-planning,
 .lane--accent-plan-review,
@@ -1804,43 +1820,36 @@ body {
    a legacy fallback for accent-less renders (e.g. isolated component tests
    that mount TileShell without a Lane-computed accentKey). Mirrors the
    lane__header accent grouping one chunk up. */
+/* Status-coloured (blue todo): Backlog is the `planned` top-level status —
+   see `.lane__header--backlog` above. */
 .card-tile--accent-backlog {
-  --card-accent-fill: var(--qb-accent-forest-fill);
-  --card-accent-border: var(--qb-accent-forest-border);
-  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
-}
-
-.card-tile--accent-bootstrap {
-  --card-accent-fill: var(--qb-accent-amber-fill);
-  --card-accent-border: var(--qb-accent-amber-border);
-  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
-}
-
-.card-tile--accent-planning,
-.card-tile--accent-plan-review,
-.card-tile--accent-verification {
   --card-accent-fill: var(--qb-accent-sky-fill);
   --card-accent-border: var(--qb-accent-sky-border);
   --card-accent-shadow: var(--qb-accent-sky-cardshadow);
 }
 
+/* Status-coloured (orange in-progress): all 7 in-flight stage keys share
+   the orange accent now, so every in-flight card reads orange regardless
+   of sub-stage — sub-status colouring is a later pass. See
+   `.lane__header--in-progress` above. */
+.card-tile--accent-bootstrap,
+.card-tile--accent-planning,
+.card-tile--accent-plan-review,
+.card-tile--accent-verification,
 .card-tile--accent-implementation,
-.card-tile--accent-impl-review {
+.card-tile--accent-impl-review,
+.card-tile--accent-awaiting-merge {
   --card-accent-fill: var(--qb-accent-orange-fill);
   --card-accent-border: var(--qb-accent-orange-border);
   --card-accent-shadow: var(--qb-accent-orange-cardshadow);
 }
 
-.card-tile--accent-awaiting-merge {
-  --card-accent-fill: var(--qb-accent-rose-fill);
-  --card-accent-border: var(--qb-accent-rose-border);
-  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
-}
-
+/* Status-coloured (green done): Done is the `done` top-level status — see
+   `.lane__header--done` above. */
 .card-tile--accent-done {
-  --card-accent-fill: var(--qb-accent-umber-fill);
-  --card-accent-border: var(--qb-accent-umber-border);
-  --card-accent-shadow: var(--qb-accent-umber-cardshadow);
+  --card-accent-fill: var(--qb-accent-forest-fill);
+  --card-accent-border: var(--qb-accent-forest-border);
+  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
 }
 
 .card-tile--accent-parked {
@@ -1855,11 +1864,17 @@ body {
   --card-accent-shadow: var(--qb-accent-ash-cardshadow);
 }
 
-/* WF-085 in-progress lane (mobile-only) — see `.lane__header--in-progress`. */
+/* WF-085 in-progress lane (mobile-only) — the accent key its cards
+   actually carry (Lane.tsx: `kind:"in-progress"` cards use the lane's own
+   `accentKey`, not their individual stage), so this is the rule that
+   colours mobile in-flight cards, not the 7 desktop stage-key rules above.
+   Status-coloured (orange in-progress), same as `.lane__header--in-progress`
+   and the stage-key group above — every in-flight card reads orange
+   regardless of sub-stage. */
 .card-tile--accent-in-progress {
-  --card-accent-fill: var(--qb-accent-amber-fill);
-  --card-accent-border: var(--qb-accent-amber-border);
-  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
+  --card-accent-fill: var(--qb-accent-orange-fill);
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
 }
 
 .card-tile {
@@ -5810,11 +5825,11 @@ button.trail-tag:focus-visible {
     background: var(--qb-accent-amber-fill);
   }
 
-  /* WF-085 in-progress lane: same amber family as `.lane__header--in-progress` /
-     `.card-tile--accent-in-progress` — one accent, everywhere this merged
-     mobile-only lane shows up. */
+  /* In Progress lane: orange, matching `.lane__header--in-progress` /
+     `.card-tile--accent-in-progress` — status-coloured (in-flight = orange),
+     one accent everywhere this merged lane's nav icon shows up. */
   .lane-icon-nav__item--in-progress.lane-icon-nav__item--active {
-    background: var(--qb-accent-amber-fill);
+    background: var(--qb-accent-orange-fill);
   }
 
   .lane-icon-nav__item--planning.lane-icon-nav__item--active,
