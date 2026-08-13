@@ -212,6 +212,7 @@ function TileShell({
               ⑃ {card.branch}
             </span>
           ) : (
+            !card.claimed_by &&
             card.status !== "done" &&
             card.status !== "abandoned" && (
               <span

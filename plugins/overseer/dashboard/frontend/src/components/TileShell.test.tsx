@@ -313,6 +313,21 @@ describe('TileShell "Awaiting a hero" badge (task 10)', () => {
     const { container } = renderTile(card({ id: "WF-PARKED-NOBRANCH", status: "parked" }));
     expect(container.querySelector(".awaiting-hero-chip")).not.toBeNull();
   });
+
+  it("hides Awaiting-a-hero when the card is claimed", () => {
+    renderTile(
+      card({ id: "WF-HASOWNER-INFLIGHT", claimed_by: "sess-1", status: "in-flight" })
+    );
+    expect(screen.queryByText(/Awaiting a hero/i)).toBeNull();
+    expect(screen.getByText(/claimed/i)).toBeInTheDocument();
+  });
+
+  it("shows Awaiting-a-hero when unclaimed and branchless", () => {
+    renderTile(
+      card({ id: "WF-UNCLAIMED-PLANNED", claimed_by: null, status: "planned" })
+    );
+    expect(screen.getByText(/Awaiting a hero/i)).toBeInTheDocument();
+  });
 });
 
 describe("TileShell branch filter dim/spotlight (WF-031)", () => {
