@@ -2103,7 +2103,8 @@ body {
 }
 
 .card-tile__id {
-  font-family: ui-monospace, Menlo, monospace;
+  /* Silkscreen pixel font — matches the detail drawer's `.card-drawer__id`. */
+  font-family: var(--qb-font-mono);
   font-size: 0.7rem;
   color: var(--legacy-color-6b7280);
 }
