@@ -6597,8 +6597,8 @@ button.trail-tag:focus-visible {
   align-items: center;
 }
 .card-tile__lifecycle-icon {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
 }
 @media (prefers-reduced-motion: no-preference) {
   .card-tile__lifecycle-icon.is-glowing {
