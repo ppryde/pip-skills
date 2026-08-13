@@ -11,6 +11,10 @@ export interface CardTileProps {
   /** WF-031 branch filter — see TileShell's doc comment. */
   branchDimmed?: boolean;
   branchSpotlight?: boolean;
+  /** Task 6: true while this card's `cardIconKey` changed within the last
+   * 60s (App.tsx's `useIconKeyGlow`, threaded via Lane) — passed straight
+   * through to `TileShell`'s `is-glowing` treatment. */
+  glowing?: boolean;
   dragDisabled?: boolean;
   /** Chunk 5: clicking the tile body opens the detail drawer for this card. */
   onOpen?: (id: string) => void;
@@ -30,6 +34,7 @@ function CardTile({
   highlighted = false,
   branchDimmed = false,
   branchSpotlight = false,
+  glowing = false,
   dragDisabled = false,
   onOpen,
   colorRegistry,
@@ -42,6 +47,7 @@ function CardTile({
       highlighted={highlighted}
       branchDimmed={branchDimmed}
       branchSpotlight={branchSpotlight}
+      glowing={glowing}
       dragDisabled={dragDisabled}
       onOpen={onOpen}
       colorRegistry={colorRegistry}

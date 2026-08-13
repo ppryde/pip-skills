@@ -49,6 +49,9 @@ export interface BoardProps {
    * placement below; sprints/quarantined/party are untouched by it (the
    * filter bar only ever curates cards). */
   visibleIds: Set<string>;
+  /** Task 6: ids currently within their 60s post-icon-change glow window
+   * (App.tsx's `useIconKeyGlow`) — passed straight through to every Lane. */
+  glowingIds: Set<string>;
 }
 
 /**
@@ -76,6 +79,7 @@ function Board({
   activeBranch,
   threshold,
   visibleIds,
+  glowingIds,
 }: BoardProps) {
   // Filtered once, up front — every lane/epic-grouping consumer below reads
   // this instead of `board.cards` directly. `visibleCardIds` (cardFilter.ts)
@@ -400,6 +404,7 @@ function Board({
             dragDisabled={inFlight}
             onOpenCard={onOpenCard}
             activeBranch={activeBranch}
+            glowingIds={glowingIds}
             // F10 editable colour registry (WF-067) — straight off the
             // board payload's `label_colors`, threaded to every tile's
             // LabelChips via Lane -> CardTile/EpicCard -> TileShell.

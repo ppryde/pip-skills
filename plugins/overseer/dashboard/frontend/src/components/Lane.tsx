@@ -18,6 +18,11 @@ export interface LaneProps {
    * state above. A card with NO branch (never started) stays neutral: it's
    * not "on another branch", it just hasn't got one yet (task 10). */
   activeBranch: string | null;
+  /** Task 6: ids currently within their 60s post-icon-change glow window
+   * (App.tsx's `useIconKeyGlow`) — mirrors `activeBranch` above: Lane
+   * derives a per-card boolean (`glowing`) from this set and passes it
+   * straight through to `<CardTile>`/`<EpicCard>`. */
+  glowingIds: Set<string>;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * threaded through to every CardTile/EpicCard's LabelChips. */
   colorRegistry?: Record<string, string>;
@@ -41,6 +46,7 @@ function Lane({
   dragDisabled,
   onOpenCard,
   activeBranch,
+  glowingIds,
   colorRegistry,
 }: LaneProps) {
   const { setNodeRef } = useDroppable({ id: lane.key });
@@ -104,6 +110,7 @@ function Lane({
                 card.branch !== activeBranch;
               const branchSpotlight =
                 activeBranch !== null && card.branch === activeBranch;
+              const glowing = glowingIds.has(card.id);
 
               return card.is_epic ? (
                 <EpicCard
@@ -116,6 +123,7 @@ function Lane({
                   highlighted={highlighted}
                   branchDimmed={branchDimmed}
                   branchSpotlight={branchSpotlight}
+                  glowing={glowing}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                   colorRegistry={colorRegistry}
@@ -129,6 +137,7 @@ function Lane({
                   highlighted={highlighted}
                   branchDimmed={branchDimmed}
                   branchSpotlight={branchSpotlight}
+                  glowing={glowing}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                   colorRegistry={colorRegistry}
