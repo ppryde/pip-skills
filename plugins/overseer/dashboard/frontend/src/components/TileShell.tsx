@@ -258,7 +258,7 @@ function TileShell({
           */}
           {card.claimed_by && (
             <span className="claim-badge" title={card.claimed_by}>
-              hero assigned
+              ⚑ hero assigned
             </span>
           )}
           {card.status === "blocked" && (
