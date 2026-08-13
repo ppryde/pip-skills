@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import InfoTooltip from "./InfoTooltip";
 
@@ -28,5 +28,19 @@ describe("<InfoTooltip/>", () => {
     expect(screen.getByRole("tooltip")).toBeInTheDocument();
     fireEvent.click(trigger);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+});
+
+describe("InfoTooltip custom trigger", () => {
+  it("renders a custom trigger and toggles the bubble", () => {
+    render(<InfoTooltip label="stage" trigger={<span>ICON</span>}>Impl Review</InfoTooltip>);
+    fireEvent.click(screen.getByText("ICON"));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Impl Review");
+  });
+  it("stops click propagation to a parent handler", () => {
+    const parent = vi.fn();
+    render(<div onClick={parent}><InfoTooltip label="s" trigger={<span>ICON</span>}>x</InfoTooltip></div>);
+    fireEvent.click(screen.getByText("ICON"));
+    expect(parent).not.toHaveBeenCalled();
   });
 });
