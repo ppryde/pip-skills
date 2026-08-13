@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import type { BoardCard, Rollup } from "../api/types";
-import { BEAST_RESERVE_PX, TRAILHEAD_ICON_SIZE_PX, TRAILHEAD_RESERVE_PX } from "../board/atlasTrailLayout";
+import { BEAST_ANCHOR_OFFSET_PX, BEAST_RESERVE_PX, TRAILHEAD_ICON_SIZE_PX, TRAILHEAD_RESERVE_PX } from "../board/atlasTrailLayout";
 import { beastFor } from "../board/beastName";
 import { formatTokens } from "../board/formatTokens";
 import AtlasTrail from "./AtlasTrail";
@@ -51,7 +51,13 @@ const PX_PER_WEIGHT = 20;
 function renderTrail(
   epic: BoardCard,
   childCards: BoardCard[],
-  overrides: Partial<{ rollup: Rollup; showNames: boolean; laneWidth: number; pxPerWeight: number }> = {}
+  overrides: Partial<{
+    rollup: Rollup;
+    showNames: boolean;
+    trailWidth: number;
+    pxPerWeight: number;
+    onOpenCard: (id: string) => void;
+  }> = {}
 ) {
   const cardsById = new Map<string, BoardCard>([epic, ...childCards].map((c) => [c.id, c]));
   return render(
@@ -61,8 +67,9 @@ function renderTrail(
       childCards={childCards}
       cardsById={cardsById}
       pxPerWeight={overrides.pxPerWeight ?? PX_PER_WEIGHT}
-      laneWidth={overrides.laneWidth ?? 600}
+      trailWidth={overrides.trailWidth ?? 600}
       showNames={overrides.showNames ?? true}
+      onOpenCard={overrides.onOpenCard ?? vi.fn()}
     />
   );
 }
@@ -140,12 +147,12 @@ describe("<AtlasTrail/>", () => {
     expect(tooltipTexts(container).some((t) => t.includes("the quest at hand"))).toBe(true);
   });
 
-  it("in-flight epic: when the in-progress child IS the last child (no todos after it), the AT-HAND pennant label is suppressed — marker and tooltip still render", () => {
+  it("in-flight epic: the in-progress child that is also the last child STILL gets its AT-HAND ring, pennant, and tooltip", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
     const { container } = renderTrail(epic, [prog]);
     expect(container.querySelector(".at-hand-ring")).toBeInTheDocument();
-    expect(container.querySelector(".atlas-trail__pennant--athand")).not.toBeInTheDocument();
+    expect(container.querySelector(".atlas-trail__pennant--athand")).toBeInTheDocument();
     expect(tooltipTexts(container).some((t) => t.includes("the quest at hand"))).toBe(true);
   });
 
@@ -205,11 +212,8 @@ describe("<AtlasTrail/>", () => {
     expect(hidden.container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
   });
 
-  it("todo child name-tags alternate between two vertical tiers so adjacent tags never collide", () => {
+  it("todo child name-tags alternate above and below the path so adjacent tags never collide", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
-    // Three children so the tier-alternation check lands on the first TWO
-    // (non-last) tags — the third (last) child's own tag is suppressed
-    // (round 2, finding 5's beast-clearance rule) regardless of tiering.
     const kids = [
       child({ id: "k1", title: "First", status: "planned", complexity: "S", order: 1 }),
       child({ id: "k2", title: "Second", status: "planned", complexity: "S", order: 2 }),
@@ -217,8 +221,39 @@ describe("<AtlasTrail/>", () => {
     ];
     const { container } = renderTrail(epic, kids, { showNames: true });
     const tags = Array.from(container.querySelectorAll(".trail-tag--todo"));
-    expect(tags.length).toBe(2);
-    expect(tags[0].className).not.toBe(tags[1].className);
+    // All three show (incl. the last) and alternate above / below / above.
+    expect(tags.length).toBe(3);
+    expect(tags[0]).not.toHaveClass("trail-tag--below");
+    expect(tags[1]).toHaveClass("trail-tag--below");
+    expect(tags[2]).not.toHaveClass("trail-tag--below");
+    // Above and below anchor from opposite edges of their own box.
+    expect((tags[0] as HTMLElement).style.transform).toContain("-100%");
+    expect((tags[1] as HTMLElement).style.transform).not.toContain("-100%");
+  });
+
+  // Task 2: the above/below alternation is keyed off ONE running counter
+  // shared across the done AND todo groups (Feature 3's greyed done tags
+  // included), not two independent per-group counters — otherwise the
+  // zig-zag would reset (or collide) wherever a done stretch hands off to a
+  // todo one.
+  it("the above/below alternation uses one shared counter across the done AND todo groups, in trail order", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const kids = [
+      child({ id: "k1", title: "Cleared First", status: "done", complexity: "S", order: 1 }),
+      child({ id: "k2", title: "Todo Second", status: "planned", complexity: "S", order: 2 }),
+      child({ id: "k3", title: "Todo Third", status: "planned", complexity: "S", order: 3 }),
+    ];
+    const { container } = renderTrail(epic, kids, { showNames: true });
+    // Trail order is done -> todo -> todo (orderChildrenForTrail); all three
+    // render, alternating above / below / above off the one shared counter.
+    const tags = Array.from(container.querySelectorAll(".trail-tag"));
+    expect(tags.length).toBe(3);
+    expect(tags[0]).toHaveClass("trail-tag--done");
+    expect(tags[0]).not.toHaveClass("trail-tag--below");
+    expect(tags[1]).toHaveClass("trail-tag--todo");
+    expect(tags[1]).toHaveClass("trail-tag--below");
+    expect(tags[2]).toHaveClass("trail-tag--todo");
+    expect(tags[2]).not.toHaveClass("trail-tag--below");
   });
 
   it("blocked child (open depends_on): renders the boulder overlay with a 'the way is barred' tooltip", () => {
@@ -238,6 +273,25 @@ describe("<AtlasTrail/>", () => {
     expect(container.querySelector(".atlas-trail__boulder")).not.toBeInTheDocument();
   });
 
+  it("a blocked child's name-tag carries trail-tag--blocked (rose pastel) alongside trail-tag--todo", () => {
+    const epic = card({ id: "WF-085", status: "in-flight" });
+    const blocker = child({ id: "WF-DEP", status: "in-flight" });
+    const blocked = child({
+      id: "k1",
+      title: "Barred Quest",
+      status: "planned",
+      complexity: "S",
+      depends_on: ["WF-DEP"],
+      order: 1,
+    });
+    const later = child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 });
+    const { container } = renderTrail(epic, [blocked, blocker, later]);
+    const tag = Array.from(container.querySelectorAll(".trail-tag--todo")).find(
+      (el) => el.textContent === "Barred Quest"
+    );
+    expect(tag).toHaveClass("trail-tag--blocked");
+  });
+
   it("heavier children yield a longer trail than lighter ones on the same shared pxPerWeight scale", () => {
     const heavyEpic = card({ id: "WF-HEAVY", status: "in-flight" });
     const heavyKid = child({ id: "h1", status: "done", complexity: "XL" });
@@ -254,7 +308,7 @@ describe("<AtlasTrail/>", () => {
     expect(heavyX).toBeGreaterThan(lightX);
   });
 
-  it("re-measures its own HEIGHT on ResizeObserver callback (width comes from the shared laneWidth prop, not its own measurement)", () => {
+  it("re-measures its own HEIGHT on ResizeObserver callback (width comes from the shared trailWidth prop, not its own measurement)", () => {
     let capturedCallback: ResizeObserverCallback | null = null;
     class MockResizeObserver {
       constructor(cb: ResizeObserverCallback) {
@@ -267,7 +321,7 @@ describe("<AtlasTrail/>", () => {
     vi.stubGlobal("ResizeObserver", MockResizeObserver);
 
     const epic = card({ id: "WF-085", status: "in-flight" });
-    const { container } = renderTrail(epic, [], { laneWidth: 500 });
+    const { container } = renderTrail(epic, [], { trailWidth: 500 });
 
     expect(capturedCallback).not.toBeNull();
     act(() => {
@@ -278,7 +332,7 @@ describe("<AtlasTrail/>", () => {
     });
 
     const svg = container.querySelector("svg")!;
-    // Width tracks the laneWidth PROP (500), never the ResizeObserver's own
+    // Width tracks the trailWidth PROP (500), never the ResizeObserver's own
     // width reading (999) — only height is self-measured.
     expect(svg.getAttribute("viewBox")).toBe("0 0 500 220");
   });
@@ -325,31 +379,32 @@ describe("<AtlasTrail/>", () => {
     // pick a weight that keeps the raw anchor comfortably short of any
     // defensive clamp so this asserts the NORMAL (unclamped) path.
     const kid = child({ id: "k1", status: "done", complexity: "M" }); // weight 2
-    const { container } = renderTrail(epic, [kid], { laneWidth: 600, pxPerWeight: 20 });
+    const { container } = renderTrail(epic, [kid], { trailWidth: 600, pxPerWeight: 20 });
 
     const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
     const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
-    // trailEnd = TRAILHEAD_RESERVE_PX + 2*20; anchor = trailEnd + 26.
+    // trailEnd = TRAILHEAD_RESERVE_PX + 2*20; anchor = trailEnd + offset.
     const expectedTrailEnd = TRAILHEAD_RESERVE_PX + 2 * 20;
-    expect(beastX).toBeCloseTo(expectedTrailEnd + 26, 5);
+    expect(beastX).toBeCloseTo(expectedTrailEnd + BEAST_ANCHOR_OFFSET_PX, 5);
   });
 
-  it("never lets the beast's own footprint overflow a lane whose heaviest epic exactly saturates the shared scale", () => {
-    // usable = laneWidth - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX; a
+  it("never lets the beast's own footprint overflow a trailWidth whose heaviest epic exactly saturates the shared scale", () => {
+    // usable = trailWidth - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX; a
     // pxPerWeight computed so THIS epic's total weight * pxPerWeight ==
-    // usable exactly reproduces "the heaviest epic spans the lane" — the
-    // beast's right edge (beastX + 48) must still land at/under laneWidth.
-    const laneWidth = 300;
-    const usable = laneWidth - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX;
+    // usable exactly reproduces "the heaviest epic spans the trail width"
+    // (EpicAtlas.tsx's own trailWidth formula) — the beast's right edge
+    // (beastX + 48) must still land at/under trailWidth.
+    const trailWidth = 300;
+    const usable = trailWidth - BEAST_RESERVE_PX - TRAILHEAD_RESERVE_PX;
     const totalWeightUnits = 4; // one XL child
     const pxPerWeight = usable / totalWeightUnits;
     const epic = card({ id: "WF-SATURATED", status: "in-flight" });
     const kid = child({ id: "k1", status: "done", complexity: "XL" });
-    const { container } = renderTrail(epic, [kid], { laneWidth, pxPerWeight });
+    const { container } = renderTrail(epic, [kid], { trailWidth, pxPerWeight });
 
     const beastTransform = container.querySelector(".atlas-trail__beast")!.getAttribute("transform")!;
     const beastX = Number(beastTransform.match(/translate\(([\d.-]+),/)![1]);
-    expect(beastX + 48).toBeLessThanOrEqual(laneWidth + 0.01);
+    expect(beastX + 48).toBeLessThanOrEqual(trailWidth + 0.01);
   });
 
   // Impl-review round 1, finding 3: a parked epic with ZERO done and ZERO
@@ -362,22 +417,22 @@ describe("<AtlasTrail/>", () => {
     const { container } = renderTrail(epic, [todo]);
 
     expect(container.querySelector(".atlas-trail__campfire")).toBeInTheDocument();
-    // TRAILHEAD_RESERVE_PX is both the campfire's fallback position and
-    // the first segment's own start — a real cut there means the first
-    // rendered path segment starts measurably AFTER it, not exactly at it.
-    const firstPathD = container.querySelector(".atlas-trail__path")!.getAttribute("d")!;
-    const firstPathStartX = Number(firstPathD.match(/^M([\d.]+)/)![1]);
-    expect(firstPathStartX).toBeGreaterThan(TRAILHEAD_RESERVE_PX + 6); // clear of the 12px campfire gap's near edge
+    // TRAILHEAD_RESERVE_PX is the campfire's fallback position for an all-todo
+    // parked epic. The line now starts under the trailhead village (left of
+    // TRAILHEAD_RESERVE_PX), so a real campfire cut there splits it into a
+    // lead-in piece that STARTS before that x and a resume piece that STARTS
+    // after it — the gap.
+    const startXs = Array.from(
+      container.querySelectorAll(".atlas-trail__path")
+    ).map((p) => Number(p.getAttribute("d")!.match(/^M([\d.]+)/)![1]));
+    expect(startXs.some((x) => x < TRAILHEAD_RESERVE_PX)).toBe(true); // lead-in under the village
+    expect(startXs.some((x) => x > TRAILHEAD_RESERVE_PX)).toBe(true); // resumes past the campfire gap
   });
 
-  // Impl-review round 2, finding 5: the LAST-ordered child's marker sits
-  // exactly at the trail's true end by construction (its segment's own
-  // `end` IS `trailEnd`) — only BEAST_ANCHOR_OFFSET_PX(26) away from the
-  // beast's own left edge. A centred name-tag on that marker routinely
-  // crowds/overlaps the beast doodle; earlier (non-last) children have no
-  // such constraint. This is true on every trail — "short trails" in the
-  // review's own observation was just where it happened to be noticed.
-  it("suppresses the LAST todo child's name-tag (it would crowd the beast) but keeps an earlier todo child's tag", () => {
+  // Every quest gets its on-trail name-tag now — including the LAST child (the
+  // one right before the beast). It used to be suppressed for beast-clearance,
+  // but that hid one label per journey; the label wins.
+  it("shows every todo child's name-tag, including the last one before the beast", () => {
     const epic = card({ id: "WF-085", status: "in-flight" });
     const kids = [
       child({ id: "k1", title: "Earlier Quest", status: "planned", complexity: "S", order: 1 }),
@@ -387,22 +442,102 @@ describe("<AtlasTrail/>", () => {
 
     const tags = Array.from(container.querySelectorAll(".trail-tag--todo")).map((el) => el.textContent);
     expect(tags).toContain("Earlier Quest");
-    expect(tags).not.toContain("Final Quest");
+    expect(tags).toContain("Final Quest");
 
-    // The suppressed child's own WAYPOINT marker and full-name tooltip
-    // still render fine — only the on-trail label is dropped.
+    // Both waypoint markers render too.
     expect(container.querySelectorAll(".atlas-trail__waypoint--todo").length).toBe(2);
     expect(tooltipTexts(container).some((t) => t.startsWith("Final Quest —"))).toBe(true);
   });
 
-  it("an in-flight epic where the LAST child is a todo (nothing done/at-hand) still suppresses only that last tag", () => {
-    // A degenerate but real case: an epic that's marching (in-flight) but
-    // whose only children so far are todo — the "last" child is also the
-    // FIRST/only one, same geometry as the single-child case above.
+  it("an in-flight epic with a single todo child shows that child's name-tag", () => {
     const epic = card({ id: "WF-090", status: "in-flight" });
     const solo = child({ id: "k1", title: "Only Quest", status: "planned", complexity: "M" });
     const { container } = renderTrail(epic, [solo], { showNames: true });
-    expect(container.querySelector(".trail-tag--todo")).not.toBeInTheDocument();
+    expect(container.querySelector(".trail-tag--todo")).toBeInTheDocument();
+  });
+
+  // Feature 3 (WF-086 v3): a done child now ALSO gets an on-trail name-tag
+  // — greyed (`.trail-tag--done`), same showNames gating and same
+  // last-child beast-clearance suppression as the todo tag.
+  describe("done child name-tags (Feature 3)", () => {
+    it("a NON-last done child's name-tag shows, greyed, when showNames is true", () => {
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const kids = [
+        child({ id: "k1", title: "Cleared Quest", status: "done", complexity: "S", order: 1 }),
+        // A trailing sibling so k1 isn't the trail's last child.
+        child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 }),
+      ];
+      const shown = renderTrail(epic, kids, { showNames: true });
+      const tag = shown.container.querySelector(".trail-tag--done");
+      expect(tag).toHaveTextContent("Cleared Quest");
+
+      const hidden = renderTrail(epic, kids, { showNames: false });
+      expect(hidden.container.querySelector(".trail-tag--done")).not.toBeInTheDocument();
+    });
+
+    it("shows the LAST done child's name-tag too (all-done, single-child epic)", () => {
+      const epic = card({ id: "WF-027", status: "in-flight" });
+      const solo = child({ id: "k1", title: "Only Cleared Quest", status: "done", complexity: "S" });
+      const { container } = renderTrail(epic, [solo], { showNames: true });
+      expect(container.querySelector(".trail-tag--done")).toBeInTheDocument();
+      expect(container.querySelector(".atlas-trail__waypoint--done")).toBeInTheDocument();
+    });
+  });
+
+  // Feature 3 (WF-086 v3): trail name-tags (todo AND done) are clickable
+  // buttons that reuse the existing card detail drawer via onOpenCard —
+  // not a new modal.
+  describe("clickable trail name-tags open the card detail drawer (Feature 3)", () => {
+    it("clicking a todo child's name-tag calls onOpenCard with that child's id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const kids = [
+        child({ id: "k1", title: "Earlier Quest", status: "planned", complexity: "S", order: 1 }),
+        child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 }),
+      ];
+      const { container } = renderTrail(epic, kids, { onOpenCard });
+      const tag = container.querySelector(".trail-tag--todo") as HTMLButtonElement;
+      expect(tag.tagName).toBe("BUTTON");
+      tag.click();
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
+
+    it("clicking a done child's name-tag calls onOpenCard with that child's id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const kids = [
+        child({ id: "k1", title: "Cleared Quest", status: "done", complexity: "S", order: 1 }),
+        child({ id: "k2", title: "Later Quest", status: "planned", complexity: "S", order: 2 }),
+      ];
+      const { container } = renderTrail(epic, kids, { onOpenCard });
+      const tag = container.querySelector(".trail-tag--done") as HTMLButtonElement;
+      expect(tag.tagName).toBe("BUTTON");
+      tag.click();
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
+
+    it("clicking the AT HAND pennant calls onOpenCard with the in-progress child's id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const prog = child({ id: "k1", status: "in-flight", complexity: "M", order: 1 });
+      const todoAfter = child({ id: "k2", status: "planned", complexity: "S", order: 2 });
+      const { container } = renderTrail(epic, [prog, todoAfter], { onOpenCard });
+      const pennant = container.querySelector(".atlas-trail__pennant--athand") as HTMLButtonElement;
+      expect(pennant.tagName).toBe("BUTTON");
+      pennant.click();
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
+
+    it("when the in-progress child is the trail's last child, its pennant shows and clicking its marker calls onOpenCard with that id", () => {
+      const onOpenCard = vi.fn();
+      const epic = card({ id: "WF-085", status: "in-flight" });
+      const prog = child({ id: "k1", status: "in-flight", complexity: "M" });
+      const { container } = renderTrail(epic, [prog], { onOpenCard });
+      expect(container.querySelector(".atlas-trail__pennant--athand")).toBeInTheDocument();
+      const marker = container.querySelector(".atlas-trail__waypoint--athand") as SVGGElement;
+      marker.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(onOpenCard).toHaveBeenCalledWith("k1");
+    });
   });
 
   afterEach(() => {

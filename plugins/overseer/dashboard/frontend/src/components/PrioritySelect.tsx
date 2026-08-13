@@ -2,6 +2,11 @@ import type { ChangeEvent } from "react";
 import { setPriority } from "../api/client";
 import type { Priority } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+// WF-097 follow-up: the `<select>` now routes through the design-library
+// `<Select/>` primitive (`src/ui/`) — `.priority-select` in styles.css is
+// slimmed to its genuine overrides now that most of its chrome duplicates
+// `.qb-select`.
+import { Select } from "../ui";
 
 export interface PrioritySelectProps {
   cardId: string;
@@ -34,7 +39,7 @@ function PrioritySelect({
   }
 
   return (
-    <select
+    <Select
       className="priority-select"
       aria-label="Priority"
       value={value ?? ""}
@@ -47,7 +52,7 @@ function PrioritySelect({
           {p}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 

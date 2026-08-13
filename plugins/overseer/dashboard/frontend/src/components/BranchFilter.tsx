@@ -1,3 +1,8 @@
+// WF-097 follow-up: the eyebrow label and the `<select>` itself now route
+// through the design-library primitives (`src/ui/`) — same treatment as
+// RepoSelector.tsx, see its own call site comment for the rationale.
+import { Label, Select } from "../ui";
+
 const ALL_VALUE = "";
 
 export interface BranchFilterProps {
@@ -25,8 +30,8 @@ function BranchFilter({ branches, activeBranch, onSelect }: BranchFilterProps) {
 
   return (
     <label className="topbar__branch-select">
-      <span className="topbar__branch-select-label">⑃ branch</span>
-      <select
+      <Label className="topbar__branch-select-label">⑃ branch</Label>
+      <Select
         aria-label="Branch"
         value={selected}
         onChange={(e) =>
@@ -39,7 +44,7 @@ function BranchFilter({ branches, activeBranch, onSelect }: BranchFilterProps) {
             {branch}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

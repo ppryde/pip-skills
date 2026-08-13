@@ -143,42 +143,64 @@
   --qb-ink-400: #9a8464; /* muted */
   --qb-ink-300: #b0a088; /* todo/disabled */
 
-  /* Column accent groups: fill (banner) / shadow (banner) / border (card) /
+  /* Lane/stage palette — the cheerful per-column accents, keyed to lane
+     STAGE. Separate namespace from the status palette below (which is keyed
+     to card STATUS); the two currently share the same base colours but are
+     kept apart so lane + status can diverge later without cross-talk.
+     Column accent groups: fill (banner) / shadow (banner) / border (card) /
      cardshadow (card's soft sticker shadow). Where HANDOFF gives no distinct
      cardshadow tint for a group, cardshadow aliases to that group's own
      border colour (documented per group below) rather than inventing a hex
-     HANDOFF doesn't specify. */
-  --qb-accent-forest-fill: #7a8b45; /* Backlog */
+     HANDOFF doesn't specify.
+     Fill retune: the 8 -fill hues were pulled into the same green/blue/
+     orange family as the status palette below (forest/sky/orange fills are
+     literally shared with done/todo/in-progress status already) so lanes +
+     cards read as one cohesive set. amber, rose and umber were the
+     outliers (flat amber, off-family pink, off-family caramel) and got
+     nudged toward gold, teal and golden-olive respectively — still each
+     its own distinct hue, never matching a neighbour. -shadow/-border/
+     -cardshadow were left untouched per this pass's scope. */
+  --qb-accent-forest-fill: #8fbf5e; /* Backlog */
   --qb-accent-forest-shadow: #63722f;
   --qb-accent-forest-border: #c9a86a; /* HANDOFF: Backlog reuses the base card border */
   --qb-accent-forest-cardshadow: var(--qb-accent-forest-border); /* no distinct tint given */
 
-  --qb-accent-amber-fill: #b08948; /* Bootstrap */
+  --qb-accent-amber-fill: #e7b74f; /* Bootstrap — warm gold, bridging the
+    forest green and orange family members (retuned off a flatter amber) */
   --qb-accent-amber-shadow: #977236;
   --qb-accent-amber-border: #ddbb7c;
   --qb-accent-amber-cardshadow: #edd9ae;
 
-  --qb-accent-sky-fill: #5c86b0; /* Planning / Plan Review / Verification */
+  --qb-accent-sky-fill: #69a8dc; /* Planning / Plan Review / Verification */
   --qb-accent-sky-shadow: #47709a;
   --qb-accent-sky-border: #a9c0da;
   --qb-accent-sky-cardshadow: #d3e0ee;
 
-  --qb-accent-orange-fill: #d98a3d; /* Implementation / Impl Review */
+  --qb-accent-orange-fill: #ef9d52; /* Implementation / Impl Review */
   --qb-accent-orange-shadow: #bc722c;
   --qb-accent-orange-border: #e0a24c;
   --qb-accent-orange-cardshadow: #f0dbae;
 
-  --qb-accent-rose-fill: #a8506b; /* Awaiting Merge */
-  --qb-accent-rose-shadow: #8c3e56;
-  --qb-accent-rose-border: #d49aad;
-  --qb-accent-rose-cardshadow: #ebd1d9;
+  --qb-accent-rose-fill: #57b7a6; /* Awaiting Merge — teal/aqua bridge
+    between the sky-blue and forest-green lanes; retuned off a pink that
+    read outside the green/blue/orange status family (token keeps the
+    "rose" name for handoff traceability, hue is now teal) */
+  /* Retuned to the teal fill above (were pink #8c3e56/#d49aad/#ebd1d9) so
+     Awaiting-Merge card borders/shadows + stat badges don't clash with the
+     new teal lane. */
+  --qb-accent-rose-shadow: #3f8576;
+  --qb-accent-rose-border: #9fd0c6;
+  --qb-accent-rose-cardshadow: #d6ece7;
 
-  --qb-accent-umber-fill: #5b4632; /* Done */
+  --qb-accent-umber-fill: #b4a84b; /* Done — golden-olive/sage, pulled off
+    the caramel into the green/blue/orange family while staying clearly its
+    own hue from Backlog's brighter forest green (lane colour stays
+    distinct from the DONE status token by design — separate namespace) */
   --qb-accent-umber-shadow: #43331f;
   --qb-accent-umber-border: #c9b48c; /* HANDOFF: Done's muted-card border */
   --qb-accent-umber-cardshadow: var(--qb-accent-umber-border); /* no distinct tint given */
 
-  --qb-accent-taupe-fill: #9a8464; /* Parked */
+  --qb-accent-taupe-fill: #ab9274; /* Parked */
   --qb-accent-taupe-shadow: #7f6b4e;
   --qb-accent-taupe-border: #c4b292; /* HANDOFF: Parked card's dashed border */
   --qb-accent-taupe-cardshadow: var(--qb-accent-taupe-border); /* no distinct tint given */
@@ -188,6 +210,62 @@
   --qb-accent-ash-shadow: #55554f;
   --qb-accent-ash-border: #b4b2aa;
   --qb-accent-ash-cardshadow: var(--qb-accent-ash-border); /* no distinct tint given, mirrors taupe/umber */
+
+  /* Status palette (card status colours; separate namespace from the
+     lane/stage accents above, sharing the same colour set for now).
+     Keyed to card STATUS, not lane stage — so the two can diverge later
+     without cross-talk. Each status carries THREE steps derived from one
+     base hue with `color-mix`, matching the codebase's existing idiom:
+       -soft   = base 24% over white  → lightest; fills/washes/tag backgrounds
+       -base   = the base hue itself  → mid; borders/accents
+       -strong = base 62% over #2c2015 (dark ink) → darkest; text
+     in-progress/todo/parked/abandoned reuse the lane accent tokens as their
+     base (that's "same colour set, separate namespace"); done now has its
+     own decoupled base (see below — no longer reuses forest); blocked is
+     the one status that introduces a hue no lane owns.
+     REMAP (this pass): todo purple → sky blue, in-progress sky blue →
+     orange, done decoupled from forest into its own darker earthy green;
+     blocked/parked/abandoned unchanged (blocked nudged redder — see below —
+     to stay distinct from the new in-progress orange). The old #9d86d4
+     todo purple is retired. */
+  --qb-status-done-soft: color-mix(in srgb, var(--qb-status-done-base) 24%, white);
+  --qb-status-done-base: #6a9449; /* decoupled from --qb-accent-forest-fill (WF-follow-up):
+    forest's #8fbf5e read as too bright/luminous for a completed-status colour, but forest
+    is still owned by the Atlas backlog stage accent + a couple of stat badges, so DONE gets
+    its own darker, muted, earthy green instead of sharing forest's token. Soft/strong below
+    are now derived off THIS base (not forest) so the whole done ramp moves together. */
+  --qb-status-done-strong: color-mix(in srgb, var(--qb-status-done-base) 62%, #2c2015);
+
+  /* in-progress — REMAPPED (was lane sky blue) to lane orange, so "at hand"
+     reads as a warm, active hue instead of borrowing todo's old blue. */
+  --qb-status-in-progress-soft: color-mix(in srgb, var(--qb-accent-orange-fill) 24%, white);
+  --qb-status-in-progress-base: var(--qb-accent-orange-fill); /* #ef9d52 — lane orange */
+  --qb-status-in-progress-strong: color-mix(in srgb, var(--qb-accent-orange-fill) 62%, #2c2015);
+
+  /* todo/planned — REMAPPED (was a bespoke purple #9d86d4, now unused/removed)
+     to lane sky blue. "Ahead ground" now reads as calm and beckoning rather
+     than the fun-violet the old palette used. */
+  --qb-status-todo-soft: color-mix(in srgb, var(--qb-accent-sky-fill) 24%, white);
+  --qb-status-todo-base: var(--qb-accent-sky-fill); /* #69a8dc — lane sky blue */
+  --qb-status-todo-strong: color-mix(in srgb, var(--qb-accent-sky-fill) 62%, #2c2015);
+
+  /* blocked — a NEW coral-red that reads as "barred"; distinct from the rose
+     lane accent so a blocked tag never reads as an Awaiting-Merge lane note.
+     Nudged a touch redder from the original #e8776e now that in-progress
+     sits on orange (#ef9d52) — the two warm hues were sitting too close
+     together after the remap, so blocked moved further from orange on the
+     hue wheel to stay visually distinct. */
+  --qb-status-blocked-soft: color-mix(in srgb, #df6a60 24%, white);
+  --qb-status-blocked-base: #df6a60; /* coral-red, nudged redder from #e8776e for distinctness from in-progress orange */
+  --qb-status-blocked-strong: color-mix(in srgb, #df6a60 62%, #2c2015);
+
+  --qb-status-parked-soft: color-mix(in srgb, var(--qb-accent-taupe-fill) 24%, white);
+  --qb-status-parked-base: var(--qb-accent-taupe-fill); /* #ab9274 — lane taupe, calm */
+  --qb-status-parked-strong: color-mix(in srgb, var(--qb-accent-taupe-fill) 62%, #2c2015);
+
+  --qb-status-abandoned-soft: color-mix(in srgb, var(--qb-accent-ash-fill) 24%, white);
+  --qb-status-abandoned-base: var(--qb-accent-ash-fill); /* #6e6e68 — lane ash, muted grey */
+  --qb-status-abandoned-strong: color-mix(in srgb, var(--qb-accent-ash-fill) 62%, #2c2015);
 
   /* Epic Atlas (WF-086) — beast-doodle outline / plaque-shadow ink, from
      the Boss Ledger family. The ONE new colour the HANDOFF calls for; every
@@ -313,9 +391,14 @@
   --qb-font-mono: "Silkscreen", ui-monospace, Menlo, monospace;
   --qb-font-prose: "Nunito", sans-serif;
 
-  /* Radii scale */
-  --qb-radius-card-a: 14px 20px 14px 20px;
-  --qb-radius-card-b: 20px 14px 20px 14px;
+  /* Radii scale. The two card radii are irregular hand-inked wobbles (a
+     scaled-up cousin of the `--qb-btn-wobble*` set the buttons/chips use) so
+     the card CONTAINERS read as hand-drawn too, not just the controls —
+     different horizontal/vertical radius per corner, alternated a/b by row
+     parity so neighbouring cards never share the exact silhouette. Used only
+     by `.card-tile` and `.atlas-rail-card`. */
+  --qb-radius-card-a: 20px 26px 16px 24px / 24px 16px 26px 18px;
+  --qb-radius-card-b: 26px 16px 24px 18px / 16px 26px 18px 22px;
   --qb-radius-modal: 26px;
   --qb-radius-chip-sm: 10px;
   --qb-radius-chip-lg: 14px;
@@ -342,17 +425,22 @@
      HANDOFF-sourced, §Design Tokens line 64). */
   --qb-progress-track: #f0e3c4;
 
-  /* CHOSEN button system (task-12): two roles across the board's real
-     controls. Role A — "fine hand-inked, light-recess hover" — the
-     rectangular text action/control buttons (Refresh, threshold Set,
-     Claim, status-menu items) plus the native dropdowns restyled to match
-     (WF-046 item 3: topbar repo/branch selects, priority-select,
-     claim-control select, link-editor selects). Role B — "T1 gold
-     underline" — tabs/secondary nav (the card-drawer view toggle). Round
-     close buttons (✕) get only the ink border + hover recess, keeping
-     their circular shape — the link-editor dependency-chip remove ✕ joins
-     that round-exception family as of WF-046 item 2 (too small for a
-     rectangular ink outline; see `.link-editor__deps-list button` below). */
+  /* CHOSEN button system (task-12, revised WF-096): ONE role across the
+     board's real controls now. Role A — "fine hand-inked, light-recess
+     hover" — the rectangular text action/control buttons (Refresh,
+     threshold Set, Claim, status-menu items, the card-drawer's Save/
+     Cancel/Edit/Pull children/view-toggle buttons) plus the native
+     dropdowns restyled to match (WF-046 item 3: topbar repo/branch
+     selects, priority-select, claim-control select, link-editor selects).
+     Role B — "T1 gold underline" tabs — is RETIRED as of WF-096 (the
+     card-drawer view toggle was its last user; it's now Role A like every
+     other toggle in the app — see `.card-drawer__viewtoggle` below); the
+     `--qb-tab-*` tokens stay declared in case a future secondary-nav needs
+     them again, but nothing currently reads them. Round close buttons (✕)
+     get only the ink border + hover recess, keeping their circular shape —
+     the link-editor dependency-chip remove ✕ joins that round-exception
+     family as of WF-046 item 2 (too small for a rectangular ink outline;
+     see `.link-editor__deps-list button` below). */
   --qb-btn-face: #faf3df;
   --qb-btn-face-hover: #f1e7c8;
   --qb-btn-face-active: #ece0c0;
@@ -374,6 +462,29 @@
   --qb-btn-wobble-4: 8px 13px 9px 12px / 12px 9px 11px 8px;
   --qb-btn-shadow-hover: inset 0 1px 4px rgba(74, 56, 38, 0.2);
   --qb-btn-shadow-active: inset 0 2px 5px rgba(74, 56, 38, 0.3);
+  /* Standard height for every button-family control + native select (WF-096
+     button consolidation), so the topbar/filter-bar/drawer rows all line
+     up on one box regardless of a control's own font metrics — this is the
+     SAME box several controls already pinned individually (was a repeated
+     `1.65rem` literal in `.topbar__new-card`/`.topbar__atlas-control`/the
+     topbar+filter-bar selects/`.threshold-control__select`; WF-090's
+     comments there explain why an explicit height beats chasing padding
+     numbers). Hoisted to a token so every control — old and new — reads
+     off ONE source of truth instead of a copy-pasted magic number. */
+  --qb-control-height: 1.65rem;
+
+  /* The touch-device control height — a comfortable tap target that stays
+     consistent with the standard button box instead of towering over it.
+     The `@media (pointer: coarse)` layer near the end of this file folds the
+     migrated `.qb-btn`/`.qb-select`/`.qb-input` touch controls onto THIS
+     token instead of the old ad-hoc 44px/38px `min-height` floors, so every
+     text button/select/input lands on ONE comfortable ~34px box — noticeably
+     less tall than 44px, uniform across controls, and clearly a relative of
+     the desktop `--qb-control-height` standard above (not a magic number).
+     Genuinely icon-only square tap targets (drag handle, drawer/party ✕,
+     the round ×/label-remove glyphs, the archive checkbox) keep their own
+     explicit 44/32px sizing there — a finger still needs the real square. */
+  --qb-control-height-touch: 2.15rem;
 
   --qb-tab-text: #5b4632;
   --qb-tab-text-active: #4a3826;
@@ -381,6 +492,197 @@
   --qb-tab-underline-active: #7a8b45;
   --qb-tab-hover-bg: rgba(216, 195, 154, 0.18);
   --qb-tab-active-bg: rgba(122, 139, 69, 0.1);
+}
+
+/* ==========================================================================
+   Design library (v1, WF-097) — a small set of shared UI primitives that
+   encapsulate control shapes reused across the topbar/filter-bar/board.
+   Each `.qb-*` class below is FACTORED OUT of an already-shipped bespoke
+   class (see each rule's own "source" comment) — no new visual language is
+   invented here, just a documented, reusable name for a look several
+   call-sites already share. The existing bespoke classes are left exactly
+   as they were and keep working unchanged; nothing here migrates them.
+
+   `.qb-btn` / `.qb-btn--primary` — the button primitive — already exist
+   further down this file (see that class's own doc comment, just above
+   `.topbar__refresh`) and stay declared there rather than being moved here,
+   to avoid disturbing their surrounding cascade/specificity; treat this
+   comment as their pointer into this section's inventory.
+
+   Consumers: the typed React wrappers in `src/ui/` (Button/Select/Chip/
+   Input/Label) apply these classes 1:1, and `src/ui/DesignLibrary.tsx`
+   (reachable at the `#design` hash — see App.tsx) shows every state.
+   `CardDetailDrawer.tsx`'s Save/Cancel/Edit/Pull-children buttons were the
+   first real adopters of the React wrappers (v1); a WF-097 follow-up pass
+   then routed TopBar.tsx/FilterBar.tsx's own buttons, the priority/
+   complexity selects, the search input, and the Short/Long Rest + last-
+   refreshed pills through the same wrappers, and a second WF-097 follow-up
+   pass routed the remaining shared controls — the topbar's repo/branch
+   selects (RepoSelector.tsx/BranchFilter.tsx), Last Orders
+   (ThresholdControl.tsx), the drawer's priority select, and the drawer's
+   StatusMenu/ClaimControl/LinkEditor buttons+selects — through them too.
+   Each migrated call site's own bespoke class was slimmed to layout-only
+   (or removed if it had nothing left) once its chrome duplicated the shared
+   `.qb-*` recipe; see each rule's own comment for what survived and why.
+   Still bespoke: the view-toggle "coins" (a wholly different circular
+   shape, not a Role-A button), the gold/vanquished/fleet pills (share one
+   combined selector with fleet-pill's real button semantics — splitting
+   two of three onto `<Chip>` would fragment that rule for no visual gain),
+   and the small round icon-only glyphs (`.link-editor__deps-list button`'s
+   dependency-remove "×", `.label-editor__remove`) — too small for a
+   rectangular Role-A outline, not a `.qb-btn` shape at all. */
+
+/* .qb-select — the standard native-<select> chip/dropdown look. Factored
+   from `.topbar__repo-select select` / `.topbar__branch-select select` /
+   `.filter-bar__select select` (each of which keeps its OWN copy, tuned
+   with a different wobble variant per WF-046 item 1's "no two neighbouring
+   controls read as the exact same stamped shape" rule) — this is the ONE
+   canonical version new call-sites (the `<Select/>` wrapper) build on. */
+.qb-select {
+  font: inherit;
+  /* Explicit size so a select doesn't fall back to the ambient 16px — that
+     overflowed the Role-A box (height: var(--qb-control-height)) and clipped
+     the handwritten glyphs top and bottom. ~matches the `.qb-btn` 0.75rem so a
+     select and a button beside it read at the same size. */
+  font-size: 0.8rem;
+  font-weight: 600;
+  /* A native <select> value ignores loose line-height on Android Chrome and
+     seats its text by the font's own metrics — Patrick Hand sits low, so the
+     value looked bottom-heavy in the box. Extra padding on the BOTTOM carves
+     space there and lifts the text back to centre (asymmetric padding is the
+     only lever the native value box actually respects here). */
+  line-height: 1.2;
+  color: var(--qb-ink-900);
+  background: var(--qb-btn-face);
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  height: var(--qb-control-height);
+  box-sizing: border-box;
+  padding: 0 0.7rem 0.1rem;
+  max-width: 40vw;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.qb-select:hover:not(:disabled) {
+  border-color: var(--qb-btn-ink-hover);
+}
+
+.qb-select:focus-visible {
+  outline: 2px solid var(--qb-ink-400);
+  outline-offset: 2px;
+}
+
+.qb-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* .qb-chip — the small pill/badge look. Factored from `.topbar__pill` (the
+   "torn-note" badges: last-refreshed time, Short/Long Rest windows). */
+.qb-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pennant);
+  border: 1px solid var(--qb-ink-300);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
+}
+
+/* .qb-input — text input / search / textarea. Factored from
+   `.filter-bar__search` (Scry's search box) + the card drawer's own
+   `.card-drawer__title-input` / `.card-drawer__body-textarea` (which keep
+   their own bespoke rules — bigger display font, monospace, resize —
+   layered on top of this same plain bordered-field base). */
+.qb-input {
+  font: inherit;
+  font-size: 0.8rem;
+  box-sizing: border-box;
+  padding: 0.3rem 0.6rem;
+  border: 1.5px solid var(--qb-btn-ink);
+  border-radius: var(--qb-btn-wobble);
+  background: var(--qb-btn-face);
+  color: var(--qb-ink-900);
+}
+
+.qb-input:hover,
+.qb-input:focus {
+  border-color: var(--qb-btn-ink-hover);
+  outline: none;
+}
+
+.qb-input::placeholder {
+  color: var(--qb-ink-400);
+}
+
+/* .qb-label — the small uppercase eyebrow/field-label. Factored from
+   `.topbar__repo-select-label` / `.filter-bar__eyebrow` (also shared by
+   `.topbar__branch-select-label`'s near-identical recipe).
+
+   Eyebrow-weight unification: `font-weight` was `600` — the topbar's own
+   REPO/BRANCH labels cancelled it back to `normal` (their own rules used to
+   carry an explicit `font-weight: normal` override), while every OTHER
+   consumer left `.qb-label`'s bold default standing (SCRY/PROVISIONS/Last
+   Orders' topbar eyebrows, plus the drawer's PARENT/DEPENDS ON/GOAL/DESIGN
+   field-labels and section headings) — so the same "eyebrow" role read at
+   two different weights depending on which corner of the app it sat in.
+   Changed to `normal` here instead, to match the topbar's own lighter look,
+   and the three call sites that used to cancel `600` back to `normal`
+   (`.topbar__repo-select-label`/`.topbar__branch-select-label`/
+   `.threshold-control__title`) had that now-redundant override removed —
+   see each rule's own comment. Every eyebrow now reads at one weight. */
+.qb-label {
+  display: inline-block;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: normal;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+/* Showcase-only layout for `src/ui/DesignLibrary.tsx` (reachable at the
+   `#design` hash) — it is the ONE consumer of these three classes, so they
+   live here with the rest of the design-library inventory rather than
+   getting a top-level section of their own elsewhere in this file. */
+.design-library {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  color: var(--qb-ink-700);
+}
+
+.design-library h1 {
+  font-family: var(--qb-font-display);
+  color: var(--qb-ink-900);
+}
+
+.design-library section {
+  margin-top: 2rem;
+}
+
+.design-library section h2 {
+  font-family: var(--qb-font-display);
+  color: var(--qb-ink-900);
+  margin-bottom: 0.3rem;
+}
+
+.design-library__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.design-library__col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 24rem;
 }
 
 /* Minimal reset */
@@ -432,6 +734,20 @@ body {
 }
 
 /* Parchment sticky top bar (WF-029 chunk 5, HANDOFF §Board "Top bar"). */
+/* Header↔content seam has moved off `.topbar`'s own bottom edge — the
+   filter bar (`.filter-bar`, below) renders BELOW this block and is open
+   whenever filters are shown, so a divider here would land mid-header, not
+   at the header's true bottom. The one seam that separates the whole header
+   stack (topbar + control + filter, whichever are open) from the board now
+   lives on `.board-region`'s own top edge instead (see that rule) — it's
+   the header's ACTUAL bottom edge in every toggle state, unlike a fixed
+   spot on this block. The chunky inset dash band on `.topbar__controls-
+   header` below (Task A) is unrelated — that reads as a section header
+   between the header's own sub-parts, not as the header's outer edge; the
+   matching control↔scry seam now lives on `.filter-bar`'s own top edge
+   instead (see that rule's comment), since `.filter-bar` went back to its
+   own `--qb-parchment-muted` colour rather than sharing this block's
+   `--qb-panel`. */
 .topbar {
   flex: 0 0 auto;
   display: flex;
@@ -440,7 +756,6 @@ body {
   padding: 18px 26px;
   background: var(--qb-panel);
   color: var(--qb-ink-700);
-  border-bottom: 2px dashed var(--qb-line-dashed);
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
   position: sticky;
@@ -454,23 +769,6 @@ body {
   gap: 0.6rem;
 }
 
-/* Irregular-radius crest (HANDOFF: "50px circular crest, irregular radius
-   50% 48% 52% 50%"). Purely decorative — no image asset. */
-.topbar__crest {
-  flex: 0 0 auto;
-  width: 50px;
-  height: 50px;
-  border-radius: 50% 48% 52% 50%;
-  border: 2px solid var(--qb-ink-700);
-  background: var(--qb-gold-chip-bg);
-}
-
-.topbar__titles {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
 .topbar h1 {
   margin: 0;
   font-family: var(--qb-font-display);
@@ -479,13 +777,6 @@ body {
      jump in the guild wordmark. */
   font-size: clamp(20px, 4.5vw, 26px);
   color: var(--qb-ink-900);
-}
-
-.topbar__subtitle {
-  margin: 0;
-  font-family: var(--qb-font-body);
-  font-size: clamp(14px, 3.6vw, 17px);
-  color: var(--qb-ink-400);
 }
 
 /* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
@@ -511,57 +802,30 @@ body {
   min-width: 0;
 }
 
-.topbar__repo-select-label {
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  letter-spacing: 0.04em;
-  color: var(--qb-ink-400);
-}
+/* WF-097 follow-up: renders via `<Label className="topbar__repo-select-label"/>`
+   now (RepoSelector.tsx), which applies `.qb-label` — text-transform/
+   font-size/letter-spacing/color were identical to `.qb-label`'s own and are
+   gone below. `font-weight: normal` used to survive as a genuine override —
+   this eyebrow was never bold, so it cancelled `.qb-label`'s then-default
+   `600` rather than duplicating it — but the eyebrow-weight unification
+   pass changed `.qb-label`'s own default to `normal` (see that rule's
+   comment) specifically to match this look, so the override is gone too:
+   nothing left to cancel, and the whole rule with it. `<Label
+   className="topbar__repo-select-label">` still composes the class in
+   (RepoSelector.tsx unchanged) — it just resolves no declarations of its
+   own now, `.qb-label`'s alone. */
 
-/* WF-046 item 3: a hand-inked border + wobble silhouette so the native
-   control reads as individually drawn rather than the browser's stock
-   rectangle, even sitting inside the pill's own rounded chip — background
-   stays transparent so the pill's own shape still reads as the outer
-   chrome. */
+/* WF-097 follow-up: renders via `<Select/>` now (RepoSelector.tsx) — most of
+   this rule's declarations were identical to `.qb-select`'s own (font/
+   font-weight/line-height/color/border/border-radius/height/box-sizing/
+   padding/max-width/min-width/overflow/text-overflow/white-space/cursor are
+   gone below); `background: transparent` survives as the one genuine
+   override — `.qb-select`'s own default is the opaque `--qb-btn-face`, but
+   this select sits inside a chip whose own box IS the visible border, so it
+   stays see-through. The `:hover`/`:focus-visible` states below were also
+   full duplicates of `.qb-select`'s own and are gone entirely. */
 .topbar__repo-select select {
-  font: inherit;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--qb-ink-900);
   background: transparent;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  /* Matches the Role A button box (`.topbar__new-card`) so the select's own
-     border is the ONLY box the control shows — no more outer pill.
-     WF-090 follow-up: a native `<select>` renders ~4-5px taller than a
-     `<button>`/`<input>` sharing the same padding (UA form-control chrome
-     inflates its intrinsic content height) — pinning an explicit `height`
-     (with `box-sizing: border-box`, so the border/padding are INSIDE it,
-     not added on top) sidesteps that instead of chasing padding numbers.
-     Vertical padding is trimmed to `0.12rem` so the box doesn't need to
-     stretch past `height` to fit the text (which would silently win over
-     `height` in a border-box layout). */
-  height: 1.65rem;
-  box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
-  max-width: 40vw;
-  /* WF-085: a long repo root/label truncates with an ellipsis instead of
-     wrapping the native <select> onto a second line — `min-width: 0`
-     overrides the UA default of `min-width: auto` (which otherwise refuses
-     to shrink a <select> below its longest <option>'s intrinsic width). */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topbar__repo-select select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
-}
-
-.topbar__repo-select select:focus-visible {
-  outline: 2px solid var(--qb-ink-400);
-  outline-offset: 2px;
 }
 
 /* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
@@ -585,10 +849,9 @@ body {
   font-size: 0.75rem;
   /* De-bulked (WF-078 follow-up): dropped the filled, fully-rounded pill —
      see `.topbar__repo-select` above for the full rationale. The branch's
-     blue coding survives as a thin left tint border + the label's own
-     colour, rather than a full filled chip. */
-  padding: 0 0.5rem;
-  border-left: 2px solid var(--qb-branch-chip-border);
+     blue coding now survives purely as the label's own colour — the thin
+     left tint bar was dropped per user request. */
+  padding: 0;
   background: transparent;
   color: var(--qb-branch-chip-text);
   /* WF-085: same shrink-to-allow-ellipsis rationale as `.topbar__repo-select`
@@ -596,48 +859,40 @@ body {
   min-width: 0;
 }
 
+/* WF-097 follow-up: renders via `<Label className="topbar__branch-select-label"/>`
+   now (BranchFilter.tsx), which applies `.qb-label` — text-transform/
+   font-size/letter-spacing were identical to `.qb-label`'s own and are gone
+   below. `font-weight: normal` used to survive too (this eyebrow was never
+   bold — same "cancel `.qb-label`'s default weight" rationale as
+   `.topbar__repo-select-label`), but the eyebrow-weight unification pass
+   changed `.qb-label`'s own default to `normal` (see that rule's comment),
+   so it's gone — nothing left to cancel. Two genuine overrides remain:
+   `color` (the branch's own tint, not `.qb-label`'s neutral ink-400) and
+   `white-space: nowrap` (layout — keeps the ⑃ glyph and "branch" on one
+   line). `color` is left as the one deliberate exception to the weight
+   unification — the branch label is intentionally colour-coded, distinct
+   from every other now-uniform eyebrow; note this in case that, too, should
+   ever be unified. */
 .topbar__branch-select-label {
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  letter-spacing: 0.04em;
   color: var(--qb-branch-chip-text);
-}
-
-/* WF-046 item 3 — same treatment as `.topbar__repo-select select` above,
-   a different wobble variant so the two neighbouring topbar chips don't
-   read as the same stamped shape. */
-.topbar__branch-select select {
-  font: inherit;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--qb-ink-900);
-  background: transparent;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble-2);
-  /* Matches the Role A button box (`.topbar__new-card`) — see
-     `.topbar__repo-select select` above for the full rationale, including
-     the explicit `height` (WF-090 follow-up) that pins this select to the
-     same box as the buttons/input beside it instead of the UA's own
-     ~4-5px-taller intrinsic form-control height. */
-  height: 1.65rem;
-  box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
-  max-width: 40vw;
-  /* WF-085: same ellipsis-truncation treatment as `.topbar__repo-select
-     select` above — a long branch name never wraps to a second line. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.topbar__branch-select select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
+/* WF-097 follow-up: renders via `<Select/>` now (BranchFilter.tsx) — same
+   "only `background`/wobble survive" treatment as `.topbar__repo-select
+   select` above; `border-radius` keeps its own wobble-2 variant (a genuine
+   override — DIFFERENT from `.qb-select`'s default wobble, per WF-046 item
+   1's "no two neighbouring controls share a stamped shape" rule), and
+   `:focus-visible`'s outline colour survives too (the branch's own tint,
+   not `.qb-select`'s neutral ink-400) — everything else duplicated
+   `.qb-select` and is gone. */
+.topbar__branch-select select {
+  background: transparent;
+  border-radius: var(--qb-btn-wobble-2);
 }
 
 .topbar__branch-select select:focus-visible {
-  outline: 2px solid var(--qb-branch-chip-border);
-  outline-offset: 2px;
+  outline-color: var(--qb-branch-chip-border);
 }
 
 /* WF-042: wraps ThresholdControl, whose own label now reads "default
@@ -657,83 +912,36 @@ body {
   font-size: 0.85rem;
 }
 
-.topbar__pill {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--qb-radius-pill);
-  background: var(--qb-parchment-muted);
-  color: var(--qb-ink-500);
-}
+/* WF-097 follow-up: `.topbar__pill` now renders via `<Chip/>` (TopBar.tsx)
+   — every declaration this class used to carry (font-size/padding/wobble
+   radius/border/background/color) is IDENTICAL to `.qb-chip` (unsurprising:
+   `.qb-chip`'s own doc comment says it was factored FROM this exact class),
+   so the base rule is gone entirely. The class name lives on only as a
+   selector hook for the mobile responsive overrides below (`order`, the
+   shrunk font-size/padding at ≤720px — see the "Mobile layout layer" at the
+   end of this file) — `<Chip className="topbar__pill">` still composes it
+   in, so those rules keep matching unchanged. */
 
-/* Role A — "fine hand-inked, light-recess hover" (CHOSEN button system,
-   task-12). The wobble radius is fixed and does not shift on hover/active;
-   only background/border-color/box-shadow move. */
-.topbar__refresh {
-  margin-left: auto;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.topbar__refresh:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.topbar__refresh:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.topbar__refresh:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
-}
-
-/* Task 10: "＋ New card" control, beside the repo selector. Same Role-A
-   wobble shape/paint as `.topbar__refresh` — a positive, non-destructive
-   action, so no recolor (contrast `.topbar-clear.danger` below).
-   `height`/`box-sizing` (WF-090 follow-up): this button's own class is
-   reused verbatim for "Labels…" (`.topbar__labels-settings`, plain ASCII
-   text), but "＋ New card" leads with a FULLWIDTH PLUS SIGN (＋, U+FF0B) —
-   a code point the primary font likely doesn't cover, so the browser
-   silently substitutes a fallback font for just that glyph; that
-   fallback's own ascent/descent metrics inflated the line box, measuring
-   ~29px vs Labels…'s ~26.5px even though both share this class and
-   `line-height: normal`. First tried pinning `line-height: 1` to
-   normalize both off `font-size` alone — measured that this OVERSHRINKS
-   Labels… too (~24.5px, 2px under the Set/Clear/input baseline), so a
-   glyph-proof explicit `height` (same technique as the topbar/filter-bar
-   selects below) replaces it — both "＋ New card" and "Labels…" now land
-   on the identical pinned box regardless of either one's line-box
-   quirks. `display:flex` + `align-items/justify-content:center` (WF-090
-   follow-up #2): pinning `height` fixed the BOX but not the TEXT's
-   position inside it — baseline-positioned text still sat low within the
-   fixed height (the fallback-font glyph's oversized descent pushes the
-   baseline down), most visible on "＋ New card". Flex-centering the
-   content is immune to that for the same reason the `height` fix was:
-   it centers the line box as a whole rather than trusting any one
-   glyph's own metrics. */
-.topbar__new-card {
+/* Shared Role-A base (WF-096 button consolidation). The topbar/filter-bar
+   button classes below predate this class and keep their OWN copies of the
+   same recipe — safer than rewriting already-tuned controls wholesale —
+   but they're folded into the grouped `--qb-control-height` rule right
+   after this block, so every Role-A button ends up the same height either
+   way. New or rewritten button-family controls (the card drawer's
+   Save/Cancel/Edit/Pull children/view-toggle buttons, further down) build
+   on `.qb-btn` directly instead of re-declaring the recipe a third time —
+   reach for this class first before copy-pasting border/background/wobble
+   declarations onto a new selector. */
+.qb-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.3rem;
+  font: inherit;
   font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
   font-weight: 700;
-  height: 1.65rem;
+  padding: 0.3rem 0.7rem;
+  height: var(--qb-control-height);
   box-sizing: border-box;
   border-radius: var(--qb-btn-wobble);
   border: 1.5px solid var(--qb-btn-ink);
@@ -747,38 +955,92 @@ body {
     box-shadow var(--qb-motion-hover) ease;
 }
 
-.topbar__new-card:hover {
+.qb-btn:hover:not(:disabled) {
   background: var(--qb-btn-face-hover);
   border-color: var(--qb-btn-ink-hover);
   box-shadow: var(--qb-btn-shadow-hover);
 }
 
-.topbar__new-card:active {
+.qb-btn:active:not(:disabled) {
   background: var(--qb-btn-face-active);
   box-shadow: var(--qb-btn-shadow-active);
 }
 
-/* Task 7: Clear-data control, beside the repo selector. Same Role-A wobble
-   shape as `.topbar__refresh` above, but recolored red — `.danger` alone
-   only reaches inside `.clear-dialog` (see `.clear-dialog .danger`), so this
-   button needs its own paint rather than relying on that scoped rule. */
+.qb-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* Positive/primary emphasis — the SAME gold-chip fill the topbar view
+   toggle's active coin and the atlas controls' pressed state already use,
+   so "the button that commits" (drawer Save) reads as raised above its
+   neutral `.qb-btn` sibling (Cancel) without inventing a new colour. */
+.qb-btn--primary {
+  border-color: var(--qb-gold-chip-border);
+  background: var(--qb-gold-chip-bg);
+  color: var(--qb-gold-chip-text);
+}
+
+.qb-btn--primary:hover:not(:disabled) {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: var(--qb-btn-shadow-hover);
+}
+
+.qb-btn--primary:active:not(:disabled) {
+  background: var(--qb-gold-chip-border);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+/* WF-097 follow-up: `.topbar__refresh`/`.topbar__controls-toggle`/
+   `.filter-bar__labels-btn`/`.filter-bar__clear-btn` now all render via
+   `<Button/>` (TopBar.tsx/FilterBar.tsx) — the grouped WF-096 height rule
+   that used to live here, and each class's own border/background/wobble/
+   padding/hover/active/disabled chrome below, are IDENTICAL to `.qb-btn`'s
+   own (this WAS that class's whole point — see `.qb-btn`'s doc comment
+   above `.qb-btn--primary`), so all of it is gone. Only genuine LAYOUT (not
+   chrome) survives per class, below. */
+.topbar__refresh {
+  margin-left: auto;
+}
+
+/* Task 10: "＋ New card" control (Task 2: now icon-only, in the
+   `.topbar__toggle-cluster`) and "Labels…" (`.topbar__labels-settings`,
+   reusing this same class rather than duplicating it) both render via
+   `<Button variant="neutral"/>` now — every box/paint declaration this
+   class used to carry duplicated `.qb-btn` exactly, so the base rule is
+   gone; only the icon-only size override below survives. */
+.topbar__new-card--icon {
+  width: 1.65rem;
+  padding: 0;
+  font-size: 0.95rem;
+}
+
+/* Task 7: Clear-data control, beside the repo selector. Renders via
+   `<Button className="topbar-clear danger"/>` now (TopBar.tsx) — box/
+   wobble/padding/font chrome comes from `.qb-btn`; only the red recolor
+   (border/background/text) and its hover survive here. WF-097 follow-up:
+   `box-shadow: none` was ADDED to the hover rule below (it wasn't there
+   before) — `.qb-btn:hover:not(:disabled)`'s inset light-recess shadow
+   ties on specificity with `.topbar-clear.danger:hover` (both (0,3,0)) and
+   this rule wins by coming later in the file, but a cascade tie only
+   settles PROPERTIES both rules declare; box-shadow wasn't one of those
+   until this override was added, so `.qb-btn`'s shadow would otherwise
+   silently leak onto a button whose hover is a solid red swap, not a
+   recess. `.danger` alone only reaches inside `.clear-dialog` (see
+   `.clear-dialog .danger`), so this button still needs its own paint
+   rather than relying on that scoped rule. */
 .topbar-clear.danger {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
   border: 1.5px solid var(--legacy-color-b3261e);
   background: var(--legacy-color-fff5f5);
   color: var(--legacy-color-b3261e);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease;
 }
 
 .topbar-clear.danger:hover {
   background: var(--legacy-color-b3261e);
   color: var(--legacy-color-fff);
+  box-shadow: none;
 }
 
 /* Archive is an on/off TOGGLE (checkbox + label), not an action button —
@@ -799,19 +1061,52 @@ body {
   cursor: pointer;
 }
 
-/* WF-085: the mobile-collapsible secondary-controls group (threshold,
-   Clear…, Labels…, Refresh, Abandoned toggle) and the "Controls ▾" button
-   that drives it. `display: contents` un-wraps the group unconditionally —
-   its children flow as direct flex items of `.topbar` exactly as they did
-   before this wrapper existed, on every viewport, REGARDLESS of the
-   `hidden` attribute TopBar.tsx toggles. Only the ≤720px block below (which
-   targets `.topbar__controls-group[hidden]` with higher specificity than
-   this bare-class rule) actually lets `hidden` hide anything — so desktop
-   is provably unaffected by the collapse state. The toggle button mirrors
-   this: hidden by default, shown only inside that same media query. */
+/* WF-085 (Task 3): the collapsible secondary-controls group (threshold,
+   Clear…, Labels…, Refresh, Abandoned toggle). `display: contents` unwraps
+   the group's children into direct flex items of `.topbar` when it's NOT
+   hidden — same visual arrangement as if this wrapper didn't exist at all
+   (desktop's natural-wrap chip shelf). The `[hidden]` rule right below is
+   what actually hides it now — `.topbar__controls-group[hidden]`'s two
+   simple selectors outrank the bare `.topbar__controls-group` class alone
+   on specificity, so it wins on every viewport, not just ≤720px (the old
+   behaviour: this override used to live ONLY inside that media query, so
+   desktop was unconditionally exempt — see git history). The ≤720px block
+   below still adds its OWN `:not([hidden])` treatment (a real block-level
+   wrapped row) on top of this. */
 .topbar__controls-group {
   display: contents;
 }
+
+.topbar__controls-group[hidden] {
+  display: none;
+}
+
+/* Task 4: `#topbar-controls-group`'s own small header — a divider rule +
+   muted eyebrow title, opening the group before ThresholdControl. Same
+   "quiet caption" idea as `.filter-bar__eyebrow` above the filter row, just
+   paired with a divider instead of sitting inline. `flex-basis: 100%`
+   self-forces a line break in the `display: contents`-unwrapped group (same
+   trick as `.topbar__quarantine-banner`/mobile's `.topbar__threshold`) so
+   ThresholdControl and everything after it in the group starts underneath
+   this header, on every viewport. The divider itself (margin/padding/
+   background-image band) is declared below (Task A) — this is Provisions'
+   own topbar↔control seam, distinct from the control↔scry seam that now
+   lives on `.filter-bar`'s own top edge. */
+.topbar__controls-header {
+  flex-basis: 100%;
+}
+
+/* WF-097 follow-up: renders via `<Label className="topbar__controls-eyebrow"/>`
+   now (TopBar.tsx), which applies `.qb-label` — text-transform/font-size/
+   font-weight/color were identical to `.qb-label`'s own and are gone below.
+   `letter-spacing` used to survive as a genuine override, 0.06em here vs.
+   `.qb-label`'s own 0.04em, same wider track `.filter-bar__eyebrow` (Scry)
+   deliberately used too — but a letter-spacing pass found that wider track
+   was never a deliberate design choice for either, just an un-noticed drift
+   between the two eyebrows, so both are unified back onto `.qb-label`'s own
+   0.04em and this override is dropped. This rule is now empty and kept only
+   as a selector hook — `<Label className="topbar__controls-eyebrow">` still
+   composes it in. */
 
 /* WF-090 follow-up: wraps Labels…/Refresh/Abandoned/Clear… as ONE atomic
    flex item of `.topbar` (desktop) — see the JSX comment at this wrapper's
@@ -829,8 +1124,118 @@ body {
   gap: 0.75rem;
 }
 
-.topbar__controls-toggle {
-  display: none;
+/* Task 2/3: "Filters ▾" and "Controls ▾" share this class — both render via
+   `<Button className="topbar__controls-toggle"/>` now (TopBar.tsx), so the
+   gap/box/wobble/padding/font/paint chrome this class used to carry
+   duplicated `.qb-btn` exactly and is gone (`gap` spaced the "Controls"
+   button's leading gear icon (task C) from its text — a no-op for
+   "Filters ▾", which has no icon; `.qb-btn`'s own `gap: 0.3rem` is the same
+   value, so that spacing survives unchanged).
+
+   WF-097 follow-up: `:hover`/`:active` below are kept ON PURPOSE, despite
+   being value-duplicates of `.qb-btn`'s own — this class's ORIGINAL hover/
+   active never declared a `box-shadow`, so `.qb-btn`'s light-recess inset
+   shadow would otherwise newly appear on hover/press (this plain
+   `:hover`/`:active` pairing is specificity (0,2,0), lower than `.qb-btn
+   :hover:not(:disabled)`'s (0,3,0), so without a matching `:not(:disabled)`
+   guard here `.qb-btn`'s rule would win outright and the shadow WOULD leak
+   through — these are written to tie its specificity exactly, then win by
+   sitting later in the file). */
+.topbar__controls-toggle:hover:not(:disabled) {
+  background: var(--qb-btn-face-hover);
+  border-color: var(--qb-btn-ink-hover);
+  box-shadow: none;
+}
+
+/* Task C: small gear icon leading the "Controls ▾" button's text — same
+   decorative-icon convention as `.topbar__atlas-control-icon`/
+   `.topbar__view-toggle-icon` (`alt=""`, accessible name stays the text
+   alone). ~14px keeps it modest against this button's 0.75rem type. */
+.topbar__toggle-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.topbar__controls-toggle:active:not(:disabled) {
+  background: var(--qb-btn-face-active);
+  box-shadow: none;
+}
+
+/* Task 2: the [Filters ▾] [Controls ▾] [＋] cluster — one atomic flex item
+   of `.topbar` (same wrapping-together technique as
+   `.topbar__controls-actions`) so the three buttons never split across a
+   line break. */
+.topbar__toggle-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* WF-091: the Epic Atlas toggles, moved into the Controls group from the
+   retired standalone `<AtlasToolbar>` component (a static complexity-weight
+   label plus three segmented two-button toggles, previously rendered
+   between the topbar and the chart). Same wrapping-atomic-unit technique as
+   `.topbar__controls-actions` just above — these three buttons wrap
+   together rather than splitting across lines. Only rendered by TopBar.tsx
+   when `view === "atlas"`. */
+.topbar__atlas-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Role-A wobble-button treatment (`.topbar__new-card`'s box metrics) with a
+   gold-chip pressed state (matches the view-switcher circles and the
+   trail's own gold coin) — each button IS its own toggle now (a single
+   control, not a two-button pair), so the active/inactive read has to live
+   entirely in this one element's own paint.
+   WF-097 follow-up: renders via `<Button className="topbar__atlas-control"
+   aria-pressed=.../>` now (TopBar.tsx) — the box/wobble/padding/font/paint
+   this class used to carry in its OWN base rule duplicated `.qb-btn`
+   exactly, so that base rule (and its old plain `:hover`, see below) are
+   gone. */
+
+/* Task 3: rpg-icons pack art leading each atlas control's own text label
+   (scroll/skull — see TopBar.tsx) — same small-leading-image
+   pattern as `.topbar__view-toggle-icon`, just sized down to fit this
+   control's shorter/denser button. `alt=""` on the `<img>` keeps these
+   decorative — the button's accessible NAME stays the text label alone. */
+.topbar__atlas-control-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Resting pressed state — (0,2,0) already outranks `.qb-btn`'s bare (0,1,0)
+   base rule, so this alone is enough while neither hovered nor pressed. */
+.topbar__atlas-control[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+  box-shadow: var(--qb-btn-shadow-active);
+}
+
+/* WF-097 follow-up: now that this control also carries `.qb-btn`'s classes,
+   `.qb-btn:hover:not(:disabled)` / `:active:not(:disabled)` are BOTH
+   higher-specificity ((0,3,0)) than the plain-attribute rule above
+   ((0,2,0)) — left alone, a PRESSED (gold) control would flash back to
+   `.qb-btn`'s neutral hover/active paint the instant it's hovered or
+   clicked, which it never did before (the old bespoke `:hover` rule this
+   replaces tied `[aria-pressed="true"]` on specificity by ALSO being
+   (0,2,0), same fix, different mechanism). Matching `.qb-btn`'s own
+   `:hover`/`:active` pseudo-classes here ties the specificity at (0,3,0);
+   sitting later in the file is what wins the tie. */
+.topbar__atlas-control[aria-pressed="true"]:hover,
+.topbar__atlas-control[aria-pressed="true"]:active {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+  box-shadow: var(--qb-btn-shadow-active);
 }
 
 /* Quarantine alert keeps a strong danger red rather than a guild accent —
@@ -843,7 +1248,10 @@ body {
 .topbar__quarantine-banner {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
-  border-radius: var(--qb-radius-chip-sm);
+  /* Path-tag note treatment (WF-093) — torn-note radius, flat (no lift
+     shadow, tried alongside the other topbar badges); keeps its alert-red
+     fill. */
+  border-radius: var(--qb-radius-pennant);
   background: var(--legacy-color-7a2e2e);
   color: var(--legacy-color-ffd9d9);
 }
@@ -862,24 +1270,27 @@ body {
   font-size: 0.75rem;
   font-weight: 600;
   padding: 0.25rem 0.65rem;
-  border-radius: var(--legacy-radius-999px);
+  /* Path-tag note treatment (WF-093): torn-note radius, flat (no lift
+     shadow); each pill keeps its own accent fill/border below. Border
+     lightened to 1px (was 2px) — read too heavy at the original weight. */
+  border-radius: var(--qb-radius-pennant);
 }
 
 .topbar__gold-pill {
   background: var(--qb-gold-chip-bg);
-  border: 2px solid var(--qb-gold-chip-border);
+  border: 1px solid var(--qb-gold-chip-border);
   color: var(--qb-gold-chip-text);
 }
 
 .topbar__vanquished-pill {
   background: var(--qb-success-chip-bg);
-  border: 2px solid var(--qb-success-chip-border);
+  border: 1px solid var(--qb-success-chip-border);
   color: var(--qb-success-chip-text);
 }
 
 .topbar__fleet-pill {
   background: var(--qb-locked-chip-bg);
-  border: 2px solid var(--qb-questing-chip-border);
+  border: 1px solid var(--qb-questing-chip-border);
   color: var(--qb-locked-chip-text);
   cursor: pointer;
 }
@@ -889,73 +1300,201 @@ body {
    overrides win the cascade over every base rule above. */
 
 /* Filter bar (F3, WF-061) — search + priority/complexity + a Labels button
-   (which folds out `LabelFilterPopover`) + a visible/total readout + Clear,
-   sitting between the topbar and `.board-region`. Search/selects borrow the
-   topbar chip's hand-inked select treatment (`.topbar__repo-select select`);
-   the Labels/Clear buttons are the shared Role A button system (`--qb-btn-*`,
-   see `.card-drawer__edit-actions button`) — no new button style. */
+   (which folds out `LabelFilterPopover`) + a "Clear" button + a visible/
+   total readout, sitting between the topbar and `.board-region`. Search/
+   selects borrow the topbar chip's hand-inked select treatment
+   (`.topbar__repo-select select`); the Labels/Clear buttons are the shared
+   Role A button system (`--qb-btn-*`, see `.qb-btn` above `.topbar__refresh`)
+   — no new button style. Background is back to `--qb-parchment-muted`
+   (a brief detour through `--qb-panel` — matching `.topbar` — erased the
+   colour seam between Provisions/control and Scry/filter; restored so the
+   two sections read as visibly distinct blocks again). The chunky 9px-dash
+   "control↔scry" divider now rides this block's OWN top edge — see the
+   `background-image` band below — landing exactly on that colour seam
+   instead of floating inset on `.filter-bar__eyebrow-row` further down (see
+   that rule's comment). No divider on this block's own bottom edge — the
+   header↔content seam lives on `.board-region`'s top edge instead (see that
+   rule), clear of Scry regardless of which header rows are open. */
 .filter-bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.6rem;
   padding: 0.6rem 1rem;
-  background: var(--qb-parchment-muted);
-  border-bottom: 1.5px dashed var(--qb-line-dashed);
+  background-color: var(--qb-parchment-muted);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--qb-line-dashed) 0 9px,
+    transparent 9px 15px
+  );
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 2px;
 }
 
+/* Task 3: makes the `hidden` attribute (driven by `filtersOpen`) actually
+   hide this bar on EVERY viewport — previously only the ≤720px media query
+   below had a `.filter-bar[hidden]` override, so desktop ignored the
+   attribute entirely (the base rule above always won with `display: flex`).
+   Now the "Filters ▾" button genuinely collapses this bar anywhere. */
+.filter-bar[hidden] {
+  display: none;
+}
+
+/* The "Scry" eyebrow now opens its OWN full-width row above search/
+   selects/Labels — `flex-basis: 100%` on this wrapper forces the wrap
+   (same "self-forcing full-width flex item" trick used elsewhere, e.g.
+   `.topbar__quarantine-banner`), and `.filter-bar__row` below holds
+   everything that used to sit inline with the eyebrow. Task B: the
+   visible/total count now lives at the OTHER end of this same row —
+   `justify-content: space-between` puts "Scry" left, "N of M" right, so the
+   row reads as one section-header line rather than the count being buried
+   down in the filter controls. Coordinator follow-up: "Clear" (was "Clear
+   filters", read `.filter-bar__count`) no longer shares this row — it moved
+   to the end of `.filter-bar__facets` below, alongside Labels. No divider
+   band on this row itself — the "control↔scry" chunky divider moved to
+   `.filter-bar`'s own top edge (see that rule's comment) so it sits on the
+   colour seam rather than floating inset here, inside the parchment fill. */
+.filter-bar__eyebrow-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+/* Icon + "Scry" text, grouped so `justify-content: space-between` above has
+   exactly two children to split apart (this group vs. `.filter-bar__count`). */
+.filter-bar__eyebrow-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Small magnifying-glass icon ahead of the "Scry" text — same ui-icons
+   convention as the topbar's own small glyphs (journal/compass/etc). */
+.filter-bar__eyebrow-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* WF-092: a small quest-board eyebrow opening the row, ahead of search —
+   same quiet caption treatment as `.topbar__repo-select-label`/
+   `-branch-select-label` (uppercase, 0.65rem, tracked out), just recast as
+   a standalone heading instead of a select's adjacent label.
+   WF-097 follow-up: renders via `<Label className="filter-bar__eyebrow"/>`
+   now (FilterBar.tsx), which applies `.qb-label` — text-transform/font-size/
+   font-weight/color were identical to `.qb-label`'s own and are gone below;
+   `flex` (layout) survives. `letter-spacing` used to survive too — 0.06em
+   here vs. `.qb-label`'s own 0.04em, framed as a deliberately wider track —
+   but per `.topbar__controls-eyebrow`'s own comment, that "deliberate" track
+   was really just drift shared by these two eyebrows alone; both are now
+   unified back onto `.qb-label`'s own 0.04em and this override is dropped. */
+.filter-bar__eyebrow {
+  flex: 0 0 auto;
+}
+
+/* Task A (WF-085 follow-up: split): Provisions' own topbar↔control divider.
+   Used to be a grouped selector with `.filter-bar__eyebrow-row` (Scry's
+   eyebrow row rendered the identical band) so the two could never drift
+   apart — that band has since moved onto `.filter-bar`'s own top edge (see
+   that rule's comment) to land on the control↔scry colour seam instead of
+   floating inset inside the parchment fill, so this rule now stands alone.
+   A `repeating-linear-gradient` background band reads as clearly chunkier
+   dashes (9px dash/6px gap) than the flat 1.5px dashed/dotted borders used
+   elsewhere in this file; painted as a `background-image` rather than
+   `border-top` because a gradient has no intrinsic size to slice against
+   `border-image` predictably, while a `background-size: 100% 2px` band sits
+   in exactly the same visual spot a 2px top border would. Inset (not
+   full-width) — unlike `.topbar`'s own edge-to-edge dotted seam above, this
+   band stops at the row's own padding. */
+.topbar__controls-header {
+  margin-top: 0.3rem;
+  padding-top: 0.5rem;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--qb-line-dashed) 0 9px,
+    transparent 9px 15px
+  );
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 2px;
+}
+
+/* Task 1: the search/selects/Labels/count row, wrapped separately from the
+   eyebrow above so the eyebrow can sit on its own line without disturbing
+   this row's own wrap/gap behaviour. */
+.filter-bar__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+}
+
+/* WF-092: shrunk from a 22rem max (it dominated the row) to a compact
+   ~12.5rem so search reads as one control among several rather than the
+   row's anchor. Still comfortably usable; the ≤720px block only toggles
+   this bar's visibility (`.filter-bar[hidden]`), not its children's
+   widths, so this size carries through unchanged on mobile too. */
+/* Priority/Complexity/Labels/Clear grouped onto their own line below
+   search — `flex-basis: 100%` forces the wrap inside `.filter-bar__row`
+   (same self-forcing full-width flex item trick as
+   `.filter-bar__eyebrow-row`), leaving search alone on the line above; its
+   own `flex-wrap` still lets the controls fold onto extra lines if the
+   viewport is too narrow for them side by side. "Clear" (`.filter-bar__clear-btn`)
+   sits last, after Labels — a coordinator follow-up moved it off the Scry
+   eyebrow row. */
+.filter-bar__facets {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+/* WF-097 follow-up: renders via `<Input className="filter-bar__search"/>`
+   now (FilterBar.tsx) — font/box/padding/border/wobble/background/color
+   were all identical to `.qb-input`, and both the `:hover,:focus` pairing
+   and `::placeholder` rules that used to live here matched `.qb-input`'s
+   own byte-for-byte, so all three are gone. Only the field's own SIZE
+   (flex-basis/min/max-width — nothing `.qb-input` has an opinion on)
+   survives. */
 .filter-bar__search {
-  font: inherit;
-  font-size: 0.8rem;
-  flex: 0 1 22rem;
+  flex: 0 1 12.5rem;
   min-width: 8rem;
-  max-width: 22rem;
-  box-sizing: border-box;
-  padding: 0.3rem 0.6rem;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  background: var(--qb-btn-face);
-  color: var(--qb-ink-900);
+  max-width: 12.5rem;
 }
 
-.filter-bar__search:hover,
-.filter-bar__search:focus {
-  border-color: var(--qb-btn-ink-hover);
-  outline: none;
-}
-
-.filter-bar__search::placeholder {
-  color: var(--qb-ink-400);
-}
-
+/* WF-092: the visible "Priority"/"Complexity" caption that used to sit
+   beside the select moved INTO the select as its placeholder option (see
+   FilterBar.tsx) — this is now just a plain wrapper `<div>`, not a
+   `<label>` around text, so it carries only layout, no type styling. */
 .filter-bar__select {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--qb-ink-500);
 }
 
+/* WF-097 follow-up: the priority/complexity `<select>`s render via
+   `<Select/>` now (FilterBar.tsx), which applies `.qb-select` — most of
+   this rule's declarations were identical to `.qb-select`'s own (color/
+   background/border/height/box-sizing/padding are gone below), but three
+   survive as genuine overrides `.qb-select` doesn't make: `font-size`
+   (`.qb-select` inherits its font-size; this bar's controls all sit at
+   0.75rem explicitly), `text-transform`/`letter-spacing` (guard against
+   `.qb-select` having none of its own to inherit stray values from), and
+   `border-radius` (a DIFFERENT wobble variant than `.qb-select`'s default —
+   WF-046 item 1's "no two neighbouring controls read as the exact same
+   stamped shape" rule, same reasoning as `.topbar__branch-select select`'s
+   own divergent wobble). This still wins the cascade over `.qb-select`
+   despite `.qb-select` being a class on the SAME element now — `.filter-
+   bar__select select` (class + element) outranks a bare `.qb-select`
+   (class alone) on specificity regardless of source order. */
 .filter-bar__select select {
-  font: inherit;
   font-size: 0.75rem;
-  line-height: 1;
   text-transform: none;
   letter-spacing: normal;
-  font-weight: 600;
-  color: var(--qb-ink-900);
-  background: var(--qb-btn-face);
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--qb-btn-wobble-2);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem.
-     WF-090 follow-up: explicit `height` + trimmed vertical padding — same
-     fix, same reasoning, as `.topbar__repo-select select` above (a native
-     `<select>` renders taller than its padding alone would suggest). */
-  height: 1.65rem;
-  box-sizing: border-box;
-  padding: 0.12rem 0.7rem;
 }
 
 .filter-bar__select select:hover,
@@ -964,25 +1503,19 @@ body {
   outline: none;
 }
 
-/* Same Role A button system as `.card-drawer__edit-actions button` — the
-   Labels/Clear controls are just another toolbar action, not a new style. */
+/* WF-097 follow-up: Labels/Clear render via `<Button/>` now (FilterBar.tsx)
+   — font/padding/border/background/color/box-shadow/cursor/transition, and
+   the `:hover:not(:disabled)`/`:active:not(:disabled)`/`:disabled` states
+   below, all duplicated `.qb-btn`'s own byte-for-byte (same `:not(:disabled)`
+   guards, so no specificity gap the way `.topbar__controls-toggle`'s plain
+   `:hover`/`:active` had), so all of that is gone. Two things survive as
+   genuine overrides: `gap` (0.35rem — `.qb-btn`'s own is 0.3rem, a
+   deliberate difference for the Labels badge's spacing) and each button's
+   own divergent wobble radius (WF-046 item 1's "no two neighbouring
+   controls share a stamped shape" rule). */
 .filter-bar__labels-btn,
 .filter-bar__clear-btn {
-  display: inline-flex;
-  align-items: center;
   gap: 0.35rem;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
 .filter-bar__labels-btn {
@@ -991,25 +1524,6 @@ body {
 
 .filter-bar__clear-btn {
   border-radius: var(--qb-btn-wobble-4);
-}
-
-.filter-bar__labels-btn:hover:not(:disabled),
-.filter-bar__clear-btn:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.filter-bar__labels-btn:active:not(:disabled),
-.filter-bar__clear-btn:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.filter-bar__clear-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
 }
 
 /* Same neutral base tokens as `.claim-badge` — a quiet count pill, no
@@ -1029,21 +1543,41 @@ body {
   border: 1px solid var(--qb-line-dashed);
 }
 
+/* Task B: now the right-hand child of `.filter-bar__eyebrow-row` (was
+   `margin-left: auto` inside `.filter-bar__row` below, pushed right among
+   the search/select controls) — `justify-content: space-between` on the
+   parent row now does that positioning job instead. */
 .filter-bar__count {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-left: auto;
   font-size: 0.75rem;
   color: var(--qb-ink-500);
   white-space: nowrap;
 }
 
+/* Header↔content seam (moved off `.topbar`'s own bottom edge — see that
+   rule's comment). `.board-region` is the scroll container for both Board
+   and Atlas (App.tsx renders it as the one sibling below TopBar/FilterBar),
+   so its own top edge is the header stack's TRUE bottom in every toggle
+   state — topbar alone, topbar+control, topbar+filter, or all three —
+   without needing to track which header rows are currently open. Being
+   the scroll container's own border (not a child inside its scrolling
+   content) also means the line never scrolls away with the board/atlas
+   content. `2px dashed` renders ~5-6px dashes — a deliberate MEDIUM step
+   between the old `1.5px dotted` seam this replaces and the chunky 9px-
+   dash/6px-gap bands on `.topbar__controls-header` (inset, topbar↔control)
+   and `.filter-bar`'s own top edge (full-width, control↔scry — see that
+   rule's comment) above (those are `repeating-linear-gradient` background
+   bands, not borders — see each rule's comment); this stays a plain
+   full-bleed `border-top` since it's the header's outer edge, not another
+   section-header seam. */
 .board-region {
   flex: 1 1 auto;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 1rem;
+  border-top: 2px dashed var(--qb-line-dashed);
 }
 
 .board-placeholder {
@@ -1098,23 +1632,34 @@ body {
   color: var(--legacy-color-dcfce7);
 }
 
+/* WF-092: the swim-lane fill is a soft wash of each column's OWN header
+   accent (see `.lane--accent-*` below), and the old 1px border is dropped
+   (user preference — "the border's the bit I didn't like") — the tint plus
+   the radius carry the column shape now. `.lane--parked`/`--done`/`--archive`
+   keep their own parchment status fill instead; that's a deliberate
+   distinction, so no accent tint is written for those keys. */
 .lane {
   flex: 0 0 260px;
   display: flex;
   flex-direction: column;
-  background: var(--qb-panel);
-  border: 1px solid var(--qb-card-border);
   border-radius: var(--legacy-radius-6px);
+  /* Floor a lane at the full board-region height (desktop only — the
+     `max-width: 720px` layer below overrides both these to `none`/`visible`
+     for its own content-sized swipe panes) so a short column doesn't look
+     clipped next to its taller siblings; `max-height` + `overflow-y: auto`
+     still cap it and scroll internally once its own cards exceed that. */
+  min-height: 100%;
   max-height: 100%;
   overflow-y: auto;
 }
 
-/* Parked/Done/Archive are visually distinct and right-grouped in the row. */
+/* Parked/Done/Archive are visually distinct and right-grouped in the row.
+   Border dropped alongside the base lane's (a bare `border-style` with no
+   width would otherwise render a default medium border). */
 .lane--parked,
 .lane--done,
 .lane--archive {
   background: var(--qb-parchment-muted);
-  border-style: dashed;
   margin-left: 0;
 }
 
@@ -1122,10 +1667,12 @@ body {
   margin-left: 1.5rem;
 }
 
-/* Pennant banner header (WF-028 chunk 2) — HANDOFF's column banner: an
-   asymmetric-radius pennant shape, white text, hard offset shadow. Fill
-   colour is per accent key (`.lane__header--<key>` below); the header
-   itself only owns shape/spacing/text-colour, not colour. */
+/* Rectangular sketch label header (WF-093) — matches the Epic Atlas trail's
+   `.trail-tag` name-tags: a hand-inked rectangular wobble (not the old
+   pennant/flag shape) and dark ink text — tried flat here (no lift shadow,
+   unlike the trail tags). Fill colour is per accent key
+   (`.lane__header--<key>` below); the header itself only owns
+   shape/spacing/text-colour, not colour. */
 .lane__header {
   flex: 0 0 auto;
   display: flex;
@@ -1134,8 +1681,14 @@ body {
   padding: 7px 14px;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--legacy-color-fff);
+  color: var(--qb-ink-900);
+  /* Match the Atlas trail's `.trail-tag` note as closely as a lane header
+     can: the SAME pennant/torn-note radius and border — but tried flat here
+     (no lift shadow, unlike the trail tags), and (unlike a trail tag)
+     stretched to the lane's full width, so it reads as a banner across the
+     top of its column rather than a floating note. */
   border-radius: var(--qb-radius-pennant);
+  border: 1.5px solid var(--qb-ink-300);
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1146,57 +1699,115 @@ body {
    lanes (Implementation/Impl Review) share one accent group each; Archive
    (labelled "Abandoned") gets its own muted ash accent (WF-076) — no
    HANDOFF row of its own, so this is a new, deliberately desaturated
-   addition rather than a borrowed group. */
+   addition rather than a borrowed group.
+   WF-093: each is now a pastel wash of its accent (mixed over white, same
+   recipe as `.trail-tag--*`) with an inked border, not the old saturated
+   banner fill — the base `.lane__header` rule above owns the shared shape
+   (radius/border), so these only ever set background + border. Held a
+   touch stronger than the trail tags' 30%/55% (38%/60%) since a lane header
+   anchors a whole column rather than floating over parchment. */
+/* Status-coloured (blue todo): Backlog is the `planned` top-level status,
+   so this now reuses the sky accent — the same hue as `--qb-status-todo-*`
+   — rather than the old forest green. */
 .lane__header--backlog {
-  background: var(--qb-accent-forest-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-forest-shadow);
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 60%, white);
 }
 
 .lane__header--bootstrap {
-  background: var(--qb-accent-amber-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-amber-fill) 60%, white);
 }
 
 .lane__header--planning,
 .lane__header--plan-review,
 .lane__header--verification {
-  background: var(--qb-accent-sky-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-sky-shadow);
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-sky-fill) 60%, white);
 }
 
 .lane__header--implementation,
 .lane__header--impl-review {
-  background: var(--qb-accent-orange-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-orange-shadow);
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-orange-fill) 60%, white);
 }
 
 .lane__header--awaiting-merge {
-  background: var(--qb-accent-rose-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-rose-shadow);
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 60%, white);
 }
 
+/* Status-coloured (green done): Done is the `done` top-level status, so
+   this reads `--qb-status-done-base` directly — the DONE ramp's own
+   decoupled earthy green (WF-follow-up) — rather than the brighter forest
+   lane accent it briefly reused, or the old olive/umber before that. */
 .lane__header--done {
-  background: var(--qb-accent-umber-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-umber-shadow);
+  /* Richer than the 38% the other headers use: the earthy olive done-green
+     lightens to a dull/muddy sage at 38%, so it gets a stronger mix to read
+     as a clear, classy green (closer to the card accent). */
+  background: color-mix(in srgb, var(--qb-status-done-base) 70%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-status-done-base) 85%, white);
 }
 
 .lane__header--parked {
-  background: var(--qb-accent-taupe-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-taupe-shadow);
+  background: color-mix(in srgb, var(--qb-accent-taupe-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-taupe-fill) 60%, white);
 }
 
 .lane__header--abandoned {
-  background: var(--qb-accent-ash-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-ash-shadow);
+  background: color-mix(in srgb, var(--qb-accent-ash-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-ash-fill) 60%, white);
 }
 
 /* WF-085 in-progress lane (mobile-only — `collapseStagesForMobile`'s
-   synthetic lane never exists on desktop): reuses the amber accent group
-   rather than inventing a new one, since it's the umbrella over all 7
-   stages this lane replaces on a phone. */
+   synthetic lane never exists on desktop). Status-coloured (orange
+   in-progress): this is the umbrella over all 7 stages this lane replaces
+   on a phone, and the `in-flight` top-level status is orange (the same
+   hue as `--qb-status-in-progress-*`), so every stage reads consistently
+   orange here regardless of sub-stage — no longer the amber bootstrap
+   group. */
 .lane__header--in-progress {
-  background: var(--qb-accent-amber-fill);
-  box-shadow: var(--qb-shadow-banner) var(--qb-accent-amber-shadow);
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-orange-fill) 60%, white);
+}
+
+/* WF-092: light lane fill — the same per-accent groups as the header banners
+   above, but the pennant colour washed down to ~20% over the board (a soft
+   tint of each column's own hue, not the old flat panel grey). Keyed on the
+   lane root's `lane--accent-<key>` (Lane.tsx). Parked/Done/Abandoned are
+   deliberately absent — they keep the parchment status fill above. */
+/* Status-coloured (blue todo) — see `.lane__header--backlog` above. */
+.lane--accent-backlog {
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 20%, transparent);
+}
+.lane--accent-bootstrap {
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 20%, transparent);
+}
+/* WF-085 in-progress lane, split out of the `.lane--accent-bootstrap` amber
+   group it used to share (desktop `.lane--accent-bootstrap` above still
+   owns that group on its own). Status-coloured (orange in-progress) — see
+   `.lane__header--in-progress` above. */
+.lane--accent-in-progress {
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 20%, transparent);
+}
+/* Done lane gets a green wash like the other status lanes (overrides the
+   parchment-muted `.lane--done` fill above — declared later so it wins) so
+   the whole Done swimlane reads green, not just its header. Uses the earthy
+   `--qb-status-done-base`, matching the header/cards. */
+.lane--accent-done {
+  background: color-mix(in srgb, var(--qb-status-done-base) 20%, transparent);
+}
+.lane--accent-planning,
+.lane--accent-plan-review,
+.lane--accent-verification {
+  background: color-mix(in srgb, var(--qb-accent-sky-fill) 20%, transparent);
+}
+.lane--accent-implementation,
+.lane--accent-impl-review {
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 20%, transparent);
+}
+.lane--accent-awaiting-merge {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 20%, transparent);
 }
 
 .lane__cards {
@@ -1236,43 +1847,38 @@ body {
    a legacy fallback for accent-less renders (e.g. isolated component tests
    that mount TileShell without a Lane-computed accentKey). Mirrors the
    lane__header accent grouping one chunk up. */
+/* Status-coloured (blue todo): Backlog is the `planned` top-level status —
+   see `.lane__header--backlog` above. */
 .card-tile--accent-backlog {
-  --card-accent-fill: var(--qb-accent-forest-fill);
-  --card-accent-border: var(--qb-accent-forest-border);
-  --card-accent-shadow: var(--qb-accent-forest-cardshadow);
-}
-
-.card-tile--accent-bootstrap {
-  --card-accent-fill: var(--qb-accent-amber-fill);
-  --card-accent-border: var(--qb-accent-amber-border);
-  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
-}
-
-.card-tile--accent-planning,
-.card-tile--accent-plan-review,
-.card-tile--accent-verification {
   --card-accent-fill: var(--qb-accent-sky-fill);
   --card-accent-border: var(--qb-accent-sky-border);
   --card-accent-shadow: var(--qb-accent-sky-cardshadow);
 }
 
+/* Status-coloured (orange in-progress): all 7 in-flight stage keys share
+   the orange accent now, so every in-flight card reads orange regardless
+   of sub-stage — sub-status colouring is a later pass. See
+   `.lane__header--in-progress` above. */
+.card-tile--accent-bootstrap,
+.card-tile--accent-planning,
+.card-tile--accent-plan-review,
+.card-tile--accent-verification,
 .card-tile--accent-implementation,
-.card-tile--accent-impl-review {
+.card-tile--accent-impl-review,
+.card-tile--accent-awaiting-merge {
   --card-accent-fill: var(--qb-accent-orange-fill);
   --card-accent-border: var(--qb-accent-orange-border);
   --card-accent-shadow: var(--qb-accent-orange-cardshadow);
 }
 
-.card-tile--accent-awaiting-merge {
-  --card-accent-fill: var(--qb-accent-rose-fill);
-  --card-accent-border: var(--qb-accent-rose-border);
-  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
-}
-
+/* Status-coloured (green done): Done is the `done` top-level status — see
+   `.lane__header--done` above. Border/shadow are mixed off the DONE base
+   itself (not the forest border/cardshadow tokens) so the card doesn't
+   pair the new darker green fill with a mismatched bright/tan trim. */
 .card-tile--accent-done {
-  --card-accent-fill: var(--qb-accent-umber-fill);
-  --card-accent-border: var(--qb-accent-umber-border);
-  --card-accent-shadow: var(--qb-accent-umber-cardshadow);
+  --card-accent-fill: var(--qb-status-done-base);
+  --card-accent-border: color-mix(in srgb, var(--qb-status-done-base) 70%, #2c2015);
+  --card-accent-shadow: var(--qb-status-done-strong);
 }
 
 .card-tile--accent-parked {
@@ -1287,11 +1893,17 @@ body {
   --card-accent-shadow: var(--qb-accent-ash-cardshadow);
 }
 
-/* WF-085 in-progress lane (mobile-only) — see `.lane__header--in-progress`. */
+/* WF-085 in-progress lane (mobile-only) — the accent key its cards
+   actually carry (Lane.tsx: `kind:"in-progress"` cards use the lane's own
+   `accentKey`, not their individual stage), so this is the rule that
+   colours mobile in-flight cards, not the 7 desktop stage-key rules above.
+   Status-coloured (orange in-progress), same as `.lane__header--in-progress`
+   and the stage-key group above — every in-flight card reads orange
+   regardless of sub-stage. */
 .card-tile--accent-in-progress {
-  --card-accent-fill: var(--qb-accent-amber-fill);
-  --card-accent-border: var(--qb-accent-amber-border);
-  --card-accent-shadow: var(--qb-accent-amber-cardshadow);
+  --card-accent-fill: var(--qb-accent-orange-fill);
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
 }
 
 .card-tile {
@@ -1762,12 +2374,16 @@ body {
    next to the priority chip: this is provenance metadata, not a signal that
    should compete for attention on the tile. */
 .repo-chip {
+  /* Same square torn-note chip as the labels (mirrors the .qb-chip primitive):
+     a quiet grey provenance tag, reshaped from the old small-radius pill so it
+     sits in the same family as the label chips beside it. */
   font-size: 0.65rem;
   font-weight: 500;
-  padding: 0.05rem 0.35rem;
-  border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-f3f4f6);
-  color: var(--legacy-color-6b7280);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--qb-radius-pennant);
+  border: 1px solid var(--qb-ink-300);
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-500);
 }
 
 /* Branch chip (WF-031): visually distinct from the repo-chip's grey
@@ -1823,13 +2439,15 @@ body {
 }
 
 /* Label chips (F1, WF-058) — the base pill shared by the read-only tile
-   wrapper (`.card-tile__labels`, below) and the drawer's editable
+   wrapper (`.card-tile__labels`, below), the drawer's editable
    `.label-editor__chip` (further down, alongside `.label-editor`'s other
-   rules) — both apply `.label-chip--<key>`. Colour is ALWAYS the per-label
-   `.label-chip--<key>` modifier (board/labelColor.ts's stable hash ->
-   palette key), never an inline style — same chip-formula shape as
-   `.branch-chip` (pale bg / saturated text / medium border) so a label chip
-   reads as a sibling of the other tile chips, not a foreign element. */
+   rules), and the label-colours dialog's per-row current chip
+   (`.label-settings-row`, LabelSettingsDialog.tsx) — all three apply
+   `.label-chip--<key>`. Colour is ALWAYS the per-label `.label-chip--<key>`
+   modifier (board/labelColor.ts's stable hash -> palette key), never an
+   inline style — same chip-formula shape as `.branch-chip` (pale bg /
+   saturated text / medium border) so a label chip reads as a sibling of the
+   other tile chips, not a foreign element. */
 .label-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1837,22 +2455,46 @@ body {
   margin: 0.1rem 0 0.35rem;
 }
 
-/* WF-079: hand-drawn wobble to match Role A's illustrated system — a fixed
-   wobble radius (reusing `--qb-btn-wobble-3`, distinct from the neighbouring
-   filter-bar/label-editor controls' own -2/-4 picks so chips don't read as
-   the same stamped shape) plus a subtle ink ring layered OVER each palette's
-   own coloured border via box-shadow (not the `border` property) — the
-   9-colour `.label-chip--<key>` modifiers below still own background/color/
-   border in full and are declared after this rule, so their colours are
-   untouched and stay legible. `.label-filter-chip` (pill shape) and its
-   `--include`/`--exclude` box-shadow rings still override both properties
-   for the filter popover, unchanged from before this chunk. */
+/* Design-library reconciliation: every `.label-chip` element (`LabelChips`/
+   `LabelEditor`/`LabelSettingsDialog`) now renders through `<Chip/>`
+   (`src/ui/`), so `.qb-chip` (declared above, "Design library" section) is
+   ALWAYS present as the base class too. `.qb-chip` supplies `display:
+   inline-flex; align-items: center` — genuinely shared, so it's gone from
+   here — plus a fallback font-size/padding/border-radius/border/background/
+   color for the plain neutral pill (`<Chip/>` with no `tone`). `.label-chip`
+   below is declared LATER in the cascade, so its font-size/padding/
+   border-radius win over `.qb-chip`'s for any chip carrying it — this is
+   the hand-drawn WOBBLE SHAPE layer, kept in full (nothing stripped: none
+   of its values happen to already match `.qb-chip`'s, so every property
+   here is a genuine, needed override, not dead duplication). `.label-chip`
+   itself never sets colour — that's always the `.label-chip--<key>`
+   modifiers below (also declared later, also winning over `.qb-chip`'s own
+   border/background/color) — board/labelColor.ts's stable hash -> palette
+   key, never an inline style.
+
+   WF-079: the wobble radius itself (reusing `--qb-btn-wobble-3`, distinct
+   from the neighbouring filter-bar/label-editor controls' own -2/-4 picks so
+   chips don't read as the same stamped shape) plus a subtle ink ring layered
+   OVER each palette's own coloured border via box-shadow (not the `border`
+   property) — the 9-colour `.label-chip--<key>` modifiers still own
+   background/color/border in full and are declared after this rule, so
+   their colours are untouched and stay legible. `.label-filter-chip` (pill
+   shape, LabelFilterPopover's bespoke `<button>` — never routed through
+   `<Chip/>`, see that file's own doc comment for why) and its `--include`/
+   `--exclude` box-shadow rings still override both properties for the
+   filter popover, unchanged from before this chunk. */
 .label-chip {
+  /* Displayed as the same square torn-note badge as the topbar guild pills
+     (.topbar__gold-pill/-vanquished-pill/-fleet-pill) — which is exactly what
+     the `.qb-chip` PRIMITIVE this composes onto already provides (pennant
+     radius, 1px border, flat). This class used to override that back into a
+     soft rounded pill (`--qb-btn-wobble-3`) with a ring box-shadow; those two
+     overrides are dropped so the primitive's note shape shows through. Only
+     the genuinely label-specific bits stay: smaller text, medium weight, and
+     ellipsis clipping. The tone variants below still supply each label's
+     fill/border/text colour. */
   font-size: 0.65rem;
   font-weight: 500;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--qb-btn-wobble-3);
-  box-shadow: 0 0 0 1px rgba(74, 56, 38, 0.12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1947,6 +2589,15 @@ body {
   box-shadow: var(--qb-shadow-modal);
 }
 
+/* A bespoke eyebrow, never routed through `<Label>`/`.qb-label` — its own
+   plain `<div className="label-filter-popover__legend">` (LabelFilterPopover.tsx).
+   Left un-migrated for now (eyebrow-weight unification pass): `font-weight`
+   was never set here at all (a bare div defaults to `normal`) and
+   `letter-spacing` already happens to match `.qb-label`'s own `0.04em`, so
+   both already read consistent with the rest of the unified eyebrows —
+   only `font-size` (0.7rem vs. `.qb-label`'s 0.65rem) is a genuine delta,
+   not trivial to drop without a visual size change, so this rule stays
+   bespoke rather than being folded onto `.qb-label`. */
 .label-filter-popover__legend {
   flex-basis: 100%;
   margin: 0 0 0.3rem;
@@ -2024,23 +2675,42 @@ body {
   margin-top: 0.5rem;
 }
 
+/* Board/drawer chip parity: this rule deliberately leaves `.label-chip`'s
+   own font-size/padding/border-radius/height untouched — those come from
+   `.label-chip` alone (declared above), so a drawer chip is the exact same
+   small pill as a board `LabelChips` tile chip, remove glyph aside. Only
+   `max-width`/`white-space`/`overflow`/`text-overflow` below are overridden
+   (`.label-chip`'s ellipsis-and-clip sizing is tuned for a bare text pill;
+   loosened here so the trailing remove glyph never gets clipped). The one
+   thing that used to break this parity was `.label-editor__remove`'s own
+   coarse-pointer touch floor forcing this chip's cross-axis height up past
+   the pill's — see that rule's own comment for the fix (an invisible hit-
+   area instead of a bigger visible button), which keeps this chip at
+   `.label-chip`'s own height on every pointer type. */
 .label-editor__chip {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  /* .label-chip's ellipsis-and-clip sizing is tuned for a bare text pill;
-     override it here so the remove glyph never gets clipped. */
   max-width: none;
   white-space: normal;
   overflow: visible;
   text-overflow: unset;
 }
 
+/* Kept compact (14px) on every pointer type, unlike the shared 32px touch
+   floor most small icon-buttons in this file get under `@media (pointer:
+   coarse)` (see that block, further down) — a 32px BUTTON box would force
+   `.label-editor__chip` (its `display: inline-flex; align-items: center`
+   parent, above) to grow to fit it, ballooning the whole chip well past the
+   board's own `.label-chip` pill height it's meant to match. `position:
+   relative` anchors the coarse-pointer `::before` hit-area added in that
+   same block below — this rule itself is unchanged across pointer types. */
 .label-editor__remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  position: relative;
   width: 14px;
   height: 14px;
   padding: 0;
@@ -2063,20 +2733,43 @@ body {
   opacity: 1;
 }
 
-.label-editor__input {
-  font: inherit;
-  font-size: 0.75rem;
+/* Add-a-label affordance — an empty dotted-border note (same pennant radius as
+   the label chips) with a leading + icon, so it reads as an empty label slot
+   you fill in. The dashed border lives on this wrapper; the input inside is
+   borderless and transparent. */
+.label-editor__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0.5rem;
   border: 1.5px dashed var(--qb-line-dashed);
-  border-radius: var(--legacy-radius-3px);
-  padding: 0.05rem 0.4rem;
-  background: transparent;
-  color: var(--qb-ink-500);
-  min-width: 6rem;
+  border-radius: var(--qb-radius-pennant);
+  color: var(--qb-ink-400);
+  cursor: text;
 }
 
-.label-editor__input:hover,
-.label-editor__input:focus {
+.label-editor__add:focus-within {
   border-color: var(--qb-btn-ink-hover);
+}
+
+.label-editor__add-plus {
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.label-editor__input {
+  font: inherit;
+  font-size: 0.65rem;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--qb-ink-500);
+  min-width: 3rem;
+  width: 4rem;
+}
+
+.label-editor__input:focus {
   outline: none;
 }
 
@@ -2296,6 +2989,12 @@ body {
   gap: 0.6rem;
 }
 
+/* WF-097 follow-up: renders via `<Input>` (CardDetailDrawer.tsx), so the
+   plain bordered-field chrome (background/border/focus border-swap) that used
+   to live here — identical to `.qb-input`'s own, which was factored FROM this
+   field — is gone. Only the drawer's bigger display-font title look survives
+   as genuine overrides layered on that base, exactly the split `.qb-input`'s
+   own doc comment anticipates. */
 .card-drawer__title-input {
   display: block;
   width: 100%;
@@ -2304,57 +3003,17 @@ body {
   font-weight: 800;
   font-size: 30px;
   color: var(--qb-ink-900);
-  background: var(--qb-btn-face);
-  border: 1.5px solid var(--qb-btn-ink);
   border-radius: var(--legacy-radius-3px);
   padding: 0.1rem 0.4rem;
 }
 
-.card-drawer__title-input:focus {
-  outline: none;
-  border-color: var(--qb-btn-ink-hover);
-}
-
-/* Same Role A button system as `.claim-control button` (task-12) — the
-   Edit/Save/Cancel controls are just another drawer action, not a new
-   button style. */
-.card-drawer__edit-btn,
-.card-drawer__edit-actions button {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.card-drawer__edit-btn:hover:not(:disabled),
-.card-drawer__edit-actions button:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.card-drawer__edit-btn:active:not(:disabled),
-.card-drawer__edit-actions button:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.card-drawer__edit-btn:disabled,
-.card-drawer__edit-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
-}
-
+/* Edit/Save/Cancel/Pull-children carry NO per-control styling — they render
+   purely as the shared design-library `.qb-btn` button (Save adds
+   `.qb-btn--primary` via the primitive's `variant="primary"`). The old
+   per-button wobble-radius overrides were removed (nobody drew a
+   `.card-drawer__edit-btn`/`--cancel-btn`/`--pull-children-btn` rule any
+   more) so every drawer button is identical in size and shape to buttons
+   elsewhere in the app — the constructed classes do the work. */
 .card-drawer__edit-body {
   display: flex;
   flex-direction: column;
@@ -2366,6 +3025,12 @@ body {
  * so this uses the same plain monospace stack as `.md-view pre`/`code`
  * instead; Silkscreen stays reserved for small badges (MD tag, hero-class
  * chip, quest-log stamp). */
+/* WF-097 follow-up: renders via `<Textarea>` (CardDetailDrawer.tsx). The
+   background and focus border-swap that duplicated `.qb-input`'s own are
+   gone; the genuine overrides layered on that base survive — real monospace
+   prose (NOT the `--qb-font-mono` pixel font, see WF-082 note above), the
+   taller min-height, vertical resize, and its OWN dashed resting border
+   (`--qb-line-dashed`, deliberately softer than `.qb-input`'s solid ink). */
 .card-drawer__body-textarea {
   width: 100%;
   min-height: 14rem;
@@ -2373,16 +3038,10 @@ body {
   font-size: 0.85rem;
   line-height: 1.5;
   color: var(--qb-ink-900);
-  background: var(--qb-btn-face);
   border: 1.5px solid var(--qb-line-dashed);
   border-radius: var(--legacy-radius-3px);
   padding: 0.6rem;
   resize: vertical;
-}
-
-.card-drawer__body-textarea:focus {
-  outline: none;
-  border-color: var(--qb-btn-ink-hover);
 }
 
 .card-drawer__edit-actions {
@@ -2412,9 +3071,18 @@ body {
    lighter "tinted" chip distinct from the banner pill's solid fill so the
    two don't compete for attention right next to each other. */
 .card-drawer__status-fact {
+  /* Displayed as the same square torn-note chip as the labels (pennant radius,
+     1px border, flat). The --<accentKey> variants below supply each chip's
+     pale accent background; text is a single dark ink (NOT the bright accent
+     fill, which read illegibly as text — e.g. green on the tan backlog tint),
+     and the border derives from that dark text so every variant gets a
+     matching soft outline automatically. */
+  font-size: 0.65rem;
+  font-weight: 500;
   padding: 0.15rem 0.5rem;
-  border-radius: var(--qb-radius-chip-sm);
-  font-weight: 600;
+  border-radius: var(--qb-radius-pennant);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  color: var(--qb-ink-900);
 }
 
 .card-drawer__banner--backlog {
@@ -2422,7 +3090,6 @@ body {
 }
 .card-drawer__status-fact--backlog {
   background: var(--qb-accent-forest-cardshadow);
-  color: var(--qb-accent-forest-fill);
 }
 
 .card-drawer__banner--bootstrap {
@@ -2430,7 +3097,6 @@ body {
 }
 .card-drawer__status-fact--bootstrap {
   background: var(--qb-accent-amber-cardshadow);
-  color: var(--qb-accent-amber-fill);
 }
 
 .card-drawer__banner--planning,
@@ -2442,7 +3108,6 @@ body {
 .card-drawer__status-fact--plan-review,
 .card-drawer__status-fact--verification {
   background: var(--qb-accent-sky-cardshadow);
-  color: var(--qb-accent-sky-fill);
 }
 
 .card-drawer__banner--implementation,
@@ -2452,7 +3117,6 @@ body {
 .card-drawer__status-fact--implementation,
 .card-drawer__status-fact--impl-review {
   background: var(--qb-accent-orange-cardshadow);
-  color: var(--qb-accent-orange-fill);
 }
 
 .card-drawer__banner--awaiting-merge {
@@ -2460,7 +3124,6 @@ body {
 }
 .card-drawer__status-fact--awaiting-merge {
   background: var(--qb-accent-rose-cardshadow);
-  color: var(--qb-accent-rose-fill);
 }
 
 .card-drawer__banner--done {
@@ -2468,7 +3131,6 @@ body {
 }
 .card-drawer__status-fact--done {
   background: var(--qb-accent-umber-cardshadow);
-  color: var(--qb-accent-umber-fill);
 }
 
 .card-drawer__banner--parked {
@@ -2476,7 +3138,6 @@ body {
 }
 .card-drawer__status-fact--parked {
   background: var(--qb-accent-taupe-cardshadow);
-  color: var(--qb-accent-taupe-fill);
 }
 
 .card-drawer__banner--abandoned {
@@ -2484,7 +3145,6 @@ body {
 }
 .card-drawer__status-fact--abandoned {
   background: var(--qb-accent-ash-cardshadow);
-  color: var(--qb-accent-ash-fill);
 }
 
 /* Hero chip: PartyAvatar + name + class (HANDOFF: "assigned-hero chip
@@ -2535,12 +3195,20 @@ a.card-drawer__pr-chip:hover {
   margin-bottom: 1rem;
 }
 
+/* Label standardisation follow-up: renders via `<Label as="h3"
+   className="card-drawer__section-heading"/>` now (CardDetailDrawer.tsx) —
+   these were the ONE genuinely semantic heading among the drawer's caption-
+   like text (real `<h3>`s: "Links", "Sub-quests", and the markdown section
+   labels), so they needed a heading TAG, not just eyebrow styling — see
+   `Label`'s own `as` prop doc comment. `text-transform`/`letter-spacing`/
+   `color` were previously a DIFFERENT recipe from `.qb-label` (0.85rem/
+   0.03em/ink-500 vs. `.qb-label`'s 0.65rem/0.04em/ink-400) — per this
+   migration's goal ("read identically to the topbar eyebrows"), that
+   distinct look is dropped rather than kept as a genuine override, so
+   these now match `.qb-label` exactly. Only `margin` survives below (a
+   real layout delta; `.qb-label` has none). */
 .card-drawer__section-heading {
   margin: 0 0 0.25rem;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--qb-ink-500);
 }
 
 .card-drawer__section-text {
@@ -2662,10 +3330,17 @@ a.card-drawer__pr-chip:hover {
   margin-bottom: 0.75rem;
 }
 
+/* Label standardisation follow-up: renders via `<Label
+   className="card-drawer__journey-label"/>` now (CardDetailDrawer.tsx) —
+   `font-weight: 600` was already identical to `.qb-label`'s own default and
+   is gone below; `font-size`/`color` (0.75rem/ink-500) were a distinct,
+   slightly bigger/darker recipe than `.qb-label`'s (0.65rem/ink-400) and
+   are dropped too, per this migration's goal of reading identically to the
+   topbar eyebrows rather than keeping the old delta. Only `margin-bottom`
+   survives — genuine layout spacing above the progress track, which
+   `.qb-label` (an inline-block eyebrow with no opinion on its neighbours)
+   doesn't provide. */
 .card-drawer__journey-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--qb-ink-500);
   margin-bottom: 0.25rem;
 }
 
@@ -2732,10 +3407,16 @@ a.card-drawer__pr-chip:hover {
   margin: 0;
 }
 
-.card-drawer__checklist-count {
-  font-size: 0.75rem;
-  color: var(--qb-ink-400);
-}
+/* Label standardisation follow-up: renders via `<Label
+   className="card-drawer__checklist-count"/>` now (CardDetailDrawer.tsx) —
+   `color: var(--qb-ink-400)` was already identical to `.qb-label`'s own
+   default and `font-size: 0.75rem` is dropped too (matches `.qb-label`'s
+   0.65rem now, per this migration's goal), so nothing genuinely distinct
+   survives — the base rule is gone entirely, same as `.topbar__pill`'s own
+   WF-097 note above. The class name lives on only as a selector hook (and
+   for `.card-drawer__checklist-header`'s flex layout, unaffected) —
+   `<Label className="card-drawer__checklist-count">` still composes it in,
+   it just carries no declarations of its own any more. */
 
 .card-drawer__checklist .checklist__row {
   font-size: 0.85rem;
@@ -2852,48 +3533,35 @@ a.card-drawer__pr-chip:hover {
   margin-top: 0.15rem;
 }
 
-/* Segmented Quest | Scroll (MD) tab bar (HANDOFF: "segmented, in a
-   #EDE0C2 track, border-radius:14px, padding:5px"). */
+/* Segmented Quest | Scroll (MD) toggle (WF-096: was a standalone Role B
+   "T1 gold underline" tab pair — see git history for that HANDOFF-sourced
+   "#EDE0C2 track" version; the `--qb-tab-*` tokens it used stay declared
+   for any future Role-B use but are no longer read here). Realigned to the
+   app's standard segmented-control pattern instead — each button is its
+   own `.qb-btn` toggle with a gold-chip pressed state, the SAME recipe
+   `.topbar__atlas-control[aria-pressed="true"]` uses — so this reads as
+   the same kind of on/off control as every other toggle pair in the app,
+   not a bespoke drawer-only tab style. `aria-pressed`/behavior in
+   CardDetailDrawer.tsx are unchanged — only the paint moved. */
 .card-drawer__viewtoggle {
   display: inline-flex;
-  gap: 0.25rem;
+  gap: 0.4rem;
   margin-bottom: 0.5rem;
-  padding: 5px;
-  background: var(--qb-tab-track);
-  border-radius: 14px;
 }
 
-/* Role B — "T1 gold underline" tabs (CHOSEN button system, task-12). */
-.card-drawer__viewtoggle button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.3rem 0.75rem;
-  border-radius: 5px 5px 2px 2px;
-  border: 0;
-  border-bottom: 2px solid var(--qb-tab-underline);
-  background: transparent;
-  color: var(--qb-tab-text);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    color var(--qb-motion-hover) ease;
+.card-drawer__viewtoggle-btn[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
 }
 
-.card-drawer__viewtoggle button:hover {
-  background: var(--qb-tab-hover-bg);
-  border-bottom-color: var(--qb-tab-underline-active);
-  color: var(--qb-tab-text-active);
-}
-
-/* Active tab — mapped to the existing selected-tab marker. */
-.card-drawer__viewtoggle button[aria-pressed="true"] {
-  border-bottom-color: var(--qb-tab-underline-active);
-  color: var(--qb-tab-text-active);
-  background: var(--qb-tab-active-bg);
+/* Specificity note: `.qb-btn:hover:not(:disabled)` outranks a bare
+   `[aria-pressed="true"]` selector, so the pressed (gold) state needs its
+   own `:hover` override here to survive a hover — same reasoning as
+   `.qb-btn--primary:hover` above. */
+.card-drawer__viewtoggle-btn[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
 }
 
 /* Tiny Silkscreen "MD" tag on the Scroll tab (HANDOFF: "#7A8B45 bg,
@@ -2909,22 +3577,26 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* Mutation controls (Chunk 6). */
-/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, replacing
-   the plain square swatch, so it matches the button family it sits next
-   to in the card drawer. */
+/* WF-097 follow-up: renders via `<Select className="priority-select"/>` now
+   (PrioritySelect.tsx) — line-height/border/height/box-sizing/background
+   were all identical to `.qb-select`'s own and are gone below (as was
+   `:hover`'s border-color, also a full duplicate); genuine overrides
+   survive: `font-size` (`.qb-select` inherits; this control pins 0.75rem
+   explicitly), `border-radius` (a DIFFERENT wobble variant — WF-046 item 1's
+   "no two neighbouring controls share a stamped shape" rule), `padding`
+   (0.3rem vertical vs. `.qb-select`'s own 0.12rem — this drawer control
+   matches the Role-A button box), and `color`/hover-`background` (this
+   control reads at `--qb-ink-700` with a face-hover swap, not `.qb-select`'s
+   neutral ink-900 with no hover fill). */
 .priority-select {
-  font-size: 0.75rem;
-  line-height: 1;
-  border: 1.5px solid var(--qb-btn-ink);
+  /* Nothing but the wobble variant — font-size / padding / color are dropped
+     so this select renders identically to the topbar's (both are the bare
+     `.qb-select`). The old `padding: 0.3rem 0.7rem` added top padding on top of
+     the fixed height, which shoved the value text low; base padding centres it. */
   border-radius: var(--qb-btn-wobble-3);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
-  padding: 0.3rem 0.7rem;
-  background: var(--qb-btn-face);
-  color: var(--qb-ink-700);
 }
 
 .priority-select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
   background: var(--qb-btn-face-hover);
 }
 
@@ -2938,14 +3610,26 @@ a.card-drawer__pr-chip:hover {
    was `.threshold-control__label`, wrapping a `<label>` around the input;
    now a plain `<span>` sibling (a `<button>` — the InfoTooltip trigger —
    can't nest inside a `<label>`), keeping the same typography so the
-   relabel doesn't change how the control reads in the topbar. */
+   relabel doesn't change how the control reads in the topbar.
+   WF-097 follow-up: renders via `<Label className="threshold-control__title"/>`
+   now (ThresholdControl.tsx), which applies `.qb-label` — text-transform/
+   font-size (well, font-size stays overridden, see below)/color were
+   identical to `.qb-label`'s own where they matched and are gone below;
+   `display: inline-flex; align-items: center; gap: 0.3rem` (layout, for the
+   icon+text+tooltip row) and `font-size: 0.7rem`/`letter-spacing: 0.03em`
+   (genuine overrides — 0.7rem vs. `.qb-label`'s 0.65rem, 0.03em vs. its
+   0.04em) survive as real deltas. `font-weight: normal` used to sit here
+   too — this title was never bold before its own migration, so it cancelled
+   `.qb-label`'s then-default `600` rather than silently picking it up, same
+   "eyebrow that was never bold" case as `.topbar__repo-select-label`/
+   `-branch-select-label` above — but the eyebrow-weight unification pass
+   changed `.qb-label`'s own default to `normal` (see that rule's comment),
+   so it's gone too: nothing left to cancel. */
 .threshold-control__title {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   font-size: 0.7rem;
-  color: var(--qb-ink-400);
-  text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
@@ -3031,35 +3715,23 @@ a.card-drawer__pr-chip:hover {
    including the `:not(.info-tooltip__trigger)` scoping that used to be
    needed to keep the InfoTooltip's own `<button>` trigger from being
    caught by a bare `.threshold-control button` selector, are gone with
-   them). Same hand-inked recipe as `.topbar__repo-select select` above —
-   transparent bg, wobble border, pinned `height`/`box-sizing` so it lines
-   up with the buttons/selects beside it in the row. `width` is fixed
-   (rather than left to the native auto-size-to-selected-option behaviour)
-   so the box doesn't visibly resize as the user steps between "5%" and
-   "95%" — sized to fit "95%" plus the native dropdown arrow without
-   clipping. */
+   them).
+   WF-097 follow-up: renders via `<Select className="threshold-control__select"/>`
+   now (ThresholdControl.tsx) — font/font-weight/line-height/color/border/
+   border-radius/height/box-sizing were all identical to `.qb-select`'s own
+   and are gone below (as were the `:hover`/`:focus-visible` states, also
+   full duplicates); three genuine overrides survive: `width` (fixed rather
+   than the native auto-size-to-selected-option behaviour, so the box
+   doesn't visibly resize as the user steps between "5%" and "95%" — sized
+   to fit "95%" plus the dropdown arrow without clipping), `font-size`
+   (`.qb-select` inherits; this control pins 0.75rem explicitly), and
+   `padding` (tighter horizontal padding than `.qb-select`'s default, to
+   suit the narrower fixed width). */
 .threshold-control__select {
   width: 3.75rem;
-  font: inherit;
   font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--qb-ink-900);
   background: transparent;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  height: 1.65rem;
-  box-sizing: border-box;
   padding: 0.12rem 0.4rem;
-}
-
-.threshold-control__select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
-}
-
-.threshold-control__select:focus-visible {
-  outline: 2px solid var(--qb-ink-400);
-  outline-offset: 2px;
 }
 
 .card-drawer__controls {
@@ -3079,31 +3751,18 @@ a.card-drawer__pr-chip:hover {
   flex-wrap: wrap;
 }
 
-/* Role A (CHOSEN button system, task-12). */
-.status-menu button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
+/* WF-097 follow-up: every button here renders via `<Button/>` now
+   (StatusMenu.tsx) — the base rule's display/align-items/gap/font-size/
+   padding/font-weight/border-radius(default wobble)/border/background/
+   color/box-shadow/cursor/transition, plus the `:hover`/`:active`/
+   `:disabled` states below, all duplicated `.qb-btn`'s own exactly and are
+   gone entirely. Only the genuine per-button overrides survive: */
 
 /* WF-046 item 1: this menu is the one place where up to four Role-A
    buttons sit as direct siblings — `:nth-of-type` cycles the wobble
    variants across them (park/unpark, block/unblock, done, abandon) so
-   the row doesn't read as four copies of the same stamp. The base rule
-   above already carries the default variant for the first button. */
+   the row doesn't read as four copies of the same stamp. The first button
+   needs no override — `.qb-btn`'s own default wobble already carries it. */
 .status-menu button:nth-of-type(2) {
   border-radius: var(--qb-btn-wobble-3);
 }
@@ -3120,25 +3779,11 @@ a.card-drawer__pr-chip:hover {
    cuter guild-flavoured label (StatusMenu.tsx) — Unpark/Unblock keep
    their plain text, they're the toggle-back state, not one of the four
    themed verbs. */
-.status-menu button svg {
+.status-menu__icon {
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
-}
-
-.status-menu button:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.status-menu button:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.status-menu button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
+  object-fit: contain;
 }
 
 .claim-control {
@@ -3148,57 +3793,34 @@ a.card-drawer__pr-chip:hover {
   flex-wrap: wrap;
 }
 
-/* WF-046 item 3: Role-A hand-inked border + wobble silhouette. */
+/* WF-097 follow-up: renders via `<Select/>` now (ClaimControl.tsx) —
+   line-height/border/background were all identical to `.qb-select`'s own
+   and are gone below (as was `:hover`'s border-color, also a full
+   duplicate); genuine overrides survive: `font-size` (`.qb-select`
+   inherits), `border-radius` (a DIFFERENT wobble variant — WF-046 item 1),
+   `padding` (0.3rem vertical vs. `.qb-select`'s own 0.12rem — matches the
+   Role-A button box), and `color`/hover-`background` (this control reads at
+   `--qb-ink-700` with a face-hover swap, not `.qb-select`'s neutral
+   ink-900 with no hover fill). */
 .claim-control select {
-  font-size: 0.75rem;
-  line-height: 1;
-  border: 1.5px solid var(--qb-btn-ink);
+  /* Wobble variant only — see `.priority-select` above: font/padding/color
+     dropped so it matches the topbar's bare `.qb-select` and the value text
+     centres instead of sitting low. */
   border-radius: var(--qb-btn-wobble-4);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
-  padding: 0.3rem 0.7rem;
-  background: var(--qb-btn-face);
-  color: var(--qb-ink-700);
 }
 
 .claim-control select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
   background: var(--qb-btn-face-hover);
 }
 
-/* Role A (CHOSEN button system, task-12). WF-046 item 1: variant-3 wobble
-   so Assign/Unassign don't share an outline with the select right next
-   to it. */
+/* WF-097 follow-up: Assign/Unassign render via `<Button/>` now
+   (ClaimControl.tsx) — font-size/padding/font-weight/border/background/
+   color/box-shadow/cursor/transition, plus `:hover`/`:active`/`:disabled`
+   below, all duplicated `.qb-btn`'s own exactly and are gone; only the
+   WF-046 item 1 wobble variant survives (variant-3, so Assign/Unassign
+   don't share an outline with the select right next to it). */
 .claim-control button {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
-}
-
-.claim-control button:hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.claim-control button:active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.claim-control button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
 }
 
 .claim-control__holder {
@@ -3218,23 +3840,18 @@ a.card-drawer__pr-chip:hover {
   font-size: 0.8rem;
 }
 
-/* WF-046 item 3: Role-A hand-inked border + wobble silhouette, shared by
-   both selects in this component (parent + add-dependency); the
-   add-dependency one gets its own variant below so the two don't match. */
-.link-editor select {
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1;
-  border: 1.5px solid var(--qb-btn-ink);
-  border-radius: var(--qb-btn-wobble);
-  /* Role A button box match (WF-078 follow-up) — was 0.25rem 0.5rem. */
-  padding: 0.3rem 0.7rem;
-  background: var(--qb-btn-face);
-  color: var(--qb-ink-700);
-}
-
+/* WF-097 follow-up: both selects in this component (parent + add-dependency)
+   render via `<Select/>` now (LinkEditor.tsx) — font/line-height/border/
+   border-radius(default wobble)/background were all identical to
+   `.qb-select`'s own and are gone below (as was `:hover`'s border-color,
+   also a full duplicate); genuine overrides survive: `font-size`
+   (`.qb-select` inherits), `padding` (0.3rem vertical vs. `.qb-select`'s own
+   0.12rem — matches the Role-A button box), and `color`/hover-`background`
+   (this control reads at `--qb-ink-700` with a face-hover swap, not
+   `.qb-select`'s neutral ink-900 with no hover fill). The add-dependency
+   select keeps its own DIFFERENT wobble variant below (WF-046 item 1) so
+   the two selects don't match. */
 .link-editor select:hover:not(:disabled) {
-  border-color: var(--qb-btn-ink-hover);
   background: var(--qb-btn-face-hover);
 }
 
@@ -3244,6 +3861,11 @@ a.card-drawer__pr-chip:hover {
   gap: 0.4rem;
 }
 
+/* The "Add" button (LinkEditor.tsx) needs no rule of its own here — it
+   renders via a bare `<Button/>` (WF-097 follow-up), and `.qb-btn`'s own
+   default wobble already differs from the add-dependency select's
+   wobble-2 right beside it (WF-046 item 1), so no override is needed to
+   keep the two from reading as the same stamped shape. */
 .link-editor__deps {
   display: flex;
   align-items: center;
@@ -3255,9 +3877,15 @@ a.card-drawer__pr-chip:hover {
   border-radius: var(--qb-btn-wobble-2);
 }
 
-.link-editor__deps-label {
-  color: var(--qb-ink-400);
-}
+/* Label standardisation follow-up: renders via `<Label
+   className="link-editor__deps-label"/>` now (LinkEditor.tsx) —
+   `color: var(--qb-ink-400)` was already identical to `.qb-label`'s own
+   default, so the base rule is gone entirely, same treatment as
+   `.card-drawer__checklist-count`/`.topbar__pill` above. The class name
+   lives on only as a selector hook — `<Label className="link-editor__deps-
+   label">` still composes it in. The sibling "Parent" caption (same
+   component, above the parent `<Select>`) needed no className at all —
+   plain `<Label>Parent</Label>`, nothing to override. */
 
 .link-editor__deps-list {
   list-style: none;
@@ -3554,7 +4182,15 @@ a.card-drawer__pr-chip:hover {
    rather than "here is a label", so it can't be mistaken for one more chip
    in the row. `aria-pressed` (LabelSettingsDialog) marks the label's
    current registry colour with a ring, same affordance
-   `.label-filter-chip--include`'s inset ring already uses. */
+   `.label-filter-chip--include`'s inset ring already uses. This 1.4rem
+   (22.4px) box is well under a comfortable touch target — the `@media
+   (pointer: coarse)` layer bumps it to 32px (unchanged here on desktop/
+   mouse). `.label-editor__remove` used to join it in that same bump, same
+   small-square-icon-button tier, but it now gets an invisible hit-area
+   instead — this swatch isn't a flex child forced to inflate a sibling
+   chip's height the way that button was, so growing its own visible box is
+   fine here; see `.label-editor__remove`'s own coarse-pointer rule for why
+   it split off. */
 .label-settings-swatch {
   width: 1.4rem;
   height: 1.4rem;
@@ -3572,71 +4208,47 @@ a.card-drawer__pr-chip:hover {
   box-shadow: 0 0 0 2px var(--qb-ink-900) inset;
 }
 
+/* WF-097 follow-up: renders via `<Button>` (LabelSettingsDialog.tsx) — the
+   border/background/font-weight/hover chrome it used to copy by hand was
+   identical to `.qb-btn`'s own and is gone; only its wobble-3 variant, the
+   tighter horizontal padding, and `height: auto` (to keep the natural
+   content height it had before `.qb-btn`'s fixed control-height would newly
+   apply) survive as genuine overrides. */
 .label-settings-row__reset {
-  font-size: 0.75rem;
+  height: auto;
   padding: 0.3rem 0.6rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
-.label-settings-row__reset:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-/* Modal action buttons (NewCardDialog create/cancel + ClearDialog back/cancel)
-   adopt the shared Role A button system (see the --qb-btn-* tokens) — same as
-   the drawer edit / threshold / claim controls. Bare <button>s otherwise fall
-   back to raw browser default, visibly out of step with the rest of the board.
-   The destructive `.clear-dialog .danger` primary keeps its red fill (higher
-   specificity wins bg/color/border-color); here it only gains the shared
-   Role A shape so it lines up with its sibling. */
+/* Modal action buttons (NewCardDialog Create/Cancel + ClearDialog Turn
+   back/Press on/Back/Slay it). WF-097 follow-up: all now render via
+   `<Button>` (Create = `variant="primary"` gold-chip commit; the two
+   destructive confirms keep `variant="neutral"` + `.danger`), so the full
+   border/background/hover/active/disabled recipe these element selectors used
+   to carry — identical to `.qb-btn`'s own — is gone. Only the modal size
+   recipe survives as genuine overrides `.qb-btn` doesn't make: a larger
+   font, roomier padding, the wobble-3 variant, and `height: auto` to keep the
+   natural content height these had before `.qb-btn`'s fixed control-height
+   would newly apply. (These selectors are class + element = higher
+   specificity than `.qb-btn`, so they win those four properties cleanly.) */
 .new-card-actions button,
 .clear-actions button {
+  height: auto;
   font-size: 0.85rem;
   padding: 0.4rem 0.9rem;
-  font-weight: 700;
   border-radius: var(--qb-btn-wobble-3);
-  border: 1.5px solid var(--qb-btn-ink);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
 }
 
-.new-card-actions button,
-.clear-actions button:not(.danger) {
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-}
-
-.new-card-actions button:hover:not(:disabled),
-.clear-actions button:not(.danger):hover:not(:disabled) {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.new-card-actions button:active:not(:disabled),
-.clear-actions button:not(.danger):active:not(:disabled) {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-.new-card-actions button:disabled,
-.clear-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
+/* `.qb-btn`'s neutral hover/active (face-swap + light-recess shadow, both
+   (0,3,0)) would otherwise paint over the destructive confirm's solid red on
+   hover/press — the same leak `.topbar-clear.danger:hover` guards against.
+   This (0,4,0) rule keeps the red fill+border and suppresses the shadow, so
+   the danger buttons read exactly as they did before (no hover swap). */
+.clear-dialog .danger:hover:not(:disabled),
+.clear-dialog .danger:active:not(:disabled) {
+  background: #b00020;
+  border-color: #b00020;
+  box-shadow: none;
 }
 
 /* Hero card (HANDOFF: light card floating inside the dark sheet). */
@@ -4056,23 +4668,30 @@ a.card-drawer__pr-chip:hover {
    cascade convention (that section must load last to win).
    ========================================================================== */
 
-/* --- TopBar: Board|Atlas view toggle (chunk 7; polish pass: "a couple of
-   nice circles" — user words) -------------------------------------------
-   Two circular icon buttons, board sticker language: parchment fill, 2px
-   ink border, a hard (not blurred) shadow, gentle hover lift. The button's
-   own box is 44px (border included) — meeting the ≥44px touch-target floor
-   directly, no separate hit-slop pseudo-element needed — with the border
-   eating into that box just enough that the FILLED interior reads as the
-   ~40px "nice circle" the request asked for. Active = the same gold-chip
-   fill/border/text trio the trail's own gold coin and chips use elsewhere
-   (`--qb-gold-chip-*`) — the current view reads at a glance without needing
-   to compare against its sibling. */
+/* --- TopBar: Board|Atlas view toggle — "guild coin" stack -----------------
+   Two circular icon coins overlapping to the LEFT of the wordmark. The active
+   view is the FRONT coin (gold-chip fill); the inactive one peeks out behind
+   and to the right, shrunk and dimmed. Tapping the coin behind slides it
+   forward and swaps the view — transform + z-index driven purely by
+   `aria-pressed` — reading as one coin shuffling in front of the other. Two
+   coins only encode two views: fine while Board|Atlas are the only pages (a
+   third would need a real segmented control, per the JSX note).
+
+   Each coin's box is 44px (border included) — meeting the ≥44px touch-target
+   floor directly. Active = the same gold-chip fill/border/text trio the
+   trail's own gold coin and chips use elsewhere (`--qb-gold-chip-*`). */
 .topbar__view-toggle {
-  display: inline-flex;
-  gap: 0.5rem;
+  position: relative;
+  flex: 0 0 auto;
+  /* 44px front coin + 16px peek of the coin behind it */
+  width: 60px;
+  height: 44px;
 }
 
 .topbar__view-toggle-btn {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4083,38 +4702,46 @@ a.card-drawer__pr-chip:hover {
   border-radius: 50%;
   border: 2px solid var(--qb-ink-700);
   background: var(--qb-parchment-muted);
-  /* no drop shadow — user preference (flat circles read cleaner in the topbar) */
   font-size: 1.15rem;
   line-height: 1;
   color: var(--qb-ink-500);
-  opacity: 0.72;
   cursor: pointer;
-  transition:
-    transform var(--qb-motion-hover) ease,
-    opacity var(--qb-motion-hover) ease,
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease;
-}
-
-.topbar__view-toggle-btn:hover {
-  opacity: 1;
-  border-color: var(--qb-btn-ink-hover);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .topbar__view-toggle-btn:hover {
-    transform: translateY(-2px);
+  .topbar__view-toggle-btn {
+    transition:
+      transform 0.28s ease,
+      opacity 0.2s ease,
+      background-color 0.2s ease,
+      border-color 0.2s ease;
   }
 }
 
+/* Front coin — the active view: flush left, fully opaque, above its sibling. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
+  transform: translateX(0) scale(1);
+  z-index: 2;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
   color: var(--qb-gold-chip-text);
 }
 
-/* rpg-icons pack art inside the view-toggle circles (journal / treasure map) */
+/* Back coin — the inactive view: peeks out to the right, shrunk and dimmed,
+   behind the front coin. */
+.topbar__view-toggle-btn[aria-pressed="false"] {
+  transform: translateX(16px) scale(0.9);
+  z-index: 1;
+  opacity: 0.7;
+}
+
+.topbar__view-toggle-btn[aria-pressed="false"]:hover {
+  opacity: 1;
+  border-color: var(--qb-btn-ink-hover);
+}
+
+/* rpg-icons pack art inside the view-toggle coins (journal / treasure map) */
 .topbar__view-toggle-icon {
   display: block;
   width: 26px;
@@ -4123,100 +4750,21 @@ a.card-drawer__pr-chip:hover {
   pointer-events: none;
 }
 
-/* --- Atlas chart: page shell, toolbar, rows -----------------------------
+/* --- Atlas chart: page shell, rows --------------------------------------
    WF-086 v2 (progress-trail revision): the v1 date axis / TODAY signpost /
    legend / honesty footnote are KILLED (HANDOFF's "Killed from v1") — dates
    survive only in tooltips and checklist stamps, so there's no shared axis
-   row to align a rail width against any more. */
+   row to align a rail width against any more.
+
+   WF-091: the standalone toolbar that used to sit here (between the topbar
+   and the chart — a static complexity-weight label plus three segmented
+   toggles, `.atlas-toolbar*`) is retired; its three toggles moved into the
+   topbar's Controls group as single buttons (`.topbar__atlas-control*` in
+   the topbar section above), shown only on this page. */
 
 .atlas-page {
   display: flex;
   flex-direction: column;
-}
-
-/* Toolbar (HANDOFF, between the topbar and the chart): a static
-   complexity-weight label plus three toggles. Polish pass: restyled off
-   the plain segmented-tab pattern onto the board's own wobble-button
-   sticker chips (`--qb-btn-*` — same family as `.atlas-rail-card__expand`'s
-   "sub-quests" chip and every card-tile button elsewhere) — asymmetric
-   hand-drawn radii, a hard resting shadow, and a clearly distinct pressed/
-   active state (the same gold-chip treatment the view-switcher circles and
-   the trail's own gold coin use) rather than the tab underline this toolbar
-   used to share with `.topbar__view-toggle` (that toggle has since gone
-   its own, circular, way — see above). Pure presentation: no change to
-   the toggles' own state/behavior. */
-.atlas-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  padding: 0.6rem 0.75rem;
-}
-
-.atlas-toolbar__label {
-  font-family: var(--qb-font-body);
-  font-size: 0.72rem;
-  color: var(--qb-ink-500);
-  margin-right: auto;
-}
-
-.atlas-toolbar__toggle {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.atlas-toolbar__toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 0.3rem 0.65rem;
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  box-shadow: var(--qb-shadow-card) var(--qb-btn-ink);
-  cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease,
-    transform var(--qb-motion-hover) ease;
-}
-
-/* Asymmetric hand-drawn radii, alternating per button in a pair — real
-   stickers never share an identical wobble. */
-.atlas-toolbar__toggle-btn:first-child {
-  border-radius: var(--qb-btn-wobble);
-}
-
-.atlas-toolbar__toggle-btn:last-child {
-  border-radius: var(--qb-btn-wobble-3);
-}
-
-.atlas-toolbar__toggle-btn:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .atlas-toolbar__toggle-btn:hover {
-    transform: translateY(-2px);
-  }
-}
-
-.atlas-toolbar__toggle-btn[aria-pressed="true"] {
-  background: var(--qb-gold-chip-bg);
-  border-color: var(--qb-gold-chip-border);
-  color: var(--qb-gold-chip-text);
-  box-shadow: var(--qb-btn-shadow-active);
-}
-
-/* The mobile orientation toggle is inert (CSS-invisible) above 720px —
-   desktop always renders across (HANDOFF); the mobile layout layer below
-   reveals it. */
-.atlas-toolbar__toggle--orientation {
-  display: none;
 }
 
 /* `--rail` is the ONE source of truth for the rail column width — every
@@ -4293,7 +4841,12 @@ a.card-drawer__pr-chip:hover {
 
 .atlas-chart__lane {
   position: relative;
-  min-height: 104px;
+  /* Task 2: bumped from 104px — the across-mode trail's name-tags now
+     alternate above AND below the path (AtlasTrail.tsx's own
+     DEFAULT_LANE_HEIGHT mirrors this), so the floor needs enough headroom
+     under a max-amplitude wobble crest for a below tag's own box, without
+     crowding the row's bottom divider. */
+  min-height: 112px;
 }
 
 /* --- Per-accent tokens (rail card + trail, one declaration each) --------
@@ -4389,10 +4942,13 @@ a.card-drawer__pr-chip:hover {
   flex-direction: column;
   gap: 0.3rem;
   width: 100%;
-  background: var(--legacy-color-fff);
-  border: 2px solid var(--card-accent-border, var(--qb-line-dashed));
-  border-radius: var(--qb-radius-card-a);
-  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  /* "Swimlane-header box" (mock A): a light wash of the epic's OWN accent, a
+     darker accent border, and the torn-note pennant radius — so an epic card
+     reads like the board's lane-header pills. Flat, no drop shadow. */
+  background: color-mix(in srgb, var(--card-accent-fill, var(--qb-accent-forest-fill)) 30%, white);
+  border: 2px solid color-mix(in srgb, var(--card-accent-fill, var(--qb-accent-forest-fill)) 72%, #2c2015);
+  border-radius: var(--qb-radius-pennant);
+  box-shadow: none;
   padding: 12px;
   font-size: 0.8rem;
   cursor: pointer;
@@ -4403,7 +4959,9 @@ a.card-drawer__pr-chip:hover {
    .card-tile:nth-child(even)`, scoped to `.atlas-chart__row` since that's
    this tree's per-saga repeating unit. */
 .atlas-chart__row:nth-child(even) .atlas-rail-card {
-  border-radius: var(--qb-radius-card-b);
+  /* Mirror the pennant's sharp/round corners on even rows for hand-drawn
+     variety (the torn note "tears" the other way). */
+  border-radius: 10px 255px 10px 225px / 225px 10px 255px 10px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -4457,14 +5015,56 @@ a.card-drawer__pr-chip:hover {
 
 .atlas-rail-card__title {
   font-family: var(--qb-font-display);
-  font-weight: 600;
-  font-size: 1rem;
+  font-weight: 800;
+  font-size: 0.95rem;
+  line-height: 1.1;
   color: var(--qb-ink-900);
 }
 
 .atlas-rail-card__title--done {
   text-decoration: line-through;
   color: var(--qb-ink-500);
+}
+
+/* Marquee for a too-wide rail-card title (mobile condensed cards). Only fires
+   when ScrollingTitle has flagged `--marquee` — i.e. the inner line genuinely
+   overflows the clip — and it eases to each end and pauses (the 12%/88% stops)
+   so the text is readable, not a constant crawl. `--marquee-dist`/`--marquee-
+   dur` come from ScrollingTitle's inline style. Reduced-motion users keep the
+   static clipped title. */
+@media (prefers-reduced-motion: no-preference) {
+  .marquee-title--marquee .marquee-title__inner {
+    animation: rail-title-marquee var(--marquee-dur, 6s) ease-in-out infinite;
+  }
+}
+
+/* Scroll to the end, hold, fade OUT, jump back to the start while invisible
+   (so there's no visible snap), then fade back IN and hold — a loop that reads
+   left-to-right every time, rather than ping-ponging backwards. */
+@keyframes rail-title-marquee {
+  0%,
+  8% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  48%,
+  60% {
+    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+    opacity: 1;
+  }
+  72% {
+    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+    opacity: 0;
+  }
+  73% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  88%,
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .atlas-rail-card__vs {
@@ -4518,33 +5118,37 @@ a.card-drawer__pr-chip:hover {
   background: var(--card-accent-fill, var(--qb-ink-300));
 }
 
-/* Role A wobble button — deliberately its OWN class, not a reuse of
-   `.epic-card__expand`'s legacy paint (chunk-4 handoff). */
+/* Role A wobble button — renders via `<Button>` (AtlasRailCard.tsx), so the
+   full border/background/hover/active recipe it used to copy by hand is gone
+   (identical to `.qb-btn`'s own — WF-097 follow-up). Only genuine overrides
+   survive: its own wobble-2 variant, the tighter condensed-rail metrics, and
+   `height: auto` to keep the natural content height it had before `.qb-btn`'s
+   fixed control-height would newly apply. Deliberately still its OWN class,
+   not a reuse of `.epic-card__expand`'s legacy indigo paint (chunk-4
+   handoff). */
+/* Plain clickable text, not a button — the label itself is the affordance. */
 .atlas-rail-card__expand {
   align-self: flex-start;
-  font-size: 0.7rem;
-  padding: 0.25rem 0.6rem;
-  font-weight: 700;
-  border-radius: var(--qb-btn-wobble-2);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  margin-top: 0.2rem;
+  padding: 0.1rem 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--qb-ink-700);
   cursor: pointer;
-  transition:
-    background-color var(--qb-motion-hover) ease,
-    border-color var(--qb-motion-hover) ease,
-    box-shadow var(--qb-motion-hover) ease;
+  text-align: left;
 }
 
 .atlas-rail-card__expand:hover {
-  background: var(--qb-btn-face-hover);
-  border-color: var(--qb-btn-ink-hover);
-  box-shadow: var(--qb-btn-shadow-hover);
-}
-
-.atlas-rail-card__expand:active {
-  background: var(--qb-btn-face-active);
-  box-shadow: var(--qb-btn-shadow-active);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Checklist wheel (HANDOFF): caps at ~5 visible rows (~132px desktop,
@@ -4558,9 +5162,11 @@ a.card-drawer__pr-chip:hover {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin-top: 0.2rem;
-  padding-top: 0.4rem;
-  border-top: 1.5px dashed var(--qb-line-dashed-2);
+  /* Reset the <ul> UA defaults — no left indent, no list bullets — so the rows
+     sit flush at the card's own edge. No background/box either. */
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -4678,20 +5284,50 @@ a.card-drawer__pr-chip:hover {
   display: block;
   width: 100%;
   height: 100%;
+  /* The boss monster is taller than the lane; let it draw past the lane's top
+     and bottom into the row's empty space instead of being clipped by the
+     SVG viewport. */
+  overflow: visible;
 }
 
+/* Feature 1 (wide-view overspill): AtlasTrail.tsx sets the
+   `width`/`height` SVG attributes to the shared `trailWidth`/laneHeight —
+   `width:auto;height:auto` here means the SVG uses THOSE intrinsic
+   dimensions instead of the base rule's `100%` (which would stretch/
+   compress it back down to its parent `.atlas-trail` box, i.e. back to the
+   lane's own viewport-constrained width, defeating the whole point). The
+   parent chain (`.atlas-trail`, `.atlas-chart__lane`, `.atlas-chart__row`,
+   `.atlas-chart__rows`) is deliberately never `overflow: hidden`, so a
+   wider-than-the-lane SVG here overflows visibly up to `.atlas-chart`
+   (mobile) / `.board-region` (desktop), both `overflow-x: auto` — "render
+   at intrinsic size, let CSS auto pick up the ratio". */
+.atlas-trail__svg--across {
+  width: auto;
+  height: auto;
+}
+
+/* Status-remap pass: the trail's ground now carries STATUS colour (has the
+   party walked it yet?), not the epic's LANE accent — `.atlas-trail__path`
+   is the walked stretch (done AND the in-progress child's own segment both
+   render un-faded, i.e. "ground already covered"), `--faded` below is the
+   ahead/todo stretch. Routed to `--qb-status-*` rather than
+   `--atlas-trail-fill` so a status reads in one colour everywhere it
+   appears on the trail, matching the name-tags/markers. */
 .atlas-trail__path {
   fill: none;
-  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--qb-status-done-base);
   stroke-width: 3.5;
   stroke-linecap: round;
   stroke-dasharray: 1 9;
 }
 
 /* Ahead (todo) ground — HANDOFF: "faded (~.68 opacity) ... trail continues
-   at 1 9 but faded" — same dasharray as walked ground, opacity is the only
-   distinction (not a different dash pattern). */
+   at 1 9 but faded" — same dasharray as walked ground; opacity is still the
+   fade mechanism (kept exactly as before), the stroke additionally switches
+   to the todo status hue so "ahead" reads as both blue AND faded, not just
+   faded-green. */
 .atlas-trail__path--faded {
+  stroke: var(--qb-status-todo-base);
   opacity: 0.68;
 }
 
@@ -4699,11 +5335,19 @@ a.card-drawer__pr-chip:hover {
   font-size: 15px;
 }
 
-/* --- Waypoints: done / abandoned / at-hand / todo / blocked ------------- */
+/* --- Waypoints: done / abandoned / at-hand / todo / blocked -------------
+   Status-remap pass: every waypoint below now reads its fill/stroke from
+   the `--qb-status-*` tokens (same source of truth as the trail path above
+   and the `.trail-tag--*` name-tags) rather than the epic's `--atlas-trail-
+   fill/-dark` LANE accent — a status now renders in ONE colour across its
+   tag, its marker, and the ground leading up to it. The lane accent vars
+   stay defined (still driving the rail card border + beast hue, which are
+   intentionally lane- not status-coloured) but nothing below reads them
+   anymore. */
 
 .atlas-trail__waypoint--done circle {
-  fill: var(--atlas-trail-fill, var(--qb-ink-300));
-  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  fill: var(--qb-status-done-base);
+  stroke: var(--qb-status-done-strong);
   stroke-width: 2;
 }
 
@@ -4724,13 +5368,13 @@ a.card-drawer__pr-chip:hover {
    opt-in) — suppressed (plain dot only, no ring/pennant) on a parked epic,
    see AtlasTrail.tsx's `atHand` branch. */
 .atlas-trail__athand-dot {
-  fill: var(--qb-parchment-muted);
-  stroke: var(--atlas-trail-dark, var(--qb-ink-500));
+  fill: var(--qb-status-in-progress-soft);
+  stroke: var(--qb-status-in-progress-strong);
   stroke-width: 2.5;
 }
 
 .atlas-trail__athand-glyph {
-  fill: var(--atlas-trail-dark, var(--qb-ink-500));
+  fill: var(--qb-status-in-progress-strong);
   font-size: 11px;
   font-weight: 700;
   text-anchor: middle;
@@ -4738,11 +5382,24 @@ a.card-drawer__pr-chip:hover {
 
 .at-hand-ring {
   fill: none;
-  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--qb-status-in-progress-base);
   stroke-width: 2;
   transform-box: fill-box;
   transform-origin: center;
   opacity: 0.8;
+}
+
+/* The AT HAND marker opens the card detail drawer directly (it's the only
+   affordance to do so when the pennant itself is suppressed — see
+   AtlasTrail.tsx/AtlasTrailVertical.tsx's last-child pennant gate). Subtle
+   hover feedback on the dot itself, echoing `button.trail-tag:hover`'s
+   underline without fighting the pulsing ring's own opacity animation. */
+.atlas-trail__waypoint--athand {
+  cursor: pointer;
+}
+
+.atlas-trail__waypoint--athand:hover .atlas-trail__athand-dot {
+  stroke-width: 3.5;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -4763,10 +5420,12 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* Ahead (todo) hollow waypoint — dashed outline, no fill; opacity comes
-   from the SVG group's own `opacity` attribute (AtlasTrail.tsx), not here. */
+   from the SVG group's own `opacity` attribute (AtlasTrail.tsx), not here.
+   Fill stays the neutral parchment wash (a genuinely hollow dot, not a
+   status wash) — only the outline carries the todo status colour. */
 .atlas-trail__todo-dot {
   fill: var(--qb-parchment-muted);
-  stroke: var(--atlas-trail-fill, var(--qb-ink-300));
+  stroke: var(--qb-status-todo-base);
   stroke-width: 2;
   stroke-dasharray: 2 3;
 }
@@ -4839,6 +5498,107 @@ a.card-drawer__pr-chip:hover {
   z-index: 2;
 }
 
+/* --- Mobile across-view POC: tap-a-child preview, floated above the trail ---
+   Rendered inside `.atlas-trail__overlays` at the tapped marker's x (`left`
+   inline in AtlasTrail). Pinned to the lane's TOP and lifted fully above it
+   (`top: 0` + translateY(-100%)) so it clears the name-tags that sit over the
+   path, rather than colliding with them. Only ever rendered on mobile-across
+   (EpicAtlas gates it). Flat — no drop shadow. `pointer-events: auto`
+   re-enables interaction inside the `pointer-events: none` overlay layer. */
+.atlas-trail__preview {
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 4px));
+  pointer-events: auto;
+  cursor: pointer;
+  /* Above the sticky epic-card rail (z-index 3) — the popup is a direct child
+     of `.atlas-trail` (outside the overlay layer's z-index-2 trap). */
+  z-index: 20;
+  width: 172px;
+  max-width: 62vw;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  padding: 7px 24px 7px 9px;
+  background: var(--legacy-color-fff);
+  border: 2px solid var(--qb-ink-300);
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: none;
+  text-align: left;
+  /* A long unbroken title (e.g. a file path) must wrap inside the fixed width,
+     never widen the card off the right edge. */
+  overflow: hidden;
+}
+
+/* Plain ✕ — no circle/border/background, just the glyph. */
+.atlas-trail__preview-close {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  padding: 2px;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: var(--qb-ink-500);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.atlas-trail__preview-top {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.atlas-trail__preview-id {
+  font-family: var(--qb-font-mono);
+  font-size: 0.58rem;
+  color: var(--qb-ink-500);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.atlas-trail__preview-stars {
+  display: inline-flex;
+  gap: 0.05rem;
+}
+
+.atlas-trail__preview-star {
+  width: 11px;
+  height: 11px;
+}
+
+.atlas-trail__preview-star--filled {
+  color: var(--qb-gold-chip-border);
+}
+
+.atlas-trail__preview-star--empty {
+  color: var(--qb-star-empty);
+}
+
+.atlas-trail__preview-title {
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.76rem;
+  line-height: 1.15;
+  color: var(--qb-ink-900);
+  overflow-wrap: anywhere;
+}
+
+.atlas-trail__preview-status {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--qb-ink-500);
+  overflow-wrap: anywhere;
+}
+
+.atlas-trail__preview-checklist {
+  font-size: 0.6rem;
+  color: var(--qb-ink-500);
+}
+
 .trail-tag {
   position: absolute;
   pointer-events: auto;
@@ -4851,31 +5611,115 @@ a.card-drawer__pr-chip:hover {
   font-weight: 600;
   padding: 0.1rem 0.4rem;
   border-radius: var(--qb-radius-pennant);
-  box-shadow: var(--qb-shadow-card) rgba(0, 0, 0, 0.18);
+  /* Task 1 polish: softer than `--qb-shadow-card`'s usual `0 3px 0` (a card
+     tile's own drop shadow) — a name-tag is a small floating label, not a
+     tile, so a lighter 2px lift with lower ink opacity keeps the shadow
+     present without it reading as heavy as the card chrome underneath it. */
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
 }
 
+/* Feature 3 (WF-086 v3): the todo/done tags render as `<button>` now
+   (clickable — opens the existing card detail drawer); the AT HAND
+   pennant stays a plain `<span>` (a status marker, never clickable).
+   Scoping the button-chrome reset to the ELEMENT itself, rather than
+   folding it into the base `.trail-tag` rule above, keeps the pennant
+   completely untouched. The font-family/-size/-weight lines are repeated
+   here (not just left to the base rule) because this selector's extra
+   `button` qualifier gives it higher specificity than the base rule — a
+   bare `font: inherit` here would otherwise beat the base rule's font-*
+   longhands and fall back to the browser's own default button font. */
+button.trail-tag {
+  /* `appearance: none` strips the native button chrome; the per-status
+     `.trail-tag--*` rules below own the fill + border. Deliberately NOT
+     setting `background`/`border` here — this selector (`button.trail-tag`)
+     outspecifies the single-class `.trail-tag--todo/--done/--blocked` rules,
+     so a `background: none` here would silently beat (and blank out) every
+     status pastel, which is exactly the bug this comment guards against. */
+  appearance: none;
+  font: inherit;
+  font-family: var(--qb-font-body);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Subtle clickable affordance — an underline on hover (not a colour/scale
+   change, which would fight the tier tilt/rotation already on these). */
+button.trail-tag:hover {
+  text-decoration: underline;
+}
+
+button.trail-tag:focus-visible {
+  outline: 2px solid var(--atlas-trail-dark, var(--qb-ink-500));
+  outline-offset: 1px;
+}
+
+/* Bright per-status name-tags, now sourced from the `--qb-status-*` palette
+   (see :root) rather than ad-hoc `color-mix(<accent> 30/55%, white)` — the
+   status tokens are the single source of truth for status-coded colour.
+   soft = fill, base = border, strong = text. Because these three rules read
+   the tokens (not a hardcoded hue), the WF-status-remap pass — todo purple
+   → BLUE, in-progress sky blue → ORANGE — needed no edits here at all;
+   done stays green, blocked stays coral. */
 .trail-tag--todo {
-  background: var(--qb-parchment-muted);
-  border: 1.5px solid var(--atlas-trail-fill, var(--qb-ink-300));
-  color: var(--qb-ink-500);
+  background: var(--qb-status-todo-soft);
+  border: 1.5px solid var(--qb-status-todo-base);
+  color: var(--qb-status-todo-strong);
+}
+
+/* Settled history, not "ahead ground" — the done status green. The soft
+   fill + strong ink now carry the "walked, done" de-emphasis on their own,
+   so (unlike the old parchment version) this no longer needs an `opacity`
+   dial on top. */
+.trail-tag--done {
+  background: var(--qb-status-done-soft);
+  border: 1.5px solid var(--qb-status-done-base);
+  color: var(--qb-status-done-strong);
+}
+
+/* The way is barred — the blocked status coral. Placed after `--todo`/
+   `--done` so it wins the cascade when paired with `--todo` on a blocked
+   ahead-quest's tag (same class list, `--blocked` just added alongside). */
+.trail-tag--blocked {
+  background: var(--qb-status-blocked-soft);
+  border: 1.5px solid var(--qb-status-blocked-base);
+  color: var(--qb-status-blocked-strong);
 }
 
 /* The AT HAND pennant is a status marker, not a name-tag — solid accent
-   fill (not the todo tag's parchment) so it reads as "in progress right
-   now", not "ahead ground". */
+   fill (not the todo tag's pastel/parchment) with bold white text, so it
+   reads as "in progress right now", not "ahead ground". Kept at full
+   intensity by design (user preference) — the calmer per-status pastels are
+   only for the todo/done/blocked name-tags around it.
+   Status-remap pass: this used to deliberately pin itself to the
+   IMPLEMENTATION lane's orange accent (`--atlas-trail-fill`, falling back to
+   `--qb-accent-orange-fill`) because that happened to be the colour the user
+   wanted — a lane accent standing in for a status colour. Now that
+   in-progress status IS orange in its own right, it reads `--qb-status-in-
+   progress-*` instead: same visible orange, but sourced from the status
+   token so it can never drift from the todo/done/blocked tags and markers
+   around it (e.g. on a card whose current lane ISN'T orange). */
 .atlas-trail__pennant--athand {
-  background: var(--atlas-trail-fill, var(--qb-accent-orange-fill));
-  border: 1.5px solid var(--atlas-trail-dark, var(--qb-accent-orange-shadow));
+  background: var(--qb-status-in-progress-base);
+  border: 1.5px solid var(--qb-status-in-progress-strong);
   color: var(--legacy-color-fff);
   font-weight: 700;
+  /* The AT HAND pennant marks the current quest — keep it above the other
+     name-tags (which stack by DOM order and would otherwise cover it). */
+  z-index: 5;
 }
 
-/* Down-mode (HANDOFF: "plain horizontal text right of the trail — no
-   wobble tilt") — AtlasTrailVertical.tsx never sets an inline `rotate()`
-   on these, this modifier just narrows the max-width for the column's own
-   (typically narrower) cross-axis. */
-.trail-tag--down {
-  max-width: 130px;
+/* Task 2 (Across mode only): the below-the-path bank of the alternating
+   name-tag zig-zag. AtlasTrail.tsx computes the actual `top`/`transform`
+   inline per-tag (same "positioned per-marker, not CSS-only" pattern as
+   every other trail-tag placement — an inline `transform` always wins over
+   a class one anyway), so this modifier's own job is just pinning the
+   rotation's pivot to the tag's OWN top edge (nearest the path) instead of
+   its default centre — the small opposite tilt then reads as hanging off
+   the path rather than spinning in place. */
+.trail-tag--below {
+  transform-origin: top center;
 }
 
 /* --- Blocked overlay: the boulder / trailhead / campfire images --------- */
@@ -4916,7 +5760,7 @@ a.card-drawer__pr-chip:hover {
    is untouched by everything below.
    ========================================================================== */
 @media (max-width: 720px) {
-  /* --- Top bar: crest row, then a wrapping chip shelf ------------------- */
+  /* --- Top bar: identity row, then a wrapping chip shelf ---------------- */
   .topbar {
     padding: 12px 14px 10px;
     gap: 0.4rem 0.5rem;
@@ -4928,13 +5772,8 @@ a.card-drawer__pr-chip:hover {
     flex-basis: 100%;
   }
 
-  .topbar__crest {
-    width: 38px;
-    height: 38px;
-  }
-
   /* The default-threshold control gets its own "scribe's line" under the
-     crest, same as the old ctx+threshold row it replaced (WF-042). */
+     header, same as the old ctx+threshold row it replaced (WF-042). */
   .topbar__threshold {
     flex-basis: 100%;
     flex-wrap: wrap;
@@ -4950,8 +5789,9 @@ a.card-drawer__pr-chip:hover {
      DOM order stays exactly as TopBar.tsx renders it (desktop reads that
      order unmodified — no `order` applies above 720px) — only `order`
      numbers here re-sequence the same elements into full-width mobile
-     rows: R2 repo+branch, R3 the two rest pills, R4 gold+vanquished+
-     questing, R5 New-card/Controls. `.topbar__row-break--rN` spacers (see
+     rows: R2 repo+branch, R3 the rest pills + last-refreshed badge, R4
+     gold+vanquished+questing, R5 the [Filters ▾][Controls ▾][＋] cluster.
+     `.topbar__row-break--rN` spacers (see
      TopBar.tsx) force each row boundary regardless of viewport width
      within 320-720px — real wrap-on-overflow alone isn't reliable there
      (e.g. repo+branch could still be narrow enough to share a line with
@@ -5010,45 +5850,26 @@ a.card-drawer__pr-chip:hover {
   .topbar__vanquished-pill { order: 31; }
   .topbar__fleet-pill { order: 32; }
 
-  /* R5: ＋New card on the left, Controls ▾ pinned right via the toggle's
-     own `margin-left: auto` (unchanged) — the two are the only items
-     between the r4 and (self-forcing, flex-basis:100%) controls-group
-     breaks, so that auto margin has the whole row's slack to push into. */
-  .topbar__new-card { order: 40; }
+  /* R5: the [Filters ▾][Controls ▾][＋] cluster, pinned right via its own
+     `margin-left: auto` — it's the only item between the r4 and
+     (self-forcing, flex-basis:100%) controls-group breaks, so that auto
+     margin has the whole row's slack to push into. The three buttons
+     inside keep natural DOM order (the cluster is `inline-flex`, not
+     `contents`), so no per-button `order` is needed here. */
+  .topbar__toggle-cluster { order: 40; margin-left: auto; }
 
   /* Rare/optional (`quarantinedCount > 0`) — own full-width row right
      after identity, ahead of R2, so it never crowds into the repo/branch
      row when present. */
   .topbar__quarantine-banner { order: 5; flex-basis: 100%; }
 
-  /* R1b (WF-086): Board|Atlas view toggle — its own full-width row right
-     after identity/the (rare) quarantine banner, ahead of R2's repo/branch
-     row. `order: 6` sits in the gap the R2-R5 scheme deliberately left
-     between the quarantine banner's 5 and R2's 10 (see that scheme's own
-     "gaps... leave room to slot a future chip" comment above) — it's an
-     always-visible chip, so it earns an early row of its own rather than
-     folding into an existing one or waiting behind Controls ▾. */
-  .topbar__view-toggle { order: 6; flex-basis: 100%; }
-
-  /* --- Top bar: "Controls ▾" collapse (WF-085/074) ---
-     `order` pairs the toggle with ＋New card on R5 (right end of that row,
-     via `margin-left: auto`) and drops its revealed group — plus the
-     separate <FilterBar/> below the topbar — into one block beneath
-     everything else, rather than wedged mid-shelf. */
-  /* WF-090 follow-up: was `font-size: 0.8rem; padding: 0.35rem 0.75rem` —
-     visibly bigger than every neighbouring Role-A control (0.75rem /
-     0.3rem), including ＋New card right beside it on this same row.
-     Brought down to the same box as `.topbar__new-card`. */
-  .topbar__controls-toggle {
-    order: 41; margin-left: auto;
-    display: inline-flex; align-items: center; font-size: 0.75rem;
-    padding: 0.3rem 0.6rem; font-weight: 700; border-radius: var(--qb-btn-wobble);
-    border: 1.5px solid var(--qb-btn-ink); background: var(--qb-btn-face);
-    color: var(--qb-btn-text); cursor: pointer;
-  }
-  .topbar__controls-toggle:hover { background: var(--qb-btn-face-hover); border-color: var(--qb-btn-ink-hover); }
-  .topbar__controls-toggle:active { background: var(--qb-btn-face-active); }
-  .topbar__controls-group[hidden] { display: none; }
+  /* --- Top bar: "Controls ▾"/"Filters ▾" collapse (WF-085/074, Task 3) ---
+     `.topbar__controls-group[hidden]` is now handled by the base rule
+     (styles.css, applies on every viewport) — only the block-level
+     "expanded" treatment is mobile-specific: on a phone the group becomes
+     its OWN full-width wrapped row (order 91, dropped beneath everything
+     else) rather than staying `display: contents` and blending into the
+     topbar's natural-wrap chip shelf like it does on desktop. */
   .topbar__controls-group:not([hidden]) {
     order: 91;
     display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem;
@@ -5058,36 +5879,18 @@ a.card-drawer__pr-chip:hover {
      item so they can't be split across a natural-wrap line break) is fully
      un-wrapped here — its children become direct flex items of the group
      above again, exactly as if the wrapper didn't exist, so the mobile
-     `order` resets just below still apply to each of them individually. */
+     `order` reset just below still applies to each of them individually. */
   .topbar__controls-actions {
     display: contents;
   }
-  /* WF-090: `.topbar__new-card { order: 40; }` above targets the OUTER row's
-     standalone "＋New card" button (R5) — but "Labels…" reuses that same
-     class for its paint, and once the group above goes `display: flex` on
-     expand, `order` scores every child against THAT (new, separate) flex
-     container, not the one the rule's author had in mind. The leaked 40
-     was silently sorting Labels… after every other child in the group
-     (all default `order: 0`) — including Clear…, undoing the DOM move
-     below that's supposed to put Clear… last. Reset scoped to this
-     container only, so the outer-row ＋New card keeps its order: 40
-     untouched. `.topbar-clear` gets an explicit `order: 1` alongside it —
-     rather than relying on DOM position once everything else in the group
-     is back to a tied `order: 0` — so it's guaranteed rightmost regardless
-     of any future reordering here. */
-  .topbar__controls-group .topbar__new-card {
-    order: 0;
-  }
+  /* Clear… is the one destructive action in this group — pinned explicitly
+     rightmost rather than relying on DOM order alone (it already IS last
+     in DOM, but this survives any future reordering here). */
   .topbar__controls-group .topbar-clear {
     order: 1;
   }
-  /* WF-085b: same collapse driven by the SAME "Controls ▾" toggle, mirrored
-     onto the separate <FilterBar/> App.tsx renders below the topbar — see
-     `.filter-bar` base rule (always `display: flex`, so desktop is
-     unaffected by `hidden` per the origin-cascade rule the group above
-     already relies on). `[hidden]` here is what actually hides it, and
-     only inside this ≤720px block. */
-  .filter-bar[hidden] { display: none; }
+  /* Task 3: `.filter-bar[hidden]` is now handled by the base rule too (see
+     styles.css) — nothing mobile-specific left to add here. */
   /* compact status glance shrinks so it fits a couple of wrapped rows on a phone */
   .topbar__pill, .topbar__gold-pill, .topbar__vanquished-pill, .topbar__fleet-pill {
     font-size: 0.68rem; padding: 0.15rem 0.45rem;
@@ -5228,18 +6031,19 @@ a.card-drawer__pr-chip:hover {
   }
 
   .lane-icon-nav__item--backlog.lane-icon-nav__item--active {
-    background: var(--qb-accent-forest-fill);
+    /* Backlog is status-coloured blue (todo) — matches the lane header/wash. */
+    background: var(--qb-accent-sky-fill);
   }
 
   .lane-icon-nav__item--bootstrap.lane-icon-nav__item--active {
     background: var(--qb-accent-amber-fill);
   }
 
-  /* WF-085 in-progress lane: same amber family as `.lane__header--in-progress` /
-     `.card-tile--accent-in-progress` — one accent, everywhere this merged
-     mobile-only lane shows up. */
+  /* In Progress lane: orange, matching `.lane__header--in-progress` /
+     `.card-tile--accent-in-progress` — status-coloured (in-flight = orange),
+     one accent everywhere this merged lane's nav icon shows up. */
   .lane-icon-nav__item--in-progress.lane-icon-nav__item--active {
-    background: var(--qb-accent-amber-fill);
+    background: var(--qb-accent-orange-fill);
   }
 
   .lane-icon-nav__item--planning.lane-icon-nav__item--active,
@@ -5258,7 +6062,9 @@ a.card-drawer__pr-chip:hover {
   }
 
   .lane-icon-nav__item--done.lane-icon-nav__item--active {
-    background: var(--qb-accent-umber-fill);
+    /* Done is the earthy status green (was the umber lane accent, which read
+       as a funky olive-mustard next to the green cards/header). */
+    background: var(--qb-status-done-base);
   }
 
   .lane-icon-nav__item--parked.lane-icon-nav__item--active {
@@ -5276,7 +6082,10 @@ a.card-drawer__pr-chip:hover {
      switches to a vertical scroller instead: with the per-lane vertical
      trap gone (below), a tall lane's overflow is the PAGE's to scroll, not
      a fixed-height column's (this is what fixes WF-075's "one card visible
-     at a time" pain — swiping down now reveals every card in the lane). */
+     at a time" pain — swiping down now reveals every card in the lane).
+     Only padding/overflow are overridden here — the base rule's
+     `border-top` (the header↔content seam) isn't touched, so it still
+     applies at every mobile width without needing to be repeated. */
   .board-region {
     padding: 0.75rem 0.75rem 1rem;
     overflow-x: visible;
@@ -5392,7 +6201,10 @@ a.card-drawer__pr-chip:hover {
      725ddea invariant it encodes: exactly one scroller, everything else
      (rail, lane, row) scrolls WITH the chart, never independently. */
   .atlas-chart {
-    --rail: 160px;
+    /* Full-viewport-width epic card (minus the chart's own 0.5rem side
+       padding) — the card is a banner across the top of each row, the trail
+       scrolls beneath it. */
+    --rail: calc(100vw - 1rem);
     min-width: 0;
     width: 100%;
     max-width: 100vw;
@@ -5424,6 +6236,31 @@ a.card-drawer__pr-chip:hover {
      HANDOFF's own "condensed card above its trail" framing. */
   .atlas-chart__row {
     display: block;
+    /* The trail SVG overflows the (viewport-width) row box, so the row's own
+       `border-bottom` divider stopped at the viewport edge. Draw the divider
+       as a pseudo-element sized to the full trail width instead (--trail-w is
+       set on `.atlas-chart` from EpicAtlas's shared `trailWidth`), so it spans
+       the whole lane as you scroll. */
+    position: relative;
+    /* Own stacking context so the `z-index: -1` divider below stays contained
+       within the row (behind the lane's overflowing monster, but never behind
+       other rows). Keeps the rail (3) and the tap-preview popup (20) — both
+       resolved in this same context — working as before. */
+    z-index: 0;
+    border-bottom: none;
+  }
+
+  .atlas-chart__row::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: var(--trail-w, 100%);
+    border-top: 1.5px dashed var(--qb-line-dashed-2);
+    pointer-events: none;
+    /* Behind the lane content, so the boss monster spilling across the divider
+       paints ON TOP of the line rather than under it. */
+    z-index: -1;
   }
 
   /* Legibility floor for the SVG trail lane — tunable, not a promise; a
@@ -5450,11 +6287,10 @@ a.card-drawer__pr-chip:hover {
     background: var(--qb-bg-page);
     padding: 0.5rem 0.4rem;
     margin-bottom: 0.3rem;
-    /* Impl-review round 1, finding 8 (HANDOFF: "soft right-edge shadow") —
-       a soft ink shadow bleeding off the rail's right edge, so the trail
-       passing beneath it (opaque background, above) reads as sliding UNDER
-       a physically raised strip rather than just stopping at a hard line. */
-    box-shadow: 6px 0 10px -6px rgba(58, 42, 24, 0.35);
+    /* No right-edge shadow — the epic card container reads flat (per the ask).
+       The trail still passes UNDER the rail via its opaque background + z-index
+       above the overlay layer; it just meets the rail at a clean edge now. */
+    box-shadow: none;
   }
 
   .atlas-rail-card {
@@ -5474,13 +6310,20 @@ a.card-drawer__pr-chip:hover {
     display: none;
   }
 
-  /* 2-line clamp keeps a long epic title from pushing the condensed card
-     past a readable height on a 160px-wide rail. */
+  /* One line — the condensed card stays a fixed, tidy height. Instead of an
+     ellipsis, a too-wide title marquee-scrolls (see `.marquee-title__inner`
+     below + the animation). The outer just clips; the inner is the moving
+     part. */
   .atlas-rail-card__title {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  /* Mobile-only: the title's inner span is a single nowrap line that can
+     overflow the clip. On desktop this rule doesn't apply, so the title wraps
+     to multiple lines as before and never scrolls. */
+  .marquee-title__inner {
+    display: inline-block;
+    white-space: nowrap;
   }
 
   /* Checklist wheel's mobile cap (HANDOFF: "~224px mobile" vs desktop's
@@ -5507,68 +6350,6 @@ a.card-drawer__pr-chip:hover {
     padding-left: 22px; /* aligns under the title, past the 14px checkbox + gap */
   }
 
-  /* The mobile orientation toggle only matters at this width — desktop
-     hides it (base rule) since it's always Across there. */
-  .atlas-toolbar__toggle--orientation {
-    display: inline-flex;
-  }
-
-  /* --- Epic Atlas Down-mode: 86vw snap columns (HANDOFF, shipped in
-     production) --------------------------------------------------------
-     `.atlas-chart` is STILL the page's one horizontal scroller (the
-     725ddea invariant) — Down-mode just changes what scrolls inside it:
-     columns instead of rows, `scroll-snap-type: x mandatory` overriding
-     Across-mode's `overflow-x: auto` on the same element (the two
-     orientations never render at once, so there's no axis conflict). */
-  .atlas-chart--down {
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scroll-padding-inline: 0.75rem;
-  }
-
-  .atlas-chart__columns {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    /* Item 8 precedent (Board.tsx's activeLaneHeight): pins this box's
-       page-scroll-relevant height to the ACTIVE column's own content
-       height (inline style, EpicAtlas.tsx) so a short column's page
-       scroll can't run past its own last marker into a taller sibling's
-       empty space. `overflow-y: hidden` is what actually clips the
-       off-screen, currently-taller siblings out of the scrollable region. */
-    overflow-y: hidden;
-    transition: height 0.18s ease;
-  }
-
-  .atlas-chart__column {
-    flex: 0 0 86vw;
-    scroll-snap-align: center;
-  }
-
-  .atlas-chart__column-card {
-    margin-bottom: 0.4rem;
-  }
-
-  .atlas-chart__column-lane {
-    position: relative;
-  }
-
-  /* Down-mode's SVG grows to its own natural content height (the page
-     scrolls; HANDOFF's flat per-complexity scale, "no fit-to-container")
-     rather than being squeezed/stretched into a fixed-height box the way
-     Across-mode's `.atlas-trail` (absolute, inset:0 over an already-sized
-     lane) is. `height: auto` + the intrinsic viewBox aspect ratio
-     (AtlasTrailVertical.tsx sets the viewBox's own width to this same
-     element's measured width) is what makes the rendered SVG height come
-     out in real CSS pixels equal to the viewBox's own height units. */
-  .atlas-trail--down {
-    position: static;
-    display: block;
-  }
-
-  .atlas-trail--down .atlas-trail__svg {
-    height: auto;
-  }
 }
 
 /* ==========================================================================
@@ -5599,14 +6380,36 @@ a.card-drawer__pr-chip:hover {
      Refresh and the threshold "Set" button join them on the same reasoning
      (WF-085 follow-up): both sit directly beside ＋New card / Labels… / Clear…
      / the selects in the mobile topbar shelf, so they take the Role-A box
-     (~29-31px) instead of the 44px floor below, rather than towering over
-     their neighbours. */
+     (~29-31px) instead of the touch floor below, rather than towering over
+     their neighbours.
+
+     The controls that DO get a touch floor land on `--qb-control-height-touch`
+     (~34px) rather than a raw 44px — a comfortable tap target that stays a
+     relative of the desktop button box instead of towering over it (WF-097
+     touch-layer reconciliation; see the token's `:root` comment).
+
+     The drawer's own text buttons (`.status-menu button` / `.claim-control
+     button` / `.card-drawer__viewtoggle button`) are deliberately NOT here:
+     they render via the shared `<Button>` (`.qb-btn`), and EVERY `.qb-btn` on
+     the site — the topbar's ＋New/Controls/Filters/Refresh included — sits at
+     the Role-A box, so giving only these three a taller touch floor made them
+     the odd ones out inside the drawer. They now take the same Role-A box as
+     the rest of the site's buttons (site-wide button-size parity — the drawer
+     was the only place buttons towered above their neighbours). Trade-off:
+     these tap targets drop from ~34px to the ~29px Role-A box, matching every
+     other button rather than the 44px ideal — the same call WF-078 already
+     made for the topbar controls above.
+
+     Only genuinely non-`.qb-btn` tappables keep the ~34px floor:
+     `.topbar__fleet-pill` (a pill, not a button), `.topbar__archive-toggle`
+     (a checkbox row), and `.label-filter-chip` (LabelFilterPopover's bare-
+     `<button>` tri-state toggle, which has no `.qb-btn` box of its own). The
+     read-only `.label-chip` is not here either — no `onClick`, no tap target
+     to grow. */
   .topbar__fleet-pill,
   .topbar__archive-toggle,
-  .status-menu button,
-  .claim-control button,
-  .card-drawer__viewtoggle button {
-    min-height: 44px;
+  .label-filter-chip {
+    min-height: var(--qb-control-height-touch);
   }
 
   .card-drawer__close,
@@ -5621,9 +6424,28 @@ a.card-drawer__pr-chip:hover {
   }
 
   .link-editor__deps-list button,
-  .label-editor__remove {
+  .label-settings-swatch {
     min-width: 32px;
     min-height: 32px;
+  }
+
+  /* `.label-editor__remove` used to join the rule above, but growing the
+     BUTTON's own box to 32px forces `.label-editor__chip` (its `display:
+     inline-flex; align-items: center` parent) to grow to fit it, ballooning
+     the whole chip well past the board's `.label-chip` pill height it's
+     meant to match (Fix 1: drawer/board label-chip parity) — unlike
+     `.link-editor__deps-list button`/`.label-settings-swatch` above, which
+     aren't flex children of a chip that has to stay pill-sized. Kept at its
+     compact 14x14px visible box here too (see the base rule, above); the
+     touch floor instead comes from an invisible `::before`, expanded 9px on
+     every side via `position: absolute` (out of flow, so it can't affect
+     the button's own box or its flex parent's height) up to the same 32px
+     square the other icon-buttons above get, just without the layout
+     cost. */
+  .label-editor__remove::before {
+    content: "";
+    position: absolute;
+    inset: -9px;
   }
 
   .epic-card__expand {
@@ -5638,22 +6460,39 @@ a.card-drawer__pr-chip:hover {
      it (same reasoning that already exempts the topbar's other selects —
      `.topbar__repo-select select`/`.topbar__branch-select select`/
      `.filter-bar__select select` — none of which are in this list either).
-     It just inherits the base rule's `height: 1.65rem`, same as those. */
-  .priority-select,
-  .claim-control select,
-  .link-editor select,
-  .link-editor input,
-  .label-editor__input {
+     It just inherits the base rule's `height: var(--qb-control-height)`,
+     same as those (WF-096 hoisted the old repeated `1.65rem` literal into
+     that token — see `:root`). */
+  /* Drawer dropdowns (.priority-select / .claim-control select / .link-editor
+     select) take NO mobile override now: no touch floor (they keep
+     `.qb-select`'s Role-A box height, matching the buttons + topbar selects)
+     and no 16px bump (that overflowed the box and clipped the text — they use
+     `.qb-select`'s own 0.8rem). Trade-off: no iOS zoom-on-focus guard, same as
+     the topbar selects, which never had one. */
+
+  .link-editor input {
     font-size: 16px;
-    min-height: 38px;
+    min-height: var(--qb-control-height-touch);
   }
 
-  /* Epic Atlas (WF-086): the condensed-rail expand affordance needs a real
-     touch target — HANDOFF's spec sets a 44px floor here, stricter than
-     the board's own 32px `.epic-card__expand` precedent a few lines up.
-     Deliberate, not a drift: the rail card is already reduced to its
-     condensed set at this width, so its one remaining interactive control
-     gets the full floor rather than the board's smaller one.
+  /* The add-label input is DELIBERATELY excluded from the touch floor above:
+     it now sits inside the dotted note chip (.label-editor__add), which is the
+     tap target, so a 34px min-height on the input just made the note tower over
+     the label chips beside it. It keeps the chips' own font size for a matching
+     height. (Trade-off: no 16px iOS-zoom guard on this one tiny field — the
+     note would balloon past the chips again with it.) */
+  .label-editor__input {
+    font-size: 0.65rem;
+    min-height: 0;
+  }
+
+  /* Epic Atlas (WF-086): the condensed-rail expand affordance ("▾ sub-quests")
+     is a Role-A `<Button>` (AtlasRailCard.tsx), so it folds onto the shared
+     touch token like every other migrated text button above — a comfortable
+     ~34px tap target that matches its neighbours instead of the old bespoke
+     44px floor that towered over them (WF-097 touch-layer reconciliation).
+     No `min-width` floor: the label is always wider than any square minimum,
+     unlike the genuinely icon-only glyphs that keep their own square sizing.
 
      The sub-quest checkbox (`.atlas-rail-card__checkbox`) is deliberately
      NOT given a matching floor here, despite HANDOFF listing it alongside
@@ -5663,68 +6502,34 @@ a.card-drawer__pr-chip:hover {
      that receives no interaction; if a future card makes the sub-quest row
      itself tappable, the target belongs on the `<li>`, not the checkbox. */
   .atlas-rail-card__expand {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: var(--qb-control-height-touch);
   }
 }
 
 /* ==========================================================================
    Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
    touch-target layer above so it wins the cascade (same specificity, later
-   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
-   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
-   match) that 44px floor left the questing/fleet pill visibly taller than
-   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
-   though all three already share identical padding/font-size/border via the
-   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
-   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
-   three (the other two are plain `<span>`s) — a bare button doesn't inherit
-   the guild body font from the UA stylesheet the way inline elements do, so
-   its `line-height: normal` resolves against a different font's metrics;
-   pinning its `font-family` here (line-height was already the shared
-   `normal` keyword on both — the mismatch was that keyword resolving
-   against two different fonts' metrics) makes all three pills
-   byte-for-byte the same box on mobile, not just coincidentally close.
-   NB: `font-family` only, never the `font` shorthand — that resets
-   font-size/weight too, which would fight the shared 0.68rem override
-   above (same specificity, later in the cascade would win and blow the
-   pill back up to the body's default size). */
-@media (max-width: 720px) {
-  .topbar__fleet-pill {
-    min-height: 0;
-    font-family: inherit;
-    /* Defensive, not load-bearing here (measured with/without: no height
-       change once the icon font-size fix below is in) — strips whatever
-       native form-control chrome Chromium might otherwise reserve room
-       for on a plain `<button>`, same "don't rely on the platform ever
-       agreeing with custom padding/border" instinct as every other
-       hand-styled button in this file. */
-    appearance: none;
-    -webkit-appearance: none;
-  }
-}
-
-/* ==========================================================================
-   Mobile fleet-pill height normalisation (topbar R4). Declared AFTER the
-   touch-target layer above so it wins the cascade (same specificity, later
-   rule wins) against that layer's `.topbar__fleet-pill { min-height: 44px }`
-   — on an actual touch phone (`pointer: coarse` AND `max-width: 720px` both
-   match) that 44px floor left the questing/fleet pill visibly taller than
-   its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, even
-   though all three already share identical padding/font-size/border via the
-   combined selector above (`.topbar__gold-pill, .topbar__vanquished-pill,
-   .topbar__fleet-pill`). The fleet pill is also the only `<button>` of the
-   three (the other two are plain `<span>`s) — a bare button doesn't inherit
-   the guild body font from the UA stylesheet the way inline elements do, so
-   its `line-height: normal` resolves against a different font's metrics;
-   pinning its `font-family` here (line-height was already the shared
-   `normal` keyword on both — the mismatch was that keyword resolving
-   against two different fonts' metrics) makes all three pills
-   byte-for-byte the same box on mobile, not just coincidentally close.
-   NB: `font-family` only, never the `font` shorthand — that resets
-   font-size/weight too, which would fight the shared 0.68rem override
-   above (same specificity, later in the cascade would win and blow the
-   pill back up to the body's default size). */
+   rule wins) against that layer's `.topbar__fleet-pill` touch floor (now
+   `min-height: var(--qb-control-height-touch)`, ~34px — was a raw 44px).
+   Even at the reduced touch height the fleet pill would still read taller
+   than its `.topbar__gold-pill`/`.topbar__vanquished-pill` neighbours, which
+   take NO touch floor: on a touch phone (`pointer: coarse` AND
+   `max-width: 720px` both match) this drops the pill's floor back to `0` so
+   all three match the shared 0.68rem pill box (identical padding/font-size/
+   border via the combined selector above `.topbar__gold-pill,
+   .topbar__vanquished-pill, .topbar__fleet-pill`) — the pill tracks its pill
+   neighbours, not the rectangular-button touch token.
+   The fleet pill is also the only `<button>` of the three (the other two are
+   plain `<span>`s) — a bare button doesn't inherit the guild body font from
+   the UA stylesheet the way inline elements do, so its `line-height: normal`
+   resolves against a different font's metrics; pinning its `font-family` here
+   (line-height was already the shared `normal` keyword on both — the mismatch
+   was that keyword resolving against two different fonts' metrics) makes all
+   three pills byte-for-byte the same box on mobile, not just coincidentally
+   close. NB: `font-family` only, never the `font` shorthand — that resets
+   font-size/weight too, which would fight the shared 0.68rem override above
+   (same specificity, later in the cascade would win and blow the pill back
+   up to the body's default size). */
 @media (max-width: 720px) {
   .topbar__fleet-pill {
     min-height: 0;

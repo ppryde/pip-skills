@@ -2,6 +2,20 @@ import { useEffect } from "react";
 import { setLabelColor } from "../api/client";
 import { labelColor, PALETTE_KEYS } from "../board/labelColor";
 import type { UseBoardResult } from "../board/useBoard";
+// WF-097 follow-up: the per-row "Reset" (a standard Role-A text button) now
+// routes through `<Button>` (`src/ui/`) — `.label-settings-row__reset` in
+// styles.css is slimmed to its genuine overrides (wobble-3 wobble, tighter
+// horizontal padding) now that the rest of its chrome duplicates `.qb-btn`.
+// The 9 colour swatches stay bespoke: `.label-settings-swatch` is a small
+// fixed square colour-picker affordance (deliberately NOT the pill/Role-A
+// shape), and the `<input type="color">`-free palette grid is intentional —
+// there is no native colour swatch here to migrate.
+//
+// The per-row "current chip" now routes through `<Chip tone=…/>`, same
+// `tone`/`className="label-chip"` composition `LabelChips`/`LabelEditor`
+// use — `.label-chip label-chip--<key>` on the rendered element, unchanged
+// from the bare `<span>` this used to be.
+import { Button, Chip } from "../ui";
 
 export interface LabelSettingsDialogProps {
   open: boolean;
@@ -89,11 +103,9 @@ function LabelSettingsDialog({
             const current = colors[name];
             return (
               <div key={name} className="label-settings-row">
-                <span
-                  className={`label-chip label-chip--${labelColor(name, colors)}`}
-                >
+                <Chip tone={labelColor(name, colors)} className="label-chip">
                   {name}
-                </span>
+                </Chip>
                 <div className="label-settings-row__swatches">
                   {PALETTE_KEYS.map((key) => (
                     <button
@@ -106,13 +118,13 @@ function LabelSettingsDialog({
                     />
                   ))}
                 </div>
-                <button
-                  type="button"
+                <Button
+                  variant="neutral"
                   className="label-settings-row__reset"
                   onClick={() => void reset(name)}
                 >
                   Reset
-                </button>
+                </Button>
               </div>
             );
           })

@@ -1,7 +1,21 @@
 import { park, unpark, move } from "../api/client";
 import type { Status } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
-import { TentIcon, BarredShieldIcon, SkullIcon, CheckIcon } from "./icons";
+// WF follow-up: the four committing verbs use the same hand-drawn asset icons
+// as the board's lane strip / atlas trail (nicer than the inline SVG glyphs) —
+// each button carries the icon of the lane/state it sends the card TO: Camp →
+// parked, Vanquished → done, Forsake → abandoned, and Barred → a trail boulder
+// (the obstacle that blocks the path). Unpark/Unblock stay bare text.
+import campIcon from "../assets/lane-icons/parked.png";
+import barredIcon from "../assets/trail-icons/boulder.svg";
+import vanquishedIcon from "../assets/lane-icons/done.png";
+import forsakeIcon from "../assets/lane-icons/abandoned.png";
+// WF-097 follow-up: every button here now routes through the design-library
+// `<Button/>` primitive (`src/ui/`) — all neutral (the default variant),
+// same as before. `.status-menu button`'s base rule/hover/active/disabled
+// states duplicated `.qb-btn`'s own exactly and are gone from styles.css;
+// only the per-button wobble-variant cycle (WF-046 item 1) survives.
+import { Button } from "../ui";
 
 export interface StatusMenuProps {
   cardId: string;
@@ -79,35 +93,35 @@ function StatusMenu({
   return (
     <div className="status-menu">
       {status === "parked" ? (
-        <button type="button" onClick={() => void handleUnpark()} disabled={inFlight}>
+        <Button onClick={() => void handleUnpark()} disabled={inFlight}>
           Unpark
-        </button>
+        </Button>
       ) : (
-        <button type="button" onClick={() => void handlePark()} disabled={inFlight}>
-          <TentIcon aria-hidden="true" />
+        <Button onClick={() => void handlePark()} disabled={inFlight}>
+          <img src={campIcon} className="status-menu__icon" alt="" aria-hidden="true" />
           Camp
-        </button>
+        </Button>
       )}
 
       {status === "blocked" ? (
-        <button type="button" onClick={() => void handleUnblock()} disabled={inFlight}>
+        <Button onClick={() => void handleUnblock()} disabled={inFlight}>
           Unblock
-        </button>
+        </Button>
       ) : (
-        <button type="button" onClick={() => void handleBlock()} disabled={inFlight}>
-          <BarredShieldIcon aria-hidden="true" />
+        <Button onClick={() => void handleBlock()} disabled={inFlight}>
+          <img src={barredIcon} className="status-menu__icon" alt="" aria-hidden="true" />
           Barred…
-        </button>
+        </Button>
       )}
 
-      <button type="button" onClick={() => void handleDone()} disabled={inFlight}>
-        <CheckIcon aria-hidden="true" />
+      <Button onClick={() => void handleDone()} disabled={inFlight}>
+        <img src={vanquishedIcon} className="status-menu__icon" alt="" aria-hidden="true" />
         Vanquished
-      </button>
-      <button type="button" onClick={() => void handleAbandon()} disabled={inFlight}>
-        <SkullIcon aria-hidden="true" />
+      </Button>
+      <Button onClick={() => void handleAbandon()} disabled={inFlight}>
+        <img src={forsakeIcon} className="status-menu__icon" alt="" aria-hidden="true" />
         Forsake
-      </button>
+      </Button>
     </div>
   );
 }

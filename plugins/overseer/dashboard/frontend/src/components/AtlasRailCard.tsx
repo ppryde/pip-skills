@@ -12,6 +12,10 @@ import {
   weightOf,
 } from "../board/atlasTrailLayout";
 import { StarIcon } from "./icons";
+import ScrollingTitle from "./ScrollingTitle";
+// The sub-quests toggle is plain clickable text now (no button chrome) — the
+// "N sub-quests" label itself IS the affordance (styled in styles.css). It's
+// still a real `<button>` for keyboard/aria, just painted like a heading.
 
 export interface AtlasRailCardProps {
   card: BoardCard;
@@ -139,13 +143,12 @@ function AtlasRailCard({
         )}
       </div>
 
-      <div
+      <ScrollingTitle
+        text={card.title}
         className={
           "atlas-rail-card__title" + (card.status === "done" ? " atlas-rail-card__title--done" : "")
         }
-      >
-        {card.title}
-      </div>
+      />
 
       {/* Hidden (not omitted) at mobile widths — condensed-set contract,
           see HANDOFF's "Responsive (required)" section. */}
@@ -180,14 +183,14 @@ function AtlasRailCard({
           className="atlas-rail-card__expand"
           aria-expanded={expanded}
           onClick={(e) => {
-            // Same stopPropagation pattern as EpicCard.tsx's expand button —
-            // expanding sub-quests is distinct from opening the drawer, even
-            // though the button lives inside the onOpen-wired card body.
+            // stopPropagation: expanding sub-quests is distinct from opening
+            // the drawer, even though the toggle lives inside the onOpen-wired
+            // card body.
             e.stopPropagation();
             onToggleExpand(card.id);
           }}
         >
-          {expanded ? "▾" : "▸"} sub-quests
+          {expanded ? "▾" : "▸"} {orderedChildren.length} sub-quests
         </button>
       )}
 

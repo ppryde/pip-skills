@@ -1,4 +1,5 @@
 import { labelColor } from "../board/labelColor";
+import { Chip } from "../ui";
 
 export interface LabelChipsProps {
   labels: string[];
@@ -23,6 +24,14 @@ export interface LabelChipsProps {
  * Renders nothing at all (not even an empty wrapper) when `labels` is empty,
  * so a label-less card's tile/drawer layout is byte-identical to before this
  * component existed — see TileShell/CardDetailDrawer call sites.
+ *
+ * Each chip routes through the design-library `<Chip/>` (`src/ui/`):
+ * `tone={labelColor(...)}` supplies the `.label-chip--<key>` colour, and
+ * `className="label-chip"` layers the hand-drawn wobble shape (small
+ * font/padding, wobble border-radius, ellipsis clipping) on top of `.qb-chip`
+ * — same `.label-chip` class as before this migration, just composed via the
+ * primitive instead of a bare `<span>`, so `.label-chip`/`.label-chip--<key>`
+ * class-based queries (this file's own tests, `LabelEditor`'s) still match.
  */
 function LabelChips({ labels, className, colorRegistry }: LabelChipsProps) {
   // Defensive guard: the contract guarantees `labels` is always present, but
@@ -33,12 +42,13 @@ function LabelChips({ labels, className, colorRegistry }: LabelChipsProps) {
   return (
     <div className={"label-chips" + (className ? ` ${className}` : "")}>
       {list.map((label) => (
-        <span
+        <Chip
           key={label}
-          className={`label-chip label-chip--${labelColor(label, colorRegistry)}`}
+          tone={labelColor(label, colorRegistry)}
+          className="label-chip"
         >
           {label}
-        </span>
+        </Chip>
       ))}
     </div>
   );

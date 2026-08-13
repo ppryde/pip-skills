@@ -13,10 +13,10 @@ describe("<LabelEditor/>", () => {
   it("adds a label and calls onSave with the full set", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<LabelEditor labels={["policy"]} onSave={onSave} />);
-    fireEvent.change(screen.getByPlaceholderText(/add label/i), {
+    fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "arch" },
     });
-    fireEvent.keyDown(screen.getByPlaceholderText(/add label/i), {
+    fireEvent.keyDown(screen.getByRole("textbox"), {
       key: "Enter",
     });
     await waitFor(() =>
@@ -34,7 +34,7 @@ describe("<LabelEditor/>", () => {
   it("clears the add-input after committing", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<LabelEditor labels={[]} onSave={onSave} />);
-    const input = screen.getByPlaceholderText(/add label/i) as HTMLInputElement;
+    const input = screen.getByRole("textbox") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "arch" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(["arch"]));
@@ -44,7 +44,7 @@ describe("<LabelEditor/>", () => {
   it("does NOT call onSave for a whitespace-only add (no-op)", () => {
     const onSave = vi.fn();
     render(<LabelEditor labels={["policy"]} onSave={onSave} />);
-    const input = screen.getByPlaceholderText(/add label/i);
+    const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSave).not.toHaveBeenCalled();
@@ -53,7 +53,7 @@ describe("<LabelEditor/>", () => {
   it("does NOT call onSave for an empty add (no-op)", () => {
     const onSave = vi.fn();
     render(<LabelEditor labels={["policy"]} onSave={onSave} />);
-    fireEvent.keyDown(screen.getByPlaceholderText(/add label/i), {
+    fireEvent.keyDown(screen.getByRole("textbox"), {
       key: "Enter",
     });
     expect(onSave).not.toHaveBeenCalled();
@@ -62,7 +62,7 @@ describe("<LabelEditor/>", () => {
   it("does NOT add a duplicate label (no-op, no onSave call)", () => {
     const onSave = vi.fn();
     render(<LabelEditor labels={["policy"]} onSave={onSave} />);
-    const input = screen.getByPlaceholderText(/add label/i);
+    const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "policy" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSave).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe("<LabelEditor/>", () => {
   it("trims surrounding whitespace off an added label", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<LabelEditor labels={[]} onSave={onSave} />);
-    const input = screen.getByPlaceholderText(/add label/i);
+    const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "  arch  " } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(["arch"]));

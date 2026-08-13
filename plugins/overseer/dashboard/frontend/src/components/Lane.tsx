@@ -45,24 +45,28 @@ function Lane({
 }: LaneProps) {
   const { setNodeRef } = useDroppable({ id: lane.key });
   const isEmpty = lane.cards.length === 0;
-  const className = [
-    "lane",
-    `lane--${lane.kind}`,
-    isEmpty ? "lane--empty" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   // Guild banner/card accent key (WF-028): mirrors HANDOFF's per-column
   // accent table. Archive (labelled "Abandoned") gets its own muted
   // "abandoned"/ash accent group (WF-076) — it used to borrow "parked"'s
   // taupe, which made abandoned and parked cards visually identical.
+  // Computed before `className` so the lane root can carry it too — the light
+  // lane fill (WF-092) tints off the same accent as the header banner.
   const accentKey =
     lane.kind === "archive"
       ? "abandoned"
       : lane.kind === "stage"
         ? lane.stage!
         : lane.kind;
+
+  const className = [
+    "lane",
+    `lane--${lane.kind}`,
+    `lane--accent-${accentKey}`,
+    isEmpty ? "lane--empty" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className={className} data-lane-key={lane.key} ref={setNodeRef}>

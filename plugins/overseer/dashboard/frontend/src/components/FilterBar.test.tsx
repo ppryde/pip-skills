@@ -14,11 +14,11 @@ const base = {
   onPriority: () => {},
   onComplexity: () => {},
   onClear: () => {},
-  // WF-085b: expanded by default here so every other test in this file (all
+  // Expanded by default here so every other test in this file (all
   // exercising the bar's own controls, not the collapse behaviour) keeps
   // finding a reachable/visible bar without opting in per-test — the
   // collapse itself is covered by the dedicated describe block below.
-  controlsOpen: true,
+  filtersOpen: true,
 };
 
 describe("<FilterBar/>", () => {
@@ -31,7 +31,7 @@ describe("<FilterBar/>", () => {
     expect(onQuery).toHaveBeenCalledWith("frob");
   });
 
-  it("choosing a priority calls onPriority with the value (null for None)", () => {
+  it("choosing a priority calls onPriority with the value (null for the placeholder)", () => {
     const onPriority = vi.fn();
     render(<FilterBar {...base} onPriority={onPriority} />);
     fireEvent.change(screen.getByLabelText(/priority/i), {
@@ -44,7 +44,7 @@ describe("<FilterBar/>", () => {
     expect(onPriority).toHaveBeenCalledWith(null);
   });
 
-  it("choosing a complexity calls onComplexity with the value (null for None)", () => {
+  it("choosing a complexity calls onComplexity with the value (null for the placeholder)", () => {
     const onComplexity = vi.fn();
     render(<FilterBar {...base} onComplexity={onComplexity} />);
     fireEvent.change(screen.getByLabelText(/complexity/i), {
@@ -60,13 +60,15 @@ describe("<FilterBar/>", () => {
   it("shows visible/total and disables Clear when default", () => {
     render(<FilterBar {...base} visibleCount={5} totalCount={20} isDefault={true} />);
     expect(screen.getByText(/5 of 20/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /clear filters/i })).toBeDisabled();
+    // Exact "Clear" (no ellipsis) — distinguishes this from the topbar's
+    // own "Clear…"/ClearDialog button (see App.test.tsx).
+    expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
   });
 
   it("enables Clear and calls onClear when not default", () => {
     const onClear = vi.fn();
     render(<FilterBar {...base} isDefault={false} onClear={onClear} />);
-    const clearBtn = screen.getByRole("button", { name: /clear filters/i });
+    const clearBtn = screen.getByRole("button", { name: "Clear" });
     expect(clearBtn).not.toBeDisabled();
     fireEvent.click(clearBtn);
     expect(onClear).toHaveBeenCalled();
@@ -95,28 +97,53 @@ describe("<FilterBar/>", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  // WF-092: priority/complexity dropped their standalone visible label in
+  // favour of the field name as the select's own default-option
+  // placeholder — accessibility now rides solely on each select's
+  // `aria-label` ("priority"/"complexity"), not adjacent text.
+  it("shows the field name as the unset placeholder option, not a standalone label", () => {
+    render(<FilterBar {...base} />);
+    const prioritySelect = screen.getByLabelText(/priority/i) as HTMLSelectElement;
+    const complexitySelect = screen.getByLabelText(/complexity/i) as HTMLSelectElement;
+    expect(prioritySelect.options[0]).toHaveTextContent("Priority");
+    expect(complexitySelect.options[0]).toHaveTextContent("Complexity");
+    // No standalone <label> wrapping visible "Priority"/"Complexity" text —
+    // the only place those words appear is inside each select's own
+    // placeholder <option> (asserted above), never as a sibling text node.
+    expect(document.querySelector("label")).toBeNull();
+    expect(screen.queryByText("None")).toBeNull();
+  });
+
+  // Task 1: a small on-theme eyebrow (with a magnifying-glass icon) opens
+  // its own row, ahead of search — "Muster" was renamed "Scry".
+  it("shows the Scry eyebrow at the start of the row", () => {
+    render(<FilterBar {...base} />);
+    expect(screen.getByText("Scry")).toBeInTheDocument();
+    expect(screen.queryByText("Muster")).not.toBeInTheDocument();
+  });
 });
 
-// WF-085b: the root element carries a stable id + the native `hidden`
-// attribute driven by `controlsOpen`, mirroring TopBar's own
-// `#topbar-controls-group` so App.tsx's single "Controls ▾" toggle can fold
-// this bar away on mobile alongside it (styles.css confines the actual
-// hide/show effect to the ≤720px media query — see App.test.tsx/
+// Task 2: the root element carries a stable id + the native `hidden`
+// attribute driven by `filtersOpen` — its OWN independent toggle now (the
+// "Filters ▾" button in TopBar), split from the old shared `controlsOpen`
+// that used to also drive TopBar's `#topbar-controls-group`. Task 3: this
+// takes effect on every viewport, not just ≤720px (see App.test.tsx/
 // TopBar.test.tsx for the cross-component wiring; this is just the unit
 // contract on FilterBar's own root element).
-describe("<FilterBar/> mobile collapse wiring (WF-085b)", () => {
+describe("<FilterBar/> Filters collapse wiring (Task 2/3)", () => {
   it("has a stable #filter-bar id for aria-controls to reference", () => {
     render(<FilterBar {...base} />);
     expect(document.getElementById("filter-bar")).not.toBeNull();
   });
 
-  it("carries the native hidden attribute when controlsOpen is false", () => {
-    render(<FilterBar {...base} controlsOpen={false} />);
+  it("carries the native hidden attribute when filtersOpen is false", () => {
+    render(<FilterBar {...base} filtersOpen={false} />);
     expect(document.getElementById("filter-bar")).not.toBeVisible();
   });
 
-  it("is visible when controlsOpen is true", () => {
-    render(<FilterBar {...base} controlsOpen={true} />);
+  it("is visible when filtersOpen is true", () => {
+    render(<FilterBar {...base} filtersOpen={true} />);
     expect(document.getElementById("filter-bar")).toBeVisible();
   });
 });

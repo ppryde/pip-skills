@@ -57,34 +57,6 @@ export function wobblePath(x0: number, x1: number, laneHeight: number, seed: num
   return { d, yAt };
 }
 
-export interface WobblePathVertical {
-  d: string;
-  xAt: (y: number) => number;
-}
-
-/** Mobile "Down" orientation's mirror of `wobblePath` (HANDOFF's mobile
- * down-mode) — progress runs down `y` instead of across `x`, the wobble
- * itself still runs sideways (in `x`) around the lane's own centre. Ported
- * from the prototype's `trailV()`. */
-export function wobblePathVertical(
-  y0: number,
-  y1: number,
-  laneWidth: number,
-  seed: number
-): WobblePathVertical {
-  const x = laneWidth * 0.52;
-  const xAt = (y: number) => x + WOBBLE_AMPLITUDE * Math.sin(WOBBLE_K * y + seed);
-
-  const steps = Math.max(2, Math.round((y1 - y0) / 14));
-  let d = "";
-  for (let i = 0; i <= steps; i++) {
-    const y = y0 + (y1 - y0) * (i / steps);
-    d += (i ? " L" : "M") + xAt(y).toFixed(1) + " " + y.toFixed(1);
-  }
-
-  return { d, xAt };
-}
-
 /** djb2 hash — same pattern as `labelColor.ts`/`beastName.ts` — folded
  * into a 0..2π phase so each epic's trail wobbles out of sync with its
  * neighbours, deterministically (no storage, stable across renders). Being

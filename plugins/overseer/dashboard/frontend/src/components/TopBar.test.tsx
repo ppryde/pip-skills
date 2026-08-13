@@ -14,22 +14,31 @@ import type {
 import type { PartyMember } from "../board/party";
 import TopBar, { type TopBarProps } from "./TopBar";
 
-// WF-085b: `controlsOpen` moved from TopBar-local state up to App.tsx, so
-// TopBar is now a fully controlled component — it renders the "Controls ▾"
-// button/group but doesn't own whether they're open. Every test in this
-// file needs a `controlsOpen`/`onToggleControls` pair; this harness
-// reproduces App's own `useState` + toggle callback locally so tests that
-// click the toggle and expect the group to actually show/hide keep working
-// without each test hand-rolling its own state.
+// `controlsOpen`/`filtersOpen` are App-owned, so TopBar is a fully
+// controlled component — it renders the "Controls ▾"/"Filters ▾" buttons
+// but doesn't own whether either is open. Every test in this file needs
+// both pairs; this harness reproduces App's own `useState`s + toggle
+// callbacks locally so tests that click a toggle and expect its region to
+// actually show/hide (or its `aria-expanded` to flip) keep working without
+// each test hand-rolling its own state. `controlsOpen` defaults false here
+// (this file's own long-standing convention, covering the collapsed case
+// most tests below need) — independent of App.tsx's own default, which is
+// `true` (Task 3: the board looks unchanged on load).
 function StatefulTopBar(
-  props: Omit<TopBarProps, "controlsOpen" | "onToggleControls">
+  props: Omit<
+    TopBarProps,
+    "controlsOpen" | "onToggleControls" | "filtersOpen" | "onToggleFilters"
+  >
 ) {
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   return (
     <TopBar
       {...props}
       controlsOpen={controlsOpen}
       onToggleControls={() => setControlsOpen((open) => !open)}
+      filtersOpen={filtersOpen}
+      onToggleFilters={() => setFiltersOpen((open) => !open)}
     />
   );
 }
@@ -85,7 +94,6 @@ function partyMember(
 
 function baseProps() {
   return {
-    projectName: "acme",
     context: null as Context | null,
     limits: null as Limits,
     quarantinedCount: 0,
@@ -110,6 +118,14 @@ function baseProps() {
     // the toggle's own describe block below needs to care about it.
     view: "board" as "board" | "atlas",
     onSelectView: () => {},
+    // WF-091: Epic Atlas toggle defaults — every existing test gets a
+    // stable no-op fixture (matching `view`'s own default above) via this
+    // shared helper; only the atlas-controls describe block below cares
+    // about these.
+    showNames: true,
+    onToggleNames: () => {},
+    hideVanquished: true,
+    onToggleVanquished: () => {},
   };
 }
 
@@ -122,7 +138,10 @@ function openControls() {
 }
 
 describe("<TopBar/>", () => {
-  it("the subtitle does NOT contain 'as of last refresh'", () => {
+  // Task 5: last-refreshed moved out of the Controls group and renders as
+  // a `.topbar__pill` note-badge beside the Short/Long Rest pills instead
+  // of its own dedicated `.topbar__updated` class.
+  it("shows the last-refreshed time as a '.topbar__pill' badge when set", () => {
     render(
       <StatefulTopBar
         {...baseProps()}
@@ -130,27 +149,18 @@ describe("<TopBar/>", () => {
       />
     );
 
-    const subtitle = document.querySelector(".topbar__subtitle");
-    expect(subtitle).not.toBeNull();
-    expect(subtitle!.textContent).not.toMatch(/as of last refresh/i);
+    const updated = screen.getByText("updated 14:32");
+    expect(updated).toBeInTheDocument();
+    expect(updated).toHaveClass("topbar__pill");
+    // The repo name that used to share this line is gone — it now lives only
+    // in the repo selector below, so no "name · updated …" middot here.
+    expect(updated.textContent).not.toMatch(/·/);
   });
 
-  it("formats the subtitle as project name + updated HH:MM when lastRefreshedAt is set", () => {
-    render(
-      <StatefulTopBar
-        {...baseProps()}
-        projectName="pip-skills"
-        lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
-      />
-    );
+  it("renders no last-updated text when lastRefreshedAt is null", () => {
+    render(<StatefulTopBar {...baseProps()} lastRefreshedAt={null} />);
 
-    expect(screen.getByText("pip-skills · updated 14:32")).toBeInTheDocument();
-  });
-
-  it("falls back to just the project name when lastRefreshedAt is null", () => {
-    render(<StatefulTopBar {...baseProps()} projectName="pip-skills" lastRefreshedAt={null} />);
-
-    expect(screen.getByText("pip-skills")).toBeInTheDocument();
+    expect(screen.queryByText(/updated/i)).toBeNull();
   });
 
   it("renders the gold-total pill summed from budget.actual across cards", () => {
@@ -471,6 +481,17 @@ describe("<TopBar/>", () => {
     expect(screen.getByRole("dialog", { name: /new card/i })).toBeInTheDocument();
   });
 
+  // Task 2: "＋ New card" is icon-only now — the visible label text is
+  // dropped, but `aria-label`/`title="New card"` keep it resolvable by name
+  // exactly like the old "＋ New card" text button was.
+  it("renders the New card button icon-only, still accessible by name", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+    const button = screen.getByRole("button", { name: /new card/i });
+    expect(button).toHaveTextContent("＋");
+    expect(button.textContent).not.toMatch(/new card/i);
+    expect(button).toHaveAttribute("title", "New card");
+  });
+
   // Task 10 (F10, WF-067): the Labels settings control — TopBar owns the
   // dialog's open state itself, same pattern as "＋ New card" above.
   it("renders no Label colors dialog until the Labels settings button is clicked", () => {
@@ -505,30 +526,29 @@ describe("<TopBar/>", () => {
   });
 });
 
-// WF-085b: mobile (≤720px) collapses threshold/Labels…/Refresh/Abandoned/
-// Clear… behind a single "Controls ▾" toggle. The collapse itself is
-// implemented with the native `hidden` attribute (see TopBar.tsx), which
-// jsdom's own accessibility-tree logic honours regardless of whether any
-// stylesheet is loaded — `getByRole` excludes descendants of a `hidden`
+// WF-085/Task 2/3: "Controls ▾" collapses threshold/Labels…/Refresh/
+// Abandoned/Clear… — its OWN region now (`#topbar-controls-group`), split
+// from the old shared toggle that also drove <FilterBar/>. The collapse
+// itself is implemented with the native `hidden` attribute (see TopBar.tsx),
+// which jsdom's own accessibility-tree logic honours regardless of whether
+// any stylesheet is loaded — `getByRole` excludes descendants of a `hidden`
 // ancestor by default, and jest-dom's `toBeVisible()` checks
 // `hasAttribute('hidden')` directly. That's what lets these tests verify
 // real show/hide behaviour without styles.css ever being imported here;
-// styles.css itself additionally confines the `[hidden]` override to the
-// ≤720px media query so desktop is provably unaffected (see the CSS
-// content assertions further down).
+// Task 3: styles.css now lets `[hidden]` hide this group on EVERY viewport,
+// not just ≤720px (see the CSS content assertions further down and
+// styles.css itself).
 describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
   it("collapses the secondary controls by default, hiding them from the accessibility tree", () => {
     render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
 
     const toggle = screen.getByRole("button", { name: /^controls/i });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    // WF-085b: the toggle now drives BOTH TopBar's own group AND the
-    // separate <FilterBar/> App.tsx renders as a sibling — a
-    // space-separated id list in aria-controls is valid WAI-ARIA.
-    expect(toggle).toHaveAttribute(
-      "aria-controls",
-      "topbar-controls-group filter-bar"
-    );
+    // Task 2: "Controls ▾" now drives ONLY TopBar's own group — the
+    // separate <FilterBar/> App.tsx renders as a sibling is driven by its
+    // own independent "Filters ▾" toggle instead (see the describe block
+    // below).
+    expect(toggle).toHaveAttribute("aria-controls", "topbar-controls-group");
 
     expect(screen.queryByRole("button", { name: /^clear/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^labels/i })).not.toBeInTheDocument();
@@ -591,6 +611,97 @@ describe("<TopBar/> mobile Controls toggle (WF-085)", () => {
   });
 });
 
+// Task 2: "Filters ▾" is its OWN independent toggle now (was folded into
+// the shared "Controls ▾" toggle) — wired to `filter-bar` only, entirely
+// separate from `topbar-controls-group`/`onToggleControls`.
+describe("<TopBar/> Filters toggle (Task 2)", () => {
+  it("wires aria-expanded to filtersOpen and aria-controls to filter-bar only", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+
+    const toggle = screen.getByRole("button", { name: /^filters/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", "filter-bar");
+  });
+
+  it("clicking the Filters toggle calls onToggleFilters and flips aria-expanded/the caret", () => {
+    const onToggleFilters = vi.fn();
+    const { rerender } = render(
+      <TopBar
+        {...baseProps()}
+        controlsOpen={false}
+        onToggleControls={() => {}}
+        filtersOpen={true}
+        onToggleFilters={onToggleFilters}
+      />
+    );
+
+    const toggle = screen.getByRole("button", { name: /^filters/i });
+    expect(toggle).toHaveTextContent("Filters ▴");
+    fireEvent.click(toggle);
+    expect(onToggleFilters).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TopBar
+        {...baseProps()}
+        controlsOpen={false}
+        onToggleControls={() => {}}
+        filtersOpen={false}
+        onToggleFilters={onToggleFilters}
+      />
+    );
+    expect(screen.getByRole("button", { name: /^filters/i })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    expect(screen.getByRole("button", { name: /^filters/i })).toHaveTextContent(
+      "Filters ▾"
+    );
+  });
+
+  it("toggling Filters never affects the Controls group (fully independent)", () => {
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+
+    // Controls starts collapsed (this file's StatefulTopBar default).
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^filters/i }));
+    // Filters flipped, Controls untouched.
+    expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
+  });
+
+  it("puts the toggle cluster in [Filters ▾] [Controls ▾] [＋] order", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} />);
+    const cluster = container.querySelector(".topbar__toggle-cluster")!;
+    expect(cluster).not.toBeNull();
+    const buttons = Array.from(cluster.querySelectorAll("button"));
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
+    expect(buttons[1]).toHaveAccessibleName(/^controls/i);
+    expect(buttons[2]).toHaveAccessibleName(/new card/i);
+  });
+});
+
+// Task 4: `#topbar-controls-group` opens with a small dotted-line header +
+// title, before ThresholdControl.
+describe("<TopBar/> Controls group header (Task 4)", () => {
+  it("renders a header with the group's eyebrow title before ThresholdControl", () => {
+    render(<StatefulTopBar {...baseProps()} />);
+    openControls();
+
+    const group = document.getElementById("topbar-controls-group")!;
+    const header = group.querySelector(".topbar__controls-header");
+    expect(header).not.toBeNull();
+    expect(header!.textContent).toBe("Provisions");
+
+    const children = Array.from(group.children);
+    const headerIndex = children.indexOf(header!);
+    const thresholdIndex = children.findIndex((c) =>
+      c.classList.contains("topbar__threshold")
+    );
+    expect(headerIndex).toBeGreaterThanOrEqual(0);
+    expect(headerIndex).toBeLessThan(thresholdIndex);
+  });
+});
+
 // WF-086: Board|Atlas view toggle. Role-B "T1 gold underline" tab pattern
 // (same aria-pressed mechanics as CardDetailDrawer's `.card-drawer__viewtoggle`
 // segmented tabs), but under its own `.topbar__view-toggle` class — this is
@@ -613,43 +724,130 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(screen.getByRole("button", { name: "Atlas" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("calls onSelectView with the clicked view", () => {
+  it("switches to the other view when EITHER coin is clicked", () => {
     const onSelectView = vi.fn();
-    render(<StatefulTopBar {...baseProps()} view="board" onSelectView={onSelectView} />);
-    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
-    expect(onSelectView).toHaveBeenCalledWith("atlas");
-  });
-
-  it("places the toggle in the always-visible chip row — a sibling of, NOT nested inside, #topbar-controls-group", () => {
-    const { container } = render(<StatefulTopBar {...baseProps()} />);
-    const toggle = container.querySelector(".topbar__view-toggle");
-    expect(toggle).toBeInTheDocument();
-    expect(container.querySelector("#topbar-controls-group .topbar__view-toggle")).toBeNull();
-    // Same parent (<header class="topbar">) as the controls group, not a
-    // descendant of it — the mobile "Controls ▾" collapse must never hide it.
-    expect(toggle!.parentElement).toBe(
-      container.querySelector("#topbar-controls-group")!.parentElement
+    const { rerender } = render(
+      <StatefulTopBar {...baseProps()} view="board" onSelectView={onSelectView} />
     );
+    // On the board, either coin takes you to the atlas — including the active
+    // Board coin (no longer a dead click).
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Board" }));
+    expect(onSelectView).toHaveBeenNthCalledWith(1, "atlas");
+    expect(onSelectView).toHaveBeenNthCalledWith(2, "atlas");
+
+    onSelectView.mockClear();
+    rerender(<StatefulTopBar {...baseProps()} view="atlas" onSelectView={onSelectView} />);
+    // On the atlas, either coin takes you back to the board.
+    fireEvent.click(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    expect(onSelectView).toHaveBeenNthCalledWith(1, "board");
+    expect(onSelectView).toHaveBeenNthCalledWith(2, "board");
   });
 
-  it("sits after topbar__identity and before the repo selector (invisible-on-desktop mobile row-break spacers may sit between)", () => {
+  it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} />);
+    const circles = container.querySelectorAll(".topbar__view-toggle-btn");
+    expect(circles).toHaveLength(2);
+    // Always-visible identity cluster — never behind the mobile "Controls ▾"
+    // collapse.
+    circles.forEach((c) => expect(c.closest(".topbar__identity")).not.toBeNull());
+    expect(container.querySelector("#topbar-controls-group .topbar__view-toggle-btn")).toBeNull();
+  });
+
+  it("stacks both coins in the .topbar__view-toggle group ahead of the wordmark; identity sits before the repo selector", () => {
     const { container } = render(
       <StatefulTopBar {...baseProps()} repos={[{ root: "/r", label: "r", current: true, has_board: true, live_sessions: 0 }]} />
     );
+    const identity = container.querySelector(".topbar__identity")!;
+    const stack = identity.querySelector(".topbar__view-toggle")!;
+    // Both coins live together in the stack (an overlapping pair, not flanking).
+    expect(stack.querySelectorAll(".topbar__view-toggle-btn")).toHaveLength(2);
+    // The stack comes before the wordmark within the identity cluster.
+    const kids = Array.from(identity.children);
+    const stackIndex = kids.indexOf(stack);
+    const titleIndex = kids.findIndex((c) => c.tagName === "H1");
+    expect(stackIndex).toBeGreaterThanOrEqual(0);
+    expect(stackIndex).toBeLessThan(titleIndex);
+    // The identity cluster itself still precedes the repo selector in the bar.
     const header = container.querySelector("header.topbar")!;
-    const children = Array.from(header.children);
-    const identityIndex = children.findIndex((c) => c.classList.contains("topbar__identity"));
-    const toggleIndex = children.findIndex((c) => c.classList.contains("topbar__view-toggle"));
-    const repoIndex = children.findIndex((c) => c.classList.contains("topbar__repo-select"));
+    const barKids = Array.from(header.children);
+    const identityIndex = barKids.indexOf(identity);
+    const repoIndex = barKids.findIndex((c) => c.classList.contains("topbar__repo-select"));
     expect(identityIndex).toBeGreaterThanOrEqual(0);
-    // Not necessarily the VERY next sibling — the mobile row-break spacers
-    // (.topbar__row-break--r2/r3/r4, `display:none` outside the ≤720px
-    // media query) are grouped right after identity too, DOM-adjacent
-    // purely to keep their own diff small; they carry no desktop visual
-    // weight, so "after identity, before the repo selector" is the actual
-    // contract, not byte-adjacent.
-    expect(toggleIndex).toBeGreaterThan(identityIndex);
-    expect(toggleIndex).toBeLessThan(repoIndex);
+    expect(identityIndex).toBeLessThan(repoIndex);
+  });
+});
+
+// WF-091: the Epic Atlas toolbar folded into the Controls group — single
+// toggle buttons, shown ONLY on `view === "atlas"` (the retired
+// standalone `<AtlasToolbar>` used to render these, as segmented
+// two-button pairs, between the topbar and the chart). Lives inside
+// `#topbar-controls-group`, so — like Labels…/Refresh/Abandoned/Clear… —
+// these tests open the mobile Controls collapse first via `openControls()`.
+describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
+  it("renders no atlas controls on the board view", () => {
+    render(<StatefulTopBar {...baseProps()} view="board" />);
+    openControls();
+    expect(screen.queryByRole("button", { name: /quest names/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /vanquished/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the atlas controls on the atlas view", () => {
+    render(<StatefulTopBar {...baseProps()} view="atlas" />);
+    openControls();
+    expect(screen.getByRole("button", { name: /quest names/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /vanquished/i })).toBeInTheDocument();
+  });
+
+  it("Quest names button reflects showNames and calls onToggleNames with the flipped value", () => {
+    const onToggleNames = vi.fn();
+    const { rerender } = render(
+      <StatefulTopBar {...baseProps()} view="atlas" showNames onToggleNames={onToggleNames} />
+    );
+    openControls();
+    const btn = screen.getByRole("button", { name: /quest names/i });
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+    expect(btn).toHaveTextContent(/on/i);
+    fireEvent.click(btn);
+    expect(onToggleNames).toHaveBeenCalledWith(false);
+
+    rerender(
+      <StatefulTopBar {...baseProps()} view="atlas" showNames={false} onToggleNames={onToggleNames} />
+    );
+    const offBtn = screen.getByRole("button", { name: /quest names/i });
+    expect(offBtn).toHaveAttribute("aria-pressed", "false");
+    expect(offBtn).toHaveTextContent(/off/i);
+  });
+
+  it("Vanquished button reflects hideVanquished (default hidden) and calls onToggleVanquished with the flipped value", () => {
+    const onToggleVanquished = vi.fn();
+    const { rerender } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        view="atlas"
+        hideVanquished
+        onToggleVanquished={onToggleVanquished}
+      />
+    );
+    openControls();
+    const btn = screen.getByRole("button", { name: /vanquished/i });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    expect(btn).toHaveTextContent(/hidden/i);
+    fireEvent.click(btn);
+    expect(onToggleVanquished).toHaveBeenCalledWith(false);
+
+    rerender(
+      <StatefulTopBar
+        {...baseProps()}
+        view="atlas"
+        hideVanquished={false}
+        onToggleVanquished={onToggleVanquished}
+      />
+    );
+    const shownBtn = screen.getByRole("button", { name: /vanquished/i });
+    expect(shownBtn).toHaveAttribute("aria-pressed", "true");
+    expect(shownBtn).toHaveTextContent(/shown/i);
   });
 });
 
@@ -658,11 +856,17 @@ describe("<TopBar/> view toggle (WF-086)", () => {
 // never imported by these component tests (only src/main.tsx imports it —
 // see the other frontend test files), so there is no computed-style
 // signal to assert on from jsdom; instead this reads the real stylesheet
-// source and asserts the specific truncation declarations are present on
-// the exact selectors TopBar's repo/branch chips render
-// (`.topbar__repo-select select` / `.topbar__branch-select select`,
-// RepoSelector.tsx / BranchFilter.tsx). This is a regression guard against
-// someone dropping the rule later, not a substitute for visual QA.
+// source and asserts the specific truncation declarations are present.
+// This is a regression guard against someone dropping the rule later, not
+// a substitute for visual QA.
+//
+// WF-097 follow-up: RepoSelector.tsx/BranchFilter.tsx's `<select>`s now
+// render via the shared `<Select/>` primitive (`.qb-select`) — the
+// truncation declarations moved there (every `<Select/>` gets them, not
+// just these two), so the guard now reads `.qb-select`'s own rule rather
+// than `.topbar__repo-select select`/`.topbar__branch-select select`
+// (which keep only their own genuine overrides — a transparent background,
+// plus the branch select's own wobble variant — nothing duplicated).
 describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
 
@@ -673,20 +877,24 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
     return match![1];
   }
 
-  it("truncates the repo <select> with an ellipsis instead of wrapping", () => {
-    const body = ruleBodyFor(".topbar__repo-select select");
+  it("truncates every <Select/>-rendered control with an ellipsis instead of wrapping", () => {
+    const body = ruleBodyFor(".qb-select");
     expect(body).toMatch(/overflow:\s*hidden/);
     expect(body).toMatch(/text-overflow:\s*ellipsis/);
     expect(body).toMatch(/white-space:\s*nowrap/);
     expect(body).toMatch(/min-width:\s*0/);
   });
 
-  it("truncates the branch <select> with an ellipsis instead of wrapping", () => {
-    const body = ruleBodyFor(".topbar__branch-select select");
-    expect(body).toMatch(/overflow:\s*hidden/);
-    expect(body).toMatch(/text-overflow:\s*ellipsis/);
-    expect(body).toMatch(/white-space:\s*nowrap/);
-    expect(body).toMatch(/min-width:\s*0/);
+  it("still renders the repo <select> with its own transparent-background override", () => {
+    expect(ruleBodyFor(".topbar__repo-select select")).toMatch(
+      /background:\s*transparent/
+    );
+  });
+
+  it("still renders the branch <select> with its own transparent-background override", () => {
+    expect(ruleBodyFor(".topbar__branch-select select")).toMatch(
+      /background:\s*transparent/
+    );
   });
 
   it("lets the repo/branch chip wrappers shrink below their content width so the ellipsis can engage", () => {

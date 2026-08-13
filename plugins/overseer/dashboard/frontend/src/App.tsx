@@ -7,6 +7,7 @@ import CardDetailDrawer from "./components/CardDetailDrawer";
 import PartyOverlay from "./components/PartyOverlay";
 import UnbegunHolding from "./components/UnbegunHolding";
 import ClearDialog from "./components/ClearDialog";
+import DesignLibrary from "./ui/DesignLibrary";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
@@ -130,24 +131,27 @@ function App() {
   // this state never lives on TopBar itself).
   const [clearOpen, setClearOpen] = useState(false);
   const [clearToast, setClearToast] = useState<string | null>(null);
-  // WF-085b: mobile-only "Controls ▾" collapse state, lifted here from
-  // TopBar so ONE toggle drives BOTH TopBar's own secondary-controls group
-  // AND the separate <FilterBar/> below (previously TopBar-local state only
-  // reached its own group, leaving FilterBar always visible on mobile —
-  // see the mobile-v2 brief). Collapsed by default; desktop (>720px) always
-  // shows both groups regardless of this flag (styles.css confines the
-  // `[hidden]` override to the ≤720px media query, same pattern as the
-  // pre-existing `#topbar-controls-group`).
+  // Task 2/3: "Controls ▾" and "Filters ▾" are now two INDEPENDENT collapse
+  // toggles (previously one shared `controlsOpen` drove both TopBar's own
+  // secondary-controls group AND the separate <FilterBar/> below it — see
+  // git history for that WF-085b arrangement). Follow-up: both now default
+  // CLOSED (was: both OPEN so the board looked unchanged on load) — the
+  // board opens tidier, with Filters ▾/Controls ▾ revealing each region on
+  // demand. `hidden={!controlsOpen}`/`hidden={!filtersOpen}` take effect on
+  // every viewport, not just ≤720px (styles.css), so either button can
+  // collapse/reveal its own region anywhere.
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // WF-086: Board|Atlas view toggle — session-local (no localStorage,
   // same precedent as `activeBranch`), reset to "board" on reload.
   const [view, setView] = useState<"board" | "atlas">("board");
-
-  // `board.project` is a loose/`unknown` shape per the frozen contract (see
-  // api/types.ts) — the backend currently sends the repo root name as a
-  // plain string. Fall back gracefully if that ever changes.
-  const projectName =
-    typeof board?.project === "string" ? board.project : "overseer";
+  // WF-091: the Epic Atlas toolbar's toggles, lifted here from
+  // EpicAtlas-local state — the controls that drive them now live in
+  // TopBar's Controls group (shown only on `view === "atlas"`), so both
+  // TopBar and EpicAtlas need the same App-owned values. Session-local, same
+  // precedent as `view`/`activeBranch` (no localStorage persistence).
+  const [showNames, setShowNames] = useState(true);
+  const [hideVanquished, setHideVanquished] = useState(true);
 
   // Single shared join, computed once and handed to every consumer (TopBar's
   // questing pill, PartyColumn, PartyOverlay) — see Decisions: "consumers
@@ -199,10 +203,31 @@ function App() {
     sameLabelSet(filter.includeLabels, DEFAULT_FILTER.includeLabels) &&
     sameLabelSet(filter.excludeLabels, DEFAULT_FILTER.excludeLabels);
 
+  // v1 design library showcase (`src/ui/DesignLibrary.tsx`) — reachable at
+  // the `#design` hash rather than a real route, so no router dependency is
+  // needed: read the hash once at mount, then re-derive it on every
+  // `hashchange` (covers both a user editing the URL bar and browser Back/
+  // Forward). This is a diagnostic/reference page, not a normal app view —
+  // it deliberately swaps out the ENTIRE board below rather than living
+  // alongside `view` ("board" | "atlas").
+  const [showDesignLibrary, setShowDesignLibrary] = useState(
+    () => window.location.hash === "#design"
+  );
+  useEffect(() => {
+    function handleHashChange() {
+      setShowDesignLibrary(window.location.hash === "#design");
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  if (showDesignLibrary) {
+    return <DesignLibrary />;
+  }
+
   return (
     <div className="app-shell">
       <TopBar
-        projectName={projectName}
         context={context}
         limits={limits}
         quarantinedCount={board?.quarantined.length ?? 0}
@@ -240,13 +265,19 @@ function App() {
         // actually selected — `undefined` (rather than a no-op closure)
         // means TopBar renders no Clear control at all until then.
         onClear={selectedRepo ? () => setClearOpen(true) : undefined}
-        // WF-085b: App-owned collapse state (see comment above) — TopBar
-        // still renders the "Controls ▾" button/group, it just no longer
-        // owns whether they're open.
+        // App-owned collapse state (see comment above) — TopBar still
+        // renders the "Controls ▾"/"Filters ▾" buttons/groups, it just
+        // doesn't own whether they're open.
         controlsOpen={controlsOpen}
         onToggleControls={() => setControlsOpen((open) => !open)}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((open) => !open)}
         view={view}
         onSelectView={setView}
+        showNames={showNames}
+        onToggleNames={setShowNames}
+        hideVanquished={hideVanquished}
+        onToggleVanquished={setHideVanquished}
       />
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
@@ -272,10 +303,9 @@ function App() {
           onComplexity={setComplexity}
           onClear={clear}
           colorRegistry={board.label_colors}
-          // WF-085b: folds FilterBar under the SAME "Controls ▾" toggle as
-          // TopBar's own secondary-controls group on mobile — see the
-          // `controlsOpen` state comment in App.tsx above.
-          controlsOpen={controlsOpen}
+          // Its own independent "Filters ▾" toggle now (Task 2) — see the
+          // `filtersOpen` state comment in App.tsx above.
+          filtersOpen={filtersOpen}
         />
       )}
       <main className="board-region">
@@ -310,7 +340,12 @@ function App() {
                 for both views (App.tsx owns `openCardId` regardless of
                 which page opened it). */}
             {board && view === "atlas" && (
-              <EpicAtlas board={board} onOpenCard={setOpenCardId} />
+              <EpicAtlas
+                board={board}
+                onOpenCard={setOpenCardId}
+                showNames={showNames}
+                hideVanquished={hideVanquished}
+              />
             )}
           </>
         )}

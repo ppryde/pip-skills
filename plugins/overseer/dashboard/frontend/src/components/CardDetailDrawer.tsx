@@ -19,6 +19,30 @@ import ChecklistRows from "./ChecklistRows";
 import PartyAvatar from "./PartyAvatar";
 import LabelEditor from "./LabelEditor";
 import { StarIcon } from "./icons";
+// WF-097 follow-up: the edit-mode title field and body field now route
+// through the design-library `<Input>`/`<Textarea>` primitives (`src/ui/`) —
+// `.card-drawer__title-input`/`.card-drawer__body-textarea` in styles.css are
+// slimmed to the genuine overrides they layer on the shared `.qb-input` base
+// (display font / monospace prose / dashed border / resize), which is exactly
+// the split `.qb-input`'s own doc comment anticipates. The `.card-drawer__close`
+// "×" stays the icon-only affordance, and the Quest|Scroll viewtoggle stays on
+// its bespoke segmented `.qb-btn` pair (aria-pressed mechanics unchanged).
+//
+// Label standardisation follow-up: every small caption/eyebrow in the drawer
+// now routes through the SAME `<Label>` the topbar's REPO/BRANCH/SCRY/
+// Provisions eyebrows use, so they read as one look app-wide —
+// `.card-drawer__section-heading` (via `<Label as="h3">`, keeping real
+// heading semantics — see Label's own doc comment), `.card-drawer__journey-
+// label`, and `.card-drawer__checklist-count`; each class below is slimmed
+// to its genuine layout delta now that `.qb-label` supplies the caption
+// look. Deliberately EXCLUDED: `.card-drawer__id` (the card's own id VALUE,
+// not a field caption), `.card-drawer__hero-class`/`.card-drawer__pr-chip`
+// (badge/chip VALUES — a session's model name or a PR ref, not label text),
+// and the status-fact pill (a filled/tinted chip, a different design
+// language from the muted eyebrow) — none of these describe another
+// element, they ARE the content, so `.qb-label`'s uppercase-eyebrow
+// treatment doesn't apply.
+import { Button, Input, Label, Textarea } from "../ui";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -327,7 +351,7 @@ function CardDetailDrawer({
                 )}
               </div>
               {editing ? (
-                <input
+                <Input
                   aria-label="title"
                   className="card-drawer__title-input"
                   value={titleDraft}
@@ -336,14 +360,13 @@ function CardDetailDrawer({
               ) : (
                 <div className="card-drawer__title-row">
                   <h2 className="card-drawer__title">{detail.title}</h2>
-                  <button
-                    type="button"
-                    className="card-drawer__edit-btn"
+                  <Button
+                    variant="neutral"
                     onClick={() => setEditing(true)}
                     disabled={inFlight}
                   >
                     Edit
-                  </button>
+                  </Button>
                 </div>
               )}
               <div className="card-drawer__facts">
@@ -452,14 +475,13 @@ function CardDetailDrawer({
                   because it mutates every live child's stage/status at
                   once. */}
               {detail.is_epic && (
-                <button
-                  type="button"
-                  className="card-drawer__pull-children-btn"
+                <Button
+                  variant="neutral"
                   onClick={() => void handlePullChildren()}
                   disabled={inFlight}
                 >
                   Pull children
-                </button>
+                </Button>
               )}
             </div>
 
@@ -477,9 +499,9 @@ function CardDetailDrawer({
                         sub-quests panel; hidden with the whole block when
                         there's no checklist). */}
                     <div className="card-drawer__journey">
-                      <div className="card-drawer__journey-label">
+                      <Label className="card-drawer__journey-label">
                         Journey progress
-                      </div>
+                      </Label>
                       <div
                         className="card-drawer__journey-track"
                         data-progress-pct={journeyPct}
@@ -492,12 +514,12 @@ function CardDetailDrawer({
                     </div>
                     <section className="card-drawer__checklist">
                       <div className="card-drawer__checklist-header">
-                        <h3 className="card-drawer__section-heading">
+                        <Label as="h3" className="card-drawer__section-heading">
                           Sub-quests
-                        </h3>
-                        <span className="card-drawer__checklist-count">
+                        </Label>
+                        <Label className="card-drawer__checklist-count">
                           {checklistDone} / {checklistTotal}
-                        </span>
+                        </Label>
                       </div>
                       <ChecklistRows entries={detail.checklist} />
                     </section>
@@ -521,7 +543,9 @@ function CardDetailDrawer({
                     nothing when the card has none. */}
                 {detail.links && detail.links.length > 0 && (
                   <section className="card-drawer__links">
-                    <h3 className="card-drawer__section-heading">Links</h3>
+                    <Label as="h3" className="card-drawer__section-heading">
+                      Links
+                    </Label>
                     <ul className="card-drawer__links-list">
                       {detail.links.map((l, i) => (
                         <li key={i}>
@@ -551,7 +575,7 @@ function CardDetailDrawer({
                 above), exactly like every other drawer control. */}
             {editing ? (
               <div className="card-drawer__edit-body">
-                <textarea
+                <Textarea
                   aria-label="body"
                   className="card-drawer__body-textarea"
                   value={bodyDraft}
@@ -564,27 +588,30 @@ function CardDetailDrawer({
                   </p>
                 )}
                 <div className="card-drawer__edit-actions">
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
                     onClick={() => void saveEdit()}
                     disabled={busy || inFlight || !titleDraft.trim()}
                   >
                     Save
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="neutral"
                     onClick={cancelEdit}
                     disabled={busy || inFlight}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
               <>
-                {/* Segmented Quest | Scroll (MD) tab bar (HANDOFF) — internal
-                    view state stays "rendered"/"source" (aria-pressed/state
-                    mechanics byte-identical); only the VISIBLE labels changed. */}
+                {/* Segmented Quest | Scroll (MD) toggle (HANDOFF labels;
+                    WF-096 restyled it onto the shared `.qb-btn` Role-A
+                    recipe, matching the topbar/atlas segmented controls) —
+                    internal view state stays "rendered"/"source" and the
+                    aria-pressed/state mechanics are unchanged either way,
+                    only the paint/labels moved. */}
                 <div
                   className="card-drawer__viewtoggle"
                   role="group"
@@ -592,6 +619,7 @@ function CardDetailDrawer({
                 >
                   <button
                     type="button"
+                    className="qb-btn card-drawer__viewtoggle-btn"
                     aria-pressed={view === "rendered"}
                     onClick={() => setView("rendered")}
                   >
@@ -599,6 +627,7 @@ function CardDetailDrawer({
                   </button>
                   <button
                     type="button"
+                    className="qb-btn card-drawer__viewtoggle-btn"
                     aria-pressed={view === "source"}
                     onClick={() => setView("source")}
                   >
@@ -623,9 +652,9 @@ function CardDetailDrawer({
                       : null;
                   return (
                     <section key={heading} className="card-drawer__section">
-                      <h3 className="card-drawer__section-heading">
+                      <Label as="h3" className="card-drawer__section-heading">
                         {sectionLabel(heading)}
-                      </h3>
+                      </Label>
                       {progressEntries ? (
                         <ol className="card-drawer__quest-log">
                           {progressEntries.map((entry, i) => (

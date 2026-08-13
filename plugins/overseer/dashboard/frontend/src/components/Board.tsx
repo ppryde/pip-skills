@@ -87,20 +87,21 @@ function Board({
   );
   const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
 
-  // WF-085 in-progress lane: mobile (<=720px, same breakpoint the CSS mobile
-  // block already gates on) collapses the 7 `kind:"stage"` lanes into ONE
+  // WF-085 in-progress lane: collapse the 7 `kind:"stage"` lanes into ONE
   // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
-  // mostly-empty swipe panes/nav icons on a phone. `displayLanes` (NOT
-  // `lanes`) is what the swipe track and the icon-nav both render from
-  // below, so they can never disagree about which lanes exist. Desktop
-  // (`isMobile === false`) is byte-for-byte the old path: `displayLanes ===
-  // lanes`, the real 11-lane result. Drag/drop below deliberately keeps
-  // using `lanes` (the real per-stage layout), never `displayLanes` — see
-  // `handleDragEnd`'s comment.
+  // mostly-empty columns. As of the user's "hide the additional columns for
+  // now on desktop" request this is applied on EVERY viewport (was mobile-
+  // only), so desktop and mobile both show the collapsed set (Backlog / In
+  // Progress / Parked / Done / Abandoned). `displayLanes` (NOT `lanes`) is
+  // what the swipe track, the icon-nav, AND the desktop columns render from,
+  // so they can never disagree about which lanes exist. Drag/drop below
+  // deliberately keeps using `lanes` (the real per-stage layout), never
+  // `displayLanes` — see `handleDragEnd`'s comment — so the stage granularity
+  // is preserved under the hood for when the columns come back.
   const isMobile = useMediaQuery("(max-width:720px)");
   const displayLanes = useMemo(
-    () => (isMobile ? collapseStagesForMobile(lanes) : lanes),
-    [isMobile, lanes]
+    () => collapseStagesForMobile(lanes),
+    [lanes]
   );
 
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
@@ -203,19 +204,31 @@ function Board({
   }, [activeLaneKey, navLaneKeys]);
 
   // Nav-jump: tapping an icon both sets the active pill immediately (no
-  // waiting on the scroll-settle above) and scrolls that lane's pane to
-  // the track's centre — mirrors the approved prototype's tap-to-jump.
+  // waiting on the scroll-settle above) and centres that lane's pane in the
+  // HORIZONTAL track — mirrors the approved prototype's tap-to-jump.
   const handleNavJump = useCallback((key: string) => {
     setActiveLaneKey(key);
-    const target = trackRef.current?.querySelector<HTMLElement>(
+    const track = trackRef.current;
+    const target = track?.querySelector<HTMLElement>(
       `[data-lane-key="${key}"]`
     );
-    // Guarded rather than a bare optional call: jsdom (unlike every real
-    // browser) doesn't implement `scrollIntoView` at all — see Element.
-    // prototype in test envs — so an unguarded call would throw in tests.
-    if (target && typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-    }
+    if (!track || !target) return;
+    // Scroll ONLY the track's own horizontal position. This used to call
+    // `target.scrollIntoView({ inline: "center", block: "nearest" })`, but the
+    // `block` axis also scrolled the vertical `.board-region`, pushing the
+    // tapped lane's header up out of view (a tap "jumped past" the header to
+    // the first card). Nudging `scrollLeft` by the centre-to-centre delta
+    // leaves the page's vertical position — and the header — untouched.
+    // Guarded: jsdom doesn't implement `scrollTo` (the tests polyfill it), so
+    // an unguarded call would throw there.
+    if (typeof track.scrollTo !== "function") return;
+    const trackRect = track.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const delta =
+      targetRect.left +
+      targetRect.width / 2 -
+      (trackRect.left + trackRect.width / 2);
+    track.scrollTo({ left: track.scrollLeft + delta, behavior: "smooth" });
   }, []);
 
   // Item 8: on mobile, `.board-region`'s page-scroll length must follow the
@@ -364,6 +377,11 @@ function Board({
         {dragToast && (
           <div className="board-toast" role="status">
             {dragToast}
+            {/* WF-097 follow-up: bare `<button>`, NOT `<Button>` —
+                `.board-toast__dismiss` is a borderless underline text-link
+                inside the toast (inherits the toast's own colour), not a
+                `.qb-btn` Role-A button; the primitive's chrome would be wrong
+                here. */}
             <button
               type="button"
               className="board-toast__dismiss"

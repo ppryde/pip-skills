@@ -2,6 +2,15 @@ import { useEffect, useState } from "react";
 import { createCard } from "../api/client";
 import type { CreateCardBody } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
+// WF-097 follow-up: this dialog's form controls now route through the
+// design-library primitives (`src/ui/`) — text fields via `<Input>`, the
+// Goal box via `<Textarea>`, Complexity via `<Select>`, and Create/Cancel
+// via `<Button>` (Create = primary, the one action that commits). The
+// `.new-card-field`/`.new-card-actions` rules in styles.css are slimmed to
+// their genuine layout overrides now that the chrome comes from `.qb-input`/
+// `.qb-select`/`.qb-btn`. The `.party-sheet__close` "×" stays a bespoke
+// icon-only affordance (same as every other sheet's close).
+import { Button, Input, Select, Textarea } from "../ui";
 
 export interface NewCardDialogProps {
   open: boolean;
@@ -97,7 +106,7 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
         <h2 className="new-card-dialog__title">New card</h2>
         <label className="new-card-field">
           Title
-          <input
+          <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={busy}
@@ -106,7 +115,7 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
         </label>
         <label className="new-card-field">
           Complexity
-          <select
+          <Select
             value={complexity}
             onChange={(e) => setComplexity(e.target.value)}
             disabled={busy}
@@ -116,11 +125,11 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
             <option value="M">M</option>
             <option value="L">L</option>
             <option value="XL">XL</option>
-          </select>
+          </Select>
         </label>
         <label className="new-card-field">
           Labels
-          <input
+          <Input
             value={labels}
             onChange={(e) => setLabels(e.target.value)}
             placeholder="comma, separated"
@@ -129,7 +138,7 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
         </label>
         <label className="new-card-field">
           Goal
-          <textarea
+          <Textarea
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             disabled={busy}
@@ -141,16 +150,16 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
           </p>
         )}
         <div className="new-card-actions">
-          <button type="button" onClick={onClose} disabled={busy}>
+          <Button variant="neutral" onClick={onClose} disabled={busy}>
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => void submit()}
             disabled={busy || !titleTrimmed}
           >
             Create
-          </button>
+          </Button>
         </div>
       </div>
     </div>

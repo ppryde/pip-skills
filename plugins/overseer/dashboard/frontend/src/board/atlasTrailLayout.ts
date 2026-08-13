@@ -13,11 +13,12 @@
 import type { BoardCard, Status } from "../api/types";
 import { rarityStars } from "./rarityStars";
 
-/** The walled-village trailhead icon's own rendered size — HANDOFF (user
- * amendment): "~28-32px ... it is a town after all", deliberately GRANDER
- * than the other ~20px trail markers (`MARKER_SIZE_PX` in AtlasTrail.tsx/
- * AtlasTrailVertical.tsx). */
-export const TRAILHEAD_ICON_SIZE_PX = 30;
+/** The walled-village trailhead icon's own rendered size — doubled (user
+ * amendment) from the original HANDOFF tuning of "~28-32px ... it is a
+ * town after all" (30px) to read as unmistakably a town; deliberately
+ * GRANDER than the other ~20px trail markers (`MARKER_SIZE_PX` in
+ * AtlasTrail.tsx/AtlasTrailVertical.tsx). */
+export const TRAILHEAD_ICON_SIZE_PX = 60;
 /** Clearance beyond the trailhead icon before the trail's first segment
  * starts — keeps the icon clear of the rail/card on one side and the
  * trail's own content on the other. */
@@ -30,7 +31,11 @@ export const TRAILHEAD_PADDING_PX = 14;
 export const TRAILHEAD_RESERVE_PX = TRAILHEAD_ICON_SIZE_PX + TRAILHEAD_PADDING_PX;
 /** Fixed offset from a trail's true end (H_LEFT_PAD + totalWeight *
  * pxPerWeight) to the beast's anchor point. */
-export const BEAST_ANCHOR_OFFSET_PX = 26;
+// Bumped from 26 so the last quest's name-tag has room between it and the boss
+// monster (which is drawn large and reaches left of its anchor); the trail
+// visibly runs on past the final card before the beast, rather than the label
+// overlapping the monster.
+export const BEAST_ANCHOR_OFFSET_PX = 90;
 /** BeastFace's actual rendered footprint (viewBox 0 0 50 50, drawn at
  * width={48} height={48} — see BeastFace.tsx) — the beast's own doodle
  * extends this far past whichever point it's anchored/translated to. */
@@ -49,6 +54,16 @@ export const BEAST_RESERVE_PX = BEAST_ANCHOR_OFFSET_PX + BEAST_ICON_SIZE_PX;
 /** Usable trail width never collapses below this, however narrow the lane
  * gets (matches the prototype's floor). */
 export const MIN_USABLE_PX = 40;
+/** Minimum arc px per complexity point on the shared scale — a cramped
+ * board (many/heavy visible epics competing for one lane width) floors
+ * HERE rather than compressing every card indefinitely tighter together.
+ * Once this floor dominates, the heaviest epic's trail exceeds the lane's
+ * own (viewport-constrained) width — `EpicAtlas.tsx` derives a shared
+ * `trailWidth` from this same floor and hands it to `AtlasTrail.tsx`,
+ * which lets its SVG OVERFLOW the lane rather than resizing the lane
+ * itself (`.atlas-chart` scrolls horizontally); see that component's own
+ * doc comment for why the lane must never be resized to match. */
+export const MIN_PX_PER_WEIGHT = 64;
 /** Gap the dotted line leaves on each side of a waypoint/boundary marker
  * (HANDOFF: "~15px gaps"). */
 export const WAYPOINT_GAP_PX = 15;
@@ -122,10 +137,15 @@ export function totalWeight(children: BoardCard[]): number {
 /** The ONE shared px-per-weight scalar (HANDOFF: "recomputed each render")
  * — usable width divided by the HEAVIEST epic's total weight, across every
  * currently-visible epic. Floors the heaviest weight at 1 so an
- * all-childless board never divides by zero. */
+ * all-childless board never divides by zero. Also floors the RESULT at
+ * `MIN_PX_PER_WEIGHT` — a cramped board (small `usable` relative to the
+ * heaviest epic) would otherwise compress every trail arbitrarily tight;
+ * once this floor wins, the heaviest epic's trail deliberately exceeds
+ * `usable` and the lane overspills+scrolls instead (see that constant's
+ * own doc comment). */
 export function globalPxPerWeight(totalWeights: number[], usable: number): number {
   const heaviest = Math.max(1, ...totalWeights);
-  return usable / heaviest;
+  return Math.max(usable / heaviest, MIN_PX_PER_WEIGHT);
 }
 
 export interface TrailSegment {

@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from "react";
 import { labelColor } from "../board/labelColor";
+import { Chip } from "../ui";
 
 export interface LabelEditorProps {
   labels: string[];
@@ -14,6 +15,14 @@ export interface LabelEditorProps {
 }
 
 /**
+ * WF-097 follow-up: the one control here that could route through the
+ * design library, the per-chip remove "×", is DELIBERATELY left as a bare
+ * `<button>` — `.label-editor__remove` is a small round icon-only glyph
+ * (border: none, transparent fill, opacity-fade hover), the same bespoke
+ * shape as `.link-editor__deps-list button` (LinkEditor.tsx), not a `.qb-btn`
+ * rectangular Role-A button. Forcing it onto `<Button/>` would paint over
+ * that shape with the wrong chrome entirely.
+ *
  * Editable label control (F1 fold-in, WF-058) — chips with a per-chip remove
  * plus an add-input that commits on Enter. Every mutation (add/remove) calls
  * `onSave` with the full new set immediately; there is no separate "save"
@@ -22,11 +31,12 @@ export interface LabelEditorProps {
  * controls (PrioritySelect/StatusMenu/LinkEditor) deferring to their own
  * props rather than tracking a shadow copy.
  *
- * Each chip carries the SAME `label-chip label-chip--<key>` classes the
- * read-only `LabelChips` uses (`board/labelColor.ts`'s stable hash), so an
- * edited label keeps its established colour — `.label-editor__chip` in
- * styles.css only adds the layout needed to sit the remove glyph inline,
- * it never overrides the palette itself.
+ * Each chip routes through the design-library `<Chip/>` (`src/ui/`), same
+ * `tone`/`className="label-chip"` composition `LabelChips` uses — so an
+ * edited label keeps the SAME `.label-chip label-chip--<key>` classes and
+ * established colour (`board/labelColor.ts`'s stable hash) it always has.
+ * `.label-editor__chip` in styles.css only adds the layout needed to sit the
+ * remove glyph inline, it never overrides the palette itself.
  */
 function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
   const [draft, setDraft] = useState("");
@@ -52,9 +62,10 @@ function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
   return (
     <div className="label-editor">
       {labels.map((label) => (
-        <span
+        <Chip
           key={label}
-          className={`label-editor__chip label-chip label-chip--${labelColor(label, colorRegistry)}`}
+          tone={labelColor(label, colorRegistry)}
+          className="label-editor__chip label-chip"
         >
           {label}
           <button
@@ -65,16 +76,21 @@ function LabelEditor({ labels, onSave, colorRegistry }: LabelEditorProps) {
           >
             ×
           </button>
-        </span>
+        </Chip>
       ))}
-      <input
-        type="text"
-        className="label-editor__input"
-        placeholder="add label…"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={handleKeyDown}
-      />
+      <label className="label-editor__add">
+        <span className="label-editor__add-plus" aria-hidden="true">
+          +
+        </span>
+        <input
+          type="text"
+          className="label-editor__input"
+          placeholder="label"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </label>
     </div>
   );
 }
