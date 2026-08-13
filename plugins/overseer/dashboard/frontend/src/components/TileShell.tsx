@@ -202,11 +202,6 @@ function TileShell({
             {iconKeyLabel(cardIconKey(card))}
           </InfoTooltip>
           <span className="card-tile__id">{card.id}</span>
-          {card.priority && (
-            <span className={`priority-chip priority-chip--${card.priority}`}>
-              {card.priority}
-            </span>
-          )}
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly
               distinct from L, not clipped to the same 3 pips).
@@ -231,6 +226,11 @@ function TileShell({
             coins (gold/budget) right-aligned (`.card-tile__coins` uses
             margin-left:auto). */}
         <div className="card-tile__statusline">
+          {card.priority && (
+            <span className={`priority-chip priority-chip--${card.priority}`}>
+              {card.priority}
+            </span>
+          )}
           {/* Branch chip if the card has one, else the "awaiting a hero"
               flag for an unclaimed, un-started, still-active quest. */}
           {card.branch ? (
