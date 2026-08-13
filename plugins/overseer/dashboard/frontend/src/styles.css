@@ -5162,9 +5162,11 @@ a.card-drawer__pr-chip:hover {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin-top: 0.35rem;
-  /* No background/box — the checklist rows sit bare on the card, no panel or
-     divider. */
+  /* Reset the <ul> UA defaults — no left indent, no list bullets — so the rows
+     sit flush at the card's own edge. No background/box either. */
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
