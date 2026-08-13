@@ -249,8 +249,8 @@ function TileShell({
           {/*
             Presence-only signal (design spec §5): the board payload carries
             just the holder's bare census session_id, no session_name — so
-            the tile shows quiet "claimed" text rather than guessing at a
-            label, with the full id available via the title tooltip.
+            the tile shows quiet "hero assigned" text rather than guessing at
+            a label, with the full id available via the title tooltip.
             Staleness dimming needs the sessions poll (drawer-only data), so
             it lives in the drawer's ClaimControl row instead of here — see
             that component's doc comment (deviates from the spec's
@@ -258,7 +258,7 @@ function TileShell({
           */}
           {card.claimed_by && (
             <span className="claim-badge" title={card.claimed_by}>
-              claimed
+              hero assigned
             </span>
           )}
           {card.status === "blocked" && (

@@ -2417,18 +2417,22 @@ body {
 }
 
 /* Green (done ramp): marks "a hero is on this quest" — the positive
-   counterpart to the red awaiting-hero chip, so claimed vs unclaimed reads
-   as green vs red at a glance. Same done-status green the board already uses
-   for completed work, kept as a quiet pill so it doesn't shout over the
+   counterpart to the red awaiting-hero chip. Deliberately the SAME shape as
+   `.awaiting-hero-chip` (italic, dashed outline, nowrap) so the two read as a
+   matched pair — same placeholder-style chip, green when a hero is assigned,
+   red while the quest still awaits one. Uses the done-status green the board
+   already uses for completed work, kept quiet so it doesn't shout over the
    priority/blocked badges. */
 .claim-badge {
   font-size: 0.65rem;
   font-weight: 500;
-  padding: 0.05rem 0.35rem;
+  font-style: italic;
+  padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
   background: var(--qb-status-done-soft);
   color: var(--qb-status-done-strong);
-  border: 1px solid var(--qb-status-done-base);
+  border: 1px dashed var(--qb-status-done-base);
+  white-space: nowrap;
 }
 
 /* Label chips (F1, WF-058) — the base pill shared by the read-only tile

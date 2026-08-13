@@ -315,7 +315,7 @@ describe('TileShell "Awaiting a hero" badge (task 10)', () => {
       card({ id: "WF-HASOWNER-INFLIGHT", claimed_by: "sess-1", status: "in-flight" })
     );
     expect(screen.queryByText(/Awaiting a hero/i)).toBeNull();
-    expect(screen.getByText(/claimed/i)).toBeInTheDocument();
+    expect(screen.getByText(/hero assigned/i)).toBeInTheDocument();
   });
 
   it("shows Awaiting-a-hero when unclaimed and branchless", () => {
