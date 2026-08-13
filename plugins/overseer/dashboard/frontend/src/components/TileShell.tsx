@@ -217,7 +217,9 @@ function TileShell({
             ) : (
               <span className="pr-chip pr-chip--text">{card.pr}</span>
             ))}
-          {card.repo && <span className="repo-chip">{card.repo}</span>}
+          {/* Repo chip removed from the tile: the board shows one repo at a
+              time and names it in the top bar, so a per-tile repo label is
+              pure redundancy. The chip still lives in the detail drawer. */}
           {/* Branch chip (WF-031): distinct from the repo-chip's quiet grey
               provenance label — this one flags WHICH branch the card's
               work lives on, feeding the same glance as the Party's branch

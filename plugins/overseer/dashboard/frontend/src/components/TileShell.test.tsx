@@ -189,17 +189,13 @@ describe("TileShell tile-body opener (a11y: no nested interactive)", () => {
 });
 
 describe("TileShell repo chip", () => {
-  it("renders the repo chip when the card carries a repo label", () => {
+  // The board shows one repo at a time and names it in the top bar, so the
+  // per-tile repo chip is redundant and no longer rendered on the tile (it
+  // still appears in the detail drawer).
+  it("renders no repo chip on the tile, even when the card carries a repo label", () => {
     const { container } = renderTile(
       card({ id: "WF-REPO", repo: "pip-skills" })
     );
-    const chip = container.querySelector(".repo-chip");
-    expect(chip).not.toBeNull();
-    expect(chip).toHaveTextContent("pip-skills");
-  });
-
-  it("renders no repo chip when the card carries no repo label", () => {
-    const { container } = renderTile(card({ id: "WF-NOREPO" }));
     expect(container.querySelector(".repo-chip")).toBeNull();
   });
 });

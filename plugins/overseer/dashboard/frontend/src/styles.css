@@ -2407,25 +2407,28 @@ body {
   font-style: italic;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--qb-parchment-muted);
-  color: var(--qb-ink-400);
-  border: 1px dashed var(--qb-line-dashed);
+  /* Red (blocked ramp): an unclaimed quest wants attention. Keeps the dashed
+     placeholder border so it still reads as a "no hero yet" stand-in, now in
+     an alerting red rather than the quiet parchment it used to be. */
+  background: var(--qb-status-blocked-soft);
+  color: var(--qb-status-blocked-strong);
+  border: 1px dashed var(--qb-status-blocked-base);
   white-space: nowrap;
 }
 
-/* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
-   without competing with the priority/blocked badges. CSS-only restyle
-   (WF-028 chunk 4): HANDOFF specs an avatar-chip visual with no colour of
-   its own, so this reuses neutral base parchment/ink tokens rather than
-   inventing or misappropriating a semantically distinct chip's colours. */
+/* Green (done ramp): marks "a hero is on this quest" — the positive
+   counterpart to the red awaiting-hero chip, so claimed vs unclaimed reads
+   as green vs red at a glance. Same done-status green the board already uses
+   for completed work, kept as a quiet pill so it doesn't shout over the
+   priority/blocked badges. */
 .claim-badge {
   font-size: 0.65rem;
   font-weight: 500;
   padding: 0.05rem 0.35rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--qb-parchment-muted-2);
-  color: var(--qb-ink-500);
-  border: 1px solid var(--qb-line-dashed);
+  background: var(--qb-status-done-soft);
+  color: var(--qb-status-done-strong);
+  border: 1px solid var(--qb-status-done-base);
 }
 
 /* Label chips (F1, WF-058) — the base pill shared by the read-only tile
