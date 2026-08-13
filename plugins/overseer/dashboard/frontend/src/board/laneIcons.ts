@@ -13,7 +13,8 @@
  * can never disagree about which lane a colour/icon belongs to.
  */
 import type { Lane } from "./layout";
-import type { Stage } from "../api/types";
+import { STAGE_LABELS, STAGES } from "./layout";
+import type { BoardCard, Stage } from "../api/types";
 
 import backlog from "../assets/lane-icons/backlog.png";
 import bootstrap from "../assets/lane-icons/bootstrap.png";
@@ -70,4 +71,36 @@ export function laneIcon(key: string): string {
  * for the same stage. */
 export function stageIcon(stage: Stage): string {
   return laneIcon(stage);
+}
+
+/** A card's icon key, mirroring layout.ts::groupIntoLanes bucketing exactly
+ * so a card and the lane it sits in never resolve different icons. Returns
+ * the SPECIFIC stage key for active staged cards (e.g. "implementation" ->
+ * axe), never the synthetic "in-progress" collapse key. */
+export function cardIconKey(card: BoardCard): string {
+  if (card.status === "planned" || (card.status === "blocked" && card.stage == null))
+    return "backlog";
+  if (
+    card.stage != null &&
+    (card.status === "in-flight" || card.status === "blocked") &&
+    (STAGES as string[]).includes(card.stage)
+  )
+    return card.stage;
+  if (card.status === "parked") return "parked";
+  if (card.status === "done") return "done";
+  if (card.status === "abandoned") return "abandoned";
+  return "backlog"; // defensive fallback, matches groupIntoLanes
+}
+
+/** Human label for any of the 11 icon keys — stage keys reuse STAGE_LABELS,
+ * bucket keys get their lane label. */
+const BUCKET_LABELS: Record<string, string> = {
+  backlog: "Backlog",
+  parked: "Parked",
+  done: "Done",
+  abandoned: "Abandoned",
+  "in-progress": "In Progress",
+};
+export function iconKeyLabel(key: string): string {
+  return (STAGE_LABELS as Record<string, string>)[key] ?? BUCKET_LABELS[key] ?? key;
 }
