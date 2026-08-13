@@ -8,6 +8,8 @@ import { rarityStars } from "../board/rarityStars";
 import { parseProgressLog } from "../board/progressLog";
 import { ACCENT_GROUPS } from "../board/avatarAccent";
 import { HTTP_URL_RE } from "../board/httpUrl";
+import { cardIconKey, laneIcon } from "../board/laneIcons";
+import { STAGE_LABELS } from "../board/layout";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ClaimControl from "./ClaimControl";
@@ -359,7 +361,18 @@ function CardDetailDrawer({
                 />
               ) : (
                 <div className="card-drawer__title-row">
+                  <img
+                    className="card-drawer__lifecycle-icon"
+                    src={laneIcon(cardIconKey(detail))}
+                    alt=""
+                    aria-hidden="true"
+                  />
                   <h2 className="card-drawer__title">{detail.title}</h2>
+                  {detail.stage && (
+                    <span className="card-drawer__stage-chip">
+                      {STAGE_LABELS[detail.stage]}
+                    </span>
+                  )}
                   <Button
                     variant="neutral"
                     onClick={() => setEditing(true)}
@@ -374,7 +387,6 @@ function CardDetailDrawer({
                   className={`card-drawer__status-fact card-drawer__status-fact--${accentKey}`}
                 >
                   {detail.status}
-                  {detail.stage ? ` · ${detail.stage}` : ""}
                 </span>
                 {detail.repo && <span className="repo-chip">{detail.repo}</span>}
                 {/* Card's stored PR ref/URL (WF-073) — Card.pr, a plain

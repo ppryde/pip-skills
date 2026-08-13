@@ -175,7 +175,7 @@ describe("<CardDetailDrawer/>", () => {
       })
     );
 
-    render(
+    const { container } = render(
       <CardDetailDrawer
         cardId="WF-A"
         onClose={() => {}}
@@ -196,7 +196,14 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByText("Do steps 1, 2, 3.")).toBeInTheDocument();
     expect(screen.getByText("P1")).toBeInTheDocument();
     expect(screen.getByText(/in-flight/)).toBeInTheDocument();
-    expect(screen.getByText(/implementation/)).toBeInTheDocument();
+    // Stage now renders as the title-row chip (STAGE_LABELS) rather than
+    // appended to the status-fact text — see CardDetailDrawer's stage-chip.
+    // The banner pill ALSO reads "Implementation" (WF-030 chunk 2), so this
+    // scopes to the chip specifically rather than screen.getByText, which
+    // would ambiguously match both.
+    expect(
+      container.querySelector(".card-drawer__stage-chip")
+    ).toHaveTextContent("Implementation");
   });
 
   it("renders the repo chip in the facts row when the card carries a repo label", async () => {
