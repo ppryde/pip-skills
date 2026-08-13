@@ -187,12 +187,26 @@ function TileShell({
         onClick={onOpen ? () => onOpen(card.id) : undefined}
       >
         <div className="card-tile__header">
+          <InfoTooltip
+            label={iconKeyLabel(cardIconKey(card))}
+            triggerClassName="card-tile__lifecycle-trigger"
+            trigger={
+              <img
+                className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
+                src={laneIcon(cardIconKey(card))}
+                alt=""
+                aria-hidden="true"
+              />
+            }
+          >
+            {iconKeyLabel(cardIconKey(card))}
+          </InfoTooltip>
+          <span className="card-tile__id">{card.id}</span>
           {card.priority && (
             <span className={`priority-chip priority-chip--${card.priority}`}>
               {card.priority}
             </span>
           )}
-          <span className="card-tile__id">{card.id}</span>
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly
               distinct from L, not clipped to the same 3 pips).
@@ -213,24 +227,10 @@ function TileShell({
           )}
           {headerExtra}
         </div>
-        {/* Row 2 — status line: the stage/lifecycle icon, then the
-            hero/branch/PR/blocked signals, then the coins (gold/budget)
-            right-aligned (`.card-tile__coins` uses margin-left:auto). */}
+        {/* Row 2 — status line: the hero/branch/PR/blocked signals, then the
+            coins (gold/budget) right-aligned (`.card-tile__coins` uses
+            margin-left:auto). */}
         <div className="card-tile__statusline">
-          <InfoTooltip
-            label={iconKeyLabel(cardIconKey(card))}
-            triggerClassName="card-tile__lifecycle-trigger"
-            trigger={
-              <img
-                className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
-                src={laneIcon(cardIconKey(card))}
-                alt=""
-                aria-hidden="true"
-              />
-            }
-          >
-            {iconKeyLabel(cardIconKey(card))}
-          </InfoTooltip>
           {/* Branch chip if the card has one, else the "awaiting a hero"
               flag for an unclaimed, un-started, still-active quest. */}
           {card.branch ? (
