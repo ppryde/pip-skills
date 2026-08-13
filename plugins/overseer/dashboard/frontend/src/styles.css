@@ -2348,6 +2348,32 @@ body {
   color: var(--legacy-color-4338ca);
 }
 
+/* Priority heat ramp: escalating urgency reads as a colour temperature —
+   P4 calm grey, P3 green, P2 amber/yellow, P1 orange, P0 red. Each reuses a
+   board status/accent ramp (soft wash bg + strong ink) so priorities sit in
+   the same palette as the rest of the chrome. The `--P<n>` modifier overrides
+   only the base chip's bg/colour. */
+.priority-chip--P4 {
+  background: var(--qb-status-abandoned-soft);
+  color: var(--qb-status-abandoned-strong);
+}
+.priority-chip--P3 {
+  background: var(--qb-status-done-soft);
+  color: var(--qb-status-done-strong);
+}
+.priority-chip--P2 {
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 24%, white);
+  color: color-mix(in srgb, var(--qb-accent-amber-fill) 66%, #2c2015);
+}
+.priority-chip--P1 {
+  background: var(--qb-status-in-progress-soft);
+  color: var(--qb-status-in-progress-strong);
+}
+.priority-chip--P0 {
+  background: var(--qb-status-blocked-soft);
+  color: var(--qb-status-blocked-strong);
+}
+
 /* PR chip (WF-073): the card's own stored `pr` ref/URL — deliberately the
    loudest chip in the header row after priority (sky accent + solid border,
    vs. the repo/branch chips' quieter provenance tones) since a card's PR is
