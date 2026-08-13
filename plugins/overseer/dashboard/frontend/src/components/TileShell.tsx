@@ -106,6 +106,36 @@ function TileShell({
   const parkedTripwire =
     parkedEstimate !== null && parkedEstimate > 0 && parkedActual >= 2 * parkedEstimate;
 
+  // "Coins" — the card's gold/budget, shown right-aligned on the status line
+  // (row 2). Done cards show earned gold, parked cards show "on hold" (plus the
+  // 2x-overbudget tripwire), everything else shows the live BudgetMeter. Same
+  // per-status content the footer used to carry, just relocated up a row.
+  const coins =
+    card.status === "done" ? (
+      <>
+        <span className="card-tile__done-badge" aria-hidden="true">
+          <CheckIcon />
+        </span>
+        <span className="card-tile__gold-earned">
+          +{formatTokens(card.budget.actual)} gold earned
+        </span>
+      </>
+    ) : card.status === "parked" ? (
+      <>
+        <span className="card-tile__hold-chip">on hold</span>
+        {parkedTripwire && (
+          <span
+            className="budget-meter__flag"
+            title="Actual is at least 2x the estimate"
+          >
+            2x
+          </span>
+        )}
+      </>
+    ) : (
+      <BudgetMeter budget={card.budget} />
+    );
+
   // No @dnd-kit/utilities per the frozen constraints — build the transform
   // string by hand instead of importing `CSS.Transform.toString`.
   const style: CSSProperties | undefined = transform
@@ -157,20 +187,11 @@ function TileShell({
         onClick={onOpen ? () => onOpen(card.id) : undefined}
       >
         <div className="card-tile__header">
-          <InfoTooltip
-            label={iconKeyLabel(cardIconKey(card))}
-            triggerClassName="card-tile__lifecycle-trigger"
-            trigger={
-              <img
-                className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
-                src={laneIcon(cardIconKey(card))}
-                alt=""
-                aria-hidden="true"
-              />
-            }
-          >
-            {iconKeyLabel(cardIconKey(card))}
-          </InfoTooltip>
+          {card.priority && (
+            <span className={`priority-chip priority-chip--${card.priority}`}>
+              {card.priority}
+            </span>
+          )}
           <span className="card-tile__id">{card.id}</span>
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly
@@ -190,46 +211,28 @@ function TileShell({
               ))}
             </span>
           )}
-          {card.priority && (
-            <span className={`priority-chip priority-chip--${card.priority}`}>
-              {card.priority}
-            </span>
-          )}
-          {/* PR chip (WF-073): the card's stored `pr` (a plain string set via
-              `overseer set-field --pr`) — placed right after the priority
-              chip, ahead of the quieter repo/branch provenance chips, so it
-              reads as front-and-center. NOT the census-derived `Context.pr`
-              (`PrWindow`) — that's live session data, unrelated to this
-              card's own field. `stopPropagation` keeps a click on the link
-              from also firing the tile body's `onOpen` (drawer-open) click
-              handler above. */}
-          {card.pr &&
-            (HTTP_URL_RE.test(card.pr) ? (
-              <a
-                href={card.pr}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="pr-chip"
-                onClick={(e) => e.stopPropagation()}
-              >
-                PR
-              </a>
-            ) : (
-              <span className="pr-chip pr-chip--text">{card.pr}</span>
-            ))}
-          {/* Repo chip removed from the tile: the board shows one repo at a
-              time and names it in the top bar, so a per-tile repo label is
-              pure redundancy. The chip still lives in the detail drawer. */}
-          {/* Branch chip (WF-031): distinct from the repo-chip's quiet grey
-              provenance label — this one flags WHICH branch the card's
-              work lives on, feeding the same glance as the Party's branch
-              labels. Absent entirely when the card carries no branch.
-              Task 10 "Awaiting a hero": a card only ever GETS a `branch`
-              once the orchestrator has actually started it — a branchless
-              todo/backlog card hasn't been claimed by any adventurer yet.
-              That's worth flagging too, but a `done`/`abandoned` card with
-              no branch is just old/never-tracked, not "unclaimed" — no chip
-              either way there. */}
+          {headerExtra}
+        </div>
+        {/* Row 2 — status line: the stage/lifecycle icon, then the
+            hero/branch/PR/blocked signals, then the coins (gold/budget)
+            right-aligned (`.card-tile__coins` uses margin-left:auto). */}
+        <div className="card-tile__statusline">
+          <InfoTooltip
+            label={iconKeyLabel(cardIconKey(card))}
+            triggerClassName="card-tile__lifecycle-trigger"
+            trigger={
+              <img
+                className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
+                src={laneIcon(cardIconKey(card))}
+                alt=""
+                aria-hidden="true"
+              />
+            }
+          >
+            {iconKeyLabel(cardIconKey(card))}
+          </InfoTooltip>
+          {/* Branch chip if the card has one, else the "awaiting a hero"
+              flag for an unclaimed, un-started, still-active quest. */}
           {card.branch ? (
             <span className="branch-chip" title={card.branch}>
               ⑃ {card.branch}
@@ -246,25 +249,36 @@ function TileShell({
               </span>
             )
           )}
-          {/*
-            Presence-only signal (design spec §5): the board payload carries
-            just the holder's bare census session_id, no session_name — so
-            the tile shows quiet "hero assigned" text rather than guessing at
-            a label, with the full id available via the title tooltip.
-            Staleness dimming needs the sessions poll (drawer-only data), so
-            it lives in the drawer's ClaimControl row instead of here — see
-            that component's doc comment (deviates from the spec's
-            "stale-dimmed tile badge" per the card brief's approved carve-out).
-          */}
+          {/* Presence-only "hero assigned" flag — the board payload carries
+              only the holder's bare census session_id (shown via the title
+              tooltip), no session_name to render. */}
           {card.claimed_by && (
             <span className="claim-badge" title={card.claimed_by}>
               ⚑ hero assigned
             </span>
           )}
+          {/* PR chip (WF-073): the card's own stored `pr` string, NOT the
+              census-derived live-session PR. `stopPropagation` stops a click
+              on the link from also opening the drawer. */}
+          {card.pr &&
+            (HTTP_URL_RE.test(card.pr) ? (
+              <a
+                href={card.pr}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pr-chip"
+                onClick={(e) => e.stopPropagation()}
+              >
+                PR
+              </a>
+            ) : (
+              <span className="pr-chip pr-chip--text">{card.pr}</span>
+            ))}
           {card.status === "blocked" && (
             <span className="badge badge--blocked">BLOCKED</span>
           )}
-          {headerExtra}
+          <DependencyBadge card={card} />
+          <span className="card-tile__coins">{coins}</span>
         </div>
         {onOpen ? (
           <button
@@ -328,33 +342,6 @@ function TileShell({
           </div>
         )}
         {children}
-        {card.status === "done" ? (
-          <div className="card-tile__footer">
-            <span className="card-tile__done-badge" aria-hidden="true">
-              <CheckIcon />
-            </span>
-            <span className="card-tile__gold-earned">
-              +{formatTokens(card.budget.actual)} gold earned
-            </span>
-          </div>
-        ) : card.status === "parked" ? (
-          <div className="card-tile__footer">
-            <span className="card-tile__hold-chip">on hold</span>
-            {parkedTripwire && (
-              <span
-                className="budget-meter__flag"
-                title="Actual is at least 2x the estimate"
-              >
-                2x
-              </span>
-            )}
-          </div>
-        ) : (
-          <div className="card-tile__footer">
-            <BudgetMeter budget={card.budget} />
-            <DependencyBadge card={card} />
-          </div>
-        )}
       </div>
     </div>
   );

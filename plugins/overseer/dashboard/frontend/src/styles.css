@@ -2084,6 +2084,24 @@ body {
   flex-wrap: wrap;
 }
 
+/* Row 2 status line — same flex shape as the header row above it. The coins
+   slot is pushed to the right edge (margin-left:auto), so the row reads
+   [stage icon] [hero/branch/PR/blocked signals] … [coins]. */
+.card-tile__statusline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+}
+
+.card-tile__coins {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .card-tile__id {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 0.7rem;
@@ -2309,6 +2327,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.05rem;
+  margin-left: auto;
 }
 
 .card-tile__star--filled {
