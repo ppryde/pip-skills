@@ -226,11 +226,6 @@ function TileShell({
             coins (gold/budget) right-aligned (`.card-tile__coins` uses
             margin-left:auto). */}
         <div className="card-tile__statusline">
-          {card.priority && (
-            <span className={`priority-chip priority-chip--${card.priority}`}>
-              {card.priority}
-            </span>
-          )}
           {/* Branch chip if the card has one, else the "awaiting a hero"
               flag for an unclaimed, un-started, still-active quest. */}
           {card.branch ? (
@@ -255,6 +250,11 @@ function TileShell({
           {card.claimed_by && (
             <span className="claim-badge" title={card.claimed_by}>
               ⚑ hero assigned
+            </span>
+          )}
+          {card.priority && (
+            <span className={`priority-chip priority-chip--${card.priority}`}>
+              {card.priority}
             </span>
           )}
           {/* PR chip (WF-073): the card's own stored `pr` string, NOT the
