@@ -6564,3 +6564,37 @@ button.trail-tag:focus-visible {
     -webkit-appearance: none;
   }
 }
+
+/* Task 5 (card header cues): interactive lifecycle icon, START of every
+   `.card-tile__header` — replaces the old mobile-only `showStage` icon with
+   ONE always-on code path (InfoTooltip-wrapped) for both CardTile and
+   EpicCard. `is-glowing` (task 6) pulses the icon for 60s after the card's
+   lifecycle bucket last changed. */
+.card-tile__lifecycle-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-right: 0.25rem;
+  cursor: pointer;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.card-tile__lifecycle-icon {
+  width: 18px;
+  height: 18px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card-tile__lifecycle-icon.is-glowing {
+    animation: lifecycle-glow 1.6s ease-in-out infinite;
+  }
+  @keyframes lifecycle-glow {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 0 transparent);
+    }
+    50% {
+      filter: drop-shadow(0 0 5px var(--card-accent-fill));
+    }
+  }
+}

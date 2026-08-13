@@ -592,6 +592,15 @@ describe("TileShell in-flight progress bar (WF-028 chunk 5)", () => {
   });
 });
 
+describe("TileShell lifecycle icon (task 5)", () => {
+  it("renders a lifecycle icon whose tooltip names the bucket", () => {
+    renderTile(card({ id: "WF-LIFECYCLE", status: "done", stage: null }));
+    const trigger = screen.getByLabelText("Done"); // aria-label = iconKeyLabel
+    fireEvent.click(trigger);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Done");
+  });
+});
+
 describe("TileShell rarity stars (D2 — XL complexity)", () => {
   function renderWithComplexity(complexity: string | null) {
     const c = card({ id: "WF-XL", complexity });

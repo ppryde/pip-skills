@@ -132,15 +132,6 @@ function Lane({
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                   colorRegistry={colorRegistry}
-                  // WF-085 in-progress lane, Part B: `kind:"in-progress"`
-                  // ONLY ever exists on the mobile merged lane
-                  // (`collapseStagesForMobile` — desktop's real `kind:
-                  // "stage"` lanes never carry this kind), so gating off the
-                  // lane's own kind — rather than threading a separate
-                  // isMobile flag down from Board — already guarantees the
-                  // stage icon is mobile-only, with no desktop card face
-                  // change at all.
-                  showStage={lane.kind === "in-progress"}
                 />
               );
             })}

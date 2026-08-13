@@ -6,10 +6,12 @@ import { checklistWindow } from "../board/checklistWindow";
 import { rarityStars } from "../board/rarityStars";
 import { formatTokens } from "../board/formatTokens";
 import { HTTP_URL_RE } from "../board/httpUrl";
+import { cardIconKey, laneIcon, iconKeyLabel } from "../board/laneIcons";
 import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ChecklistRows from "./ChecklistRows";
 import LabelChips from "./LabelChips";
+import InfoTooltip from "./InfoTooltip";
 import { StarIcon, CheckIcon } from "./icons";
 
 export interface TileShellProps {
@@ -31,6 +33,10 @@ export interface TileShellProps {
   branchSpotlight?: boolean;
   /** True while a mutation is in flight — disables the drag handle. */
   dragDisabled?: boolean;
+  /** Task 6: true for a card whose lifecycle bucket changed in the last
+   * 60s — pulses the lifecycle icon. Wired by task 6; this task only
+   * renders the `is-glowing` class toggle. */
+  glowing?: boolean;
   /** Optional extra header controls (e.g. the epic expand button), right-aligned. */
   headerExtra?: ReactNode;
   /** Optional block rendered between the title and the footer (e.g. the epic rollup line). */
@@ -63,6 +69,7 @@ function TileShell({
   branchDimmed = false,
   branchSpotlight = false,
   dragDisabled = false,
+  glowing = false,
   headerExtra,
   children,
   onOpen,
@@ -150,6 +157,20 @@ function TileShell({
         onClick={onOpen ? () => onOpen(card.id) : undefined}
       >
         <div className="card-tile__header">
+          <InfoTooltip
+            label={iconKeyLabel(cardIconKey(card))}
+            triggerClassName="card-tile__lifecycle-trigger"
+            trigger={
+              <img
+                className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
+                src={laneIcon(cardIconKey(card))}
+                alt=""
+                aria-hidden="true"
+              />
+            }
+          >
+            {iconKeyLabel(cardIconKey(card))}
+          </InfoTooltip>
           <span className="card-tile__id">{card.id}</span>
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly

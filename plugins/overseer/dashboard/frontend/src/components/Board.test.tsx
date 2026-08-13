@@ -613,11 +613,12 @@ describe("mobile board scroll-container (WF-085 review — CSS regression guard)
 });
 
 // WF-085 in-progress lane: `collapseStagesForMobile` (board/layout.ts)
-// merges the 7 stage lanes into ONE "In Progress" tab/pane, and each
-// in-flight card inside that merged pane carries its own small stage icon
-// (CardTile's `showStage`, wired by Lane.tsx off `lane.kind ===
-// "in-progress"`). WF-085 follow-up (per the user's "hide the additional
-// columns for now on desktop" request): `Board.tsx`'s `displayLanes` now
+// merges the 7 stage lanes into ONE "In Progress" tab/pane. Every card now
+// carries its own always-on lifecycle icon (task 5, TileShell) regardless
+// of lane — the old mobile-only `CardTile.showStage`/`Lane`'s `kind ===
+// "in-progress"` gate has been removed. WF-085 follow-up (per the user's
+// "hide the additional columns for now on desktop" request): `Board.tsx`'s
+// `displayLanes` now
 // runs this collapse UNCONDITIONALLY, so it's no longer gated on
 // `window.matchMedia` reporting mobile — the sibling "desktop" test below
 // (matchMedia stubbed NOT-mobile) now locks in the OPPOSITE of the old
@@ -676,7 +677,7 @@ describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
     ).toBeNull();
   });
 
-  it("mobile: each in-flight card in the merged lane gets its own stage icon", async () => {
+  it("mobile: each in-flight card in the merged lane still carries its own (always-on, task 5) lifecycle icon", async () => {
     stubViewport(true);
     vi.mocked(getBoard).mockResolvedValueOnce(fixture);
 
@@ -685,9 +686,11 @@ describe("mobile: In Progress lane collapse (WF-085 in-progress lane)", () => {
 
     const tile = container.querySelector('[data-card-id="WF-EPIC-C2"]');
     expect(tile).not.toBeNull();
-    const icon = tile!.querySelector("img.card-tile__stage-icon");
+    const icon = tile!.querySelector("img.card-tile__lifecycle-icon");
     expect(icon).not.toBeNull();
-    expect(icon).toHaveAttribute("alt", "Implementation");
+    expect(
+      tile!.querySelector('[aria-label="Implementation"]')
+    ).not.toBeNull();
   });
 
   it("desktop (matchMedia reports not-mobile) now collapses the stage lanes into In Progress too (WF-085 follow-up: hide additional columns on desktop) — stage tabs are gone, one In Progress tab present instead", async () => {
