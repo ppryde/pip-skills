@@ -138,6 +138,22 @@ function Board({
     setHighlightedEpicId((current) => (current === id ? null : id));
   };
 
+  // Click-away to dismiss the epic highlight: while an epic is highlighted, a
+  // pointerdown anywhere OUTSIDE that epic's own card clears it (same dismiss
+  // idiom as InfoTooltip). A pointerdown WITHIN the highlighted epic — its
+  // expand toggle, body, drag handle — is left to that card's own handlers,
+  // so the expand button can still toggle it off directly.
+  useEffect(() => {
+    if (!highlightedEpicId) return;
+    function onPointerDown(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(`[data-card-id="${highlightedEpicId}"]`)) return;
+      setHighlightedEpicId(null);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [highlightedEpicId]);
+
   const visibleLanes = displayLanes.filter(
     (lane) => lane.kind !== "archive" || showArchive
   );
