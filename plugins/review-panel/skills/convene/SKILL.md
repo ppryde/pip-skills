@@ -69,6 +69,10 @@ finding contract JSON (see `../../scripts/contract.py`): `reviewer`,
 `findings[]` with `id,file,line,rule,actual,severity,category,suggestion`
 (+ `citation` for clone reviewers), `clean_files`, `notes`. Clone findings
 use id `CLONE-<alias>-NNN`; built-in findings use the reviewer's prefix.
+Set each finding's `reviewer` field to the reviewer's **bare name** — a
+built-in reviewer's name, or a clone persona's alias (i.e. `ReviewerRef.name`),
+never the `clone:` key. (Clone finding *ids* still use the `CLONE-<alias>-NNN`
+form.)
 
 ## Step 5 — Reconcile, strictness, decisions
 
@@ -76,12 +80,16 @@ Apply the strategy's reconciliation (adversarial critic/judge,
 dual-tiebreaker arbiter — these annotate each finding with a `verdict`; drop
 `refuted`, downgrade `weakened`). Then apply `apply_strictness(...)` using
 each reviewer's strictness and its "Allowed exceptions", and
-`apply_decisions(...)` from `.review-panel/decisions.yml` if present.
+`apply_decisions(...)` from `.review-panel/decisions.yml` if present — load
+it with `load_decisions(path)` first (returns `{}` if the file is absent).
+The strictness and allowed-exception maps are keyed by this same bare
+`reviewer` name.
 
 ## Step 6 — Output
 
 - **report** (default) → `render_report(collate(findings), meta)`; print to
-  chat and write to `output.file` (default `.review-panel/last-review.md`).
+  chat and write to `output.file` (default `.review-panel/last-review.md`,
+  available on the resolved review as `resolved.output_file`).
 - **interactive** → walk findings one at a time: fix / explain / skip /
   accept-exception (accept writes an override into `.review-panel/decisions.yml`).
 - **inline** → confirmation-gated. Resolve the open PR

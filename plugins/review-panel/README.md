@@ -5,7 +5,7 @@ named **profile**:
 
 - **Reviewers** — *what* to examine (a lens: concern + voice).
 - **Strategies** — *how* to orchestrate (committee, blind, informed,
-  adversarial, dual+tiebreaker).
+  adversarial, dual-tiebreaker).
 
 Reviewers come from `skills/reviewers/*.md` or a review-clone persona
 (`clone:<alias>`). Configure via `.review-panel/config.yml`. Run with

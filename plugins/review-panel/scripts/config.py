@@ -36,6 +36,7 @@ class ResolvedReview:
     reviewers: tuple[ReviewerRef, ...]
     context: tuple[str, ...]
     output: str
+    output_file: str
 
 
 def load_config(path: Path) -> dict:
@@ -86,6 +87,7 @@ def resolve_profile(config: dict, profile: str | None) -> ResolvedReview:
     output = (config.get("output", {}) or {}).get("default", DEFAULT_OUTPUT)
     if output not in VALID_OUTPUT:
         raise ConfigError(f"invalid output {output!r}; expected {sorted(VALID_OUTPUT)}")
+    output_file = (config.get("output", {}) or {}).get("file", ".review-panel/last-review.md")
     return ResolvedReview(
         strategy=strategy,
         scope=scope,
@@ -93,6 +95,7 @@ def resolve_profile(config: dict, profile: str | None) -> ResolvedReview:
         reviewers=_reviewers(spec.get("reviewers", {})),
         context=tuple(spec.get("context", []) or []),
         output=output,
+        output_file=output_file,
     )
 
 
@@ -107,4 +110,5 @@ def resolve_adhoc(config: dict, reviewer_keys: list[str]) -> ResolvedReview:
         reviewers=tuple(parse_reviewer_key(k, DEFAULT_STRICTNESS) for k in reviewer_keys),
         context=(),
         output=(config.get("output", {}) or {}).get("default", DEFAULT_OUTPUT),
+        output_file=(config.get("output", {}) or {}).get("file", ".review-panel/last-review.md"),
     )

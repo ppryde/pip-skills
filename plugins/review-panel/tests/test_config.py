@@ -74,6 +74,7 @@ def test_resolve_adhoc_defaults_to_committee_changed(tmp_path):
     r = resolve_adhoc(cfg, ["general", "clone:danvk"])
     assert r.strategy == "committee" and r.scope == "changed"
     assert r.output == "report"
+    assert r.output_file == ".review-panel/last-review.md"
     assert [x.name for x in r.reviewers] == ["general", "danvk"]
 
 

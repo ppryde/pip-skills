@@ -41,4 +41,4 @@ Neutral, professional, direct. State the problem, the location, and the fix.
 No praise sandwiching; no persona flavour.
 
 ## Allowed exceptions
-- `GEN-008` and `GEN-010` are already at `info` — the lowest severity tier — so they never block under any strictness level. (Listed here for authoring clarity; no pragmatic downgrade applies to an `info` finding.)
+- `GEN-008` and `GEN-010` are already at `info` — the lowest severity tier — so they never block under any strictness level — note that `aspirational` strictness still normalises every finding (including these) to `warning`, but a warning never blocks either. (Listed here for authoring clarity; no pragmatic downgrade applies to an `info` finding.)
