@@ -2878,26 +2878,89 @@ body {
   color: var(--legacy-color-fff);
 }
 
+/* Epic identity: gold accent edge, warmer parchment body, and a wax-seal
+   emblem in the top-right corner. `position: relative` anchors the seal. */
 .epic-card {
-  border-left: 3px solid var(--card-accent-fill);
+  position: relative;
+  border-left: 4px solid var(--qb-gold-coin-stroke);
+  background: #f7ecd6;
+}
+.epic-card::after {
+  content: "⚔";
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ea7d73, #a83228);
+  color: #fff;
+  border: 2px solid #7a1f14;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  line-height: 30px;
+  font-size: 14px;
+  pointer-events: none;
 }
 
+/* Bottom bar: quest count (left) + sub-quest expand toggle (right). */
+.epic-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--qb-line-dashed);
+  font-size: 0.7rem;
+}
+.epic-card__count {
+  color: var(--qb-status-done-strong);
+  font-weight: 700;
+}
 .epic-card__expand {
   margin-left: auto;
-  font-size: 0.65rem;
-  border: 1px solid var(--legacy-color-c7d2fe);
-  background: var(--legacy-color-eef2ff);
-  color: var(--legacy-color-4338ca);
-  border-radius: var(--legacy-radius-3px);
-  padding: 0.05rem 0.4rem;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  color: #7a5a1a;
 }
 
-.epic-card__rollup {
+/* Inline quest log — inset parchment, never indigo. */
+.epic-card__subquests {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 5px 8px;
   font-size: 0.7rem;
-  color: var(--legacy-color-4338ca);
-  margin-bottom: 0.35rem;
+  background: #efe1c2;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 3px rgba(120, 90, 40, 0.16);
 }
+.epic-card__subquest {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  padding: 3px 0;
+  color: #4a4033;
+  border-bottom: 1px dashed rgba(150, 120, 70, 0.28);
+}
+.epic-card__subquest:last-child { border-bottom: none; }
+.epic-card__subquest-glyph { width: 14px; text-align: center; flex: none; }
+.epic-card__subquest--done .epic-card__subquest-title { text-decoration: line-through; opacity: 0.65; }
+.epic-card__subquest--done { color: var(--qb-status-done-strong); }
+.epic-card__subquest--prog .epic-card__subquest-glyph,
+.epic-card__subquest--prog .epic-card__athand { color: var(--qb-status-in-progress-strong); }
+.epic-card__subquest--blocked .epic-card__subquest-glyph { color: var(--qb-status-blocked-strong); }
+.epic-card__subquest-title { flex: 1; }
+.epic-card__athand {
+  margin-left: 6px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.epic-card__subquest-meta { margin-left: auto; flex: none; color: #9a8a6c; font-size: 0.6rem; }
 
 /* Card detail drawer (Chunk 5): a right-hand panel over a dimming overlay. */
 /* Backdrop (HANDOFF line 70: both halves — the tint AND the blur, the

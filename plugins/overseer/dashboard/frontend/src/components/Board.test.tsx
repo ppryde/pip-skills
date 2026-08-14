@@ -149,8 +149,9 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
     expect(screen.getByText("Epic child (done)")).toBeInTheDocument();
     expect(screen.getByText("Epic child (in flight)")).toBeInTheDocument();
 
-    // Epic rollup line.
-    expect(screen.getByText(/1\/2 done/)).toBeInTheDocument();
+    // Epic quest count (bottom bar) — replaces the retired `.epic-card__rollup`
+    // "N/M done" line (task 3, epic board identity).
+    expect(screen.getByText("1 / 2 quests")).toBeInTheDocument();
 
     // Dependency "waiting on" badge.
     expect(screen.getByText(/waiting on WF-EPIC/)).toBeInTheDocument();

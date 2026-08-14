@@ -16,6 +16,7 @@ import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
 import { collapseStagesForMobile, groupIntoLanes } from "../board/layout";
+import { groupChildrenByEpic } from "../board/epicChildren";
 import { laneIconKey } from "../board/laneIcons";
 import { useMediaQuery } from "../board/useMediaQuery";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
@@ -90,6 +91,20 @@ function Board({
     [board.cards, visibleIds]
   );
   const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
+
+  // Epic children (task 3/4, epic board identity): threaded straight through
+  // to Lane -> EpicCard's inline sub-quest log and blocked-child resolution.
+  // Derived from the WHOLE board (`board.cards`), not `visibleCards` — a
+  // filtered-out child should still count toward its epic's quest log even
+  // if the filter bar currently hides it from its own lane.
+  const childrenByEpic = useMemo(
+    () => groupChildrenByEpic(board.cards),
+    [board.cards]
+  );
+  const cardsById = useMemo(
+    () => new Map(board.cards.map((c) => [c.id, c])),
+    [board.cards]
+  );
 
   // WF-085 in-progress lane: collapse the 7 `kind:"stage"` lanes into ONE
   // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
@@ -405,6 +420,8 @@ function Board({
             onOpenCard={onOpenCard}
             activeBranch={activeBranch}
             glowingIds={glowingIds}
+            childrenByEpic={childrenByEpic}
+            cardsById={cardsById}
             // F10 editable colour registry (WF-067) — straight off the
             // board payload's `label_colors`, threaded to every tile's
             // LabelChips via Lane -> CardTile/EpicCard -> TileShell.
