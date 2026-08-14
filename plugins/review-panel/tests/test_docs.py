@@ -59,3 +59,10 @@ def test_shipped_default_profile_is_set():
     cfg = load_config(SHIPPED_CONFIG)
     # resolve_profile(None) must work -> defaults.profile present
     assert resolve_profile(cfg, None).reviewers
+
+
+def test_shipped_profiles_are_clone_free():
+    cfg = load_config(SHIPPED_CONFIG)
+    for name, spec in cfg["profiles"].items():
+        for key in (spec.get("reviewers") or {}):
+            assert not key.startswith("clone:"), f"shipped profile {name!r} references a persona {key!r}"

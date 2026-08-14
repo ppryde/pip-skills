@@ -1,5 +1,6 @@
 ---
-description: Run a composable code review — pick a profile (strategy × reviewers) or name reviewers ad-hoc. Args: [profile] [full|interactive|inline] | <reviewer…> | reviewers | strategies
+description: Run a composable code review — pick a profile (strategy × reviewers) or name reviewers ad-hoc.
+argument-hint: [profile] [full|interactive|inline] | <reviewer…> | reviewers | strategies
 ---
 
 Invoke the review-panel orchestrator (`skills/convene/SKILL.md`) with
