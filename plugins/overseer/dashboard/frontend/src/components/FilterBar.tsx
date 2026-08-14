@@ -120,6 +120,18 @@ function FilterBar({
           onChange={(e) => onQuery(e.target.value)}
         />
 
+        {/* Clear sits on the SEARCH line, right-aligned (margin-left:auto in
+            CSS); the priority/complexity/labels/epics facets wrap to their own
+            line below. Exact-match "Clear" (distinct from the topbar's own
+            "Clear…"/ClearDialog button — see FilterBar.test.tsx/App.test.tsx). */}
+        <Button
+          className="filter-bar__clear-btn"
+          onClick={onClear}
+          disabled={isDefault}
+        >
+          Clear
+        </Button>
+
         {/* Priority/Complexity/Labels/Clear grouped onto their own line
             below search — `.filter-bar__facets`'s `flex-basis: 100%` forces
             the wrap inside `.filter-bar__row` (same trick as
@@ -177,19 +189,6 @@ function FilterBar({
             onClick={() => onEpicsOnly(!filter.epicsOnly)}
           >
             Epics only
-          </Button>
-
-          {/* Moved off the Scry eyebrow line onto the end of this row
-              (coordinator follow-up) — same class/onClick/disabled as
-              before, just relocated + shortened to "Clear" (exact-match,
-              distinct from the topbar's own "Clear…"/ClearDialog button —
-              see FilterBar.test.tsx/App.test.tsx). */}
-          <Button
-            className="filter-bar__clear-btn"
-            onClick={onClear}
-            disabled={isDefault}
-          >
-            Clear
           </Button>
         </div>
       </div>

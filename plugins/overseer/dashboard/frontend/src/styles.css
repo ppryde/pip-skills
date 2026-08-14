@@ -1524,6 +1524,8 @@ body {
 
 .filter-bar__clear-btn {
   border-radius: var(--qb-btn-wobble-4);
+  /* Sits on the search line, pushed to the right edge; the facets wrap below. */
+  margin-left: auto;
 }
 
 /* Epics-only toggle: quiet by default, gold "pressed" fill when active so it
