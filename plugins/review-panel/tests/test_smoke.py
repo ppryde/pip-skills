@@ -2,7 +2,6 @@
 resolve a profile -> parse a (mocked) reviewer result -> strictness ->
 decisions -> collate -> render. No live subagent, no git, no gh."""
 import textwrap
-from pathlib import Path
 
 from scripts.config import load_config, resolve_profile
 from scripts.contract import parse_reviewer_result, collate, render_report

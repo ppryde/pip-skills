@@ -19,13 +19,13 @@ parts that need git, a live model, or `gh`.
 `$ARGUMENTS` may be: empty · a profile name · a profile + `full`/`interactive`/
 `inline` · one or more reviewer keys · `reviewers` · `strategies`.
 
-- `reviewers` → print `available_reviewers()` (built-in + `clone:<alias>`) and stop.
-- `strategies` → print `discover_strategies()` and stop.
+- `reviewers` → list `available_reviewers(../reviewers/)` (built-in reviewers + `clone:<alias>` personas) and stop.
+- `strategies` → list `discover_strategies(../strategies/)` and stop.
 
 ## Step 1 — Resolve the review
 
 Load `.review-panel/config.yml`. If it is missing, offer to seed it from
-`templates/config.yml`, then stop.
+`../../templates/config.yml`, then stop.
 
 - Profile form → `resolve_profile(config, <name or None>)`.
 - Ad-hoc reviewer form → `resolve_adhoc(config, [<keys>])`.
