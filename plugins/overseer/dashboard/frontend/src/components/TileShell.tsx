@@ -197,18 +197,14 @@ function TileShell({
 
   return (
     <div className={className} data-card-id={card.id} ref={setNodeRef} style={style}>
-      {/* Epics get a coloured drag "spine": the stage icon at its top, the
-          drag grip below (siblings, never nested — so no nested-interactive
-          a11y issue and the drag listeners stay on the grip alone). Normal
-          cards keep the plain grip and show the stage icon in the header. */}
-      {card.is_epic ? (
-        <div className="card-tile__rail">
-          {stageIcon}
-          {handle}
-        </div>
-      ) : (
-        handle
-      )}
+      {/* Left rail (all cards): the stage icon at the top, the drag grip below
+          (siblings, never nested — so no nested-interactive a11y issue and the
+          drag listeners stay on the grip alone). Epics colour this strip as a
+          gold spine via `.epic-card`'s background (see styles.css). */}
+      <div className="card-tile__rail">
+        {stageIcon}
+        {handle}
+      </div>
       {/*
         The body is a PLAIN container (no `role="button"`, no tabIndex): a
         `role="button"` here would nest the interactive `headerExtra` (the
@@ -223,7 +219,6 @@ function TileShell({
         onClick={onOpen ? () => onOpen(card.id) : undefined}
       >
         <div className="card-tile__header">
-          {!card.is_epic && stageIcon}
           <span className="card-tile__id">{card.id}</span>
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly

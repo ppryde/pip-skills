@@ -2067,46 +2067,37 @@ body {
   background: var(--card-accent-fill);
 }
 
-/* Left rail (epics only): a coloured drag spine holding the stage icon at its
-   top and the drag grip below. Negative margins cancel the card's 14px padding
-   so it sits at the border's inner edge; the left corners round to that inner
-   curve (card radius − the 2px border) so it hugs the card's rounded corners. */
+/* Left rail (all cards): the stage icon at the top, the drag grip filling the
+   space below it. Transparent by default; epics paint a gold spine behind it
+   via `.epic-card`'s background (below). */
 .card-tile__rail {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  margin: -14px 0 -14px -14px;
-  padding: 8px 5px;
-  background: linear-gradient(180deg, var(--qb-accent-orange-fill), var(--qb-gold-coin-fill));
-  border-radius: calc(var(--qb-radius-card-a) - 2px) 0 0 calc(var(--qb-radius-card-a) - 2px);
 }
 .card-tile__rail .card-tile__lifecycle-icon {
   width: 28px;
   height: 28px;
 }
-
-/* Base drag grip (normal cards): quiet grey, sized to content. */
 .card-tile__handle {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--legacy-color-9ca3af);
   cursor: grab;
   user-select: none;
-  padding: 0.1rem 0.2rem 0 0;
+  padding: 0;
   border: none;
   background: transparent;
   font: inherit;
   touch-action: none;
 }
-/* The grip inside the epic rail: fills the spine below the icon, dark-on-gold. */
-.card-tile__rail .card-tile__handle {
-  flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* On an epic's gold spine, darken the grip for contrast. */
+.epic-card .card-tile__handle {
   color: var(--qb-gold-chip-text);
-  padding: 0;
 }
 
 .card-tile__handle:disabled {
@@ -2929,10 +2920,15 @@ body {
   color: var(--legacy-color-fff);
 }
 
-/* Epic identity: gold accent edge + warmer parchment body. */
+/* Epic identity: warmer parchment body + a gold/orange drag spine down the
+   left. The spine is painted as the card's OWN left-strip background, so the
+   card's border-radius clips it to the rounded corners — no square edge. The
+   rail (stage icon + grip) sits over it. */
 .epic-card {
-  border-left: 4px solid var(--qb-gold-coin-stroke);
-  background: #f7ecd6;
+  background:
+    linear-gradient(180deg, var(--qb-accent-orange-fill), var(--qb-gold-coin-fill))
+      left top / 46px 100% no-repeat,
+    #f7ecd6;
 }
 
 /* Bottom bar: quest count (left) + sub-quest expand toggle (right). */
