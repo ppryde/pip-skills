@@ -1925,7 +1925,10 @@ body {
   background: var(--legacy-color-fff);
   border: 2px solid var(--card-accent-border);
   border-radius: var(--qb-radius-card-a);
-  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  /* Shadow colour tracks the BORDER (not the paler `--card-accent-shadow`
+     fill-tint) so the 3px drop matches the card's border rather than washing
+     out against it. */
+  box-shadow: var(--qb-shadow-card) var(--card-accent-border, transparent);
   padding: 14px;
   font-size: 0.8rem;
 }
@@ -2940,11 +2943,9 @@ body {
    on the 46px strip rather than sitting right-of-centre. */
 .epic-card {
   padding-left: 6px;
-  /* Always the orange accent — border AND matching shadow — whatever lane the
-     epic sits in. Overriding the accent VARIABLES (not border-color directly)
-     keeps the border and the accent shadow in sync, like a normal card. */
+  /* Always the orange accent, whatever lane the epic sits in — the border
+     (and, tracking it, the shadow) go orange. */
   --card-accent-border: var(--qb-accent-orange-border);
-  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
   background:
     linear-gradient(
         180deg,
