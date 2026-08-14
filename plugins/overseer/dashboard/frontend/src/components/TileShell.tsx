@@ -284,6 +284,11 @@ function TileShell({
           <DependencyBadge card={card} />
           <span className="card-tile__coins">{coins}</span>
         </div>
+        {/* Parent-epic reference — shown under the status row for any card
+            that belongs to an epic, so a sub-quest tile names its epic. */}
+        {card.parent && (
+          <div className="card-tile__parent">↳ {card.parent}</div>
+        )}
         {onOpen ? (
           <button
             type="button"

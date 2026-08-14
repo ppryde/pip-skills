@@ -200,6 +200,20 @@ describe("TileShell repo chip", () => {
   });
 });
 
+describe("TileShell parent-epic reference", () => {
+  it("shows the parent epic id under the status row when the card has a parent", () => {
+    const { container } = renderTile(card({ id: "WF-K", parent: "WF-086" }));
+    const parent = container.querySelector(".card-tile__parent");
+    expect(parent).not.toBeNull();
+    expect(parent?.textContent).toContain("WF-086");
+  });
+
+  it("shows no parent line for a top-level card", () => {
+    const { container } = renderTile(card({ id: "WF-TOP", parent: null }));
+    expect(container.querySelector(".card-tile__parent")).toBeNull();
+  });
+});
+
 describe("TileShell PR chip (WF-073)", () => {
   it("renders a clickable, safely-attributed anchor for an http(s) pr", () => {
     const { container } = renderTile(
