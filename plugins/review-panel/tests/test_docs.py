@@ -1,0 +1,24 @@
+from pathlib import Path
+
+from scripts.discovery import discover_strategies
+from scripts.doclint import required_sections, lint_doc
+
+PLUGIN = Path(__file__).resolve().parents[1]
+STRATEGIES = PLUGIN / "skills" / "strategies"
+
+
+def test_five_strategies_present():
+    assert discover_strategies(STRATEGIES) == [
+        "adversarial", "blind", "committee", "dual-tiebreaker", "informed",
+    ]
+
+
+def test_every_strategy_has_required_sections():
+    problems = []
+    for name in discover_strategies(STRATEGIES):
+        problems += lint_doc(STRATEGIES / f"{name}.md", "strategy")
+    assert problems == [], problems
+
+
+def test_required_sections_known_kind():
+    assert "Stages" in required_sections("strategy")
