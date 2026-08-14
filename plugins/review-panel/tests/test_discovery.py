@@ -37,6 +37,13 @@ def test_review_clone_root_prefers_env(tmp_path):
     assert review_clone_root() == Path(os.environ["REVIEW_CLONE_ROOT"])
 
 
+def test_review_clone_root_falls_back_to_config_dir(monkeypatch):
+    # With REVIEW_CLONE_ROOT unset, it derives from CLAUDE_CONFIG_DIR.
+    monkeypatch.delenv("REVIEW_CLONE_ROOT", raising=False)
+    cfg = os.environ["CLAUDE_CONFIG_DIR"]  # pinned into tmp_path by the fixture
+    assert review_clone_root() == Path(cfg) / "review-clone"
+
+
 def test_discover_clone_personas(tmp_path):
     root = Path(os.environ["REVIEW_CLONE_ROOT"])
     for alias in ["danvk", "kentbeck"]:
