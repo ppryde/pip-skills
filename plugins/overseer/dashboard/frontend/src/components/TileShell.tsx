@@ -244,6 +244,21 @@ function TileShell({
             coins (gold/budget) right-aligned (`.card-tile__coins` uses
             margin-left:auto). */}
         <div className="card-tile__statusline">
+          {/* Parent-epic label — clickable, opens the parent epic's drawer.
+              stopPropagation so it doesn't also open this card. */}
+          {card.parent && (
+            <button
+              type="button"
+              className="card-tile__parent"
+              title={`Open epic ${card.parent}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen?.(card.parent as string);
+              }}
+            >
+              Epic {card.parent}
+            </button>
+          )}
           {/* Branch chip if the card has one, else the "awaiting a hero"
               flag for an unclaimed, un-started, still-active quest. */}
           {card.branch ? (
@@ -298,11 +313,6 @@ function TileShell({
           <DependencyBadge card={card} />
           <span className="card-tile__coins">{coins}</span>
         </div>
-        {/* Parent-epic reference — shown under the status row for any card
-            that belongs to an epic, so a sub-quest tile names its epic. */}
-        {card.parent && (
-          <div className="card-tile__parent">↳ {card.parent}</div>
-        )}
         {onOpen ? (
           <button
             type="button"

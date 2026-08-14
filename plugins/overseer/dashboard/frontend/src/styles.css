@@ -2144,15 +2144,14 @@ body {
 }
 
 /* Parent-epic reference under the status row — quiet, mono to echo the id. */
-/* Parent-epic reference — a quiet label chip (not a mono "heading"). Inline-
-   flex so it hugs its content and sits left-aligned on its own line under the
-   status row. */
+/* Parent-epic reference — a quiet, clickable label chip on the status row
+   (opens the parent epic). Button-reset so it renders as a chip, not a button. */
 .card-tile__parent {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  margin-top: 4px;
-  font-size: 0.6rem;
+  font-family: inherit;
+  font-size: 0.65rem;
   font-weight: 600;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
@@ -2160,6 +2159,10 @@ body {
   color: var(--qb-ink-500);
   border: 1px solid var(--qb-line-dashed);
   white-space: nowrap;
+  cursor: pointer;
+}
+.card-tile__parent:hover {
+  border-color: var(--qb-ink-400);
 }
 
 /*
@@ -2503,7 +2506,6 @@ body {
 .awaiting-hero-chip {
   font-size: 0.65rem;
   font-weight: 500;
-  font-style: italic;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
   /* Red (blocked ramp): an unclaimed quest wants attention. Keeps the dashed
@@ -2525,7 +2527,6 @@ body {
 .claim-badge {
   font-size: 0.65rem;
   font-weight: 500;
-  font-style: italic;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
   background: var(--qb-status-done-soft);
@@ -2938,15 +2939,19 @@ body {
    with a warm off-white). `padding-left` is trimmed so the rail's icon centres
    on the 46px strip rather than sitting right-of-centre. */
 .epic-card {
-  padding-left: 9px;
+  padding-left: 6px;
   background:
     linear-gradient(
         180deg,
         color-mix(in srgb, var(--qb-accent-orange-fill) 58%, #fff4e2),
         color-mix(in srgb, var(--qb-gold-coin-fill) 58%, #fff4e2)
       )
-      left top / 46px 100% no-repeat,
+      left top / 40px 100% no-repeat,
     #f7ecd6;
+}
+/* Breathing room between the gold spine and the card's main content. */
+.epic-card .card-tile__rail {
+  margin-right: 0.5rem;
 }
 
 /* Bottom bar: quest count (left) + sub-quest expand toggle (right). */
