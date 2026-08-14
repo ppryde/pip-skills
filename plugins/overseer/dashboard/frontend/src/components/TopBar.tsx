@@ -69,6 +69,10 @@ export interface TopBarProps {
    * `selectedRepo`), so there is never a Clear control with nothing to
    * target. */
   onClear?: () => void;
+  /** Short-landscape scroll-away: adds `topbar--hidden` so the bar slides up
+   * out of view. Only ever true on that viewport (see useHideTopBarOnScroll);
+   * false everywhere else, so the bar renders normally. */
+  hidden?: boolean;
   /** App-owned "Controls ▾" collapse state, driving ONLY TopBar's own
    * `#topbar-controls-group` now — it used to also fold the separate
    * `<FilterBar/>` under the same flag, but that's split into its own
@@ -191,6 +195,7 @@ function TopBar({
   onToggleNames,
   hideVanquished,
   onToggleVanquished,
+  hidden = false,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -227,7 +232,7 @@ function TopBar({
 
   return (
     <>
-      <header className="topbar">
+      <header className={"topbar" + (hidden ? " topbar--hidden" : "")}>
         {/* WF-086 (moved): the Board|Atlas toggle is a small stack of two
             overlapping "guild coins" to the LEFT of the wordmark. The active
             view's coin sits in front; clicking EITHER coin switches to the
