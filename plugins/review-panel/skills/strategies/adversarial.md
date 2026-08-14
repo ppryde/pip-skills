@@ -12,15 +12,12 @@ Informed (as committee). The critic additionally receives the diff so it can
 check each finding against reality.
 
 ## Stages
-1. **Reviewers (parallel).** As committee. Output: candidate findings.
-2. **Critic (per finding).** One `model: sonnet` subagent per finding,
-   prompted to REFUTE it (default to refuted when uncertain). Output:
-   `{verdict: confirmed|refuted|weakened, reason}`.
-3. **Judge.** Attach each verdict+reason to its finding.
+1. **Reviewers (parallel).** As committee — one subagent per seated reviewer, `model: sonnet`. Output: candidate findings.
+2. **Critic (per finding).** One `model: sonnet` subagent per finding, prompted to REFUTE it (default to refuted when uncertain). Output: `{verdict: confirmed|refuted|weakened, reason}`.
+3. **Judge (orchestrator, no subagent).** Apply each critic verdict: keep `confirmed`, drop `refuted`, downgrade `weakened` one severity step. Attach the reason to each surviving finding.
 
 ## Reconciliation
-Drop `refuted` findings; downgrade `weakened` findings one severity step;
-keep `confirmed`. Then collate and apply strictness/decisions.
+The judged set (confirmed findings plus downgraded-weakened ones) is collated, then strictness and decisions overrides are applied.
 
 ## Cost
 Highest: N reviewers + one critic per candidate finding.

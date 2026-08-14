@@ -22,3 +22,11 @@ def test_every_strategy_has_required_sections():
 
 def test_required_sections_known_kind():
     assert "Stages" in required_sections("strategy")
+
+
+def test_lint_doc_flags_missing_section(tmp_path):
+    doc = tmp_path / "broken.md"
+    doc.write_text("# Broken Strategy\n\n## Summary\nonly this section\n")
+    problems = lint_doc(doc, "strategy")
+    assert problems  # non-empty
+    assert any("Stages" in p for p in problems)
