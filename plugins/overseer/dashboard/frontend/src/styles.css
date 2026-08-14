@@ -2878,29 +2878,10 @@ body {
   color: var(--legacy-color-fff);
 }
 
-/* Epic identity: gold accent edge, warmer parchment body, and a wax-seal
-   emblem in the top-right corner. `position: relative` anchors the seal. */
+/* Epic identity: gold accent edge + warmer parchment body. */
 .epic-card {
-  position: relative;
   border-left: 4px solid var(--qb-gold-coin-stroke);
   background: #f7ecd6;
-}
-.epic-card::after {
-  content: "⚔";
-  position: absolute;
-  top: -9px;
-  right: -9px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ea7d73, #a83228);
-  color: #fff;
-  border: 2px solid #7a1f14;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  text-align: center;
-  line-height: 30px;
-  font-size: 14px;
-  pointer-events: none;
 }
 
 /* Bottom bar: quest count (left) + sub-quest expand toggle (right). */
