@@ -1,0 +1,6 @@
+{
+  "name": "review-panel",
+  "version": "0.1.0",
+  "description": "Composable code review: swappable reviewer lenses × orchestration strategies, composed into named profiles.",
+  "author": "Pip"
+}
