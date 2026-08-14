@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -62,6 +62,13 @@
       "description": "Test suite speed and dryness, by measurement. Profiles the whole suite rather than the part you pointed at, catches accidental quadratics with a scaling ladder, proves a fix removed the defect rather than shrinking its constant, and names what the speedup cost in fidelity.",
       "category": "engineering",
       "tags": ["tests", "performance", "ci", "pytest", "junit", "profiling", "quadratic", "fixtures", "duplication", "coverage", "optimisation"]
+    },
+    {
+      "name": "census",
+      "source": "./plugins/census",
+      "description": "Records the Claude Code status-line payload into a single worktree-indexed store, so any tool can read a session's live context %, model, PR status, and 5h/7d rate-limit usage. One writer (the status line), many readers. Pure stdlib, quarantine-safe.",
+      "category": "engineering",
+      "tags": ["statusline", "status-line", "context", "rate-limits", "usage", "worktree", "session", "telemetry", "hooks"]
     }
   ]
 }
