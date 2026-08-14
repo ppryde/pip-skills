@@ -2940,6 +2940,8 @@ body {
    on the 46px strip rather than sitting right-of-centre. */
 .epic-card {
   padding-left: 6px;
+  /* Always an orange border, whatever lane the epic sits in. */
+  border-color: var(--qb-accent-orange-border);
   background:
     linear-gradient(
         180deg,
