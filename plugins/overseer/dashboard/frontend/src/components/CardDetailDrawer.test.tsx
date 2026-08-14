@@ -175,7 +175,7 @@ describe("<CardDetailDrawer/>", () => {
       })
     );
 
-    render(
+    const { container } = render(
       <CardDetailDrawer
         cardId="WF-A"
         onClose={() => {}}
@@ -196,7 +196,11 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByText("Do steps 1, 2, 3.")).toBeInTheDocument();
     expect(screen.getByText("P1")).toBeInTheDocument();
     expect(screen.getByText(/in-flight/)).toBeInTheDocument();
-    expect(screen.getByText(/implementation/)).toBeInTheDocument();
+    // Stage is shown by the banner pill (WF-030) — the redundant, floating
+    // title-row stage chip was removed.
+    expect(
+      container.querySelector(".card-drawer__banner")
+    ).toHaveTextContent("Implementation");
   });
 
   it("renders the repo chip in the facts row when the card carries a repo label", async () => {

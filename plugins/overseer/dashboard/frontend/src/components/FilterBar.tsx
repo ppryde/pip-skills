@@ -25,6 +25,7 @@ export interface FilterBarProps {
   onCycleLabel: (label: string) => void;
   onPriority: (priority: string | null) => void;
   onComplexity: (complexity: string | null) => void;
+  onEpicsOnly: (epicsOnly: boolean) => void;
   onClear: () => void;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * passed straight through to `LabelFilterPopover` when it's open. */
@@ -74,6 +75,7 @@ function FilterBar({
   onCycleLabel,
   onPriority,
   onComplexity,
+  onEpicsOnly,
   onClear,
   colorRegistry,
   filtersOpen,
@@ -117,6 +119,18 @@ function FilterBar({
           value={filter.query}
           onChange={(e) => onQuery(e.target.value)}
         />
+
+        {/* Clear sits on the SEARCH line, right-aligned (margin-left:auto in
+            CSS); the priority/complexity/labels/epics facets wrap to their own
+            line below. Exact-match "Clear" (distinct from the topbar's own
+            "Clear…"/ClearDialog button — see FilterBar.test.tsx/App.test.tsx). */}
+        <Button
+          className="filter-bar__clear-btn"
+          onClick={onClear}
+          disabled={isDefault}
+        >
+          Clear
+        </Button>
 
         {/* Priority/Complexity/Labels/Clear grouped onto their own line
             below search — `.filter-bar__facets`'s `flex-basis: 100%` forces
@@ -164,17 +178,17 @@ function FilterBar({
             )}
           </Button>
 
-          {/* Moved off the Scry eyebrow line onto the end of this row
-              (coordinator follow-up) — same class/onClick/disabled as
-              before, just relocated + shortened to "Clear" (exact-match,
-              distinct from the topbar's own "Clear…"/ClearDialog button —
-              see FilterBar.test.tsx/App.test.tsx). */}
+          {/* Epics-only toggle (a boolean facet, so a pressed <button> rather
+              than a select) — aria-pressed reflects the state; no <label>, per
+              this bar's "no <label> element" contract. */}
           <Button
-            className="filter-bar__clear-btn"
-            onClick={onClear}
-            disabled={isDefault}
+            className={
+              "filter-bar__epics-btn" + (filter.epicsOnly ? " is-active" : "")
+            }
+            aria-pressed={filter.epicsOnly}
+            onClick={() => onEpicsOnly(!filter.epicsOnly)}
           >
-            Clear
+            Epics only
           </Button>
         </div>
       </div>

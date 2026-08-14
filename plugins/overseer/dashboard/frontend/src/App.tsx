@@ -12,6 +12,7 @@ import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
 import { useCardFilter } from "./board/useCardFilter";
+import { useIconKeyGlow } from "./board/useIconKeyGlow";
 import { buildParty } from "./board/party";
 import { distinctBranches } from "./board/branches";
 import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilter";
@@ -102,13 +103,18 @@ function App() {
   // 400s `/api/sessions` exactly like it 400s `/api/board`, so this fetch
   // (mount AND poll) must be hard-skipped for it too.
   const { sessions } = useSessions(activeRoot, !isUnbegun);
+  // Task 6: 60s post-change glow (live, frontend-only) — observes
+  // `board.cards` across polls/mutations and glows any card whose
+  // `cardIconKey` changed within the last 60s. `board?.cards ?? []` mirrors
+  // the `allCards` fallback below.
+  const glowingIds = useIconKeyGlow(board?.cards ?? []);
   // F3/WF-061: the card filter bar's state (search/labels/priority/
   // complexity) — App-owned like every other cross-cutting UI concern here
   // (party/branch/clear), persisted via localStorage inside the hook
   // itself. `useCardFilter()` returns a fresh object literal every render,
   // so destructure the pieces used below rather than depending on the
   // whole-object reference.
-  const { filter, setQuery, setPriority, setComplexity, clear, cycleLabel } =
+  const { filter, setQuery, setPriority, setComplexity, setEpicsOnly, clear, cycleLabel } =
     useCardFilter();
   // WF-0XX item 6: the Abandoned lane is opt-OUT now, not opt-in — it used
   // to default hidden (`false`) so a fresh load never showed it, but that
@@ -200,6 +206,7 @@ function App() {
     filter.query === DEFAULT_FILTER.query &&
     filter.priority === DEFAULT_FILTER.priority &&
     filter.complexity === DEFAULT_FILTER.complexity &&
+    filter.epicsOnly === DEFAULT_FILTER.epicsOnly &&
     sameLabelSet(filter.includeLabels, DEFAULT_FILTER.includeLabels) &&
     sameLabelSet(filter.excludeLabels, DEFAULT_FILTER.excludeLabels);
 
@@ -301,6 +308,7 @@ function App() {
           onCycleLabel={cycleLabel}
           onPriority={setPriority}
           onComplexity={setComplexity}
+          onEpicsOnly={setEpicsOnly}
           onClear={clear}
           colorRegistry={board.label_colors}
           // Its own independent "Filters ▾" toggle now (Task 2) — see the
@@ -332,6 +340,7 @@ function App() {
                 activeBranch={activeBranch}
                 threshold={threshold}
                 visibleIds={visibleIds}
+                glowingIds={glowingIds}
               />
             )}
             {/* WF-086: same <main class="board-region"> the board renders

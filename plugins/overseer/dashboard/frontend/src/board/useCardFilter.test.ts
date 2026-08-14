@@ -44,6 +44,7 @@ describe("useCardFilter", () => {
       excludeLabels: ["future"],
       priority: null,
       complexity: null,
+      epicsOnly: false,
     });
   });
 

@@ -13,6 +13,7 @@ const base = {
   onCycleLabel: () => {},
   onPriority: () => {},
   onComplexity: () => {},
+  onEpicsOnly: () => {},
   onClear: () => {},
   // Expanded by default here so every other test in this file (all
   // exercising the bar's own controls, not the collapse behaviour) keeps
@@ -42,6 +43,22 @@ describe("<FilterBar/>", () => {
       target: { value: "" },
     });
     expect(onPriority).toHaveBeenCalledWith(null);
+  });
+
+  it("toggling Epics only calls onEpicsOnly with the flipped value and reflects aria-pressed", () => {
+    const onEpicsOnly = vi.fn();
+    const { rerender } = render(<FilterBar {...base} onEpicsOnly={onEpicsOnly} />);
+    const btn = screen.getByRole("button", { name: /epics only/i });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(btn);
+    expect(onEpicsOnly).toHaveBeenCalledWith(true);
+    rerender(
+      <FilterBar {...base} filter={{ ...DEFAULT_FILTER, epicsOnly: true }} onEpicsOnly={onEpicsOnly} />
+    );
+    expect(screen.getByRole("button", { name: /epics only/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
   });
 
   it("choosing a complexity calls onComplexity with the value (null for the placeholder)", () => {

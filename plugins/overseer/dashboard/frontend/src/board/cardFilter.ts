@@ -6,6 +6,9 @@ export interface FilterState {
   excludeLabels: string[];
   priority: string | null;
   complexity: string | null;
+  /** When true, only epic cards are shown (still subject to the other
+   * facets/search). A hard gate — no parent/child expansion. */
+  epicsOnly: boolean;
 }
 
 export const DEFAULT_FILTER: FilterState = {
@@ -14,6 +17,7 @@ export const DEFAULT_FILTER: FilterState = {
   excludeLabels: ["future"],
   priority: null,
   complexity: null,
+  epicsOnly: false,
 };
 // Frozen so nobody can mutate the shared instance in place (e.g.
 // `DEFAULT_FILTER.includeLabels.push(...)`). Consumers that need a mutable
@@ -50,6 +54,21 @@ function passesFilters(c: BoardCard, s: FilterState): boolean {
 
 export function visibleCardIds(cards: BoardCard[], state: FilterState): Set<string> {
   const q = state.query.trim();
+
+  // "Epics only" is a hard gate: only epic cards can be visible, still subject
+  // to the other facets + search. No parent/child expansion (an epic stands
+  // on its own; its children carry their epic reference on their own tiles).
+  if (state.epicsOnly) {
+    const epics = new Set<string>();
+    for (const c of cards) {
+      if (!c.is_epic) continue;
+      if (!passesFilters(c, state)) continue;
+      if (q && !searchMatch(c, q)) continue;
+      epics.add(c.id);
+    }
+    return epics;
+  }
+
   const out = new Set<string>();
   if (!q) {
     for (const c of cards) if (passesFilters(c, state)) out.add(c.id);

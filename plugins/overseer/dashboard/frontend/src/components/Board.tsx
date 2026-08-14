@@ -16,6 +16,7 @@ import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
 import { collapseStagesForMobile, groupIntoLanes } from "../board/layout";
+import { groupChildrenByEpic } from "../board/epicChildren";
 import { laneIconKey } from "../board/laneIcons";
 import { useMediaQuery } from "../board/useMediaQuery";
 import { DRAG_SENSOR_DESCRIPTORS } from "../board/dragSensors";
@@ -49,6 +50,9 @@ export interface BoardProps {
    * placement below; sprints/quarantined/party are untouched by it (the
    * filter bar only ever curates cards). */
   visibleIds: Set<string>;
+  /** Task 6: ids currently within their 60s post-icon-change glow window
+   * (App.tsx's `useIconKeyGlow`) — passed straight through to every Lane. */
+  glowingIds: Set<string>;
 }
 
 /**
@@ -76,6 +80,7 @@ function Board({
   activeBranch,
   threshold,
   visibleIds,
+  glowingIds,
 }: BoardProps) {
   // Filtered once, up front — every lane/epic-grouping consumer below reads
   // this instead of `board.cards` directly. `visibleCardIds` (cardFilter.ts)
@@ -86,6 +91,20 @@ function Board({
     [board.cards, visibleIds]
   );
   const lanes = useMemo(() => groupIntoLanes(visibleCards), [visibleCards]);
+
+  // Epic children (task 3/4, epic board identity): threaded straight through
+  // to Lane -> EpicCard's inline sub-quest log and blocked-child resolution.
+  // Derived from the WHOLE board (`board.cards`), not `visibleCards` — a
+  // filtered-out child should still count toward its epic's quest log even
+  // if the filter bar currently hides it from its own lane.
+  const childrenByEpic = useMemo(
+    () => groupChildrenByEpic(board.cards),
+    [board.cards]
+  );
+  const cardsById = useMemo(
+    () => new Map(board.cards.map((c) => [c.id, c])),
+    [board.cards]
+  );
 
   // WF-085 in-progress lane: collapse the 7 `kind:"stage"` lanes into ONE
   // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
@@ -118,6 +137,22 @@ function Board({
   const toggleEpicHighlight = (id: string) => {
     setHighlightedEpicId((current) => (current === id ? null : id));
   };
+
+  // Click-away to dismiss the epic highlight: while an epic is highlighted, a
+  // pointerdown anywhere OUTSIDE that epic's own card clears it (same dismiss
+  // idiom as InfoTooltip). A pointerdown WITHIN the highlighted epic — its
+  // expand toggle, body, drag handle — is left to that card's own handlers,
+  // so the expand button can still toggle it off directly.
+  useEffect(() => {
+    if (!highlightedEpicId) return;
+    function onPointerDown(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(`[data-card-id="${highlightedEpicId}"]`)) return;
+      setHighlightedEpicId(null);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [highlightedEpicId]);
 
   const visibleLanes = displayLanes.filter(
     (lane) => lane.kind !== "archive" || showArchive
@@ -400,6 +435,9 @@ function Board({
             dragDisabled={inFlight}
             onOpenCard={onOpenCard}
             activeBranch={activeBranch}
+            glowingIds={glowingIds}
+            childrenByEpic={childrenByEpic}
+            cardsById={cardsById}
             // F10 editable colour registry (WF-067) — straight off the
             // board payload's `label_colors`, threaded to every tile's
             // LabelChips via Lane -> CardTile/EpicCard -> TileShell.

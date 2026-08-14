@@ -1,5 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import type { BoardCard } from "../api/types";
 import type { Lane as LaneModel } from "../board/layout";
 import CardTile from "./CardTile";
 import EpicCard from "./EpicCard";
@@ -18,9 +19,21 @@ export interface LaneProps {
    * state above. A card with NO branch (never started) stays neutral: it's
    * not "on another branch", it just hasn't got one yet (task 10). */
   activeBranch: string | null;
+  /** Task 6: ids currently within their 60s post-icon-change glow window
+   * (App.tsx's `useIconKeyGlow`) — mirrors `activeBranch` above: Lane
+   * derives a per-card boolean (`glowing`) from this set and passes it
+   * straight through to `<CardTile>`/`<EpicCard>`. */
+  glowingIds: Set<string>;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * threaded through to every CardTile/EpicCard's LabelChips. */
   colorRegistry?: Record<string, string>;
+  /** Task 4 (epic board identity): every epic's own children, keyed by the
+   * epic's id — `Board.tsx`'s `groupChildrenByEpic(board.cards)`, threaded
+   * straight through to each epic tile's inline sub-quest log. */
+  childrenByEpic: Map<string, BoardCard[]>;
+  /** Whole-board id→card map (same source as `childrenByEpic`), passed to
+   * EpicCard to resolve each child's blocked (`openDependencies`) state. */
+  cardsById: Map<string, BoardCard>;
 }
 
 /**
@@ -41,7 +54,10 @@ function Lane({
   dragDisabled,
   onOpenCard,
   activeBranch,
+  glowingIds,
   colorRegistry,
+  childrenByEpic,
+  cardsById,
 }: LaneProps) {
   const { setNodeRef } = useDroppable({ id: lane.key });
   const isEmpty = lane.cards.length === 0;
@@ -104,6 +120,7 @@ function Lane({
                 card.branch !== activeBranch;
               const branchSpotlight =
                 activeBranch !== null && card.branch === activeBranch;
+              const glowing = glowingIds.has(card.id);
 
               return card.is_epic ? (
                 <EpicCard
@@ -116,9 +133,12 @@ function Lane({
                   highlighted={highlighted}
                   branchDimmed={branchDimmed}
                   branchSpotlight={branchSpotlight}
+                  glowing={glowing}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                   colorRegistry={colorRegistry}
+                  childCards={childrenByEpic.get(card.id) ?? []}
+                  cardsById={cardsById}
                 />
               ) : (
                 <CardTile
@@ -129,18 +149,10 @@ function Lane({
                   highlighted={highlighted}
                   branchDimmed={branchDimmed}
                   branchSpotlight={branchSpotlight}
+                  glowing={glowing}
                   dragDisabled={dragDisabled}
                   onOpen={onOpenCard}
                   colorRegistry={colorRegistry}
-                  // WF-085 in-progress lane, Part B: `kind:"in-progress"`
-                  // ONLY ever exists on the mobile merged lane
-                  // (`collapseStagesForMobile` — desktop's real `kind:
-                  // "stage"` lanes never carry this kind), so gating off the
-                  // lane's own kind — rather than threading a separate
-                  // isMobile flag down from Board — already guarantees the
-                  // stage icon is mobile-only, with no desktop card face
-                  // change at all.
-                  showStage={lane.kind === "in-progress"}
                 />
               );
             })}

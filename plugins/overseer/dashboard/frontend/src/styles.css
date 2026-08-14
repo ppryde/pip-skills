@@ -1524,6 +1524,19 @@ body {
 
 .filter-bar__clear-btn {
   border-radius: var(--qb-btn-wobble-4);
+  /* Sits on the search line, pushed to the right edge; the facets wrap below. */
+  margin-left: auto;
+}
+
+/* Epics-only toggle: quiet by default, gold "pressed" fill when active so it
+   reads as a live filter (matches the topbar toggle's aria-pressed idiom). */
+.filter-bar__epics-btn {
+  border-radius: var(--qb-btn-wobble-3);
+}
+.filter-bar__epics-btn[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
 }
 
 /* Same neutral base tokens as `.claim-badge` — a quiet count pill, no
@@ -1813,7 +1826,7 @@ body {
 .lane__cards {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.85rem;
   padding: 0.5rem;
 }
 
@@ -1912,7 +1925,10 @@ body {
   background: var(--legacy-color-fff);
   border: 2px solid var(--card-accent-border);
   border-radius: var(--qb-radius-card-a);
-  box-shadow: var(--qb-shadow-card) var(--card-accent-shadow, transparent);
+  /* Shadow colour tracks the BORDER (not the paler `--card-accent-shadow`
+     fill-tint) so the 3px drop matches the card's border rather than washing
+     out against it. */
+  box-shadow: var(--qb-shadow-card) var(--card-accent-border, transparent);
   padding: 14px;
   font-size: 0.8rem;
 }
@@ -2054,16 +2070,37 @@ body {
   background: var(--card-accent-fill);
 }
 
-.card-tile__handle {
+/* Left rail (all cards): the stage icon at the top, the drag grip filling the
+   space below it. Transparent by default; epics paint a gold spine behind it
+   via `.epic-card`'s background (below). */
+.card-tile__rail {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.card-tile__rail .card-tile__lifecycle-icon {
+  width: 28px;
+  height: 28px;
+}
+.card-tile__handle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--legacy-color-9ca3af);
   cursor: grab;
   user-select: none;
-  padding: 0.1rem 0.2rem 0 0;
+  padding: 0;
   border: none;
   background: transparent;
   font: inherit;
   touch-action: none;
+}
+/* On an epic's gold spine, darken the grip for contrast. */
+.epic-card .card-tile__handle {
+  color: var(--qb-gold-chip-text);
 }
 
 .card-tile__handle:disabled {
@@ -2084,20 +2121,51 @@ body {
   flex-wrap: wrap;
 }
 
+/* Row 2 status line — same flex shape as the header row above it. The coins
+   slot is pushed to the right edge (margin-left:auto), so the row reads
+   [stage icon] [hero/branch/PR/blocked signals] … [coins]. */
+.card-tile__statusline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+}
+
+.card-tile__coins {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .card-tile__id {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.7rem;
+  /* Silkscreen pixel font — matches the detail drawer's `.card-drawer__id`. */
+  font-family: var(--qb-font-mono);
+  font-size: 0.8rem;
   color: var(--legacy-color-6b7280);
 }
 
-/* WF-085 in-progress lane, Part B (mobile-only — see CardTile.tsx's
-   `showStage`): a small per-card stage badge, sat in the header row
-   alongside the id, replacing the "which lane am I in" cue the card loses
-   once its stage lane is merged away on a phone. */
-.card-tile__stage-icon {
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
+/* Parent-epic reference under the status row — quiet, mono to echo the id. */
+/* Parent-epic reference — a quiet, clickable label chip on the status row
+   (opens the parent epic). Button-reset so it renders as a chip, not a button. */
+.card-tile__parent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted-2);
+  color: var(--qb-ink-500);
+  border: 1px solid var(--qb-line-dashed);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.card-tile__parent:hover {
+  border-color: var(--qb-ink-400);
 }
 
 /*
@@ -2319,6 +2387,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.05rem;
+  margin-left: auto;
 }
 
 .card-tile__star--filled {
@@ -2336,6 +2405,32 @@ body {
   border-radius: var(--legacy-radius-3px);
   background: var(--legacy-color-eef2ff);
   color: var(--legacy-color-4338ca);
+}
+
+/* Priority heat ramp: escalating urgency reads as a colour temperature —
+   P4 calm grey, P3 green, P2 amber/yellow, P1 orange, P0 red. Each reuses a
+   board status/accent ramp (soft wash bg + strong ink) so priorities sit in
+   the same palette as the rest of the chrome. The `--P<n>` modifier overrides
+   only the base chip's bg/colour. */
+.priority-chip--P4 {
+  background: var(--qb-status-abandoned-soft);
+  color: var(--qb-status-abandoned-strong);
+}
+.priority-chip--P3 {
+  background: var(--qb-status-done-soft);
+  color: var(--qb-status-done-strong);
+}
+.priority-chip--P2 {
+  background: color-mix(in srgb, var(--qb-accent-amber-fill) 24%, white);
+  color: color-mix(in srgb, var(--qb-accent-amber-fill) 66%, #2c2015);
+}
+.priority-chip--P1 {
+  background: var(--qb-status-in-progress-soft);
+  color: var(--qb-status-in-progress-strong);
+}
+.priority-chip--P0 {
+  background: var(--qb-status-blocked-soft);
+  color: var(--qb-status-blocked-strong);
 }
 
 /* PR chip (WF-073): the card's own stored `pr` ref/URL — deliberately the
@@ -2414,28 +2509,33 @@ body {
 .awaiting-hero-chip {
   font-size: 0.65rem;
   font-weight: 500;
-  font-style: italic;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--qb-parchment-muted);
-  color: var(--qb-ink-400);
-  border: 1px dashed var(--qb-line-dashed);
+  /* Red (blocked ramp): an unclaimed quest wants attention. Keeps the dashed
+     placeholder border so it still reads as a "no hero yet" stand-in, now in
+     an alerting red rather than the quiet parchment it used to be. */
+  background: var(--qb-status-blocked-soft);
+  color: var(--qb-status-blocked-strong);
+  border: 1px dashed var(--qb-status-blocked-base);
   white-space: nowrap;
 }
 
-/* Quiet, distinct from the repo-chip's grey — marks "someone's on this"
-   without competing with the priority/blocked badges. CSS-only restyle
-   (WF-028 chunk 4): HANDOFF specs an avatar-chip visual with no colour of
-   its own, so this reuses neutral base parchment/ink tokens rather than
-   inventing or misappropriating a semantically distinct chip's colours. */
+/* Green (done ramp): marks "a hero is on this quest" — the positive
+   counterpart to the red awaiting-hero chip. Deliberately the SAME shape as
+   `.awaiting-hero-chip` (italic, dashed outline, nowrap) so the two read as a
+   matched pair — same placeholder-style chip, green when a hero is assigned,
+   red while the quest still awaits one. Uses the done-status green the board
+   already uses for completed work, kept quiet so it doesn't shout over the
+   priority/blocked badges. */
 .claim-badge {
   font-size: 0.65rem;
   font-weight: 500;
-  padding: 0.05rem 0.35rem;
+  padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--qb-parchment-muted-2);
-  color: var(--qb-ink-500);
-  border: 1px solid var(--qb-line-dashed);
+  background: var(--qb-status-done-soft);
+  color: var(--qb-status-done-strong);
+  border: 1px dashed var(--qb-status-done-base);
+  white-space: nowrap;
 }
 
 /* Label chips (F1, WF-058) — the base pill shared by the read-only tile
@@ -2835,26 +2935,87 @@ body {
   color: var(--legacy-color-fff);
 }
 
+/* Epic identity: warmer parchment body + a gold/orange drag spine down the
+   left. The spine is painted as the card's OWN left-strip background, so the
+   card's border-radius clips it to the rounded corners — no square edge. The
+   colours are the board's orange/gold muted toward the pastel palette (mixed
+   with a warm off-white). `padding-left` is trimmed so the rail's icon centres
+   on the 46px strip rather than sitting right-of-centre. */
 .epic-card {
-  border-left: 3px solid var(--card-accent-fill);
+  padding-left: 6px;
+  /* Always the orange accent, whatever lane the epic sits in — the border
+     (and, tracking it, the shadow) go orange. */
+  --card-accent-border: var(--qb-accent-orange-border);
+  background:
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--qb-accent-orange-fill) 58%, #fff4e2),
+        color-mix(in srgb, var(--qb-gold-coin-fill) 58%, #fff4e2)
+      )
+      left top / 40px 100% no-repeat,
+    #f7ecd6;
+}
+/* Breathing room between the gold spine and the card's main content. */
+.epic-card .card-tile__rail {
+  margin-right: 0.5rem;
 }
 
+/* Bottom bar: quest count (left) + sub-quest expand toggle (right). */
+.epic-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--qb-line-dashed);
+  font-size: 0.7rem;
+}
+.epic-card__count {
+  color: var(--qb-status-done-strong);
+  font-weight: 700;
+}
 .epic-card__expand {
   margin-left: auto;
-  font-size: 0.65rem;
-  border: 1px solid var(--legacy-color-c7d2fe);
-  background: var(--legacy-color-eef2ff);
-  color: var(--legacy-color-4338ca);
-  border-radius: var(--legacy-radius-3px);
-  padding: 0.05rem 0.4rem;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  color: var(--qb-gold-chip-text);
 }
 
-.epic-card__rollup {
+/* Inline quest log — flat, no container box (rows sit directly on the card). */
+.epic-card__subquests {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
   font-size: 0.7rem;
-  color: var(--legacy-color-4338ca);
-  margin-bottom: 0.35rem;
 }
+.epic-card__subquest {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 3px 0;
+  color: #4a4033;
+  border-bottom: 1px dashed rgba(150, 120, 70, 0.28);
+  cursor: pointer;
+}
+.epic-card__subquest:last-child { border-bottom: none; }
+.epic-card__subquest-glyph { width: 16px; text-align: center; flex: none; font-size: 1rem; line-height: 1; }
+.epic-card__subquest--done .epic-card__subquest-title { text-decoration: line-through; opacity: 0.65; }
+.epic-card__subquest--done { color: var(--qb-status-done-strong); }
+.epic-card__subquest--prog .epic-card__subquest-glyph,
+.epic-card__subquest--prog .epic-card__athand { color: var(--qb-status-in-progress-strong); }
+.epic-card__subquest--blocked .epic-card__subquest-glyph { color: var(--qb-status-blocked-strong); }
+.epic-card__subquest-title { flex: 1; }
+.epic-card__athand {
+  margin-left: 6px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.epic-card__subquest-meta { margin-left: auto; flex: none; color: #9a8a6c; font-size: 0.6rem; }
 
 /* Card detail drawer (Chunk 5): a right-hand panel over a dimming overlay. */
 /* Backdrop (HANDOFF line 70: both halves — the tint AND the blur, the
@@ -2941,6 +3102,13 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.25rem;
+  /* Reserve room on the right for the absolute × close button so the
+     right-aligned Edit button never sits under it. */
+  padding-right: 2.75rem;
+}
+/* Edit moved onto the top (banner) row, pushed to the right. */
+.card-drawer__edit-btn {
+  margin-left: auto;
 }
 
 .card-drawer__banner {
@@ -2978,6 +3146,9 @@ body {
   font-weight: 800;
   font-size: 30px;
   color: var(--qb-ink-900);
+  /* Fills the row now that Edit has moved up to the banner row. */
+  flex: 1;
+  min-width: 0;
 }
 
 /* Title/body edit mode (Task 8) — the title row pairs the read-only <h2>
@@ -2989,6 +3160,13 @@ body {
   gap: 0.6rem;
 }
 
+/* Lifecycle icon + stage chip beside the drawer title (display-only —
+   mirrors the board tile's own icon/stage cue, see laneIcons.ts). */
+.card-drawer__lifecycle-icon {
+  width: 1.4em;
+  height: 1.4em;
+  flex: none;
+}
 /* WF-097 follow-up: renders via `<Input>` (CardDetailDrawer.tsx), so the
    plain bordered-field chrome (background/border/focus border-swap) that used
    to live here — identical to `.qb-input`'s own, which was factored FROM this
@@ -6542,5 +6720,38 @@ button.trail-tag:focus-visible {
        hand-styled button in this file. */
     appearance: none;
     -webkit-appearance: none;
+  }
+}
+
+/* Task 5 (card header cues): interactive lifecycle icon, START of every
+   `.card-tile__header` — replaces the old mobile-only `showStage` icon with
+   ONE always-on code path (InfoTooltip-wrapped) for both CardTile and
+   EpicCard. `is-glowing` (task 6) pulses the icon for 60s after the card's
+   lifecycle bucket last changed. */
+.card-tile__lifecycle-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.card-tile__lifecycle-icon {
+  width: 22px;
+  height: 22px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card-tile__lifecycle-icon.is-glowing {
+    animation: lifecycle-glow 1.6s ease-in-out infinite;
+  }
+  @keyframes lifecycle-glow {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 0 transparent);
+    }
+    50% {
+      filter: drop-shadow(0 0 5px var(--card-accent-fill));
+    }
   }
 }

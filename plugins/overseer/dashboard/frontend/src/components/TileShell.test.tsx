@@ -189,18 +189,28 @@ describe("TileShell tile-body opener (a11y: no nested interactive)", () => {
 });
 
 describe("TileShell repo chip", () => {
-  it("renders the repo chip when the card carries a repo label", () => {
+  // The board shows one repo at a time and names it in the top bar, so the
+  // per-tile repo chip is redundant and no longer rendered on the tile (it
+  // still appears in the detail drawer).
+  it("renders no repo chip on the tile, even when the card carries a repo label", () => {
     const { container } = renderTile(
       card({ id: "WF-REPO", repo: "pip-skills" })
     );
-    const chip = container.querySelector(".repo-chip");
-    expect(chip).not.toBeNull();
-    expect(chip).toHaveTextContent("pip-skills");
+    expect(container.querySelector(".repo-chip")).toBeNull();
+  });
+});
+
+describe("TileShell parent-epic reference", () => {
+  it("shows the parent epic id under the status row when the card has a parent", () => {
+    const { container } = renderTile(card({ id: "WF-K", parent: "WF-086" }));
+    const parent = container.querySelector(".card-tile__parent");
+    expect(parent).not.toBeNull();
+    expect(parent?.textContent).toContain("WF-086");
   });
 
-  it("renders no repo chip when the card carries no repo label", () => {
-    const { container } = renderTile(card({ id: "WF-NOREPO" }));
-    expect(container.querySelector(".repo-chip")).toBeNull();
+  it("shows no parent line for a top-level card", () => {
+    const { container } = renderTile(card({ id: "WF-TOP", parent: null }));
+    expect(container.querySelector(".card-tile__parent")).toBeNull();
   });
 });
 
@@ -312,6 +322,21 @@ describe('TileShell "Awaiting a hero" badge (task 10)', () => {
   it("still shows the badge for a parked card with no branch", () => {
     const { container } = renderTile(card({ id: "WF-PARKED-NOBRANCH", status: "parked" }));
     expect(container.querySelector(".awaiting-hero-chip")).not.toBeNull();
+  });
+
+  it("hides Awaiting-a-hero when the card is claimed", () => {
+    renderTile(
+      card({ id: "WF-HASOWNER-INFLIGHT", claimed_by: "sess-1", status: "in-flight" })
+    );
+    expect(screen.queryByText(/Awaiting a hero/i)).toBeNull();
+    expect(screen.getByText(/hero assigned/i)).toBeInTheDocument();
+  });
+
+  it("shows Awaiting-a-hero when unclaimed and branchless", () => {
+    renderTile(
+      card({ id: "WF-UNCLAIMED-PLANNED", claimed_by: null, status: "planned" })
+    );
+    expect(screen.getByText(/Awaiting a hero/i)).toBeInTheDocument();
   });
 });
 
@@ -577,6 +602,15 @@ describe("TileShell in-flight progress bar (WF-028 chunk 5)", () => {
   });
 });
 
+describe("TileShell lifecycle icon (task 5)", () => {
+  it("renders a lifecycle icon whose tooltip names the bucket", () => {
+    renderTile(card({ id: "WF-LIFECYCLE", status: "done", stage: null }));
+    const trigger = screen.getByLabelText("Done"); // aria-label = iconKeyLabel
+    fireEvent.click(trigger);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Done");
+  });
+});
+
 describe("TileShell rarity stars (D2 — XL complexity)", () => {
   function renderWithComplexity(complexity: string | null) {
     const c = card({ id: "WF-XL", complexity });
@@ -646,5 +680,20 @@ describe("TileShell rarity stars (D2 — XL complexity)", () => {
         container.querySelectorAll(".card-tile__star--empty")
       ).toHaveLength(0);
     });
+  });
+});
+
+describe("TileShell epic coins (rollup, not own budget)", () => {
+  it("an epic's coins come from the rollup, not its own budget", () => {
+    const { container } = renderTile(
+      card({
+        id: "WF-EPIC", is_epic: true,
+        budget: { estimate: 100, actual: 50 },
+        rollup: { done: 7, total: 12, estimate: 20000, actual: 8400 },
+      })
+    );
+    // BudgetMeter renders formatTokens(actual) / formatTokens(estimate)
+    expect(container.querySelector(".budget-meter__value")?.textContent).toContain("8.4k");
+    expect(container.querySelector(".budget-meter__value")?.textContent).toContain("20k");
   });
 });

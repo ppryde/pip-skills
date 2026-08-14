@@ -6,6 +6,12 @@ export interface InfoTooltipProps {
    * for "what does this info glyph explain". */
   label: string;
   children: React.ReactNode;
+  /** Custom trigger content (default: the info glyph). The trigger is a
+   * <button>; its click toggles the bubble AND stops propagation so a
+   * tooltip inside a clickable parent (e.g. a card tile whose body opens a
+   * drawer) does not also fire the parent's onClick. */
+  trigger?: React.ReactNode;
+  triggerClassName?: string;
 }
 
 /**
@@ -18,7 +24,7 @@ export interface InfoTooltipProps {
  * same dismiss idiom as `LabelFilterPopover`, minus the backdrop (this is
  * an inline glyph, not a modal sheet, so it doesn't dim the page).
  */
-function InfoTooltip({ label, children }: InfoTooltipProps) {
+function InfoTooltip({ label, children, trigger, triggerClassName }: InfoTooltipProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
 
@@ -46,12 +52,12 @@ function InfoTooltip({ label, children }: InfoTooltipProps) {
     <span className="info-tooltip" ref={rootRef}>
       <button
         type="button"
-        className="info-tooltip__trigger"
+        className={"info-tooltip__trigger" + (triggerClassName ? " " + triggerClassName : "")}
         aria-label={label}
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
       >
-        <InfoIcon />
+        {trigger ?? <InfoIcon />}
       </button>
       {open && (
         <div role="tooltip" className="info-tooltip__bubble">
