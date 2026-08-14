@@ -21,7 +21,7 @@
 - **Strictness:** `strict` (keep), `pragmatic` (allowed-exception ids → warning), `aspirational` (all → warning). Default `pragmatic`.
 - **Severities:** `error`, `warning`, `info`.
 - **Test isolation (CLAUDE.md law):** any test that reads a config/state dir MUST pin `CLAUDE_CONFIG_DIR`, `REVIEW_CLONE_ROOT`, `OVERSEER_*` into `tmp_path` via an autouse fixture *before* the code runs. Create nothing outside `tmp_path`.
-- **Tooling:** run tests with the worktree venv: `.venv/bin/pytest plugins/review-panel/tests -q` (poetry is unusable here). Create the venv in Task 1.
+- **Tooling:** run tests from the plugin dir with the worktree venv: `cd plugins/review-panel && .venv/bin/python -m pytest tests -q` (poetry is unusable here). Use `python -m pytest` — it puts the cwd on `sys.path` so `import scripts` resolves, which `.venv/bin/pytest` does not. Create the venv in Task 1.
 
 ---
 
@@ -141,7 +141,7 @@ Run:
 cd plugins/review-panel
 python3 -m venv .venv
 .venv/bin/pip install -q pyyaml pytest
-.venv/bin/pytest tests -q -p no:cacheprovider -o addopts="" \
+.venv/bin/python -m pytest tests -q -p no:cacheprovider -o addopts="" \
   --rootdir . --import-mode=importlib
 ```
 Expected: 1 passed. (Run pytest from `plugins/review-panel` so `import scripts` resolves.)
@@ -264,7 +264,7 @@ def test_load_config_malformed_raises(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_config.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_config.py -q --import-mode=importlib`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.config'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -385,7 +385,7 @@ def resolve_adhoc(config: dict, reviewer_keys: list[str]) -> ResolvedReview:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_config.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_config.py -q --import-mode=importlib`
 Expected: PASS (9 passed).
 
 - [ ] **Step 5: Commit**
@@ -475,7 +475,7 @@ def test_available_reviewers_merges_sources(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_discovery.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_discovery.py -q --import-mode=importlib`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.discovery'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -542,7 +542,7 @@ def available_reviewers(reviewers_dir: Path) -> list[str]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_discovery.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_discovery.py -q --import-mode=importlib`
 Expected: PASS (6 passed).
 
 - [ ] **Step 5: Commit**
@@ -633,7 +633,7 @@ def test_render_report_includes_counts_and_ids():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_contract.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_contract.py -q --import-mode=importlib`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.contract'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -739,7 +739,7 @@ def render_report(collated: dict, meta: dict) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_contract.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_contract.py -q --import-mode=importlib`
 Expected: PASS (5 passed).
 
 - [ ] **Step 5: Commit**
@@ -827,7 +827,7 @@ def test_load_decisions_missing_is_empty(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_strictness.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_strictness.py -q --import-mode=importlib`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.strictness'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -890,7 +890,7 @@ def apply_decisions(findings: list[Finding], decisions: dict) -> list[Finding]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_strictness.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_strictness.py -q --import-mode=importlib`
 Expected: PASS (6 passed).
 
 - [ ] **Step 5: Commit**
@@ -958,7 +958,7 @@ def test_read_persona_without_frontmatter_is_all_body():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_personas.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_personas.py -q --import-mode=importlib`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.personas'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1008,7 +1008,7 @@ def read_persona(alias: str) -> Persona | None:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_personas.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_personas.py -q --import-mode=importlib`
 Expected: PASS (4 passed).
 
 - [ ] **Step 5: Commit**
@@ -1066,7 +1066,7 @@ def test_required_sections_known_kind():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_docs.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_docs.py -q --import-mode=importlib`
 Expected: FAIL (`ModuleNotFoundError: scripts.doclint`, and the strategy files do not exist yet).
 
 - [ ] **Step 3: Write doclint**
@@ -1280,7 +1280,7 @@ and apply strictness/decisions.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_docs.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_docs.py -q --import-mode=importlib`
 Expected: PASS (3 passed).
 
 - [ ] **Step 7: Commit**
@@ -1325,7 +1325,7 @@ from scripts.discovery import discover_builtin_reviewers
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_docs.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_docs.py -q --import-mode=importlib`
 Expected: FAIL (reviewer files do not exist yet).
 
 - [ ] **Step 3: Write the reviewer template**
@@ -1413,7 +1413,7 @@ No praise sandwiching; no persona flavour.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_docs.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_docs.py -q --import-mode=importlib`
 Expected: PASS (5 passed).
 
 - [ ] **Step 6: Commit**
@@ -1465,7 +1465,7 @@ def test_shipped_default_profile_is_set():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_docs.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_docs.py -q --import-mode=importlib`
 Expected: FAIL (shipped config missing).
 
 - [ ] **Step 3: Write the shipped default config**
@@ -1528,7 +1528,7 @@ Follow the workflow in `skills/convene/SKILL.md` exactly.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_docs.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_docs.py -q --import-mode=importlib`
 Expected: PASS (7 passed).
 
 - [ ] **Step 6: Commit**
@@ -1609,7 +1609,7 @@ def test_full_suite_importable():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests/test_smoke.py -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests/test_smoke.py -q --import-mode=importlib`
 Expected: PASS for the pipeline test is possible already (Tasks 2–5 exist), but the SKILL.md does not yet exist. Confirm the pipeline test passes; the SKILL.md is authored in Step 3 and validated by the full run in Step 4.
 
 - [ ] **Step 3: Write the orchestrator SKILL.md**
@@ -1716,7 +1716,7 @@ each reviewer's strictness and its "Allowed exceptions", and
 
 - [ ] **Step 4: Run the full suite**
 
-Run: `cd plugins/review-panel && .venv/bin/pytest tests -q --import-mode=importlib`
+Run: `cd plugins/review-panel && .venv/bin/python -m pytest tests -q --import-mode=importlib`
 Expected: PASS (all tests across the suite green).
 
 - [ ] **Step 5: Commit**
