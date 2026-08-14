@@ -25,6 +25,7 @@ export interface FilterBarProps {
   onCycleLabel: (label: string) => void;
   onPriority: (priority: string | null) => void;
   onComplexity: (complexity: string | null) => void;
+  onEpicsOnly: (epicsOnly: boolean) => void;
   onClear: () => void;
   /** F10 editable colour registry (WF-067) — board payload's `label_colors`,
    * passed straight through to `LabelFilterPopover` when it's open. */
@@ -74,6 +75,7 @@ function FilterBar({
   onCycleLabel,
   onPriority,
   onComplexity,
+  onEpicsOnly,
   onClear,
   colorRegistry,
   filtersOpen,
@@ -162,6 +164,19 @@ function FilterBar({
             {labelBadge > 0 && (
               <span className="filter-bar__labels-badge">{labelBadge}</span>
             )}
+          </Button>
+
+          {/* Epics-only toggle (a boolean facet, so a pressed <button> rather
+              than a select) — aria-pressed reflects the state; no <label>, per
+              this bar's "no <label> element" contract. */}
+          <Button
+            className={
+              "filter-bar__epics-btn" + (filter.epicsOnly ? " is-active" : "")
+            }
+            aria-pressed={filter.epicsOnly}
+            onClick={() => onEpicsOnly(!filter.epicsOnly)}
+          >
+            Epics only
           </Button>
 
           {/* Moved off the Scry eyebrow line onto the end of this row

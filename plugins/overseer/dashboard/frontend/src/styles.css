@@ -1526,6 +1526,17 @@ body {
   border-radius: var(--qb-btn-wobble-4);
 }
 
+/* Epics-only toggle: quiet by default, gold "pressed" fill when active so it
+   reads as a live filter (matches the topbar toggle's aria-pressed idiom). */
+.filter-bar__epics-btn {
+  border-radius: var(--qb-btn-wobble-3);
+}
+.filter-bar__epics-btn[aria-pressed="true"] {
+  background: var(--qb-gold-chip-bg);
+  border-color: var(--qb-gold-chip-border);
+  color: var(--qb-gold-chip-text);
+}
+
 /* Same neutral base tokens as `.claim-badge` — a quiet count pill, no
    colour of its own to compete with the priority/label chips it sits next
    to. */

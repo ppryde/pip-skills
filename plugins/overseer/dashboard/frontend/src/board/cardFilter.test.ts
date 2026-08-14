@@ -7,7 +7,7 @@ const card = (o: Partial<BoardCard> & { id: string }): BoardCard => ({
   id: o.id, title: o.title ?? o.id, body: o.body ?? "", status: "planned",
   stage: null, complexity: o.complexity ?? null, priority: o.priority ?? null,
   sprint: null, parent: o.parent ?? null, depends_on: [], order: 0,
-  budget: { estimate: null, actual: 0 }, is_epic: false, ready: true,
+  budget: { estimate: null, actual: 0 }, is_epic: o.is_epic ?? false, ready: true,
   rollup: null, created: "", updated: "", checklist: [], labels: o.labels ?? [],
   links: [], pr: null,
 });
@@ -34,6 +34,18 @@ it("priority + complexity are strict equality when set", () => {
   const cs = [card({ id: "A", priority: "P0", complexity: "L" }), card({ id: "B", priority: "P1", complexity: "L" })];
   expect(ids(cs, F({ priority: "P0" }))).toEqual(["A"]);
   expect(ids(cs, F({ complexity: "L" }))).toEqual(["A", "B"]);
+});
+it("epicsOnly shows only epic cards, still respecting the other facets", () => {
+  const cs = [
+    card({ id: "EPIC", is_epic: true }),
+    card({ id: "EPIC2", is_epic: true, priority: "P0" }),
+    card({ id: "K1", parent: "EPIC" }),
+    card({ id: "PLAIN" }),
+  ];
+  expect(ids(cs, F({ epicsOnly: true }))).toEqual(["EPIC", "EPIC2"]);
+  // combines with other facets and with search
+  expect(ids(cs, F({ epicsOnly: true, priority: "P0" }))).toEqual(["EPIC2"]);
+  expect(ids(cs, F({ epicsOnly: true, query: "EPIC2" }))).toEqual(["EPIC2"]);
 });
 it("a search-matched epic reveals ALL its children, bypassing an active label filter", () => {
   const cs = [

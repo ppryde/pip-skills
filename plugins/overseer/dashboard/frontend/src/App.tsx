@@ -114,7 +114,7 @@ function App() {
   // itself. `useCardFilter()` returns a fresh object literal every render,
   // so destructure the pieces used below rather than depending on the
   // whole-object reference.
-  const { filter, setQuery, setPriority, setComplexity, clear, cycleLabel } =
+  const { filter, setQuery, setPriority, setComplexity, setEpicsOnly, clear, cycleLabel } =
     useCardFilter();
   // WF-0XX item 6: the Abandoned lane is opt-OUT now, not opt-in — it used
   // to default hidden (`false`) so a fresh load never showed it, but that
@@ -206,6 +206,7 @@ function App() {
     filter.query === DEFAULT_FILTER.query &&
     filter.priority === DEFAULT_FILTER.priority &&
     filter.complexity === DEFAULT_FILTER.complexity &&
+    filter.epicsOnly === DEFAULT_FILTER.epicsOnly &&
     sameLabelSet(filter.includeLabels, DEFAULT_FILTER.includeLabels) &&
     sameLabelSet(filter.excludeLabels, DEFAULT_FILTER.excludeLabels);
 
@@ -307,6 +308,7 @@ function App() {
           onCycleLabel={cycleLabel}
           onPriority={setPriority}
           onComplexity={setComplexity}
+          onEpicsOnly={setEpicsOnly}
           onClear={clear}
           colorRegistry={board.label_colors}
           // Its own independent "Filters ▾" toggle now (Task 2) — see the

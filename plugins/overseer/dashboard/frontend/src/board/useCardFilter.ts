@@ -30,6 +30,7 @@ function looksLikeFilter(v: unknown): v is Partial<FilterState> {
   if ("complexity" in o && o.complexity !== null && typeof o.complexity !== "string") return false;
   if ("includeLabels" in o && !isStringArray(o.includeLabels)) return false;
   if ("excludeLabels" in o && !isStringArray(o.excludeLabels)) return false;
+  if ("epicsOnly" in o && typeof o.epicsOnly !== "boolean") return false;
   return true;
 }
 
@@ -65,6 +66,10 @@ export function useCardFilter() {
     (complexity: string | null) => setFilter((f) => ({ ...f, complexity })),
     [],
   );
+  const setEpicsOnly = useCallback(
+    (epicsOnly: boolean) => setFilter((f) => ({ ...f, epicsOnly })),
+    [],
+  );
   const clear = useCallback(() => setFilter(freshDefault()), []);
 
   const cycleLabel = useCallback(
@@ -85,5 +90,5 @@ export function useCardFilter() {
     [],
   );
 
-  return { filter, setQuery, setPriority, setComplexity, clear, cycleLabel };
+  return { filter, setQuery, setPriority, setComplexity, setEpicsOnly, clear, cycleLabel };
 }
