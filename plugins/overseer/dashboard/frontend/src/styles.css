@@ -3102,6 +3102,13 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.25rem;
+  /* Reserve room on the right for the absolute × close button so the
+     right-aligned Edit button never sits under it. */
+  padding-right: 2.75rem;
+}
+/* Edit moved onto the top (banner) row, pushed to the right. */
+.card-drawer__edit-btn {
+  margin-left: auto;
 }
 
 .card-drawer__banner {
@@ -3139,6 +3146,9 @@ body {
   font-weight: 800;
   font-size: 30px;
   color: var(--qb-ink-900);
+  /* Fills the row now that Edit has moved up to the banner row. */
+  flex: 1;
+  min-width: 0;
 }
 
 /* Title/body edit mode (Task 8) — the title row pairs the read-only <h2>

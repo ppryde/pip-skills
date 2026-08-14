@@ -351,6 +351,16 @@ function CardDetailDrawer({
                     ))}
                   </span>
                 )}
+                {!editing && (
+                  <Button
+                    className="card-drawer__edit-btn"
+                    variant="neutral"
+                    onClick={() => setEditing(true)}
+                    disabled={inFlight}
+                  >
+                    Edit
+                  </Button>
+                )}
               </div>
               {editing ? (
                 <Input
@@ -373,13 +383,6 @@ function CardDetailDrawer({
                       {STAGE_LABELS[detail.stage]}
                     </span>
                   )}
-                  <Button
-                    variant="neutral"
-                    onClick={() => setEditing(true)}
-                    disabled={inFlight}
-                  >
-                    Edit
-                  </Button>
                 </div>
               )}
               <div className="card-drawer__facts">
