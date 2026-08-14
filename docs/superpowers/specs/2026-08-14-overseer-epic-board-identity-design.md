@@ -84,18 +84,20 @@ Reuse the existing helpers: `orderChildrenForTrail`, `statusGroupOf`, `weightOf`
 - `Lane.tsx`: accept `childrenByEpic: Map<string, BoardCard[]>` and `cardsById: Map<string, BoardCard>`; for an epic card pass `childCards={childrenByEpic.get(card.id) ?? []}` and `cardsById={cardsById}` to `<EpicCard>`.
 - New helper `groupChildrenByEpic(cards): Map<string, BoardCard[]>` in `board/` (pure, unit-tested).
 
-## Open decision (needs a call) — does expand still highlight children across lanes?
+## Expand behaviour — inline list AND cross-lane dimming (both)
 
-Today `expanded` (`highlightedEpicId === card.id`) dims every non-child card across all lanes. With the new inline sub-quest list, that cross-lane highlight is arguably redundant.
+The expand toggle (`highlightedEpicId === card.id`) does **both**, on the one toggle:
+1. renders the epic's inline sub-quest quest-log (new, this spec), and
+2. keeps the existing cross-lane child-highlight — dimming every non-child card across all lanes (unchanged).
 
-**Default chosen for this spec:** the expand toggle drives the **inline sub-quest list only**; the cross-lane child-highlight/dimming is **retired**. Rationale: the inline list shows the children directly, so hunting for dimmed children across lanes is no longer needed, and one toggle doing two big visual things is busy. If we'd rather keep both, it's a small change (leave the existing `highlightedEpicId`-driven dimming wired in `Board`/`Lane`). Flagged for the user-review gate.
+So no existing behaviour is removed: the `highlightedEpicId` / `onToggleEpicHighlight` wiring in `Board`/`Lane` and the dimming logic stay exactly as they are; this pass only *adds* the inline list (and the bottom-bar toggle that drives the same state). (Decided at the user-review gate.)
 
 ## Testing
 
 - `groupChildrenByEpic` — unit test: groups by `parent`, epics with no children → absent/empty, non-epic parents included correctly.
 - `EpicCard` — RTL tests: renders the seal (via class), the rollup-based coins on row 2, the `N / M quests` count, the expand button only when there are children; expanding renders the sub-quest rows with the right glyph/strike/date-or-weight per child status; the expand click does not open the drawer (`stopPropagation`).
 - `TileShell` — epic coins use rollup, not budget (a `is_epic` card with a rollup renders `actual/estimate` from the rollup); non-epic coins unchanged.
-- Update existing `EpicCard`/`Board`/`Lane` tests for the retired `.epic-card__rollup` line and the new bottom bar / removed cross-lane highlight (if that default holds).
+- Update existing `EpicCard` tests for the retired `.epic-card__rollup` line and the new bottom bar. The cross-lane child-highlight/dimming is KEPT — its existing `Board`/`Lane` tests stay green unchanged.
 
 ## Mechanics
 
@@ -110,5 +112,5 @@ Today `expanded` (`highlightedEpicId === card.id`) dims every non-child card acr
 | Coins | Rollup sum (`actual / estimate`) in the usual row-2 spot |
 | Bottom bar | `N / M quests` count + `▸/▾ sub-quests` expand toggle |
 | Expanded box | Inset-parchment quest log, trail-ordered rows, Atlas row semantics |
-| Expand behaviour | Inline list only; cross-lane highlight retired (see open decision) |
+| Expand behaviour | Inline list AND cross-lane child-highlight (both kept) |
 | Atlas `AtlasRailCard` | Out of scope — later pass |
