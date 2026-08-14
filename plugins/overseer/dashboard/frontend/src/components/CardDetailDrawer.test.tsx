@@ -196,13 +196,10 @@ describe("<CardDetailDrawer/>", () => {
     expect(screen.getByText("Do steps 1, 2, 3.")).toBeInTheDocument();
     expect(screen.getByText("P1")).toBeInTheDocument();
     expect(screen.getByText(/in-flight/)).toBeInTheDocument();
-    // Stage now renders as the title-row chip (STAGE_LABELS) rather than
-    // appended to the status-fact text — see CardDetailDrawer's stage-chip.
-    // The banner pill ALSO reads "Implementation" (WF-030 chunk 2), so this
-    // scopes to the chip specifically rather than screen.getByText, which
-    // would ambiguously match both.
+    // Stage is shown by the banner pill (WF-030) — the redundant, floating
+    // title-row stage chip was removed.
     expect(
-      container.querySelector(".card-drawer__stage-chip")
+      container.querySelector(".card-drawer__banner")
     ).toHaveTextContent("Implementation");
   });
 

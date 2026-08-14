@@ -3167,19 +3167,6 @@ body {
   height: 1.4em;
   flex: none;
 }
-.card-drawer__stage-chip {
-  font-size: 0.7rem;
-  padding: 0.05rem 0.4rem;
-  border-radius: 4px;
-  background: var(--qb-chip-bg, rgba(0, 0, 0, 0.06));
-  color: inherit;
-}
-@media (prefers-color-scheme: dark) {
-  .card-drawer__stage-chip {
-    background: rgba(255, 255, 255, 0.08);
-  }
-}
-
 /* WF-097 follow-up: renders via `<Input>` (CardDetailDrawer.tsx), so the
    plain bordered-field chrome (background/border/focus border-swap) that used
    to live here — identical to `.qb-input`'s own, which was factored FROM this
