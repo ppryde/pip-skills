@@ -2105,7 +2105,7 @@ body {
 .card-tile__id {
   /* Silkscreen pixel font — matches the detail drawer's `.card-drawer__id`. */
   font-family: var(--qb-font-mono);
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   color: var(--legacy-color-6b7280);
 }
 
@@ -2925,7 +2925,7 @@ body {
   cursor: pointer;
   font: inherit;
   font-weight: 700;
-  color: #7a5a1a;
+  color: var(--qb-gold-chip-text);
 }
 
 /* Inline quest log — inset parchment, never indigo. */
