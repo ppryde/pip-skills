@@ -1826,7 +1826,7 @@ body {
 .lane__cards {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.85rem;
   padding: 0.5rem;
 }
 
@@ -2923,10 +2923,17 @@ body {
 /* Epic identity: warmer parchment body + a gold/orange drag spine down the
    left. The spine is painted as the card's OWN left-strip background, so the
    card's border-radius clips it to the rounded corners — no square edge. The
-   rail (stage icon + grip) sits over it. */
+   colours are the board's orange/gold muted toward the pastel palette (mixed
+   with a warm off-white). `padding-left` is trimmed so the rail's icon centres
+   on the 46px strip rather than sitting right-of-centre. */
 .epic-card {
+  padding-left: 9px;
   background:
-    linear-gradient(180deg, var(--qb-accent-orange-fill), var(--qb-gold-coin-fill))
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--qb-accent-orange-fill) 58%, #fff4e2),
+        color-mix(in srgb, var(--qb-gold-coin-fill) 58%, #fff4e2)
+      )
       left top / 46px 100% no-repeat,
     #f7ecd6;
 }
