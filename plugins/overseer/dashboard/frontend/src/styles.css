@@ -2927,14 +2927,14 @@ body {
 .epic-card__subquest {
   display: flex;
   gap: 7px;
-  align-items: baseline;
+  align-items: center;
   padding: 3px 0;
   color: #4a4033;
   border-bottom: 1px dashed rgba(150, 120, 70, 0.28);
   cursor: pointer;
 }
 .epic-card__subquest:last-child { border-bottom: none; }
-.epic-card__subquest-glyph { width: 14px; text-align: center; flex: none; }
+.epic-card__subquest-glyph { width: 16px; text-align: center; flex: none; font-size: 1rem; line-height: 1; }
 .epic-card__subquest--done .epic-card__subquest-title { text-decoration: line-through; opacity: 0.65; }
 .epic-card__subquest--done { color: var(--qb-status-done-strong); }
 .epic-card__subquest--prog .epic-card__subquest-glyph,
