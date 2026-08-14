@@ -2,7 +2,7 @@
 reviewer list) into a ResolvedReview the orchestrator can execute."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -73,7 +73,7 @@ def _reviewers(raw: dict) -> tuple[ReviewerRef, ...]:
 def resolve_profile(config: dict, profile: str | None) -> ResolvedReview:
     defaults = config.get("defaults", {}) or {}
     profiles = config.get("profiles", {}) or {}
-    name = profile or defaults.get("profile")
+    name = profile if profile is not None else defaults.get("profile")
     if name is None:
         raise ConfigError("no profile given and no defaults.profile set")
     if name not in profiles:

@@ -25,6 +25,11 @@ def test_parse_clone_reviewer_key():
     assert ref == ReviewerRef("clone:danvk", "clone", "danvk", "pragmatic")
 
 
+def test_parse_clone_reviewer_key_empty_alias_raises():
+    with pytest.raises(ConfigError, match="alias"):
+        parse_reviewer_key("clone:", "strict")
+
+
 def test_resolve_profile_merges_defaults_and_strictness(tmp_path):
     cfg = load_config(_write(tmp_path, """
         defaults: { strategy: committee, scope: changed }
@@ -79,5 +84,12 @@ def test_load_config_missing_returns_empty(tmp_path):
 def test_load_config_malformed_raises(tmp_path):
     bad = tmp_path / "config.yml"
     bad.write_text("profiles: [unbalanced")
+    with pytest.raises(ConfigError):
+        load_config(bad)
+
+
+def test_load_config_non_mapping_root_raises(tmp_path):
+    bad = tmp_path / "config.yml"
+    bad.write_text("- a\n- b")
     with pytest.raises(ConfigError):
         load_config(bad)
