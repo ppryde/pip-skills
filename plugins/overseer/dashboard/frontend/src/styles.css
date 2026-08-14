@@ -2144,11 +2144,22 @@ body {
 }
 
 /* Parent-epic reference under the status row — quiet, mono to echo the id. */
+/* Parent-epic reference — a quiet label chip (not a mono "heading"). Inline-
+   flex so it hugs its content and sits left-aligned on its own line under the
+   status row. */
 .card-tile__parent {
-  margin-top: 3px;
-  font-family: var(--qb-font-mono);
-  font-size: 0.65rem;
-  color: var(--legacy-color-6b7280);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 4px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--legacy-radius-3px);
+  background: var(--qb-parchment-muted-2);
+  color: var(--qb-ink-500);
+  border: 1px solid var(--qb-line-dashed);
+  white-space: nowrap;
 }
 
 /*
