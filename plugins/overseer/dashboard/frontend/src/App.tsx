@@ -9,7 +9,6 @@ import UnbegunHolding from "./components/UnbegunHolding";
 import ClearDialog from "./components/ClearDialog";
 import DesignLibrary from "./ui/DesignLibrary";
 import { useBoard } from "./board/useBoard";
-import { useHideTopBarOnScroll } from "./board/useHideTopBarOnScroll";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
 import { useCardFilter } from "./board/useCardFilter";
@@ -117,10 +116,6 @@ function App() {
   // whole-object reference.
   const { filter, setQuery, setPriority, setComplexity, setEpicsOnly, clear, cycleLabel } =
     useCardFilter();
-
-  // Short-landscape only: the top bar collapses away on scroll-down and
-  // returns on scroll-up (see useHideTopBarOnScroll + styles.css).
-  const topBarHidden = useHideTopBarOnScroll();
   // WF-0XX item 6: the Abandoned lane is opt-OUT now, not opt-in — it used
   // to default hidden (`false`) so a fresh load never showed it, but that
   // made the lane (and its nav icon) invisible unless a user discovered the
@@ -240,7 +235,6 @@ function App() {
   return (
     <div className="app-shell">
       <TopBar
-        hidden={topBarHidden}
         context={context}
         limits={limits}
         quarantinedCount={board?.quarantined.length ?? 0}

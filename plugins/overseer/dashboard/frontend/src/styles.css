@@ -763,29 +763,6 @@ body {
   z-index: 5;
 }
 
-/* Short landscape (width > height, limited height): the top bar collapses away
-   on scroll-down and returns on scroll-up, handing its vertical space to the
-   board. `useHideTopBarOnScroll` toggles `.topbar--hidden` under this EXACT
-   media query (keep the two in lock-step). Collapsing max-height + padding (not
-   a transform) is what actually reclaims the space in the flex column. */
-@media (orientation: landscape) and (max-height: 600px) {
-  .topbar {
-    overflow: hidden;
-    max-height: 60vh;
-    transition:
-      max-height 0.25s ease,
-      padding 0.2s ease,
-      opacity 0.2s ease;
-  }
-  .topbar--hidden {
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    opacity: 0;
-    pointer-events: none;
-  }
-}
-
 .topbar__identity {
   display: flex;
   align-items: center;
