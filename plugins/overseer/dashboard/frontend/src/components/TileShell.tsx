@@ -168,15 +168,36 @@ function TileShell({
 
   return (
     <div className={className} data-card-id={card.id} ref={setNodeRef} style={style}>
-      <button
-        type="button"
-        className="card-tile__handle"
-        aria-label={dragSource ? "Drag to reorder or move" : "Not draggable"}
-        disabled={sortableDisabled}
-        {...(sortableDisabled ? {} : { ...attributes, ...listeners })}
-      >
-        ⠿
-      </button>
+      {/* Left rail (experiment): a coloured drag spine with the stage icon at
+          its top, then the drag grip below. The stage InfoTooltip and the
+          handle button are SIBLINGS here (never nested), so there's no
+          nested-interactive a11y violation and the drag listeners stay on the
+          grip alone. */}
+      <div className="card-tile__rail">
+        <InfoTooltip
+          label={iconKeyLabel(cardIconKey(card))}
+          triggerClassName="card-tile__lifecycle-trigger"
+          trigger={
+            <img
+              className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
+              src={laneIcon(cardIconKey(card))}
+              alt=""
+              aria-hidden="true"
+            />
+          }
+        >
+          {iconKeyLabel(cardIconKey(card))}
+        </InfoTooltip>
+        <button
+          type="button"
+          className="card-tile__handle"
+          aria-label={dragSource ? "Drag to reorder or move" : "Not draggable"}
+          disabled={sortableDisabled}
+          {...(sortableDisabled ? {} : { ...attributes, ...listeners })}
+        >
+          ⠿
+        </button>
+      </div>
       {/*
         The body is a PLAIN container (no `role="button"`, no tabIndex): a
         `role="button"` here would nest the interactive `headerExtra` (the
@@ -191,20 +212,6 @@ function TileShell({
         onClick={onOpen ? () => onOpen(card.id) : undefined}
       >
         <div className="card-tile__header">
-          <InfoTooltip
-            label={iconKeyLabel(cardIconKey(card))}
-            triggerClassName="card-tile__lifecycle-trigger"
-            trigger={
-              <img
-                className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
-                src={laneIcon(cardIconKey(card))}
-                alt=""
-                aria-hidden="true"
-              />
-            }
-          >
-            {iconKeyLabel(cardIconKey(card))}
-          </InfoTooltip>
           <span className="card-tile__id">{card.id}</span>
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly

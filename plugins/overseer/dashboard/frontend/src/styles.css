@@ -2067,12 +2067,30 @@ body {
   background: var(--card-accent-fill);
 }
 
-.card-tile__handle {
+/* Left rail (experiment): a coloured drag spine holding the stage icon at its
+   top and the drag grip below. Full-bleed on the left/top/bottom via negative
+   margins that cancel the card's 14px padding. */
+.card-tile__rail {
   flex: 0 0 auto;
-  color: var(--legacy-color-9ca3af);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: -14px 0 -14px -14px;
+  padding: 8px 5px;
+  background: linear-gradient(180deg, var(--qb-accent-orange-fill), var(--qb-gold-coin-fill));
+  border-radius: var(--qb-radius-card-a) 0 0 var(--qb-radius-card-a);
+}
+
+.card-tile__handle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--qb-gold-chip-text);
   cursor: grab;
   user-select: none;
-  padding: 0.1rem 0.2rem 0 0;
+  padding: 0;
   border: none;
   background: transparent;
   font: inherit;
