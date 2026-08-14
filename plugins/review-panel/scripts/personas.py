@@ -32,7 +32,10 @@ def read_persona(alias: str) -> Persona | None:
     text = path.read_text()
     match = _FRONTMATTER_RE.match(text)
     if match:
-        front = yaml.safe_load(match.group(1)) or {}
+        try:
+            front = yaml.safe_load(match.group(1)) or {}
+        except yaml.YAMLError:
+            front = {}
         body = match.group(2)
     else:
         front, body = {}, text

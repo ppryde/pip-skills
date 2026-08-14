@@ -33,3 +33,11 @@ def test_read_persona_without_frontmatter_is_all_body():
     p = read_persona("plain")
     assert p.frontmatter == {}
     assert "do the thing" in p.body
+
+
+def test_read_persona_malformed_frontmatter_degrades_to_empty():
+    _persona("broken", "---\nbad: [unclosed\n---\n## Rules\n- keep going\n")
+    p = read_persona("broken")
+    assert p is not None
+    assert p.frontmatter == {}
+    assert "keep going" in p.body
