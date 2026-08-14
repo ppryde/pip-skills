@@ -111,7 +111,11 @@ function TileShell({
   // 2x-overbudget tripwire), everything else shows the live BudgetMeter. Same
   // per-status content the footer used to carry, just relocated up a row.
   const coins =
-    card.status === "done" ? (
+    card.is_epic && card.rollup ? (
+      <BudgetMeter
+        budget={{ estimate: card.rollup.estimate, actual: card.rollup.actual }}
+      />
+    ) : card.status === "done" ? (
       <>
         <span className="card-tile__done-badge" aria-hidden="true">
           <CheckIcon />

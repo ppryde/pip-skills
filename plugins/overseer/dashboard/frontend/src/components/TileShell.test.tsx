@@ -668,3 +668,18 @@ describe("TileShell rarity stars (D2 — XL complexity)", () => {
     });
   });
 });
+
+describe("TileShell epic coins (rollup, not own budget)", () => {
+  it("an epic's coins come from the rollup, not its own budget", () => {
+    const { container } = renderTile(
+      card({
+        id: "WF-EPIC", is_epic: true,
+        budget: { estimate: 100, actual: 50 },
+        rollup: { done: 7, total: 12, estimate: 20000, actual: 8400 },
+      })
+    );
+    // BudgetMeter renders formatTokens(actual) / formatTokens(estimate)
+    expect(container.querySelector(".budget-meter__value")?.textContent).toContain("8.4k");
+    expect(container.querySelector(".budget-meter__value")?.textContent).toContain("20k");
+  });
+});
