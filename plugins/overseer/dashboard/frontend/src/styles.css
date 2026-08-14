@@ -2945,6 +2945,7 @@ body {
   padding: 3px 0;
   color: #4a4033;
   border-bottom: 1px dashed rgba(150, 120, 70, 0.28);
+  cursor: pointer;
 }
 .epic-card__subquest:last-child { border-bottom: none; }
 .epic-card__subquest-glyph { width: 14px; text-align: center; flex: none; }

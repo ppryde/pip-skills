@@ -118,7 +118,17 @@ function EpicCard({
               .join(" ");
 
             return (
-              <li key={child.id} className={rowClassName}>
+              <li
+                key={child.id}
+                className={rowClassName}
+                onClick={(e) => {
+                  // Open the SUB-QUEST in the drawer, not the epic —
+                  // stopPropagation keeps the click from bubbling to the tile
+                  // body's onOpen (which opens this epic).
+                  e.stopPropagation();
+                  onOpen?.(child.id);
+                }}
+              >
                 <span className="epic-card__subquest-glyph" aria-hidden="true">
                   {glyph}
                 </span>

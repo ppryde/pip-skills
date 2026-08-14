@@ -71,4 +71,19 @@ describe("<EpicCard/> bottom bar + inline sub-quest log", () => {
     renderEpic(<EpicCard card={epic} childCards={[]} expanded={false} onToggleExpand={vi.fn()} />);
     expect(screen.queryByRole("button", { name: /sub-quests/i })).toBeNull();
   });
+
+  it("clicking a sub-quest row opens THAT child, not the epic", () => {
+    const epic = card({ id: "WF-086", is_epic: true, rollup: { done: 1, total: 2, estimate: 20000, actual: 8400 } });
+    const kids = [
+      card({ id: "K1", parent: "WF-086", status: "done", updated: "2026-08-10" }),
+      card({ id: "K2", parent: "WF-086", status: "planned", complexity: "L" }),
+    ];
+    const onOpen = vi.fn();
+    renderEpic(
+      <EpicCard card={epic} childCards={kids} expanded={true} onToggleExpand={vi.fn()} onOpen={onOpen} />
+    );
+    fireEvent.click(screen.getByText("K2"));
+    expect(onOpen).toHaveBeenCalledWith("K2");
+    expect(onOpen).not.toHaveBeenCalledWith("WF-086");
+  });
 });
