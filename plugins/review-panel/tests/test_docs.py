@@ -3,10 +3,12 @@ from pathlib import Path
 from scripts.discovery import discover_strategies
 from scripts.discovery import discover_builtin_reviewers
 from scripts.doclint import required_sections, lint_doc
+from scripts.config import load_config, resolve_profile
 
 PLUGIN = Path(__file__).resolve().parents[1]
 STRATEGIES = PLUGIN / "skills" / "strategies"
 REVIEWERS = PLUGIN / "skills" / "reviewers"
+SHIPPED_CONFIG = PLUGIN / "templates" / "config.yml"
 
 
 def test_five_strategies_present():
@@ -40,3 +42,20 @@ def test_general_reviewer_present():
 
 def test_general_reviewer_has_required_sections():
     assert lint_doc(REVIEWERS / "general.md", "reviewer") == []
+
+
+def test_shipped_profiles_all_resolve():
+    cfg = load_config(SHIPPED_CONFIG)
+    profiles = cfg["profiles"]
+    assert "pre-merge" in profiles
+    for name in profiles:
+        r = resolve_profile(cfg, name)
+        assert r.reviewers  # non-empty
+        assert r.strategy in {
+            "committee", "blind", "informed", "adversarial", "dual-tiebreaker"}
+
+
+def test_shipped_default_profile_is_set():
+    cfg = load_config(SHIPPED_CONFIG)
+    # resolve_profile(None) must work -> defaults.profile present
+    assert resolve_profile(cfg, None).reviewers

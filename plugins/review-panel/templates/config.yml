@@ -1,0 +1,30 @@
+# .review-panel/config.yml — copy into your repo root and edit.
+# Reviewer keys are a built-in name (e.g. general) or clone:<alias> for a
+# review-clone persona. Strictness: strict | pragmatic | aspirational.
+defaults:
+  strategy: committee
+  scope: changed
+  profile: pre-merge
+
+profiles:
+  pre-merge:
+    strategy: committee
+    scope: changed
+    reviewers: { general: pragmatic }
+
+  quick-pass:
+    strategy: blind
+    reviewers: { general: aspirational }
+
+  high-risk:
+    strategy: adversarial
+    reviewers: { general: strict }
+
+  design-heavy:
+    strategy: informed
+    context: []          # add spec/arch paths, e.g. [docs/spec.md]
+    reviewers: { general: pragmatic }
+
+output:
+  default: report        # report | inline | interactive
+  file: .review-panel/last-review.md
