@@ -2940,8 +2940,11 @@ body {
    on the 46px strip rather than sitting right-of-centre. */
 .epic-card {
   padding-left: 6px;
-  /* Always an orange border, whatever lane the epic sits in. */
-  border-color: var(--qb-accent-orange-border);
+  /* Always the orange accent — border AND matching shadow — whatever lane the
+     epic sits in. Overriding the accent VARIABLES (not border-color directly)
+     keeps the border and the accent shadow in sync, like a normal card. */
+  --card-accent-border: var(--qb-accent-orange-border);
+  --card-accent-shadow: var(--qb-accent-orange-cardshadow);
   background:
     linear-gradient(
         180deg,
