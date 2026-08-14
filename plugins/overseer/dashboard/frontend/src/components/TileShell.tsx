@@ -166,38 +166,49 @@ function TileShell({
     .filter(Boolean)
     .join(" ");
 
+  const stageIcon = (
+    <InfoTooltip
+      label={iconKeyLabel(cardIconKey(card))}
+      triggerClassName="card-tile__lifecycle-trigger"
+      trigger={
+        <img
+          className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
+          src={laneIcon(cardIconKey(card))}
+          alt=""
+          aria-hidden="true"
+        />
+      }
+    >
+      {iconKeyLabel(cardIconKey(card))}
+    </InfoTooltip>
+  );
+
+  const handle = (
+    <button
+      type="button"
+      className="card-tile__handle"
+      aria-label={dragSource ? "Drag to reorder or move" : "Not draggable"}
+      disabled={sortableDisabled}
+      {...(sortableDisabled ? {} : { ...attributes, ...listeners })}
+    >
+      ⠿
+    </button>
+  );
+
   return (
     <div className={className} data-card-id={card.id} ref={setNodeRef} style={style}>
-      {/* Left rail (experiment): a coloured drag spine with the stage icon at
-          its top, then the drag grip below. The stage InfoTooltip and the
-          handle button are SIBLINGS here (never nested), so there's no
-          nested-interactive a11y violation and the drag listeners stay on the
-          grip alone. */}
-      <div className="card-tile__rail">
-        <InfoTooltip
-          label={iconKeyLabel(cardIconKey(card))}
-          triggerClassName="card-tile__lifecycle-trigger"
-          trigger={
-            <img
-              className={"card-tile__lifecycle-icon" + (glowing ? " is-glowing" : "")}
-              src={laneIcon(cardIconKey(card))}
-              alt=""
-              aria-hidden="true"
-            />
-          }
-        >
-          {iconKeyLabel(cardIconKey(card))}
-        </InfoTooltip>
-        <button
-          type="button"
-          className="card-tile__handle"
-          aria-label={dragSource ? "Drag to reorder or move" : "Not draggable"}
-          disabled={sortableDisabled}
-          {...(sortableDisabled ? {} : { ...attributes, ...listeners })}
-        >
-          ⠿
-        </button>
-      </div>
+      {/* Epics get a coloured drag "spine": the stage icon at its top, the
+          drag grip below (siblings, never nested — so no nested-interactive
+          a11y issue and the drag listeners stay on the grip alone). Normal
+          cards keep the plain grip and show the stage icon in the header. */}
+      {card.is_epic ? (
+        <div className="card-tile__rail">
+          {stageIcon}
+          {handle}
+        </div>
+      ) : (
+        handle
+      )}
       {/*
         The body is a PLAIN container (no `role="button"`, no tabIndex): a
         `role="button"` here would nest the interactive `headerExtra` (the
@@ -212,6 +223,7 @@ function TileShell({
         onClick={onOpen ? () => onOpen(card.id) : undefined}
       >
         <div className="card-tile__header">
+          {!card.is_epic && stageIcon}
           <span className="card-tile__id">{card.id}</span>
           {/* Rarity stars (HANDOFF): complexity S/M/L/XL -> 1-4 filled pips
               (D2 — XL added a 4th slot so an XL card renders visibly
