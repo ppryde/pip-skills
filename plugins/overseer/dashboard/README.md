@@ -62,8 +62,18 @@ Run from the repo root:
 .venv/bin/python plugins/overseer/dashboard/serve.py
 ```
 
+For a quieter start with preflight tick output — reuses an already-running
+server instead of colliding on the port, asks whether to bind local-machine-only
+(`127.0.0.1`, default) or the local network (`0.0.0.0`), and warns if `dist/` is
+stale — use the launcher (it passes every flag through to `serve.py`, and skips
+the bind-scope question when `--host` is given or there's no TTY):
+
+```bash
+plugins/overseer/dashboard/bringup.sh
+```
+
 (or, from a Claude Code session in this repo, run the `/dashboard` command —
-see `plugins/overseer/commands/dashboard.md`.)
+which now wraps `bringup.sh`; see `plugins/overseer/commands/dashboard.md`.)
 
 This resolves `--root` (default: current directory) to the overseer/vigil
 state root to serve, builds the FastAPI app via
