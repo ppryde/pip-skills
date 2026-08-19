@@ -1792,10 +1792,11 @@ def _forwardable_argv(raw_argv: list[str]) -> list[str]:
     return out
 
 
-def _run_remote(url: str, raw_argv: list[str]) -> int:
+def _run_remote(url: str, raw_argv: list[str], root: Path) -> int:
     """Forward the whole command to the host board API and relay the result."""
     from scripts import remote  # lazy: httpx only needed on the remote path
-    token = os.environ.get("OVERSEER_REMOTE_TOKEN")
+    from scripts.remote_token import read_remote_token
+    token = os.environ.get("OVERSEER_REMOTE_TOKEN") or read_remote_token(root)
     forward = _forwardable_argv(raw_argv)
     stdin = None if sys.stdin.isatty() else sys.stdin.read()
     try:
@@ -1818,7 +1819,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:  # argparse --help (0) or usage error (2)
         return 0 if not exc.code else 1
     if getattr(args, "remote", None):
-        return _run_remote(args.remote, raw)
+        return _run_remote(args.remote, raw, args.root)
     try:
         result: int = args.func(args)
         return result

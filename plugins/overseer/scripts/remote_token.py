@@ -26,7 +26,7 @@ def read_remote_token(root: str | os.PathLike[str]) -> str | None:
     """
     try:
         token = remote_token_path(root).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     return token or None
 

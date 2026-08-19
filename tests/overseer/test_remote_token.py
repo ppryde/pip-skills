@@ -39,3 +39,10 @@ def test_write_tightens_preexisting_loose_mode(tmp_path):
     write_remote_token(tmp_path, "new")
     assert stat.S_IMODE(p.stat().st_mode) == 0o600
     assert read_remote_token(tmp_path) == "new"
+
+
+def test_read_non_utf8_returns_none(tmp_path):
+    p = remote_token_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_bytes(b"\xff\xfe\x00\x01corrupt")
+    assert read_remote_token(tmp_path) is None

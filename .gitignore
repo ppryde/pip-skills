@@ -8,3 +8,4 @@ __pycache__/
 /assets/rpg-icons/
 /assets/rpg-icons-transparent/
 .overseer/config.local.json
+.overseer/remote-token
