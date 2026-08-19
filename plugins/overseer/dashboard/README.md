@@ -70,6 +70,9 @@ state root to serve, builds the FastAPI app via
 `backend/app/main.py::create_app`, opens `http://127.0.0.1:8770/` in your
 browser, and serves until you Ctrl-C it.
 
+For a dev container that needs to reach a board living on the host, run the
+LAN-only board API service instead — see `BOARD_API.md`.
+
 Options:
 
 | Flag | Default | Meaning |

@@ -22,31 +22,11 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import config, db, liveness  # noqa: E402
-from scripts.calibration import BANDS, calibrate  # noqa: E402
-from scripts.conflicts import find_conflicts  # noqa: E402
-from scripts.index import rebuild_index  # noqa: E402
-from scripts.models import (  # noqa: E402
-    Card, CardParseError, LABEL_PALETTE_KEYS, PRIORITIES, format_tokens, parse_tokens,
-)
-from scripts.relations import would_cycle_depends, would_cycle_parent  # noqa: E402
-from scripts.resume import format_report, handoff_data, handoff_report, resume_entries  # noqa: E402
-from scripts.sprints import (  # noqa: E402
-    SPRINT_STATUSES,
-    Sprint,
-    load_sprint,
-    retro_rollup,
-    rollup,
-    save_sprint,
-    sprint_path,
-)
-from scripts.store import (  # noqa: E402
-    derive_repo_label,
-    init_workflow,
-    state_root,
-)
-from scripts.usage import append_usage, load_usage, summarise  # noqa: E402
-from scripts.knowledge import (  # noqa: E402
+from scripts import config, db, liveness
+from scripts.calibration import BANDS, calibrate
+from scripts.conflicts import find_conflicts
+from scripts.index import rebuild_index
+from scripts.knowledge import (
     Fact,
     FactParseError,
     ensure_kb,
@@ -59,6 +39,31 @@ from scripts.knowledge import (  # noqa: E402
     retire_fact_file,
     save_fact,
 )
+from scripts.models import (
+    LABEL_PALETTE_KEYS,
+    PRIORITIES,
+    Card,
+    CardParseError,
+    format_tokens,
+    parse_tokens,
+)
+from scripts.relations import would_cycle_depends, would_cycle_parent
+from scripts.resume import format_report, handoff_data, handoff_report, resume_entries
+from scripts.sprints import (
+    SPRINT_STATUSES,
+    Sprint,
+    load_sprint,
+    retro_rollup,
+    rollup,
+    save_sprint,
+    sprint_path,
+)
+from scripts.store import (
+    derive_repo_label,
+    init_workflow,
+    state_root,
+)
+from scripts.usage import append_usage, load_usage, summarise
 
 DEFAULT_TTL = 30  # minutes — TTL fallback for reclaim_stale when census is down
 
@@ -1506,12 +1511,24 @@ def cmd_label_color_list(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="overseer", description=__doc__)
+    # allow_abbrev=False: reject abbreviated optionals (e.g. `--roo`, `--rem`).
+    # The remote /api/exec strippers match `--root`/`--remote` exactly, so an
+    # abbreviation would otherwise slip past them yet still resolve here —
+    # `--roo /evil` overrides the pinned root, `--rem URL` re-forwards outbound
+    # (SSRF + token exfil). Rejecting abbreviations fails loud instead. argparse
+    # never abbreviates subcommand NAMES, so verb matching is unaffected.
+    parser = argparse.ArgumentParser(prog="overseer", description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument(
         "--session-id", dest="session_id", default=None,
         help="task-list lookup key for this session (hook stdin's session_id "
              "wins when invoked as a hook; used for scripted/manual calls)",
+    )
+    parser.add_argument(
+        "--remote",
+        default=os.environ.get("OVERSEER_REMOTE"),
+        help="Forward this command to a remote overseer board API at URL "
+             "(default: $OVERSEER_REMOTE). Runs the verb on the host board.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1756,12 +1773,52 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _forwardable_argv(raw_argv: list[str]) -> list[str]:
+    """Strip the --remote flag (and its value) from raw argv before forwarding,
+    so the host never re-forwards. --root is left for the host to strip/replace
+    with its pinned root."""
+    out: list[str] = []
+    skip = False
+    for tok in raw_argv:
+        if skip:
+            skip = False
+            continue
+        if tok == "--remote":
+            skip = True
+            continue
+        if tok.startswith("--remote="):
+            continue
+        out.append(tok)
+    return out
+
+
+def _run_remote(url: str, raw_argv: list[str]) -> int:
+    """Forward the whole command to the host board API and relay the result."""
+    from scripts import remote  # lazy: httpx only needed on the remote path
+    token = os.environ.get("OVERSEER_REMOTE_TOKEN")
+    forward = _forwardable_argv(raw_argv)
+    stdin = None if sys.stdin.isatty() else sys.stdin.read()
+    try:
+        res = remote.exec_remote(url, token, forward, stdin)
+    except remote.RemoteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if res.stdout:
+        sys.stdout.write(res.stdout)
+    if res.stderr:
+        sys.stderr.write(res.stderr)
+    return res.returncode
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_args(raw)
     except SystemExit as exc:  # argparse --help (0) or usage error (2)
         return 0 if not exc.code else 1
+    if getattr(args, "remote", None):
+        return _run_remote(args.remote, raw)
     try:
         result: int = args.func(args)
         return result
