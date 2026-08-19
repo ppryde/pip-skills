@@ -30,15 +30,42 @@ DEFAULT_PORT = 8771
 REMOTE_TOKEN_ENV = "OVERSEER_REMOTE_TOKEN"
 
 
-def resolve_remote_token(host: str) -> str | None:
-    """The token in effect for this bind: env wins, else auto-gen on a
-    non-loopback bind, else None (a pure-loopback bind may stay token-free)."""
+def resolve_remote_token(host: str, root: Path) -> str | None:
+    """The token in effect for this bind: env wins; loopback stays tokenless;
+    else reuse the persisted token file or generate one and persist it (0600) so
+    a mounted dev container can read it without a manual copy."""
     env = os.environ.get(REMOTE_TOKEN_ENV)
     if env:
         return env
-    if host not in LOOPBACK_HOSTS:
-        return secrets.token_urlsafe(24)
-    return None
+    if host in LOOPBACK_HOSTS:
+        return None
+    from scripts.remote_token import read_remote_token, write_remote_token
+    existing = read_remote_token(root)
+    if existing:
+        return existing
+    token = secrets.token_urlsafe(24)
+    write_remote_token(root, token)
+    return token
+
+
+def _startup_token_lines(token: str | None, env_token: str | None, root: Path) -> list[str]:
+    """Lines to print about the token in effect at startup.
+
+    The token-file line only applies when the token was persisted to (or
+    read from) disk by ``resolve_remote_token`` — never for an
+    ``OVERSEER_REMOTE_TOKEN`` override, which writes no file, so printing
+    that line in the env case would point at a path nothing wrote.
+    """
+    if not token:
+        return []
+    lines = [f"board API token: {token}"]
+    if not env_token:
+        from scripts.remote_token import remote_token_path
+        lines.append(
+            "token file (auto-read by a container mounting this repo): "
+            f"{remote_token_path(root)}"
+        )
+    return lines
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -52,10 +79,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     root = Path(args.root).resolve()
-    token = resolve_remote_token(args.host)
+    env_token = os.environ.get(REMOTE_TOKEN_ENV)
+    token = resolve_remote_token(args.host, root)
     app = create_service_app(root, host=args.host, token=token)
-    if token:
-        print(f"board API token: {token}")
+    for line in _startup_token_lines(token, env_token, root):
+        print(line)
     print(f"serving board API for {root} on http://{args.host}:{args.port}/  (LAN-only)")
     # proxy_headers=False: uvicorn trusts X-Forwarded-For by default. If this
     # LAN-only service were ever fronted by a loopback reverse proxy, that

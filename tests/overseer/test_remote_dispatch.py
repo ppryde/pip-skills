@@ -85,3 +85,31 @@ def test_remote_env_default(monkeypatch):
     monkeypatch.setattr(remote, "exec_remote", fake_exec)
     assert main(["board"]) == 0
     assert seen["url"] == "http://from-env"
+
+
+def test_remote_reads_token_from_file_when_env_unset(monkeypatch, tmp_path, capsys):
+    from scripts.remote_token import write_remote_token
+    from scripts import remote
+    write_remote_token(tmp_path, "file-tok")
+    monkeypatch.delenv("OVERSEER_REMOTE_TOKEN", raising=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    seen = {}
+    monkeypatch.setattr(remote, "exec_remote",
+                        lambda url, token, argv, stdin, **k: seen.update(token=token)
+                        or remote.RemoteResult("", "", 0))
+    assert main(["--root", str(tmp_path), "--remote", "http://h", "board"]) == 0
+    assert seen["token"] == "file-tok"
+
+
+def test_remote_env_token_wins_over_file(monkeypatch, tmp_path):
+    from scripts.remote_token import write_remote_token
+    from scripts import remote
+    write_remote_token(tmp_path, "file-tok")
+    monkeypatch.setenv("OVERSEER_REMOTE_TOKEN", "env-tok")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    seen = {}
+    monkeypatch.setattr(remote, "exec_remote",
+                        lambda url, token, argv, stdin, **k: seen.update(token=token)
+                        or remote.RemoteResult("", "", 0))
+    assert main(["--root", str(tmp_path), "--remote", "http://h", "board"]) == 0
+    assert seen["token"] == "env-tok"
