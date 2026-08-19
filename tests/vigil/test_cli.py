@@ -184,8 +184,15 @@ class TestNudgeHook:
         out = capsys.readouterr().out
         payload = json.loads(out)
         assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-        assert "40%" in payload["hookSpecificOutput"]["additionalContext"]
-        assert "35%" in payload["hookSpecificOutput"]["additionalContext"]
+        ctx = payload["hookSpecificOutput"]["additionalContext"]
+        assert "40%" in ctx
+        assert "35%" in ctx
+        # WF-088: the nudge must firmly guard against handing over while
+        # dispatched subagents are still running — the orchestrator already
+        # knows what it spawned, so this is a hard precondition on its own
+        # judgement, not vague advice.
+        assert "subagent" in ctx.lower()
+        assert "do not hand over" in ctx.lower()
         assert st.gate_active(repo) is True
 
     def test_writes_gate_exactly_once_per_cycle(self, repo, capsys, monkeypatch):

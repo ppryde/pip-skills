@@ -302,7 +302,11 @@ def _maybe_kick_resume(payload: dict[str, object]) -> None:
 _NUDGE_BODY = (
     "**vigil: context at {pct}% — over the {threshold}% threshold.** "
     "At your next reasonable stopping point:\n"
-    "(1) wait for running subagents to finish, or ask them to stop and confirm;\n"
+    "(1) FIRST check your own context for any subagent you dispatched that has "
+    "not yet reported back. Handing over discards this session, so any subagent "
+    "still running would have its work abandoned and its result lost. If ANY are "
+    "outstanding, do NOT hand over yet — wait for them to finish (or stop them "
+    "and confirm) before going further;\n"
     "(2) judge whether this is a sane place to pause — if mid-critical-step, "
     "finish that step first;\n"
     "(3) write a rich handover (what you were doing, what's next, gotchas) and run "
