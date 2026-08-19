@@ -1475,6 +1475,24 @@ class TestBackupRestoreInit:
         assert local["central_dir"] == str(tmp_path / "c")
         assert ".overseer/config.local.json" in (repo / ".gitignore").read_text()
 
+    def test_init_does_not_freeze_env_central_into_local_config(self, tmp_path, monkeypatch):
+        """Regression (WF-087): a non-interactive ``init`` with no ``--central``
+        must NOT persist the env-derived ``OVERSEER_CENTRAL`` into
+        config.local.json. Freezing the env value there pins every future
+        resolution to whatever ephemeral central the env happened to hold at
+        init time, defeating ``central_root()``'s env > config > default
+        precedence (config.py). The key must be omitted so central resolves
+        fresh on each read. An EXPLICIT ``--central`` still persists (covered
+        by ``test_cli_init_writes_config``)."""
+        import subprocess
+        repo = tmp_path / "r"; repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "env-central"))
+        cli.main(["--root", str(repo), "init", "--yes"])
+        local = json.loads((repo / ".overseer" / "config.local.json").read_text())
+        assert "central_dir" not in local
+
 
 class TestLabelColorCommand:
     """F10 registry CLI (WF-067): `label-color set|clear|list`."""

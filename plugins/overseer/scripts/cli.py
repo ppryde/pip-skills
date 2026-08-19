@@ -259,10 +259,19 @@ def cmd_init(args: argparse.Namespace) -> int:
     default_central = str(cfg.central_root(args.root))
     default_backup_dir = ".overseer/backups"
     non_interactive = args.yes or not sys.stdin.isatty()
-    central = args.central or (
-        default_central if non_interactive
-        else input(f"Central folder [{default_central}]: ") or default_central
-    )
+
+    # Persist `central_dir` ONLY when the operator EXPLICITLY chose one — via
+    # `--central` or a non-empty interactive answer. When it falls through to
+    # the default, that default is `central_root()`'s resolution, which reads
+    # `OVERSEER_CENTRAL` first (config.py): freezing it here would pin every
+    # future read to whatever ephemeral env central happened to hold at init
+    # time, defeating the env > config > default precedence. Omit the key so
+    # it resolves fresh on each read (WF-087).
+    central_explicit: str | None = args.central
+    if central_explicit is None and not non_interactive:
+        entered = input(f"Central folder [{default_central}]: ").strip()
+        if entered:
+            central_explicit = entered
     backup_dir_value = args.backup_dir or (
         default_backup_dir if non_interactive
         else input(f"Backup dir [{default_backup_dir}]: ") or default_backup_dir
@@ -270,8 +279,9 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     (base / "config.json").write_text(
         json.dumps({"backup_dir": backup_dir_value}, indent=2))
+    local_config = {"central_dir": central_explicit} if central_explicit else {}
     (base / "config.local.json").write_text(
-        json.dumps({"central_dir": central}, indent=2))
+        json.dumps(local_config, indent=2))
 
     # `base.parent` is the same canonical root `base` itself was resolved
     # against — never a linked worktree's own root — so the gitignore line
@@ -287,7 +297,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     rebuild_index(args.root, args.root.resolve().name, _now())
 
     print(f"initialised {state_root(args.root)} "
-          f"(central={central} backup_dir={backup_dir_value})")
+          f"(central={central_explicit or default_central} "
+          f"backup_dir={backup_dir_value})")
     return 0
 
 
