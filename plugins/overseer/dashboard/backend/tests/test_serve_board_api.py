@@ -36,6 +36,25 @@ def test_resolve_remote_token_reuses_existing_file(monkeypatch, tmp_path):
     assert serve_board_api.resolve_remote_token("0.0.0.0", tmp_path) == "persisted-tok"  # stable across restarts
 
 
+def test_startup_token_lines_no_token():
+    assert serve_board_api._startup_token_lines(None, None, Path("/x")) == []
+
+
+def test_startup_token_lines_env_token_omits_file_line(tmp_path):
+    # OVERSEER_REMOTE_TOKEN never gets a file written for it — the file-location
+    # line would point at a path nothing wrote, so it must not print.
+    lines = serve_board_api._startup_token_lines("env-tok", "env-tok", tmp_path)
+    assert lines == ["board API token: env-tok"]
+
+
+def test_startup_token_lines_file_token_includes_file_line(tmp_path):
+    lines = serve_board_api._startup_token_lines("gen-tok", None, tmp_path)
+    assert lines[0] == "board API token: gen-tok"
+    assert len(lines) == 2
+    assert "token file" in lines[1]
+    assert str(tmp_path) in lines[1]
+
+
 def test_parse_args_defaults():
     args = serve_board_api.parse_args([])
     assert args.host == "0.0.0.0"
