@@ -23,8 +23,8 @@ _BACKEND_DIR = Path(__file__).resolve().parent / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-from app.board_service import create_service_app  # noqa: E402 (after sys.path setup)
-from app.main import LOOPBACK_HOSTS  # noqa: E402
+from app.board_service import create_service_app
+from app.main import LOOPBACK_HOSTS
 
 DEFAULT_PORT = 8771
 REMOTE_TOKEN_ENV = "OVERSEER_REMOTE_TOKEN"
@@ -57,7 +57,11 @@ def main(argv: list[str] | None = None) -> int:
     if token:
         print(f"board API token: {token}")
     print(f"serving board API for {root} on http://{args.host}:{args.port}/  (LAN-only)")
-    uvicorn.run(app, host=args.host, port=args.port)
+    # proxy_headers=False: uvicorn trusts X-Forwarded-For by default. If this
+    # LAN-only service were ever fronted by a loopback reverse proxy, that
+    # header would become attacker-controllable and could spoof a private
+    # source IP past _is_lan_client. The LAN guard must not ride on a default.
+    uvicorn.run(app, host=args.host, port=args.port, proxy_headers=False)
     return 0
 
 

@@ -54,11 +54,25 @@ def _is_lan_client(host: str | None) -> bool:
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
-def _strip_root_flags(argv: list[str]) -> list[str]:
-    """Drop any --root/--remote (and their values) from a forwarded argv.
+# Flags whose value is a HOST path (or an outbound URL) that a container caller
+# must never be able to inject: --root/--remote (global) plus every host-path
+# option on the admin verbs — --central/--backup-dir (init) and --dir
+# (backup/restore). These verbs are additionally denied outright (see
+# _DENIED_VERBS); stripping the flags is defense-in-depth so a value can never
+# reach the subprocess even if the denylist is ever bypassed.
+_STRIPPED_FLAGS = ("--root", "--remote", "--dir", "--central", "--backup-dir")
 
-    A container root path is meaningless on the host, and a forwarded --remote
-    must never recurse. The service injects its own pinned root instead.
+# Verbs refused on the remote board API: they wipe, re-bootstrap, or read/write
+# arbitrary host paths, none of which a remote container caller may drive.
+_DENIED_VERBS = {"clear", "init", "backup", "restore"}
+
+
+def _strip_root_flags(argv: list[str]) -> list[str]:
+    """Drop path-override flags (and their values) from a forwarded argv.
+
+    A container root/host path is meaningless (or dangerous) on the host, and a
+    forwarded --remote must never recurse. The service injects its own pinned
+    root instead. Handles both ``--flag value`` and ``--flag=value`` forms.
     """
     out: list[str] = []
     skip = False
@@ -66,13 +80,31 @@ def _strip_root_flags(argv: list[str]) -> list[str]:
         if skip:
             skip = False
             continue
-        if tok in ("--root", "--remote"):
+        if tok in _STRIPPED_FLAGS:
             skip = True
             continue
-        if tok.startswith(("--root=", "--remote=")):
+        if tok.startswith(tuple(f"{flag}=" for flag in _STRIPPED_FLAGS)):
             continue
         out.append(tok)
     return out
+
+
+def _invoked_verb(argv: list[str]) -> str | None:
+    """Return the subcommand verb in a (already root-flag-stripped) argv.
+
+    The verb is the first bare (non ``--``-prefixed) token, skipping a leading
+    ``--session-id`` and its value (``--session-id X`` or ``--session-id=X``)
+    and any other option token. Returns None if no verb is present.
+    """
+    it = iter(argv)
+    for tok in it:
+        if tok == "--session-id":
+            next(it, None)  # consume its value
+            continue
+        if tok.startswith("--"):
+            continue
+        return tok
+    return None
 
 
 def create_service_app(root: Path, *, host: str = "0.0.0.0", token: str | None = None) -> FastAPI:
@@ -90,6 +122,12 @@ def create_service_app(root: Path, *, host: str = "0.0.0.0", token: str | None =
     @app.post("/api/exec", dependencies=[Depends(require_token)])
     def exec_cli(req: ExecRequest) -> ExecResult:
         argv = _strip_root_flags(req.argv)
+        verb = _invoked_verb(argv)
+        if verb in _DENIED_VERBS:
+            raise HTTPException(
+                status_code=403,
+                detail=f"verb '{verb}' is not permitted on the remote board API",
+            )
         try:
             proc = subprocess.run(
                 [sys.executable, str(_OVERSEER_CLI), "--root", str(pinned_root), *argv],

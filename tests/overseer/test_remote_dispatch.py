@@ -1,9 +1,7 @@
 import sys
 
-import pytest
-
-from scripts.cli import main
 from scripts import remote
+from scripts.cli import main
 
 
 def test_remote_forwards_argv_and_relays(monkeypatch, capsys):
@@ -59,6 +57,20 @@ def test_remote_transport_error_returns_1(monkeypatch, capsys):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     assert main(["--remote", "http://h", "board"]) == 1
     assert "cannot reach" in capsys.readouterr().err
+
+
+def test_abbreviated_global_flag_is_rejected(monkeypatch):
+    # allow_abbrev=False: `--roo` must NOT resolve to `--root`. argparse errors
+    # (exit 2), which main() relays as a non-zero return — it never dispatches
+    # a verb against a bogus root. Guards the /api/exec root-escape bypass.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    called = {"remote": False}
+    monkeypatch.setattr(remote, "exec_remote",
+                        lambda *a, **k: called.__setitem__("remote", True))
+    # `--rem` must not resolve to `--remote` either (outbound re-forward / SSRF).
+    assert main(["--roo", "/x", "board"]) != 0
+    assert main(["--rem", "http://evil", "board"]) != 0
+    assert called["remote"] is False   # abbreviation never triggered a remote dispatch
 
 
 def test_remote_env_default(monkeypatch):
