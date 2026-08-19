@@ -53,6 +53,9 @@ surface and adds the missing container→host mechanism.
 - A standalone host service, decoupled from the dashboard's `dist/`-serving
   app, that also answers the existing `/api/*` REST reads for curl/scripts.
 - Token-gated, reachable from the container (`host.docker.internal`).
+- **LAN-only: the service must be reachable only from the local network and
+  never from a remote, non-LAN caller** — enforced in depth (bind + a
+  source-IP allowlist), not merely by convention.
 
 ### Non-goals
 - **No MCP / FastMCP.** The writer is the CLI, not an agent calling tools;
@@ -105,22 +108,25 @@ never on the dashboard.
 
 | File | Change | Purpose |
 |---|---|---|
-| `backend/app/board_api.py` | **NEW** | `build_board_router(...)` → an `APIRouter` holding the existing `/api/*` read+mutation routes and their pydantic models, extracted from `main.py`. One source of truth for the REST surface. |
-| `backend/app/main.py` | **MODIFY** | Dashboard `create_app` mounts `build_board_router(...)` instead of defining routes inline. Behaviour identical; existing backend tests must stay green (regression guard). |
-| `backend/app/board_service.py` | **NEW** entrypoint | Standalone FastAPI app: mounts the shared router **and** adds `POST /api/exec`. Token-gated, binds `0.0.0.0`, pins `--root` to the host repo, no `dist/` serving. CLI args `--root`/`--host`/`--port`. |
+| `backend/app/main.py` | **MODIFY** | (a) Extract the inline `require_token` closure into a module-level factory `make_require_token(token) -> Callable`. (b) Add a `mount_frontend: bool = True` parameter to `create_app`; when `False`, skip `_mount_frontend`. Both changes are behaviour-preserving for the dashboard — existing backend tests must stay green (regression guard). |
+| `backend/app/board_service.py` | **NEW** entrypoint | Standalone service. Reuses `create_app(root, host=..., token=..., mount_frontend=False)` to get the **identical** `/api/*` surface with no `dist/` serving, then adds the LAN-guard middleware and `POST /api/exec` (gated by `make_require_token(token)`). Plus a `main()` with `--root`/`--host`/`--port`, `resolve_remote_token`, and `uvicorn.run`. |
 | `scripts/remote.py` | **NEW** | Thin `httpx` client: `exec_remote(url, token, argv, stdin) -> ExecResult(stdout, stderr, returncode)`. Sends `X-Overseer-Token`. |
-| `scripts/cli.py` | **MODIFY** | New global `--remote URL` (env `OVERSEER_REMOTE`), token from `OVERSEER_REMOTE_TOKEN`. In `main()`, if remote is set, short-circuit before local dispatch: read stdin, forward argv (minus `--remote*`) to `remote.exec_remote`, print returned streams, return returned exit code. Otherwise unchanged. |
+| `scripts/cli.py` | **MODIFY** | New global `--remote URL` (env `OVERSEER_REMOTE`), token from `OVERSEER_REMOTE_TOKEN`. In `main()`, if remote is set, short-circuit before local dispatch: read stdin, forward argv (minus `--remote`) to `remote.exec_remote`, print returned streams, return returned exit code. Otherwise unchanged. |
 
-### The router extraction (the delicate part)
-`main.py`'s routes are closures over `launch_root`, `_derived_launch_root`,
+### Reuse `create_app`, don't hand-extract a router
+`main.py`'s ~20 routes are closures over `launch_root`, `_derived_launch_root`,
 `require_token`, and helpers (`_mutate`, `_board_response`, `_resolve_root`,
-`_mutation_error`). `build_board_router` must take these as parameters (or a
-small context object) so both `create_app` and `board_service` wire identical
-behaviour. Success criterion: the existing dashboard-backend test suite passes
-unchanged after the extraction.
+`_mutation_error`). Hand-lifting them into a standalone `APIRouter` is a large,
+regression-prone refactor for no added value. Instead the standalone service
+**calls `create_app` directly** with `mount_frontend=False` — it inherits the
+exact same routes, helpers, and token gate, decoupled only from `dist/`
+serving. The one genuinely shared piece pulled to module level is the token
+dependency (`make_require_token`), so `board_service` can gate `/api/exec` with
+the identical check. Success criterion: the existing dashboard-backend suite
+passes unchanged.
 
-`/api/exec` is **not** part of the shared router — the dashboard UI has no
-business offering arbitrary CLI exec. It is defined on `board_service` only.
+`/api/exec` is added **only** on `board_service`, never via `create_app` — the
+dashboard UI has no business offering arbitrary CLI exec.
 
 ## 5. Endpoint: `POST /api/exec`
 
@@ -165,11 +171,23 @@ Response (pydantic `ExecResult`):
   send as `X-Overseer-Token`) — symmetric and unambiguous. `resolve_token`
   itself is either parameterised to accept the env-var name or a thin sibling is
   added; the plan decides which, but the observable behaviour is as above.
-- **Reachability** — host service binds `0.0.0.0`; the container reaches it at
-  `host.docker.internal:PORT` (Docker Desktop on macOS/Windows; on Linux add
+- **Reachability** — host service binds `0.0.0.0` so the Docker bridge can
+  reach it; the container reaches it at `host.docker.internal:PORT` (Docker
+  Desktop on macOS/Windows; on Linux add
   `--add-host=host.docker.internal:host-gateway`). Container config:
   `OVERSEER_REMOTE=http://host.docker.internal:PORT` plus the token. Documented
   in the service README.
+- **LAN-only source guard (hard requirement)** — binding `0.0.0.0` would, on a
+  host with a public IP, expose the service to the internet. That is
+  forbidden. A Starlette middleware inspects `request.client.host` and rejects
+  (HTTP 403, before routing/auth) any source that is not
+  private/loopback/link-local, using `ipaddress.ip_address(host)` with
+  `is_private or is_loopback or is_link_local` (covers RFC1918 10/8,
+  172.16/12 — which includes the Docker bridge — and 192.168/16, plus 127/8
+  and 169.254/16). An unparseable/absent client is rejected (safe default).
+  This guarantees "never a remote, non-LAN caller" independent of bind
+  interface, and sits *in front of* the token gate (defence in depth). An
+  escape hatch env var is deliberately **not** provided for this service.
 
 ## 8. Error handling & edge cases
 
@@ -183,7 +201,9 @@ Response (pydantic `ExecResult`):
 - **Transport failure** — unreachable host / bad token surfaces a clear stderr
   message and a non-zero exit, distinguishable from a CLI-level failure.
 - **Security** — fixed binary, argv list (no shell), token-gated, exec endpoint
-  absent from the dashboard. Same trust model as today's `cli_client`.
+  absent from the dashboard, and the LAN-only source guard (§7) in front of
+  everything. Same trust model as today's `cli_client`, tightened for a
+  non-loopback bind.
 
 ## 9. Testing
 
@@ -197,6 +217,11 @@ All tests pin `CLAUDE_CONFIG_DIR`/`OVERSEER_DB`/`OVERSEER_CENTRAL` into
   its stdout+exit; token gate rejects a missing/wrong token (401); the incoming
   `--root` is stripped and the pinned host root is used; a non-zero CLI exit is
   returned as body `returncode`, HTTP 200.
+- **LAN-only guard** — using `httpx.ASGITransport(app, client=(ip, port))` to
+  spoof the source: a private/loopback client (e.g. `172.17.0.2`, `127.0.0.1`)
+  is allowed; a public client (e.g. `8.8.8.8`) is rejected 403 *before* auth
+  (403 even with a valid token). This is the test that proves "never a remote,
+  non-LAN caller".
 - **`remote.py`** — client posts the right shape and header; parses
   `ExecResult`; against a live `TestClient` for a round-trip.
 - **`cli --remote` dispatch** — `main(["--remote", url, "board"])` forwards the
