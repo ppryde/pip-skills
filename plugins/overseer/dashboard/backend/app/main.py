@@ -104,6 +104,24 @@ class LabelColorBody(BaseModel):
     color: str | None = None
 
 
+def make_require_token(token: str | None) -> Callable[..., None]:
+    """Build the FastAPI dependency that gates mutating routes.
+
+    Inactive when ``token`` is None (loopback bind, no env var) — preserves the
+    pre-auth open behaviour and every existing test. When a token exists, the
+    request must carry a matching ``X-Overseer-Token`` header (constant-time
+    compare) or the request is refused 401.
+    """
+    def require_token(x_overseer_token: str | None = Header(default=None)) -> None:
+        if token is None:
+            return
+        supplied = x_overseer_token or ""
+        if not hmac.compare_digest(supplied, token):
+            raise HTTPException(status_code=401, detail="missing or invalid dashboard token")
+
+    return require_token
+
+
 def _context_pct(root: Path) -> int | None:
     """`vigil context` has no --json; parse `ctx NN%` out of its one-line stdout."""
     try:
@@ -377,7 +395,7 @@ def _is_loopback(host: str) -> bool:
 
 
 def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = None,
-               token: str | None = None) -> FastAPI:
+               token: str | None = None, mount_frontend: bool = True) -> FastAPI:
     app = FastAPI(title="overseer dashboard")
     launch_root = root
     launch_host = host
@@ -404,20 +422,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
-    def require_token(x_overseer_token: str | None = Header(default=None)) -> None:
-        """Gate mutating routes when a token is in effect.
-
-        Inactive when ``token`` is None (default: loopback bind, no env var) —
-        preserves the pre-auth open behaviour and every existing test. When a
-        token exists, the request must carry a matching ``X-Overseer-Token``
-        header (constant-time compare) or the mutation is refused 401. Reads
-        never depend on this.
-        """
-        if token is None:
-            return
-        supplied = x_overseer_token or ""
-        if not hmac.compare_digest(supplied, token):
-            raise HTTPException(status_code=401, detail="missing or invalid dashboard token")
+    require_token = make_require_token(token)
     # The dashboard is normally launched from inside a worktree (e.g.
     # `.claude/worktrees/<name>`), whose path differs from the main-repo
     # root `board.db` records as `meta['repo_root']`. Derive the MAIN repo
@@ -730,7 +735,8 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         except CliError as exc:
             raise _mutation_error(exc) from exc
 
-    _mount_frontend(app, dist_dir)
+    if mount_frontend:
+        _mount_frontend(app, dist_dir)
 
     return app
 
