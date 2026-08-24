@@ -3008,6 +3008,15 @@ body {
 .epic-card__subquest--prog .epic-card__subquest-glyph,
 .epic-card__subquest--prog .epic-card__athand { color: var(--qb-status-in-progress-strong); }
 .epic-card__subquest--blocked .epic-card__subquest-glyph { color: var(--qb-status-blocked-strong); }
+/* The barred sub-quest's boulder fills the glyph column exactly (16px, same
+   as the column's own width) so the title edge stays flush with every other
+   row's. */
+.epic-card__subquest-boulder {
+  width: 16px;
+  height: 16px;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+}
 .epic-card__subquest-title { flex: 1; }
 .epic-card__athand {
   margin-left: 6px;
@@ -5425,8 +5434,23 @@ a.card-drawer__pr-chip:hover {
 }
 
 .atlas-rail-card__subquest--blocked .atlas-rail-card__checkbox {
-  border-color: var(--qb-accent-rose-fill);
+  /* The barred row hands its checkbox over to the trail's boulder: the
+     obstacle IS the marker, so the rose box would only cage it. The border
+     stays (transparent) rather than being removed, to keep the 14px outer
+     footprint identical to every other row's checkbox — the column must not
+     shift when a quest becomes blocked. `color` still carries the rose for
+     any text fallback. */
+  border-color: transparent;
   color: var(--qb-accent-rose-fill);
+  overflow: visible;
+}
+
+.atlas-rail-card__checkbox-boulder {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .atlas-rail-card__subquest-title {

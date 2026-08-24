@@ -54,20 +54,35 @@ function renderAtlas(
 }
 
 describe("<EpicAtlas/>", () => {
-  it("renders one row per is_epic card with a non-null rollup, sorted by created ascending", () => {
+  it("renders one row per is_epic card with a non-null rollup, most-recently-touched first", () => {
     const cards = [
-      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 5, estimate: null, actual: 0 }, created: "2026-08-08" }),
-      card({ id: "WF-027", is_epic: true, rollup: { done: 9, total: 9, estimate: null, actual: 210000 }, created: "2026-07-14" }),
-      card({ id: "WF-058", is_epic: true, rollup: { done: 6, total: 6, estimate: null, actual: 74000 }, created: "2026-07-20" }),
+      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 5, estimate: null, actual: 0 }, updated: "2026-08-08T09:00" }),
+      card({ id: "WF-027", is_epic: true, rollup: { done: 9, total: 9, estimate: null, actual: 210000 }, updated: "2026-07-14T09:00" }),
+      card({ id: "WF-058", is_epic: true, rollup: { done: 6, total: 6, estimate: null, actual: 74000 }, updated: "2026-07-20T09:00" }),
     ];
     const { container } = renderAtlas(board(cards));
     const rails = container.querySelectorAll(".atlas-rail-card");
     expect(rails.length).toBe(3);
     expect(Array.from(rails).map((r) => r.getAttribute("data-card-id"))).toEqual([
-      "WF-027",
-      "WF-058",
       "WF-090",
+      "WF-058",
+      "WF-027",
     ]);
+  });
+
+  it("an epic with a freshly-updated CHILD outranks one whose own card is newer but whose work is stale", () => {
+    const cards = [
+      card({ id: "WF-090", is_epic: true, rollup: { done: 0, total: 5, estimate: null, actual: 0 }, updated: "2026-08-19T09:00" }),
+      card({ id: "WF-090-1", parent: "WF-090", updated: "2026-08-01T09:00" }),
+      card({ id: "WF-027", is_epic: true, rollup: { done: 1, total: 9, estimate: null, actual: 0 }, updated: "2026-08-02T09:00" }),
+      card({ id: "WF-027-1", parent: "WF-027", updated: "2026-08-21T08:00" }),
+    ];
+    const { container } = renderAtlas(board(cards));
+    expect(
+      Array.from(container.querySelectorAll(".atlas-rail-card")).map((r) =>
+        r.getAttribute("data-card-id")
+      )
+    ).toEqual(["WF-027", "WF-090"]);
   });
 
   it("excludes an is_epic card with a null rollup", () => {

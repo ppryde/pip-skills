@@ -11,6 +11,7 @@
  * SVG-painting layer over this module's output.
  */
 import type { BoardCard, Status } from "../api/types";
+import { compareRecency } from "./layout";
 import { rarityStars } from "./rarityStars";
 
 /** The walled-village trailhead icon's own rendered size — doubled (user
@@ -243,14 +244,42 @@ export function openDependencies(
   return card.depends_on.filter((id) => cardsById.get(id)?.status !== "done");
 }
 
+/** The epic's own recency key: the MOST RECENT `updated` across the epic
+ * card itself and every one of its children. An epic whose card hasn't been
+ * touched in weeks but whose sub-quest moved this morning counts as fresh —
+ * activity anywhere under the epic is activity on the epic.
+ *
+ * This is deliberately the same policy the board lanes already use for epic
+ * groups (`layout.ts`'s `sortLane`: "a group's sort key is the MOST RECENT
+ * `updated` across the group's root card and all its same-lane descendants"),
+ * so the Atlas and the board agree on which epic is freshest. */
+function epicRecencyKey(epic: BoardCard, childrenByEpic: Map<string, BoardCard[]>): BoardCard {
+  let key = epic;
+  for (const child of childrenByEpic.get(epic.id) ?? []) {
+    if (compareRecency(child, key) < 0) key = child;
+  }
+  return key;
+}
+
 /** Vanquished-epics toolbar toggle (HANDOFF): hidden (default) filters
- * done epics out entirely; shown, they sort LAST, every other epic keeping
- * its relative order — `Array.prototype.sort` is guaranteed stable (ES2019+),
- * so this never needs to track original indices itself. Trail wobble seeds
- * (`seedFor(card.id)`) are already keyed on the card's own id rather than
- * its array position, so re-sorting here can never re-wobble a surviving
- * trail either — no extra bookkeeping needed for that HANDOFF requirement. */
-export function orderEpicsForDisplay(epics: BoardCard[], hideVanquished: boolean): BoardCard[] {
-  if (hideVanquished) return epics.filter((e) => e.status !== "done");
-  return [...epics].sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
+ * done epics out entirely; shown, they sort LAST. Within each of those two
+ * groups epics run most-recently-touched first, keyed by `epicRecencyKey`
+ * (the epic's freshest card, not just the epic card's own stamp).
+ *
+ * Done-last remains the PRIMARY key — recency only orders epics within a
+ * group, so a vanquished epic finished this morning still sits below every
+ * live one, per the HANDOFF contract. Trail wobble seeds (`seedFor(card.id)`)
+ * are keyed on the card's own id rather than its array position, so
+ * re-sorting here can never re-wobble a surviving trail. */
+export function orderEpicsForDisplay(
+  epics: BoardCard[],
+  hideVanquished: boolean,
+  childrenByEpic: Map<string, BoardCard[]> = new Map()
+): BoardCard[] {
+  const visible = hideVanquished ? epics.filter((e) => e.status !== "done") : epics;
+  return [...visible].sort((a, b) => {
+    const vanquishedDelta = Number(a.status === "done") - Number(b.status === "done");
+    if (vanquishedDelta !== 0) return vanquishedDelta;
+    return compareRecency(epicRecencyKey(a, childrenByEpic), epicRecencyKey(b, childrenByEpic));
+  });
 }

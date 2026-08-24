@@ -335,7 +335,7 @@ describe("orderEpicsForDisplay", () => {
     expect(orderEpicsForDisplay(epics, true).map((e) => e.id)).toEqual(["a"]);
   });
 
-  it("sorts done epics LAST when shown, preserving the relative order of everything else", () => {
+  it("sorts done epics LAST when shown; equal-timestamp epics fall to the deterministic id tiebreak", () => {
     const epics = [
       epic({ id: "a", status: "done" }),
       epic({ id: "b", status: "in-flight" }),
@@ -343,6 +343,68 @@ describe("orderEpicsForDisplay", () => {
       epic({ id: "d", status: "done" }),
     ];
     expect(orderEpicsForDisplay(epics, false).map((e) => e.id)).toEqual(["b", "c", "a", "d"]);
+  });
+
+  it("orders epics most-recently-updated first", () => {
+    const epics = [
+      epic({ id: "stale", updated: "2026-08-01T09:00" }),
+      epic({ id: "freshest", updated: "2026-08-20T18:30" }),
+      epic({ id: "middling", updated: "2026-08-10T12:00" }),
+    ];
+    expect(orderEpicsForDisplay(epics, false).map((e) => e.id)).toEqual([
+      "freshest",
+      "middling",
+      "stale",
+    ]);
+  });
+
+  it("a freshly-touched CHILD bubbles its epic up, even when the epic card itself is stale", () => {
+    const epics = [
+      epic({ id: "sleepy", updated: "2026-08-19T09:00" }),
+      epic({ id: "stale-card-live-work", updated: "2026-08-01T09:00" }),
+    ];
+    const childrenByEpic = new Map([
+      ["sleepy", [child({ id: "s1", parent: "sleepy", updated: "2026-08-02T09:00" })]],
+      [
+        "stale-card-live-work",
+        [child({ id: "w1", parent: "stale-card-live-work", updated: "2026-08-21T08:00" })],
+      ],
+    ]);
+    expect(orderEpicsForDisplay(epics, false, childrenByEpic).map((e) => e.id)).toEqual([
+      "stale-card-live-work",
+      "sleepy",
+    ]);
+  });
+
+  it("done-last outranks recency: a vanquished epic finished today still sits below a stale live one", () => {
+    const epics = [
+      epic({ id: "just-won", status: "done", updated: "2026-08-21T10:00" }),
+      epic({ id: "old-but-live", status: "in-flight", updated: "2026-01-02T10:00" }),
+    ];
+    expect(orderEpicsForDisplay(epics, false).map((e) => e.id)).toEqual([
+      "old-but-live",
+      "just-won",
+    ]);
+  });
+
+  it("applies recency to the surviving epics when hideVanquished filters the done ones out", () => {
+    const epics = [
+      epic({ id: "a", status: "in-flight", updated: "2026-08-05T09:00" }),
+      epic({ id: "gone", status: "done", updated: "2026-08-21T09:00" }),
+      epic({ id: "b", status: "planned", updated: "2026-08-18T09:00" }),
+    ];
+    expect(orderEpicsForDisplay(epics, true, new Map()).map((e) => e.id)).toEqual(["b", "a"]);
+  });
+
+  it("an epic with no children entry keys off its own updated (no crash on a missing map)", () => {
+    const epics = [
+      epic({ id: "childless", updated: "2026-08-20T09:00" }),
+      epic({ id: "other", updated: "2026-08-02T09:00" }),
+    ];
+    expect(orderEpicsForDisplay(epics, false, new Map()).map((e) => e.id)).toEqual([
+      "childless",
+      "other",
+    ]);
   });
 
   it("does not mutate the input array", () => {
