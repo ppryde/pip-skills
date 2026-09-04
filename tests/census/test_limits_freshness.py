@@ -216,6 +216,43 @@ class TestHoistOrdering:
         assert limits["five_hour"]["used_percentage"] == 4
         assert st.limits(now=10_500.0)["five_hour"]["used_percentage"] == 4
 
+    def test_boundaries_a_second_apart_are_the_same_window(self, store_file):
+        """Zero tolerance would invert the rule: a fossil reading one second
+        later would read as a newer window and win with the lower percentage.
+        Observed boundaries are identical across sessions and quantised to ten
+        minutes, so a minute of slack cannot merge two real windows."""
+        st.ingest(_payload("working", "/wt/b", self._rate(85, resets_at=10_000.0)), now=100.0)
+        st.ingest(_payload("dormant", "/wt/a", self._rate(12, resets_at=10_001.0)), now=110.0)
+        assert self._pct(store_file) == 85
+
+    def test_a_boundary_well_past_the_tolerance_is_a_new_window(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(85, resets_at=10_000.0)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(12, resets_at=10_000.0 + 600)), now=110.0)
+        assert self._pct(store_file) == 12
+
+    def test_an_implausibly_distant_reset_is_refused(self, store_file):
+        """A wrong-unit value (a millisecond epoch) or a corrupt one would
+        otherwise be the latest window forever and out-rank every real reading."""
+        st.ingest(_payload("s1", "/wt/a", self._rate(20, resets_at=10_000.0)), now=100.0)
+        st.ingest(_payload("bogus", "/wt/b", self._rate(7, resets_at=10_000.0 * 1000)), now=110.0)
+        assert self._pct(store_file) == 20
+        # And it is never served, even with nothing to compare against.
+        assert st.limits(now=110.0)["five_hour"]["used_percentage"] == 20
+
+    def test_a_losing_reading_does_not_restamp_updated_at(self, store_file):
+        """`updated_at` means "when the account figure last MOVED". A latched
+        peak must not masquerade as a fresh observation."""
+        st.ingest(_payload("s1", "/wt/a", self._rate(85)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(12)), now=500.0)
+        limits = _read(store_file)["limits"]
+        assert limits["five_hour"]["used_percentage"] == 85
+        assert limits["updated_at"] == 100.0
+
+    def test_a_winning_reading_does_restamp_updated_at(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(85)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(90)), now=500.0)
+        assert _read(store_file)["limits"]["updated_at"] == 500.0
+
     def test_pre_upgrade_limits_are_ordered_not_trusted(self, store_file):
         store_file.parent.mkdir(parents=True, exist_ok=True)
         store_file.write_text(

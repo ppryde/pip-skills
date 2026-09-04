@@ -12,6 +12,7 @@ directly below to compute the launch root's OWN main-repo root, matching how
 from __future__ import annotations
 
 import hmac
+import math
 import os
 import re
 import sys
@@ -196,9 +197,7 @@ def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
         number = float(value or 0)
     except (TypeError, ValueError):
         return 0.0
-    if number != number or number in (float("inf"), float("-inf")):  # NaN, ±inf
-        return 0.0
-    return number
+    return number if math.isfinite(number) else 0.0  # rejects NaN and ±inf
 
 
 def _active_ts(entry: dict[str, Any]) -> float:

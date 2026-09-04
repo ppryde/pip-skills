@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -42,6 +43,15 @@ SCHEMA_VERSION = 1
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
 STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
 IDLE_HORIZON_SECONDS = 10 * 60       # readers flag sessions with no API activity for this long as idle
+# Two readings whose reset boundaries are this close describe the SAME window.
+# Observed boundaries are quantised to exactly 10 minutes and are bit-identical
+# across concurrent sessions, and the closest two DISTINCT boundaries seen are
+# 4h50m apart, so a minute of tolerance cannot merge two real windows.
+_SAME_WINDOW_TOLERANCE_SECONDS = 60
+# A reset further out than this is not a rate-limit window we know: the longest
+# is seven days, so anything beyond eight is a corrupt or wrong-unit value (a
+# millisecond epoch, say) and must not be served or allowed to win.
+_MAX_WINDOW_HORIZON_SECONDS = 8 * 24 * 3600
 _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
 _LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
@@ -125,9 +135,7 @@ def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     number = float(value)
-    if number != number or number in (float("inf"), float("-inf")):  # NaN, ±inf
-        return None
-    return number
+    return number if math.isfinite(number) else None  # rejects NaN and ±inf
 
 
 def _section(payload: dict[str, Any], key: str) -> dict[str, Any]:
@@ -202,6 +210,11 @@ def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
     window. Hoisting or serving that reading makes the account-global figure
     flip-flop to whichever session wrote the file last. Gating on a future
     ``resets_at`` keeps only genuinely-current windows; an expired one is dropped.
+
+    An implausibly distant ``resets_at`` is dropped too. Without that ceiling a
+    single wrong-unit or corrupt value (a millisecond epoch reads as a reset
+    tens of thousands of years out) would stay "live" forever and, being the
+    latest window, would out-rank every honest reading indefinitely.
     """
     if not isinstance(limits, dict):
         return None
@@ -210,9 +223,10 @@ def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
         window = limits.get(key)
         if not isinstance(window, dict):
             continue
-        resets = window.get("resets_at")
-        # bool is an int subclass — exclude it explicitly
-        if isinstance(resets, (int, float)) and not isinstance(resets, bool) and resets > now:
+        resets = _number(window.get("resets_at"))
+        if resets is None:
+            continue
+        if now < resets <= now + _MAX_WINDOW_HORIZON_SECONDS:
             live[key] = window
     return live or None
 
@@ -224,10 +238,14 @@ def _window_is_fresher(incoming: dict[str, Any], stored: dict[str, Any]) -> bool
     window resets, so the two readings can be ordered without trusting any
     clock or any write order:
 
-    - A later ``resets_at`` is a NEWER window; its counter has restarted, so it
-      wins outright however low its percentage.
-    - An earlier ``resets_at`` belongs to a window already superseded, so it
+    - A meaningfully later ``resets_at`` is a NEWER window; its counter has
+      restarted, so it wins outright however low its percentage.
+    - A meaningfully earlier one belongs to a window already superseded, so it
       loses however high its percentage.
+    - Boundaries within ``_SAME_WINDOW_TOLERANCE_SECONDS`` describe the same
+      window and fall through to the usage comparison. Without that, two
+      readings of one window differing by a second would invert the rule and
+      let the lower percentage win.
     - Within the SAME window the higher percentage is the more recent reading.
       This is what stops a dormant session's frozen figure from winning: its
       percentage cannot exceed the one a working session has since reported.
@@ -239,9 +257,11 @@ def _window_is_fresher(incoming: dict[str, Any], stored: dict[str, Any]) -> bool
     stored_resets = _number(stored.get("resets_at"))
     if incoming_resets is None:
         return False
-    if stored_resets is None or incoming_resets > stored_resets:
+    if stored_resets is None:
         return True
-    if incoming_resets < stored_resets:
+    if incoming_resets > stored_resets + _SAME_WINDOW_TOLERANCE_SECONDS:
+        return True
+    if incoming_resets < stored_resets - _SAME_WINDOW_TOLERANCE_SECONDS:
         return False
 
     incoming_pct = _number(incoming.get("used_percentage"))
@@ -271,14 +291,29 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
     """
     stored = store.get("limits")
     stored = stored if isinstance(stored, dict) else {}
-    merged = _live_limits(stored, now) or {}
+    live = _live_limits(stored, now) or {}
+    merged = dict(live)
 
+    changed = False
     for key, window in incoming.items():
         current = merged.get(key)
         if not isinstance(current, dict) or _window_is_fresher(window, current):
             merged[key] = window
+            changed = True
 
-    store["limits"] = {**merged, "updated_at": now}
+    # A window ``_live_limits`` just dropped (expired, or implausibly distant)
+    # is a change to the account figure too.
+    stored_keys = {key for key in _LIMIT_WINDOWS if isinstance(stored.get(key), dict)}
+    dropped = bool(stored_keys - set(live))
+
+    # ``updated_at`` means "when the account figure last MOVED", not "when a
+    # status line last rendered". A reading that loses the ordering leaves it
+    # alone, so a latched figure cannot masquerade as a fresh observation.
+    previous_updated = _number(stored.get("updated_at"))
+    store["limits"] = {
+        **merged,
+        "updated_at": now if (changed or dropped or previous_updated is None) else previous_updated,
+    }
 
 
 def _prune(sessions: dict[str, Any], now: float) -> None:

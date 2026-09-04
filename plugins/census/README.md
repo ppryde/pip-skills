@@ -36,6 +36,18 @@ default, or `~/.claude-personal/census/status.json` when that account sets `CLAU
   and within one window the higher percentage wins. That ordering reads the readings
   themselves, so it needs neither write order nor a trustworthy clock, and a dormant
   session's frozen figure can never displace a working session's current one.
+  Boundaries within a minute of each other count as the same window, and a reset more
+  than eight days out is refused as a corrupt or wrong-unit value.
+- **Known tradeoff:** because the higher percentage wins, the figure LATCHES for the rest
+  of a window. If the denominator changes mid-window — a plan upgrade, extra capacity
+  purchased, or limits raised — usage legitimately falls, and the stored figure stays at
+  the old peak until that window resets. Up to five hours for `five_hour`, up to seven
+  days for `seven_day`. The error is conservative (it overstates usage, never understates
+  it), which is the safe direction for a "how close am I" gauge, but it is real.
+  Both windows are fixed rather than rolling, which is what makes the latch bounded:
+  measured across 155 captured payloads, `seven_day` boundaries are always Sunday 20:00
+  local and exactly one week apart, and `five_hour` boundaries are quantised to ten
+  minutes and bit-identical across concurrent sessions.
 - The full payload is stored per session — any future CC field is captured with no schema change.
 - `updated_at` is "last rendered": the status line reruns on `refreshInterval` as well as after
   each API response, so a dormant TUI keeps refreshing it. `active_at` is "last active": it moves
