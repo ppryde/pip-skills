@@ -27,6 +27,10 @@ interface ColumnChartProps {
   /** Sentence-case name of the measure, used by the table view and the
    * accessible label ("Context tokens per day"). */
   title: string;
+  /** CSS custom-property name supplying this chart's single hue. Each
+   * MEASURE gets its own hue so the eye can tell the panels apart; within a
+   * chart it stays one hue, because the data is magnitude, not identity. */
+  hue?: string;
   height?: number;
 }
 
@@ -78,7 +82,13 @@ function labelStride(count: number, plotWidth: number): number {
   return Math.max(1, Math.ceil(count / Math.max(1, Math.floor(plotWidth / 48))));
 }
 
-export function ColumnChart({ points, format, title, height = 180 }: ColumnChartProps) {
+export function ColumnChart({
+  points,
+  format,
+  title,
+  hue = "--chr-context",
+  height = 180,
+}: ColumnChartProps) {
   const [hover, setHover] = useState<number | null>(null);
   const id = useId();
   const width = 520;
@@ -97,7 +107,7 @@ export function ColumnChart({ points, format, title, height = 180 }: ColumnChart
   }
 
   return (
-    <div className="chr-chart">
+    <div className="chr-chart" style={{ ["--chr-hue" as string]: `var(${hue})` }}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="chr-chart__svg"
@@ -191,17 +201,23 @@ interface BarListProps {
   rows: { label: string; value: number; detail?: string }[];
   format: (n: number) => string;
   title: string;
+  hue?: string;
 }
 
 /** Horizontal bars for a ranked nominal list (models, tools). One hue: the
  * categories carry no order, so hue must not pretend they do. */
-export function BarList({ rows, format, title }: BarListProps) {
+export function BarList({ rows, format, title, hue = "--chr-context" }: BarListProps) {
   if (rows.length === 0) {
     return <p className="chr-chart__empty">No data in this window.</p>;
   }
   const max = Math.max(1, ...rows.map((r) => r.value));
   return (
-    <div className="chr-barlist" role="list" aria-label={title}>
+    <div
+      className="chr-barlist"
+      role="list"
+      aria-label={title}
+      style={{ ["--chr-hue" as string]: `var(${hue})` }}
+    >
       {rows.map((row) => (
         <div className="chr-barlist__row" role="listitem" key={row.label} title={row.detail}>
           <span className="chr-barlist__label">{row.label}</span>
@@ -230,6 +246,7 @@ interface LineChartProps {
   dots?: number[];
   /** Extra tooltip line for point i (e.g. "cold · idle 12m"). */
   annotate?: (i: number) => string | null;
+  hue?: string;
   height?: number;
 }
 
@@ -242,6 +259,7 @@ export function LineChart({
   markers = [],
   dots = [],
   annotate,
+  hue = "--chr-context",
   height = 180,
 }: LineChartProps) {
   const [hover, setHover] = useState<number | null>(null);
@@ -271,7 +289,7 @@ export function LineChart({
   }
 
   return (
-    <div className="chr-chart">
+    <div className="chr-chart" style={{ ["--chr-hue" as string]: `var(${hue})` }}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="chr-chart__svg"

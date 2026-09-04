@@ -71,6 +71,15 @@ export function formatPct(ratio: number | null | undefined): string {
   return `${Math.round(ratio * 100)}%`;
 }
 
+/** Where a cache hit rate sits, in a word — so the gauge never means by
+ * colour alone. Thresholds are advisory, not a rule the data must obey. */
+export function cacheVerdict(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "no data";
+  if (ratio >= 0.9) return "warm";
+  if (ratio >= 0.7) return "mixed";
+  return "cold";
+}
+
 /** Model ids are long ("claude-fable-5-1") — strip the vendor prefix for
  * chart labels, keep the id in tooltips/tables. */
 export function shortModel(model: string | null): string {

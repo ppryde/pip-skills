@@ -41,3 +41,13 @@ describe("formatTokens", () => {
     expect(formatTokens(2_000_000)).toBe("2M");
   });
 });
+
+describe("billions band", () => {
+  it("formats a billion or more in B", () => {
+    expect(formatTokens(1_000_000_000)).toBe("1B");
+    expect(formatTokens(1_372_800_000)).toBe("1.4B");
+    expect(formatTokens(999_500_000)).toBe("999.5M"); // still honest in M
+    expect(formatTokens(999_000_000)).toBe("999M");
+    expect(formatTokens(999_950_000)).toBe("1B"); // rounds to 1000M — carry to B
+  });
+});

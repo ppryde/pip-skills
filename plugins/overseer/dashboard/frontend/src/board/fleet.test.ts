@@ -15,6 +15,7 @@ describe("fleetSummary", () => {
   it("returns a safe zero-state for an empty fleet — no NaN, no sessions", () => {
     expect(fleetSummary([], null)).toEqual({
       questing: 0,
+      working: 0,
       topCtx: null,
       nearThreshold: 0,
     });
@@ -30,6 +31,27 @@ describe("fleetSummary", () => {
       null
     );
     expect(result.questing).toBe(2);
+  });
+
+  it("working excludes idle sessions; questing still counts them as present", () => {
+    const result = fleetSummary(
+      [
+        session({ id: "busy", stale: false }),
+        session({ id: "dormant", stale: false, idle: true }),
+        session({ id: "ghost", stale: true }),
+      ],
+      null
+    );
+    expect(result.questing).toBe(2);
+    expect(result.working).toBe(1);
+  });
+
+  it("working equals questing when census supplies no idle flag", () => {
+    const result = fleetSummary(
+      [session({ id: "s1", stale: false }), session({ id: "s2", stale: false })],
+      null
+    );
+    expect(result.working).toBe(2);
   });
 
   it("topCtx is the max pct among live sessions", () => {

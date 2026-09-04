@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cacheVerdict,
   formatBytes,
   formatDuration,
   formatActive,
@@ -42,6 +43,16 @@ describe("formatPct", () => {
     expect(formatPct(0.973)).toBe("97%");
     expect(formatPct(0)).toBe("0%");
     expect(formatPct(null)).toBe("—");
+  });
+});
+
+describe("cacheVerdict", () => {
+  it("bands the reading into a word", () => {
+    expect(cacheVerdict(0.98)).toBe("warm");
+    expect(cacheVerdict(0.9)).toBe("warm");
+    expect(cacheVerdict(0.8)).toBe("mixed");
+    expect(cacheVerdict(0.4)).toBe("cold");
+    expect(cacheVerdict(null)).toBe("no data");
   });
 });
 

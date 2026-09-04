@@ -128,6 +128,10 @@ export interface Context {
   session_name?: string;
   pr?: PrWindow;
   stale?: boolean;
+  /** Census sees the status line still rendering, but the session's activity
+   * counters haven't moved for 10 minutes — an open TUI nobody is working in.
+   * Distinct from `stale`, which means census sees no render at all. */
+  idle?: boolean;
 }
 
 export interface RateWindow {
@@ -206,8 +210,16 @@ export interface LabelsBody {
 export interface SessionSummary {
   id: string;
   worktree_cwd: string | null;
+  /** Last time the status line RAN for this session. The status line reruns on
+   * a timer, so this refreshes even while the session sits idle — never read it
+   * as "last active"; use `active_at`. */
   updated_at: number | null | string;
+  /** Last time the session's activity counters MOVED (prompt, cost, tokens,
+   * cache requests). Absent for entries written by a census predating it. */
+  active_at?: number | null | string;
   stale: boolean;
+  /** Still rendering, but no activity for 10 minutes (see Context.idle). */
+  idle?: boolean;
   session_name?: string;
   model?: string;
   /** Git branch the session's worktree is on (WF-031) — omitted when
@@ -312,6 +324,11 @@ export interface ChronicleTotals {
   /** Cache-creation tokens split by TTL. */
   cache_5m_tokens: number;
   cache_1h_tokens: number;
+  /** Largest single window reached by any session in the range. */
+  peak_context_tokens: number;
+  /** That peak as a share of its inferred window (200k or 1M). */
+  peak_context_pct: number | null;
+  context_window: number;
 }
 
 export interface ChronicleDay {
@@ -325,6 +342,8 @@ export interface ChronicleDay {
   cold_turns: number;
   /** Largest single main-agent context window seen that day. */
   peak_context_tokens: number;
+  /** That peak as a share of its inferred window. */
+  peak_context_pct: number | null;
   cache_hit_rate: number | null;
 }
 
@@ -399,6 +418,9 @@ export interface ChronicleSession {
   active_ms: number;
   models: string[];
   cache_hit_rate: number | null;
+  /** Peak context as a share of the window inferred for this session. */
+  peak_context_pct: number | null;
+  context_window: number;
   /** Derived server-side: last activity minus start, in seconds. */
   duration_s: number | null;
   /** Derived: input + cache read + cache creation, summed over turns. */

@@ -4591,6 +4591,13 @@ a.card-drawer__pr-chip:hover {
   opacity: 0.55;
 }
 
+/* An idle session is present but not working — lightly dimmed, between a
+   working row and a stale ghost. Its avatar dot (below) goes amber and stops
+   pulsing. */
+.party-row--idle {
+  opacity: 0.8;
+}
+
 .party-row__body {
   flex: 1 1 auto;
   min-width: 0;
@@ -4747,8 +4754,16 @@ a.card-drawer__pr-chip:hover {
   border: 1.5px solid var(--qb-party-text-muted);
 }
 
+/* Idle: still here, not working. Solid amber, and excluded from the pulse
+   below so only a genuinely working session animates. */
+.party-avatar__dot--idle {
+  background: var(--legacy-color-d97706, #d97706);
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .party-avatar__dot:not(.party-avatar__dot--stale) {
+  .party-avatar__dot:not(.party-avatar__dot--stale):not(
+      .party-avatar__dot--idle
+    ) {
     animation: qb-pulse var(--qb-motion-pulse) ease-in-out infinite;
   }
 
@@ -6766,9 +6781,20 @@ button.trail-tag:focus-visible {
    reuses `.card-drawer` so the two sheets read as one family.
    ========================================================================= */
 :root {
-  --chr-series: #256abf;
-  --chr-series-hover: #3987e5;
-  --chr-series-wash: rgba(37, 106, 191, 0.12);
+  /* One hue per MEASURE, so the eye can tell the panels apart at a glance;
+     within any one chart it stays a single hue, because every series here is
+     magnitude, not identity. All four validated on the parchment panel
+     (#fbf4e1): lightness band, chroma floor, CVD separation and >= 3:1
+     contrast all pass, worst adjacent CVD dE 16.3. */
+  --chr-context: #256abf; /* blue — context processed */
+  --chr-output: #c2571f; /* rust — tokens the model wrote */
+  --chr-peak: #7a3fa8; /* plum — peak context */
+  --chr-cache: #1f7a52; /* forest — cache warmth */
+  --chr-turns: #1f6f7a; /* teal — turns and time */
+  --chr-tools: #9a5b12; /* bronze — tool calls */
+  /* The active chart's hue, set per component via an inline custom property
+     (see ChronicleCharts' `hue` prop); defaults to context blue. */
+  --chr-hue: var(--chr-context);
   --chr-grid: #eadfc6;
   --chr-axis: var(--qb-line-dashed);
   --chr-marker: var(--qb-ink-400);
@@ -6860,13 +6886,25 @@ button.trail-tag:focus-visible {
 }
 
 .chr-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  padding: 0.7rem 0.85rem;
+  padding: 0.7rem 0.85rem 0.7rem 1rem;
   background: var(--qb-panel);
   border: 1.5px solid var(--qb-card-border);
   border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Decorative accent grouping a tile with the chart that shares its measure.
+   Never encodes a value — the number beside it carries every meaning. */
+.chr-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--chr-hue);
 }
 
 .chr-tile__label {
@@ -6909,11 +6947,25 @@ button.trail-tag:focus-visible {
 }
 
 .chr-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   margin: 0;
   font-family: var(--qb-font-display);
   font-weight: 700;
   font-size: 1rem;
   color: var(--qb-ink-900);
+}
+
+/* A small hue dot before each panel title, matching that panel's chart —
+   decorative grouping, same role as the tile accent. */
+.chr-panel__title::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--chr-hue);
+  flex: 0 0 auto;
 }
 
 .chr-panel__sub {
@@ -6952,24 +7004,26 @@ button.trail-tag:focus-visible {
 }
 
 .chr-chart__bar {
-  fill: var(--chr-series);
-  transition: fill 0.12s ease;
+  fill: var(--chr-hue);
+  transition: opacity 0.12s ease;
 }
 
+/* Hover lifts the bar rather than recolouring it — the hue stays the
+   measure's own, so a hovered bar is never mistaken for a different series. */
 .chr-chart__bar--hover {
-  fill: var(--chr-series-hover);
+  opacity: 0.72;
 }
 
 .chr-chart__line {
   fill: none;
-  stroke: var(--chr-series);
+  stroke: var(--chr-hue);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .chr-chart__area {
-  fill: var(--chr-series-wash);
+  fill: color-mix(in srgb, var(--chr-hue) 12%, transparent);
 }
 
 .chr-chart__marker {
@@ -6983,7 +7037,7 @@ button.trail-tag:focus-visible {
 }
 
 .chr-chart__dot {
-  fill: var(--chr-series);
+  fill: var(--chr-hue);
   stroke: var(--qb-panel);
   stroke-width: 2;
 }
@@ -7071,17 +7125,19 @@ button.trail-tag:focus-visible {
   white-space: nowrap;
 }
 
+/* Track is a pale step of the fill's own ramp (meter convention), so the
+   unfilled remainder still reads as part of the same measure. */
 .chr-barlist__track {
   display: block;
   height: 10px;
-  background: var(--chr-grid);
+  background: color-mix(in srgb, var(--chr-hue) 14%, var(--qb-parchment-muted));
   border-radius: 0 4px 4px 0;
 }
 
 .chr-barlist__fill {
   display: block;
   height: 100%;
-  background: var(--chr-series);
+  background: var(--chr-hue);
   border-radius: 0 4px 4px 0;
 }
 
@@ -7123,14 +7179,12 @@ button.trail-tag:focus-visible {
   padding: 0.25rem 0.5rem;
 }
 
+/* Numeric columns: left-aligned like everything else (the user's call —
+   headers and cells must agree), tabular figures so digits still line up. */
 .chr-num {
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.chr-table th.chr-num {
-  text-align: right;
 }
 
 .chr-table__sort {
@@ -7277,4 +7331,84 @@ button.trail-tag:focus-visible {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+
+/* --- gauges (the page's hero readouts) ------------------------------------ */
+.chr-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+
+.chr-hero--drawer {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 0.75rem;
+}
+
+.chr-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.9rem 1rem 0.8rem;
+  background: var(--qb-panel);
+  border: 1.5px solid var(--qb-card-border);
+  border-radius: var(--qb-radius-panel);
+  text-align: center;
+}
+
+.chr-gauge__svg {
+  width: 100%;
+  max-width: 168px;
+  height: auto;
+}
+
+/* Track: a pale step of the fill's own ramp, so the whole arc reads as one
+   measure (meter convention). */
+.chr-gauge__track {
+  stroke: color-mix(in srgb, var(--chr-gauge-hue) 16%, var(--qb-parchment-muted));
+  stroke-linecap: round;
+}
+
+.chr-gauge__fill {
+  stroke: var(--chr-gauge-hue);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chr-gauge__fill {
+    transition: none;
+  }
+}
+
+/* Proportional figures on the big number (tabular would read loose here). */
+.chr-gauge__value {
+  margin-top: -0.9rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 2.1rem;
+  line-height: 1;
+  color: var(--qb-ink-900);
+}
+
+.chr-gauge__label {
+  font-family: var(--qb-font-prose);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--qb-ink-700);
+}
+
+/* The reading in a word — the gauge must never mean by colour alone. */
+.chr-gauge__verdict {
+  font-family: var(--qb-font-prose);
+  font-size: 0.72rem;
+  color: var(--qb-ink-500);
+}
+
+.chr-gauge__note {
+  font-family: var(--qb-font-prose);
+  font-size: 0.68rem;
+  color: var(--qb-ink-400);
 }

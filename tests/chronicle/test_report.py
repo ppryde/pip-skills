@@ -1,6 +1,7 @@
 import time
 
 from scripts import ingest, report, store
+from scripts.report import context_window_for, peak_context_pct
 from scripts.transcript import parse_ts
 
 from .conftest import TranscriptBuilder
@@ -44,6 +45,10 @@ class TestSummary:
         assert round(out["totals"]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
         assert out["totals"]["cache_5m_tokens"] == 0
         assert out["by_day"][1]["peak_context_tokens"] == 1203
+        assert out["totals"]["peak_context_tokens"] == 1203
+        assert out["totals"]["context_window"] == 200_000
+        assert round(out["totals"]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
+        assert round(out["by_day"][1]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
         assert out["by_day"][1]["cold_turns"] == 0
         assert round(out["by_day"][1]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
 
@@ -73,6 +78,20 @@ class TestSummary:
         assert out["shape"]["turns"] == {"p50": None, "p90": None, "max": None, "mean": None}
 
 
+class TestContextWindow:
+    def test_window_is_the_smallest_standard_size_that_fits(self):
+        assert context_window_for(0) == 200_000
+        assert context_window_for(190_000) == 200_000
+        assert context_window_for(200_001) == 1_000_000
+        assert context_window_for(837_503) == 1_000_000
+        assert context_window_for(2_000_000) == 1_000_000
+
+    def test_pct_is_none_without_turns(self):
+        assert peak_context_pct(0) is None
+        assert round(peak_context_pct(100_000), 3) == 0.5
+        assert round(peak_context_pct(500_000), 3) == 0.5
+
+
 class TestSessions:
     def test_ordering_and_derived_fields(self, projects):
         conn = _seed(projects)
@@ -82,6 +101,8 @@ class TestSessions:
         assert s2["context_tokens"] == 2406
         assert s2["duration_s"] == 0
         assert s2["models"] == ["claude-opus-5"]
+        assert s2["context_window"] == 200_000
+        assert round(s2["peak_context_pct"], 6) == round(1203 / 200_000, 6)
         assert s2["live"] is False
 
     def test_limit_and_root(self, projects):

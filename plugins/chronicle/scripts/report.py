@@ -14,6 +14,29 @@ from typing import Any
 # SessionEnd hook) counts as live only while it has been active this recently.
 LIVE_HORIZON_SECONDS = 15 * 60
 
+# The context windows Claude Code actually runs with. The transcript records
+# how many tokens were IN the window, never how big the window was — so the
+# window is inferred as the smallest standard size the observed peak fits in.
+# Honest and stable: a session that peaked at 837k was plainly on a 1M window,
+# and one that peaked at 190k on a 200k window. A session that never got near
+# a boundary reads as 200k, the default for every current model.
+STANDARD_WINDOWS = (200_000, 1_000_000)
+
+
+def context_window_for(peak_tokens: int) -> int:
+    """Smallest standard context window the observed peak fits inside."""
+    for window in STANDARD_WINDOWS:
+        if peak_tokens <= window:
+            return window
+    return STANDARD_WINDOWS[-1]
+
+
+def peak_context_pct(peak_tokens: int) -> float | None:
+    """Peak context as a share of its inferred window; None with no turns."""
+    if peak_tokens <= 0:
+        return None
+    return peak_tokens / context_window_for(peak_tokens)
+
 
 def _session_filter(repo_root: str | None, since: float | None,
                     alias: str = "s") -> tuple[str, list[Any]]:
@@ -59,6 +82,8 @@ def _row_to_session(row: sqlite3.Row, now: float | None = None) -> dict[str, Any
     out["cache_hit_rate"] = cache_hit_rate(
         out["input_tokens"], out["cache_read_tokens"], out["cache_creation_tokens"]
     )
+    out["context_window"] = context_window_for(out["peak_context_tokens"])
+    out["peak_context_pct"] = peak_context_pct(out["peak_context_tokens"])
     return out
 
 
@@ -237,6 +262,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         day["cache_hit_rate"] = cache_hit_rate(
             day["input_tokens"], day["cache_read_tokens"], day["cache_creation_tokens"]
         )
+        day["peak_context_pct"] = peak_context_pct(day["peak_context_tokens"])
     by_model = [
         dict(r) for r in conn.execute(
             f"""SELECT t.model AS model, COUNT(*) AS turns,
@@ -272,6 +298,10 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         for r in shape_rows
         if r["started_at"] and r["last_activity_at"] and r["last_activity_at"] >= r["started_at"]
     ]
+    peak_overall = max((int(r["peak_context_tokens"]) for r in shape_rows), default=0)
+    totals["peak_context_tokens"] = peak_overall
+    totals["peak_context_pct"] = peak_context_pct(peak_overall)
+    totals["context_window"] = context_window_for(peak_overall)
     shape = {
         "turns": _quantiles([float(r["turns"]) for r in shape_rows]),
         "prompts": _quantiles([float(r["prompts"]) for r in shape_rows]),

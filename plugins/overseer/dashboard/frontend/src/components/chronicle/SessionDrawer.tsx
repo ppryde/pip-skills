@@ -7,6 +7,7 @@
 import { useEffect } from "react";
 import { useChronicleSession } from "../../board/chronicle/useChronicle";
 import {
+  cacheVerdict,
   formatActive,
   formatBytes,
   formatDuration,
@@ -18,6 +19,7 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { BarList, LineChart } from "./ChronicleCharts";
+import Gauge from "./Gauge";
 import StatTile from "./StatTile";
 
 export interface SessionDrawerProps {
@@ -94,12 +96,29 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
               </p>
             </header>
 
+            <div className="chr-hero chr-hero--drawer">
+              <Gauge
+                value={detail.cache_hit_rate}
+                display={formatPct(detail.cache_hit_rate)}
+                label="Cache hit rate"
+                verdict={cacheVerdict(detail.cache_hit_rate)}
+                note={`${detail.cold_turns} cold turns`}
+                hue="--chr-cache"
+              />
+              <Gauge
+                value={detail.peak_context_pct}
+                display={formatPct(detail.peak_context_pct)}
+                label="Peak context used"
+                verdict={`${formatTokens(detail.peak_context_tokens)} of ${formatTokens(detail.context_window)}`}
+                hue="--chr-peak"
+              />
+            </div>
+
             <div className="chr-tiles chr-tiles--drawer">
-              <StatTile label="Turns" value={String(detail.turns)} />
-              <StatTile label="Prompts" value={String(detail.prompts)} />
-              <StatTile label="Tool calls" value={String(detail.tool_calls)} />
-              <StatTile label="Peak context" value={formatTokens(detail.peak_context_tokens)} />
-              <StatTile label="Output tokens" value={formatTokens(detail.output_tokens)} />
+              <StatTile label="Turns" value={String(detail.turns)} hue="--chr-turns" />
+              <StatTile label="Prompts" value={String(detail.prompts)} hue="--chr-turns" />
+              <StatTile label="Tool calls" value={String(detail.tool_calls)} hue="--chr-tools" />
+              <StatTile label="Output tokens" value={formatTokens(detail.output_tokens)} hue="--chr-output" />
               <StatTile
                 label="Context processed"
                 value={formatTokens(detail.context_tokens)}
@@ -107,17 +126,12 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
               />
               <StatTile label="Span" value={formatDuration(detail.duration_s)} />
               <StatTile label="Active" value={formatActive(detail.active_ms)} />
-              <StatTile label="Transcript" value={formatBytes(detail.transcript_bytes)} />
-              <StatTile label="Compactions" value={String(detail.compactions)} />
+              <StatTile label="Transcript" value={formatBytes(detail.transcript_bytes)} hue="--chr-tools" />
+              <StatTile label="Compactions" value={String(detail.compactions)} hue="--chr-peak" />
               <StatTile
-                label="Cache hit rate"
-                value={formatPct(detail.cache_hit_rate)}
-                note={`${formatTokens(detail.cache_creation_tokens)} written`}
-              />
-              <StatTile
-                label="Cold turns"
-                value={String(detail.cold_turns)}
-                note="wrote more cache than read"
+                label="Cache written"
+                value={formatTokens(detail.cache_creation_tokens)}
+                hue="--chr-cache"
               />
             </div>
 
@@ -135,6 +149,7 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
                 markers={markers}
                 dots={coldTurns}
                 annotate={annotate}
+                hue="--chr-context"
               />
             </section>
 
@@ -144,6 +159,7 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
                 rows={detail.tools.slice(0, 12).map((t) => ({ label: t.tool_name, value: t.calls }))}
                 format={(n) => String(n)}
                 title="Tool calls in this session"
+                hue="--chr-tools"
               />
             </section>
 
