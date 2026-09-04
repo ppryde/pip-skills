@@ -55,6 +55,7 @@ type SortKey =
   | "prompts"
   | "tool_calls"
   | "peak_context_tokens"
+  | "peak_context_pct"
   | "output_tokens"
   | "duration_s"
   | "transcript_bytes"
@@ -67,7 +68,7 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "prompts", label: "Prompts", render: (s) => String(s.prompts) },
   { key: "tool_calls", label: "Tools", render: (s) => String(s.tool_calls) },
   { key: "peak_context_tokens", label: "Peak ctx", render: (s) => formatTokens(s.peak_context_tokens) },
-  { key: "peak_context_tokens", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
+  { key: "peak_context_pct", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
   { key: "transcript_bytes", label: "Size", render: (s) => formatBytes(s.transcript_bytes) },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },

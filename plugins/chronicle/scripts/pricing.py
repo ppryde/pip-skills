@@ -8,7 +8,10 @@ price change here is reflected the moment the page reloads, with no re-sync.
 
 Rates are USD per million tokens. Cache writes are priced by TTL: 1.25× the
 input rate for the 5-minute prefix, 2× for the 1-hour one; cache reads are
-0.1× input on every model except Claude Fable 5.1, whose reads are $0.25.
+0.1× input on every model except Claude Fable 5.1 and Claude Mythos 5.1,
+whose reads are $0.25 (0.025× — a quarter of Claude Fable 5's cache-read
+rate; whether Claude Mythos 5.1 truly shares Claude Fable 5.1's rate was
+still open when this table was last checked, so it is assumed here).
 ``PRICING_AS_OF`` is the date these were last checked against the pricing
 page — if a model is missing, its turns are counted as *unpriced* rather than
 guessed, and the report says how many.
