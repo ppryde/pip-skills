@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.25.2",
+  "version": "1.27.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -12,63 +12,171 @@
       "source": "./plugins/puritan",
       "description": "Architectural doctrine enforcement through composable lenses. Covenant for planning, Inquisition for auditing, Scriptorium for writing new doctrine.",
       "category": "engineering",
-      "tags": ["architecture", "audit", "lenses", "ddd", "cqrs", "event-sourcing", "hexagonal", "layered-n-tier", "messaging", "microservices", "modular-monolith", "resilience", "saga", "repository", "strategy", "backend-for-frontend"]
+      "tags": [
+        "architecture",
+        "audit",
+        "lenses",
+        "ddd",
+        "cqrs",
+        "event-sourcing",
+        "hexagonal",
+        "layered-n-tier",
+        "messaging",
+        "microservices",
+        "modular-monolith",
+        "resilience",
+        "saga",
+        "repository",
+        "strategy",
+        "backend-for-frontend"
+      ]
     },
     {
       "name": "tribunal",
       "source": "./plugins/tribunal",
       "description": "PR comment review, categorisation, prioritisation and resolution. No heresy goes unaddressed.",
       "category": "engineering",
-      "tags": ["pr-review", "code-review", "github", "feedback"]
+      "tags": [
+        "pr-review",
+        "code-review",
+        "github",
+        "feedback"
+      ]
     },
     {
       "name": "email-absolution",
       "source": "./plugins/email-absolution",
       "description": "HTML email auditing and generation under the watchful eye of the Witchfinder. Twelve doctrines. Three skills. No sinful templates shall pass.",
       "category": "engineering",
-      "tags": ["email", "html-email", "transactional", "accessibility", "deliverability", "rendering", "mjml", "audit"]
+      "tags": [
+        "email",
+        "html-email",
+        "transactional",
+        "accessibility",
+        "deliverability",
+        "rendering",
+        "mjml",
+        "audit"
+      ]
     },
     {
       "name": "django-inquisition",
       "source": "./plugins/django-inquisition",
       "description": "Django ORM performance auditor. Audits source files and symbols against ~70 ORM heuristics, ranks findings by impact, and emits a tier-grouped report.",
       "category": "engineering",
-      "tags": ["django", "orm", "performance", "database", "postgresql", "mysql", "sqlite", "queryset", "n-plus-one", "indexes", "bulk", "optimisation"]
+      "tags": [
+        "django",
+        "orm",
+        "performance",
+        "database",
+        "postgresql",
+        "mysql",
+        "sqlite",
+        "queryset",
+        "n-plus-one",
+        "indexes",
+        "bulk",
+        "optimisation"
+      ]
     },
     {
       "name": "review-clone",
       "source": "./plugins/review-clone",
       "description": "Clone a reviewer's voice and rules from their public GitHub review history. Every finding cites a real comment; the persona never invents APIs.",
       "category": "engineering",
-      "tags": ["code-review", "pr-review", "github", "persona", "voice", "review-bot"]
+      "tags": [
+        "code-review",
+        "pr-review",
+        "github",
+        "persona",
+        "voice",
+        "review-bot"
+      ]
     },
     {
       "name": "overseer",
       "source": "./plugins/overseer",
       "description": "Persistent work ledger plus card orchestration: delegated agents, adversarial review loops, budget tripwires and session handoff.",
       "category": "engineering",
-      "tags": ["workflow", "ledger", "sprints", "orchestration", "task-tracking", "budgets", "resume", "agents", "review-loops"]
+      "tags": [
+        "workflow",
+        "ledger",
+        "sprints",
+        "orchestration",
+        "task-tracking",
+        "budgets",
+        "resume",
+        "agents",
+        "review-loops"
+      ]
     },
     {
       "name": "vigil",
       "source": "./plugins/vigil",
       "description": "Portable context handover: measure a session's context usage (ctx NN%) and reset in-process via /clear at points you choose, resuming from a re-injected handover. Works in any repo; ships fail-safe Stop/SessionStart hooks.",
       "category": "engineering",
-      "tags": ["context", "handover", "session", "tmux", "portability", "hooks", "resume"]
+      "tags": [
+        "context",
+        "handover",
+        "session",
+        "tmux",
+        "portability",
+        "hooks",
+        "resume"
+      ]
     },
     {
       "name": "test-crucible",
       "source": "./plugins/test-crucible",
       "description": "Test suite speed and dryness, by measurement. Profiles the whole suite rather than the part you pointed at, catches accidental quadratics with a scaling ladder, proves a fix removed the defect rather than shrinking its constant, and names what the speedup cost in fidelity.",
       "category": "engineering",
-      "tags": ["tests", "performance", "ci", "pytest", "junit", "profiling", "quadratic", "fixtures", "duplication", "coverage", "optimisation"]
+      "tags": [
+        "tests",
+        "performance",
+        "ci",
+        "pytest",
+        "junit",
+        "profiling",
+        "quadratic",
+        "fixtures",
+        "duplication",
+        "coverage",
+        "optimisation"
+      ]
     },
     {
       "name": "census",
       "source": "./plugins/census",
       "description": "Records the Claude Code status-line payload into a single worktree-indexed store, so any tool can read a session's live context %, model, PR status, and 5h/7d rate-limit usage. One writer (the status line), many readers. Pure stdlib, quarantine-safe.",
       "category": "engineering",
-      "tags": ["statusline", "status-line", "context", "rate-limits", "usage", "worktree", "session", "telemetry", "hooks"]
+      "tags": [
+        "statusline",
+        "status-line",
+        "context",
+        "rate-limits",
+        "usage",
+        "worktree",
+        "session",
+        "telemetry",
+        "hooks"
+      ]
+    },
+    {
+      "name": "chronicle",
+      "source": "./plugins/chronicle",
+      "description": "Session telemetry from Claude Code transcripts: per-turn token usage, context growth, prompts, tool calls, subagents, compactions and duration in an account-scoped SQLite chronicle, synced on demand. The overseer dashboard grows a Chronicle page when it is present.",
+      "category": "engineering",
+      "tags": [
+        "sessions",
+        "tokens",
+        "usage",
+        "telemetry",
+        "sqlite",
+        "metrics",
+        "transcripts",
+        "dashboard",
+        "hooks"
+      ]
     }
   ]
 }

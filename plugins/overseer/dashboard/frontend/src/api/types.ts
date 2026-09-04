@@ -128,6 +128,10 @@ export interface Context {
   session_name?: string;
   pr?: PrWindow;
   stale?: boolean;
+  /** Census sees the status line still rendering, but the session's activity
+   * counters haven't moved for 10 minutes — an open TUI nobody is working in.
+   * Distinct from `stale`, which means census sees no render at all. */
+  idle?: boolean;
 }
 
 export interface RateWindow {
@@ -270,4 +274,272 @@ export interface ClearResponse {
   removed: Record<string, unknown>;
   label: string;
   noop: boolean;
+}
+
+// --- Chronicle (optional sibling plugin — session telemetry) ---------------
+// Mirrors `plugins/chronicle/scripts/report.py`'s JSON. The dashboard grows
+// a Chronicle page only when `/api/chronicle/status` says the plugin is
+// installed; every shape below is what chronicle's CLI prints verbatim.
+
+export interface ChronicleStatus {
+  installed: boolean;
+  exists: boolean;
+  db?: string;
+  sessions?: number;
+  turns?: number;
+  repos?: number;
+  last_ingest_at?: number | null;
+  /** Epoch seconds of the last `sync`, null before the first one. */
+  synced_at?: number | null;
+}
+
+/** POST /api/chronicle/sync — what the on-demand pull found and did. */
+export interface ChronicleSyncResponse {
+  /** Transcript files stat-ed (main + subagent files). */
+  scanned: number;
+  /** Sessions with at least one file that moved since last seen. */
+  changed: number;
+  /** New JSONL lines parsed across those sessions. */
+  lines: number;
+  /** Ids of the sessions that changed. */
+  sessions: string[];
+  synced_at: number;
+}
+
+export interface ChronicleTotals {
+  sessions: number;
+  turns: number;
+  prompts: number;
+  tool_calls: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  compactions: number;
+  /** Main-agent turns that wrote more cache than they read (first call,
+   * TTL lapsed, or prefix changed). */
+  cold_turns: number;
+  /** Distinct artifact pages published (republishes of one url count once). */
+  artifacts: number;
+  subagents: number;
+  active_ms: number;
+  transcript_bytes: number;
+  live: number;
+  /** cache_read / (input + cache_read + cache_creation); null with no context. */
+  cache_hit_rate: number | null;
+  /** Cache-creation tokens split by TTL. */
+  cache_5m_tokens: number;
+  cache_1h_tokens: number;
+  /** Largest single window reached by any session in the range. */
+  peak_context_tokens: number;
+  /** That peak as a share of its inferred window (200k or 1M). */
+  peak_context_pct: number | null;
+  context_window: number;
+  /** API-equivalent cost in USD at Anthropic list prices (see chronicle's
+   * pricing.py) — a yardstick, not a bill. Turns on a model the table does
+   * not know contribute nothing and are counted in `unpriced_turns`. */
+  cost_usd: number;
+  unpriced_turns: number;
+  /** ISO date the pricing table was last checked. */
+  pricing_as_of: string;
+}
+
+export interface ChronicleDay {
+  day: string;
+  sessions: number;
+  turns: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  cold_turns: number;
+  /** Largest single main-agent context window seen that day. */
+  peak_context_tokens: number;
+  /** That peak as a share of its inferred window. */
+  peak_context_pct: number | null;
+  cache_hit_rate: number | null;
+  cost_usd: number;
+  unpriced_turns: number;
+}
+
+export interface ChronicleModel {
+  model: string;
+  turns: number;
+  sessions: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cache_5m_tokens: number;
+  cache_1h_tokens: number;
+  output_tokens: number;
+  /** Null when the model is not in the pricing table. */
+  cost_usd: number | null;
+}
+
+export interface ChronicleTool {
+  tool_name: string;
+  calls: number;
+  sessions?: number;
+}
+
+export interface ChronicleQuantiles {
+  p50: number | null;
+  p90: number | null;
+  max: number | null;
+  mean: number | null;
+}
+
+export interface ChronicleShape {
+  turns: ChronicleQuantiles;
+  prompts: ChronicleQuantiles;
+  duration_s: ChronicleQuantiles;
+  transcript_bytes: ChronicleQuantiles;
+  peak_context_tokens: ChronicleQuantiles;
+  cost_usd: ChronicleQuantiles;
+}
+
+/** One published artifact PAGE — the latest publish of a url, with how many
+ * times it was published in that session and when it first appeared. */
+export interface ChronicleArtifact {
+  session_id: string;
+  session_title?: string | null;
+  /** Latest publish time. */
+  ts: number | null;
+  first_ts: number | null;
+  /** Null when the publish's result never landed in the transcript. */
+  url: string | null;
+  title: string | null;
+  description: string | null;
+  favicon: string | null;
+  publishes: number;
+}
+
+/** One entry in a session's biggest-jumps list: the turn whose context grew
+ * most since the previous one, attributed to what landed in between. */
+export interface ChronicleJump {
+  turn: number;
+  ts: number | null;
+  context_tokens: number;
+  delta_tokens: number;
+  output_tokens: number;
+  cold: boolean;
+  tool_calls: number;
+  /** Top three tool results (by size) that landed before this turn. */
+  landed: { tool_name: string; chars: number }[];
+  /** Every result that landed before this turn, in characters. */
+  landed_chars: number;
+}
+
+export interface ChronicleSummary {
+  /** `null` when chronicle has no store yet (or the plugin is absent). */
+  totals: ChronicleTotals | null;
+  by_day?: ChronicleDay[];
+  by_model?: ChronicleModel[];
+  tools?: ChronicleTool[];
+  shape?: ChronicleShape;
+  artifacts?: ChronicleArtifact[];
+}
+
+export interface ChronicleSession {
+  session_id: string;
+  project_slug: string | null;
+  cwd: string | null;
+  repo_root: string | null;
+  git_branch: string | null;
+  entrypoint: string | null;
+  version: string | null;
+  title: string | null;
+  transcript_path: string | null;
+  transcript_bytes: number;
+  started_at: number | null;
+  ended_at: number | null;
+  end_reason: string | null;
+  last_activity_at: number | null;
+  updated_at: number;
+  turns: number;
+  prompts: number;
+  tool_calls: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  peak_context_tokens: number;
+  compactions: number;
+  cold_turns: number;
+  artifacts: number;
+  subagents: number;
+  active_ms: number;
+  models: string[];
+  cache_hit_rate: number | null;
+  /** Peak context as a share of the window inferred for this session. */
+  peak_context_pct: number | null;
+  context_window: number;
+  /** Derived server-side: last activity minus start, in seconds. */
+  duration_s: number | null;
+  /** Derived: input + cache read + cache creation, summed over turns. */
+  context_tokens: number;
+  live: boolean;
+  /** API-equivalent cost at list prices, every agent's turns included. */
+  cost_usd: number;
+  unpriced_turns: number;
+}
+
+export interface ChronicleSessionsResponse {
+  sessions: ChronicleSession[];
+}
+
+export interface ChronicleTurn {
+  ts: number | null;
+  model: string | null;
+  context_tokens: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cache_5m_tokens: number;
+  cache_1h_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  tool_calls: number;
+  stop_reason: string | null;
+  /** cache_creation > cache_read for this call. */
+  cold: boolean;
+  /** Seconds since the previous main-agent call; null for the first. */
+  gap_s: number | null;
+  /** This call at list prices; null when its model is unpriced. */
+  cost_usd: number | null;
+}
+
+export interface ChronicleSubagent {
+  agent_id: string;
+  turns: number;
+  context_tokens: number;
+  output_tokens: number;
+  tool_calls: number;
+  first_ts: number | null;
+  last_ts: number | null;
+}
+
+/** `GET /api/chronicle/session/{id}` — the session row plus its per-turn
+ * series. NOTE: `subagents` here is the per-agent LIST, not the rollup
+ * count `ChronicleSession.subagents` carries (chronicle's CLI replaces the
+ * count with the breakdown on the detail verb); likewise `artifacts` is the
+ * page LIST here and the distinct-page count on the session row. */
+export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagents" | "artifacts"> {
+  turn_series: ChronicleTurn[];
+  subagents: ChronicleSubagent[];
+  tools: ChronicleTool[];
+  compactions_at: number[];
+  artifacts: ChronicleArtifact[];
+  biggest_jumps: ChronicleJump[];
+}
+
+/** Query knobs shared by the summary and sessions reads. */
+export interface ChronicleQuery {
+  /** Only sessions active in the last N days; omit for all time. */
+  days?: number;
+  /** `"all"` drops the repo filter (account-wide); default scopes to the
+   * active root exactly like `/api/board`. */
+  scope?: "repo" | "all";
 }

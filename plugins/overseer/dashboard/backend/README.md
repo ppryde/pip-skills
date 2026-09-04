@@ -4,7 +4,9 @@ A FastAPI app that turns the `overseer` and `vigil` CLIs into a JSON API and
 serves the (separately built) dashboard frontend. It is a pure CLIENT of both
 CLIs — every read and write is a `subprocess` call to their `cli.py`; it never
 imports overseer/vigil internals and never touches `.workflow/` directly, which
-preserves overseer's single-writer invariant.
+preserves overseer's single-writer invariant. Two optional sibling plugins are
+read the same way and degrade to "unavailable" when absent: `census` (live
+session status) and `chronicle` (session telemetry, `/api/chronicle/*`).
 
 ## Install
 

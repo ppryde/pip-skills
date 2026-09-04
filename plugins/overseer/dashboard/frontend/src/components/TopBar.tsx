@@ -31,6 +31,11 @@ import skullIcon from "../assets/ui-icons/skull.png";
 import scrollIcon from "../assets/ui-icons/scroll.png";
 import settingsIcon from "../assets/ui-icons/settings.png";
 
+/** The dashboard's pages. Board|Atlas share the two-coin toggle; Chronicle
+ * (the optional session-telemetry page) has its own button, shown only
+ * when the chronicle plugin is installed beside this dashboard. */
+export type View = "board" | "atlas" | "chronicle";
+
 export interface TopBarProps {
   context: Context | null;
   limits: Limits;
@@ -105,8 +110,11 @@ export interface TopBarProps {
    * `activeBranch`. Required — App.tsx has owned and passed this since
    * its own chunk landed; the standalone-compile rationale for making it
    * optional expired the moment that wiring existed. */
-  view: "board" | "atlas";
-  onSelectView: (view: "board" | "atlas") => void;
+  view: View;
+  onSelectView: (view: View) => void;
+  /** Whether `/api/chronicle/status` reported the plugin installed — gates
+   * the Chronicle nav button entirely (absent plugin, absent button). */
+  chronicleAvailable?: boolean;
   /** WF-091: the Epic Atlas toolbar folded into the Controls group — single
    * toggle buttons rendered ONLY when `view === "atlas"` (retired
    * standalone `<AtlasToolbar>`, which sat between the topbar and the
@@ -191,6 +199,7 @@ function TopBar({
   onToggleNames,
   hideVanquished,
   onToggleVanquished,
+  chronicleAvailable = false,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -229,7 +238,11 @@ function TopBar({
   // other view anyway — and the front (active) coin now switches away rather
   // than being a dead click. Only holds while there are two pages (see the
   // JSX note); a third view would need a real segmented control.
+  // While the Chronicle page is showing, the coins keep Board in front (the
+  // page a coin click returns to) — the Chronicle button beside them is the
+  // pressed control, so the stack never shows two "back" coins.
   const toggleView = () => onSelectView(view === "board" ? "atlas" : "board");
+  const boardCoinPressed = view !== "atlas";
 
   return (
     <>
@@ -248,7 +261,7 @@ function TopBar({
             <button
               type="button"
               className="topbar__view-toggle-btn"
-              aria-pressed={view === "board"}
+              aria-pressed={boardCoinPressed}
               aria-label="Board"
               title="Board"
               onClick={toggleView}
@@ -268,6 +281,19 @@ function TopBar({
               <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
             </button>
           </div>
+          {chronicleAvailable && (
+            <button
+              type="button"
+              className="topbar__chronicle-btn"
+              aria-pressed={view === "chronicle"}
+              title="The Chronicle — session token usage and shape"
+              onClick={() => onSelectView(view === "chronicle" ? "board" : "chronicle")}
+            >
+              {/* rpg-icons pack "sealed letter" — the guild's session ledger */}
+              <img src={scrollIcon} alt="" className="topbar__chronicle-icon" />
+              Chronicle
+            </button>
+          )}
           <h1>Adventurers&rsquo; Guild Board</h1>
         </div>
 
