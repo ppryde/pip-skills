@@ -7078,6 +7078,13 @@ button.trail-tag:focus-visible {
   color: var(--qb-ink-400);
 }
 
+.chr-chart__note {
+  margin: 0.35rem 0 0;
+  font-family: var(--qb-font-prose);
+  font-size: 0.75rem;
+  color: var(--qb-ink-400);
+}
+
 .chr-chart__table {
   margin-top: 0.25rem;
   font-family: var(--qb-font-prose);

@@ -507,8 +507,17 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "duration_s": _quantiles(durations),
         "transcript_bytes": _quantiles([float(r["transcript_bytes"]) for r in shape_rows]),
         "peak_context_tokens": _quantiles([float(r["peak_context_tokens"]) for r in shape_rows]),
+        # A session priced entirely on unpriced models sums to 0.0 — that is
+        # "unknown", not a genuine free session, so it is excluded here
+        # rather than dragging the typical-cost quantiles toward zero. A
+        # PARTIALLY unpriced session still contributes its priced portion.
         "cost_usd": _quantiles([
-            session_costs.get(r["session_id"], {"cost_usd": 0.0})["cost_usd"] for r in shape_rows
+            entry["cost_usd"]
+            for entry in (
+                session_costs.get(r["session_id"], {"cost_usd": 0.0, "unpriced_turns": 0})
+                for r in shape_rows
+            )
+            if not (entry["cost_usd"] == 0.0 and entry["unpriced_turns"] > 0)
         ]),
     }
     return {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cacheVerdict,
   formatBytes,
+  formatCostWithUnpriced,
   formatDuration,
   formatActive,
   formatDay,
@@ -65,6 +66,20 @@ describe("formatUsd", () => {
     expect(formatUsd(3103.67)).toBe("$3.1k");
     expect(formatUsd(null)).toBe("—");
     expect(formatUsd(-1)).toBe("—");
+  });
+});
+
+describe("formatCostWithUnpriced", () => {
+  it("never reads as free when a fully-unpriced session sums to zero", () => {
+    expect(formatCostWithUnpriced(0, 3)).toBe("unpriced (3)");
+    expect(formatCostWithUnpriced(null, 2)).toBe("unpriced (2)");
+  });
+  it("appends an unpriced count to a partially-priced total", () => {
+    expect(formatCostWithUnpriced(1.2, 2)).toBe("$1.20 +2 unpriced");
+  });
+  it("falls back to plain formatUsd when nothing is unpriced", () => {
+    expect(formatCostWithUnpriced(0, 0)).toBe("$0");
+    expect(formatCostWithUnpriced(12.3, 0)).toBe("$12.30");
   });
 });
 

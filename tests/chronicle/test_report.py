@@ -76,6 +76,19 @@ class TestSummary:
         assert s3["cost_usd"] == 0.0
         assert s3["unpriced_turns"] == 1
 
+    def test_shape_cost_excludes_unpriced_sessions_not_zeros_them(self, projects):
+        """A session whose every turn is unpriced must not appear as a $0
+        session in the cost quantiles — that would drag the typical-cost
+        figures toward zero and misrepresent 'unknown' as 'free'."""
+        conn = _seed(projects)
+        conn.execute("UPDATE turns SET model = 'claude-experimental-9' WHERE session_id = 's3'")
+        conn.commit()
+        out = report.summary(conn)
+        # s1 = 1 turn, s2 = 2 turns; s3 is fully unpriced and excluded. A
+        # buggy 0.0-inclusive mean would be (0+1+2)/3 = 1.0*TURN_USD instead.
+        assert round(out["shape"]["cost_usd"]["mean"], 6) == round(1.5 * TURN_USD, 6)
+        assert round(out["shape"]["cost_usd"]["max"], 6) == round(2 * TURN_USD, 6)
+
     def test_repo_root_filter(self, projects):
         conn = _seed(projects)
         out = report.summary(conn, repo_root="/repo/a")

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from scripts import ingest, store
 
+from .conftest import _assistant
+
 T0 = "2026-09-01T10:00:00.000Z"
 T1 = "2026-09-01T10:05:00.000Z"
 T2 = "2026-09-01T10:10:00.000Z"
@@ -44,6 +46,33 @@ class TestIngestSession:
         assert row["transcript_bytes"] == path.stat().st_size
         assert row["started_at"] < row["last_activity_at"]
         assert row["ended_at"] is None
+
+    def test_tool_calls_survive_a_message_split_across_two_ingests(self, builder):
+        """A message's content blocks can land either side of an ingest
+        boundary (a Stop hook, or a dashboard Sync mid-write): the tool_use
+        line ingested in one call, the trailing text line in the next. The
+        second call's ``fold()`` sees only ITS OWN batch, so its Turn has no
+        tool_uses — turns.tool_calls must be recomputed from the tool_calls
+        table (which never loses rows), not overwritten with the batch-local
+        count. See ingest._write_facts."""
+        tool_line = _assistant("m1", ts=T0, blocks=[
+            {"type": "tool_use", "id": "m1-tool0", "name": "Bash", "input": {}}
+        ], session_id="s1")
+        path = builder.raw(tool_line).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        row = conn.execute("SELECT tool_calls FROM turns WHERE message_id = 'm1'").fetchone()
+        assert row[0] == 1
+
+        text_line = _assistant("m1", ts=T0, blocks=[{"type": "text", "text": "done"}], session_id="s1")
+        builder.append(text_line)
+        ingest.ingest_session(conn, path)
+
+        row = conn.execute("SELECT tool_calls FROM turns WHERE message_id = 'm1'").fetchone()
+        assert row[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM tool_calls WHERE message_id = 'm1'"
+        ).fetchone()[0] == 1
 
     def test_cold_turns_and_ttl_split_roll_up(self, builder):
         cold_usage = {"input_tokens": 1, "cache_read_input_tokens": 0,
@@ -267,6 +296,20 @@ class TestSync:
         os.utime(path, (2_000_000_000, 2_000_000_000))
         assert ingest.sync(conn, projects)["changed"] == 1
         assert ingest.sync(conn, projects)["changed"] == 0
+
+    def test_first_sync_of_an_empty_file_settles_on_the_second(self, projects):
+        """A file with no complete line on its FIRST sight (an empty
+        transcript, or a live session whose first line is still being
+        written) must still get a cursor row written, or file_changed keeps
+        reporting it changed forever — see ingest_file's ``if not lines``
+        branch, which used to be a bare UPDATE (0 rows affected when no
+        cursor row exists yet)."""
+        path = projects / "-repo" / "s1.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        conn = store.connect()
+        assert ingest.sync(conn, projects)["changed"] == 1  # never seen before -> changed
+        assert ingest.sync(conn, projects)["changed"] == 0  # cursor now recorded -> settles
 
     def test_full_sync_rereads_everything_without_double_counting(self, projects):
         from .conftest import TranscriptBuilder

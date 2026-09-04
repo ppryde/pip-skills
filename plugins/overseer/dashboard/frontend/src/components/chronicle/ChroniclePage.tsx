@@ -15,6 +15,7 @@ import {
   cacheVerdict,
   formatActive,
   formatBytes,
+  formatCostWithUnpriced,
   formatDay,
   formatDuration,
   formatMonth,
@@ -72,7 +73,7 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
   { key: "transcript_bytes", label: "Size", render: (s) => formatBytes(s.transcript_bytes) },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
-  { key: "cost_usd", label: "Cost", render: (s) => formatUsd(s.cost_usd) },
+  { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {

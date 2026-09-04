@@ -36,6 +36,12 @@ interface ColumnChartProps {
 
 const MARGIN = { top: 12, right: 8, bottom: 22, left: 44 };
 const MAX_BAR = 24;
+// A day-per-bar chart is 468px of plot at the default width; past this many
+// points a bar is under 4px and the columns smear into an unreadable block
+// (an "All time" window can be years of daily points). Window to the most
+// recent MAX_POINTS and say so — the Table view twin below is never capped,
+// so no data is lost, only what the plot itself renders.
+const MAX_POINTS = 120;
 
 function TableView({
   title,
@@ -94,12 +100,14 @@ export function ColumnChart({
   const width = 520;
   const plotW = width - MARGIN.left - MARGIN.right;
   const plotH = height - MARGIN.top - MARGIN.bottom;
-  const max = Math.max(0, ...points.map((p) => p.value));
+  const capped = points.length > MAX_POINTS;
+  const rendered = capped ? points.slice(-MAX_POINTS) : points;
+  const max = Math.max(0, ...rendered.map((p) => p.value));
   const ticks = niceTicks(max);
   const top = ticks[ticks.length - 1] || 1;
-  const slot = points.length > 0 ? plotW / points.length : plotW;
+  const slot = rendered.length > 0 ? plotW / rendered.length : plotW;
   const bar = Math.min(MAX_BAR, Math.max(2, slot - 2));
-  const stride = labelStride(points.length, plotW);
+  const stride = labelStride(rendered.length, plotW);
   const y = (v: number) => MARGIN.top + plotH - (v / top) * plotH;
 
   if (points.length === 0) {
@@ -130,7 +138,7 @@ export function ColumnChart({
             </text>
           </g>
         ))}
-        {points.map((p, i) => {
+        {rendered.map((p, i) => {
           const cx = MARGIN.left + slot * i + slot / 2;
           const h = Math.max(0, (p.value / top) * plotH);
           const r = Math.min(4, bar / 2, h);
@@ -142,8 +150,11 @@ export function ColumnChart({
             h === 0
               ? ""
               : `M${x0},${base} V${yTop + r} Q${x0},${yTop} ${x0 + r},${yTop} H${x0 + bar - r} Q${x0 + bar},${yTop} ${x0 + bar},${yTop + r} V${base} Z`;
+          // Keyed on index + detail, not the bare display label: per-day
+          // labels drop the year ("4 Sep"), so a multi-year "All time"
+          // window can repeat a label and collide on label-only keys.
           return (
-            <g key={p.label}>
+            <g key={`${i}-${p.detail ?? p.label}`}>
               {d && (
                 <path
                   d={d}
@@ -180,14 +191,20 @@ export function ColumnChart({
           className="chr-chart__axis"
         />
       </svg>
-      {hover !== null && points[hover] && (
+      {hover !== null && rendered[hover] && (
         <Tooltip
           x={`${((MARGIN.left + slot * hover + slot / 2) / width) * 100}%` as unknown as number}
           y={0}
         >
-          <strong>{format(points[hover].value)}</strong>
-          <span>{points[hover].detail ?? points[hover].label}</span>
+          <strong>{format(rendered[hover].value)}</strong>
+          <span>{rendered[hover].detail ?? rendered[hover].label}</span>
         </Tooltip>
+      )}
+      {capped && (
+        <p className="chr-chart__note">
+          Showing the most recent {MAX_POINTS} of {points.length} points — see Table view for the
+          full history.
+        </p>
       )}
       <TableView
         title={title}

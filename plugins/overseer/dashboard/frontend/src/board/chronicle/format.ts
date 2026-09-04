@@ -78,6 +78,22 @@ export function formatUsd(usd: number | null | undefined): string {
   return `$${(usd / 1000).toFixed(1)}k`;
 }
 
+/**
+ * A priced-portion cost plus how many turns that price excludes — so a
+ * session or day priced entirely on unpriced models reads as "unpriced",
+ * never "$0" (a genuinely free session and an unknown-cost one must not
+ * look the same). A partially-priced total keeps its number, with a count
+ * appended: `formatCostWithUnpriced(0, 3)` -> "unpriced (3)",
+ * `formatCostWithUnpriced(1.2, 2)` -> "$1.20 +2 unpriced".
+ */
+export function formatCostWithUnpriced(usd: number | null | undefined, unpriced: number): string {
+  if (unpriced <= 0) return formatUsd(usd);
+  if (usd === null || usd === undefined || !Number.isFinite(usd) || usd <= 0) {
+    return `unpriced (${unpriced})`;
+  }
+  return `${formatUsd(usd)} +${unpriced} unpriced`;
+}
+
 /** "2026-06-24" -> "Jun 2026" (a tile note has no room for a full date). */
 export function formatMonth(day: string): string {
   const match = /^(\d{4})-(\d{2})/.exec(day);

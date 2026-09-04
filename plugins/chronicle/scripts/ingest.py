@@ -110,19 +110,14 @@ def file_changed(conn: sqlite3.Connection, path: Path) -> bool:
 
 
 def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> None:
-    conn.executemany(
-        """INSERT OR REPLACE INTO turns(session_id, agent_id, message_id, request_id, ts, model,
-               input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
-               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        [
-            (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
-             t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
-             t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens, len(t.tool_uses),
-             t.stop_reason, t.effort)
-            for t in facts.turns.values()
-        ],
-    )
+    # tool_calls rows first: a message split across two ingests (a Stop hook
+    # or a dashboard Sync landing mid-write) folds into two DISJOINT Turn
+    # objects, one per call, each seeing only the tool_use blocks that were
+    # on disk at the time — so len(t.tool_uses) is only THIS batch's count,
+    # not the message's total. tool_calls rows are keyed by tool_use_id and
+    # never overwritten (INSERT OR IGNORE), so they accumulate correctly
+    # across ingests; turns.tool_calls below is then a COUNT(*) against that
+    # already-correct table, not the batch-local len().
     conn.executemany(
         """INSERT OR IGNORE INTO tool_calls(session_id, tool_use_id, agent_id, message_id,
                tool_name, ts) VALUES (?,?,?,?,?,?)""",
@@ -130,6 +125,31 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
             (session_id, tool_id, t.agent_id, t.message_id, name, t.ts)
             for t in facts.turns.values()
             for tool_id, name in t.tool_uses
+        ],
+    )
+    conn.executemany(
+        """INSERT INTO turns(session_id, agent_id, message_id, request_id, ts, model,
+               input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
+               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,
+               (SELECT COUNT(*) FROM tool_calls
+                WHERE session_id = ? AND agent_id = ? AND message_id = ?),
+               ?,?)
+           ON CONFLICT(session_id, agent_id, message_id) DO UPDATE SET
+               request_id = excluded.request_id, ts = excluded.ts, model = excluded.model,
+               input_tokens = excluded.input_tokens, cache_read_tokens = excluded.cache_read_tokens,
+               cache_creation_tokens = excluded.cache_creation_tokens,
+               output_tokens = excluded.output_tokens, thinking_tokens = excluded.thinking_tokens,
+               cache_5m_tokens = excluded.cache_5m_tokens, cache_1h_tokens = excluded.cache_1h_tokens,
+               tool_calls = excluded.tool_calls, stop_reason = excluded.stop_reason,
+               effort = excluded.effort""",
+        [
+            (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
+             t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
+             t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens,
+             session_id, t.agent_id, t.message_id,
+             t.stop_reason, t.effort)
+            for t in facts.turns.values()
         ],
     )
     conn.executemany(
@@ -212,10 +232,18 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
     stat = _stat(path) or (0.0, 0)
     if not lines:
         # Nothing new to parse, but remember the file as seen so a later
-        # sync does not re-stat it as "changed" (e.g. a touched-but-empty tail).
+        # sync does not re-stat it as "changed" (e.g. a touched-but-empty
+        # tail). An upsert, not a bare UPDATE: a file seen for the first
+        # time with no complete line yet (an empty transcript, or a live
+        # session whose first line is still being written) has no cursor
+        # row, so a plain UPDATE would match zero rows and file_changed
+        # would keep reporting it changed forever.
         conn.execute(
-            "UPDATE cursors SET mtime = ?, size = ?, updated_at = ? WHERE path = ?",
-            (stat[0], stat[1], now, str(path)),
+            """INSERT INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, updated_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(path) DO UPDATE SET
+                   mtime = excluded.mtime, size = excluded.size, updated_at = excluded.updated_at""",
+            (str(path), session_id, agent_id, offset, stat[0], stat[1], now),
         )
         return 0
     facts = fold(lines, default_agent=agent_id)

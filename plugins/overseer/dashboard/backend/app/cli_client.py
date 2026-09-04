@@ -126,8 +126,8 @@ def run_chronicle(*args: str, timeout: int = 20) -> Any:
     chronicle is a SOFT dependency like census: a missing plugin, a timeout,
     a non-zero exit, or bad JSON yields None rather than raising, so the
     board never depends on it and the Chronicle page degrades to "not
-    installed" / "no data yet". Only report verbs go through here — the
-    dashboard never triggers an ingest.
+    installed" / "no data yet". Report verbs and the explicit Sync action go
+    through here — the dashboard never triggers an ingest on its own.
     """
     if not chronicle_installed():
         return None
