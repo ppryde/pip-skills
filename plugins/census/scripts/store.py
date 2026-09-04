@@ -49,9 +49,17 @@ IDLE_HORIZON_SECONDS = 10 * 60       # readers flag sessions with no API activit
 # 4h50m apart, so a minute of tolerance cannot merge two real windows.
 _SAME_WINDOW_TOLERANCE_SECONDS = 60
 # A reset further out than this is not a rate-limit window we know: the longest
-# is seven days, so anything beyond eight is a corrupt or wrong-unit value (a
-# millisecond epoch, say) and must not be served or allowed to win.
-_MAX_WINDOW_HORIZON_SECONDS = 8 * 24 * 3600
+# is seven days, so anything well beyond that is a corrupt or wrong-unit value
+# (a millisecond epoch, say) and must not be served or allowed to win.
+#
+# Ten days rather than eight, to leave slack for a clock running BEHIND. The
+# ceiling is measured against our own ``now``, so a machine two days slow would
+# see a genuine seven-day window as nine days out and drop it, showing nothing
+# where it could have shown something. The values this ceiling exists to reject
+# are wrong by orders of magnitude, not by days, so the extra slack costs
+# nothing: no real window falls in the eight-to-ten-day band, and no plausible
+# corruption does either.
+_MAX_WINDOW_HORIZON_SECONDS = 10 * 24 * 3600
 _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
 _LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
@@ -309,6 +317,13 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
     # ``updated_at`` means "when the account figure last MOVED", not "when a
     # status line last rendered". A reading that loses the ordering leaves it
     # alone, so a latched figure cannot masquerade as a fresh observation.
+    #
+    # No reader is served this today: both ``_live_limits`` here and the
+    # dashboard's own limits section whitelist the two window keys. It is kept
+    # correct on disk rather than exposed, since an API field nothing consumes
+    # is dead surface — but a reader that ever needs the age of the account
+    # figure needs this to be honest, and by then the store will hold years of
+    # it.
     previous_updated = _number(stored.get("updated_at"))
     store["limits"] = {
         **merged,

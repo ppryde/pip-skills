@@ -37,7 +37,8 @@ default, or `~/.claude-personal/census/status.json` when that account sets `CLAU
   themselves, so it needs neither write order nor a trustworthy clock, and a dormant
   session's frozen figure can never displace a working session's current one.
   Boundaries within a minute of each other count as the same window, and a reset more
-  than eight days out is refused as a corrupt or wrong-unit value.
+  than ten days out is refused as a corrupt or wrong-unit value (ten rather than eight,
+  so a clock running a couple of days behind still accepts a genuine seven-day window).
 - **Known tradeoff:** because the higher percentage wins, the figure LATCHES for the rest
   of a window. If the denominator changes mid-window — a plan upgrade, extra capacity
   purchased, or limits raised — usage legitimately falls, and the stored figure stays at

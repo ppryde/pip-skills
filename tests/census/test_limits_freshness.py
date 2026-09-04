@@ -239,6 +239,16 @@ class TestHoistOrdering:
         # And it is never served, even with nothing to compare against.
         assert st.limits(now=110.0)["five_hour"]["used_percentage"] == 20
 
+    def test_a_genuine_seven_day_window_survives_a_slow_clock(self, store_file):
+        """The ceiling is measured against our own clock, so it must leave slack
+        for one running behind — otherwise a slow machine shows nothing where it
+        could have shown something."""
+        seven_days = 7 * 24 * 3600
+        rate = {"seven_day": {"used_percentage": 40, "resets_at": 1_000.0 + seven_days}}
+        # Clock two days behind: the window looks nine days out.
+        st.ingest(_payload("s1", "/wt/a", rate), now=1_000.0 - 2 * 24 * 3600)
+        assert _read(store_file)["limits"]["seven_day"]["used_percentage"] == 40
+
     def test_a_losing_reading_does_not_restamp_updated_at(self, store_file):
         """`updated_at` means "when the account figure last MOVED". A latched
         peak must not masquerade as a fresh observation."""
