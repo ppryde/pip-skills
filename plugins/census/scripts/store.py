@@ -160,6 +160,13 @@ def _activity_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...] | None:
     Claude Code only on an API round-trip or a new user prompt, so an identical
     fingerprint across two ingests means nothing happened in between.
 
+    KNOWN LIMIT: these are API-traffic facts, so a session that is busy WITHOUT
+    talking to the API — a long tool call, a subagent whose usage does not reach
+    the parent's counters — looks dormant. ``idle`` therefore means "no API
+    traffic for a while", which is a good proxy for "nobody working" but not the
+    same claim. Consumers should treat it as a dimming cue, never as grounds to
+    reclaim or interrupt a session.
+
     Returns None when the payload carries NONE of these facts. Absent data is
     not the same as absent activity: without evidence we must not claim a
     session is idle, or a payload shape we do not recognise would report every
@@ -196,9 +203,16 @@ def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
         return now
     prior_fingerprint = _activity_fingerprint(prior_payload)
     fingerprint = _activity_fingerprint(payload)
-    # No evidence either way (an unrecognised payload shape): treat it as
-    # activity rather than carrying an ageing timestamp toward "idle".
+    if prior_fingerprint is None and fingerprint is None:
+        # Evidence-free on BOTH sides, so nothing observable changed. Carry the
+        # prior stamp: a TUI opened and never prompted carries no fingerprint
+        # fields at all, and it is the archetypal idle session — returning
+        # ``now`` here would make it permanently non-idle, which is the feature
+        # failing silently in exactly the case it exists for.
+        return prior_active
     if prior_fingerprint is None or fingerprint is None:
+        # Evidence appeared or vanished between ingests. That is a change we
+        # cannot interpret, so treat it as activity rather than guess.
         return now
     if prior_fingerprint != fingerprint:
         return now
@@ -331,12 +345,28 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
     }
 
 
+def _entry_activity(entry: dict[str, Any]) -> float:
+    """When this entry last showed real activity, for RANKING entries.
+
+    ``active_at`` when the entry has a usable one, else ``updated_at``, else 0.
+
+    Every reader that picks "the freshest session" must rank on this rather than
+    on ``updated_at``. The status line reruns on a timer, so ``updated_at``
+    ranks a dormant TUI above a session that is actually working — which is the
+    whole ambiguity this module exists to remove.
+    """
+    active = _number(entry.get("active_at"))
+    if active is not None:
+        return active
+    return _number(entry.get("updated_at")) or 0.0
+
+
 def _prune(sessions: dict[str, Any], now: float) -> None:
     dead = [
         sid
         for sid, entry in sessions.items()
         if not isinstance(entry, dict)
-        or now - float(entry.get("updated_at", 0) or 0) > SESSION_TTL_SECONDS
+        or now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS
     ]
     for sid in dead:
         sessions.pop(sid, None)
@@ -482,9 +512,7 @@ def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]
     An entry from a pre-``active_at`` store falls back to ``updated_at``.
     """
     updated = _number(entry.get("updated_at")) or 0.0
-    active = _number(entry.get("active_at"))
-    if active is None:
-        active = updated
+    active = _entry_activity(entry)
     result = dict(entry)
     result["stale"] = (now - updated) > STALE_HORIZON_SECONDS
     result["idle"] = (now - active) > IDLE_HORIZON_SECONDS
@@ -509,11 +537,17 @@ def limits(now: float | None = None) -> dict[str, Any] | None:
 
 
 def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | None:
-    """The freshest session entry indexed to ``cwd``, plus top-level limits.
+    """The most recently ACTIVE session entry indexed to ``cwd``, plus limits.
 
-    Returns None when no session matches. The result carries a ``stale`` flag
-    (True when older than the staleness horizon) so a consumer can distinguish a
-    live reading from a frozen one left by a dead session.
+    Freshest means last active, not last rendered. Ranking on ``updated_at``
+    would hand a worktree's answer to whichever of its sessions rendered most
+    recently, and since the status line reruns on a timer that is routinely a
+    dormant TUI rather than the session doing the work. Ties (equal activity,
+    or entries predating ``active_at``) fall back to ``updated_at``.
+
+    Returns None when no session matches. The result carries ``stale`` and
+    ``idle`` flags so a consumer can distinguish a live reading from one frozen
+    by a dead session, and a working session from a dozing one.
     """
     if now is None:
         now = time.time()
@@ -521,13 +555,13 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
     store = _load(store_path())
 
     best: dict[str, Any] | None = None
-    best_ts = -1.0
+    best_rank = (-1.0, -1.0)
     for entry in store.get("sessions", {}).values():
         if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
             continue
-        ts = float(entry.get("updated_at", 0) or 0)
-        if ts > best_ts:
-            best_ts, best = ts, entry
+        rank = (_entry_activity(entry), _number(entry.get("updated_at")) or 0.0)
+        if rank > best_rank:
+            best_rank, best = rank, entry
 
     if best is None:
         return None

@@ -458,3 +458,78 @@ def test_sessions_idle_flag_edge_cases(
         assert sessions[sid]["stale"] is False, sid
     assert sessions["dead"]["stale"] is True
     assert sessions["dead"]["idle"] is True
+
+
+def test_sessions_sorted_by_activity_not_render(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dormant session rendered most recently, so an updated_at sort would
+    put it first. Only the dashboard's own hook re-sorts client side; every
+    other consumer of this endpoint gets the order we send."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    cwd = os.path.realpath(str(root))
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {
+            "dormant": {"worktree_cwd": cwd, "updated_at": now - 1, "active_at": now - 1800, "payload": {}},
+            "working": {"worktree_cwd": cwd, "updated_at": now - 30, "active_at": now - 30, "payload": {}},
+            "legacy": {"worktree_cwd": cwd, "updated_at": now - 120, "payload": {}},
+        },
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    assert [s["id"] for s in resp.json()["sessions"]] == ["working", "legacy", "dormant"]
+
+
+def test_sessions_nan_active_at_does_not_500(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """json round-trips a bare NaN, and Starlette renders with allow_nan=False,
+    so forwarding it raw would 500 the one census read documented as never
+    doing so."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    cwd = os.path.realpath(str(root))
+    store.write_text(
+        '{"version": 1, "limits": {}, "sessions": {"nan": {"worktree_cwd": "'
+        + cwd
+        + '", "updated_at": ' + repr(now - 5) + ', "active_at": NaN, "payload": {}}}}'
+    )
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    session = resp.json()["sessions"][0]
+    assert session["active_at"] is None
+    assert session["idle"] is False  # falls back to updated_at, which is fresh
+
+
+def test_sessions_numeric_string_active_at_agrees_with_census(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """census's own reader rejects a string active_at and falls back to
+    updated_at. This mirror must reach the same verdict, or one entry is idle
+    to one reader and working to the other."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    cwd = os.path.realpath(str(root))
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {"s1": {"worktree_cwd": cwd, "updated_at": now - 5, "active_at": "700", "payload": {}}},
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    assert resp.json()["sessions"][0]["idle"] is False

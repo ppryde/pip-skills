@@ -306,13 +306,29 @@ class TestActivityTracking:
         st.ingest(_payload(sid="s1", rate_limits=moved, **_busy()), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
 
-    def test_payload_with_no_activity_evidence_is_never_reported_idle(self, store_file):
-        """Absent data is not absent activity. A payload shape carrying none of
-        the fingerprint fields must not pin every session dormant forever."""
+    def test_a_session_that_never_prompts_still_goes_idle(self, store_file):
+        """A TUI opened and never prompted carries none of the fingerprint
+        fields, and is the archetypal idle session. Treating "no evidence" as
+        activity on every tick would make it permanently non-idle — the feature
+        failing silently in exactly the case it exists for."""
+        later = 10.0 + st.IDLE_HORIZON_SECONDS + 60
         st.ingest(_payload(sid="s1"), now=10.0)
-        st.ingest(_payload(sid="s1"), now=10.0 + st.IDLE_HORIZON_SECONDS + 60)
-        entry = st.for_session("s1", now=10.0 + st.IDLE_HORIZON_SECONDS + 60)
-        assert entry["idle"] is False
+        st.ingest(_payload(sid="s1"), now=later)
+        assert st.for_session("s1", now=later)["idle"] is True
+
+    def test_evidence_appearing_counts_as_activity(self, store_file):
+        """Its first real turn must wake it, not be read as another blank tick."""
+        later = 10.0 + st.IDLE_HORIZON_SECONDS + 60
+        st.ingest(_payload(sid="s1"), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy()), now=later)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == later
+
+    def test_evidence_vanishing_counts_as_activity(self, store_file):
+        """An unrecognised payload shape must not be read as dormancy."""
+        later = 10.0 + st.IDLE_HORIZON_SECONDS + 60
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1"), now=later)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == later
 
     def test_identical_repeat_ingest_at_the_same_instant_keeps_active_at(self, store_file):
         """`active == prior` — the boundary case, pinned explicitly."""

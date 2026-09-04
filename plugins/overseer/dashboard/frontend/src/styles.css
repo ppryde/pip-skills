@@ -4766,15 +4766,19 @@ a.card-drawer__pr-chip:hover {
 /* Idle: still here, not working. Takes the `-fill` end of the amber pair, per
    the convention in this file that a filled surface uses `-fill` and `-shadow`
    is only ever a darker companion.
-   The ring is a box-shadow, not a border, for two reasons: a border would grow
-   the dot past its live sibling (nothing sets box-sizing here), and every
-   avatar accent is a `-fill` token — so an amber dot lands on
-   `.party-avatar--amber`'s own fill and would otherwise vanish into it. The
-   ring is the row background, so the dot separates on all seven accents.
+   The ring is a box-shadow, not a border, because nothing sets box-sizing here
+   and a border would grow the dot past its live sibling.
+   It is the amber SHADOW token — the darker companion to the fill, which is
+   what that token is for — rather than any surface colour. PartyAvatar renders
+   on three different surfaces (the party row, the overlay's cream hero card,
+   the card drawer), so a ring matched to one of them is a mismatched halo on
+   the other two. A darker amber reads against all three AND against
+   `.party-avatar--amber`'s own fill, which is the identical colour to the dot
+   and the only accent it could otherwise vanish into.
    Excluded from the pulse below so only a genuinely working session animates. */
 .party-avatar__dot--idle {
   background: var(--qb-accent-amber-fill);
-  box-shadow: 0 0 0 1.5px var(--qb-party-row-bg);
+  box-shadow: 0 0 0 1.5px var(--qb-accent-amber-shadow);
 }
 
 @media (prefers-reduced-motion: no-preference) {
