@@ -222,8 +222,7 @@ function TopBar({
   // the questing count: they ARE still out there, just not swinging. Suppressed
   // under `questingCountOverride`, whose count comes from a different source
   // (an unbegun repo's own live-session tally) and has no idle split to report.
-  const idleCount =
-    questingCountOverride === undefined ? fleet.questing - fleet.working : 0;
+  const idleCount = questingCountOverride === undefined ? fleet.idle : 0;
 
   // The two coins are a 2-state toggle: clicking EITHER switches to the OTHER
   // view. For the back (inactive) coin this reads naturally — its view is the

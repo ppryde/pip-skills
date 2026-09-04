@@ -181,7 +181,6 @@ _IDLE_HORIZON_SECONDS = 10 * 60
 def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
     """The entry's ``key`` timestamp as a float; malformed/missing reads as 0.0.
 
-    Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
     Malformed timestamps (None, non-numeric strings) are treated as 0, which
     places them beyond any staleness horizon — quarantine-safe, never raises.
 
@@ -189,6 +188,14 @@ def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
     is 1.0, which would read as a real (ancient) epoch; NaN survives a json
     round trip and makes every comparison false, which would report a session
     non-idle forever.
+
+    This DELIBERATELY diverges from vigil's coercion
+    (vigil/scripts/census.py:_entry_ts), which it was originally copied from and
+    which has neither guard. Vigil reads only ``updated_at``, where both bad
+    values land on the safe side (a session wrongly judged stale), so the
+    divergence is not a bug there. Here the same values decide ``idle``, where
+    they land on the WRONG side, so the guards are load-bearing. Census's own
+    ``store._number`` is the third copy and matches this one.
     """
     value = entry.get(key, 0)
     if isinstance(value, bool):

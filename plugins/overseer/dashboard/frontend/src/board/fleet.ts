@@ -5,10 +5,11 @@ export interface FleetSummary {
    * on a quest, it's just a ghost still shown in the Party (mirrors
    * TopBar's prior questing-pill count, see party.ts). */
   questing: number;
-  /** Live sessions that are actually WORKING — live minus those census flags
-   * `idle` (rendering, but no API activity for 10 minutes). Equals `questing`
-   * when census supplies no `idle` flag at all. */
-  working: number;
+  /** Live sessions census flags `idle` — present, but no API activity for 10
+   * minutes. A subset of `questing`, not a deduction from it: an idle session
+   * is still out there, just not swinging. Zero when census supplies no `idle`
+   * flag at all. */
+  idle: number;
   /** Max `pct` across live sessions that carry one; `null` when no live
    * session has a pct (never NaN). */
   topCtx: number | null;
@@ -28,7 +29,6 @@ export function fleetSummary(
   threshold: number | null
 ): FleetSummary {
   const live = sessions.filter((s) => !s.stale);
-  const working = live.filter((s) => !s.idle);
 
   const livePcts = live
     .map((s) => s.pct)
@@ -42,7 +42,7 @@ export function fleetSummary(
 
   return {
     questing: live.length,
-    working: working.length,
+    idle: live.filter((s) => s.idle).length,
     topCtx,
     nearThreshold,
   };

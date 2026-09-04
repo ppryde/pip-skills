@@ -311,19 +311,19 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
 
     # A window ``_live_limits`` just dropped (expired, or implausibly distant)
     # is a change to the account figure too.
-    stored_keys = {key for key in _LIMIT_WINDOWS if isinstance(stored.get(key), dict)}
-    dropped = bool(stored_keys - set(live))
+    dropped = any(
+        isinstance(stored.get(key), dict) and key not in live for key in _LIMIT_WINDOWS
+    )
 
     # ``updated_at`` means "when the account figure last MOVED", not "when a
     # status line last rendered". A reading that loses the ordering leaves it
     # alone, so a latched figure cannot masquerade as a fresh observation.
     #
     # No reader is served this today: both ``_live_limits`` here and the
-    # dashboard's own limits section whitelist the two window keys. It is kept
-    # correct on disk rather than exposed, since an API field nothing consumes
-    # is dead surface — but a reader that ever needs the age of the account
-    # figure needs this to be honest, and by then the store will hold years of
-    # it.
+    # dashboard's own limits section whitelist the two window keys. The field
+    # is written either way — it predates this ordering rule — so the choice is
+    # not whether to have it but whether it tells the truth. Kept honest rather
+    # than exposed: an API field nothing consumes would be dead surface.
     previous_updated = _number(stored.get("updated_at"))
     store["limits"] = {
         **merged,
