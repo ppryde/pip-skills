@@ -4763,10 +4763,18 @@ a.card-drawer__pr-chip:hover {
   border: 1.5px solid var(--qb-party-text-muted);
 }
 
-/* Idle: still here, not working. Solid amber, and excluded from the pulse
-   below so only a genuinely working session animates. */
+/* Idle: still here, not working. Takes the `-fill` end of the amber pair, per
+   the convention in this file that a filled surface uses `-fill` and `-shadow`
+   is only ever a darker companion.
+   The ring is a box-shadow, not a border, for two reasons: a border would grow
+   the dot past its live sibling (nothing sets box-sizing here), and every
+   avatar accent is a `-fill` token — so an amber dot lands on
+   `.party-avatar--amber`'s own fill and would otherwise vanish into it. The
+   ring is the row background, so the dot separates on all seven accents.
+   Excluded from the pulse below so only a genuinely working session animates. */
 .party-avatar__dot--idle {
-  background: var(--qb-accent-amber-shadow);
+  background: var(--qb-accent-amber-fill);
+  box-shadow: 0 0 0 1.5px var(--qb-party-row-bg);
 }
 
 @media (prefers-reduced-motion: no-preference) {
