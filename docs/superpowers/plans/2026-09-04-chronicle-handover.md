@@ -1,6 +1,7 @@
 # Chronicle — session handover (2026-09-04)
 
-**Branch:** `feat/session-metrics` · **PR:** https://github.com/ppryde/pip-skills/pull/63 (open, 8 commits, all pushed)
+**Branch:** `feat/session-metrics` · **PR:** https://github.com/ppryde/pip-skills/pull/63 (open, review required, 9+ commits, all pushed)
+**Last verified:** 2026-09-04 (second handover) — branch in sync with origin; 67 chronicle + 23 backend (chronicle & sessions) + 87 census tests green.
 **Read first:** `docs/superpowers/specs/2026-09-04-chronicle-session-telemetry-design.md` (what/why), then
 `docs/superpowers/plans/2026-09-04-chronicle-decoupled-dashboard-and-session-deep-dive.md` (what's next).
 
@@ -23,13 +24,21 @@ tools, subagents.
 Real store: `~/.claude/chronicle/sessions.db` — synced with `sync --full` after the last schema change
 (52 sessions, 17 distinct artifact pages). Run `sync --full` again after ANY schema/parser change.
 
+## Uncommitted edits in the working tree — NOT this branch's work
+`plugins/census/{README.md,scripts/store.py}`, `tests/census/*`, and the census-idle passthrough in
+`plugins/overseer/dashboard/backend/app/main.py` (`_census_extras` adds `idle`) + `test_sessions_idle_flag`
+in `backend/tests/test_sessions.py` all belong to ANOTHER session's census "idle vs stale" feature.
+They pass (run census tests from `plugins/census/` as cwd: `cd plugins/census && ../../.venv/bin/python -m pytest ../../tests/census`),
+but do not stage or commit them here. Untracked noise to ignore: `.overseer/`, `.superpowers/`, `scratch/`,
+`design_handoff_quest_board/`, `SECURITY.md`, `node_modules/`, `scratchpad_dashboard.log`, `.DS_Store`.
+
 ## In flight when handed over
-Was mid browser check of the artifacts list + biggest-jumps drawer on the test server. The page
+Nothing new since the first handover — the session was reset (`/clear`) before further work. Was mid browser check of the artifacts list + biggest-jumps drawer on the test server. The page
 screenshot (`This repo` scope, pip-skills) rendered correctly — artifacts panel shows the empty state
 because pip-skills sessions published nothing; switch scope to **All repos** to see the 17 pages.
 The drawer's Biggest jumps table has NOT yet been eyeballed in the browser (unit-tested only).
 
-Test server: `serve.py --port 8772` may still be running from this checkout (`pkill -f "serve.py --port 8772"`
+Test server: `serve.py --port 8772 --no-browser` IS still running from this checkout (pid 68792 at last check) (`pkill -f "serve.py --port 8772"`
 to stop). Port 8770 holds an OLD dashboard process from 25 Aug — not this build.
 
 ## Gotchas learned
