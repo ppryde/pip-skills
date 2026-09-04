@@ -204,6 +204,38 @@ describe("<TopBar/>", () => {
     expect(screen.getByText(/2 questing/)).toBeInTheDocument();
   });
 
+  it("the fleet-health pill reports the idle split of its live members", () => {
+    render(
+      <StatefulTopBar
+        {...baseProps()}
+        party={[
+          partyMember({ id: "busy", stale: false }),
+          partyMember({ id: "dormant", stale: false, idle: true }),
+          partyMember({ id: "ghost", stale: true }),
+        ]}
+      />
+    );
+
+    // Idle sessions stay IN the questing count — they are still out there,
+    // just not swinging — and are called out as a suffix.
+    expect(screen.getByText(/2 questing \(1 idle\)/)).toBeInTheDocument();
+  });
+
+  it("omits the idle suffix entirely when no live member is idle", () => {
+    render(
+      <StatefulTopBar
+        {...baseProps()}
+        party={[
+          partyMember({ id: "s1", stale: false }),
+          partyMember({ id: "s2", stale: false }),
+        ]}
+      />
+    );
+
+    const pill = screen.getByRole("button", { name: /questing/i });
+    expect(pill.textContent).not.toMatch(/idle/);
+  });
+
   it("clicking the fleet-health pill calls onOpenParty", () => {
     const onOpenParty = vi.fn();
     render(

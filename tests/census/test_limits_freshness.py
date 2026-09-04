@@ -79,45 +79,101 @@ class TestReadGate:
         assert st.latest_for_worktree("/wt/a", now=FUTURE + 1)["limits"] is None
 
 
-class TestActivityGatedHoist:
+class TestHoistOrdering:
     """A dormant session's frozen reading must not clobber a working session's.
 
     Both sessions' windows reset in the future, so ``resets_at`` gating alone
-    cannot separate them — only the source's ``active_at`` can.
+    cannot separate them. Usage only rises within a window, so the readings
+    order themselves — no clock and no write order involved.
     """
 
     def _rate(self, pct, resets_at=10_000.0):
         return {"five_hour": {"used_percentage": pct, "resets_at": resets_at}}
 
+    def _pct(self, store_file):
+        return _read(store_file)["limits"]["five_hour"]["used_percentage"]
+
     def test_dormant_timer_rerun_does_not_clobber_active_reading(self, store_file):
-        # A dormant session establishes itself, then goes quiet.
         dormant = {"prompt_id": "p1", "cost": {"total_cost_usd": 1.0}}
         st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=100.0)
-        # A working session posts a fresher account figure.
         st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
-        # The dormant session's status line reruns on the timer: same counters,
-        # same frozen 36% — and it writes LAST.
+        # The dormant session's status line reruns on the timer: same frozen
+        # 36%, and it writes LAST.
         st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=260.0)
 
-        assert _read(store_file)["limits"]["five_hour"]["used_percentage"] == 60
+        assert self._pct(store_file) == 60
+
+    def test_new_prompt_without_an_api_response_cannot_win(self, store_file):
+        """A new prompt id advances session activity, but ``rate_limits`` only
+        refreshes on an API response — so the reading is still the old one and
+        must not displace a higher figure."""
+        st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        # Session A: user pressed enter (new prompt id), no API response yet.
+        st.ingest(_payload("dormant", "/wt/a", self._rate(20), prompt_id="p2"), now=300.0)
+
+        assert self._pct(store_file) == 60
 
     def test_dormant_session_that_wakes_up_wins(self, store_file):
-        dormant = {"prompt_id": "p1", "cost": {"total_cost_usd": 1.0}}
-        st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=100.0)
+        st.ingest(_payload("dormant", "/wt/a", self._rate(36), prompt_id="p1"), now=100.0)
         st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
-        # Same session, but its counters moved — a real API call, so its reading
-        # is now the freshest one there is.
-        awake = {"prompt_id": "p2", "cost": {"total_cost_usd": 2.0}}
-        st.ingest(_payload("dormant", "/wt/a", self._rate(71), **awake), now=300.0)
+        # Its counters moved AND its reading rose past the stored figure.
+        st.ingest(_payload("dormant", "/wt/a", self._rate(71), prompt_id="p2"), now=300.0)
 
-        assert _read(store_file)["limits"]["five_hour"]["used_percentage"] == 71
+        assert self._pct(store_file) == 71
 
-    def test_sources_recorded_per_window(self, store_file):
-        st.ingest(_payload("s1", "/wt/a", self._rate(20), prompt_id="p1"), now=100.0)
-        limits = _read(store_file)["limits"]
-        assert limits["sources"]["five_hour"] == 100.0
+    def test_write_order_does_not_matter(self, store_file):
+        st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        st.ingest(_payload("dormant", "/wt/a", self._rate(36), prompt_id="p1"), now=100.0)
+        assert self._pct(store_file) == 60
 
-    def test_pre_upgrade_limits_without_sources_are_replaced(self, store_file):
+    def test_a_new_window_wins_however_low_its_percentage(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(96, resets_at=10_000.0)), now=100.0)
+        # The window rolled over: counter restarted, reset time moved out.
+        st.ingest(_payload("s2", "/wt/b", self._rate(3, resets_at=28_000.0)), now=110.0)
+        limits = _read(store_file)["limits"]["five_hour"]
+        assert limits["used_percentage"] == 3
+        assert limits["resets_at"] == 28_000.0
+
+    def test_a_superseded_window_loses_however_high_its_percentage(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(3, resets_at=28_000.0)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(96, resets_at=10_000.0)), now=110.0)
+        assert self._pct(store_file) == 3
+
+    def test_a_forward_clock_step_cannot_wedge_a_window(self, store_file):
+        """A reading written while the clock was hours fast must not lock the
+        window until wall clock catches up — the ordering ignores clocks."""
+        st.ingest(_payload("skewed", "/wt/a", self._rate(11)), now=100.0 + 7200)
+        st.ingest(_payload("normal", "/wt/b", self._rate(88)), now=200.0)
+        assert self._pct(store_file) == 88
+
+    def test_nan_percentage_cannot_wedge_a_window(self, store_file):
+        """json round-trips a bare NaN, and every comparison against it is
+        false — it must never become an unbeatable stored reading."""
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "limits": {
+                        "five_hour": {"used_percentage": float("nan"), "resets_at": 10_000.0},
+                        "updated_at": 50.0,
+                    },
+                    "sessions": {},
+                }
+            )
+        )
+        st.ingest(_payload("s1", "/wt/a", self._rate(44)), now=100.0)
+        assert self._pct(store_file) == 44
+
+    def test_reading_without_a_percentage_never_displaces_a_real_one(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(44)), now=100.0)
+        st.ingest(
+            _payload("s2", "/wt/b", {"five_hour": {"resets_at": 10_000.0}}),
+            now=110.0,
+        )
+        assert self._pct(store_file) == 44
+
+    def test_pre_upgrade_limits_are_ordered_not_trusted(self, store_file):
         store_file.parent.mkdir(parents=True, exist_ok=True)
         store_file.write_text(
             json.dumps(
@@ -128,11 +184,5 @@ class TestActivityGatedHoist:
                 }
             )
         )
-        st.ingest(_payload("s1", "/wt/a", self._rate(44), prompt_id="p1"), now=100.0)
-        assert _read(store_file)["limits"]["five_hour"]["used_percentage"] == 44
-
-    def test_readers_never_see_the_sources_bookkeeping(self, store_file):
-        st.ingest(_payload("s1", "/wt/a", self._rate(20), prompt_id="p1"), now=100.0)
-        assert "sources" not in (st.limits(now=100.0) or {})
-        entry = st.for_session("s1", now=100.0)
-        assert "sources" not in (entry["limits"] or {})
+        st.ingest(_payload("s1", "/wt/a", self._rate(44)), now=100.0)
+        assert self._pct(store_file) == 44

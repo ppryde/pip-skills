@@ -8,11 +8,7 @@ Layout of ``~/.claude/census/status.json`` (override with ``CENSUS_STORE``)::
 
     {
       "version": 1,
-      "limits": {
-        "five_hour": {...}, "seven_day": {...},
-        "updated_at": <epoch>,
-        "sources": { "<window>": <active_at of the session that supplied it> }
-      },
+      "limits": { "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> },
       "sessions": {
         "<session_id>": {
           "worktree_cwd": "<abs path>",
@@ -118,6 +114,22 @@ def _context_is_blank(payload: dict[str, Any]) -> bool:
     return window.get("current_usage") is None and window.get("used_percentage") is None
 
 
+def _number(value: Any) -> float | None:
+    """``value`` as a finite float, or None if it is not a usable number.
+
+    Rejects ``bool`` (an int subclass), NaN and the infinities. NaN matters
+    specifically: ``json`` both emits and re-reads a bare ``NaN``, so one that
+    reaches the store survives every round trip, and every comparison against
+    it is false — a naive ``>=`` gate would then wedge permanently.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if number != number or number in (float("inf"), float("-inf")):  # NaN, ±inf
+        return None
+    return number
+
+
 def _section(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = payload.get(key)
     return value if isinstance(value, dict) else {}
@@ -152,12 +164,17 @@ def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
     if not isinstance(previous, dict):
         return now
     prior_payload = previous.get("payload")
-    prior_active = previous.get("active_at")
-    if not isinstance(prior_payload, dict) or not isinstance(prior_active, (int, float)):
+    prior_active = _number(previous.get("active_at"))
+    if not isinstance(prior_payload, dict) or prior_active is None:
+        return now
+    # A timestamp from the future is not trustworthy (a clock step, or a
+    # hand-edited store): start the clock again rather than carry it forward
+    # and report the session idle-free until wall clock catches up.
+    if prior_active > now:
         return now
     if _activity_fingerprint(prior_payload) != _activity_fingerprint(payload):
         return now
-    return float(prior_active)
+    return prior_active
 
 
 _LIMIT_WINDOWS = ("five_hour", "seven_day")
@@ -188,43 +205,68 @@ def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
     return live or None
 
 
-def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], active: float, now: float) -> None:
-    """Fold live rate-limit windows into top-level ``limits``, newest-ACTIVITY-wins.
+def _window_is_fresher(incoming: dict[str, Any], stored: dict[str, Any]) -> bool:
+    """Whether ``incoming`` supersedes ``stored`` for the same rate-limit window.
+
+    Rate-limit usage is reported per window and only ever RISES until that
+    window resets, so the two readings can be ordered without trusting any
+    clock or any write order:
+
+    - A later ``resets_at`` is a NEWER window; its counter has restarted, so it
+      wins outright however low its percentage.
+    - An earlier ``resets_at`` belongs to a window already superseded, so it
+      loses however high its percentage.
+    - Within the SAME window the higher percentage is the more recent reading.
+      This is what stops a dormant session's frozen figure from winning: its
+      percentage cannot exceed the one a working session has since reported.
+
+    A reading with no usable percentage cannot be ordered, so it never displaces
+    one that has a number, but it is taken when there is nothing to compare to.
+    """
+    incoming_resets = _number(incoming.get("resets_at"))
+    stored_resets = _number(stored.get("resets_at"))
+    if incoming_resets is None:
+        return False
+    if stored_resets is None or incoming_resets > stored_resets:
+        return True
+    if incoming_resets < stored_resets:
+        return False
+
+    incoming_pct = _number(incoming.get("used_percentage"))
+    stored_pct = _number(stored.get("used_percentage"))
+    if incoming_pct is None:
+        return False
+    if stored_pct is None:
+        return True
+    return incoming_pct > stored_pct
+
+
+def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -> None:
+    """Fold live rate-limit windows into top-level ``limits``, highest-usage-wins.
 
     ``resets_at`` gating alone is not enough. A dormant session's 5h window can
     still reset in the future while its ``used_percentage`` is frozen at
     whatever it was when that session last hit the API. Because the status line
     reruns on a timer, that session keeps rewriting the store, and a plain
-    last-write-wins hoist lets its fossil percentage clobber a working session's
-    current one — the account figure then flip-flops on every timer tick.
+    last-write-wins hoist lets its fossil percentage clobber a working
+    session's current one — the account figure then flip-flops on every tick.
 
-    So each window records the ``active_at`` of the session that supplied it,
-    and a window is only replaced by a reading whose source is at least as
-    recently active. That is write-order independent: a dormant session's
-    timer rerun can no longer win against a fresher reading, whichever of the
-    two happens to write last.
+    So a window is only replaced by a reading that ``_window_is_fresher``
+    orders above it. That ordering reads the readings themselves rather than
+    any timestamp we assign, which makes it independent of write order AND of
+    the system clock — a session whose clock has stepped cannot wedge a window,
+    and no reading can become permanently unbeatable.
     """
     stored = store.get("limits")
     stored = stored if isinstance(stored, dict) else {}
-    prior_sources = stored.get("sources")
-    prior_sources = prior_sources if isinstance(prior_sources, dict) else {}
-
     merged = _live_limits(stored, now) or {}
-    sources = {
-        key: float(value)
-        for key, value in prior_sources.items()
-        if key in merged and isinstance(value, (int, float)) and not isinstance(value, bool)
-    }
 
     for key, window in incoming.items():
-        prior = sources.get(key)
-        # No recorded source (pre-upgrade store) means we cannot tell how fresh
-        # the stored reading is, so the incoming one takes it.
-        if prior is None or active >= prior:
+        current = merged.get(key)
+        if not isinstance(current, dict) or _window_is_fresher(window, current):
             merged[key] = window
-            sources[key] = active
 
-    store["limits"] = {**merged, "updated_at": now, "sources": sources}
+    store["limits"] = {**merged, "updated_at": now}
 
 
 def _prune(sessions: dict[str, Any], now: float) -> None:
@@ -279,9 +321,9 @@ def merge(
     - Stamps ``active_at`` only when the activity fingerprint moved, so a
       timer-driven rerun of the status line refreshes ``updated_at`` alone.
     - Hoists ``rate_limits`` to top-level ``limits``, but only LIVE windows
-      (``resets_at`` in the future) whose source session is at least as
-      recently ACTIVE as the stored reading — a frozen reading from a dormant
-      session must not clobber the current account figure.
+      (``resets_at`` in the future), and only when the incoming reading orders
+      above the stored one — a frozen reading from a dormant session must not
+      clobber the current account figure.
     - Prunes stale sessions.
     """
     sid = payload.get("session_id")
@@ -317,7 +359,7 @@ def merge(
 
     incoming = _live_limits(payload.get("rate_limits"), now)
     if incoming:
-        _hoist_limits(store, incoming, active, now)
+        _hoist_limits(store, incoming, now)
 
     _prune(sessions, now)
     return store
@@ -377,9 +419,10 @@ def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]
     have not moved for ``IDLE_HORIZON_SECONDS`` (open TUI, nobody working).
     An entry from a pre-``active_at`` store falls back to ``updated_at``.
     """
-    updated = float(entry.get("updated_at", 0) or 0)
-    active_raw = entry.get("active_at")
-    active = float(active_raw) if isinstance(active_raw, (int, float)) else updated
+    updated = _number(entry.get("updated_at")) or 0.0
+    active = _number(entry.get("active_at"))
+    if active is None:
+        active = updated
     result = dict(entry)
     result["stale"] = (now - updated) > STALE_HORIZON_SECONDS
     result["idle"] = (now - active) > IDLE_HORIZON_SECONDS

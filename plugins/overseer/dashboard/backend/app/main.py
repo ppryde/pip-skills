@@ -153,8 +153,6 @@ def _census_extras(entry: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     payload = entry.get("payload") or {}
     out: dict[str, Any] = {"stale": bool(entry.get("stale"))}
-    if entry.get("idle") is not None:
-        out["idle"] = bool(entry["idle"])
     model = payload.get("model") or {}
     if model.get("display_name"):
         out["model"] = model["display_name"]

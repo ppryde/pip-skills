@@ -232,6 +232,71 @@ class TestActivityTracking:
         st.ingest(_payload(sid="s1", **_busy()), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
 
+    def test_token_totals_moving_advances_active_at(self, store_file):
+        """`context_window.total_input_tokens` / `total_output_tokens` are real
+        payload fields (they appear in captured status-line payloads); a turn
+        that only moves them is still real activity."""
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        moved = _busy(context_window__total_input_tokens=99)
+        st.ingest(_payload(sid="s1", **moved), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_output_tokens_moving_advances_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy(context_window__total_output_tokens=77)), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_api_duration_moving_advances_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy(cost__total_api_duration_ms=250)), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_malformed_prior_active_at_restarts_the_clock(self, store_file):
+        """A bool, a NaN or a numeric STRING is not a usable timestamp. NaN is
+        the dangerous one: json round-trips it and every comparison is false."""
+        for bad in (True, float("nan"), "700", None):
+            store_file.parent.mkdir(parents=True, exist_ok=True)
+            store_file.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "limits": None,
+                        "sessions": {
+                            "s1": {
+                                "worktree_cwd": "/wt/a",
+                                "updated_at": 5.0,
+                                "active_at": bad,
+                                "payload": _busy(),
+                            }
+                        },
+                    }
+                )
+            )
+            st.ingest(_payload(sid="s1", **_busy()), now=70.0)
+            assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0, bad
+
+    def test_future_prior_active_at_restarts_the_clock(self, store_file):
+        """A clock step must not leave a session reporting non-idle for hours."""
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "limits": None,
+                    "sessions": {
+                        "s1": {
+                            "worktree_cwd": "/wt/a",
+                            "updated_at": 5.0,
+                            "active_at": 70.0 + 7200,
+                            "payload": _busy(),
+                        }
+                    },
+                }
+            )
+        )
+        st.ingest(_payload(sid="s1", **_busy()), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
     def test_active_at_survives_post_compact_blank_context(self, store_file):
         st.ingest(_payload(sid="s1", **_busy()), now=10.0)
         blank = _busy(context_window={"used_percentage": None, "current_usage": None})

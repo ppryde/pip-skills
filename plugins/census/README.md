@@ -31,7 +31,11 @@ default, or `~/.claude-personal/census/status.json` when that account sets `CLAU
 }
 ```
 
-- Rate limits are account-global, so they are hoisted to the top level (last-write-wins).
+- Rate limits are account-global, so they are hoisted to the top level. Not last-write-wins:
+  usage only rises until a window resets, so a later `resets_at` wins outright (new window)
+  and within one window the higher percentage wins. That ordering reads the readings
+  themselves, so it needs neither write order nor a trustworthy clock, and a dormant
+  session's frozen figure can never displace a working session's current one.
 - The full payload is stored per session — any future CC field is captured with no schema change.
 - `updated_at` is "last rendered": the status line reruns on `refreshInterval` as well as after
   each API response, so a dormant TUI keeps refreshing it. `active_at` is "last active": it moves

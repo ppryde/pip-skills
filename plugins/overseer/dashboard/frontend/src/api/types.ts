@@ -128,10 +128,6 @@ export interface Context {
   session_name?: string;
   pr?: PrWindow;
   stale?: boolean;
-  /** Census sees the status line still rendering, but the session's activity
-   * counters haven't moved for 10 minutes — an open TUI nobody is working in.
-   * Distinct from `stale`, which means census sees no render at all. */
-  idle?: boolean;
 }
 
 export interface RateWindow {
@@ -218,7 +214,9 @@ export interface SessionSummary {
    * cache requests). Absent for entries written by a census predating it. */
   active_at?: number | null | string;
   stale: boolean;
-  /** Still rendering, but no activity for 10 minutes (see Context.idle). */
+  /** Census sees the status line still rendering, but the session's activity
+   * counters haven't moved for 10 minutes — an open TUI nobody is working in.
+   * Distinct from `stale`, which means census sees no render at all. */
   idle?: boolean;
   session_name?: string;
   model?: string;

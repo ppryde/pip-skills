@@ -119,6 +119,15 @@ class TestIdleFlag:
         assert entry["idle"] is True
         assert entry["stale"] is False
 
+    def test_malformed_active_at_falls_back_to_updated_at(self, store_file):
+        """A bool would coerce to 1.0 and pin the session idle forever; a NaN
+        would make every comparison false and pin it non-idle forever."""
+        for bad in (True, float("nan"), "700"):
+            self._seed(store_file, active_at=bad, updated_at=100.0)
+            assert st.for_session("s1", now=100.0 + 60)["idle"] is False, bad
+            horizon = 100.0 + st.IDLE_HORIZON_SECONDS + 1
+            assert st.for_session("s1", now=horizon)["idle"] is True, bad
+
     def test_missing_active_at_falls_back_to_updated_at(self, store_file):
         self._seed(store_file, active_at=None, updated_at=100.0)
         assert st.for_session("s1", now=100.0 + 60)["idle"] is False
