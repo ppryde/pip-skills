@@ -124,3 +124,118 @@ class TestPrune:
         sessions = _read(store_file)["sessions"]
         assert "old" not in sessions
         assert "new" in sessions
+
+
+_CACHE = {
+    "warm": True,
+    "ttl": "1h",
+    "expires_at": 1788515961,
+    "requests": 29,
+    "misses": 0,
+    "hit_ratio": 0.973,
+}
+
+
+class TestPromptCachePassthrough:
+    """``prompt_cache`` needs no special handling: the payload is stored verbatim.
+
+    The one thing worth pinning is the interaction with the post-/compact
+    context guard — that guard carries forward ONLY ``context_window``. A stale
+    cache reading is worse than none, so ``prompt_cache`` must never be
+    resurrected from a prior entry.
+    """
+
+    def test_prompt_cache_stored_verbatim(self, store_file):
+        st.ingest(_payload(sid="s1", prompt_cache=_CACHE), now=1.0)
+        assert _read(store_file)["sessions"]["s1"]["payload"]["prompt_cache"] == _CACHE
+
+    def test_blank_context_carries_window_but_not_prior_cache(self, store_file):
+        good = {
+            "context_window": {"used_percentage": 42, "current_usage": {"input_tokens": 9}},
+            "prompt_cache": _CACHE,
+        }
+        st.ingest(_payload(sid="s1", **good), now=1.0)
+        blank = {"context_window": {"used_percentage": None, "current_usage": None}}
+        st.ingest(_payload(sid="s1", **blank), now=2.0)  # post-/compact, no prompt_cache
+        payload = _read(store_file)["sessions"]["s1"]["payload"]
+        assert payload["context_window"]["used_percentage"] == 42
+        assert "prompt_cache" not in payload
+
+    def test_fresh_cache_replaces_prior_wholesale(self, store_file):
+        st.ingest(_payload(sid="s1", prompt_cache=_CACHE), now=1.0)
+        cold = {"warm": False, "requests": 30, "misses": 1, "hit_ratio": 0.9}
+        st.ingest(_payload(sid="s1", prompt_cache=cold), now=2.0)
+        assert _read(store_file)["sessions"]["s1"]["payload"]["prompt_cache"] == cold
+
+
+def _busy(**counters):
+    """A payload slice whose counters only move on real API activity."""
+    base = {
+        "prompt_id": "p1",
+        "cost": {"total_cost_usd": 1.0, "total_api_duration_ms": 100},
+        "context_window": {"total_input_tokens": 10, "total_output_tokens": 5, "used_percentage": 3},
+        "prompt_cache": {"requests": 4},
+    }
+    for key, value in counters.items():
+        section, _, field = key.partition("__")
+        if field:
+            base[section][field] = value
+        else:
+            base[section] = value
+    return base
+
+
+class TestActivityTracking:
+    """``active_at`` moves only when the session did work; ``updated_at`` moves on every render."""
+
+    def test_first_sight_stamps_active_at_now(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        entry = _read(store_file)["sessions"]["s1"]
+        assert entry["active_at"] == 10.0
+        assert entry["updated_at"] == 10.0
+
+    def test_timer_rerun_with_identical_counters_keeps_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy()), now=70.0)  # refreshInterval tick, nothing happened
+        entry = _read(store_file)["sessions"]["s1"]
+        assert entry["updated_at"] == 70.0
+        assert entry["active_at"] == 10.0
+
+    def test_cost_change_advances_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy(cost__total_cost_usd=1.5)), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_new_prompt_advances_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy(prompt_id="p2")), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_cache_requests_change_advances_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy(prompt_cache__requests=5)), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_cosmetic_change_does_not_advance_active_at(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", session_name="renamed", **_busy()), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
+
+    def test_pre_upgrade_entry_without_active_at_starts_clock_now(self, store_file):
+        legacy = {
+            "version": 1,
+            "limits": None,
+            "sessions": {"s1": {"worktree_cwd": "/wt/a", "updated_at": 5.0, "payload": _busy()}},
+        }
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(json.dumps(legacy))
+        st.ingest(_payload(sid="s1", **_busy()), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
+
+    def test_active_at_survives_post_compact_blank_context(self, store_file):
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        blank = _busy(context_window={"used_percentage": None, "current_usage": None})
+        st.ingest(_payload(sid="s1", **blank), now=70.0)
+        entry = _read(store_file)["sessions"]["s1"]
+        assert entry["payload"]["context_window"]["used_percentage"] == 3
+        assert isinstance(entry["active_at"], float)

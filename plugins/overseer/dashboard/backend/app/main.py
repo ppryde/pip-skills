@@ -153,6 +153,8 @@ def _census_extras(entry: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     payload = entry.get("payload") or {}
     out: dict[str, Any] = {"stale": bool(entry.get("stale"))}
+    if entry.get("idle") is not None:
+        out["idle"] = bool(entry["idle"])
     model = payload.get("model") or {}
     if model.get("display_name"):
         out["model"] = model["display_name"]
@@ -173,25 +175,37 @@ def _limits_section(entry: dict[str, Any] | None) -> dict[str, Any] | None:
 
 # Mirrored from census.store.STALE_HORIZON_SECONDS (90 seconds)
 _STALE_HORIZON_SECONDS = 90
+# Mirrored from census.store.IDLE_HORIZON_SECONDS (10 minutes)
+_IDLE_HORIZON_SECONDS = 10 * 60
 
 
-def _entry_ts(entry: dict[str, Any]) -> float:
-    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0.
+def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
+    """The entry's ``key`` timestamp as a float; malformed/missing reads as 0.0.
 
     Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
     Malformed timestamps (None, non-numeric strings) are treated as 0, which
     places them beyond any staleness horizon — quarantine-safe, never raises.
     """
     try:
-        return float(entry.get("updated_at", 0) or 0)
+        return float(entry.get(key, 0) or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _active_ts(entry: dict[str, Any]) -> float:
+    """``active_at`` (last time the session's activity counters moved), falling
+    back to ``updated_at`` for entries written by a census that predates it."""
+    active = _entry_ts(entry, "active_at")
+    return active if active > 0 else _entry_ts(entry)
 
 
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
-    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at, stale}.
+    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at,
+    active_at, stale, idle}. ``stale``: census has not seen a render for 90s (dead or
+    closed). ``idle``: still rendering (the status line reruns on a timer) but no API
+    activity for 10 minutes — an open TUI nobody is working in.
     Optional fields (model, pr, session_name, branch, pct) are omitted when absent,
     mirroring _census_extras's "forward what's there" style. Malformed updated_at
     values are coerced to 0.0 (treating as stale) rather than raising.
@@ -202,7 +216,9 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
         "id": sid,
         "worktree_cwd": entry.get("worktree_cwd"),
         "updated_at": entry.get("updated_at"),
+        "active_at": entry.get("active_at"),
         "stale": (now - ts) > _STALE_HORIZON_SECONDS,
+        "idle": (now - _active_ts(entry)) > _IDLE_HORIZON_SECONDS,
     }
     if entry.get("branch"):
         out["branch"] = entry["branch"]

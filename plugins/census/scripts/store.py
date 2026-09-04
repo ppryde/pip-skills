@@ -8,11 +8,16 @@ Layout of ``~/.claude/census/status.json`` (override with ``CENSUS_STORE``)::
 
     {
       "version": 1,
-      "limits": { "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> },
+      "limits": {
+        "five_hour": {...}, "seven_day": {...},
+        "updated_at": <epoch>,
+        "sources": { "<window>": <active_at of the session that supplied it> }
+      },
       "sessions": {
         "<session_id>": {
           "worktree_cwd": "<abs path>",
-          "updated_at": <epoch>,
+          "updated_at": <epoch — last time the status line ran for this session>,
+          "active_at": <epoch — last time the session's activity counters moved>,
           "branch": "<current git branch, null when unresolvable/detached>",
           "tmux_pane": "<%N, absent when the session isn't running inside tmux>",
           "payload": { ...full status-line payload verbatim... }
@@ -40,6 +45,7 @@ SCHEMA_VERSION = 1
 
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
 STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
+IDLE_HORIZON_SECONDS = 10 * 60       # readers flag sessions with no API activity for this long as idle
 _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
 _LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
@@ -112,6 +118,48 @@ def _context_is_blank(payload: dict[str, Any]) -> bool:
     return window.get("current_usage") is None and window.get("used_percentage") is None
 
 
+def _section(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _activity_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...]:
+    """The payload facts that move ONLY when the session does real work.
+
+    The status line reruns on a timer (``refreshInterval``) as well as after
+    every API response, and the store is rewritten on both. ``updated_at`` thus
+    says "last rendered", not "last active". These counters are advanced by
+    Claude Code only on an API round-trip or a new user prompt, so an identical
+    fingerprint across two ingests means nothing happened in between.
+    """
+    cost = _section(payload, "cost")
+    window = _section(payload, "context_window")
+    cache = _section(payload, "prompt_cache")
+    return (
+        payload.get("prompt_id"),
+        cost.get("total_cost_usd"),
+        cost.get("total_api_duration_ms"),
+        window.get("total_input_tokens"),
+        window.get("total_output_tokens"),
+        cache.get("requests"),
+    )
+
+
+def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
+    """``now`` when the activity fingerprint moved (or on first sight), else the
+    prior ``active_at`` carried forward. A prior entry without one (pre-upgrade
+    store) starts the clock at ``now``."""
+    if not isinstance(previous, dict):
+        return now
+    prior_payload = previous.get("payload")
+    prior_active = previous.get("active_at")
+    if not isinstance(prior_payload, dict) or not isinstance(prior_active, (int, float)):
+        return now
+    if _activity_fingerprint(prior_payload) != _activity_fingerprint(payload):
+        return now
+    return float(prior_active)
+
+
 _LIMIT_WINDOWS = ("five_hour", "seven_day")
 
 
@@ -138,6 +186,45 @@ def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
         if isinstance(resets, (int, float)) and not isinstance(resets, bool) and resets > now:
             live[key] = window
     return live or None
+
+
+def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], active: float, now: float) -> None:
+    """Fold live rate-limit windows into top-level ``limits``, newest-ACTIVITY-wins.
+
+    ``resets_at`` gating alone is not enough. A dormant session's 5h window can
+    still reset in the future while its ``used_percentage`` is frozen at
+    whatever it was when that session last hit the API. Because the status line
+    reruns on a timer, that session keeps rewriting the store, and a plain
+    last-write-wins hoist lets its fossil percentage clobber a working session's
+    current one — the account figure then flip-flops on every timer tick.
+
+    So each window records the ``active_at`` of the session that supplied it,
+    and a window is only replaced by a reading whose source is at least as
+    recently active. That is write-order independent: a dormant session's
+    timer rerun can no longer win against a fresher reading, whichever of the
+    two happens to write last.
+    """
+    stored = store.get("limits")
+    stored = stored if isinstance(stored, dict) else {}
+    prior_sources = stored.get("sources")
+    prior_sources = prior_sources if isinstance(prior_sources, dict) else {}
+
+    merged = _live_limits(stored, now) or {}
+    sources = {
+        key: float(value)
+        for key, value in prior_sources.items()
+        if key in merged and isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+    for key, window in incoming.items():
+        prior = sources.get(key)
+        # No recorded source (pre-upgrade store) means we cannot tell how fresh
+        # the stored reading is, so the incoming one takes it.
+        if prior is None or active >= prior:
+            merged[key] = window
+            sources[key] = active
+
+    store["limits"] = {**merged, "updated_at": now, "sources": sources}
 
 
 def _prune(sessions: dict[str, Any], now: float) -> None:
@@ -189,9 +276,12 @@ def merge(
 
     - Upserts the session entry keyed by ``session_id`` (no-op without one).
     - Preserves the prior context window when the incoming one is blank.
+    - Stamps ``active_at`` only when the activity fingerprint moved, so a
+      timer-driven rerun of the status line refreshes ``updated_at`` alone.
     - Hoists ``rate_limits`` to top-level ``limits``, but only LIVE windows
-      (``resets_at`` in the future) — a stale reading from a dormant session
-      must not clobber the current account figure.
+      (``resets_at`` in the future) whose source session is at least as
+      recently ACTIVE as the stored reading — a frozen reading from a dormant
+      session must not clobber the current account figure.
     - Prunes stale sessions.
     """
     sid = payload.get("session_id")
@@ -208,9 +298,11 @@ def merge(
         ):
             payload = {**payload, "context_window": prior_payload["context_window"]}
 
+    active = _active_at(previous, payload, now)
     sessions[sid] = {
         "worktree_cwd": worktree,
         "updated_at": now,
+        "active_at": active,
         "branch": _git_branch(worktree),
         "payload": payload,
     }
@@ -225,10 +317,7 @@ def merge(
 
     incoming = _live_limits(payload.get("rate_limits"), now)
     if incoming:
-        # Merge live windows over any still-live stored windows; the just-written
-        # reading wins per-window. Expired stored windows are dropped here too.
-        existing = _live_limits(store.get("limits"), now) or {}
-        store["limits"] = {**existing, **incoming, "updated_at": now}
+        _hoist_limits(store, incoming, active, now)
 
     _prune(sessions, now)
     return store
@@ -281,9 +370,19 @@ def _acquire(lock: Any) -> bool:
 
 
 def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]:
+    """Decorate an entry with reader-side flags.
+
+    ``stale``: the status line has not run for this session recently (dead or
+    closed session). ``idle``: it is still rendering but its activity counters
+    have not moved for ``IDLE_HORIZON_SECONDS`` (open TUI, nobody working).
+    An entry from a pre-``active_at`` store falls back to ``updated_at``.
+    """
     updated = float(entry.get("updated_at", 0) or 0)
+    active_raw = entry.get("active_at")
+    active = float(active_raw) if isinstance(active_raw, (int, float)) else updated
     result = dict(entry)
     result["stale"] = (now - updated) > STALE_HORIZON_SECONDS
+    result["idle"] = (now - active) > IDLE_HORIZON_SECONDS
     result["limits"] = limits
     return result
 

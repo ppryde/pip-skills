@@ -48,6 +48,40 @@ describe("useSessions", () => {
     ]);
   });
 
+  it("orders by active_at when present, not the timer-refreshed updated_at", async () => {
+    // The dormant session's status line keeps rerunning on the timer, so its
+    // updated_at is the freshest of the three - but it has not worked in ages.
+    const mockGetSessions = vi.mocked(client.getSessions);
+    mockGetSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          id: "dormant",
+          worktree_cwd: "/w/a",
+          updated_at: 500,
+          active_at: 100,
+          stale: false,
+        },
+        {
+          id: "busy",
+          worktree_cwd: "/w/b",
+          updated_at: 400,
+          active_at: 400,
+          stale: false,
+        },
+        { id: "legacy", worktree_cwd: "/w/c", updated_at: 300, stale: false },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessions());
+    await waitFor(() => expect(result.current.sessions).toHaveLength(3));
+
+    expect(result.current.sessions.map((s) => s.id)).toEqual([
+      "busy",
+      "legacy",
+      "dormant",
+    ]);
+  });
+
   it("swallows a mount-fetch failure and returns an empty list", async () => {
     const mockGetSessions = vi.mocked(client.getSessions);
     mockGetSessions.mockRejectedValueOnce(new Error("Network error"));
@@ -219,4 +253,5 @@ describe("useSessions(root, enabled) — task 10 unbegun-repo fetch gate", () =>
 
     await waitFor(() => expect(mockGetSessions).toHaveBeenCalled());
   });
+
 });

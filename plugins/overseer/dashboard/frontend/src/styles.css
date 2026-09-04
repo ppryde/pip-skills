@@ -4600,6 +4600,13 @@ a.card-drawer__pr-chip:hover {
   opacity: 0.55;
 }
 
+/* An idle session is present but not working — lightly dimmed, between a
+   working row and a stale ghost. Its avatar dot (below) goes amber and stops
+   pulsing. */
+.party-row--idle {
+  opacity: 0.8;
+}
+
 .party-row__body {
   flex: 1 1 auto;
   min-width: 0;
@@ -4756,8 +4763,16 @@ a.card-drawer__pr-chip:hover {
   border: 1.5px solid var(--qb-party-text-muted);
 }
 
+/* Idle: still here, not working. Solid amber, and excluded from the pulse
+   below so only a genuinely working session animates. */
+.party-avatar__dot--idle {
+  background: var(--legacy-color-d97706, #d97706);
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .party-avatar__dot:not(.party-avatar__dot--stale) {
+  .party-avatar__dot:not(.party-avatar__dot--stale):not(
+      .party-avatar__dot--idle
+    ) {
     animation: qb-pulse var(--qb-motion-pulse) ease-in-out infinite;
   }
 

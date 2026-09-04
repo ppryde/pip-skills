@@ -393,3 +393,34 @@ def test_sessions_unknown_root_is_rejected(repo_a: Path, tmp_path: Path) -> None
 
     assert resp.status_code == 400
     assert "unknown root" in resp.json()["detail"]
+
+
+def test_sessions_idle_flag(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session still rendering (fresh updated_at) but with no activity for 10 minutes
+    is idle, not stale; a session without active_at falls back to updated_at."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    cwd = os.path.realpath(str(root))
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {
+            "working": {"worktree_cwd": cwd, "updated_at": now - 5, "active_at": now - 5, "payload": {}},
+            "dormant": {"worktree_cwd": cwd, "updated_at": now - 5, "active_at": now - 900, "payload": {}},
+            "legacy": {"worktree_cwd": cwd, "updated_at": now - 5, "payload": {}},
+        },
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    sessions = {s["id"]: s for s in resp.json()["sessions"]}
+    assert sessions["working"]["idle"] is False
+    assert sessions["dormant"]["idle"] is True
+    assert sessions["dormant"]["stale"] is False
+    assert sessions["dormant"]["active_at"] == now - 900
+    assert sessions["legacy"]["idle"] is False

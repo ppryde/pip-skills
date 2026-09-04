@@ -86,3 +86,40 @@ class TestLimitsAndReadAll:
         st.ingest(_payload("s1", str(tmp_path)), now=1.0)
         stored = json.loads(store_file.read_text())["sessions"]["s1"]["worktree_cwd"]
         assert stored == normalise(str(tmp_path))
+
+
+class TestIdleFlag:
+    def _seed(self, store_file, active_at, updated_at):
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "limits": None,
+                    "sessions": {
+                        "s1": {
+                            "worktree_cwd": "/wt/a",
+                            "updated_at": updated_at,
+                            "active_at": active_at,
+                            "payload": {"session_id": "s1"},
+                        }
+                    },
+                }
+            )
+        )
+
+    def test_recently_active_not_idle(self, store_file):
+        self._seed(store_file, active_at=100.0, updated_at=100.0)
+        assert st.for_session("s1", now=100.0 + 60)["idle"] is False
+
+    def test_rendering_but_inactive_is_idle_not_stale(self, store_file):
+        now = 100.0 + st.IDLE_HORIZON_SECONDS + 1
+        self._seed(store_file, active_at=100.0, updated_at=now - 10)  # timer keeps rendering
+        entry = st.latest_for_worktree("/wt/a", now=now)
+        assert entry["idle"] is True
+        assert entry["stale"] is False
+
+    def test_missing_active_at_falls_back_to_updated_at(self, store_file):
+        self._seed(store_file, active_at=None, updated_at=100.0)
+        assert st.for_session("s1", now=100.0 + 60)["idle"] is False
+        assert st.for_session("s1", now=100.0 + st.IDLE_HORIZON_SECONDS + 1)["idle"] is True
