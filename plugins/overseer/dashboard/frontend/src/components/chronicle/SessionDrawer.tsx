@@ -18,6 +18,7 @@ import {
   sessionName,
   shortModel,
 } from "../../board/chronicle/format";
+import ArtifactList from "./ArtifactList";
 import { BarList, LineChart } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
@@ -152,6 +153,51 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
                 hue="--chr-context"
               />
             </section>
+
+            <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-peak)" }}>
+              <h3 className="chr-panel__title">Biggest jumps</h3>
+              <p className="chr-panel__sub">
+                Turns whose context grew most since the one before, and what landed in between.
+              </p>
+              {detail.biggest_jumps.length === 0 ? (
+                <p className="chr-chart__empty">No turns recorded.</p>
+              ) : (
+                <table className="chr-table chr-table--compact" aria-label="Biggest jumps">
+                  <thead>
+                    <tr>
+                      <th scope="col">Turn</th>
+                      <th scope="col" className="chr-num">Jump</th>
+                      <th scope="col" className="chr-num">Context</th>
+                      <th scope="col">What landed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.biggest_jumps.map((j) => (
+                      <tr key={j.turn}>
+                        <td>
+                          {j.turn}
+                          {j.cold && <span className="chr-live chr-live--cold">cold</span>}
+                        </td>
+                        <td className="chr-num">+{formatTokens(j.delta_tokens)}</td>
+                        <td className="chr-num">{formatTokens(j.context_tokens)}</td>
+                        <td className="chr-table__landed">
+                          {j.landed.length === 0
+                            ? (j.output_tokens > 0 ? `model wrote ${formatTokens(j.output_tokens)}` : "—")
+                            : j.landed.map((l) => `${l.tool_name} ${formatTokens(l.chars)} chars`).join(" · ")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+
+            {detail.artifacts.length > 0 && (
+              <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
+                <h3 className="chr-panel__title">Artifacts</h3>
+                <ArtifactList artifacts={detail.artifacts} />
+              </section>
+            )}
 
             <section className="chr-panel">
               <h3 className="chr-panel__title">Tools</h3>

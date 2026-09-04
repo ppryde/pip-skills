@@ -149,3 +149,72 @@ class TestRepos:
         assert rows[0]["repo_root"] == "/repo/a"
         assert rows[0]["sessions"] == 2
         assert rows[1]["repo_root"] == "/repo/b"
+
+
+class TestBiggestJumps:
+    def _series(self, *contexts):
+        return [{"ts": float(i * 10), "message_id": f"m{i}", "context_tokens": c, "output_tokens": 5,
+                 "tool_calls": 0, "cold": False} for i, c in enumerate(contexts)]
+
+    def test_ranks_by_context_and_attributes_landed_results(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:"); conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM (
+                 SELECT 'Read' AS tool_name, 'm0' AS message_id, 9000 AS result_chars, 5.0 AS result_ts
+                 UNION ALL SELECT 'Bash', 'm0', 300, 6.0
+                 UNION ALL SELECT 'Edit', 'm1', NULL, NULL
+               )"""
+        ).fetchall()
+        ranked = report.biggest_jumps(self._series(1000, 4000, 4200), rows)
+        assert [r["turn"] for r in ranked] == [2, 1, 3]  # +3000, +1000, +200
+        second = ranked[0]
+        assert second["delta_tokens"] == 3000
+        assert second["landed"] == [{"tool_name": "Read", "chars": 9000}, {"tool_name": "Bash", "chars": 300}]
+        assert second["landed_chars"] == 9300
+
+    def test_result_without_timestamp_falls_back_to_next_turn(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:"); conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT 'Bash' AS tool_name, 'm0' AS message_id, 50 AS result_chars, NULL AS result_ts"
+        ).fetchall()
+        ranked = report.biggest_jumps(self._series(100, 200), rows)
+        by_turn = {r["turn"]: r for r in ranked}
+        assert by_turn[2]["landed"] == [{"tool_name": "Bash", "chars": 50}]
+        assert by_turn[1]["landed"] == []
+
+    def test_limit_and_empty(self):
+        assert report.biggest_jumps([], []) == []
+        assert len(report.biggest_jumps(self._series(*range(20)), [], limit=3)) == 3
+
+
+class TestArtifactsReport:
+    def test_summary_and_detail_carry_artifacts(self, projects):
+        conn = _seed(projects)
+        # The same page published three times, plus one whose url never landed.
+        # Only the first publish carries the favicon (as the harness does).
+        for tid, ts, title, icon in (("a1", 5, "Board v1", "📊"), ("a2", 9, "Board v2", None),
+                                     ("a3", 12, "Board v3", None)):
+            conn.execute(
+                "INSERT INTO artifacts(session_id, tool_use_id, ts, url, title, favicon) "
+                "VALUES ('s2', ?, ?, 'https://claude.ai/code/artifact/x', ?, ?)", (tid, ts, title, icon)
+            )
+        conn.execute(
+            "INSERT INTO artifacts(session_id, tool_use_id, ts, url, title) "
+            "VALUES ('s2', 'a4', 20, NULL, 'lost')"
+        )
+        ingest.rollup(conn, "s2")
+        conn.commit()
+        assert conn.execute("SELECT artifacts FROM sessions WHERE session_id='s2'").fetchone()[0] == 2
+        assert [r[0] for r in conn.execute("SELECT redeploy FROM artifacts ORDER BY ts")] == [0, 1, 1, 0]
+        out = report.summary(conn, repo_root="/repo/a")
+        assert out["totals"]["artifacts"] == 2
+        pages = out["artifacts"]
+        assert [(a["title"], a["publishes"]) for a in pages] == [("lost", 1), ("Board v3", 3)]
+        assert pages[1]["first_ts"] == 5 and pages[1]["ts"] == 12
+        assert pages[1]["favicon"] == "📊"  # inherited from the first publish
+        assert report.summary(conn, repo_root="/repo/b")["artifacts"] == []
+        detail = report.session_detail(conn, "s2")
+        assert [a["title"] for a in detail["artifacts"]] == ["Board v3", "lost"]
+        assert [t["turn"] for t in detail["biggest_jumps"]] == [1, 2]

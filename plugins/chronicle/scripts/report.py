@@ -143,6 +143,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
         gap = round(ts - previous_ts) if ts is not None and previous_ts is not None else None
         series.append({
             "ts": ts,
+            "message_id": r["message_id"],
             "model": r["model"],
             "context_tokens": r["input_tokens"] + r["cache_read_tokens"] + r["cache_creation_tokens"],
             "input_tokens": r["input_tokens"],
@@ -186,7 +187,128 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             (session_id,),
         )
     ]
+    detail["artifacts"] = artifacts_for(conn, session_id)
+    tool_rows = conn.execute(
+        """SELECT tool_name, message_id, result_chars, result_ts FROM tool_calls
+           WHERE session_id = ? AND agent_id = ''""",
+        (session_id,),
+    ).fetchall()
+    detail["biggest_jumps"] = biggest_jumps(series, tool_rows)
     return detail
+
+
+# One row per PAGE: the latest publish of each url (a url-less publish — the
+# result never landed — stands alone), with how many times it was published
+# and when it first appeared.
+_ARTIFACT_PAGE_SQL = """
+    SELECT a.session_id, s.title AS session_title, a.ts, a.url, a.title,
+           -- favicon/description are usually passed on the FIRST publish only
+           -- (a redeploy keeps the icon it has), so take the earliest non-null.
+           COALESCE(a.description, (SELECT d.description FROM artifacts d
+               WHERE d.url = a.url AND d.session_id = a.session_id AND d.description IS NOT NULL
+               ORDER BY d.ts LIMIT 1)) AS description,
+           COALESCE(a.favicon, (SELECT i.favicon FROM artifacts i
+               WHERE i.url = a.url AND i.session_id = a.session_id AND i.favicon IS NOT NULL
+               ORDER BY i.ts LIMIT 1)) AS favicon,
+           (SELECT COUNT(*) FROM artifacts p
+             WHERE p.url = a.url AND p.session_id = a.session_id) AS publishes,
+           (SELECT MIN(f.ts) FROM artifacts f
+             WHERE f.url = a.url AND f.session_id = a.session_id) AS first_ts
+    FROM artifacts a JOIN sessions s ON s.session_id = a.session_id
+    WHERE (a.url IS NULL OR a.rowid = (
+        SELECT q.rowid FROM artifacts q
+        WHERE q.url = a.url AND q.session_id = a.session_id
+        ORDER BY q.ts DESC, q.rowid DESC LIMIT 1))
+"""
+
+
+def _page_row(r: sqlite3.Row) -> dict[str, Any]:
+    out = dict(r)
+    if out["url"] is None:
+        out["publishes"] = 1
+        out["first_ts"] = out["ts"]
+    return out
+
+
+def artifacts_for(conn: sqlite3.Connection, session_id: str) -> list[dict[str, Any]]:
+    return [
+        _page_row(r) for r in conn.execute(
+            # first_ts is NULL for a url-less row in SQL (patched in Python
+            # below) — COALESCE keeps that row in time order rather than first.
+            _ARTIFACT_PAGE_SQL + " AND a.session_id = ? ORDER BY COALESCE(first_ts, a.ts)",
+            (session_id,),
+        )
+    ]
+
+
+def artifacts(conn: sqlite3.Connection, *, repo_root: str | None = None,
+              since: float | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Most recently published pages across the filtered sessions."""
+    where, params = _session_filter(repo_root, since)
+    clause = where.replace(" WHERE ", " AND ", 1) if where else ""
+    return [
+        _page_row(r) for r in conn.execute(
+            _ARTIFACT_PAGE_SQL + clause + " ORDER BY a.ts DESC LIMIT ?", (*params, int(limit))
+        )
+    ]
+
+
+def biggest_jumps(series: list[dict[str, Any]], tool_rows: list[sqlite3.Row],
+                  limit: int = 8) -> list[dict[str, Any]]:
+    """The turns that grew the context most SINCE THE PREVIOUS TURN, each
+    attributed to what landed in between. (Ranking by absolute context would
+    just list a session's last few turns — context only grows until a
+    compaction — so the jump is the figure that says what happened.)
+
+    ``series`` is the ordered main-agent turn series (``session_detail``'s
+    ``turn_series``); ``tool_rows`` every main-agent tool call with its
+    result size. A tool result is attributed to the first turn whose
+    timestamp is at or after the result's — that is the call that had to
+    read it. Results without a timestamp fall back to the turn that issued
+    the call.
+    """
+    if not series:
+        return []
+    # index -> list of (tool_name, result_chars)
+    landed: dict[int, list[tuple[str, int]]] = {}
+    times = [t["ts"] for t in series]
+    by_message = {t.get("message_id"): i for i, t in enumerate(series)}
+    for row in tool_rows:
+        chars = row["result_chars"]
+        if chars is None:
+            continue
+        target: int | None = None
+        rts = row["result_ts"]
+        if rts is not None:
+            for i, ts in enumerate(times):
+                if ts is not None and ts >= rts:
+                    target = i
+                    break
+        if target is None:
+            issued = by_message.get(row["message_id"])
+            target = issued + 1 if issued is not None and issued + 1 < len(series) else issued
+        if target is None:
+            continue
+        landed.setdefault(target, []).append((row["tool_name"], int(chars)))
+
+    ranked = []
+    for i, turn in enumerate(series):
+        previous = series[i - 1]["context_tokens"] if i > 0 else 0
+        delta = turn["context_tokens"] - previous
+        contributors = sorted(landed.get(i, []), key=lambda x: -x[1])[:3]
+        ranked.append({
+            "turn": i + 1,
+            "ts": turn["ts"],
+            "context_tokens": turn["context_tokens"],
+            "delta_tokens": delta,
+            "output_tokens": turn["output_tokens"],
+            "cold": turn.get("cold", False),
+            "tool_calls": turn["tool_calls"],
+            "landed": [{"tool_name": n, "chars": c} for n, c in contributors],
+            "landed_chars": sum(c for _, c in landed.get(i, [])),
+        })
+    ranked.sort(key=lambda r: (-r["delta_tokens"], r["turn"]))
+    return ranked[:limit]
 
 
 def _quantiles(values: list[float]) -> dict[str, float | None]:
@@ -219,6 +341,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                    COALESCE(SUM(thinking_tokens), 0) AS thinking_tokens,
                    COALESCE(SUM(compactions), 0) AS compactions,
                    COALESCE(SUM(cold_turns), 0) AS cold_turns,
+                   COALESCE(SUM(artifacts), 0) AS artifacts,
                    COALESCE(SUM(subagents), 0) AS subagents,
                    COALESCE(SUM(active_ms), 0) AS active_ms,
                    COALESCE(SUM(transcript_bytes), 0) AS transcript_bytes,
@@ -315,4 +438,5 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_model": by_model,
         "tools": tools,
         "shape": shape,
+        "artifacts": artifacts(conn, repo_root=repo_root, since=since),
     }

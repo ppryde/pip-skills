@@ -57,6 +57,38 @@ class TestIngestSession:
         ttl = conn.execute("SELECT cache_5m_tokens, cache_1h_tokens FROM turns WHERE message_id='m1'").fetchone()
         assert (ttl[0], ttl[1]) == (800, 0)
 
+    def test_tool_results_and_artifacts_roll_up(self, builder):
+        url = "https://claude.ai/code/artifact/11111111-2222-3333-4444-555555555555"
+        path = (builder.turn("m1", T0, tools=["Bash"])
+                .tool_result("r1", T1, tool_use_id="m1-tool0", content="y" * 1200)
+                .artifact("m2", T1, tool_id="a1", title="Board")
+                .raw({"type": "user", "uuid": "r2", "timestamp": T2, "sessionId": "s1",
+                      "message": {"role": "user", "content": [
+                          {"type": "tool_result", "tool_use_id": "a1", "content": f"Published at {url}"}]},
+                      "toolUseResult": {}})
+                .write())
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        row = _session(conn)
+        assert row["artifacts"] == 1
+        call = conn.execute("SELECT result_chars, result_ts FROM tool_calls WHERE tool_use_id='m1-tool0'").fetchone()
+        assert call[0] == 1200 and call[1] is not None
+        art = conn.execute("SELECT url, title, favicon, redeploy FROM artifacts").fetchone()
+        assert tuple(art) == (url, "Board", "📊", 0)
+
+    def test_result_landing_in_a_later_ingest_fills_the_row(self, builder):
+        url = "https://claude.ai/code/artifact/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        path = builder.artifact("m1", T0, tool_id="a1", title="Late").write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute("SELECT url FROM artifacts").fetchone()[0] is None
+        builder.append({"type": "user", "uuid": "r1", "timestamp": T1, "sessionId": "s1",
+                        "message": {"role": "user", "content": [
+                            {"type": "tool_result", "tool_use_id": "a1", "content": f"Published at {url}"}]},
+                        "toolUseResult": {}})
+        ingest.ingest_session(conn, path)
+        assert conn.execute("SELECT url FROM artifacts").fetchone()[0] == url
+
     def test_incremental_only_reads_appended_lines(self, builder):
         path = builder.prompt("u1", T0).turn("m1", T0).write()
         conn = store.connect()

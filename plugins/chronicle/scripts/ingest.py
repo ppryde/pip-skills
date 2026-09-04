@@ -137,6 +137,31 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         "VALUES (?,?,?,?,?,?)",
         [(session_id, e.uuid, e.agent_id, e.kind, e.ts, e.value) for e in facts.events],
     )
+    # Results may land in a later ingest than their call (a Stop hook fires
+    # between the two), so this is an UPDATE against whatever row exists.
+    conn.executemany(
+        "UPDATE tool_calls SET result_chars = ?, result_ts = ? "
+        "WHERE session_id = ? AND tool_use_id = ?",
+        [(r.chars, r.ts, session_id, r.tool_use_id) for r in facts.results.values()],
+    )
+    conn.executemany(
+        """INSERT OR REPLACE INTO artifacts(session_id, tool_use_id, agent_id, ts, url, title,
+               description, favicon, redeploy) VALUES (?,?,?,?,?,?,?,?,?)""",
+        [
+            (session_id, a.tool_use_id, t.agent_id, t.ts, a.url, a.title, a.description,
+             a.favicon, int(a.redeploy))
+            for t in facts.turns.values()
+            for a in t.artifacts.values()
+        ],
+    )
+    # An artifact whose result landed in THIS ingest but whose call was
+    # written by an earlier one (a Stop hook fired between them): fill the
+    # url on the existing row.
+    conn.executemany(
+        "UPDATE artifacts SET url = ? WHERE session_id = ? AND tool_use_id = ? AND url IS NULL",
+        [(r.artifact_url, session_id, r.tool_use_id)
+         for r in facts.results.values() if r.artifact_url],
+    )
 
 
 def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: Facts,
@@ -250,6 +275,23 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
            WHERE session_id = ? AND agent_id = '' AND cache_creation_tokens > cache_read_tokens""",
         (session_id,),
     ).fetchone()[0]
+    # A publish whose url already appeared earlier in this session is a
+    # redeploy of the same page (the call names the url only when updating
+    # an artifact from ANOTHER session; same-session republishes reuse the
+    # file path and carry no url). Distinct pages, not publishes, are what
+    # "how many artifacts" means.
+    conn.execute(
+        """UPDATE artifacts SET redeploy = 1
+           WHERE session_id = ? AND url IS NOT NULL AND EXISTS (
+               SELECT 1 FROM artifacts b
+               WHERE b.session_id = artifacts.session_id AND b.url = artifacts.url
+                 AND (b.ts < artifacts.ts OR (b.ts = artifacts.ts AND b.rowid < artifacts.rowid)))""",
+        (session_id,),
+    )
+    artifacts = conn.execute(
+        "SELECT COUNT(DISTINCT COALESCE(url, tool_use_id)) FROM artifacts WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()[0]
     prompts = conn.execute(
         "SELECT COUNT(*) FROM events WHERE session_id = ? AND kind = 'prompt' AND agent_id = ''",
         (session_id,),
@@ -281,11 +323,11 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
     conn.execute(
         """UPDATE sessions SET turns=?, input_tokens=?, cache_read_tokens=?, cache_creation_tokens=?,
                output_tokens=?, thinking_tokens=?, tool_calls=?, subagents=?, peak_context_tokens=?,
-               cold_turns=?, prompts=?, compactions=?, active_ms=?, models=?, transcript_bytes=?,
-               updated_at=?
+               cold_turns=?, artifacts=?, prompts=?, compactions=?, active_ms=?, models=?,
+               transcript_bytes=?, updated_at=?
            WHERE session_id = ?""",
-        (*totals, peak, cold, prompts, compactions, active_ms, json.dumps(models), size, now,
-         session_id),
+        (*totals, peak, cold, artifacts, prompts, compactions, active_ms, json.dumps(models),
+         size, now, session_id),
     )
 
 

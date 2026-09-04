@@ -25,6 +25,7 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { Button } from "../../ui";
+import ArtifactList from "./ArtifactList";
 import { BarList, ColumnChart } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
@@ -47,6 +48,7 @@ const WINDOWS: { label: string; days: number | undefined }[] = [
 
 type SortKey =
   | "started_at"
+  | "artifacts"
   | "turns"
   | "prompts"
   | "tool_calls"
@@ -65,6 +67,7 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "peak_context_tokens", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
   { key: "transcript_bytes", label: "Size", render: (s) => formatBytes(s.transcript_bytes) },
+  { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {
@@ -254,6 +257,12 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
               note={`${formatTokens(totals.cache_1h_tokens)} at 1h · ${formatTokens(totals.cache_5m_tokens)} at 5m`}
               hue="--chr-cache"
             />
+            <StatTile
+              label="Artifacts"
+              value={String(totals.artifacts)}
+              note="distinct pages published"
+              hue="--chr-output"
+            />
           </div>
 
           <div className="chronicle__grid">
@@ -301,6 +310,15 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
                 format={formatTokens}
                 title="Tool calls"
                 hue="--chr-tools"
+              />
+            </section>
+            <section className="chr-panel chr-panel--wide" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
+              <h3 className="chr-panel__title">Artifacts</h3>
+              <p className="chr-panel__sub">Pages published from these sessions, newest first.</p>
+              <ArtifactList
+                artifacts={(summary?.artifacts ?? []).slice(0, 12)}
+                showSession
+                onOpenSession={setOpenId}
               />
             </section>
             {shape && (

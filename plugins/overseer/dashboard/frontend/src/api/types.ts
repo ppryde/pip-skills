@@ -315,6 +315,8 @@ export interface ChronicleTotals {
   /** Main-agent turns that wrote more cache than they read (first call,
    * TTL lapsed, or prefix changed). */
   cold_turns: number;
+  /** Distinct artifact pages published (republishes of one url count once). */
+  artifacts: number;
   subagents: number;
   active_ms: number;
   transcript_bytes: number;
@@ -378,6 +380,38 @@ export interface ChronicleShape {
   peak_context_tokens: ChronicleQuantiles;
 }
 
+/** One published artifact PAGE — the latest publish of a url, with how many
+ * times it was published in that session and when it first appeared. */
+export interface ChronicleArtifact {
+  session_id: string;
+  session_title?: string | null;
+  /** Latest publish time. */
+  ts: number | null;
+  first_ts: number | null;
+  /** Null when the publish's result never landed in the transcript. */
+  url: string | null;
+  title: string | null;
+  description: string | null;
+  favicon: string | null;
+  publishes: number;
+}
+
+/** One entry in a session's biggest-jumps list: the turn whose context grew
+ * most since the previous one, attributed to what landed in between. */
+export interface ChronicleJump {
+  turn: number;
+  ts: number | null;
+  context_tokens: number;
+  delta_tokens: number;
+  output_tokens: number;
+  cold: boolean;
+  tool_calls: number;
+  /** Top three tool results (by size) that landed before this turn. */
+  landed: { tool_name: string; chars: number }[];
+  /** Every result that landed before this turn, in characters. */
+  landed_chars: number;
+}
+
 export interface ChronicleSummary {
   /** `null` when chronicle has no store yet (or the plugin is absent). */
   totals: ChronicleTotals | null;
@@ -385,6 +419,7 @@ export interface ChronicleSummary {
   by_model?: ChronicleModel[];
   tools?: ChronicleTool[];
   shape?: ChronicleShape;
+  artifacts?: ChronicleArtifact[];
 }
 
 export interface ChronicleSession {
@@ -414,6 +449,7 @@ export interface ChronicleSession {
   peak_context_tokens: number;
   compactions: number;
   cold_turns: number;
+  artifacts: number;
   subagents: number;
   active_ms: number;
   models: string[];
@@ -464,12 +500,15 @@ export interface ChronicleSubagent {
 /** `GET /api/chronicle/session/{id}` — the session row plus its per-turn
  * series. NOTE: `subagents` here is the per-agent LIST, not the rollup
  * count `ChronicleSession.subagents` carries (chronicle's CLI replaces the
- * count with the breakdown on the detail verb). */
-export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagents"> {
+ * count with the breakdown on the detail verb); likewise `artifacts` is the
+ * page LIST here and the distinct-page count on the session row. */
+export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagents" | "artifacts"> {
   turn_series: ChronicleTurn[];
   subagents: ChronicleSubagent[];
   tools: ChronicleTool[];
   compactions_at: number[];
+  artifacts: ChronicleArtifact[];
+  biggest_jumps: ChronicleJump[];
 }
 
 /** Query knobs shared by the summary and sessions reads. */

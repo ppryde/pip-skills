@@ -30,7 +30,8 @@ work account never commingle. WAL journal, busy timeout, schema migrations on op
 |---|---|---|
 | `sessions` | one per session | repo root (worktrees resolve to their main checkout), branch, title, start / end / reason, transcript path + size + mtime, and a **rollup** recomputed from the fact tables after every ingest |
 | `turns` | one per API call | model, input / cache read / cache creation / output / thinking tokens, tool count, stop reason, effort — keyed by message id, so the transcript's one-line-per-block shape never double-counts |
-| `tool_calls` | one per `tool_use` | tool name, timestamp |
+| `tool_calls` | one per `tool_use` | tool name, timestamp, and the size/time of its `tool_result` once it lands — what grows the next turn's context |
+| `artifacts` | one per Artifact publish | title (falling back to the file stem), description, favicon, the published url parsed from the tool result, and a redeploy flag when the url was already published earlier in the session |
 | `events` | prompts, compactions, turn durations | timestamp, value (ms) |
 | `cursors` | one per transcript file | byte offset after the last complete line + the file's mtime/size as last seen |
 | `meta` | | schema version, last sync time |
@@ -77,8 +78,9 @@ the dashboard offers a **Chronicle** button beside the Board|Atlas coins. The pa
 time window (7 / 30 / 90 days / all), a repo scope (this repo / all repos), stat tiles,
 context-per-day and output-per-day columns, turns by model, a tool leaderboard, session
 shape quantiles, and a sortable session table whose rows open a drawer with the session's
-context-per-turn line (compactions marked), tools and subagents. **Sync** on the page calls
-`POST /api/chronicle/sync`.
+context-per-turn line (compactions and cold cache turns marked), the biggest context jumps
+with the tool results that landed before each, artifacts published, tools and subagents.
+**Sync** on the page calls `POST /api/chronicle/sync`.
 
 Routes: `GET /api/chronicle/{status,summary,sessions,session/{id}}`, `POST /api/chronicle/sync`.
 Reads take the same `root` as `/api/board` (validated against the repo allowlist) or

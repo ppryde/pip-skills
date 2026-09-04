@@ -122,3 +122,52 @@ class TestFold:
         facts = fold(["not json", "", "[]", json.dumps({"type": "user"})])
         assert facts.turns == {}
         assert facts.events == []
+
+
+class TestToolResultsAndArtifacts:
+    def test_result_size_and_time_are_captured(self):
+        lines = _lines(
+            _assistant("m1", ts=T0, blocks=[{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]),
+            _user("r1", ts=T1, content=[{"type": "tool_result", "tool_use_id": "t1", "content": "x" * 500}],
+                  toolUseResult={}),
+        )
+        facts = fold(lines)
+        assert facts.results["t1"].chars == 500
+        assert facts.results["t1"].ts == parse_ts(T1)
+        assert facts.results["t1"].artifact_url is None
+
+    def test_artifact_publish_pairs_with_its_url(self):
+        url = "https://claude.ai/code/artifact/f7ec8e3d-b032-4432-94a1-c81758132da3"
+        lines = _lines(
+            _assistant("m1", ts=T0, blocks=[{"type": "tool_use", "id": "a1", "name": "Artifact",
+                                            "input": {"file_path": "/x.html", "title": "Walkthrough",
+                                                      "description": "A tour", "favicon": "🔔"}}]),
+            _user("r1", ts=T1, content=[{"type": "tool_result", "tool_use_id": "a1",
+                                         "content": f"Published /x.html at {url}\n\nLive subscription: arming"}],
+                  toolUseResult={}),
+        )
+        facts = fold(lines)
+        artifact = facts.turns[("", "m1")].artifacts["a1"]
+        assert (artifact.title, artifact.description, artifact.favicon) == ("Walkthrough", "A tour", "🔔")
+        assert artifact.url == url
+        assert artifact.redeploy is False
+        assert facts.results["a1"].artifact_url == url
+
+    def test_title_falls_back_to_the_file_stem(self):
+        lines = _lines(_assistant("m1", ts=T0, blocks=[
+            {"type": "tool_use", "id": "a1", "name": "Artifact",
+             "input": {"file_path": "/scratch/notifications-internals.html", "favicon": "🔔"}}]))
+        assert fold(lines).turns[("", "m1")].artifacts["a1"].title == "notifications-internals"
+
+    def test_redeploy_and_non_publish_actions(self):
+        lines = _lines(_assistant("m1", ts=T0, blocks=[
+            {"type": "tool_use", "id": "a1", "name": "Artifact",
+             "input": {"file_path": "/x.html", "url": "https://claude.ai/code/artifact/abc"}},
+            {"type": "tool_use", "id": "a2", "name": "Artifact", "input": {"action": "list"}},
+            {"type": "tool_use", "id": "a3", "name": "Artifact",
+             "input": {"action": "read", "url": "https://claude.ai/code/artifact/abc"}},
+        ]))
+        turn = fold(lines).turns[("", "m1")]
+        assert set(turn.artifacts) == {"a1"}
+        assert turn.artifacts["a1"].redeploy is True
+        assert len(turn.tool_uses) == 3  # still counted as tool calls

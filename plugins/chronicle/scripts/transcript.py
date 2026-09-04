@@ -24,6 +24,7 @@ Transcript shape (observed, Claude Code 2.1.x):
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -31,6 +32,8 @@ from typing import Any
 
 MAIN_AGENT = ""
 SYNTHETIC_MODEL = "<synthetic>"
+ARTIFACT_TOOL = "Artifact"
+_ARTIFACT_URL_RE = re.compile(r"https://claude\.ai/code/artifact/[A-Za-z0-9-]+")
 
 
 
@@ -51,6 +54,8 @@ class Turn:
     stop_reason: str | None = None
     effort: str | None = None
     tool_uses: list[tuple[str, str]] = field(default_factory=list)  # (tool_use_id, name)
+    # Artifact publishes issued in this turn, keyed by tool_use_id.
+    artifacts: dict[str, ArtifactUse] = field(default_factory=dict)
 
     @property
     def context_tokens(self) -> int:
@@ -62,6 +67,28 @@ class Turn:
         the first call of a session, the first after a cache TTL lapsed, or
         the first after the prefix changed (a compaction)."""
         return self.cache_creation_tokens > self.cache_read_tokens
+
+
+@dataclass
+class ArtifactUse:
+    """An ``Artifact`` tool call that creates or redeploys a page. Reads,
+    lists, comments and the rest are not creations and are not recorded."""
+    tool_use_id: str
+    title: str | None = None
+    description: str | None = None
+    favicon: str | None = None
+    redeploy: bool = False
+    url: str | None = None  # filled from the tool_result, when it lands
+
+
+@dataclass
+class ToolResult:
+    tool_use_id: str
+    chars: int
+    ts: float | None
+    # The published URL when this is an Artifact publish's result — kept here
+    # so an ingest that sees the result but not the call can still fill it.
+    artifact_url: str | None = None
 
 
 @dataclass
@@ -85,6 +112,9 @@ class Facts:
     last_ts: float | None = None
     turns: dict[tuple[str, str], Turn] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
+    # tool_result blocks seen, by tool_use_id (results usually follow their
+    # call within the same file, but may land in a later ingest).
+    results: dict[str, ToolResult] = field(default_factory=dict)
     lines: int = 0
 
 
@@ -196,6 +226,60 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             if (isinstance(tool_id, str) and isinstance(name, str)
                     and all(existing != tool_id for existing, _ in turn.tool_uses)):
                 turn.tool_uses.append((tool_id, name))
+                if name == ARTIFACT_TOOL:
+                    artifact = _artifact_use(tool_id, block.get("input"))
+                    if artifact is not None:
+                        turn.artifacts[tool_id] = artifact
+
+
+def _artifact_use(tool_id: str, raw: Any) -> ArtifactUse | None:
+    """An ``Artifact`` call that publishes (the default action) — None for
+    every other action (read, list, comments, db, assets, ...)."""
+    inp: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    action = inp.get("action") or "publish"
+    file_path = _opt_str(inp.get("file_path"))
+    if action != "publish" or not file_path:
+        return None
+    # The harness names a page from its <title> tag, and only reads the
+    # `title` parameter when that is absent — so most publishes carry no
+    # title here. The file's stem is the harness's own last resort, and the
+    # best name the transcript can give us.
+    title = _opt_str(inp.get("title")) or file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0] or None
+    return ArtifactUse(
+        tool_use_id=tool_id,
+        title=title,
+        description=_opt_str(inp.get("description")),
+        favicon=_opt_str(inp.get("favicon")),
+        redeploy=bool(inp.get("url")),
+    )
+
+
+def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, Any],
+                       ts: float | None) -> None:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
+            continue
+        tool_id = block.get("tool_use_id")
+        if not isinstance(tool_id, str) or not tool_id:
+            continue
+        payload = block.get("content")
+        text = payload if isinstance(payload, str) else json.dumps(payload) if payload is not None else ""
+        url = artifact_url(text)
+        facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
+                                            artifact_url=url)
+        if url:
+            for turn in facts.turns.values():
+                artifact = turn.artifacts.get(tool_id)
+                if artifact is not None:
+                    artifact.url = url
+
+
+def artifact_url(text: str) -> str | None:
+    match = _ARTIFACT_URL_RE.search(text)
+    return match.group(0) if match else None
 
 
 def fold(lines: Iterable[str], *, default_agent: str = MAIN_AGENT) -> Facts:
@@ -260,6 +344,8 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
             facts.events.append(Event(uuid=uuid, kind="prompt", agent_id=agent_id, ts=ts))
         elif record.get("isCompactSummary"):
             facts.events.append(Event(uuid=uuid, kind="compaction", agent_id=agent_id, ts=ts))
+        elif isinstance(message, dict):
+            _fold_tool_results(facts, record, message, ts)
         return
     if kind == "system":
         subtype = record.get("subtype")

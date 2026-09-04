@@ -82,12 +82,25 @@ class TranscriptBuilder:
         self.records.append(_user(uuid, ts=ts, content=text, session_id=self.session_id))
         return self
 
-    def tool_result(self, uuid: str, ts: str):
+    def tool_result(self, uuid: str, ts: str, tool_use_id: str = "t1", content: str = "ok"):
         self.records.append(_user(
             uuid, ts=ts, session_id=self.session_id,
-            content=[{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}],
-            toolUseResult={"stdout": "ok"},
+            content=[{"type": "tool_result", "tool_use_id": tool_use_id, "content": content}],
+            toolUseResult={"stdout": content},
         ))
+        return self
+
+    def artifact(self, message_id: str, ts: str, *, tool_id: str, title: str = "Report",
+                 action: str | None = None, url: str | None = None, **kw):
+        """An Artifact tool call in its own turn, with the result the harness
+        prints (the published URL) when ``url`` is given."""
+        inp = {"file_path": "/tmp/x.html", "title": title, "favicon": "📊"}
+        if action:
+            inp["action"] = action
+        if url and action is None:
+            inp["url"] = url  # a redeploy names the existing url in the CALL
+        blocks = [{"type": "tool_use", "id": tool_id, "name": "Artifact", "input": inp}]
+        self.records.append(_assistant(message_id, ts=ts, blocks=blocks, session_id=self.session_id, **kw))
         return self
 
     def turn(self, message_id: str, ts: str, *, tools=(), split: bool = True, **kw):

@@ -16,7 +16,11 @@ Tables (see ``_SCHEMA``):
                  turn's prompt is served as ``input`` (uncached), ``cache_read``
                  (warm hit) or ``cache_creation`` (cold — the prefix was
                  written), the last split by TTL into ``cache_5m``/``cache_1h``.
-- ``tool_calls`` one row per ``tool_use`` block.
+- ``tool_calls`` one row per ``tool_use`` block, with the size and time of its
+                 ``tool_result`` once that lands (the result is what grows the
+                 next turn's context — see ``report.biggest_turns``).
+- ``artifacts``  one row per Artifact publish (title, description, favicon,
+                 published URL parsed from the tool result).
 - ``events``     prompts, compactions and turn durations, keyed by record uuid
                  (scoped by session: ids are globally unique in practice, but
                  nothing here depends on it).
@@ -78,6 +82,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     peak_context_tokens   INTEGER NOT NULL DEFAULT 0,
     compactions           INTEGER NOT NULL DEFAULT 0,
     cold_turns            INTEGER NOT NULL DEFAULT 0,
+    artifacts             INTEGER NOT NULL DEFAULT 0,
     subagents             INTEGER NOT NULL DEFAULT 0,
     active_ms             INTEGER NOT NULL DEFAULT 0,
     models                TEXT NOT NULL DEFAULT '[]'
@@ -108,14 +113,30 @@ CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts);
 CREATE INDEX IF NOT EXISTS turns_ts ON turns(ts);
 
 CREATE TABLE IF NOT EXISTS tool_calls (
+    session_id   TEXT NOT NULL,
+    tool_use_id  TEXT NOT NULL,
+    agent_id     TEXT NOT NULL DEFAULT '',
+    message_id   TEXT NOT NULL,
+    tool_name    TEXT NOT NULL,
+    ts           REAL,
+    result_chars INTEGER,
+    result_ts    REAL,
+    PRIMARY KEY (session_id, tool_use_id)
+);
+
+CREATE TABLE IF NOT EXISTS artifacts (
     session_id  TEXT NOT NULL,
     tool_use_id TEXT NOT NULL,
     agent_id    TEXT NOT NULL DEFAULT '',
-    message_id  TEXT NOT NULL,
-    tool_name   TEXT NOT NULL,
     ts          REAL,
+    url         TEXT,
+    title       TEXT,
+    description TEXT,
+    favicon     TEXT,
+    redeploy    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, tool_use_id)
 );
+CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_name ON tool_calls(tool_name);
 
@@ -151,6 +172,9 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("turns", "cache_5m_tokens", "INTEGER NOT NULL DEFAULT 0"),
     ("turns", "cache_1h_tokens", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "cold_turns", "INTEGER NOT NULL DEFAULT 0"),
+    ("tool_calls", "result_chars", "INTEGER"),
+    ("tool_calls", "result_ts", "REAL"),
+    ("sessions", "artifacts", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

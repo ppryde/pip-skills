@@ -44,6 +44,7 @@ function session(overrides: Partial<ChronicleSession> & { session_id: string }):
     peak_context_tokens: 1110,
     compactions: 0,
     cold_turns: 1,
+    artifacts: 0,
     subagents: 0,
     active_ms: 0,
     models: ["claude-opus-5"],
@@ -62,13 +63,19 @@ function summary(): ChronicleSummary {
     totals: {
       sessions: 2, turns: 12, prompts: 4, tool_calls: 6, input_tokens: 20, cache_read_tokens: 2000,
       cache_creation_tokens: 200, output_tokens: 900, thinking_tokens: 100, compactions: 1,
-      subagents: 1, active_ms: 120_000, transcript_bytes: 4096, live: 1, cold_turns: 2,
+      subagents: 1, active_ms: 120_000, transcript_bytes: 4096, live: 1, cold_turns: 2, artifacts: 1,
       cache_hit_rate: 0.901, cache_5m_tokens: 50, cache_1h_tokens: 150,
       peak_context_tokens: 120_000, peak_context_pct: 0.6, context_window: 200_000,
     },
     by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
+    artifacts: [
+      // A distinct session_title: the list echoes it as a button, and the
+      // tests below look "Fix the widget" up by text.
+      { session_id: "aaaa1111-x", session_title: "Report session", ts: 1_788_260_000, first_ts: 1_788_259_000,
+        url: "https://claude.ai/code/artifact/abc", title: "Widget report", description: "A tour", favicon: "📊", publishes: 3 },
+    ],
     shape: {
       turns: { p50: 6, p90: 7, max: 7, mean: 6 },
       prompts: { p50: 2, p90: 2, max: 2, mean: 2 },
@@ -116,6 +123,11 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByRole("img", { name: "Peak context used: 60%" })).toBeInTheDocument();
     expect(screen.getByText("warm")).toBeInTheDocument();
     expect(screen.getByText("120k of 200k")).toBeInTheDocument();
+    // Artifacts: the tile, and the page list with a real link + publish count.
+    expect(screen.getByText("distinct pages published")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Widget report" });
+    expect(link).toHaveAttribute("href", "https://claude.ai/code/artifact/abc");
+    expect(screen.getByText(/3 publishes/)).toBeInTheDocument();
     expect(screen.getByText("opus-5")).toBeInTheDocument();
     expect(screen.getAllByText("bbbb2222").length).toBeGreaterThan(0);
     expect(mocked.setActiveRoot).toHaveBeenCalledWith("/repos/pip-skills");
@@ -180,6 +192,15 @@ describe("<ChroniclePage/>", () => {
       ],
       tools: [{ tool_name: "Read", calls: 1 }],
       compactions_at: [],
+      artifacts: [
+        { session_id: "aaaa1111-x", ts: 5, first_ts: 5, url: null, title: "lost-page", description: null, favicon: null, publishes: 1 },
+      ],
+      biggest_jumps: [
+        { turn: 2, ts: 700, context_tokens: 120, delta_tokens: 20, output_tokens: 5, cold: false, tool_calls: 0,
+          landed: [{ tool_name: "Read", chars: 4200 }], landed_chars: 4200 },
+        { turn: 1, ts: 1, context_tokens: 100, delta_tokens: 100, output_tokens: 5, cold: true, tool_calls: 1,
+          landed: [], landed_chars: 0 },
+      ],
     });
     render(<ChroniclePage activeRoot={null} repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
@@ -190,6 +211,13 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getAllByTestId("chr-ring")).toHaveLength(1);
     expect(screen.getByText(/rings mark cold cache turns/)).toBeInTheDocument();
     expect(screen.getByText("Read")).toBeInTheDocument();
+    // Biggest jumps: attribution text and the cold tag; a url-less artifact
+    // renders as a dotted name, not a link.
+    const jumps = within(screen.getByRole("table", { name: "Biggest jumps" }));
+    expect(jumps.getByText("Read 4.2k chars")).toBeInTheDocument();
+    expect(jumps.getByText("cold")).toBeInTheDocument();
+    expect(screen.getByText("lost-page")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "lost-page" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
