@@ -236,6 +236,18 @@ class TestSync:
         assert ingest.sync(conn, projects)["changed"] == 1
         assert ingest.sync(conn, projects)["changed"] == 0
 
+    def test_full_sync_rereads_everything_without_double_counting(self, projects):
+        from .conftest import TranscriptBuilder
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert ingest.sync(conn, projects)["lines"] == 0
+        result = ingest.sync(conn, projects, full=True)
+        assert result["lines"] == 2
+        assert result["sessions"] == ["s1"]
+        assert _session(conn)["turns"] == 1
+        assert _session(conn)["prompts"] == 1
+
     def test_backfill_is_sync(self, projects):
         conn = store.connect()
         assert ingest.backfill(conn, projects / "nope")["scanned"] == 0

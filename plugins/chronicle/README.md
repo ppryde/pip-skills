@@ -47,6 +47,7 @@ live under `~/.claude/plugins/chronicle/`):
 ```bash
 chronicle sync                 # reconcile the store with every transcript on disk
 chronicle backfill             # alias of sync (a first run over an empty store)
+chronicle sync --full          # forget every cursor and re-read all transcripts (after a schema change)
 chronicle status               # store path, row counts, last sync (JSON)
 chronicle summary [--root R] [--days N]     # totals, per-day series, by-model, tools, session shape
 chronicle sessions [--root R] [--days N] [--limit N]

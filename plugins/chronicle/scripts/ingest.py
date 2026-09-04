@@ -360,17 +360,24 @@ def scan_transcripts(projects: Path) -> list[Path]:
     return out
 
 
-def sync(conn: sqlite3.Connection, projects: Path, *, now: float | None = None) -> dict[str, Any]:
+def sync(conn: sqlite3.Connection, projects: Path, *, now: float | None = None,
+         full: bool = False) -> dict[str, Any]:
     """Pull-on-demand reconciliation of the store against the transcripts on
     disk: stat every transcript (and its subagent files), ingest the tail of
     each one whose mtime/size moved since the cursor last saw it, and record
     the sync time. Idempotent; a sync with nothing changed is a directory
     walk and no reads.
 
+    ``full`` forgets every cursor first, so every file is re-read from byte 0
+    — the way to populate columns added by a schema migration for turns that
+    were ingested before it. Safe because every write is idempotent.
+
     Returns ``{"scanned", "changed", "lines", "sessions": [ids...], "synced_at"}``.
     """
     if now is None:
         now = time.time()
+    if full:
+        conn.execute("DELETE FROM cursors")
     scanned = 0
     lines = 0
     changed: list[str] = []

@@ -126,7 +126,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     projects = Path(args.projects) if args.projects else store.projects_dir()
     conn = store.connect()
     try:
-        result = ingest.sync(conn, projects)
+        result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)))
     finally:
         conn.close()
     out: dict[str, Any] = {**result, "projects_dir": str(projects), "db": str(store.db_path())}
@@ -233,6 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         p = sub.add_parser(verb, help=help_text)
         p.add_argument("--projects", default=None, help="override $CLAUDE_CONFIG_DIR/projects")
+        p.add_argument("--full", action="store_true",
+                       help="forget every cursor and re-read all transcripts (after a schema change)")
         p.set_defaults(fn=cmd_sync)
 
     sub.add_parser("status", help="store location and row counts (JSON)").set_defaults(fn=cmd_status)
