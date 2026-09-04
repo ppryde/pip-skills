@@ -320,7 +320,7 @@ describe("<AtlasRailCard/>", () => {
       expect(row.querySelector(".atlas-rail-card__subquest-date")).toHaveTextContent("20 JUL");
     });
 
-    it("blocked (open depends_on): rose border + ⛔ checkbox glyph", () => {
+    it("blocked (open depends_on): rose border + the trail's boulder in the checkbox", () => {
       const cardsById = new Map([
         ["WF-DEP", card({ id: "WF-DEP", status: "in-flight" })],
       ]);
@@ -337,7 +337,9 @@ describe("<AtlasRailCard/>", () => {
       );
       const row = container.querySelector(".atlas-rail-card__subquest")!;
       expect(row).toHaveClass("atlas-rail-card__subquest--blocked");
-      expect(row.querySelector(".atlas-rail-card__checkbox")).toHaveTextContent("⛔");
+      expect(
+        row.querySelector(".atlas-rail-card__checkbox .atlas-rail-card__checkbox-boulder")
+      ).toBeInTheDocument();
     });
 
     // Impl-review round 1, finding 6: an in-progress child with an open
@@ -363,7 +365,9 @@ describe("<AtlasRailCard/>", () => {
       );
       const row = container.querySelector(".atlas-rail-card__subquest")!;
       expect(row).not.toHaveClass("atlas-rail-card__subquest--blocked");
-      expect(row.querySelector(".atlas-rail-card__checkbox")).not.toHaveTextContent("⛔");
+      expect(
+        row.querySelector(".atlas-rail-card__checkbox .atlas-rail-card__checkbox-boulder")
+      ).not.toBeInTheDocument();
     });
 
     it("todo: no honest date — the stamp shows ★weight instead", () => {

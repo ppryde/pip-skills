@@ -15,6 +15,7 @@ describe("fleetSummary", () => {
   it("returns a safe zero-state for an empty fleet — no NaN, no sessions", () => {
     expect(fleetSummary([], null)).toEqual({
       questing: 0,
+      idle: 0,
       topCtx: null,
       nearThreshold: 0,
     });
@@ -29,6 +30,28 @@ describe("fleetSummary", () => {
       ],
       null
     );
+    expect(result.questing).toBe(2);
+  });
+
+  it("counts idle sessions separately; questing still counts them as present", () => {
+    const result = fleetSummary(
+      [
+        session({ id: "busy", stale: false }),
+        session({ id: "dormant", stale: false, idle: true }),
+        session({ id: "ghost", stale: true }),
+      ],
+      null
+    );
+    expect(result.questing).toBe(2);
+    expect(result.idle).toBe(1);
+  });
+
+  it("idle is zero when census supplies no idle flag", () => {
+    const result = fleetSummary(
+      [session({ id: "s1", stale: false }), session({ id: "s2", stale: false })],
+      null
+    );
+    expect(result.idle).toBe(0);
     expect(result.questing).toBe(2);
   });
 

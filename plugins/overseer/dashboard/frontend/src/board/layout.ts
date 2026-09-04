@@ -59,7 +59,7 @@ function parseRecency(value: string | null | undefined): number {
 /** Recency comparator: `updated` desc, tiebreak `created` desc, then `id`
  * ascending for a fully deterministic order (two cards with identical
  * updated/created timestamps always render in the same relative order). */
-function compareRecency(a: BoardCard, b: BoardCard): number {
+export function compareRecency(a: BoardCard, b: BoardCard): number {
   const updatedDelta = parseRecency(b.updated) - parseRecency(a.updated);
   if (updatedDelta !== 0) return updatedDelta;
   const createdDelta = parseRecency(b.created) - parseRecency(a.created);

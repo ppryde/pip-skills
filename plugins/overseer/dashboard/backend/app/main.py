@@ -12,6 +12,7 @@ directly below to compute the launch root's OWN main-repo root, matching how
 from __future__ import annotations
 
 import hmac
+import math
 import os
 import re
 import sys
@@ -173,25 +174,52 @@ def _limits_section(entry: dict[str, Any] | None) -> dict[str, Any] | None:
 
 # Mirrored from census.store.STALE_HORIZON_SECONDS (90 seconds)
 _STALE_HORIZON_SECONDS = 90
+# Mirrored from census.store.IDLE_HORIZON_SECONDS (10 minutes)
+_IDLE_HORIZON_SECONDS = 10 * 60
 
 
-def _entry_ts(entry: dict[str, Any]) -> float:
-    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0.
+def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
+    """The entry's ``key`` timestamp as a float; malformed/missing reads as 0.0.
 
-    Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
     Malformed timestamps (None, non-numeric strings) are treated as 0, which
     places them beyond any staleness horizon — quarantine-safe, never raises.
+
+    ``bool``, NaN and strings are rejected rather than coerced. ``float(True)``
+    is 1.0, which would read as a real (ancient) epoch; NaN survives a json
+    round trip and makes every comparison false, which would report a session
+    non-idle forever. Strings are refused so this agrees with census's own
+    ``store._number``: accepting ``"700"`` here while census rejects it made the
+    two mirrored readers return OPPOSITE ``idle`` verdicts for one entry.
+
+    This DELIBERATELY diverges from vigil's coercion
+    (vigil/scripts/census.py:_entry_ts), which it was originally copied from and
+    which has neither guard. Vigil reads only ``updated_at``, where both bad
+    values land on the safe side (a session wrongly judged stale), so the
+    divergence is not a bug there. Here the same values decide ``idle``, where
+    they land on the WRONG side, so the guards are load-bearing. Census's own
+    ``store._number`` is the third copy and matches this one.
     """
-    try:
-        return float(entry.get("updated_at", 0) or 0)
-    except (TypeError, ValueError):
+    value = entry.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0.0
+    number = float(value)
+    return number if math.isfinite(number) else 0.0  # rejects NaN and ±inf
+
+
+def _active_ts(entry: dict[str, Any]) -> float:
+    """``active_at`` (last time the session's activity counters moved), falling
+    back to ``updated_at`` for entries written by a census that predates it."""
+    active = _entry_ts(entry, "active_at")
+    return active if active > 0 else _entry_ts(entry)
 
 
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
-    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at, stale}.
+    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at,
+    active_at, stale, idle}. ``stale``: census has not seen a render for 90s (dead or
+    closed). ``idle``: still rendering (the status line reruns on a timer) but no API
+    activity for 10 minutes — an open TUI nobody is working in.
     Optional fields (model, pr, session_name, branch, pct) are omitted when absent,
     mirroring _census_extras's "forward what's there" style. Malformed updated_at
     values are coerced to 0.0 (treating as stale) rather than raising.
@@ -202,7 +230,11 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
         "id": sid,
         "worktree_cwd": entry.get("worktree_cwd"),
         "updated_at": entry.get("updated_at"),
+        # Guarded, not raw: Starlette renders with allow_nan=False, so a NaN in
+        # the store would 500 the one census read documented as never doing so.
+        "active_at": entry.get("active_at") if _entry_ts(entry, "active_at") else None,
         "stale": (now - ts) > _STALE_HORIZON_SECONDS,
+        "idle": (now - _active_ts(entry)) > _IDLE_HORIZON_SECONDS,
     }
     if entry.get("branch"):
         out["branch"] = entry["branch"]
@@ -222,7 +254,7 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
 
 def _sessions_list(repo_root: Path) -> list[dict[str, Any]]:
     """Fetch all sessions from census, scoped to ``repo_root``, sorted by
-    updated_at descending.
+    last activity descending.
 
     Census tracks sessions across every repo on the machine (it has no
     per-repo scoping of its own), so this filters to only those sessions
@@ -253,8 +285,11 @@ def _sessions_list(repo_root: Path) -> list[dict[str, Any]]:
         for sid, entry in sessions_dict.items()
         if entry.get("worktree_cwd") and _derived_root(entry["worktree_cwd"]) == repo_root
     ]
-    # Sort by coerced updated_at descending (freshest first); malformed -> 0.0 -> sorts last
-    sessions.sort(key=lambda s: _entry_ts({"updated_at": s.get("updated_at")}), reverse=True)
+    # Sort by last ACTIVITY descending; malformed -> 0.0 -> sorts last. Not
+    # updated_at: the status line reruns on a timer, so that key ranks a dormant
+    # session above a working one. The dashboard's own hook re-sorts client
+    # side, but every other consumer of this endpoint gets the order we send.
+    sessions.sort(key=_active_ts, reverse=True)
     return sessions
 
 

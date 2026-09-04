@@ -77,3 +77,202 @@ class TestReadGate:
         assert st.latest_for_worktree("/wt/a", now=NOW)["limits"]["five_hour"]["used_percentage"] == 89
         # after the window resets, the merged limits drop it
         assert st.latest_for_worktree("/wt/a", now=FUTURE + 1)["limits"] is None
+
+
+class TestHoistOrdering:
+    """A dormant session's frozen reading must not clobber a working session's.
+
+    Both sessions' windows reset in the future, so ``resets_at`` gating alone
+    cannot separate them. Usage only rises within a window, so the readings
+    order themselves — no clock and no write order involved.
+    """
+
+    def _rate(self, pct, resets_at=10_000.0):
+        return {"five_hour": {"used_percentage": pct, "resets_at": resets_at}}
+
+    def _pct(self, store_file):
+        return _read(store_file)["limits"]["five_hour"]["used_percentage"]
+
+    def test_dormant_timer_rerun_does_not_clobber_active_reading(self, store_file):
+        dormant = {"prompt_id": "p1", "cost": {"total_cost_usd": 1.0}}
+        st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=100.0)
+        st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        # The dormant session's status line reruns on the timer: same frozen
+        # 36%, and it writes LAST.
+        st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=260.0)
+
+        assert self._pct(store_file) == 60
+
+    def test_new_prompt_without_an_api_response_cannot_win(self, store_file):
+        """A new prompt id advances session activity, but ``rate_limits`` only
+        refreshes on an API response — so the reading is still the old one and
+        must not displace a higher figure."""
+        st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        # Session A: user pressed enter (new prompt id), no API response yet.
+        st.ingest(_payload("dormant", "/wt/a", self._rate(20), prompt_id="p2"), now=300.0)
+
+        assert self._pct(store_file) == 60
+
+    def test_dormant_session_that_wakes_up_wins(self, store_file):
+        st.ingest(_payload("dormant", "/wt/a", self._rate(36), prompt_id="p1"), now=100.0)
+        st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        # Its counters moved AND its reading rose past the stored figure.
+        st.ingest(_payload("dormant", "/wt/a", self._rate(71), prompt_id="p2"), now=300.0)
+
+        assert self._pct(store_file) == 71
+
+    def test_write_order_does_not_matter(self, store_file):
+        st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        st.ingest(_payload("dormant", "/wt/a", self._rate(36), prompt_id="p1"), now=100.0)
+        assert self._pct(store_file) == 60
+
+    def test_a_new_window_wins_however_low_its_percentage(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(96, resets_at=10_000.0)), now=100.0)
+        # The window rolled over: counter restarted, reset time moved out.
+        st.ingest(_payload("s2", "/wt/b", self._rate(3, resets_at=28_000.0)), now=110.0)
+        limits = _read(store_file)["limits"]["five_hour"]
+        assert limits["used_percentage"] == 3
+        assert limits["resets_at"] == 28_000.0
+
+    def test_a_superseded_window_loses_however_high_its_percentage(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(3, resets_at=28_000.0)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(96, resets_at=10_000.0)), now=110.0)
+        assert self._pct(store_file) == 3
+
+    def test_a_forward_clock_step_cannot_wedge_a_window(self, store_file):
+        """A reading written while the clock was hours fast must not lock the
+        window until wall clock catches up — the ordering ignores clocks."""
+        st.ingest(_payload("skewed", "/wt/a", self._rate(11)), now=100.0 + 7200)
+        st.ingest(_payload("normal", "/wt/b", self._rate(88)), now=200.0)
+        assert self._pct(store_file) == 88
+
+    def test_nan_percentage_cannot_wedge_a_window(self, store_file):
+        """json round-trips a bare NaN, and every comparison against it is
+        false — it must never become an unbeatable stored reading."""
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "limits": {
+                        "five_hour": {"used_percentage": float("nan"), "resets_at": 10_000.0},
+                        "updated_at": 50.0,
+                    },
+                    "sessions": {},
+                }
+            )
+        )
+        st.ingest(_payload("s1", "/wt/a", self._rate(44)), now=100.0)
+        assert self._pct(store_file) == 44
+
+    def test_reading_without_a_percentage_never_displaces_a_real_one(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(44)), now=100.0)
+        st.ingest(
+            _payload("s2", "/wt/b", {"five_hour": {"resets_at": 10_000.0}}),
+            now=110.0,
+        )
+        assert self._pct(store_file) == 44
+
+    def test_each_window_is_ordered_independently(self, store_file):
+        """Per-window, not one global decision: a losing five_hour reading must
+        not drag its own seven_day reading down with it, or vice versa."""
+        st.ingest(
+            _payload(
+                "s1",
+                "/wt/a",
+                {
+                    "five_hour": {"used_percentage": 80, "resets_at": 10_000.0},
+                    "seven_day": {"used_percentage": 12, "resets_at": 90_000.0},
+                },
+            ),
+            now=100.0,
+        )
+        st.ingest(
+            _payload(
+                "s2",
+                "/wt/b",
+                {
+                    "five_hour": {"used_percentage": 30, "resets_at": 10_000.0},
+                    "seven_day": {"used_percentage": 44, "resets_at": 90_000.0},
+                },
+            ),
+            now=110.0,
+        )
+        limits = _read(store_file)["limits"]
+        assert limits["five_hour"]["used_percentage"] == 80  # first reading held
+        assert limits["seven_day"]["used_percentage"] == 44  # second reading won
+
+    def test_an_expired_window_is_dropped_not_carried(self, store_file):
+        """Once a window's reset time has passed, its reading must not survive
+        as a fossil that a genuine new reading has to out-rank."""
+        st.ingest(_payload("s1", "/wt/a", self._rate(96, resets_at=10_000.0)), now=100.0)
+        # Now past that reset. The next reading belongs to a fresh window and
+        # must be taken despite being far lower.
+        st.ingest(
+            _payload("s2", "/wt/b", self._rate(4, resets_at=28_000.0)),
+            now=10_500.0,
+        )
+        limits = _read(store_file)["limits"]
+        assert limits["five_hour"]["used_percentage"] == 4
+        assert st.limits(now=10_500.0)["five_hour"]["used_percentage"] == 4
+
+    def test_boundaries_a_second_apart_are_the_same_window(self, store_file):
+        """Zero tolerance would invert the rule: a fossil reading one second
+        later would read as a newer window and win with the lower percentage.
+        Observed boundaries are identical across sessions and quantised to ten
+        minutes, so a minute of slack cannot merge two real windows."""
+        st.ingest(_payload("working", "/wt/b", self._rate(85, resets_at=10_000.0)), now=100.0)
+        st.ingest(_payload("dormant", "/wt/a", self._rate(12, resets_at=10_001.0)), now=110.0)
+        assert self._pct(store_file) == 85
+
+    def test_a_boundary_well_past_the_tolerance_is_a_new_window(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(85, resets_at=10_000.0)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(12, resets_at=10_000.0 + 600)), now=110.0)
+        assert self._pct(store_file) == 12
+
+    def test_an_implausibly_distant_reset_is_refused(self, store_file):
+        """A wrong-unit value (a millisecond epoch) or a corrupt one would
+        otherwise be the latest window forever and out-rank every real reading."""
+        st.ingest(_payload("s1", "/wt/a", self._rate(20, resets_at=10_000.0)), now=100.0)
+        st.ingest(_payload("bogus", "/wt/b", self._rate(7, resets_at=10_000.0 * 1000)), now=110.0)
+        assert self._pct(store_file) == 20
+        # And it is never served, even with nothing to compare against.
+        assert st.limits(now=110.0)["five_hour"]["used_percentage"] == 20
+
+    def test_a_genuine_seven_day_window_survives_a_slow_clock(self, store_file):
+        """The ceiling is measured against our own clock, so it must leave slack
+        for one running behind — otherwise a slow machine shows nothing where it
+        could have shown something."""
+        seven_days = 7 * 24 * 3600
+        rate = {"seven_day": {"used_percentage": 40, "resets_at": 1_000.0 + seven_days}}
+        # Clock two days behind: the window looks nine days out.
+        st.ingest(_payload("s1", "/wt/a", rate), now=1_000.0 - 2 * 24 * 3600)
+        assert _read(store_file)["limits"]["seven_day"]["used_percentage"] == 40
+
+    def test_a_losing_reading_does_not_restamp_updated_at(self, store_file):
+        """`updated_at` means "when the account figure last MOVED". A latched
+        peak must not masquerade as a fresh observation."""
+        st.ingest(_payload("s1", "/wt/a", self._rate(85)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(12)), now=500.0)
+        limits = _read(store_file)["limits"]
+        assert limits["five_hour"]["used_percentage"] == 85
+        assert limits["updated_at"] == 100.0
+
+    def test_a_winning_reading_does_restamp_updated_at(self, store_file):
+        st.ingest(_payload("s1", "/wt/a", self._rate(85)), now=100.0)
+        st.ingest(_payload("s2", "/wt/b", self._rate(90)), now=500.0)
+        assert _read(store_file)["limits"]["updated_at"] == 500.0
+
+    def test_pre_upgrade_limits_are_ordered_not_trusted(self, store_file):
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "limits": {**self._rate(9), "updated_at": 50.0},
+                    "sessions": {},
+                }
+            )
+        )
+        st.ingest(_payload("s1", "/wt/a", self._rate(44)), now=100.0)
+        assert self._pct(store_file) == 44

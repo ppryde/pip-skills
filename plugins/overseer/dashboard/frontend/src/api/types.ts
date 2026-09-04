@@ -206,8 +206,21 @@ export interface LabelsBody {
 export interface SessionSummary {
   id: string;
   worktree_cwd: string | null;
+  /** Last time the status line RAN for this session. The status line reruns on
+   * a timer, so this refreshes even while the session sits idle — never read it
+   * as "last active"; use `active_at`. */
   updated_at: number | null | string;
+  /** Last time the session's activity counters MOVED (prompt, cost, tokens,
+   * cache requests). Absent for entries written by a census predating it. */
+  active_at?: number | null | string;
   stale: boolean;
+  /** Census sees the status line still rendering, but the session's activity
+   * counters haven't moved for 10 minutes — an open TUI nobody is working in.
+   * Distinct from `stale`, which means census sees no render at all.
+   *
+   * Check `stale` FIRST: a session that died within ten minutes of its last
+   * activity is `idle: false`, so read alone this field says "working". */
+  idle?: boolean;
   session_name?: string;
   model?: string;
   /** Git branch the session's worktree is on (WF-031) — omitted when

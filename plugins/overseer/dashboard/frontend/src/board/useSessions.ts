@@ -36,15 +36,24 @@ export interface UseSessionsResult {
   sessions: SessionSummary[];
 }
 
-// updated_at arrives as an epoch number, an ISO string, or null — normalise
+// A timestamp arrives as an epoch number, an ISO string, or null — normalise
 // to a comparable epoch (null/unparseable sort last).
-function activity(value: SessionSummary["updated_at"]): number {
+function epoch(value: SessionSummary["updated_at"]): number {
   if (typeof value === "number") return value;
   if (typeof value === "string") {
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? 0 : parsed;
   }
   return 0;
+}
+
+// Recency for ordering: `active_at` (last real activity) when census supplies
+// it, else `updated_at`. This matters because the status line reruns on a
+// timer, so a dormant session's `updated_at` stays fresh forever and would
+// otherwise sort it above sessions that are actually working.
+function activity(session: SessionSummary): number {
+  const active = epoch(session.active_at ?? null);
+  return active > 0 ? active : epoch(session.updated_at);
 }
 
 export function useSessions(
@@ -103,9 +112,7 @@ export function useSessions(
 
   // Most recently active first — sorted at render so the polled state stays
   // exactly what the API returned.
-  const ordered = [...sessions].sort(
-    (a, b) => activity(b.updated_at) - activity(a.updated_at)
-  );
+  const ordered = [...sessions].sort((a, b) => activity(b) - activity(a));
 
   return { sessions: ordered };
 }

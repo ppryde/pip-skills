@@ -37,7 +37,11 @@ function PartyAvatar({ session, size = 32 }: PartyAvatarProps) {
       <span
         className={
           "party-avatar__dot" +
-          (session.stale ? " party-avatar__dot--stale" : "")
+          (session.stale
+            ? " party-avatar__dot--stale"
+            : session.idle
+              ? " party-avatar__dot--idle"
+              : "")
         }
       />
     </span>

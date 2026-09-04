@@ -116,13 +116,15 @@ function EpicAtlas({ board, onOpenCard, showNames, hideVanquished }: EpicAtlasPr
     return map;
   }, [allEpics, board.cards]);
 
-  // Vanquished toggle applies AFTER the created-ascending base order (HANDOFF:
-  // hidden filters done epics out; shown, they sort last, everything else
-  // keeping its relative order) — seedFor is id-keyed, not index-keyed, so
-  // toggling this can never re-wobble a surviving trail (atlasTrailLayout.ts).
+  // Epics run most-recently-touched first, where "touched" means the freshest
+  // `updated` across the epic AND its children (childrenByEpic is threaded in
+  // for exactly that) — matching the board lanes' own epic-group policy. The
+  // vanquished toggle still wins as the primary key (HANDOFF: hidden filters
+  // done epics out; shown, they sort last) — seedFor is id-keyed, not
+  // index-keyed, so re-sorting can never re-wobble a surviving trail.
   const epics = useMemo(
-    () => orderEpicsForDisplay(allEpics, hideVanquished),
-    [allEpics, hideVanquished]
+    () => orderEpicsForDisplay(allEpics, hideVanquished, childrenByEpic),
+    [allEpics, hideVanquished, childrenByEpic]
   );
 
   // ONE shared px-per-weight scale, recomputed each render across every

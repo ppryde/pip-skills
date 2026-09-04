@@ -65,6 +65,7 @@ function PartyColumn({
               className={
                 "party-row" +
                 (session.stale ? " party-row--stale" : "") +
+                (!session.stale && session.idle ? " party-row--idle" : "") +
                 (spotlight ? " is-spotlight" : "") +
                 (isNearThreshold ? " is-near-threshold" : "")
               }

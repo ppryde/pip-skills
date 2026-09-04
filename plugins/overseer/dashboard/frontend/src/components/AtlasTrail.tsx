@@ -86,6 +86,12 @@ export interface AtlasTrailProps {
 const DEFAULT_LANE_HEIGHT = 112;
 
 const MARKER_SIZE_PX = 20;
+/** The barred-quest boulder draws at DOUBLE the common marker size — a
+ * blocked quest is the one thing on the trail you must not walk past, so it
+ * reads as an obstacle rather than just another 20px waypoint. Deliberately
+ * its own constant: the abandoned-icon and campfire markers still key off
+ * `MARKER_SIZE_PX` and must stay at the common size. */
+const BOULDER_SIZE_PX = MARKER_SIZE_PX * 2;
 /** Vertical clearance between a marker and its name-tag's near edge — same
  * magnitude used on both banks of the Task 2 alternation (`my - GAP` for an
  * above tag's bottom-anchored edge, `my + GAP` for a below tag's top-anchored
@@ -362,10 +368,10 @@ function AtlasTrail({
           <image
             className="atlas-trail__boulder"
             href={boulderIcon}
-            x={mx - MARKER_SIZE_PX / 2}
-            y={my - MARKER_SIZE_PX / 2}
-            width={MARKER_SIZE_PX}
-            height={MARKER_SIZE_PX}
+            x={mx - BOULDER_SIZE_PX / 2}
+            y={my - BOULDER_SIZE_PX / 2}
+            width={BOULDER_SIZE_PX}
+            height={BOULDER_SIZE_PX}
           />
         ) : (
           <circle cx={mx} cy={my} r={6} className="atlas-trail__todo-dot" />

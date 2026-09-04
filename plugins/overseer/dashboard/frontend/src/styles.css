@@ -3008,6 +3008,15 @@ body {
 .epic-card__subquest--prog .epic-card__subquest-glyph,
 .epic-card__subquest--prog .epic-card__athand { color: var(--qb-status-in-progress-strong); }
 .epic-card__subquest--blocked .epic-card__subquest-glyph { color: var(--qb-status-blocked-strong); }
+/* The barred sub-quest's boulder fills the glyph column exactly (16px, same
+   as the column's own width) so the title edge stays flush with every other
+   row's. */
+.epic-card__subquest-boulder {
+  width: 16px;
+  height: 16px;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+}
 .epic-card__subquest-title { flex: 1; }
 .epic-card__athand {
   margin-left: 6px;
@@ -4591,6 +4600,13 @@ a.card-drawer__pr-chip:hover {
   opacity: 0.55;
 }
 
+/* An idle session is present but not working — lightly dimmed, between a
+   working row and a stale ghost. Its avatar dot (below) goes amber and stops
+   pulsing. */
+.party-row--idle {
+  opacity: 0.8;
+}
+
 .party-row__body {
   flex: 1 1 auto;
   min-width: 0;
@@ -4747,8 +4763,28 @@ a.card-drawer__pr-chip:hover {
   border: 1.5px solid var(--qb-party-text-muted);
 }
 
+/* Idle: still here, not working. Takes the `-fill` end of the amber pair, per
+   the convention in this file that a filled surface uses `-fill` and `-shadow`
+   is only ever a darker companion.
+   The ring is a box-shadow, not a border, because nothing sets box-sizing here
+   and a border would grow the dot past its live sibling.
+   It is the amber SHADOW token — the darker companion to the fill, which is
+   what that token is for — rather than any surface colour. PartyAvatar renders
+   on three different surfaces (the party row, the overlay's cream hero card,
+   the card drawer), so a ring matched to one of them is a mismatched halo on
+   the other two. A darker amber reads against all three AND against
+   `.party-avatar--amber`'s own fill, which is the identical colour to the dot
+   and the only accent it could otherwise vanish into.
+   Excluded from the pulse below so only a genuinely working session animates. */
+.party-avatar__dot--idle {
+  background: var(--qb-accent-amber-fill);
+  box-shadow: 0 0 0 1.5px var(--qb-accent-amber-shadow);
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .party-avatar__dot:not(.party-avatar__dot--stale) {
+  .party-avatar__dot:not(.party-avatar__dot--stale):not(
+      .party-avatar__dot--idle
+    ) {
     animation: qb-pulse var(--qb-motion-pulse) ease-in-out infinite;
   }
 
@@ -5425,8 +5461,23 @@ a.card-drawer__pr-chip:hover {
 }
 
 .atlas-rail-card__subquest--blocked .atlas-rail-card__checkbox {
-  border-color: var(--qb-accent-rose-fill);
+  /* The barred row hands its checkbox over to the trail's boulder: the
+     obstacle IS the marker, so the rose box would only cage it. The border
+     stays (transparent) rather than being removed, to keep the 14px outer
+     footprint identical to every other row's checkbox — the column must not
+     shift when a quest becomes blocked. `color` still carries the rose for
+     any text fallback. */
+  border-color: transparent;
   color: var(--qb-accent-rose-fill);
+  overflow: visible;
+}
+
+.atlas-rail-card__checkbox-boulder {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .atlas-rail-card__subquest-title {
