@@ -10,6 +10,8 @@ import sqlite3
 import time
 from typing import Any
 
+from scripts import pricing
+
 # A session with no recorded end (backfilled transcripts never see a
 # SessionEnd hook) counts as live only while it has been active this recently.
 LIVE_HORIZON_SECONDS = 15 * 60
@@ -64,6 +66,58 @@ def cache_hit_rate(input_tokens: int, cache_read: int, cache_creation: int) -> f
     return cache_read / total if total > 0 else None
 
 
+_COST_COLUMNS = """COUNT(*) AS turns,
+              COALESCE(SUM(t.input_tokens), 0) AS input_tokens,
+              COALESCE(SUM(t.cache_read_tokens), 0) AS cache_read_tokens,
+              COALESCE(SUM(t.cache_creation_tokens), 0) AS cache_creation_tokens,
+              COALESCE(SUM(t.cache_5m_tokens), 0) AS cache_5m_tokens,
+              COALESCE(SUM(t.cache_1h_tokens), 0) AS cache_1h_tokens,
+              COALESCE(SUM(t.output_tokens), 0) AS output_tokens"""
+
+
+def _cost_of(row: sqlite3.Row | dict[str, Any]) -> float | None:
+    return pricing.turn_cost(
+        row["model"],
+        input_tokens=row["input_tokens"], cache_read_tokens=row["cache_read_tokens"],
+        cache_creation_tokens=row["cache_creation_tokens"],
+        cache_5m_tokens=row["cache_5m_tokens"], cache_1h_tokens=row["cache_1h_tokens"],
+        output_tokens=row["output_tokens"],
+    )
+
+
+def _costs_by(conn: sqlite3.Connection, key_sql: str, where: str, params: list[Any],
+              extra: str = "") -> dict[Any, dict[str, Any]]:
+    """API-equivalent cost grouped by ``key_sql`` (a turns/sessions expression).
+
+    Cost is a per-model rate times per-model token counts, so the query
+    groups by (key, model) and the table sums the priced models in Python;
+    turns on a model the pricing table does not know are counted in
+    ``unpriced_turns`` rather than priced as something else. Subagent turns
+    are included — they cost the same money as the main agent's.
+    """
+    clause = f"{where}{' AND' if where else ' WHERE'} {extra}" if extra else where
+    out: dict[Any, dict[str, Any]] = {}
+    for r in conn.execute(
+        f"""SELECT {key_sql} AS key, t.model AS model, {_COST_COLUMNS}
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{clause}
+            GROUP BY key, t.model""",
+        params,
+    ):
+        entry = out.setdefault(r["key"], {"cost_usd": 0.0, "unpriced_turns": 0})
+        cost = _cost_of(r)
+        if cost is None:
+            entry["unpriced_turns"] += int(r["turns"])
+        else:
+            entry["cost_usd"] += cost
+    return out
+
+
+def _attach_cost(row: dict[str, Any], costs: dict[Any, dict[str, Any]], key: Any) -> None:
+    entry = costs.get(key, {"cost_usd": 0.0, "unpriced_turns": 0})
+    row["cost_usd"] = round(entry["cost_usd"], 6)
+    row["unpriced_turns"] = entry["unpriced_turns"]
+
+
 def _row_to_session(row: sqlite3.Row, now: float | None = None) -> dict[str, Any]:
     if now is None:
         now = time.time()
@@ -114,7 +168,14 @@ def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
         (*params, int(limit)),
     ).fetchall()
     now = time.time()
-    return [_row_to_session(r, now) for r in rows]
+    out = [_row_to_session(r, now) for r in rows]
+    if out:
+        ids = [r["session_id"] for r in out]
+        marks = ",".join("?" * len(ids))
+        costs = _costs_by(conn, "t.session_id", f" WHERE t.session_id IN ({marks})", ids)
+        for r in out:
+            _attach_cost(r, costs, r["session_id"])
+    return out
 
 
 def repos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -133,6 +194,8 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     if row is None:
         return None
     detail = _row_to_session(row)
+    _attach_cost(detail, _costs_by(conn, "t.session_id", " WHERE t.session_id = ?", [session_id]),
+                 session_id)
     series: list[dict[str, Any]] = []
     previous_ts: float | None = None
     for r in conn.execute(
@@ -159,6 +222,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             # the previous call) says whether an idle stretch lapsed the TTL.
             "cold": r["cache_creation_tokens"] > r["cache_read_tokens"],
             "gap_s": gap,
+            "cost_usd": _cost_of(r),
         })
         if ts is not None:
             previous_ts = ts
@@ -360,6 +424,10 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         params,
     ).fetchone()
     totals["cache_5m_tokens"], totals["cache_1h_tokens"] = int(ttl[0]), int(ttl[1])
+    session_costs = _costs_by(conn, "t.session_id", where, params)
+    totals["cost_usd"] = round(sum(c["cost_usd"] for c in session_costs.values()), 6)
+    totals["unpriced_turns"] = sum(c["unpriced_turns"] for c in session_costs.values())
+    totals["pricing_as_of"] = pricing.PRICING_AS_OF
 
     by_day = [
         dict(r) for r in conn.execute(
@@ -381,11 +449,14 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             params,
         )
     ]
+    day_costs = _costs_by(conn, "date(t.ts, 'unixepoch', 'localtime')", where, params,
+                          extra="t.ts IS NOT NULL")
     for day in by_day:
         day["cache_hit_rate"] = cache_hit_rate(
             day["input_tokens"], day["cache_read_tokens"], day["cache_creation_tokens"]
         )
         day["peak_context_pct"] = peak_context_pct(day["peak_context_tokens"])
+        _attach_cost(day, day_costs, day["day"])
     by_model = [
         dict(r) for r in conn.execute(
             f"""SELECT t.model AS model, COUNT(*) AS turns,
@@ -393,6 +464,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                        SUM(t.input_tokens) AS input_tokens,
                        SUM(t.cache_read_tokens) AS cache_read_tokens,
                        SUM(t.cache_creation_tokens) AS cache_creation_tokens,
+                       SUM(t.cache_5m_tokens) AS cache_5m_tokens,
+                       SUM(t.cache_1h_tokens) AS cache_1h_tokens,
                        SUM(t.output_tokens) AS output_tokens
                 FROM turns t JOIN sessions s ON s.session_id = t.session_id
                 {where}{' AND' if where else ' WHERE'} t.model IS NOT NULL
@@ -400,6 +473,9 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             params,
         )
     ]
+    for m in by_model:
+        cost = _cost_of(m)
+        m["cost_usd"] = None if cost is None else round(cost, 6)
     tools = [
         dict(r) for r in conn.execute(
             f"""SELECT c.tool_name AS tool_name, COUNT(*) AS calls,
@@ -411,7 +487,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         )
     ]
     shape_rows = conn.execute(
-        f"""SELECT turns, prompts, transcript_bytes, peak_context_tokens, started_at,
+        f"""SELECT session_id, turns, prompts, transcript_bytes, peak_context_tokens, started_at,
                    last_activity_at
             FROM sessions s{where}""",
         params,
@@ -431,6 +507,9 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "duration_s": _quantiles(durations),
         "transcript_bytes": _quantiles([float(r["transcript_bytes"]) for r in shape_rows]),
         "peak_context_tokens": _quantiles([float(r["peak_context_tokens"]) for r in shape_rows]),
+        "cost_usd": _quantiles([
+            session_costs.get(r["session_id"], {"cost_usd": 0.0})["cost_usd"] for r in shape_rows
+        ]),
     }
     return {
         "totals": totals,

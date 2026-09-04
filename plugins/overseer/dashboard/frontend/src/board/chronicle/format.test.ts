@@ -5,7 +5,9 @@ import {
   formatDuration,
   formatActive,
   formatDay,
+  formatMonth,
   formatPct,
+  formatUsd,
   niceTicks,
   repoLabel,
   sessionName,
@@ -43,6 +45,26 @@ describe("formatPct", () => {
     expect(formatPct(0.973)).toBe("97%");
     expect(formatPct(0)).toBe("0%");
     expect(formatPct(null)).toBe("—");
+  });
+});
+
+describe("formatMonth", () => {
+  it("keeps month and year only", () => {
+    expect(formatMonth("2026-06-24")).toBe("Jun 2026");
+    expect(formatMonth("soon")).toBe("soon");
+  });
+});
+
+describe("formatUsd", () => {
+  it("scales from sub-cent to thousands", () => {
+    expect(formatUsd(0)).toBe("$0");
+    expect(formatUsd(0.004)).toBe("<$0.01");
+    expect(formatUsd(0.42)).toBe("$0.42");
+    expect(formatUsd(12.3)).toBe("$12.30");
+    expect(formatUsd(326.4)).toBe("$326");
+    expect(formatUsd(3103.67)).toBe("$3.1k");
+    expect(formatUsd(null)).toBe("—");
+    expect(formatUsd(-1)).toBe("—");
   });
 });
 

@@ -331,6 +331,13 @@ export interface ChronicleTotals {
   /** That peak as a share of its inferred window (200k or 1M). */
   peak_context_pct: number | null;
   context_window: number;
+  /** API-equivalent cost in USD at Anthropic list prices (see chronicle's
+   * pricing.py) — a yardstick, not a bill. Turns on a model the table does
+   * not know contribute nothing and are counted in `unpriced_turns`. */
+  cost_usd: number;
+  unpriced_turns: number;
+  /** ISO date the pricing table was last checked. */
+  pricing_as_of: string;
 }
 
 export interface ChronicleDay {
@@ -347,6 +354,8 @@ export interface ChronicleDay {
   /** That peak as a share of its inferred window. */
   peak_context_pct: number | null;
   cache_hit_rate: number | null;
+  cost_usd: number;
+  unpriced_turns: number;
 }
 
 export interface ChronicleModel {
@@ -356,7 +365,11 @@ export interface ChronicleModel {
   input_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  cache_5m_tokens: number;
+  cache_1h_tokens: number;
   output_tokens: number;
+  /** Null when the model is not in the pricing table. */
+  cost_usd: number | null;
 }
 
 export interface ChronicleTool {
@@ -378,6 +391,7 @@ export interface ChronicleShape {
   duration_s: ChronicleQuantiles;
   transcript_bytes: ChronicleQuantiles;
   peak_context_tokens: ChronicleQuantiles;
+  cost_usd: ChronicleQuantiles;
 }
 
 /** One published artifact PAGE — the latest publish of a url, with how many
@@ -462,6 +476,9 @@ export interface ChronicleSession {
   /** Derived: input + cache read + cache creation, summed over turns. */
   context_tokens: number;
   live: boolean;
+  /** API-equivalent cost at list prices, every agent's turns included. */
+  cost_usd: number;
+  unpriced_turns: number;
 }
 
 export interface ChronicleSessionsResponse {
@@ -485,6 +502,8 @@ export interface ChronicleTurn {
   cold: boolean;
   /** Seconds since the previous main-agent call; null for the first. */
   gap_s: number | null;
+  /** This call at list prices; null when its model is unpriced. */
+  cost_usd: number | null;
 }
 
 export interface ChronicleSubagent {

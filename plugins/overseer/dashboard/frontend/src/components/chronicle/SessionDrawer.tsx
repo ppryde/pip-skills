@@ -13,6 +13,7 @@ import {
   formatDuration,
   formatPct,
   formatTokens,
+  formatUsd,
   formatWhen,
   repoLabel,
   sessionName,
@@ -133,6 +134,12 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
                 label="Cache written"
                 value={formatTokens(detail.cache_creation_tokens)}
                 hue="--chr-cache"
+              />
+              <StatTile
+                label="API-equivalent cost"
+                value={formatUsd(detail.cost_usd)}
+                note={detail.unpriced_turns > 0 ? `${detail.unpriced_turns} turns unpriced` : "at list prices"}
+                hue="--chr-cost"
               />
             </div>
 

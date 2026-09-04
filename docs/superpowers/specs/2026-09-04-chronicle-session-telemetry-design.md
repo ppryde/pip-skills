@@ -108,8 +108,11 @@ live session appending in ~0.2 s.
 
 ## 5. Open questions (deferred)
 
-- **Cost.** Tokens only for now; an estimated-cost column needs a per-model
-  pricing table that drifts.
+- **Cost.** ~~Tokens only for now; an estimated-cost column needs a per-model
+  pricing table that drifts.~~ Resolved 2026-09-04: `scripts/pricing.py` holds
+  the list-price table (dated by `PRICING_AS_OF`); cost is computed at read
+  time so the table can drift without a re-sync, and unknown models are
+  counted as unpriced rather than guessed.
 - **Headline time.** Wall-clock span can be days for resumed sessions; active
   time (summed `turn_duration` markers) is only present where Claude Code
   wrote them. Both are shown; neither is promoted.

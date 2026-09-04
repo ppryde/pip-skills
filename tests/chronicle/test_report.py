@@ -1,6 +1,6 @@
 import time
 
-from scripts import ingest, report, store
+from scripts import ingest, pricing, report, store
 from scripts.report import context_window_for, peak_context_pct
 from scripts.transcript import parse_ts
 
@@ -8,6 +8,8 @@ from .conftest import TranscriptBuilder
 
 T0 = "2026-09-01T10:00:00.000Z"
 T1 = "2026-09-02T10:00:00.000Z"
+# The conftest's default usage on claude-opus-5, at list prices.
+TURN_USD = (3 * 5.0 + 1000 * 0.5 + 200 * 5.0 * 1.25 + 40 * 25.0) / 1_000_000
 
 
 def _seed(projects):
@@ -51,6 +53,28 @@ class TestSummary:
         assert round(out["by_day"][1]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
         assert out["by_day"][1]["cold_turns"] == 0
         assert round(out["by_day"][1]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
+        # Cost: every seeded turn is opus-5 with 3 in / 1000 read / 200 written
+        # (no TTL split -> 5m) / 40 out = (15 + 500 + 1250 + 1000) / 1e6.
+        assert round(out["totals"]["cost_usd"], 6) == round(4 * TURN_USD, 6)
+        assert out["totals"]["unpriced_turns"] == 0
+        assert out["totals"]["pricing_as_of"] == pricing.PRICING_AS_OF
+        assert round(out["by_day"][1]["cost_usd"], 6) == round(3 * TURN_USD, 6)
+        assert round(out["by_model"][0]["cost_usd"], 6) == round(4 * TURN_USD, 6)
+        assert round(out["shape"]["cost_usd"]["max"], 6) == round(2 * TURN_USD, 6)
+        assert round(out["shape"]["cost_usd"]["p50"], 6) == round(TURN_USD, 6)
+
+    def test_unpriced_model_is_counted_not_guessed(self, projects):
+        conn = _seed(projects)
+        conn.execute("UPDATE turns SET model = 'claude-experimental-9' WHERE session_id = 's3'")
+        conn.commit()
+        out = report.summary(conn)
+        assert round(out["totals"]["cost_usd"], 6) == round(3 * TURN_USD, 6)
+        assert out["totals"]["unpriced_turns"] == 1
+        unknown = next(m for m in out["by_model"] if m["model"] == "claude-experimental-9")
+        assert unknown["cost_usd"] is None
+        s3 = next(r for r in report.sessions(conn) if r["session_id"] == "s3")
+        assert s3["cost_usd"] == 0.0
+        assert s3["unpriced_turns"] == 1
 
     def test_repo_root_filter(self, projects):
         conn = _seed(projects)
@@ -74,6 +98,8 @@ class TestSummary:
         out = report.summary(conn)
         assert out["totals"]["sessions"] == 0
         assert out["totals"]["cache_hit_rate"] is None
+        assert out["totals"]["cost_usd"] == 0.0
+        assert out["totals"]["unpriced_turns"] == 0
         assert out["by_day"] == []
         assert out["shape"]["turns"] == {"p50": None, "p90": None, "max": None, "mean": None}
 
@@ -104,6 +130,9 @@ class TestSessions:
         assert s2["context_window"] == 200_000
         assert round(s2["peak_context_pct"], 6) == round(1203 / 200_000, 6)
         assert s2["live"] is False
+        assert round(s2["cost_usd"], 6) == round(2 * TURN_USD, 6)
+        assert s2["unpriced_turns"] == 0
+        assert round(rows[2]["cost_usd"], 6) == round(TURN_USD, 6)
 
     def test_limit_and_root(self, projects):
         conn = _seed(projects)
@@ -136,6 +165,9 @@ class TestSessionDetail:
         assert detail["subagents"][0]["turns"] == 1
         assert detail["tools"] == [{"tool_name": "Read", "calls": 2}]
         assert detail["compactions_at"] == []
+        # The subagent's turn is money too: 2 main turns + 1 subagent turn.
+        assert round(detail["cost_usd"], 6) == round(3 * TURN_USD, 6)
+        assert [round(t["cost_usd"], 6) for t in detail["turn_series"]] == [round(TURN_USD, 6)] * 2
 
     def test_missing(self):
         conn = store.connect()

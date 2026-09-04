@@ -54,6 +54,8 @@ function session(overrides: Partial<ChronicleSession> & { session_id: string }):
     duration_s: 3600,
     context_tokens: 1110,
     live: false,
+    cost_usd: 0.42,
+    unpriced_turns: 0,
     ...overrides,
   };
 }
@@ -66,9 +68,10 @@ function summary(): ChronicleSummary {
       subagents: 1, active_ms: 120_000, transcript_bytes: 4096, live: 1, cold_turns: 2, artifacts: 1,
       cache_hit_rate: 0.901, cache_5m_tokens: 50, cache_1h_tokens: 150,
       peak_context_tokens: 120_000, peak_context_pct: 0.6, context_window: 200_000,
+      cost_usd: 12.3, unpriced_turns: 0, pricing_as_of: "2026-06-24",
     },
-    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901 }],
-    by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900 }],
+    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
+    by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
     artifacts: [
       // A distinct session_title: the list echoes it as a button, and the
@@ -82,6 +85,7 @@ function summary(): ChronicleSummary {
       duration_s: { p50: 3600, p90: 3600, max: 3600, mean: 3600 },
       transcript_bytes: { p50: 2048, p90: 2048, max: 2048, mean: 2048 },
       peak_context_tokens: { p50: 1110, p90: 1110, max: 1110, mean: 1110 },
+      cost_usd: { p50: 0.42, p90: 0.42, max: 0.42, mean: 0.42 },
     },
   };
 }
@@ -118,6 +122,11 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Cache hit rate per day" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "API-equivalent cost per day" })).toBeInTheDocument();
+    // Cost: the tile with its pricing date, and a Cost column per session.
+    expect(screen.getAllByText("$12.30").length).toBeGreaterThan(0); // tile + the chart's data table
+    expect(screen.getByText("at list prices, Jun 2026")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Sessions" })).getAllByText("$0.42")).toHaveLength(2);
     // Both gauges render: cache warmth and peak context against its window.
     expect(screen.getByRole("img", { name: "Cache hit rate: 90%" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Peak context used: 60%" })).toBeInTheDocument();
@@ -187,8 +196,8 @@ describe("<ChroniclePage/>", () => {
       cold_turns: 1,
       subagents: [],
       turn_series: [
-        { ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 99, cache_5m_tokens: 99, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn", cold: true, gap_s: null },
-        { ts: 700, model: "claude-opus-5", context_tokens: 120, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 20, cache_5m_tokens: 20, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 0, stop_reason: "end_turn", cold: false, gap_s: 699 },
+        { ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 99, cache_5m_tokens: 99, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn", cold: true, gap_s: null, cost_usd: 0.0007 },
+        { ts: 700, model: "claude-opus-5", context_tokens: 120, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 20, cache_5m_tokens: 20, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 0, stop_reason: "end_turn", cold: false, gap_s: 699, cost_usd: 0.0003 },
       ],
       tools: [{ tool_name: "Read", calls: 1 }],
       compactions_at: [],
@@ -208,6 +217,7 @@ describe("<ChroniclePage/>", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
     expect(mocked.getChronicleSession).toHaveBeenCalledWith("aaaa1111-x");
     expect(screen.getByRole("img", { name: "Context tokens per turn" })).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("$0.42")).toBeInTheDocument();
     expect(screen.getAllByTestId("chr-ring")).toHaveLength(1);
     expect(screen.getByText(/rings mark cold cache turns/)).toBeInTheDocument();
     expect(screen.getByText("Read")).toBeInTheDocument();

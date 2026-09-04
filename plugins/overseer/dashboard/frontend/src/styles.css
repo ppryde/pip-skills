@@ -6792,6 +6792,7 @@ button.trail-tag:focus-visible {
   --chr-cache: #1f7a52; /* forest — cache warmth */
   --chr-turns: #1f6f7a; /* teal — turns and time */
   --chr-tools: #9a5b12; /* bronze — tool calls */
+  --chr-cost: #a8285f; /* raspberry — API-equivalent cost */
   /* The active chart's hue, set per component via an inline custom property
      (see ChronicleCharts' `hue` prop); defaults to context blue. */
   --chr-hue: var(--chr-context);

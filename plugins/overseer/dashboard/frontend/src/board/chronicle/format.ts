@@ -65,6 +65,27 @@ export function formatDay(day: string): string {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
+/**
+ * USD -> "$0.42", "$12.30", "$326", "$3.1k"; null -> "—". Sub-cent amounts
+ * read "<$0.01" so a tiny session never shows as free.
+ */
+export function formatUsd(usd: number | null | undefined): string {
+  if (usd === null || usd === undefined || !Number.isFinite(usd) || usd < 0) return "—";
+  if (usd === 0) return "$0";
+  if (usd < 0.01) return "<$0.01";
+  if (usd < 100) return `$${usd.toFixed(2)}`;
+  if (usd < 1000) return `$${Math.round(usd)}`;
+  return `$${(usd / 1000).toFixed(1)}k`;
+}
+
+/** "2026-06-24" -> "Jun 2026" (a tile note has no room for a full date). */
+export function formatMonth(day: string): string {
+  const match = /^(\d{4})-(\d{2})/.exec(day);
+  if (!match) return day;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  return date.toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
 /** 0.973 -> "97%", null -> "—". */
 export function formatPct(ratio: number | null | undefined): string {
   if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "—";

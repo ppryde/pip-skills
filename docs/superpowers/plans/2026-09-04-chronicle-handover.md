@@ -19,7 +19,11 @@ per day columns; cache hit rate per day; turns by model; tool leaderboard; artif
 publish counts, links); session-shape quantiles; sortable session table (incl. Peak %, Artifacts).
 Drawer: gauges, tiles, context-per-turn line (compaction hairlines, cold-turn rings, idle gaps in
 tooltip), **Biggest jumps** table (turn, +delta, context, what landed — tool results by size), artifacts,
-tools, subagents.
+tools, subagents. **Cost** (added 2026-09-04, after the second handover): `scripts/pricing.py` list-price
+table → `cost_usd` on totals (tile with pricing date), per day (column chart, raspberry `--chr-cost`),
+per model (bar detail), session shape row, session table column (sortable) and the drawer tile; per-turn
+`cost_usd` in `turn_series`. Unknown models count as `unpriced_turns`, never guessed. Computed at read
+time — no re-sync needed when prices change.
 
 Real store: `~/.claude/chronicle/sessions.db` — synced with `sync --full` after the last schema change
 (52 sessions, 17 distinct artifact pages). Run `sync --full` again after ANY schema/parser change.
@@ -61,7 +65,7 @@ to stop). Port 8770 holds an OLD dashboard process from 25 Aug — not this buil
 3. **Decouple** the dashboard from overseer (plan §1: a `hall` shell plugin with page providers) so
    chronicle's UI works without overseer and vice versa. Do step 1 (registry + capabilities) first.
 4. The user's message trailed off: "We also want to pull in the …" — ask what.
-5. Deferred: cost per model (pricing table), retention, census-linked liveness.
+5. Deferred: retention, census-linked liveness. (Cost per model shipped — see above.)
 
 ## Commands
 ```bash

@@ -17,8 +17,10 @@ import {
   formatBytes,
   formatDay,
   formatDuration,
+  formatMonth,
   formatPct,
   formatTokens,
+  formatUsd,
   formatWhen,
   repoLabel,
   sessionName,
@@ -55,7 +57,8 @@ type SortKey =
   | "peak_context_tokens"
   | "output_tokens"
   | "duration_s"
-  | "transcript_bytes";
+  | "transcript_bytes"
+  | "cost_usd";
 
 const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => string }[] = [
   { key: "started_at", label: "Started", render: (s) => formatWhen(s.started_at) },
@@ -68,6 +71,7 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
   { key: "transcript_bytes", label: "Size", render: (s) => formatBytes(s.transcript_bytes) },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
+  { key: "cost_usd", label: "Cost", render: (s) => formatUsd(s.cost_usd) },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {
@@ -141,6 +145,7 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
     detail: `${d.day} · ${d.cold_turns} cold`,
     value: d.cache_hit_rate ?? 0,
   }));
+  const costPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.cost_usd }));
   const shape = summary?.shape;
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
@@ -263,6 +268,16 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
               note="distinct pages published"
               hue="--chr-output"
             />
+            <StatTile
+              label="API-equivalent cost"
+              value={formatUsd(totals.cost_usd)}
+              note={
+                totals.unpriced_turns > 0
+                  ? `${totals.unpriced_turns} turns on unpriced models`
+                  : `at list prices, ${formatMonth(totals.pricing_as_of)}`
+              }
+              hue="--chr-cost"
+            />
           </div>
 
           <div className="chronicle__grid">
@@ -287,11 +302,16 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
               <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" hue="--chr-cache" />
             </section>
             <section className="chr-panel">
+              <h3 className="chr-panel__title">Cost per day</h3>
+              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
+              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+            </section>
+            <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
               <BarList
                 rows={(summary?.by_model ?? []).map((m) => ({
                   label: shortModel(m.model),
-                  detail: `${m.model} · ${m.sessions} sessions · ${formatTokens(m.output_tokens)} output`,
+                  detail: `${m.model} · ${m.sessions} sessions · ${formatTokens(m.output_tokens)} output · ${m.cost_usd === null ? "unpriced" : formatUsd(m.cost_usd)}`,
                   value: m.turns,
                 }))}
                 format={formatTokens}
@@ -342,6 +362,7 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
                         ["Span", shape.duration_s, formatDuration],
                         ["Peak context", shape.peak_context_tokens, formatTokens],
                         ["Transcript size", shape.transcript_bytes, formatBytes],
+                        ["Cost", shape.cost_usd, formatUsd],
                       ] as const
                     ).map(([label, q, fmt]) => (
                       <tr key={label}>

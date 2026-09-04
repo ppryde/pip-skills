@@ -50,7 +50,7 @@ chronicle sync                 # reconcile the store with every transcript on di
 chronicle backfill             # alias of sync (a first run over an empty store)
 chronicle sync --full          # forget every cursor and re-read all transcripts (after a schema change)
 chronicle status               # store path, row counts, last sync (JSON)
-chronicle summary [--root R] [--days N]     # totals, per-day series, by-model, tools, session shape
+chronicle summary [--root R] [--days N]     # totals, per-day series, by-model, tools, session shape, cost
 chronicle sessions [--root R] [--days N] [--limit N]
 chronicle session <id>         # one session with its per-turn context series
 chronicle repos                # repo roots seen, with session counts
@@ -81,6 +81,18 @@ shape quantiles, and a sortable session table whose rows open a drawer with the 
 context-per-turn line (compactions and cold cache turns marked), the biggest context jumps
 with the tool results that landed before each, artifacts published, tools and subagents.
 **Sync** on the page calls `POST /api/chronicle/sync`.
+
+### Cost
+
+Every session, day, model and turn carries `cost_usd`: what the same API calls would have
+cost at Anthropic's first-party list prices (`scripts/pricing.py`). A subscription session is
+not billed per token, so this is a yardstick for comparing sessions, not an invoice. It is
+computed at read time from the per-turn token counts — input, cache reads, cache writes by
+TTL (1.25× input for 5-minute, 2× for 1-hour), and output (thinking included) — so editing
+the price table takes effect on the next read with no re-sync. Subagent turns count. A
+turn on a model the table does not know is never guessed at: it contributes nothing and is
+counted in `unpriced_turns`, which the page surfaces. `pricing_as_of` records when the
+table was last checked against the pricing page.
 
 Routes: `GET /api/chronicle/{status,summary,sessions,session/{id}}`, `POST /api/chronicle/sync`.
 Reads take the same `root` as `/api/board` (validated against the repo allowlist) or
