@@ -118,6 +118,10 @@ describe("<ChroniclePage/>", () => {
     render(<ChroniclePage activeRoot="/repos/pip-skills" repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
     expect(screen.getByRole("table", { name: "Sessions" })).toBeInTheDocument();
+    // Nowrap-everywhere fix (mobile horizontal scroll, not text-wrap collapse):
+    // scoped to this table alone, never the drawer's other .chr-table uses.
+    expect(screen.getByRole("table", { name: "Sessions" })).toHaveClass("chr-table--sessions");
+    expect(screen.getByText("Scroll sideways for more columns →")).toBeInTheDocument();
     expect(screen.getByText("1 live")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();

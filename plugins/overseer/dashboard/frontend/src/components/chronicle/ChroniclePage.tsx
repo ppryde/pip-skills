@@ -385,8 +385,10 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
             {ordered.length === 0 ? (
               <p className="chr-chart__empty">No sessions in this window.</p>
             ) : (
-              <div className="chr-table-wrap">
-                <table className="chr-table" aria-label="Sessions">
+              <>
+                <p className="chr-table__scroll-hint">Scroll sideways for more columns →</p>
+                <div className="chr-table-wrap">
+                  <table className="chr-table chr-table--sessions" aria-label="Sessions">
                   <thead>
                     <tr>
                       <th scope="col">Session</th>
@@ -428,8 +430,9 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+              </>
             )}
           </section>
         </>

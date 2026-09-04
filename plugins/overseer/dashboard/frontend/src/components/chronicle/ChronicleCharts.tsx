@@ -62,8 +62,11 @@ function TableView({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
+          {rows.map((row, i) => (
+            // Index-qualified for the same reason as ColumnChart's plotted
+            // points: `row.label` is `p.detail ?? p.label`, which repeats
+            // whenever two points land on the same day/name.
+            <tr key={`${i}-${row.label}`}>
               <td>{row.label}</td>
               <td className="chr-num">{row.value}</td>
             </tr>

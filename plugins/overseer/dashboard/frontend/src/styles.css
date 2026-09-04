@@ -6397,6 +6397,7 @@ button.trail-tag:focus-visible {
     padding: 20px 18px 30px;
   }
 
+
   /* Clear the floating ✕ so the banner row never runs under it. */
   .card-drawer__header {
     padding-right: 2.75rem;
@@ -7201,6 +7202,51 @@ button.trail-tag:focus-visible {
   font-family: var(--qb-font-prose);
   font-size: 0.82rem;
   color: var(--qb-ink-700);
+}
+
+/* The Sessions table (12 columns) is the one table here that must actually
+   scroll sideways rather than reflow: `width: 100%` alone lets a narrow
+   `.chr-table-wrap` (a phone) squeeze it down by WRAPPING the Session and
+   Repo·branch cells instead of overflowing — every numeric column past
+   Span then falls off-screen with nothing to indicate it, and the row
+   name itself balloons to 4-5 lines. `white-space: nowrap` on every cell
+   forces the table back to its true intrinsic width, which the wrapper's
+   `overflow-x: auto` then genuinely scrolls to reach — the same "read the
+   whole row on one line, scroll for the rest" shape the desktop table
+   already has, just narrower.
+   Session titles are already short by convention (see sessionName()) and
+   don't wrap at any width today, so this changes nothing at desktop widths
+   — only a narrower wrapper than the table's natural width. The other
+   `.chr-table` uses (drawer's Biggest jumps / Subagents / Session shape)
+   are untouched: they have far fewer columns and already reflow cleanly
+   without scrolling, which nowrap-everywhere would break. */
+.chr-table--sessions th,
+.chr-table--sessions td {
+  white-space: nowrap;
+}
+
+/* Shown only when the row it sits above genuinely doesn't fit — nothing to
+   announce at a width where the table already shows every column. Doubles
+   as the mobile affordance the plain `overflow-x: auto` gives no visual cue
+   for otherwise. */
+.chr-table__scroll-hint {
+  display: none;
+  margin: 0 0 0.35rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.72rem;
+  color: var(--qb-ink-400);
+  text-align: right;
+}
+
+/* Kept beside the base rule (rather than the file's early @media block) so
+   source order alone decides the cascade: this must be the LAST rule
+   touching `display` on this class, since an unconditional base rule
+   later in the file would otherwise beat an earlier media-gated one at
+   equal specificity regardless of viewport. */
+@media (max-width: 720px) {
+  .chr-table__scroll-hint {
+    display: block;
+  }
 }
 
 .chr-table th,
