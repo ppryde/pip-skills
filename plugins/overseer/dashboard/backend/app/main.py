@@ -24,7 +24,16 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.cli_client import CliError, check_id, run_census, run_census_all, run_overseer, run_vigil
+from app.cli_client import (
+    CliError,
+    check_id,
+    chronicle_installed,
+    run_census,
+    run_census_all,
+    run_chronicle,
+    run_overseer,
+    run_vigil,
+)
 
 # backend/app/main.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
 # `scripts` (the overseer CLI's package) isn't on sys.path by default when
@@ -173,25 +182,37 @@ def _limits_section(entry: dict[str, Any] | None) -> dict[str, Any] | None:
 
 # Mirrored from census.store.STALE_HORIZON_SECONDS (90 seconds)
 _STALE_HORIZON_SECONDS = 90
+# Mirrored from census.store.IDLE_HORIZON_SECONDS (10 minutes)
+_IDLE_HORIZON_SECONDS = 10 * 60
 
 
-def _entry_ts(entry: dict[str, Any]) -> float:
-    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0.
+def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
+    """The entry's ``key`` timestamp as a float; malformed/missing reads as 0.0.
 
     Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
     Malformed timestamps (None, non-numeric strings) are treated as 0, which
     places them beyond any staleness horizon — quarantine-safe, never raises.
     """
     try:
-        return float(entry.get("updated_at", 0) or 0)
+        return float(entry.get(key, 0) or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _active_ts(entry: dict[str, Any]) -> float:
+    """``active_at`` (last time the session's activity counters moved), falling
+    back to ``updated_at`` for entries written by a census that predates it."""
+    active = _entry_ts(entry, "active_at")
+    return active if active > 0 else _entry_ts(entry)
 
 
 def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, Any]:
     """Convert a census session entry into a session summary response object.
 
-    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at, stale}.
+    Returns {id, session_name?, model?, worktree_cwd, branch?, pct?, pr?, updated_at,
+    active_at, stale, idle}. ``stale``: census has not seen a render for 90s (dead or
+    closed). ``idle``: still rendering (the status line reruns on a timer) but no API
+    activity for 10 minutes — an open TUI nobody is working in.
     Optional fields (model, pr, session_name, branch, pct) are omitted when absent,
     mirroring _census_extras's "forward what's there" style. Malformed updated_at
     values are coerced to 0.0 (treating as stale) rather than raising.
@@ -202,7 +223,9 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
         "id": sid,
         "worktree_cwd": entry.get("worktree_cwd"),
         "updated_at": entry.get("updated_at"),
+        "active_at": entry.get("active_at"),
         "stale": (now - ts) > _STALE_HORIZON_SECONDS,
+        "idle": (now - _active_ts(entry)) > _IDLE_HORIZON_SECONDS,
     }
     if entry.get("branch"):
         out["branch"] = entry["branch"]
@@ -734,6 +757,82 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             )
         except CliError as exc:
             raise _mutation_error(exc) from exc
+
+    # --- Chronicle (optional sibling plugin) ---------------------------------
+    # Session telemetry lives in chronicle's own account-scoped SQLite store,
+    # not in board.db, and is read via chronicle's CLI report verbs (soft
+    # dependency — every route below degrades to an "unavailable" shape when
+    # the plugin is absent, never a 500). Scoping: by default a request is
+    # scoped to the resolved repo root exactly like /api/board; `scope=all`
+    # drops the root filter for an account-wide view. `root` still goes
+    # through `_resolve_root`'s allowlist — chronicle knows about repos the
+    # board discovery doesn't, but a client may only NAME roots the board
+    # discovery allows (same trust boundary as every other route).
+
+    def _chronicle_scope(root: str | None, scope: str | None) -> list[str]:
+        if scope == "all":
+            return []
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        return ["--root", str(effective)]
+
+    def _days_args(days: int | None) -> list[str]:
+        if days is None:
+            return []
+        if days < 1 or days > 3650:
+            raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
+        return ["--days", str(days)]
+
+    @app.get("/api/chronicle/status")
+    def chronicle_status() -> dict[str, Any]:
+        if not chronicle_installed():
+            return {"installed": False, "exists": False}
+        data = run_chronicle("status")
+        if data is None:
+            return {"installed": True, "exists": False}
+        return {"installed": True, **data}
+
+    @app.get("/api/chronicle/summary")
+    def chronicle_summary(root: str | None = None, scope: str | None = None,
+                          days: int | None = None) -> dict[str, Any]:
+        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days)]
+        data = run_chronicle(*args)
+        return data if data is not None else {"totals": None}
+
+    @app.get("/api/chronicle/sessions")
+    def chronicle_sessions(root: str | None = None, scope: str | None = None,
+                           days: int | None = None, limit: int = 200) -> dict[str, Any]:
+        if limit < 1 or limit > 2000:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
+        args = ["sessions", *_chronicle_scope(root, scope), *_days_args(days),
+                "--limit", str(limit)]
+        data = run_chronicle(*args)
+        return data if data is not None else {"sessions": []}
+
+    @app.post("/api/chronicle/sync", dependencies=[Depends(require_token)])
+    def chronicle_sync() -> dict[str, Any]:
+        """Pull-on-demand reconciliation: chronicle stats every transcript on
+        disk and ingests only the files that moved since it last looked. The
+        ONLY write path the dashboard has into chronicle's store — and it is
+        account-wide (the projects dir is not per-repo), so no root is taken.
+        Token-gated like every other mutation. 503 when the plugin is absent
+        or the sync itself fails (chronicle prints JSON on success only)."""
+        if not chronicle_installed():
+            raise HTTPException(status_code=503, detail="chronicle plugin is not installed")
+        data = run_chronicle("sync", timeout=120)
+        if data is None:
+            raise HTTPException(status_code=503, detail="chronicle sync failed")
+        return data
+
+    @app.get("/api/chronicle/session/{session_id}")
+    def chronicle_session(session_id: str) -> dict[str, Any]:
+        try:
+            check_id(session_id)
+        except CliError as exc:
+            raise HTTPException(status_code=400, detail="invalid session id") from exc
+        data = run_chronicle("session", session_id)
+        if data is None:
+            raise HTTPException(status_code=404, detail=f"no chronicle session {session_id!r}")
+        return data
 
     if mount_frontend:
         _mount_frontend(app, dist_dir)

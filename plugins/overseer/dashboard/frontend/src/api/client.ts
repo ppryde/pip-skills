@@ -6,6 +6,12 @@
 import type {
   BoardResponse,
   CardDetail,
+  ChronicleQuery,
+  ChronicleSyncResponse,
+  ChronicleSessionDetail,
+  ChronicleSessionsResponse,
+  ChronicleStatus,
+  ChronicleSummary,
   ClearResponse,
   CreateCardBody,
   CreateCardResponse,
@@ -247,4 +253,51 @@ export function clearRepo(
   scope: "cards" | "repo"
 ): Promise<ClearResponse> {
   return request<ClearResponse>("POST", "/api/repo/clear", { root, scope });
+}
+
+// --- Chronicle (optional) ---------------------------------------------------
+
+/** Query-string tail for the chronicle reads. `scope=all` is appended AFTER
+ * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`. */
+function chronicleQuery(base: string, query: ChronicleQuery = {}): string {
+  const url = withRoot(base);
+  const params: string[] = [];
+  if (query.days !== undefined) params.push(`days=${encodeURIComponent(String(query.days))}`);
+  if (query.scope === "all") params.push("scope=all");
+  if (params.length === 0) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${params.join("&")}`;
+}
+
+/** Whether the chronicle plugin is installed beside this dashboard, and
+ * whether it has a store yet — gates the Chronicle page's nav entry. */
+export function getChronicleStatus(): Promise<ChronicleStatus> {
+  return request<ChronicleStatus>("GET", "/api/chronicle/status");
+}
+
+export function getChronicleSummary(query?: ChronicleQuery): Promise<ChronicleSummary> {
+  return request<ChronicleSummary>("GET", chronicleQuery("/api/chronicle/summary", query));
+}
+
+export function getChronicleSessions(
+  query?: ChronicleQuery,
+  limit = 200
+): Promise<ChronicleSessionsResponse> {
+  const url = chronicleQuery("/api/chronicle/sessions", query);
+  return request<ChronicleSessionsResponse>(
+    "GET",
+    `${url}${url.includes("?") ? "&" : "?"}limit=${limit}`
+  );
+}
+
+export function getChronicleSession(id: string): Promise<ChronicleSessionDetail> {
+  return request<ChronicleSessionDetail>(
+    "GET",
+    `/api/chronicle/session/${encodeURIComponent(id)}`
+  );
+}
+
+/** Pull-on-demand: chronicle stats every transcript on disk and ingests the
+ * ones that moved. Account-wide (no root), token-gated like a mutation. */
+export function syncChronicle(): Promise<ChronicleSyncResponse> {
+  return request<ChronicleSyncResponse>("POST", "/api/chronicle/sync");
 }

@@ -258,3 +258,183 @@ export interface ClearResponse {
   label: string;
   noop: boolean;
 }
+
+// --- Chronicle (optional sibling plugin — session telemetry) ---------------
+// Mirrors `plugins/chronicle/scripts/report.py`'s JSON. The dashboard grows
+// a Chronicle page only when `/api/chronicle/status` says the plugin is
+// installed; every shape below is what chronicle's CLI prints verbatim.
+
+export interface ChronicleStatus {
+  installed: boolean;
+  exists: boolean;
+  db?: string;
+  sessions?: number;
+  turns?: number;
+  repos?: number;
+  last_ingest_at?: number | null;
+  /** Epoch seconds of the last `sync`, null before the first one. */
+  synced_at?: number | null;
+}
+
+/** POST /api/chronicle/sync — what the on-demand pull found and did. */
+export interface ChronicleSyncResponse {
+  /** Transcript files stat-ed (main + subagent files). */
+  scanned: number;
+  /** Sessions with at least one file that moved since last seen. */
+  changed: number;
+  /** New JSONL lines parsed across those sessions. */
+  lines: number;
+  /** Ids of the sessions that changed. */
+  sessions: string[];
+  synced_at: number;
+}
+
+export interface ChronicleTotals {
+  sessions: number;
+  turns: number;
+  prompts: number;
+  tool_calls: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  compactions: number;
+  subagents: number;
+  active_ms: number;
+  transcript_bytes: number;
+  live: number;
+}
+
+export interface ChronicleDay {
+  day: string;
+  sessions: number;
+  turns: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+}
+
+export interface ChronicleModel {
+  model: string;
+  turns: number;
+  sessions: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+}
+
+export interface ChronicleTool {
+  tool_name: string;
+  calls: number;
+  sessions?: number;
+}
+
+export interface ChronicleQuantiles {
+  p50: number | null;
+  p90: number | null;
+  max: number | null;
+  mean: number | null;
+}
+
+export interface ChronicleShape {
+  turns: ChronicleQuantiles;
+  prompts: ChronicleQuantiles;
+  duration_s: ChronicleQuantiles;
+  transcript_bytes: ChronicleQuantiles;
+  peak_context_tokens: ChronicleQuantiles;
+}
+
+export interface ChronicleSummary {
+  /** `null` when chronicle has no store yet (or the plugin is absent). */
+  totals: ChronicleTotals | null;
+  by_day?: ChronicleDay[];
+  by_model?: ChronicleModel[];
+  tools?: ChronicleTool[];
+  shape?: ChronicleShape;
+}
+
+export interface ChronicleSession {
+  session_id: string;
+  project_slug: string | null;
+  cwd: string | null;
+  repo_root: string | null;
+  git_branch: string | null;
+  entrypoint: string | null;
+  version: string | null;
+  title: string | null;
+  transcript_path: string | null;
+  transcript_bytes: number;
+  started_at: number | null;
+  ended_at: number | null;
+  end_reason: string | null;
+  last_activity_at: number | null;
+  updated_at: number;
+  turns: number;
+  prompts: number;
+  tool_calls: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  peak_context_tokens: number;
+  compactions: number;
+  subagents: number;
+  active_ms: number;
+  models: string[];
+  /** Derived server-side: last activity minus start, in seconds. */
+  duration_s: number | null;
+  /** Derived: input + cache read + cache creation, summed over turns. */
+  context_tokens: number;
+  live: boolean;
+}
+
+export interface ChronicleSessionsResponse {
+  sessions: ChronicleSession[];
+}
+
+export interface ChronicleTurn {
+  ts: number | null;
+  model: string | null;
+  context_tokens: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  tool_calls: number;
+  stop_reason: string | null;
+}
+
+export interface ChronicleSubagent {
+  agent_id: string;
+  turns: number;
+  context_tokens: number;
+  output_tokens: number;
+  tool_calls: number;
+  first_ts: number | null;
+  last_ts: number | null;
+}
+
+/** `GET /api/chronicle/session/{id}` — the session row plus its per-turn
+ * series. NOTE: `subagents` here is the per-agent LIST, not the rollup
+ * count `ChronicleSession.subagents` carries (chronicle's CLI replaces the
+ * count with the breakdown on the detail verb). */
+export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagents"> {
+  turn_series: ChronicleTurn[];
+  subagents: ChronicleSubagent[];
+  tools: ChronicleTool[];
+  compactions_at: number[];
+}
+
+/** Query knobs shared by the summary and sessions reads. */
+export interface ChronicleQuery {
+  /** Only sessions active in the last N days; omit for all time. */
+  days?: number;
+  /** `"all"` drops the repo filter (account-wide); default scopes to the
+   * active root exactly like `/api/board`. */
+  scope?: "repo" | "all";
+}

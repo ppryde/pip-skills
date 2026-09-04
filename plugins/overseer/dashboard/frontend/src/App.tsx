@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import TopBar from "./components/TopBar";
+import type { View } from "./components/TopBar";
+import ChroniclePage from "./components/chronicle/ChroniclePage";
+import { useChronicleStatus } from "./board/chronicle/useChronicle";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
 import FilterBar from "./components/FilterBar";
@@ -150,7 +153,18 @@ function App() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   // WF-086: Board|Atlas view toggle — session-local (no localStorage,
   // same precedent as `activeBranch`), reset to "board" on reload.
-  const [view, setView] = useState<"board" | "atlas">("board");
+  const [view, setView] = useState<View>("board");
+  // Chronicle (optional sibling plugin): one status read on mount decides
+  // whether the page is offered at all. `null` = not yet known.
+  const chronicleStatus = useChronicleStatus();
+  const chronicleAvailable = chronicleStatus?.installed === true;
+  useEffect(() => {
+    // Defensive: a stale `#chronicle`-ish selection can't outlive the
+    // plugin's absence — fall back to the board once status is known.
+    if (view === "chronicle" && chronicleStatus !== null && !chronicleAvailable) {
+      setView("board");
+    }
+  }, [view, chronicleStatus, chronicleAvailable]);
   // WF-091: the Epic Atlas toolbar's toggles, lifted here from
   // EpicAtlas-local state — the controls that drive them now live in
   // TopBar's Controls group (shown only on `view === "atlas"`), so both
@@ -285,6 +299,7 @@ function App() {
         onToggleNames={setShowNames}
         hideVanquished={hideVanquished}
         onToggleVanquished={setHideVanquished}
+        chronicleAvailable={chronicleAvailable}
       />
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
@@ -317,7 +332,12 @@ function App() {
         />
       )}
       <main className="board-region">
-        {isUnbegun && selectedRepo ? (
+        {/* The Chronicle is account-wide data, so unlike Board/Atlas it is
+            reachable for an unbegun repo too — the page just locks its
+            scope to "All repos" since a boardless root can't be named. */}
+        {view === "chronicle" ? (
+          <ChroniclePage activeRoot={activeRoot} repoScopable={!isUnbegun} />
+        ) : isUnbegun && selectedRepo ? (
           <UnbegunHolding
             repo={selectedRepo}
             liveSessions={selectedRepo.live_sessions}

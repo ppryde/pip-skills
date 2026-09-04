@@ -1,0 +1,177 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ChronicleSession, ChronicleSummary } from "../../api/types";
+
+vi.mock("../../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/client")>();
+  return {
+    ...actual,
+    getChronicleSummary: vi.fn(),
+    getChronicleSessions: vi.fn(),
+    getChronicleSession: vi.fn(),
+    syncChronicle: vi.fn(),
+    setActiveRoot: vi.fn(),
+  };
+});
+
+import * as client from "../../api/client";
+import ChroniclePage from "./ChroniclePage";
+
+function session(overrides: Partial<ChronicleSession> & { session_id: string }): ChronicleSession {
+  return {
+    project_slug: "-repo",
+    cwd: "/repo",
+    repo_root: "/repos/pip-skills",
+    git_branch: "main",
+    entrypoint: "cli",
+    version: "2.1.258",
+    title: null,
+    transcript_path: null,
+    transcript_bytes: 2048,
+    started_at: 1_788_256_800,
+    ended_at: null,
+    end_reason: null,
+    last_activity_at: 1_788_260_400,
+    updated_at: 0,
+    turns: 5,
+    prompts: 2,
+    tool_calls: 3,
+    input_tokens: 10,
+    cache_read_tokens: 1000,
+    cache_creation_tokens: 100,
+    output_tokens: 400,
+    thinking_tokens: 50,
+    peak_context_tokens: 1110,
+    compactions: 0,
+    subagents: 0,
+    active_ms: 0,
+    models: ["claude-opus-5"],
+    duration_s: 3600,
+    context_tokens: 1110,
+    live: false,
+    ...overrides,
+  };
+}
+
+function summary(): ChronicleSummary {
+  return {
+    totals: {
+      sessions: 2, turns: 12, prompts: 4, tool_calls: 6, input_tokens: 20, cache_read_tokens: 2000,
+      cache_creation_tokens: 200, output_tokens: 900, thinking_tokens: 100, compactions: 1,
+      subagents: 1, active_ms: 120_000, transcript_bytes: 4096, live: 1,
+    },
+    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900 }],
+    by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900 }],
+    tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
+    shape: {
+      turns: { p50: 6, p90: 7, max: 7, mean: 6 },
+      prompts: { p50: 2, p90: 2, max: 2, mean: 2 },
+      duration_s: { p50: 3600, p90: 3600, max: 3600, mean: 3600 },
+      transcript_bytes: { p50: 2048, p90: 2048, max: 2048, mean: 2048 },
+      peak_context_tokens: { p50: 1110, p90: 1110, max: 1110, mean: 1110 },
+    },
+  };
+}
+
+const mocked = client as unknown as {
+  getChronicleSummary: ReturnType<typeof vi.fn>;
+  getChronicleSessions: ReturnType<typeof vi.fn>;
+  getChronicleSession: ReturnType<typeof vi.fn>;
+  syncChronicle: ReturnType<typeof vi.fn>;
+  setActiveRoot: ReturnType<typeof vi.fn>;
+};
+
+beforeEach(() => {
+  mocked.getChronicleSummary.mockResolvedValue(summary());
+  mocked.getChronicleSessions.mockResolvedValue({
+    sessions: [
+      session({ session_id: "aaaa1111-x", title: "Fix the widget", turns: 7 }),
+      session({ session_id: "bbbb2222-x", turns: 5, live: true }),
+    ],
+  });
+  mocked.syncChronicle.mockResolvedValue({ scanned: 3, changed: 1, lines: 12, sessions: ["aaaa1111-x"], synced_at: 1 });
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("<ChroniclePage/>", () => {
+  it("renders tiles, charts and the session table from the summary", async () => {
+    render(<ChroniclePage activeRoot="/repos/pip-skills" repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    expect(screen.getByRole("table", { name: "Sessions" })).toBeInTheDocument();
+    expect(screen.getByText("1 live")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
+    expect(screen.getByText("opus-5")).toBeInTheDocument();
+    expect(screen.getAllByText("bbbb2222").length).toBeGreaterThan(0);
+    expect(mocked.setActiveRoot).toHaveBeenCalledWith("/repos/pip-skills");
+    expect(mocked.getChronicleSummary).toHaveBeenCalledWith({ days: 30, scope: "repo" });
+  });
+
+  it("re-fetches with the chosen window and scope", async () => {
+    render(<ChroniclePage activeRoot={null} repoScopable />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "All time" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({ days: undefined, scope: "repo" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "All repos" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({ days: undefined, scope: "all" })
+    );
+  });
+
+  it("locks scope to all repos when the repo is not scopable", async () => {
+    render(<ChroniclePage activeRoot="/unbegun" repoScopable={false} />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalledWith({ days: 30, scope: "all" }));
+    expect(screen.getByRole("button", { name: "This repo" })).toBeDisabled();
+  });
+
+  it("Sync posts, reports, and refreshes", async () => {
+    render(<ChroniclePage activeRoot={null} repoScopable />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Sync" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("1 session updated (12 new lines)"));
+    expect(mocked.syncChronicle).toHaveBeenCalledTimes(1);
+    expect(mocked.getChronicleSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the blank-chronicle prompt when there is no store", async () => {
+    mocked.getChronicleSummary.mockResolvedValue({ totals: null });
+    mocked.getChronicleSessions.mockResolvedValue({ sessions: [] });
+    render(<ChroniclePage activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText(/chronicle is blank/i)).toBeInTheDocument());
+  });
+
+  it("sorts the table when a column header is clicked", async () => {
+    render(<ChroniclePage activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
+    let rows = table().getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Fix the widget"); // 7 turns first, desc
+    fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
+    rows = table().getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("opens the session drawer from a row", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      subagents: [],
+      turn_series: [{ ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn" }],
+      tools: [{ tool_name: "Read", calls: 1 }],
+      compactions_at: [],
+    });
+    render(<ChroniclePage activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    expect(mocked.getChronicleSession).toHaveBeenCalledWith("aaaa1111-x");
+    expect(screen.getByRole("img", { name: "Context tokens per turn" })).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});

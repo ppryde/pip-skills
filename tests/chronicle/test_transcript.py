@@ -1,0 +1,110 @@
+import json
+
+from scripts.transcript import fold, parse_ts
+
+from .conftest import _assistant, _user
+
+T0 = "2026-09-01T10:00:00.000Z"
+T1 = "2026-09-01T10:00:30.000Z"
+
+
+def _lines(*records):
+    return [json.dumps(r) for r in records]
+
+
+class TestParseTs:
+    def test_iso_z(self):
+        assert parse_ts("2026-09-01T10:00:00.000Z") == 1788256800.0
+
+    def test_epoch_passthrough(self):
+        assert parse_ts(12.5) == 12.5
+
+    def test_garbage(self):
+        assert parse_ts("yesterday") is None
+        assert parse_ts(None) is None
+        assert parse_ts(True) is None
+
+
+class TestFold:
+    def test_split_blocks_count_as_one_turn(self):
+        blocks = [
+            {"type": "thinking", "thinking": "..."},
+            {"type": "text", "text": "hi"},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}},
+        ]
+        lines = _lines(*[_assistant("m1", ts=T0, blocks=[b]) for b in blocks])
+        facts = fold(lines)
+        assert len(facts.turns) == 1
+        turn = facts.turns[("", "m1")]
+        assert turn.input_tokens == 3
+        assert turn.cache_read_tokens == 1000
+        assert turn.cache_creation_tokens == 200
+        assert turn.output_tokens == 40
+        assert turn.thinking_tokens == 10
+        assert turn.context_tokens == 1203
+        assert turn.tool_uses == [("t1", "Bash")]
+        assert turn.model == "claude-opus-5"
+        assert turn.request_id == "req-m1"
+
+    def test_prompts_vs_tool_results(self):
+        lines = _lines(
+            _user("u1", ts=T0, content="hello"),
+            _user("u2", ts=T0, content=[{"type": "tool_result", "tool_use_id": "t", "content": "x"}],
+                  toolUseResult={}),
+            _user("u3", ts=T0, content=[{"type": "text", "text": "typed"}]),
+            _user("u4", ts=T0, content="meta", isMeta=True),
+            _user("u5", ts=T0, content="   "),
+        )
+        facts = fold(lines)
+        prompts = [e.uuid for e in facts.events if e.kind == "prompt"]
+        assert prompts == ["u1", "u3"]
+
+    def test_compaction_markers(self):
+        lines = _lines(
+            _user("c1", ts=T0, content="summary...", isCompactSummary=True),
+            {"type": "system", "subtype": "compact_boundary", "uuid": "c2", "timestamp": T1,
+             "sessionId": "s1"},
+        )
+        kinds = [(e.uuid, e.kind) for e in fold(lines).events]
+        assert kinds == [("c1", "compaction"), ("c2", "compaction")]
+
+    def test_turn_duration_event(self):
+        lines = _lines({"type": "system", "subtype": "turn_duration", "durationMs": 7300,
+                        "uuid": "d1", "timestamp": T0, "sessionId": "s1"})
+        event = fold(lines).events[0]
+        assert (event.kind, event.value) == ("turn_duration", 7300)
+
+    def test_synthetic_messages_are_not_turns(self):
+        lines = _lines(_assistant("syn", ts=T0, model="<synthetic>"))
+        assert fold(lines).turns == {}
+
+    def test_identity_fields_and_timestamps(self):
+        lines = _lines(
+            _user("u1", ts=T0),
+            _assistant("m1", ts=T1),
+            {"type": "ai-title", "aiTitle": "  Fix the widget ", "sessionId": "s1"},
+        )
+        facts = fold(lines)
+        assert facts.session_id == "s1"
+        assert facts.cwd == "/repo"
+        assert facts.git_branch == "main"
+        assert facts.version == "2.1.258"
+        assert facts.entrypoint == "cli"
+        assert facts.title == "Fix the widget"
+        assert facts.first_ts == parse_ts(T0)
+        assert facts.last_ts == parse_ts(T1)
+
+    def test_branch_follows_latest_record(self):
+        lines = _lines(_user("u1", ts=T0, gitBranch="main"), _user("u2", ts=T1, gitBranch="feat"))
+        assert fold(lines).git_branch == "feat"
+
+    def test_subagent_records_do_not_move_main_timestamps(self):
+        lines = _lines(_assistant("a1", ts="2026-09-01T09:00:00Z", agent_id="agent-x"))
+        facts = fold(lines)
+        assert facts.first_ts is None
+        assert ("agent-x", "a1") in facts.turns
+
+    def test_garbage_lines_are_skipped(self):
+        facts = fold(["not json", "", "[]", json.dumps({"type": "user"})])
+        assert facts.turns == {}
+        assert facts.events == []

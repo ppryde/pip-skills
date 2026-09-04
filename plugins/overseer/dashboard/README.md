@@ -92,6 +92,20 @@ Options:
 | `--port PORT` | `8770` | Bind port |
 | `--no-browser` | off | Don't auto-open a browser tab |
 
+## Chronicle page (optional)
+
+When the `chronicle` plugin sits beside overseer (`plugins/chronicle`), the
+top bar gains a **Chronicle** button next to the Board|Atlas coins: session
+telemetry (per-turn token usage, context growth, prompts, tool calls,
+subagents, compactions, duration) read from chronicle's own account-scoped
+SQLite store — never from `board.db`. The page is pull-on-demand: its
+**Sync** button (`POST /api/chronicle/sync`, token-gated) asks chronicle to
+reconcile its store with the transcripts on disk, ingesting only files that
+moved. Reads (`GET /api/chronicle/{status,summary,sessions,session/{id}}`)
+take the same validated `root` as `/api/board`, or `scope=all` for the whole
+account. Every route degrades to an "unavailable" shape when the plugin is
+absent, and the button is simply not rendered. See `../../chronicle/README.md`.
+
 ## Clear data
 
 A "Clear data" control in the dashboard settings wipes the served repo's

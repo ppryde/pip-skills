@@ -19,6 +19,7 @@ _OVERSEER_CLI = Path(__file__).resolve().parents[3] / "scripts" / "cli.py"
 # parents[4]=plugins
 _VIGIL_CLI = Path(__file__).resolve().parents[4] / "vigil" / "scripts" / "cli.py"
 _CENSUS_CLI = Path(__file__).resolve().parents[4] / "census" / "scripts" / "cli.py"
+_CHRONICLE_CLI = Path(__file__).resolve().parents[4] / "chronicle" / "scripts" / "cli.py"
 
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
@@ -108,3 +109,39 @@ def run_census_all(timeout: int = 10) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) and data else None
+
+
+def chronicle_installed() -> bool:
+    """Whether the chronicle plugin's CLI is present beside this checkout.
+
+    The Chronicle page is OPTIONAL: the dashboard grows it only when the
+    plugin exists (same sibling-plugin resolution as census/vigil above).
+    """
+    return _CHRONICLE_CLI.is_file()
+
+
+def run_chronicle(*args: str, timeout: int = 20) -> Any:
+    """Run a chronicle READ verb and return its parsed JSON; None if unavailable.
+
+    chronicle is a SOFT dependency like census: a missing plugin, a timeout,
+    a non-zero exit, or bad JSON yields None rather than raising, so the
+    board never depends on it and the Chronicle page degrades to "not
+    installed" / "no data yet". Only report verbs go through here — the
+    dashboard never triggers an ingest.
+    """
+    if not chronicle_installed():
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_CHRONICLE_CLI), *args],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
