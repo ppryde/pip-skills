@@ -26,13 +26,35 @@ default, or `~/.claude-personal/census/status.json` when that account sets `CLAU
   "version": 1,
   "limits": { "five_hour": {"used_percentage": 23.5, "resets_at": 1738425600}, "updated_at": 1738420000 },
   "sessions": {
-    "<session_id>": { "worktree_cwd": "<abs path>", "updated_at": 1738420000, "branch": "<git branch or null>", "payload": { "...verbatim..." } }
+    "<session_id>": { "worktree_cwd": "<abs path>", "updated_at": 1738420000, "active_at": 1738419700, "branch": "<git branch or null>", "payload": { "...verbatim..." } }
   }
 }
 ```
 
-- Rate limits are account-global, so they are hoisted to the top level (last-write-wins).
+- Rate limits are account-global, so they are hoisted to the top level. Not last-write-wins:
+  usage only rises until a window resets, so a later `resets_at` wins outright (new window)
+  and within one window the higher percentage wins. That ordering reads the readings
+  themselves, so it needs neither write order nor a trustworthy clock, and a dormant
+  session's frozen figure can never displace a working session's current one.
+  Boundaries within a minute of each other count as the same window, and a reset more
+  than ten days out is refused as a corrupt or wrong-unit value (ten rather than eight,
+  so a clock running a couple of days behind still accepts a genuine seven-day window).
+- **Known tradeoff:** because the higher percentage wins, the figure LATCHES for the rest
+  of a window. If the denominator changes mid-window — a plan upgrade, extra capacity
+  purchased, or limits raised — usage legitimately falls, and the stored figure stays at
+  the old peak until that window resets. Up to five hours for `five_hour`, up to seven
+  days for `seven_day`. The error is conservative (it overstates usage, never understates
+  it), which is the safe direction for a "how close am I" gauge, but it is real.
+  Both windows are fixed rather than rolling, which is what makes the latch bounded:
+  measured across 155 captured payloads, `seven_day` boundaries are always Sunday 20:00
+  local and exactly one week apart, and `five_hour` boundaries are quantised to ten
+  minutes and bit-identical across concurrent sessions.
 - The full payload is stored per session — any future CC field is captured with no schema change.
+- `updated_at` is "last rendered": the status line reruns on `refreshInterval` as well as after
+  each API response, so a dormant TUI keeps refreshing it. `active_at` is "last active": it moves
+  only when the payload's activity counters (prompt id, cost, API duration, token totals, cache
+  requests) change between ingests. Readers derive `stale` (not rendered for 90s — dead or closed)
+  and `idle` (still rendering, no activity for 10 min — open, nobody working) from the two.
 - Sessions are keyed by `session_id`; readers resolve the freshest entry **by worktree cwd**.
 
 ## Usage
@@ -63,7 +85,7 @@ From Python:
 
 ```python
 from scripts import store
-entry = store.latest_for_worktree(cwd)   # None if unknown; carries a `stale` flag
+entry = store.latest_for_worktree(cwd)   # None if unknown; carries `stale` and `idle` flags
 limits = store.limits()
 ```
 

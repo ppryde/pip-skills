@@ -11,6 +11,7 @@ import {
   statusGroupOf,
   weightOf,
 } from "../board/atlasTrailLayout";
+import boulderIcon from "../assets/trail-icons/boulder.svg";
 import { StarIcon } from "./icons";
 import ScrollingTitle from "./ScrollingTitle";
 // The sub-quests toggle is plain clickable text now (no button chrome) — the
@@ -229,7 +230,17 @@ function AtlasRailCard({
               .filter(Boolean)
               .join(" ");
 
-            const checkboxGlyph = done ? "✓" : abandoned ? "†" : blocked ? "⛔" : "";
+            // Blocked draws the trail's own boulder rather than a ⛔, so the
+            // checklist and the trail speak with one obstacle motif.
+            const checkboxGlyph = done ? (
+              "✓"
+            ) : abandoned ? (
+              "†"
+            ) : blocked ? (
+              <img className="atlas-rail-card__checkbox-boulder" src={boulderIcon} alt="" />
+            ) : (
+              ""
+            );
 
             const titleClassName = [
               "atlas-rail-card__subquest-title",

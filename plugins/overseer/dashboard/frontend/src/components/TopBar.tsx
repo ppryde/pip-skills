@@ -226,6 +226,12 @@ function TopBar({
   // column/overlay (Decisions: honest data, no invented capacity).
   // `questingCountOverride` (task 10) wins when set — see its doc comment.
   const questingCount = questingCountOverride ?? fleet.questing;
+  // Live sessions census flags `idle` — present, but their activity counters
+  // haven't moved for 10 minutes. Shown as a suffix rather than deducted from
+  // the questing count: they ARE still out there, just not swinging. Suppressed
+  // under `questingCountOverride`, whose count comes from a different source
+  // (an unbegun repo's own live-session tally) and has no idle split to report.
+  const idleCount = questingCountOverride === undefined ? fleet.idle : 0;
 
   // The two coins are a 2-state toggle: clicking EITHER switches to the OTHER
   // view. For the back (inactive) coin this reads naturally — its view is the
@@ -559,6 +565,7 @@ function TopBar({
               there), so the full line still always shows in full. */}
           <span className="topbar__fleet-label">
             {questingCount} questing
+            {idleCount > 0 && <> ({idleCount} idle)</>}
             {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
             {fleet.nearThreshold > 0 && (
               <> · {fleet.nearThreshold} near threshold</>

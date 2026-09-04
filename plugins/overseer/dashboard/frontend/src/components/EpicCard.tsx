@@ -6,6 +6,7 @@ import {
   openDependencies,
 } from "../board/atlasTrailLayout";
 import { formatDateStamp, parseCalendarDate } from "../board/atlasGeometry";
+import boulderIcon from "../assets/trail-icons/boulder.svg";
 import TileShell from "./TileShell";
 
 export interface EpicCardProps {
@@ -101,7 +102,20 @@ function EpicCard({
             const inProgress = group === "in-progress";
             const blocked = group === "todo" && openDependencies(child, cardsById).length > 0;
 
-            const glyph = done ? "✓" : abandoned ? "†" : blocked ? "⛔" : inProgress ? "⚔" : "◦";
+            // A barred sub-quest draws the SAME boulder the Atlas trail uses
+            // for a blocked waypoint, rather than its own ⛔ — one obstacle
+            // motif across the trail and the epic's checklist.
+            const glyph = done ? (
+              "✓"
+            ) : abandoned ? (
+              "†"
+            ) : blocked ? (
+              <img className="epic-card__subquest-boulder" src={boulderIcon} alt="" />
+            ) : inProgress ? (
+              "⚔"
+            ) : (
+              "◦"
+            );
             const stamp =
               done || abandoned
                 ? formatDateStamp(parseCalendarDate(child.updated))

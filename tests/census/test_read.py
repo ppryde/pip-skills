@@ -86,3 +86,108 @@ class TestLimitsAndReadAll:
         st.ingest(_payload("s1", str(tmp_path)), now=1.0)
         stored = json.loads(store_file.read_text())["sessions"]["s1"]["worktree_cwd"]
         assert stored == normalise(str(tmp_path))
+
+
+class TestIdleFlag:
+    def _seed(self, store_file, active_at, updated_at):
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "limits": None,
+                    "sessions": {
+                        "s1": {
+                            "worktree_cwd": "/wt/a",
+                            "updated_at": updated_at,
+                            "active_at": active_at,
+                            "payload": {"session_id": "s1"},
+                        }
+                    },
+                }
+            )
+        )
+
+    def test_recently_active_not_idle(self, store_file):
+        self._seed(store_file, active_at=100.0, updated_at=100.0)
+        assert st.for_session("s1", now=100.0 + 60)["idle"] is False
+
+    def test_rendering_but_inactive_is_idle_not_stale(self, store_file):
+        now = 100.0 + st.IDLE_HORIZON_SECONDS + 1
+        self._seed(store_file, active_at=100.0, updated_at=now - 10)  # timer keeps rendering
+        entry = st.latest_for_worktree("/wt/a", now=now)
+        assert entry["idle"] is True
+        assert entry["stale"] is False
+
+    def test_malformed_active_at_falls_back_to_updated_at(self, store_file):
+        """A bool would coerce to 1.0 and pin the session idle forever; a NaN
+        would make every comparison false and pin it non-idle forever."""
+        for bad in (True, float("nan"), "700"):
+            self._seed(store_file, active_at=bad, updated_at=100.0)
+            assert st.for_session("s1", now=100.0 + 60)["idle"] is False, bad
+            horizon = 100.0 + st.IDLE_HORIZON_SECONDS + 1
+            assert st.for_session("s1", now=horizon)["idle"] is True, bad
+
+    def test_missing_active_at_falls_back_to_updated_at(self, store_file):
+        self._seed(store_file, active_at=None, updated_at=100.0)
+        assert st.for_session("s1", now=100.0 + 60)["idle"] is False
+        assert st.for_session("s1", now=100.0 + st.IDLE_HORIZON_SECONDS + 1)["idle"] is True
+
+
+class TestWorktreeSelectionRanksByActivity:
+    def _store(self, store_file, sessions):
+        store_file.parent.mkdir(parents=True, exist_ok=True)
+        store_file.write_text(
+            json.dumps({"version": 1, "limits": None, "sessions": sessions})
+        )
+
+    def test_picks_the_working_session_over_the_dormant_one(self, store_file):
+        """Both share a worktree. The dormant TUI rendered most recently, so
+        ranking on updated_at would hand the worktree's answer to the session
+        that is NOT working."""
+        self._store(
+            store_file,
+            {
+                "dormant": {
+                    "worktree_cwd": "/wt/a",
+                    "updated_at": 1000.0,  # timer tick, one second ago
+                    "active_at": 100.0,
+                    "payload": {"session_id": "dormant"},
+                },
+                "working": {
+                    "worktree_cwd": "/wt/a",
+                    "updated_at": 970.0,
+                    "active_at": 970.0,
+                    "payload": {"session_id": "working"},
+                },
+            },
+        )
+        entry = st.latest_for_worktree("/wt/a", now=1001.0)
+        assert entry["payload"]["session_id"] == "working"
+        assert entry["idle"] is False
+
+    def test_entries_predating_active_at_fall_back_to_updated_at(self, store_file):
+        self._store(
+            store_file,
+            {
+                "older": {"worktree_cwd": "/wt/a", "updated_at": 100.0, "payload": {"session_id": "older"}},
+                "newer": {"worktree_cwd": "/wt/a", "updated_at": 900.0, "payload": {"session_id": "newer"}},
+            },
+        )
+        entry = st.latest_for_worktree("/wt/a", now=901.0)
+        assert entry["payload"]["session_id"] == "newer"
+
+    def test_a_corrupt_timestamp_does_not_raise(self, store_file):
+        """`ingest` and every reader are documented as never raising. A raw
+        float() on a hand-edited value would break the status line for every
+        session, and the crash would be inside the pruner that should remove it."""
+        self._store(
+            store_file,
+            {
+                "bad": {"worktree_cwd": "/wt/a", "updated_at": "bad", "payload": {"session_id": "bad"}},
+                "good": {"worktree_cwd": "/wt/a", "updated_at": 900.0, "payload": {"session_id": "good"}},
+            },
+        )
+        entry = st.latest_for_worktree("/wt/a", now=901.0)
+        assert entry["payload"]["session_id"] == "good"
+        st.ingest(json.dumps({"session_id": "new", "cwd": "/wt/a"}), now=902.0)  # must not raise
