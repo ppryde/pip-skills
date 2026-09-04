@@ -226,12 +226,24 @@ interface LineChartProps {
   title: string;
   /** x indices to mark with a vertical hairline (compactions). */
   markers?: number[];
+  /** x indices to mark with a ring on the line (cold cache turns). */
+  dots?: number[];
+  /** Extra tooltip line for point i (e.g. "cold · idle 12m"). */
+  annotate?: (i: number) => string | null;
   height?: number;
 }
 
 /** Single-series line with a 10% area wash and a crosshair tooltip that
  * snaps to the nearest x — the reader aims at a turn, never at the line. */
-export function LineChart({ values, format, title, markers = [], height = 180 }: LineChartProps) {
+export function LineChart({
+  values,
+  format,
+  title,
+  markers = [],
+  dots = [],
+  annotate,
+  height = 180,
+}: LineChartProps) {
   const [hover, setHover] = useState<number | null>(null);
   const id = useId();
   const width = 520;
@@ -296,6 +308,18 @@ export function LineChart({ values, format, title, markers = [], height = 180 }:
         ))}
         <path d={area} className="chr-chart__area" />
         <path d={path} className="chr-chart__line" data-testid="chr-line" />
+        {dots
+          .filter((i) => i >= 0 && i < values.length)
+          .map((i) => (
+            <circle
+              key={`d${i}`}
+              cx={x(i)}
+              cy={y(values[i])}
+              r={4}
+              className="chr-chart__ring"
+              data-testid="chr-ring"
+            />
+          ))}
         {values.map((_, i) =>
           i % stride === 0 || i === values.length - 1 ? (
             <text
@@ -333,11 +357,15 @@ export function LineChart({ values, format, title, markers = [], height = 180 }:
         <Tooltip x={`${(x(hover) / width) * 100}%` as unknown as number} y={0}>
           <strong>{format(values[hover])}</strong>
           <span>turn {hover + 1}</span>
+          {annotate?.(hover) && <span>{annotate(hover)}</span>}
         </Tooltip>
       )}
       <TableView
         title={title}
-        rows={values.map((v, i) => ({ label: `turn ${i + 1}`, value: format(v) }))}
+        rows={values.map((v, i) => {
+          const note = annotate?.(i);
+          return { label: `turn ${i + 1}${note ? ` (${note})` : ""}`, value: format(v) };
+        })}
       />
     </div>
   );

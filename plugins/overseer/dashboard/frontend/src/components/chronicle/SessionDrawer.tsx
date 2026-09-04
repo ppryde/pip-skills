@@ -10,6 +10,7 @@ import {
   formatActive,
   formatBytes,
   formatDuration,
+  formatPct,
   formatTokens,
   formatWhen,
   repoLabel,
@@ -39,6 +40,15 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
   if (sessionId === null) return null;
 
   const contextSeries = detail?.turn_series.map((t) => t.context_tokens) ?? [];
+  const coldTurns = detail?.turn_series.flatMap((t, i) => (t.cold ? [i] : [])) ?? [];
+  const annotate = (i: number): string | null => {
+    const turn = detail?.turn_series[i];
+    if (!turn) return null;
+    const parts: string[] = [];
+    if (turn.cold) parts.push(`cold · wrote ${formatTokens(turn.cache_creation_tokens)}`);
+    if (turn.gap_s !== null && turn.gap_s >= 300) parts.push(`idle ${formatDuration(turn.gap_s)}`);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  };
   // Compactions are timestamps; place each marker at the first turn at or
   // after it so the hairline lands where the context actually dropped.
   const markers =
@@ -99,18 +109,32 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
               <StatTile label="Active" value={formatActive(detail.active_ms)} />
               <StatTile label="Transcript" value={formatBytes(detail.transcript_bytes)} />
               <StatTile label="Compactions" value={String(detail.compactions)} />
+              <StatTile
+                label="Cache hit rate"
+                value={formatPct(detail.cache_hit_rate)}
+                note={`${formatTokens(detail.cache_creation_tokens)} written`}
+              />
+              <StatTile
+                label="Cold turns"
+                value={String(detail.cold_turns)}
+                note="wrote more cache than read"
+              />
             </div>
 
             <section className="chr-panel">
               <h3 className="chr-panel__title">Context per turn</h3>
               <p className="chr-panel__sub">
-                Tokens in the window on each API call{markers.length > 0 ? "; hairlines mark compactions" : ""}.
+                Tokens in the window on each API call
+                {coldTurns.length > 0 ? "; rings mark cold cache turns" : ""}
+                {markers.length > 0 ? "; hairlines mark compactions" : ""}.
               </p>
               <LineChart
                 values={contextSeries}
                 format={formatTokens}
                 title="Context tokens per turn"
                 markers={markers}
+                dots={coldTurns}
+                annotate={annotate}
               />
             </section>
 

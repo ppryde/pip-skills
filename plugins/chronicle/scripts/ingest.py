@@ -113,12 +113,13 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     conn.executemany(
         """INSERT OR REPLACE INTO turns(session_id, agent_id, message_id, request_id, ts, model,
                input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
-               thinking_tokens, tool_calls, stop_reason, effort)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         [
             (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
              t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
-             t.thinking_tokens, len(t.tool_uses), t.stop_reason, t.effort)
+             t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens, len(t.tool_uses),
+             t.stop_reason, t.effort)
             for t in facts.turns.values()
         ],
     )
@@ -244,6 +245,11 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
            FROM turns WHERE session_id = ? AND agent_id = ''""",
         (session_id,),
     ).fetchone()[0]
+    cold = conn.execute(
+        """SELECT COUNT(*) FROM turns
+           WHERE session_id = ? AND agent_id = '' AND cache_creation_tokens > cache_read_tokens""",
+        (session_id,),
+    ).fetchone()[0]
     prompts = conn.execute(
         "SELECT COUNT(*) FROM events WHERE session_id = ? AND kind = 'prompt' AND agent_id = ''",
         (session_id,),
@@ -275,9 +281,11 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
     conn.execute(
         """UPDATE sessions SET turns=?, input_tokens=?, cache_read_tokens=?, cache_creation_tokens=?,
                output_tokens=?, thinking_tokens=?, tool_calls=?, subagents=?, peak_context_tokens=?,
-               prompts=?, compactions=?, active_ms=?, models=?, transcript_bytes=?, updated_at=?
+               cold_turns=?, prompts=?, compactions=?, active_ms=?, models=?, transcript_bytes=?,
+               updated_at=?
            WHERE session_id = ?""",
-        (*totals, peak, prompts, compactions, active_ms, json.dumps(models), size, now, session_id),
+        (*totals, peak, cold, prompts, compactions, active_ms, json.dumps(models), size, now,
+         session_id),
     )
 
 

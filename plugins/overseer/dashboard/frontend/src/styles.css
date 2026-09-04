@@ -6988,6 +6988,13 @@ button.trail-tag:focus-visible {
   stroke-width: 2;
 }
 
+/* Cold-cache turn: an ink ring on the line (no second hue needed). */
+.chr-chart__ring {
+  fill: var(--qb-panel);
+  stroke: var(--qb-ink-700);
+  stroke-width: 2;
+}
+
 .chr-chart__tooltip {
   position: absolute;
   transform: translate(-50%, -4px);

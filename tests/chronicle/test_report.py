@@ -39,6 +39,13 @@ class TestSummary:
         assert out["tools"][0] == {"tool_name": "Read", "calls": 2, "sessions": 1}
         assert out["shape"]["turns"]["max"] == 2.0
         assert out["shape"]["turns"]["p50"] == 1.0
+        # Every seeded turn reads 1000 of a 1203-token context: warm.
+        assert out["totals"]["cold_turns"] == 0
+        assert round(out["totals"]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
+        assert out["totals"]["cache_5m_tokens"] == 0
+        assert out["by_day"][1]["peak_context_tokens"] == 1203
+        assert out["by_day"][1]["cold_turns"] == 0
+        assert round(out["by_day"][1]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
 
     def test_repo_root_filter(self, projects):
         conn = _seed(projects)
@@ -61,6 +68,7 @@ class TestSummary:
         conn = store.connect()
         out = report.summary(conn)
         assert out["totals"]["sessions"] == 0
+        assert out["totals"]["cache_hit_rate"] is None
         assert out["by_day"] == []
         assert out["shape"]["turns"] == {"p50": None, "p90": None, "max": None, "mean": None}
 
@@ -100,6 +108,9 @@ class TestSessionDetail:
         assert detail["session_id"] == "s2"
         assert [t["context_tokens"] for t in detail["turn_series"]] == [1203, 1203]
         assert detail["turn_series"][1]["tool_calls"] == 2
+        assert [t["cold"] for t in detail["turn_series"]] == [False, False]
+        assert [t["gap_s"] for t in detail["turn_series"]] == [None, 0]
+        assert round(detail["cache_hit_rate"], 3) == round(1000 / 1203, 3)
         assert detail["subagents"][0]["agent_id"] == "agent-1"
         assert detail["subagents"][0]["turns"] == 1
         assert detail["tools"] == [{"tool_name": "Read", "calls": 2}]

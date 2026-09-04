@@ -65,6 +65,12 @@ export function formatDay(day: string): string {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
+/** 0.973 -> "97%", null -> "—". */
+export function formatPct(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return "—";
+  return `${Math.round(ratio * 100)}%`;
+}
+
 /** Model ids are long ("claude-fable-5-1") — strip the vendor prefix for
  * chart labels, keep the id in tooltips/tables. */
 export function shortModel(model: string | null): string {

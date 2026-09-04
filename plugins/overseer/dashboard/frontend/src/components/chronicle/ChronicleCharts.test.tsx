@@ -50,10 +50,21 @@ describe("<BarList/>", () => {
 });
 
 describe("<LineChart/>", () => {
-  it("draws the series and compaction markers", () => {
-    render(<LineChart title="Context" format={fmt} values={[100, 200, 50, 120]} markers={[2]} />);
+  it("draws the series, compaction markers and cold rings", () => {
+    render(
+      <LineChart
+        title="Context"
+        format={fmt}
+        values={[100, 200, 50, 120]}
+        markers={[2]}
+        dots={[0, 2, 99]}
+        annotate={(i) => (i === 0 ? "cold" : null)}
+      />
+    );
     expect(screen.getByTestId("chr-line")).toBeInTheDocument();
     expect(screen.getAllByTestId("chr-marker")).toHaveLength(1);
+    expect(screen.getAllByTestId("chr-ring")).toHaveLength(2); // out-of-range 99 dropped
+    expect(screen.getByText("turn 1 (cold)")).toBeInTheDocument();
     expect(screen.getByText("turn 3")).toBeInTheDocument();
   });
 });

@@ -46,6 +46,20 @@ class TestFold:
         assert turn.model == "claude-opus-5"
         assert turn.request_id == "req-m1"
 
+    def test_cache_ttl_split_and_cold_flag(self):
+        warm = _assistant("w", ts=T0, usage={
+            "input_tokens": 1, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 100,
+            "output_tokens": 5, "cache_creation": {"ephemeral_5m_input_tokens": 40, "ephemeral_1h_input_tokens": 60},
+        })
+        cold = _assistant("c", ts=T1, usage={
+            "input_tokens": 1, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 5000,
+            "output_tokens": 5,
+        })
+        facts = fold(_lines(warm, cold))
+        w, c = facts.turns[("", "w")], facts.turns[("", "c")]
+        assert (w.cache_5m_tokens, w.cache_1h_tokens, w.cold) == (40, 60, False)
+        assert (c.cache_5m_tokens, c.cache_1h_tokens, c.cold) == (0, 0, True)
+
     def test_prompts_vs_tool_results(self):
         lines = _lines(
             _user("u1", ts=T0, content="hello"),

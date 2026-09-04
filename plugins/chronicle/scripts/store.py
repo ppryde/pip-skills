@@ -12,7 +12,10 @@ Tables (see ``_SCHEMA``):
                  recomputed from the fact tables after every ingest.
 - ``turns``      one row per assistant API call (deduped by ``message_id`` —
                  the transcript writes one JSONL line per content block, all
-                 sharing the same message id and usage).
+                 sharing the same message id and usage). Cache columns: a
+                 turn's prompt is served as ``input`` (uncached), ``cache_read``
+                 (warm hit) or ``cache_creation`` (cold — the prefix was
+                 written), the last split by TTL into ``cache_5m``/``cache_1h``.
 - ``tool_calls`` one row per ``tool_use`` block.
 - ``events``     prompts, compactions and turn durations, keyed by record uuid
                  (scoped by session: ids are globally unique in practice, but
@@ -74,6 +77,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     thinking_tokens       INTEGER NOT NULL DEFAULT 0,
     peak_context_tokens   INTEGER NOT NULL DEFAULT 0,
     compactions           INTEGER NOT NULL DEFAULT 0,
+    cold_turns            INTEGER NOT NULL DEFAULT 0,
     subagents             INTEGER NOT NULL DEFAULT 0,
     active_ms             INTEGER NOT NULL DEFAULT 0,
     models                TEXT NOT NULL DEFAULT '[]'
@@ -93,6 +97,8 @@ CREATE TABLE IF NOT EXISTS turns (
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens         INTEGER NOT NULL DEFAULT 0,
     thinking_tokens       INTEGER NOT NULL DEFAULT 0,
+    cache_5m_tokens       INTEGER NOT NULL DEFAULT 0,
+    cache_1h_tokens       INTEGER NOT NULL DEFAULT 0,
     tool_calls            INTEGER NOT NULL DEFAULT 0,
     stop_reason           TEXT,
     effort                TEXT,
@@ -142,6 +148,9 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("cursors", "mtime", "REAL NOT NULL DEFAULT 0"),
     ("cursors", "size", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "transcript_mtime", "REAL"),
+    ("turns", "cache_5m_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("turns", "cache_1h_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("sessions", "cold_turns", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

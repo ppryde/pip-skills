@@ -43,9 +43,11 @@ function session(overrides: Partial<ChronicleSession> & { session_id: string }):
     thinking_tokens: 50,
     peak_context_tokens: 1110,
     compactions: 0,
+    cold_turns: 1,
     subagents: 0,
     active_ms: 0,
     models: ["claude-opus-5"],
+    cache_hit_rate: 0.9,
     duration_s: 3600,
     context_tokens: 1110,
     live: false,
@@ -58,9 +60,10 @@ function summary(): ChronicleSummary {
     totals: {
       sessions: 2, turns: 12, prompts: 4, tool_calls: 6, input_tokens: 20, cache_read_tokens: 2000,
       cache_creation_tokens: 200, output_tokens: 900, thinking_tokens: 100, compactions: 1,
-      subagents: 1, active_ms: 120_000, transcript_bytes: 4096, live: 1,
+      subagents: 1, active_ms: 120_000, transcript_bytes: 4096, live: 1, cold_turns: 2,
+      cache_hit_rate: 0.901, cache_5m_tokens: 50, cache_1h_tokens: 150,
     },
-    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900 }],
+    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, cache_hit_rate: 0.901 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
     shape: {
@@ -103,6 +106,9 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByRole("table", { name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByText("1 live")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Cache hit rate per day" })).toBeInTheDocument();
+    expect(screen.getAllByText("90%").length).toBeGreaterThan(0);
     expect(screen.getByText("opus-5")).toBeInTheDocument();
     expect(screen.getAllByText("bbbb2222").length).toBeGreaterThan(0);
     expect(mocked.setActiveRoot).toHaveBeenCalledWith("/repos/pip-skills");
@@ -160,7 +166,10 @@ describe("<ChroniclePage/>", () => {
     mocked.getChronicleSession.mockResolvedValue({
       ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
       subagents: [],
-      turn_series: [{ ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn" }],
+      turn_series: [
+        { ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 99, cache_5m_tokens: 99, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn", cold: true, gap_s: null },
+        { ts: 700, model: "claude-opus-5", context_tokens: 120, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 20, cache_5m_tokens: 20, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 0, stop_reason: "end_turn", cold: false, gap_s: 699 },
+      ],
       tools: [{ tool_name: "Read", calls: 1 }],
       compactions_at: [],
     });
@@ -170,6 +179,8 @@ describe("<ChroniclePage/>", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
     expect(mocked.getChronicleSession).toHaveBeenCalledWith("aaaa1111-x");
     expect(screen.getByRole("img", { name: "Context tokens per turn" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("chr-ring")).toHaveLength(1);
+    expect(screen.getByText(/rings mark cold cache turns/)).toBeInTheDocument();
     expect(screen.getByText("Read")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

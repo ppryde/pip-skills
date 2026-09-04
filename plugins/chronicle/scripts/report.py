@@ -35,6 +35,12 @@ def is_live(ended_at: float | None, last_activity_at: float | None, now: float) 
     return last_activity_at is not None and (now - last_activity_at) <= LIVE_HORIZON_SECONDS
 
 
+def cache_hit_rate(input_tokens: int, cache_read: int, cache_creation: int) -> float | None:
+    """Share of a prompt's context served from cache; None when there was no context."""
+    total = input_tokens + cache_read + cache_creation
+    return cache_read / total if total > 0 else None
+
+
 def _row_to_session(row: sqlite3.Row, now: float | None = None) -> dict[str, Any]:
     if now is None:
         now = time.time()
@@ -50,6 +56,9 @@ def _row_to_session(row: sqlite3.Row, now: float | None = None) -> dict[str, Any
         out["input_tokens"] + out["cache_read_tokens"] + out["cache_creation_tokens"]
     )
     out["live"] = is_live(out.get("ended_at"), out.get("last_activity_at"), now)
+    out["cache_hit_rate"] = cache_hit_rate(
+        out["input_tokens"], out["cache_read_tokens"], out["cache_creation_tokens"]
+    )
     return out
 
 
@@ -99,24 +108,35 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     if row is None:
         return None
     detail = _row_to_session(row)
-    detail["turn_series"] = [
-        {
-            "ts": r["ts"],
+    series: list[dict[str, Any]] = []
+    previous_ts: float | None = None
+    for r in conn.execute(
+        "SELECT * FROM turns WHERE session_id = ? AND agent_id = '' ORDER BY ts, rowid",
+        (session_id,),
+    ):
+        ts = r["ts"]
+        gap = round(ts - previous_ts) if ts is not None and previous_ts is not None else None
+        series.append({
+            "ts": ts,
             "model": r["model"],
             "context_tokens": r["input_tokens"] + r["cache_read_tokens"] + r["cache_creation_tokens"],
             "input_tokens": r["input_tokens"],
             "cache_read_tokens": r["cache_read_tokens"],
             "cache_creation_tokens": r["cache_creation_tokens"],
+            "cache_5m_tokens": r["cache_5m_tokens"],
+            "cache_1h_tokens": r["cache_1h_tokens"],
             "output_tokens": r["output_tokens"],
             "thinking_tokens": r["thinking_tokens"],
             "tool_calls": r["tool_calls"],
             "stop_reason": r["stop_reason"],
-        }
-        for r in conn.execute(
-            "SELECT * FROM turns WHERE session_id = ? AND agent_id = '' ORDER BY ts, rowid",
-            (session_id,),
-        )
-    ]
+            # Cold: more prefix written than read back. `gap_s` (seconds since
+            # the previous call) says whether an idle stretch lapsed the TTL.
+            "cold": r["cache_creation_tokens"] > r["cache_read_tokens"],
+            "gap_s": gap,
+        })
+        if ts is not None:
+            previous_ts = ts
+    detail["turn_series"] = series
     detail["subagents"] = [
         dict(r) for r in conn.execute(
             """SELECT agent_id, COUNT(*) AS turns,
@@ -173,6 +193,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
                    COALESCE(SUM(thinking_tokens), 0) AS thinking_tokens,
                    COALESCE(SUM(compactions), 0) AS compactions,
+                   COALESCE(SUM(cold_turns), 0) AS cold_turns,
                    COALESCE(SUM(subagents), 0) AS subagents,
                    COALESCE(SUM(active_ms), 0) AS active_ms,
                    COALESCE(SUM(transcript_bytes), 0) AS transcript_bytes,
@@ -182,6 +203,15 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         (time.time() - LIVE_HORIZON_SECONDS, *params),
     ).fetchone()
     totals = dict(totals_row)
+    totals["cache_hit_rate"] = cache_hit_rate(
+        totals["input_tokens"], totals["cache_read_tokens"], totals["cache_creation_tokens"]
+    )
+    ttl = conn.execute(
+        f"""SELECT COALESCE(SUM(t.cache_5m_tokens), 0), COALESCE(SUM(t.cache_1h_tokens), 0)
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}""",
+        params,
+    ).fetchone()
+    totals["cache_5m_tokens"], totals["cache_1h_tokens"] = int(ttl[0]), int(ttl[1])
 
     by_day = [
         dict(r) for r in conn.execute(
@@ -191,13 +221,22 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                        SUM(t.input_tokens) AS input_tokens,
                        SUM(t.cache_read_tokens) AS cache_read_tokens,
                        SUM(t.cache_creation_tokens) AS cache_creation_tokens,
-                       SUM(t.output_tokens) AS output_tokens
+                       SUM(t.output_tokens) AS output_tokens,
+                       SUM(CASE WHEN t.agent_id = '' AND t.cache_creation_tokens > t.cache_read_tokens
+                                THEN 1 ELSE 0 END) AS cold_turns,
+                       MAX(CASE WHEN t.agent_id = ''
+                                THEN t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens
+                                ELSE 0 END) AS peak_context_tokens
                 FROM turns t JOIN sessions s ON s.session_id = t.session_id
                 {where}{' AND' if where else ' WHERE'} t.ts IS NOT NULL
                 GROUP BY day ORDER BY day""",
             params,
         )
     ]
+    for day in by_day:
+        day["cache_hit_rate"] = cache_hit_rate(
+            day["input_tokens"], day["cache_read_tokens"], day["cache_creation_tokens"]
+        )
     by_model = [
         dict(r) for r in conn.execute(
             f"""SELECT t.model AS model, COUNT(*) AS turns,

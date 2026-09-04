@@ -46,6 +46,8 @@ class Turn:
     cache_creation_tokens: int = 0
     output_tokens: int = 0
     thinking_tokens: int = 0
+    cache_5m_tokens: int = 0
+    cache_1h_tokens: int = 0
     stop_reason: str | None = None
     effort: str | None = None
     tool_uses: list[tuple[str, str]] = field(default_factory=list)  # (tool_use_id, name)
@@ -53,6 +55,13 @@ class Turn:
     @property
     def context_tokens(self) -> int:
         return self.input_tokens + self.cache_read_tokens + self.cache_creation_tokens
+
+    @property
+    def cold(self) -> bool:
+        """A cold turn had to (re)write more of its prefix than it read back —
+        the first call of a session, the first after a cache TTL lapsed, or
+        the first after the prefix changed (a compaction)."""
+        return self.cache_creation_tokens > self.cache_read_tokens
 
 
 @dataclass
@@ -152,6 +161,8 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
         usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
         details = usage.get("output_tokens_details")
         thinking = _int(details.get("thinking_tokens")) if isinstance(details, dict) else 0
+        creation = usage.get("cache_creation")
+        creation = creation if isinstance(creation, dict) else {}
         turn = Turn(
             message_id=message_id,
             agent_id=agent_id,
@@ -163,6 +174,8 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             cache_creation_tokens=_int(usage.get("cache_creation_input_tokens")),
             output_tokens=_int(usage.get("output_tokens")),
             thinking_tokens=thinking,
+            cache_5m_tokens=_int(creation.get("ephemeral_5m_input_tokens")),
+            cache_1h_tokens=_int(creation.get("ephemeral_1h_input_tokens")),
             stop_reason=_opt_str(message.get("stop_reason")),
             effort=_opt_str(record.get("effort")),
         )

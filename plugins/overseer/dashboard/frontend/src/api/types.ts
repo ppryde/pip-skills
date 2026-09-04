@@ -300,10 +300,18 @@ export interface ChronicleTotals {
   output_tokens: number;
   thinking_tokens: number;
   compactions: number;
+  /** Main-agent turns that wrote more cache than they read (first call,
+   * TTL lapsed, or prefix changed). */
+  cold_turns: number;
   subagents: number;
   active_ms: number;
   transcript_bytes: number;
   live: number;
+  /** cache_read / (input + cache_read + cache_creation); null with no context. */
+  cache_hit_rate: number | null;
+  /** Cache-creation tokens split by TTL. */
+  cache_5m_tokens: number;
+  cache_1h_tokens: number;
 }
 
 export interface ChronicleDay {
@@ -314,6 +322,10 @@ export interface ChronicleDay {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   output_tokens: number;
+  cold_turns: number;
+  /** Largest single main-agent context window seen that day. */
+  peak_context_tokens: number;
+  cache_hit_rate: number | null;
 }
 
 export interface ChronicleModel {
@@ -382,9 +394,11 @@ export interface ChronicleSession {
   thinking_tokens: number;
   peak_context_tokens: number;
   compactions: number;
+  cold_turns: number;
   subagents: number;
   active_ms: number;
   models: string[];
+  cache_hit_rate: number | null;
   /** Derived server-side: last activity minus start, in seconds. */
   duration_s: number | null;
   /** Derived: input + cache read + cache creation, summed over turns. */
@@ -403,10 +417,16 @@ export interface ChronicleTurn {
   input_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  cache_5m_tokens: number;
+  cache_1h_tokens: number;
   output_tokens: number;
   thinking_tokens: number;
   tool_calls: number;
   stop_reason: string | null;
+  /** cache_creation > cache_read for this call. */
+  cold: boolean;
+  /** Seconds since the previous main-agent call; null for the first. */
+  gap_s: number | null;
 }
 
 export interface ChronicleSubagent {

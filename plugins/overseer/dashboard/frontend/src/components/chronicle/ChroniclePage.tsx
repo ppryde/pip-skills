@@ -16,6 +16,7 @@ import {
   formatBytes,
   formatDay,
   formatDuration,
+  formatPct,
   formatTokens,
   formatWhen,
   repoLabel,
@@ -124,6 +125,12 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
     value: d.input_tokens + d.cache_read_tokens + d.cache_creation_tokens,
   }));
   const outputPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.output_tokens }));
+  const peakPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.peak_context_tokens }));
+  const hitRatePerDay = byDay.map((d) => ({
+    label: formatDay(d.day),
+    detail: `${d.day} · ${d.cold_turns} cold`,
+    value: d.cache_hit_rate ?? 0,
+  }));
   const shape = summary?.shape;
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
@@ -200,6 +207,16 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
               value={String(totals.subagents)}
               note={`${totals.compactions} compactions`}
             />
+            <StatTile
+              label="Cache hit rate"
+              value={formatPct(totals.cache_hit_rate)}
+              note={`${formatTokens(totals.cache_creation_tokens)} written`}
+            />
+            <StatTile
+              label="Cold turns"
+              value={formatTokens(totals.cold_turns)}
+              note={`${formatTokens(totals.cache_1h_tokens)} at 1h · ${formatTokens(totals.cache_5m_tokens)} at 5m`}
+            />
           </div>
 
           <div className="chronicle__grid">
@@ -212,6 +229,16 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
               <h3 className="chr-panel__title">Output per day</h3>
               <p className="chr-panel__sub">Tokens the model wrote, thinking included.</p>
               <ColumnChart points={outputPerDay} format={formatTokens} title="Output tokens per day" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Peak context per day</h3>
+              <p className="chr-panel__sub">Largest single window any session reached that day.</p>
+              <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Cache hit rate per day</h3>
+              <p className="chr-panel__sub">Share of context read back from cache; hover for cold turns.</p>
+              <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" />
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>

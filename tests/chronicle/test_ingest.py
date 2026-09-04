@@ -45,6 +45,18 @@ class TestIngestSession:
         assert row["started_at"] < row["last_activity_at"]
         assert row["ended_at"] is None
 
+    def test_cold_turns_and_ttl_split_roll_up(self, builder):
+        cold_usage = {"input_tokens": 1, "cache_read_input_tokens": 0,
+                      "cache_creation_input_tokens": 800, "output_tokens": 5,
+                      "cache_creation": {"ephemeral_5m_input_tokens": 800, "ephemeral_1h_input_tokens": 0}}
+        path = (builder.turn("m1", T0, usage=cold_usage).turn("m2", T1).turn("m3", T2).write())
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        row = _session(conn)
+        assert row["cold_turns"] == 1
+        ttl = conn.execute("SELECT cache_5m_tokens, cache_1h_tokens FROM turns WHERE message_id='m1'").fetchone()
+        assert (ttl[0], ttl[1]) == (800, 0)
+
     def test_incremental_only_reads_appended_lines(self, builder):
         path = builder.prompt("u1", T0).turn("m1", T0).write()
         conn = store.connect()

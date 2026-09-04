@@ -4,6 +4,7 @@ import {
   formatDuration,
   formatActive,
   formatDay,
+  formatPct,
   niceTicks,
   repoLabel,
   sessionName,
@@ -33,6 +34,14 @@ describe("formatDuration", () => {
   it("formatActive treats 0ms as unknown", () => {
     expect(formatActive(0)).toBe("—");
     expect(formatActive(90_000)).toBe("1m");
+  });
+});
+
+describe("formatPct", () => {
+  it("rounds a ratio to whole percent", () => {
+    expect(formatPct(0.973)).toBe("97%");
+    expect(formatPct(0)).toBe("0%");
+    expect(formatPct(null)).toBe("—");
   });
 });
 
