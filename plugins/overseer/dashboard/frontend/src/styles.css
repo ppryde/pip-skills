@@ -4766,7 +4766,7 @@ a.card-drawer__pr-chip:hover {
 /* Idle: still here, not working. Solid amber, and excluded from the pulse
    below so only a genuinely working session animates. */
 .party-avatar__dot--idle {
-  background: var(--legacy-color-d97706, #d97706);
+  background: var(--qb-accent-amber-shadow);
 }
 
 @media (prefers-reduced-motion: no-preference) {

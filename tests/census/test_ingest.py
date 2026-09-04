@@ -297,6 +297,29 @@ class TestActivityTracking:
         st.ingest(_payload(sid="s1", **_busy()), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
 
+    def test_rate_limits_change_alone_does_not_advance_active_at(self, store_file):
+        """`rate_limits` is deliberately NOT in the fingerprint: it can change
+        for account-wide reasons while this session does nothing."""
+        rate = {"five_hour": {"used_percentage": 10, "resets_at": 10_000.0}}
+        st.ingest(_payload(sid="s1", rate_limits=rate, **_busy()), now=10.0)
+        moved = {"five_hour": {"used_percentage": 40, "resets_at": 10_000.0}}
+        st.ingest(_payload(sid="s1", rate_limits=moved, **_busy()), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
+
+    def test_payload_with_no_activity_evidence_is_never_reported_idle(self, store_file):
+        """Absent data is not absent activity. A payload shape carrying none of
+        the fingerprint fields must not pin every session dormant forever."""
+        st.ingest(_payload(sid="s1"), now=10.0)
+        st.ingest(_payload(sid="s1"), now=10.0 + st.IDLE_HORIZON_SECONDS + 60)
+        entry = st.for_session("s1", now=10.0 + st.IDLE_HORIZON_SECONDS + 60)
+        assert entry["idle"] is False
+
+    def test_identical_repeat_ingest_at_the_same_instant_keeps_active_at(self, store_file):
+        """`active == prior` — the boundary case, pinned explicitly."""
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
+
     def test_active_at_survives_post_compact_blank_context(self, store_file):
         st.ingest(_payload(sid="s1", **_busy()), now=10.0)
         blank = _busy(context_window={"used_percentage": None, "current_usage": None})

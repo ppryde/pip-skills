@@ -173,6 +173,49 @@ class TestHoistOrdering:
         )
         assert self._pct(store_file) == 44
 
+    def test_each_window_is_ordered_independently(self, store_file):
+        """Per-window, not one global decision: a losing five_hour reading must
+        not drag its own seven_day reading down with it, or vice versa."""
+        st.ingest(
+            _payload(
+                "s1",
+                "/wt/a",
+                {
+                    "five_hour": {"used_percentage": 80, "resets_at": 10_000.0},
+                    "seven_day": {"used_percentage": 12, "resets_at": 90_000.0},
+                },
+            ),
+            now=100.0,
+        )
+        st.ingest(
+            _payload(
+                "s2",
+                "/wt/b",
+                {
+                    "five_hour": {"used_percentage": 30, "resets_at": 10_000.0},
+                    "seven_day": {"used_percentage": 44, "resets_at": 90_000.0},
+                },
+            ),
+            now=110.0,
+        )
+        limits = _read(store_file)["limits"]
+        assert limits["five_hour"]["used_percentage"] == 80  # first reading held
+        assert limits["seven_day"]["used_percentage"] == 44  # second reading won
+
+    def test_an_expired_window_is_dropped_not_carried(self, store_file):
+        """Once a window's reset time has passed, its reading must not survive
+        as a fossil that a genuine new reading has to out-rank."""
+        st.ingest(_payload("s1", "/wt/a", self._rate(96, resets_at=10_000.0)), now=100.0)
+        # Now past that reset. The next reading belongs to a fresh window and
+        # must be taken despite being far lower.
+        st.ingest(
+            _payload("s2", "/wt/b", self._rate(4, resets_at=28_000.0)),
+            now=10_500.0,
+        )
+        limits = _read(store_file)["limits"]
+        assert limits["five_hour"]["used_percentage"] == 4
+        assert st.limits(now=10_500.0)["five_hour"]["used_percentage"] == 4
+
     def test_pre_upgrade_limits_are_ordered_not_trusted(self, store_file):
         store_file.parent.mkdir(parents=True, exist_ok=True)
         store_file.write_text(

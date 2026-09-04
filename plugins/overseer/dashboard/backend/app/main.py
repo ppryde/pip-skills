@@ -183,11 +183,22 @@ def _entry_ts(entry: dict[str, Any], key: str = "updated_at") -> float:
     Mirrors vigil's defensive coercion (vigil/scripts/census.py:_entry_ts).
     Malformed timestamps (None, non-numeric strings) are treated as 0, which
     places them beyond any staleness horizon — quarantine-safe, never raises.
+
+    ``bool`` and NaN are rejected explicitly rather than coerced. ``float(True)``
+    is 1.0, which would read as a real (ancient) epoch; NaN survives a json
+    round trip and makes every comparison false, which would report a session
+    non-idle forever.
     """
+    value = entry.get(key, 0)
+    if isinstance(value, bool):
+        return 0.0
     try:
-        return float(entry.get(key, 0) or 0)
+        number = float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+    if number != number or number in (float("inf"), float("-inf")):  # NaN, ±inf
+        return 0.0
+    return number
 
 
 def _active_ts(entry: dict[str, Any]) -> float:

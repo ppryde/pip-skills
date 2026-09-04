@@ -135,7 +135,7 @@ def _section(payload: dict[str, Any], key: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _activity_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...]:
+def _activity_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...] | None:
     """The payload facts that move ONLY when the session does real work.
 
     The status line reruns on a timer (``refreshInterval``) as well as after
@@ -143,11 +143,16 @@ def _activity_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...]:
     says "last rendered", not "last active". These counters are advanced by
     Claude Code only on an API round-trip or a new user prompt, so an identical
     fingerprint across two ingests means nothing happened in between.
+
+    Returns None when the payload carries NONE of these facts. Absent data is
+    not the same as absent activity: without evidence we must not claim a
+    session is idle, or a payload shape we do not recognise would report every
+    session dormant forever.
     """
     cost = _section(payload, "cost")
     window = _section(payload, "context_window")
     cache = _section(payload, "prompt_cache")
-    return (
+    fingerprint = (
         payload.get("prompt_id"),
         cost.get("total_cost_usd"),
         cost.get("total_api_duration_ms"),
@@ -155,6 +160,7 @@ def _activity_fingerprint(payload: dict[str, Any]) -> tuple[Any, ...]:
         window.get("total_output_tokens"),
         cache.get("requests"),
     )
+    return fingerprint if any(field is not None for field in fingerprint) else None
 
 
 def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
@@ -172,7 +178,13 @@ def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
     # and report the session idle-free until wall clock catches up.
     if prior_active > now:
         return now
-    if _activity_fingerprint(prior_payload) != _activity_fingerprint(payload):
+    prior_fingerprint = _activity_fingerprint(prior_payload)
+    fingerprint = _activity_fingerprint(payload)
+    # No evidence either way (an unrecognised payload shape): treat it as
+    # activity rather than carrying an ageing timestamp toward "idle".
+    if prior_fingerprint is None or fingerprint is None:
+        return now
+    if prior_fingerprint != fingerprint:
         return now
     return prior_active
 

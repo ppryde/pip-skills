@@ -216,7 +216,10 @@ export interface SessionSummary {
   stale: boolean;
   /** Census sees the status line still rendering, but the session's activity
    * counters haven't moved for 10 minutes — an open TUI nobody is working in.
-   * Distinct from `stale`, which means census sees no render at all. */
+   * Distinct from `stale`, which means census sees no render at all.
+   *
+   * Check `stale` FIRST: a session that died within ten minutes of its last
+   * activity is `idle: false`, so read alone this field says "working". */
   idle?: boolean;
   session_name?: string;
   model?: string;

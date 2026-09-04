@@ -28,3 +28,28 @@ describe("<PartyAvatar/> branch (WF-031)", () => {
     expect(container.querySelector(".party-avatar")).not.toHaveAttribute("title");
   });
 });
+
+describe("<PartyAvatar/> dot states", () => {
+  function dot(s: SessionSummary) {
+    const { container } = render(<PartyAvatar session={s} />);
+    return container.querySelector(".party-avatar__dot")!;
+  }
+
+  it("a working session's dot is plain — it keeps the pulse", () => {
+    const el = dot(session({ id: "s1" }));
+    expect(el).not.toHaveClass("party-avatar__dot--stale");
+    expect(el).not.toHaveClass("party-avatar__dot--idle");
+  });
+
+  it("an idle session's dot is marked idle, not stale", () => {
+    const el = dot(session({ id: "s1", idle: true }));
+    expect(el).toHaveClass("party-avatar__dot--idle");
+    expect(el).not.toHaveClass("party-avatar__dot--stale");
+  });
+
+  it("stale wins over idle — a dead session is a ghost, not a dozer", () => {
+    const el = dot(session({ id: "s1", stale: true, idle: true }));
+    expect(el).toHaveClass("party-avatar__dot--stale");
+    expect(el).not.toHaveClass("party-avatar__dot--idle");
+  });
+});

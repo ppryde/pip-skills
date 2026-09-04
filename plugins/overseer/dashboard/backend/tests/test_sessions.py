@@ -424,3 +424,37 @@ def test_sessions_idle_flag(
     assert sessions["dormant"]["stale"] is False
     assert sessions["dormant"]["active_at"] == now - 900
     assert sessions["legacy"]["idle"] is False
+
+
+def test_sessions_idle_flag_edge_cases(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed active_at must not raise, and a session can be BOTH stale and
+    idle — consumers check stale first, so both flags must be reported honestly."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    cwd = os.path.realpath(str(root))
+    store.write_text(json.dumps({
+        "version": 1,
+        "limits": {},
+        "sessions": {
+            # Malformed active_at values fall back to updated_at rather than raising.
+            "null_active": {"worktree_cwd": cwd, "updated_at": now - 5, "active_at": None, "payload": {}},
+            "string_active": {"worktree_cwd": cwd, "updated_at": now - 5, "active_at": "bad", "payload": {}},
+            "bool_active": {"worktree_cwd": cwd, "updated_at": now - 5, "active_at": True, "payload": {}},
+            # Long dead: no render for hours, no activity for hours.
+            "dead": {"worktree_cwd": cwd, "updated_at": now - 7200, "active_at": now - 7200, "payload": {}},
+        },
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    sessions = {s["id"]: s for s in resp.json()["sessions"]}
+    for sid in ("null_active", "string_active", "bool_active"):
+        assert sessions[sid]["idle"] is False, sid
+        assert sessions[sid]["stale"] is False, sid
+    assert sessions["dead"]["stale"] is True
+    assert sessions["dead"]["idle"] is True

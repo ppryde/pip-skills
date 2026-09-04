@@ -239,4 +239,33 @@ describe("<PartyColumn/>", () => {
       "is-near-threshold"
     );
   });
+
+  it("marks an idle session's row without making it a stale ghost", () => {
+    const { container } = render(
+      <PartyColumn party={[member({ session: session({ id: "s1", idle: true }) })]} />
+    );
+    const row = container.querySelector(".party-row")!;
+    expect(row).toHaveClass("party-row--idle");
+    expect(row).not.toHaveClass("party-row--stale");
+  });
+
+  it("a stale session's row is a ghost even when it is also idle", () => {
+    const { container } = render(
+      <PartyColumn
+        party={[member({ session: session({ id: "s1", stale: true, idle: true }) })]}
+      />
+    );
+    const row = container.querySelector(".party-row")!;
+    expect(row).toHaveClass("party-row--stale");
+    expect(row).not.toHaveClass("party-row--idle");
+  });
+
+  it("a working session's row carries neither treatment", () => {
+    const { container } = render(
+      <PartyColumn party={[member({ session: session({ id: "s1" }) })]} />
+    );
+    const row = container.querySelector(".party-row")!;
+    expect(row).not.toHaveClass("party-row--idle");
+    expect(row).not.toHaveClass("party-row--stale");
+  });
 });
