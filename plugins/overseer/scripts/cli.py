@@ -1308,6 +1308,11 @@ def cmd_claude_dirs(args: argparse.Namespace) -> int:
     if args.action in ("add", "remove") and not args.path:
         print(f"overseer: claude-dirs {args.action} needs a path", file=sys.stderr)
         return 1
+    try:
+        config.load_machine_config()  # the one place a broken file is reported
+    except ValueError as exc:
+        print(f"overseer: {exc}", file=sys.stderr)
+        return 1
     if args.action == "add":
         path = Path(args.path).expanduser()
         if not path.is_dir():
@@ -1362,6 +1367,9 @@ def cmd_merge_boards(args: argparse.Namespace) -> int:
         left = f"; left behind in the absorbed folder: {', '.join(a['left_behind'])}" if a["left_behind"] else ""
         print(f"{verb} {a['from']}: +{a['added']} cards, {a['updated']} newer, {a['kept']} kept, "
               f"+{a['label_colors']} colours -> {a['renamed_to']}{moved}{left}")
+        if a["conflicts"]:
+            print(f"  kept the active board's copy of {len(a['conflicts'])} id(s) that name a DIFFERENT "
+                  f"card in the absorbed board (created stamps differ): {' '.join(a['conflicts'])}")
     print(f"target: {result['target']}")
     return 0
 

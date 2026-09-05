@@ -2,11 +2,11 @@ import json
 import os
 import sqlite3
 from pathlib import Path
+
 import pytest
+from factories import git_init
 from scripts import config
 from scripts.store import derive_repo_label, derive_repo_root
-
-from factories import git_init
 
 
 def _init_git(root: Path):
@@ -239,12 +239,16 @@ class TestClaudeDirs:
         # twice; a dir that does not exist is dropped.
         assert config.claude_dirs() == [primary, personal, work]
 
-    def test_malformed_machine_config_raises(self, tmp_path, monkeypatch):
-        primary, = self._dirs(tmp_path, monkeypatch, "claude")
+    def test_malformed_machine_config_is_reported_by_the_loader_but_not_fatal_to_discovery(self, tmp_path, monkeypatch):
+        primary, work = self._dirs(tmp_path, monkeypatch, "claude", "work")
         config.machine_config_path().parent.mkdir(parents=True)
         config.machine_config_path().write_text("{not json")
         with pytest.raises(ValueError):
-            config.claude_dirs()
+            config.load_machine_config()
+        # Discovery — under the dashboard's repo list — falls back to the
+        # primary plus the env list rather than failing every board.
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", str(work))
+        assert config.claude_dirs() == [primary, work]
 
     def test_central_root_finds_a_board_under_another_watched_dir(self, tmp_path, monkeypatch):
         primary, personal = self._dirs(tmp_path, monkeypatch, "claude", "claude-personal")

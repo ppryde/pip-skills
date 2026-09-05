@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -74,52 +75,67 @@ def run_vigil(root: Path, *args: str, json_out: bool = False, timeout: int = 15)
     return _run(_VIGIL_CLI, "vigil", root, args, json_out, timeout)
 
 
+def _census_env(config_dir: Path | None) -> dict[str, str]:
+    """The environment for one census read: the ambient one, or with
+    `CLAUDE_CONFIG_DIR` pointed at a specific account's store (and any
+    `CENSUS_STORE` pin dropped, since that names ONE store)."""
+    env = dict(os.environ)
+    if config_dir is not None:
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        env.pop("CENSUS_STORE", None)
+    return env
+
+
+def _census_read(args: list[str], config_dir: Path | None, timeout: int) -> dict[str, Any] | None:
+    """One `census read …` subprocess; None on any failure, like every census
+    read here."""
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_CENSUS_CLI), "read", *args],
+            capture_output=True, text=True, timeout=timeout, env=_census_env(config_dir),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data else None
+
+
+def _watched_dirs() -> list[Path]:
+    """The Claude config dirs to read census from — one when `CENSUS_STORE`
+    pins a single store (tests), else every watched account, primary first.
+    Never raises: census is a soft dependency all the way down."""
+    if os.environ.get("CENSUS_STORE"):
+        return []
+    try:
+        return overseer_config.claude_dirs()
+    except Exception:  # noqa: BLE001 — a broken machine config must not 500 the board
+        return []
+
+
 def run_census(root: Path, timeout: int = 10) -> dict[str, Any] | None:
-    """Read census's entry for ``root``'s worktree; None if census is unavailable.
+    """Read census's entry for ``root``'s worktree — from whichever watched
+    account's store has one, primary first; None if none does or census is
+    unavailable. A repo worked only from a second account still gets its
+    context/rate-limit readout this way.
 
     census is a SOFT dependency: it does not take the ``--root`` convention (it is
     ``census read --worktree <cwd>``), and a missing plugin, empty store, timeout,
     or any failure yields None rather than raising — so the board read never
     depends on census being installed.
     """
-    try:
-        result = subprocess.run(
-            [sys.executable, str(_CENSUS_CLI), "read", "--worktree", str(root)],
-            capture_output=True, text=True, timeout=timeout,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) and data else None
-
-
-def _census_read_all_in(config_dir: Path | None, timeout: int) -> dict[str, Any] | None:
-    """One `census read` — against a specific Claude config dir's store when
-    given (the env override is how census finds its store), else the ambient
-    one. None on any failure, like every census read here."""
-    env = dict(os.environ)
-    if config_dir is not None:
-        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
-        env.pop("CENSUS_STORE", None)
-    try:
-        result = subprocess.run(
-            [sys.executable, str(_CENSUS_CLI), "read"],
-            capture_output=True, text=True, timeout=timeout, env=env,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) and data else None
+    dirs = _watched_dirs()
+    if not dirs:
+        return _census_read(["--worktree", str(root)], None, timeout)
+    for config_dir in dirs:
+        data = _census_read(["--worktree", str(root)], config_dir, timeout)
+        if data:
+            return data
+    return None
 
 
 def run_census_all(timeout: int = 10) -> dict[str, Any] | None:
@@ -138,11 +154,15 @@ def run_census_all(timeout: int = 10) -> dict[str, Any] | None:
     census is a SOFT dependency: like run_census, a missing plugin, empty store,
     timeout, or any failure yields None rather than raising.
     """
-    if os.environ.get("CENSUS_STORE"):
-        return _census_read_all_in(None, timeout)
+    dirs = _watched_dirs()
+    if not dirs:
+        return _census_read([], None, timeout)
+    # One subprocess per account, run together: a slow or hung store in one
+    # account costs its own timeout, not one per account in series.
+    with ThreadPoolExecutor(max_workers=len(dirs)) as pool:
+        reads = list(pool.map(lambda d: _census_read([], d, timeout), dirs))
     merged: dict[str, Any] | None = None
-    for index, config_dir in enumerate(overseer_config.claude_dirs()):
-        data = _census_read_all_in(config_dir, timeout)
+    for index, (config_dir, data) in enumerate(zip(dirs, reads, strict=True)):
         if index == 0:
             # The PRIMARY's store is the envelope (its `limits`, `version`…)
             # even when it has no sessions yet; other stores only ever

@@ -128,6 +128,29 @@ class TestMergeBoards:
         assert boards.merge_boards(repo)["absorbed"] == []
         assert len(boards.find_boards(repo)) == 1
 
+    def test_same_id_different_card_is_a_conflict_not_an_overwrite(self, tmp_path, monkeypatch):
+        # Two boards minted independently both hold WF-1 — unrelated tasks.
+        # The newer `updated` must NOT win: the target's card is kept and the
+        # id is reported. A shared id with the same `created` IS the same card.
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        _board_under(personal, repo, monkeypatch, [
+            make_card("WF-1", title="personal's own WF-1", created="2026-08-20", updated="2026-09-03T10:00"),
+            make_card("WF-2", title="shared lineage, newer", created="2026-07-01", updated="2026-09-03T10:00"),
+        ])
+        _board_under(primary, repo, monkeypatch, [
+            make_card("WF-1", title="work's own WF-1", created="2026-08-01", updated="2026-08-02T10:00"),
+            make_card("WF-2", title="shared lineage, older", created="2026-07-01", updated="2026-08-02T10:00"),
+        ])
+        config.add_claude_dir(personal)
+        result = boards.merge_boards(repo)
+        absorbed = result["absorbed"][0]
+        assert absorbed["conflicts"] == ["WF-1"]
+        assert (absorbed["added"], absorbed["updated"], absorbed["kept"]) == (0, 1, 0)
+        conn = db.connect(repo)
+        titles = dict(conn.execute("SELECT id, title FROM cards").fetchall())
+        conn.close()
+        assert titles == {"WF-1": "work's own WF-1", "WF-2": "shared lineage, newer"}
+
     def test_absorbs_a_board_with_an_older_schema(self, tmp_path, monkeypatch):
         # The legacy plain folder predates columns like `labels`; its rows
         # must still convert (missing columns read as their defaults).

@@ -98,6 +98,21 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
 
   const ordered = useMemo(() => sortSessions(sessions, sortKey, sortDir), [sessions, sortKey, sortDir]);
   const totals = summary?.totals ?? null;
+  // The Counsel's four insights each walk the session list; recompute only
+  // when the data does, not on every sort click or drawer open.
+  const insights = useMemo(
+    () =>
+      totals
+        ? windowInsights({ totals, models: summary?.by_model ?? [], shape: summary?.shape ?? null, sessions })
+        : [],
+    [totals, summary?.by_model, summary?.shape, sessions]
+  );
+  // More than one Claude account in this window? Then the drawer names each
+  // session's; otherwise the chip would say the same thing on every one.
+  const multiAccount = useMemo(
+    () => new Set(sessions.map((s) => s.config_dir).filter(Boolean)).size > 1,
+    [sessions]
+  );
   const byDay = summary?.by_day ?? [];
   const contextPerDay = byDay.map((d) => ({
     label: formatDay(d.day),
@@ -190,14 +205,7 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
           </div>
 
           <div className="chronicle__grid">
-            <CounselPanel
-              insights={windowInsights({
-                totals,
-                models: summary?.by_model ?? [],
-                shape: summary?.shape ?? null,
-                sessions,
-              })}
-            />
+            <CounselPanel insights={insights} />
             <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Where output went</h3>
               <p className="chr-panel__sub">Tokens the model wrote: thinking versus replies and tool calls.</p>
@@ -393,7 +401,7 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
 
       {summary === null && !error && <p className="board-placeholder">Loading chronicle…</p>}
 
-      <SessionDrawer sessionId={openId} onClose={closeDrawer} />
+      <SessionDrawer sessionId={openId} onClose={closeDrawer} showAccount={multiAccount} />
     </div>
   );
 }

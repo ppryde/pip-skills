@@ -303,10 +303,10 @@ export function getChronicleSession(id: string): Promise<ChronicleSessionDetail>
 }
 
 /** Pull-on-demand: chronicle stats every transcript on disk and ingests the
- * ones that moved. Account-wide (no root), token-gated like a mutation. */
-/** Reconcile chronicle's store with the transcripts on disk. `quiet` is for
- * the page's unattended timer: a missing token then fails the call rather
- * than prompting for one. */
+ * ones that moved. Account-wide (no root) and NOT token-gated (the one
+ * ungated write — it stores only what the transcripts already say). `quiet`
+ * is for the page's unattended timer: should a 401 ever come back, it fails
+ * the call rather than prompting for a token. */
 export function syncChronicle(opts: { quiet?: boolean } = {}): Promise<ChronicleSyncResponse> {
   return request<ChronicleSyncResponse>("POST", "/api/chronicle/sync", undefined, opts);
 }

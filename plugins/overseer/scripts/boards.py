@@ -127,15 +127,23 @@ class _LenientRow(dict):
 
 
 def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection, *,
-                 apply: bool = True) -> dict[str, int]:
+                 apply: bool = True) -> dict[str, Any]:
     """Union `source`'s cards into `target` — a missing card is added, a
     shared one is replaced only when the source copy is newer. With
     ``apply=False`` (dry run) the same comparison is made and counted but
-    nothing is written, so the preview cannot drift from the real merge."""
+    nothing is written, so the preview cannot drift from the real merge.
+
+    Two boards minted independently both start at WF-001, so a shared id is
+    only the same card when its ``created`` stamp matches too. A shared id
+    with a different ``created`` is a COLLISION: two unrelated cards. The
+    target's is kept, the source's is left in the absorbed folder, and the
+    id is reported in ``conflicts`` for a person to resolve — the merge never
+    overwrites one task with another on the strength of a timestamp."""
     added = updated = kept = 0
+    conflicts: list[str] = []
     existing = {
-        row["id"]: row["updated"] or ""
-        for row in target.execute("SELECT id, updated FROM cards")
+        row["id"]: (row["updated"] or "", row["created"] or "")
+        for row in target.execute("SELECT id, updated, created FROM cards")
     }
     for row in source.execute("SELECT * FROM cards"):
         lenient = _LenientRow(dict(row))
@@ -143,14 +151,19 @@ def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection, *,
         archived = int(lenient["archived"] or 0)
         if card.id not in existing:
             added += 1
-        elif (card.updated or "") > existing[card.id]:
-            updated += 1
         else:
-            kept += 1
-            continue
+            t_updated, t_created = existing[card.id]
+            if (card.created or "") != t_created:
+                conflicts.append(card.id)
+                continue
+            if (card.updated or "") > t_updated:
+                updated += 1
+            else:
+                kept += 1
+                continue
         if apply:
             db._upsert(target, card, archived, commit=False)
-    return {"added": added, "updated": updated, "kept": kept}
+    return {"added": added, "updated": updated, "kept": kept, "conflicts": conflicts}
 
 
 def _merge_label_colors(target: sqlite3.Connection, source: sqlite3.Connection) -> int:

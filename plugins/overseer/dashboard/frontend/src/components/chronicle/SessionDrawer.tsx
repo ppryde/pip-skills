@@ -28,6 +28,10 @@ import StatTile from "./StatTile";
 export interface SessionDrawerProps {
   sessionId: string | null;
   onClose: () => void;
+  /** Show which Claude account the session ran under. Only worth a chip
+   * when the window actually spans more than one account — on a
+   * single-account machine every session would wear the same one. */
+  showAccount?: boolean;
 }
 
 /** A gap between turns worth naming in the tooltip — on a 5-minute cache
@@ -37,7 +41,7 @@ const IDLE_GAP_S = 300;
  * largest; the table beneath lists the rest. */
 const JUMPS_MARKED = 1;
 
-export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps) {
+export default function SessionDrawer({ sessionId, onClose, showAccount = false }: SessionDrawerProps) {
   const { detail, loading, error } = useChronicleSession(sessionId);
 
   useEffect(() => {
@@ -101,7 +105,7 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
                 {detail.git_branch && <span className="chr-mono">{detail.git_branch}</span>}
                 {/* Multi-account: which Claude config dir this session ran
                     under, by its folder name (".claude-personal"). */}
-                {detail.config_dir && (
+                {showAccount && detail.config_dir && (
                   <span className="chr-chip" title={detail.config_dir}>
                     {detail.config_dir.split("/").filter(Boolean).pop()}
                   </span>
@@ -115,7 +119,6 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
               <p className="chr-drawer__facts chr-drawer__facts--muted">
                 <span>started {formatWhen(detail.started_at)}</span>
                 <span>last {formatWhen(detail.last_activity_at)}</span>
-                {detail.end_reason && <span>ended: {detail.end_reason}</span>}
                 {detail.version && <span>cc {detail.version}</span>}
               </p>
             </header>

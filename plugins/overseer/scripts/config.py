@@ -75,7 +75,15 @@ def claude_dirs() -> list[Path]:
     candidates: list[Path] = [primary]
     env = os.environ.get(CLAUDE_DIRS_ENV, "")
     candidates.extend(Path(p).expanduser() for p in env.split(os.pathsep) if p.strip())
-    cfg = load_machine_config()
+    try:
+        cfg = load_machine_config()
+    except ValueError:
+        # A hand-edited, broken machine config must not take every board on
+        # the machine down with it (this sits under the dashboard's repo
+        # list): watch the primary and the env list, and let `overseer
+        # claude-dirs` — which calls load_machine_config directly — be the
+        # place that reports the malformed file.
+        cfg = {}
     listed = cfg.get("claude_dirs") or []
     if isinstance(listed, list):
         candidates.extend(Path(str(p)).expanduser() for p in listed if p)
