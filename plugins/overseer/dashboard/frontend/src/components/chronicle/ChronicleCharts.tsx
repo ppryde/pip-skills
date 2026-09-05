@@ -46,9 +46,13 @@ const MAX_POINTS = 120;
 function TableView({
   title,
   rows,
+  extraHeading,
 }: {
   title: string;
-  rows: { label: string; value: string }[];
+  rows: { label: string; value: string; extra?: string }[];
+  /** Heading for an optional third column (`row.extra`), e.g. a per-turn
+   * gap beside a per-turn value. */
+  extraHeading?: string;
 }) {
   return (
     <details className="chr-chart__table">
@@ -59,6 +63,7 @@ function TableView({
           <tr>
             <th scope="col">Label</th>
             <th scope="col">{title}</th>
+            {extraHeading && <th scope="col">{extraHeading}</th>}
           </tr>
         </thead>
         <tbody>
@@ -69,6 +74,7 @@ function TableView({
             <tr key={`${i}-${row.label}`}>
               <td>{row.label}</td>
               <td className="chr-num">{row.value}</td>
+              {extraHeading && <td className="chr-num">{row.extra ?? "—"}</td>}
             </tr>
           ))}
         </tbody>
@@ -255,17 +261,154 @@ export function BarList({ rows, format, title, hue = "--chr-context" }: BarListP
   );
 }
 
+export interface DonutSegment {
+  label: string;
+  value: number;
+}
+
+interface DonutProps {
+  /** Two or three parts of one whole, in the order they should be drawn
+   * (clockwise from twelve). Zero-valued parts are kept in the legend and
+   * table but draw nothing. */
+  segments: DonutSegment[];
+  format: (n: number) => string;
+  title: string;
+  /** Figure in the ring's centre: the whole, and what it is. */
+  centre: { value: string; label: string };
+  hue?: string;
+}
+
+const DONUT_R = 44;
+const DONUT_C = 60;
+const DONUT_STROKE = 14;
+const DONUT_LEN = 2 * Math.PI * DONUT_R;
+// Surface gap between adjacent segments (the chart-guidance 2px spacer),
+// in viewBox units of the 120-wide ring.
+const DONUT_GAP = 2;
+
+/** A part-to-whole ring for a two- or three-way split of ONE measure. The
+ * parts are steps of the measure's own hue (darkest first), never separate
+ * hues: the reader is meant to see "how much of the cache was the 1h kind",
+ * not two rival categories. The whole sits in the centre as a hero figure
+ * so the ring never has to be read for its total, and every part is
+ * direct-labelled with its value and share beside it, so nothing rests on
+ * the arc lengths or the colour steps alone. */
+export function Donut({ segments, format, title, centre, hue = "--chr-context" }: DonutProps) {
+  const id = useId();
+  const total = segments.reduce((sum, s) => sum + Math.max(0, s.value), 0);
+  if (total <= 0) {
+    return <p className="chr-chart__empty">No data in this window.</p>;
+  }
+  const drawn = segments.filter((s) => s.value > 0);
+  let offset = 0;
+  const arcs = drawn.map((s, i) => {
+    const len = (s.value / total) * DONUT_LEN;
+    // Trim each end by half the gap so neighbours never touch; a lone
+    // segment is a full ring and needs no trim.
+    const trim = drawn.length > 1 ? DONUT_GAP / 2 : 0;
+    const dash = Math.max(0, len - trim * 2);
+    const arc = { key: `${i}-${s.label}`, dash, start: offset + trim, step: i };
+    offset += len;
+    return arc;
+  });
+  const pct = (n: number) => `${Math.round((n / total) * 100)}%`;
+  return (
+    <div className="chr-donut" style={{ ["--chr-hue" as string]: `var(${hue})` }}>
+      <svg
+        viewBox="0 0 120 120"
+        className="chr-donut__svg"
+        role="img"
+        aria-labelledby={`${id}-title`}
+      >
+        <title id={`${id}-title`}>{title}</title>
+        <circle cx={DONUT_C} cy={DONUT_C} r={DONUT_R} className="chr-donut__track" strokeWidth={DONUT_STROKE} fill="none" />
+        {arcs.map((a) => (
+          <circle
+            key={a.key}
+            cx={DONUT_C}
+            cy={DONUT_C}
+            r={DONUT_R}
+            className={`chr-donut__seg chr-donut__seg--${Math.min(3, a.step + 1)}`}
+            strokeWidth={DONUT_STROKE}
+            fill="none"
+            strokeDasharray={`${a.dash} ${DONUT_LEN}`}
+            strokeDashoffset={-a.start}
+            transform={`rotate(-90 ${DONUT_C} ${DONUT_C})`}
+            data-testid="chr-donut-seg"
+          />
+        ))}
+        <text x={DONUT_C} y={DONUT_C - 1} className="chr-donut__centre-value" textAnchor="middle">
+          {centre.value}
+        </text>
+        <text x={DONUT_C} y={DONUT_C + 13} className="chr-donut__centre-label" textAnchor="middle">
+          {centre.label}
+        </text>
+      </svg>
+      <ul className="chr-donut__legend" aria-label={`${title} breakdown`}>
+        {segments.map((s, i) => (
+          <li key={`${i}-${s.label}`} className="chr-donut__row">
+            <span className={`chr-donut__swatch chr-donut__swatch--${Math.min(3, i + 1)}`} aria-hidden="true" />
+            <span className="chr-donut__label">{s.label}</span>
+            <span className="chr-donut__value chr-num">{format(s.value)}</span>
+            <span className="chr-donut__pct chr-num">{pct(Math.max(0, s.value))}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Something notable that happened at one x index of a LineChart, drawn as a
+ * small glyph on the plot and named in the legend beneath it. */
+export type ChartEventKind = "cold" | "jump" | "compaction";
+
+export interface ChartEvent {
+  index: number;
+  kind: ChartEventKind;
+}
+
+/** Glyph vocabulary, in legend order. Each is a 16×16 stroke drawing kept
+ * on one visual weight so the three read as a set: an ice cube for a cold
+ * cache turn, a peak for the biggest jump, an hourglass on the compaction
+ * hairline. Never emoji: these scale and recolour with the chart. (An idle-
+ * gap mark was tried and dropped — noisy, and the gap is in the tooltip.) */
+const EVENT_KINDS: Record<ChartEventKind, { label: string; path: string }> = {
+  cold: {
+    label: "cold cache turn",
+    // An isometric cube: front face, top face, right face, plus a glint.
+    path: "M3 6 L3 13 L10 13 L10 6 Z M3 6 L6 3 L13 3 L10 6 M10 13 L13 10 L13 3 M5 8 L5 10",
+  },
+  jump: {
+    label: "biggest jump",
+    path: "M2 13 L6.5 5 L9.5 9.5 L11.5 7 L14 13 Z",
+  },
+  compaction: {
+    label: "compaction",
+    path: "M4 2.5 H12 L8 8 L12 13.5 H4 L8 8 Z",
+  },
+};
+
+const EVENT_ORDER: ChartEventKind[] = ["cold", "jump", "compaction"];
+const GLYPH = 14;
+// Glyphs hover just above the line rather than sitting on it, so the point
+// they mark stays visible beneath them.
+const GLYPH_LIFT = 5;
+
 interface LineChartProps {
   /** y per x index (turn n). */
   values: number[];
   format: (n: number) => string;
   title: string;
-  /** x indices to mark with a vertical hairline (compactions). */
-  markers?: number[];
-  /** x indices to mark with a ring on the line (cold cache turns). */
-  dots?: number[];
+  /** Notable turns, drawn as glyphs just above the line (compactions also
+   * get a vertical hairline, since they are the moments the line drops).
+   * Several events at one index stack upward. */
+  events?: ChartEvent[];
   /** Extra tooltip line for point i (e.g. "cold · idle 12m"). */
   annotate?: (i: number) => string | null;
+  /** An extra column in the table view, one cell per x index (null = "—"),
+   * for a per-point figure the plot itself does not show — the drawer uses
+   * it for the gap since the previous turn. */
+  tableColumn?: { heading: string; cell: (i: number) => string | null };
   hue?: string;
   height?: number;
 }
@@ -276,9 +419,9 @@ export function LineChart({
   values,
   format,
   title,
-  markers = [],
-  dots = [],
+  events = [],
   annotate,
+  tableColumn,
   hue = "--chr-context",
   height = 180,
 }: LineChartProps) {
@@ -299,6 +442,13 @@ export function LineChart({
   const path = values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
   const area = `${path} L${x(values.length - 1)},${MARGIN.top + plotH} L${x(0)},${MARGIN.top + plotH} Z`;
   const stride = labelStride(values.length, plotW);
+  const inRange = events.filter((e) => e.index >= 0 && e.index < values.length);
+  // Glyphs at one index stack upward from the line, in legend order, so a
+  // cold turn after an idle gap shows both without either hiding the other.
+  const byIndex = new Map<number, ChartEvent[]>();
+  for (const e of inRange) byIndex.set(e.index, [...(byIndex.get(e.index) ?? []), e]);
+  const presentKinds = EVENT_ORDER.filter((k) => inRange.some((e) => e.kind === k));
+  const symbolId = (kind: ChartEventKind) => `${id}-glyph-${kind}`;
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -319,6 +469,13 @@ export function LineChart({
         onMouseLeave={() => setHover(null)}
       >
         <title id={`${id}-title`}>{title}</title>
+        <defs>
+          {presentKinds.map((k) => (
+            <symbol key={k} id={symbolId(k)} viewBox="0 0 16 16">
+              <path d={EVENT_KINDS[k].path} />
+            </symbol>
+          ))}
+        </defs>
         {ticks.map((t) => (
           <g key={t}>
             <line
@@ -333,31 +490,39 @@ export function LineChart({
             </text>
           </g>
         ))}
-        {markers.map((m) => (
-          <line
-            key={`m${m}`}
-            x1={x(m)}
-            x2={x(m)}
-            y1={MARGIN.top}
-            y2={MARGIN.top + plotH}
-            className="chr-chart__marker"
-            data-testid="chr-marker"
-          />
-        ))}
-        <path d={area} className="chr-chart__area" />
-        <path d={path} className="chr-chart__line" data-testid="chr-line" />
-        {dots
-          .filter((i) => i >= 0 && i < values.length)
-          .map((i) => (
-            <circle
-              key={`d${i}`}
-              cx={x(i)}
-              cy={y(values[i])}
-              r={4}
-              className="chr-chart__ring"
-              data-testid="chr-ring"
+        {inRange
+          .filter((e) => e.kind === "compaction")
+          .map((e) => (
+            <line
+              key={`m${e.index}`}
+              x1={x(e.index)}
+              x2={x(e.index)}
+              y1={MARGIN.top}
+              y2={MARGIN.top + plotH}
+              className="chr-chart__marker"
+              data-testid="chr-marker"
             />
           ))}
+        <path d={area} className="chr-chart__area" />
+        <path d={path} className="chr-chart__line" data-testid="chr-line" />
+        {[...byIndex.entries()].flatMap(([i, list]) =>
+          [...list]
+            .sort((a, b) => EVENT_ORDER.indexOf(a.kind) - EVENT_ORDER.indexOf(b.kind))
+            .map((e, stack) => (
+              <use
+                key={`${e.kind}${i}`}
+                href={`#${symbolId(e.kind)}`}
+                x={x(i) - GLYPH / 2}
+                y={y(values[i]) - GLYPH - GLYPH_LIFT - stack * (GLYPH + 2)}
+                width={GLYPH}
+                height={GLYPH}
+                className={`chr-chart__glyph chr-chart__glyph--${e.kind}`}
+                data-testid="chr-event"
+                data-kind={e.kind}
+                aria-label={`${EVENT_KINDS[e.kind].label} at turn ${i + 1}`}
+              />
+            ))
+        )}
         {values.map((_, i) =>
           i % stride === 0 || i === values.length - 1 ? (
             <text
@@ -398,11 +563,29 @@ export function LineChart({
           {annotate?.(hover) && <span>{annotate(hover)}</span>}
         </Tooltip>
       )}
+      {presentKinds.length > 0 && (
+        <ul className="chr-chart__legend" aria-label="Marks">
+          {presentKinds.map((k) => (
+            <li key={k} className="chr-chart__legend-item">
+              <svg viewBox="0 0 16 16" className={`chr-chart__legend-glyph chr-chart__glyph chr-chart__glyph--${k}`} aria-hidden="true">
+                <path d={EVENT_KINDS[k].path} />
+              </svg>
+              <span>{EVENT_KINDS[k].label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <TableView
         title={title}
+        extraHeading={tableColumn?.heading}
         rows={values.map((v, i) => {
-          const note = annotate?.(i);
-          return { label: `turn ${i + 1}${note ? ` (${note})` : ""}`, value: format(v) };
+          const marks = (byIndex.get(i) ?? []).map((e) => EVENT_KINDS[e.kind].label);
+          const note = [annotate?.(i), ...marks].filter(Boolean).join(" · ");
+          return {
+            label: `turn ${i + 1}${note ? ` (${note})` : ""}`,
+            value: format(v),
+            extra: tableColumn?.cell(i) ?? undefined,
+          };
         })}
       />
     </div>

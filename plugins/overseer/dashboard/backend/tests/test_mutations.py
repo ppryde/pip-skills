@@ -413,7 +413,13 @@ def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -
     This passes today because every existing POST route is already gated;
     it exists to FAIL the day a new route (or an edit to an existing one)
     drops the dependency.
+
+    The one deliberate exception is listed in ``UNGATED_POSTS``: chronicle's
+    sync writes nothing a caller chooses (only what the transcripts on disk
+    already say), is idempotent and cheap, and the Chronicle page runs it on
+    a timer from browsers that hold no token. Anything else must be gated.
     """
+    UNGATED_POSTS = {"/api/chronicle/sync"}
     app = create_app(root, token="s3cret")
 
     checked_post = 0
@@ -427,6 +433,9 @@ def test_every_post_api_route_requires_token_and_no_get_route_does(root: Path) -
         )
         if "POST" in route.methods:
             checked_post += 1
+            if route.path in UNGATED_POSTS:
+                assert not gated, f"POST {route.path} is listed as ungated but carries the gate"
+                continue
             assert gated, f"POST {route.path} is missing the require_token gate"
         if "GET" in route.methods:
             checked_get += 1

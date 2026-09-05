@@ -31,9 +31,9 @@ import skullIcon from "../assets/ui-icons/skull.png";
 import scrollIcon from "../assets/ui-icons/scroll.png";
 import settingsIcon from "../assets/ui-icons/settings.png";
 
-/** The dashboard's pages. Board|Atlas share the two-coin toggle; Chronicle
- * (the optional session-telemetry page) has its own button, shown only
- * when the chronicle plugin is installed beside this dashboard. */
+/** The dashboard's pages, each a coin in the view switcher. Chronicle (the
+ * optional session-telemetry page) gets a coin only when the chronicle
+ * plugin is installed beside this dashboard. */
 export type View = "board" | "atlas" | "chronicle";
 
 export interface TopBarProps {
@@ -113,8 +113,16 @@ export interface TopBarProps {
   view: View;
   onSelectView: (view: View) => void;
   /** Whether `/api/chronicle/status` reported the plugin installed — gates
-   * the Chronicle nav button entirely (absent plugin, absent button). */
+   * the Chronicle coin entirely (absent plugin, absent coin). */
   chronicleAvailable?: boolean;
+  /** The Chronicle's Sync action (App-owned, `useChronicleSync`). On the
+   * Chronicle page it takes the ＋ New card control's place in the toggle
+   * cluster — the page has no cards to add, and Sync is its one action. */
+  onChronicleSync?: () => void;
+  chronicleSyncing?: boolean;
+  /** On the Chronicle page the repo selector gains an "All repos" choice,
+   * since that page's data is account-wide. App-owned; see RepoSelector. */
+  chronicleAllRepos?: { selected: boolean; onSelect: (all: boolean) => void };
   /** WF-091: the Epic Atlas toolbar folded into the Controls group — single
    * toggle buttons rendered ONLY when `view === "atlas"` (retired
    * standalone `<AtlasToolbar>`, which sat between the topbar and the
@@ -200,6 +208,9 @@ function TopBar({
   hideVanquished,
   onToggleVanquished,
   chronicleAvailable = false,
+  onChronicleSync,
+  chronicleSyncing = false,
+  chronicleAllRepos,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -233,67 +244,50 @@ function TopBar({
   // (an unbegun repo's own live-session tally) and has no idle split to report.
   const idleCount = questingCountOverride === undefined ? fleet.idle : 0;
 
-  // The two coins are a 2-state toggle: clicking EITHER switches to the OTHER
-  // view. For the back (inactive) coin this reads naturally — its view is the
-  // other view anyway — and the front (active) coin now switches away rather
-  // than being a dead click. Only holds while there are two pages (see the
-  // JSX note); a third view would need a real segmented control.
-  // While the Chronicle page is showing, the coins keep Board in front (the
-  // page a coin click returns to) — the Chronicle button beside them is the
-  // pressed control, so the stack never shows two "back" coins.
-  const toggleView = () => onSelectView(view === "board" ? "atlas" : "board");
-  const boardCoinPressed = view !== "atlas";
+  // One coin per page, spread in an overlapping row; each coin selects its
+  // own view (the pressed coin is inert — it already is the page). This
+  // replaces the old two-coin "click either to swap" toggle, which only
+  // ever encoded two views. rpg-icons pack art: journal (the guild's belted
+  // quest-ledger), treasure map (dashed trail and all), sealed letter (the
+  // session ledger).
+  const coins: { view: View; label: string; title: string; icon: string }[] = [
+    { view: "board", label: "Board", title: "Board", icon: journalIcon },
+    { view: "atlas", label: "Atlas", title: "Atlas", icon: treasureMapIcon },
+    ...(chronicleAvailable
+      ? [{ view: "chronicle" as View, label: "Chronicle", title: "The Chronicle — session token usage and shape", icon: scrollIcon }]
+      : []),
+  ];
+  // The Chronicle has no cards or board provisions: on that page the
+  // Controls group and ＋ New card give way and Sync takes the ＋ slot. The
+  // repo and branch selectors stay and drive the Chronicle's scope directly
+  // (App feeds them that page's branch list and an "All repos" choice).
+  const onChronicle = view === "chronicle";
 
   return (
     <>
       <header className="topbar">
-        {/* WF-086 (moved): the Board|Atlas toggle is a small stack of two
-            overlapping "guild coins" to the LEFT of the wordmark. The active
-            view's coin sits in front; clicking EITHER coin switches to the
-            other view, and the active one slides to the front
-            (`.topbar__view-toggle*` in styles.css). Both are always-visible
-            (never behind the mobile "Controls ▾" collapse) and self-labelled
-            via `aria-label`/`title`. A two-coin stack only reads for two views
-            — fine while Board|Atlas are the only pages. The last-refreshed time
-            is no longer here: it moved to a small label beside Refresh below. */}
+        {/* WF-086 (moved): the view switcher is a row of overlapping "guild
+            coins" to the LEFT of the wordmark, the active view's coin in front
+            (`.topbar__view-toggle*` in styles.css). Always-visible (never
+            behind the mobile "Controls ▾" collapse) and self-labelled via
+            `aria-label`/`title`. The last-refreshed time is no longer here: it
+            moved to a small label beside Refresh below. */}
         <div className="topbar__identity">
-          <div className="topbar__view-toggle" role="group" aria-label="View">
-            <button
-              type="button"
-              className="topbar__view-toggle-btn"
-              aria-pressed={boardCoinPressed}
-              aria-label="Board"
-              title="Board"
-              onClick={toggleView}
-            >
-              {/* rpg-icons pack "journal" — the guild's belted quest-ledger */}
-              <img src={journalIcon} alt="" className="topbar__view-toggle-icon" />
-            </button>
-            <button
-              type="button"
-              className="topbar__view-toggle-btn"
-              aria-pressed={view === "atlas"}
-              aria-label="Atlas"
-              title="Atlas"
-              onClick={toggleView}
-            >
-              {/* rpg-icons pack "treasure map" — dashed trail and all */}
-              <img src={treasureMapIcon} alt="" className="topbar__view-toggle-icon" />
-            </button>
+          <div className="topbar__view-toggle" role="group" aria-label="View" data-count={coins.length}>
+            {coins.map((c) => (
+              <button
+                key={c.view}
+                type="button"
+                className="topbar__view-toggle-btn"
+                aria-pressed={view === c.view}
+                aria-label={c.label}
+                title={c.title}
+                onClick={() => onSelectView(c.view)}
+              >
+                <img src={c.icon} alt="" className="topbar__view-toggle-icon" />
+              </button>
+            ))}
           </div>
-          {chronicleAvailable && (
-            <button
-              type="button"
-              className="topbar__chronicle-btn"
-              aria-pressed={view === "chronicle"}
-              title="The Chronicle — session token usage and shape"
-              onClick={() => onSelectView(view === "chronicle" ? "board" : "chronicle")}
-            >
-              {/* rpg-icons pack "sealed letter" — the guild's session ledger */}
-              <img src={scrollIcon} alt="" className="topbar__chronicle-icon" />
-              Chronicle
-            </button>
-          )}
           <h1>Adventurers&rsquo; Guild Board</h1>
         </div>
 
@@ -314,11 +308,17 @@ function TopBar({
         <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
 
-        <RepoSelector repos={repos} activeRoot={activeRoot} onSelect={onSelectRepo} />
+        <RepoSelector
+          repos={repos}
+          activeRoot={activeRoot}
+          onSelect={onSelectRepo}
+          allOption={onChronicle ? chronicleAllRepos : undefined}
+        />
         <BranchFilter
           branches={branches}
           activeBranch={activeBranch}
           onSelect={onSelectBranch}
+          keepWhenEmpty={onChronicle}
         />
 
         {limits?.five_hour?.used_percentage !== undefined && (
@@ -360,36 +360,53 @@ function TopBar({
           >
             Filters {filtersOpen ? "▴" : "▾"}
           </Button>
-          <Button
-            className="topbar__controls-toggle"
-            aria-expanded={controlsOpen}
-            aria-controls="topbar-controls-group"
-            onClick={onToggleControls}
-          >
-            {/* rpg-icons pack "settings" gear — decorative only (`alt=""`),
-                so the button's accessible name stays plain "Controls" (task
-                C: no equivalent funnel/filter asset exists for the
-                "Filters ▾" button beside this one, so that stays text-only). */}
-            <img src={settingsIcon} alt="" className="topbar__toggle-icon" />
-            Controls {controlsOpen ? "▴" : "▾"}
-          </Button>
-          {/* "＋ New card" is now icon-only — `aria-label`/`title` keep it
-              accessible/resolvable by name exactly as the old "＋ New card"
-              text button was; opens the same NewCardDialog unchanged.
-              variant="neutral" (not "primary"): despite being a create
-              action, `.topbar__new-card`'s own chrome paints it with the
-              same PLAIN Role-A face as Refresh, not the gold `.qb-btn--
-              primary` fill — keeping it neutral here preserves that
-              existing look exactly (WF-097 follow-up). */}
-          <Button
-            variant="neutral"
-            className="topbar__new-card topbar__new-card--icon"
-            onClick={() => setNewCardOpen(true)}
-            aria-label="New card"
-            title="New card"
-          >
-            ＋
-          </Button>
+          {!onChronicle && (
+            <Button
+              className="topbar__controls-toggle"
+              aria-expanded={controlsOpen}
+              aria-controls="topbar-controls-group"
+              onClick={onToggleControls}
+            >
+              {/* rpg-icons pack "settings" gear — decorative only (`alt=""`),
+                  so the button's accessible name stays plain "Controls" (task
+                  C: no equivalent funnel/filter asset exists for the
+                  "Filters ▾" button beside this one, so that stays text-only). */}
+              <img src={settingsIcon} alt="" className="topbar__toggle-icon" />
+              Controls {controlsOpen ? "▴" : "▾"}
+            </Button>
+          )}
+          {onChronicle ? (
+            /* The Chronicle's one action, in the slot ＋ New card holds on the
+               other pages. Gold primary: it is the page's call to action, and
+               the blank-chronicle prompt points at it by name. */
+            <Button
+              variant="primary"
+              className="topbar__sync"
+              onClick={onChronicleSync}
+              disabled={chronicleSyncing || !onChronicleSync}
+              title="Read every session transcript on this machine into the chronicle"
+            >
+              {chronicleSyncing ? "Syncing…" : "Sync"}
+            </Button>
+          ) : (
+            /* "＋ New card" is icon-only — `aria-label`/`title` keep it
+               accessible/resolvable by name exactly as the old "＋ New card"
+               text button was; opens the same NewCardDialog unchanged.
+               variant="neutral" (not "primary"): despite being a create
+               action, `.topbar__new-card`'s own chrome paints it with the
+               same PLAIN Role-A face as Refresh, not the gold `.qb-btn--
+               primary` fill — keeping it neutral here preserves that
+               existing look exactly (WF-097 follow-up). */
+            <Button
+              variant="neutral"
+              className="topbar__new-card topbar__new-card--icon"
+              onClick={() => setNewCardOpen(true)}
+              aria-label="New card"
+              title="New card"
+            >
+              ＋
+            </Button>
+          )}
         </div>
 
         {/* WF-085 (Task 2/3): the secondary-controls group — Last Orders
@@ -402,7 +419,7 @@ function TopBar({
         <div
           id="topbar-controls-group"
           className="topbar__controls-group"
-          hidden={!controlsOpen}
+          hidden={!controlsOpen || onChronicle}
         >
           {/* Task 4: a small dotted-line header opening the group — same
               "quiet caption above a dashed rule" idea as FilterBar's own

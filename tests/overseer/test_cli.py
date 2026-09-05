@@ -1294,6 +1294,37 @@ class TestReposCommand:
         assert Path(by_label["repo-a"]) == repo_a.resolve()
         assert Path(by_label["repo-b"]) == repo_b.resolve()
 
+    def test_discovers_boards_under_every_watched_config_dir_once(self, tmp_path, monkeypatch, capsys):
+        # Multi-account: a board raised from a second account lives under that
+        # account's config dir. Once that dir is watched, `repos` lists it —
+        # and a repo with a board under BOTH dirs lists once.
+        monkeypatch.delenv("OVERSEER_DB", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        primary = tmp_path / "config"
+        personal = tmp_path / "config-personal"
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        repo_a = self._seed(tmp_path, monkeypatch, "repo-a")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        repo_b = self._seed(tmp_path, monkeypatch, "repo-b")
+        db.connect(repo_a, migrate=False).close()  # repo-a under the personal dir too
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        capsys.readouterr()
+
+        assert main(["--root", str(tmp_path), "repos", "--json"]) == 0
+        assert [r["label"] for r in json.loads(capsys.readouterr().out)] == ["repo-a"]
+
+        assert main(["--root", str(tmp_path), "claude-dirs", "add", str(personal), "--json"]) == 0
+        listed = json.loads(capsys.readouterr().out)
+        assert listed["claude_dirs"] == [str(primary), str(personal)]
+        assert main(["--root", str(tmp_path), "repos", "--json"]) == 0
+        data = json.loads(capsys.readouterr().out)
+        assert [r["label"] for r in data] == ["repo-a", "repo-b"]
+        assert Path(data[1]["root"]) == repo_b.resolve()
+
+        assert main(["--root", str(tmp_path), "claude-dirs", "remove", str(personal), "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["claude_dirs"] == [str(primary)]
+        assert main(["--root", str(tmp_path), "claude-dirs", "add", str(tmp_path / "nope")]) == 1
+
     def test_skips_board_without_git_derived_repo_root(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)
         monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)

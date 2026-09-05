@@ -184,6 +184,16 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     )
 
 
+def config_dir_of(transcript_path: Path) -> str | None:
+    """The Claude config dir a main transcript belongs to, from its layout
+    ``<config>/projects/<slug>/<session>.jsonl`` — None for any other shape
+    (a test fixture, a copied file)."""
+    parents = transcript_path.resolve().parents
+    if len(parents) >= 3 and parents[1].name == "projects":
+        return str(parents[2])
+    return None
+
+
 def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: Facts,
                              transcript_path: Path, now: float) -> None:
     """Create the session row if absent, then fill identity columns from the
@@ -196,6 +206,7 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
     updates: dict[str, Any] = {
         "project_slug": project_slug_of(transcript_path),
         "transcript_path": str(transcript_path),
+        "config_dir": config_dir_of(transcript_path),
         "cwd": cwd,
         "repo_root": repo_root_of(cwd) if cwd else None,
         "git_branch": facts.git_branch,
@@ -378,47 +389,6 @@ def ingest_session(conn: sqlite3.Connection, transcript_path: Path, session_id: 
     return {"lines": lines, "files": files}
 
 
-def mark_started(conn: sqlite3.Connection, session_id: str, *, cwd: str | None,
-                 transcript_path: str | None, now: float | None = None) -> None:
-    if now is None:
-        now = time.time()
-    conn.execute(
-        "INSERT OR IGNORE INTO sessions(session_id, updated_at, started_at) VALUES (?, ?, ?)",
-        (session_id, now, now),
-    )
-    if cwd:
-        conn.execute(
-            "UPDATE sessions SET cwd = ?, repo_root = COALESCE(?, repo_root) WHERE session_id = ?",
-            (cwd, repo_root_of(cwd), session_id),
-        )
-    if transcript_path:
-        conn.execute(
-            "UPDATE sessions SET transcript_path = ?, project_slug = ? WHERE session_id = ?",
-            (transcript_path, Path(transcript_path).parent.name, session_id),
-        )
-    # A resumed session gets a fresh SessionStart: never clear a recorded end
-    # time here silently — reopen instead so the row reads as live again.
-    conn.execute(
-        "UPDATE sessions SET ended_at = NULL, end_reason = NULL, updated_at = ? WHERE session_id = ?",
-        (now, session_id),
-    )
-    conn.commit()
-
-
-def mark_ended(conn: sqlite3.Connection, session_id: str, *, reason: str | None,
-               now: float | None = None) -> None:
-    if now is None:
-        now = time.time()
-    conn.execute(
-        "INSERT OR IGNORE INTO sessions(session_id, updated_at) VALUES (?, ?)", (session_id, now)
-    )
-    conn.execute(
-        "UPDATE sessions SET ended_at = ?, end_reason = ?, updated_at = ? WHERE session_id = ?",
-        (now, reason, now, session_id),
-    )
-    conn.commit()
-
-
 def scan_transcripts(projects: Path) -> list[Path]:
     """Every main transcript ``<slug>/<session>.jsonl`` under ``projects``
     (subagent files live one level deeper and are reached via their session)."""
@@ -430,13 +400,17 @@ def scan_transcripts(projects: Path) -> list[Path]:
     return out
 
 
-def sync(conn: sqlite3.Connection, projects: Path, *, now: float | None = None,
+def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | None = None,
          full: bool = False) -> dict[str, Any]:
     """Pull-on-demand reconciliation of the store against the transcripts on
     disk: stat every transcript (and its subagent files), ingest the tail of
     each one whose mtime/size moved since the cursor last saw it, and record
     the sync time. Idempotent; a sync with nothing changed is a directory
     walk and no reads.
+
+    ``projects`` is one ``projects/`` dir or several (one per watched Claude
+    config dir — see ``store.projects_dirs``); every transcript under each is
+    folded into the one store, its session row recording its ``config_dir``.
 
     ``full`` forgets every cursor first, so every file is re-read from byte 0
     — the way to populate columns added by a schema migration for turns that
@@ -448,10 +422,11 @@ def sync(conn: sqlite3.Connection, projects: Path, *, now: float | None = None,
         now = time.time()
     if full:
         conn.execute("DELETE FROM cursors")
+    roots = [projects] if isinstance(projects, Path) else list(projects)
     scanned = 0
     lines = 0
     changed: list[str] = []
-    for transcript in scan_transcripts(projects):
+    for transcript in (t for root in roots for t in scan_transcripts(root)):
         sid = transcript.stem
         files = [transcript, *(path for path, _ in subagent_files(transcript, sid))]
         scanned += len(files)
@@ -460,6 +435,7 @@ def sync(conn: sqlite3.Connection, projects: Path, *, now: float | None = None,
         result = ingest_session(conn, transcript, sid, now=now)
         lines += result["lines"]
         changed.append(sid)
+    backfill_config_dirs(conn)
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES ('synced_at', ?)", (str(now),)
     )
@@ -471,6 +447,27 @@ def sync(conn: sqlite3.Connection, projects: Path, *, now: float | None = None,
         "sessions": changed,
         "synced_at": now,
     }
+
+
+def backfill_config_dirs(conn: sqlite3.Connection) -> int:
+    """Fill ``sessions.config_dir`` for rows ingested before the column
+    existed, from the transcript path they already carry — so an existing
+    store reads correctly the first sync after upgrading, without a
+    ``--full`` re-read. Returns the number of rows filled."""
+    rows = conn.execute(
+        "SELECT session_id, transcript_path FROM sessions "
+        "WHERE config_dir IS NULL AND transcript_path IS NOT NULL"
+    ).fetchall()
+    filled = 0
+    for session_id, transcript_path in rows:
+        config_dir = config_dir_of(Path(transcript_path))
+        if config_dir is None:
+            continue
+        conn.execute(
+            "UPDATE sessions SET config_dir = ? WHERE session_id = ?", (config_dir, session_id)
+        )
+        filled += 1
+    return filled
 
 
 def backfill(conn: sqlite3.Connection, projects: Path, *, now: float | None = None) -> dict[str, Any]:

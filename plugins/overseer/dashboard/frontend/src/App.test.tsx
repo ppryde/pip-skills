@@ -562,3 +562,58 @@ describe("<App/> — design library showcase (#design hash)", () => {
     expect(document.querySelector(".app-shell")).toBeInTheDocument();
   });
 });
+
+// The current page lives in the URL hash (`#atlas`, `#chronicle`; the board
+// is the bare URL) so a reload lands where you were. Same no-router hash
+// idiom as the `#design` showcase above, which keeps its own hash.
+describe("<App/> — page in the URL hash", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    window.history.replaceState(null, "", window.location.pathname);
+  });
+
+  it("lands on the Atlas when the hash says so on mount", async () => {
+    window.location.hash = "#atlas";
+    const { container } = render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+    expect(container.querySelector(".atlas-chart")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Atlas" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("writes the hash as the page changes, and clears it for the board", async () => {
+    render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+    expect(window.location.hash).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    expect(window.location.hash).toBe("#atlas");
+
+    fireEvent.click(screen.getByRole("button", { name: "Board" }));
+    expect(window.location.hash).toBe("");
+  });
+
+  it("follows a hand-edited hash", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled());
+    await screen.findByLabelText("Repo");
+
+    window.location.hash = "#atlas";
+    fireEvent(window, new Event("hashchange"));
+    expect(container.querySelector(".atlas-chart")).toBeInTheDocument();
+
+    window.location.hash = "";
+    fireEvent(window, new Event("hashchange"));
+    expect(container.querySelector(".board")).toBeInTheDocument();
+  });
+});

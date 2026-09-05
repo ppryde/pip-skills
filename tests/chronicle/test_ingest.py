@@ -185,28 +185,6 @@ class TestIngestSession:
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
-class TestLifecycle:
-    def test_mark_started_then_ended(self, tmp_path):
-        conn = store.connect()
-        ingest.mark_started(conn, "s9", cwd=str(tmp_path), transcript_path=str(tmp_path / "x" / "s9.jsonl"), now=100.0)
-        row = _session(conn, "s9")
-        assert row["started_at"] == 100.0
-        assert row["cwd"] == str(tmp_path)
-        assert row["project_slug"] == "x"
-        ingest.mark_ended(conn, "s9", reason="exit", now=200.0)
-        row = _session(conn, "s9")
-        assert (row["ended_at"], row["end_reason"]) == (200.0, "exit")
-        # A resume re-opens the row.
-        ingest.mark_started(conn, "s9", cwd=None, transcript_path=None, now=300.0)
-        assert _session(conn, "s9")["ended_at"] is None
-
-    def test_mark_started_keeps_earliest_start(self):
-        conn = store.connect()
-        ingest.mark_started(conn, "s9", cwd=None, transcript_path=None, now=100.0)
-        ingest.mark_started(conn, "s9", cwd=None, transcript_path=None, now=500.0)
-        assert _session(conn, "s9")["started_at"] == 100.0
-
-
 class TestRepoRoot:
     def test_outside_git_is_none(self, tmp_path):
         assert ingest.repo_root_of(str(tmp_path)) is None
@@ -239,6 +217,39 @@ class TestSync:
         assert result["synced_at"] == 500.0
         assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 3
         assert conn.execute("SELECT value FROM meta WHERE key='synced_at'").fetchone()[0] == "500.0"
+
+    def test_sync_spans_several_projects_dirs_and_records_the_config_dir(self, tmp_path, projects):
+        # Multi-account: a second config dir's projects/ is folded into the
+        # same store; each session row remembers the dir it came from.
+        from .conftest import TranscriptBuilder
+        personal = tmp_path / "config-personal" / "projects"
+        personal.mkdir(parents=True)
+        TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        TranscriptBuilder(personal, "-a", "s2").turn("m1", T0).write()
+        conn = store.connect()
+        result = ingest.sync(conn, [projects, personal])
+        assert sorted(result["sessions"]) == ["s1", "s2"]
+        rows = dict(conn.execute("SELECT session_id, config_dir FROM sessions").fetchall())
+        assert rows == {
+            "s1": str(projects.parent.resolve()),
+            "s2": str(personal.parent.resolve()),
+        }
+
+    def test_sync_backfills_config_dir_on_rows_from_before_the_column(self, projects):
+        from .conftest import TranscriptBuilder
+        TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET config_dir = NULL")  # as an upgraded store looks
+        conn.commit()
+        result = ingest.sync(conn, projects)  # nothing on disk moved …
+        assert result["changed"] == 0
+        # … but the row is filled from its transcript path all the same.
+        assert conn.execute("SELECT config_dir FROM sessions").fetchone()[0] == str(projects.parent.resolve())
+
+    def test_config_dir_is_derived_from_the_transcript_layout(self, tmp_path):
+        assert ingest.config_dir_of(tmp_path / "cfg" / "projects" / "-slug" / "sid.jsonl") == str((tmp_path / "cfg").resolve())
+        assert ingest.config_dir_of(tmp_path / "elsewhere" / "sid.jsonl") is None
 
     def test_unchanged_files_are_skipped(self, projects, monkeypatch):
         from .conftest import TranscriptBuilder

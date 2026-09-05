@@ -85,6 +85,48 @@ describe("<RepoSelector/>", () => {
     expect(onSelect).toHaveBeenCalledWith("/b");
   });
 
+  describe("All repos option (account-wide pages)", () => {
+    it("is absent by default", () => {
+      render(<RepoSelector repos={[repo({ label: "repo-a", root: "/a", current: true })]} activeRoot="/a" onSelect={() => {}} />);
+      expect(screen.queryByRole("option", { name: "All repos" })).not.toBeInTheDocument();
+    });
+
+    it("leads the list, reports its own selection, and clears it when a real repo is picked", () => {
+      const onSelect = vi.fn();
+      const onAll = vi.fn();
+      const { rerender } = render(
+        <RepoSelector
+          repos={[repo({ label: "repo-a", root: "/a", current: true }), repo({ label: "repo-b", root: "/b" })]}
+          activeRoot="/a"
+          onSelect={onSelect}
+          allOption={{ selected: false, onSelect: onAll }}
+        />
+      );
+      const options = screen.getAllByRole("option");
+      expect(options[0]).toHaveTextContent("All repos");
+      expect(screen.getByLabelText("Repo")).toHaveValue("/a");
+
+      fireEvent.change(screen.getByLabelText("Repo"), { target: { value: options[0].getAttribute("value") } });
+      expect(onAll).toHaveBeenCalledWith(true);
+      expect(onSelect).not.toHaveBeenCalled();
+
+      // Selected: the select shows All while activeRoot is left alone underneath.
+      rerender(
+        <RepoSelector
+          repos={[repo({ label: "repo-a", root: "/a", current: true }), repo({ label: "repo-b", root: "/b" })]}
+          activeRoot="/a"
+          onSelect={onSelect}
+          allOption={{ selected: true, onSelect: onAll }}
+        />
+      );
+      expect(screen.getByLabelText("Repo")).toHaveValue(options[0].getAttribute("value"));
+
+      fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "/b" } });
+      expect(onAll).toHaveBeenLastCalledWith(false);
+      expect(onSelect).toHaveBeenCalledWith("/b");
+    });
+  });
+
   describe("unbegun repos (has_board: false — WF-032)", () => {
     it("renders an unbegun repo's option with the distinct class and its live-agent count hint", () => {
       render(

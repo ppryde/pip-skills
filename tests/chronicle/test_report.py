@@ -106,6 +106,24 @@ class TestSummary:
         assert out["totals"]["sessions"] == 2
         assert [d["day"] for d in out["by_day"]] == ["2026-09-02"]
 
+    def test_branch_filter_is_session_level(self, projects):
+        conn = _seed(projects)
+        conn.execute("UPDATE sessions SET git_branch = 'feat/x' WHERE session_id IN ('s1', 's3')")
+        conn.execute("UPDATE sessions SET git_branch = 'main' WHERE session_id = 's2'")
+        conn.commit()
+        out = report.summary(conn, branch="feat/x")
+        # s1 (1 turn, /repo/a) + s3 (1 turn, /repo/b): whole sessions, across repos.
+        assert out["totals"]["sessions"] == 2
+        assert out["totals"]["turns"] == 2
+        assert out["tools"] == [{"tool_name": "Bash", "calls": 1, "sessions": 1}]
+        # Composes with the repo filter.
+        out = report.summary(conn, repo_root="/repo/a", branch="feat/x")
+        assert out["totals"]["sessions"] == 1
+        rows = report.sessions(conn, branch="main")
+        assert [r["session_id"] for r in rows] == ["s2"]
+        # An unknown branch is an empty window, not an error.
+        assert report.summary(conn, branch="nope")["totals"]["sessions"] == 0
+
     def test_empty_store(self):
         conn = store.connect()
         out = report.summary(conn)

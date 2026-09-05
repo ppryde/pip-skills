@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import TopBar from "./components/TopBar";
 import type { View } from "./components/TopBar";
 import ChroniclePage from "./components/chronicle/ChroniclePage";
-import { useChronicleStatus } from "./board/chronicle/useChronicle";
+import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
+import Waylaid from "./components/Waylaid";
+
+/** useBoard's poll cadence, for the fetch-failure banner's countdown. */
+const BOARD_RETRY_SECONDS = 5;
+import type { ChronicleQuery } from "./api/types";
+
+type ChronicleScope = NonNullable<ChronicleQuery["scope"]>;
+import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
 import FilterBar from "./components/FilterBar";
@@ -17,7 +25,7 @@ import { useRepos } from "./board/useRepos";
 import { useCardFilter } from "./board/useCardFilter";
 import { useIconKeyGlow } from "./board/useIconKeyGlow";
 import { buildParty } from "./board/party";
-import { distinctBranches } from "./board/branches";
+import { distinctBranches, orderBranchesByActivity } from "./board/branches";
 import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilter";
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
@@ -36,6 +44,15 @@ function readStoredRoot(): string | null {
 /** Order-insensitive equality for the filter's two label arrays — used only
  * to decide whether `filter` still equals `DEFAULT_FILTER` (gates the
  * FilterBar's Clear button). */
+/** The page a URL hash names, or null for anything that isn't one of ours
+ * (the bare URL, `#design`, a stray anchor). Chronicle is accepted here
+ * even before its plugin status is known — the guard effect in App falls
+ * back to the board once status says the page isn't offered. */
+function viewFromHash(hash: string): View | null {
+  const name = hash.replace(/^#/, "");
+  return name === "board" || name === "atlas" || name === "chronicle" ? name : null;
+}
+
 function sameLabelSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const sorted = [...b].sort();
@@ -151,9 +168,30 @@ function App() {
   // collapse/reveal its own region anywhere.
   const [controlsOpen, setControlsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // WF-086: Board|Atlas view toggle — session-local (no localStorage,
-  // same precedent as `activeBranch`), reset to "board" on reload.
-  const [view, setView] = useState<View>("board");
+  // The current page, mirrored into the URL hash (`#atlas`, `#chronicle`;
+  // the board is the bare URL) so a reload or a shared link lands on the
+  // same page — the one piece of view state that survives a refresh. Same
+  // no-router hash idiom as the `#design` showcase below, which keeps its
+  // own hash and takes over the whole app when set. `replaceState` rather
+  // than assigning `location.hash`, so clicking between coins never piles
+  // up history entries; a hand-edited hash or Back/Forward still lands via
+  // `hashchange`.
+  const [view, setView] = useState<View>(() => viewFromHash(window.location.hash) ?? "board");
+  useEffect(() => {
+    if (window.location.hash === "#design") return;
+    const wanted = view === "board" ? "" : `#${view}`;
+    if (window.location.hash === wanted) return;
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${wanted}`);
+  }, [view]);
+  useEffect(() => {
+    function onHashChange() {
+      const next = viewFromHash(window.location.hash);
+      if (next !== null) setView(next);
+      else if (window.location.hash === "") setView("board");
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
   // Chronicle (optional sibling plugin): one status read on mount decides
   // whether the page is offered at all. `null` = not yet known.
   const chronicleStatus = useChronicleStatus();
@@ -165,6 +203,59 @@ function App() {
       setView("board");
     }
   }, [view, chronicleStatus, chronicleAvailable]);
+  // The Chronicle's filters and its Sync action are App-owned for the same
+  // reason the Atlas toggles are (WF-091): the controls render in the top
+  // bar / filter region while the data renders in the page, so both need
+  // the same values. The top bar's own repo and branch selectors drive the
+  // Chronicle's scope directly on that page — the repo selector gains an
+  // "All repos" choice there (`chronicleAllRepos`, separate from
+  // `activeRoot` so the board's root survives a visit), and the branch
+  // selector reuses `activeBranch`, offered the branches chronicle actually
+  // saw in the window rather than the board's card branches. Only the time
+  // window has a control of its own (`<ChronicleFilterBar/>`). Session-
+  // local, no localStorage. The fetch is gated on the view so the board
+  // never pays for chronicle polling. An unbegun repo's root is refused on
+  // every scoped read, so its scope is pinned to "all" regardless.
+  const [chronicleDays, setChronicleDays] = useState<number | undefined>(30);
+  const [chronicleAllRepos, setChronicleAllRepos] = useState(false);
+  const chronicleScope: ChronicleScope = chronicleAllRepos || isUnbegun ? "all" : "repo";
+  const chronicle = useChronicle(
+    activeRoot,
+    { days: chronicleDays, scope: chronicleScope, branch: activeBranch },
+    view === "chronicle"
+  );
+  // Chronicle is pull only (no hooks, by design) — while the page shows, the
+  // dashboard is what keeps its store current: a quiet sync on open and
+  // every minute after.
+  const chronicleSync = useChronicleSync(chronicle.refresh, view === "chronicle");
+  // Branches chronicle saw in this window. Taken from the UNFILTERED session
+  // list only: once a branch filter is on, the fetched sessions all carry
+  // that one branch and the list would collapse to it, leaving no way to
+  // hop to another without clearing first. So the pool is refreshed while
+  // no branch is chosen and held while one is (a repo or window change made
+  // mid-filter shows the previous pool until the branch is cleared — the
+  // "All" option is always there to do that). The active branch is always
+  // listed, so the selector never shows a filter it cannot name.
+  // Ordered by each branch's newest session activity, most recent first —
+  // the same recency order the board's list and the repo selector use.
+  const [chronicleBranchPool, setChronicleBranchPool] = useState<string[]>([]);
+  useEffect(() => {
+    if (activeBranch !== null) return;
+    const activity = new Map<string, number>();
+    for (const s of chronicle.sessions) {
+      if (!s.git_branch) continue;
+      const ts = s.last_activity_at ?? s.started_at ?? 0;
+      activity.set(s.git_branch, Math.max(activity.get(s.git_branch) ?? 0, ts));
+    }
+    setChronicleBranchPool(orderBranchesByActivity(activity));
+  }, [chronicle.sessions, activeBranch]);
+  const chronicleBranches = useMemo(
+    () =>
+      activeBranch && !chronicleBranchPool.includes(activeBranch)
+        ? [...chronicleBranchPool, activeBranch]
+        : chronicleBranchPool,
+    [chronicleBranchPool, activeBranch]
+  );
   // WF-091: the Epic Atlas toolbar's toggles, lifted here from
   // EpicAtlas-local state — the controls that drive them now live in
   // TopBar's Controls group (shown only on `view === "atlas"`), so both
@@ -271,7 +362,7 @@ function App() {
         repos={repos}
         activeRoot={activeRoot}
         onSelectRepo={handleSelectRepo}
-        branches={branches}
+        branches={view === "chronicle" ? chronicleBranches : branches}
         activeBranch={activeBranch}
         onSelectBranch={setActiveBranch}
         // Task 10: an unbegun repo never populates `party` (sessions are
@@ -300,7 +391,20 @@ function App() {
         hideVanquished={hideVanquished}
         onToggleVanquished={setHideVanquished}
         chronicleAvailable={chronicleAvailable}
+        onChronicleSync={() => void chronicleSync.sync()}
+        chronicleSyncing={chronicleSync.syncing}
+        chronicleAllRepos={{ selected: chronicleScope === "all", onSelect: setChronicleAllRepos }}
       />
+      {/* The Chronicle's filters take the board FilterBar's slot (same id,
+          same "Filters ▾" collapse) — exactly one of the two renders. */}
+      {view === "chronicle" && (
+        <ChronicleFilterBar
+          days={chronicleDays}
+          onDays={setChronicleDays}
+          syncNote={chronicleSync.note}
+          filtersOpen={filtersOpen}
+        />
+      )}
       {/* F3/WF-061: only shown once a real board exists — an unbegun repo
           (holding page) or a still-loading/errored board has nothing for it
           to filter, so it renders exactly alongside <Board/> below. `board`
@@ -336,7 +440,13 @@ function App() {
             reachable for an unbegun repo too — the page just locks its
             scope to "All repos" since a boardless root can't be named. */}
         {view === "chronicle" ? (
-          <ChroniclePage activeRoot={activeRoot} repoScopable={!isUnbegun} />
+          <ChroniclePage
+            summary={chronicle.summary}
+            sessions={chronicle.sessions}
+            loading={chronicle.loading}
+            error={chronicle.error}
+            onRetry={() => void chronicle.refresh()}
+          />
         ) : isUnbegun && selectedRepo ? (
           <UnbegunHolding
             repo={selectedRepo}
@@ -347,7 +457,9 @@ function App() {
             {loading && !board && (
               <p className="board-placeholder">Loading board…</p>
             )}
-            {error && <p className="board-error">{error}</p>}
+            {error && (
+              <Waylaid error={error} retryEverySeconds={BOARD_RETRY_SECONDS} onRetry={() => void refresh()} />
+            )}
             {board && view === "board" && (
               <Board
                 board={board}

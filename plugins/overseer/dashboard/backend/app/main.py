@@ -247,6 +247,10 @@ def _session_summary(sid: str, entry: dict[str, Any], now: float) -> dict[str, A
     }
     if entry.get("branch"):
         out["branch"] = entry["branch"]
+    # Multi-account: which Claude config dir's census store this came from
+    # (set by run_census_all's merge; absent on a single pinned store).
+    if entry.get("config_dir"):
+        out["config_dir"] = entry["config_dir"]
     model = payload.get("model") or {}
     if model.get("display_name"):
         out["model"] = model["display_name"]
@@ -300,6 +304,54 @@ def _sessions_list(repo_root: Path) -> list[dict[str, Any]]:
     # side, but every other consumer of this endpoint gets the order we send.
     sessions.sort(key=_active_ts, reverse=True)
     return sessions
+
+
+def _census_activity_by_root() -> dict[Path, dict[str, float]]:
+    """Per derived repo root, across every session census knows about:
+    ``live`` (the count within `_STALE_HORIZON_SECONDS`, as
+    `_live_session_counts_by_root`) and ``last_active`` (the newest
+    `_active_ts` of ANY session there, live or not) — the latter orders the
+    repo selector by recency. Ghosts (a `worktree_cwd` that no longer
+    resolves to a repo) are dropped. Soft-degrades to `{}`."""
+    data = run_census_all()
+    if not data:
+        return {}
+    sessions_dict = data.get("sessions") or {}
+    now = time.time()
+    root_cache: dict[str, Path | None] = {}
+    out: dict[Path, dict[str, float]] = {}
+    for entry in sessions_dict.values():
+        cwd = entry.get("worktree_cwd")
+        if not cwd:
+            continue
+        if cwd not in root_cache:
+            root_cache[cwd] = derive_repo_root(Path(cwd))
+        root = root_cache[cwd]
+        if root is None:
+            continue
+        stats = out.setdefault(root, {"live": 0, "last_active": 0.0})
+        if (now - _entry_ts(entry)) <= _STALE_HORIZON_SECONDS:
+            stats["live"] += 1
+        stats["last_active"] = max(stats["last_active"], _active_ts(entry))
+    return out
+
+
+def _chronicle_last_activity_by_root() -> dict[Path, float]:
+    """Per repo root, the newest session activity chronicle has recorded —
+    history census has long forgotten. `{}` when chronicle is absent."""
+    if not chronicle_installed():
+        return {}
+    data = run_chronicle("repos")
+    rows = (data or {}).get("repos") if isinstance(data, dict) else None
+    out: dict[Path, float] = {}
+    for row in rows or []:
+        root, ts = row.get("repo_root"), row.get("last_activity_at")
+        if root and isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            try:
+                out[Path(root).resolve()] = float(ts)
+            except OSError:
+                continue
+    return out
 
 
 def _live_session_counts_by_root() -> dict[Path, int]:
@@ -500,7 +552,14 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         fetches the board for one (see docs/superpowers/specs/2026-07-28
         -overseer-worktree-branch-distinction.md).
         """
-        live_counts = _live_session_counts_by_root()
+        census = _census_activity_by_root()
+        history = _chronicle_last_activity_by_root()
+
+        def last_active(root: Path) -> float | None:
+            # Newest of census (live/recent) and chronicle (the long tail).
+            ts = max(census.get(root, {}).get("last_active", 0.0), history.get(root, 0.0))
+            return ts if ts > 0 else None
+
         repos_list: list[dict[str, Any]] = []
         board_roots: set[Path] = set()
         for entry in _discover_roots(launch_root):
@@ -510,21 +569,26 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             item = dict(entry)
             item["current"] = root == _derived_launch_root
             item["has_board"] = True
-            item["live_sessions"] = live_counts.get(root, 0)
+            item["live_sessions"] = int(census.get(root, {}).get("live", 0))
+            item["last_active_at"] = last_active(root)
             repos_list.append(item)
             board_roots.add(root)
 
-        for root, count in live_counts.items():
-            if root in board_roots:
+        for root, stats in census.items():
+            if root in board_roots or stats["live"] <= 0:
                 continue
             repos_list.append({
                 "label": derive_repo_label(root) or root.name,
                 "root": str(root),
                 "current": False,
                 "has_board": False,
-                "live_sessions": count,
+                "live_sessions": int(stats["live"]),
+                "last_active_at": last_active(root),
             })
 
+        # Most recently active first; repos nobody has touched (as far as
+        # census or chronicle know) trail, alphabetically.
+        repos_list.sort(key=lambda r: (-(r["last_active_at"] or 0.0), r["label"]))
         return {"repos": repos_list}
 
     @app.get("/api/sessions")
@@ -803,6 +867,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
         return ["--days", str(days)]
 
+    def _branch_args(branch: str | None) -> list[str]:
+        # A session-level filter on the branch chronicle last saw the session
+        # on. Passed through as an exact match; chronicle does no globbing,
+        # and the value is an argv element, never shell-interpolated.
+        if not branch:
+            return []
+        if len(branch) > 255:
+            raise HTTPException(status_code=400, detail="branch name too long")
+        return ["--branch", branch]
+
     @app.get("/api/chronicle/status")
     def chronicle_status() -> dict[str, Any]:
         if not chronicle_installed():
@@ -814,29 +888,34 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.get("/api/chronicle/summary")
     def chronicle_summary(root: str | None = None, scope: str | None = None,
-                          days: int | None = None) -> dict[str, Any]:
-        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days)]
+                          days: int | None = None, branch: str | None = None) -> dict[str, Any]:
+        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch)]
         data = run_chronicle(*args)
         return data if data is not None else {"totals": None}
 
     @app.get("/api/chronicle/sessions")
     def chronicle_sessions(root: str | None = None, scope: str | None = None,
-                           days: int | None = None, limit: int = 200) -> dict[str, Any]:
+                           days: int | None = None, branch: str | None = None,
+                           limit: int = 200) -> dict[str, Any]:
         if limit < 1 or limit > 2000:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
-        args = ["sessions", *_chronicle_scope(root, scope), *_days_args(days),
+        args = ["sessions", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
                 "--limit", str(limit)]
         data = run_chronicle(*args)
         return data if data is not None else {"sessions": []}
 
-    @app.post("/api/chronicle/sync", dependencies=[Depends(require_token)])
+    @app.post("/api/chronicle/sync")
     def chronicle_sync() -> dict[str, Any]:
         """Pull-on-demand reconciliation: chronicle stats every transcript on
         disk and ingests only the files that moved since it last looked. The
         ONLY write path the dashboard has into chronicle's store — and it is
         account-wide (the projects dir is not per-repo), so no root is taken.
-        Token-gated like every other mutation. 503 when the plugin is absent
-        or the sync itself fails (chronicle prints JSON on success only)."""
+        NOT token-gated, unlike the board mutations: it writes nothing a
+        caller chooses (only what the transcripts already say), is idempotent,
+        and with per-file cursors costs a directory walk — so the Chronicle
+        page's timed sync works from any browser that can read the page. 503
+        when the plugin is absent or the sync itself fails (chronicle prints
+        JSON on success only)."""
         if not chronicle_installed():
             raise HTTPException(status_code=503, detail="chronicle plugin is not installed")
         data = run_chronicle("sync", timeout=120)

@@ -225,6 +225,9 @@ export interface SessionSummary {
    * Check `stale` FIRST: a session that died within ten minutes of its last
    * activity is `idle: false`, so read alone this field says "working". */
   idle?: boolean;
+  /** Multi-account: the Claude config dir whose census store reported this
+   * session (e.g. "/Users/x/.claude-personal"). Absent on a single store. */
+  config_dir?: string;
   session_name?: string;
   model?: string;
   /** Git branch the session's worktree is on (WF-031) — omitted when
@@ -257,6 +260,10 @@ export interface RepoEntry {
   current: boolean;
   has_board: boolean;
   live_sessions: number;
+  /** Epoch seconds of the repo's most recent session activity, from census
+   * (live/recent) and chronicle (history) — whichever is newer. Null when
+   * neither knows the repo. The list arrives sorted by it, newest first. */
+  last_active_at?: number | null;
 }
 
 export interface ReposResponse {
@@ -447,6 +454,9 @@ export interface ChronicleSession {
   cwd: string | null;
   repo_root: string | null;
   git_branch: string | null;
+  /** Multi-account: the Claude config dir the transcript was read from.
+   * Absent/null on rows ingested before the column existed. */
+  config_dir?: string | null;
   entrypoint: string | null;
   version: string | null;
   title: string | null;
@@ -542,4 +552,7 @@ export interface ChronicleQuery {
   /** `"all"` drops the repo filter (account-wide); default scopes to the
    * active root exactly like `/api/board`. */
   scope?: "repo" | "all";
+  /** Only sessions chronicle last saw on this git branch (session-level: a
+   * session that switched branches counts wholly where it ended up). */
+  branch?: string | null;
 }

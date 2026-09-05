@@ -1,9 +1,12 @@
 import json
+import os
 import sqlite3
 from pathlib import Path
 import pytest
 from scripts import config
-from scripts.store import derive_repo_root
+from scripts.store import derive_repo_label, derive_repo_root
+
+from factories import git_init
 
 
 def _init_git(root: Path):
@@ -190,3 +193,75 @@ def test_plain_owner_reads_board_at_path_with_special_chars(tmp_path):
     plain = tmp_path / "weird #dir with space" / "api"
     _seed_plain_board(plain, owner_root)
     assert config._plain_owner(plain) == owner_root
+
+
+class TestClaudeDirs:
+    """Multi-account: `config.claude_dirs()` is the primary dir plus the
+    `CLAUDE_CONFIG_DIRS` env list plus the machine config's `claude_dirs`,
+    existing dirs only, deduplicated, primary first. `central_root` searches
+    every one for an existing board before defaulting to the primary."""
+
+    def _dirs(self, tmp_path, monkeypatch, *names):
+        made = []
+        for name in names:
+            d = tmp_path / name
+            d.mkdir(parents=True, exist_ok=True)
+            made.append(d)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(made[0]))
+        monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
+        monkeypatch.delenv("OVERSEER_CENTRAL", raising=False)
+        return made
+
+    def test_primary_only_by_default(self, tmp_path, monkeypatch):
+        primary, = self._dirs(tmp_path, monkeypatch, "claude")
+        assert config.claude_dirs() == [primary]
+        assert config.load_machine_config() == {}
+
+    def test_add_and_remove_edit_the_machine_config(self, tmp_path, monkeypatch):
+        primary, personal = self._dirs(tmp_path, monkeypatch, "claude", "claude-personal")
+        assert config.add_claude_dir(personal) == [str(personal)]
+        assert config.machine_config_path() == primary / "overseer" / "config.json"
+        assert json.loads(config.machine_config_path().read_text()) == {"claude_dirs": [str(personal)]}
+        assert config.claude_dirs() == [primary, personal]
+        # Adding twice is idempotent; removing clears it.
+        assert config.add_claude_dir(personal) == [str(personal)]
+        assert config.remove_claude_dir(personal) == []
+        assert config.claude_dirs() == [primary]
+
+    def test_env_list_and_dedup_and_missing(self, tmp_path, monkeypatch):
+        primary, personal, work = self._dirs(tmp_path, monkeypatch, "claude", "personal", "work")
+        config.add_claude_dir(work)
+        monkeypatch.setenv(
+            "CLAUDE_CONFIG_DIRS",
+            os.pathsep.join([str(personal), str(work), str(tmp_path / "gone"), str(primary)]),
+        )
+        # Env entries come before file entries; the primary is never listed
+        # twice; a dir that does not exist is dropped.
+        assert config.claude_dirs() == [primary, personal, work]
+
+    def test_malformed_machine_config_raises(self, tmp_path, monkeypatch):
+        primary, = self._dirs(tmp_path, monkeypatch, "claude")
+        config.machine_config_path().parent.mkdir(parents=True)
+        config.machine_config_path().write_text("{not json")
+        with pytest.raises(ValueError):
+            config.claude_dirs()
+
+    def test_central_root_finds_a_board_under_another_watched_dir(self, tmp_path, monkeypatch):
+        primary, personal = self._dirs(tmp_path, monkeypatch, "claude", "claude-personal")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_init(repo)
+        label = derive_repo_label(repo)
+        canonical = derive_repo_root(repo)
+        elsewhere = personal / "overseer" / f"{label}-{config._short_hash(canonical)}"
+        elsewhere.mkdir(parents=True)
+        # Not watched yet: the primary's (non-existent) folder is the answer.
+        assert config.central_root(repo) == primary / "overseer" / elsewhere.name
+        # Watched: the existing folder under the second account wins.
+        config.add_claude_dir(personal)
+        assert config.central_root(repo) == elsewhere
+        # A fresh repo still defaults to the primary for creation.
+        other = tmp_path / "other"
+        other.mkdir()
+        git_init(other)
+        assert config.central_root(other).parent == primary / "overseer"

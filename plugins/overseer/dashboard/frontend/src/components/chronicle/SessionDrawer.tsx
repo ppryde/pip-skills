@@ -10,10 +10,10 @@ import {
   cacheVerdict,
   formatActive,
   formatBytes,
+  formatCostWithUnpriced,
   formatDuration,
   formatPct,
   formatTokens,
-  formatUsd,
   formatWhen,
   repoLabel,
   sessionName,
@@ -21,6 +21,7 @@ import {
 } from "../../board/chronicle/format";
 import ArtifactList from "./ArtifactList";
 import { BarList, LineChart } from "./ChronicleCharts";
+import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
 
@@ -28,6 +29,13 @@ export interface SessionDrawerProps {
   sessionId: string | null;
   onClose: () => void;
 }
+
+/** A gap between turns worth naming in the tooltip — on a 5-minute cache
+ * TTL, long enough to have gone cold. */
+const IDLE_GAP_S = 300;
+/** How many of the biggest jumps get a peak glyph on the chart — the single
+ * largest; the table beneath lists the rest. */
+const JUMPS_MARKED = 1;
 
 export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps) {
   const { detail, loading, error } = useChronicleSession(sessionId);
@@ -44,21 +52,28 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
   if (sessionId === null) return null;
 
   const contextSeries = detail?.turn_series.map((t) => t.context_tokens) ?? [];
-  const coldTurns = detail?.turn_series.flatMap((t, i) => (t.cold ? [i] : [])) ?? [];
   const annotate = (i: number): string | null => {
     const turn = detail?.turn_series[i];
     if (!turn) return null;
     const parts: string[] = [];
-    if (turn.cold) parts.push(`cold · wrote ${formatTokens(turn.cache_creation_tokens)}`);
-    if (turn.gap_s !== null && turn.gap_s >= 300) parts.push(`idle ${formatDuration(turn.gap_s)}`);
+    if (turn.cold) parts.push(`wrote ${formatTokens(turn.cache_creation_tokens)} to cache`);
+    if (turn.gap_s !== null && turn.gap_s >= IDLE_GAP_S) parts.push(`idle ${formatDuration(turn.gap_s)}`);
     return parts.length > 0 ? parts.join(" · ") : null;
   };
-  // Compactions are timestamps; place each marker at the first turn at or
-  // after it so the hairline lands where the context actually dropped.
-  const markers =
-    detail?.compactions_at
-      .map((ts) => detail.turn_series.findIndex((t) => (t.ts ?? 0) >= ts))
-      .filter((i) => i >= 0) ?? [];
+  // The chart's marks: every cold turn (idle gaps stay in the tooltip — a
+  // mark for them was tried and read as noise); the single biggest jump;
+  // and each compaction placed at the first turn at or after its timestamp
+  // so the hairline lands where the context actually dropped.
+  const events: ChartEvent[] = detail
+    ? [
+        ...detail.turn_series.flatMap((t, i): ChartEvent[] => (t.cold ? [{ index: i, kind: "cold" }] : [])),
+        ...detail.biggest_jumps.slice(0, JUMPS_MARKED).map((j): ChartEvent => ({ index: j.turn - 1, kind: "jump" })),
+        ...detail.compactions_at
+          .map((ts) => detail.turn_series.findIndex((t) => (t.ts ?? 0) >= ts))
+          .filter((i) => i >= 0)
+          .map((index): ChartEvent => ({ index, kind: "compaction" })),
+      ]
+    : [];
 
   return (
     <div className="drawer-overlay" data-testid="chronicle-drawer-overlay" onClick={onClose}>
@@ -84,6 +99,13 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
               <p className="chr-drawer__facts">
                 <span>{repoLabel(detail.repo_root)}</span>
                 {detail.git_branch && <span className="chr-mono">{detail.git_branch}</span>}
+                {/* Multi-account: which Claude config dir this session ran
+                    under, by its folder name (".claude-personal"). */}
+                {detail.config_dir && (
+                  <span className="chr-chip" title={detail.config_dir}>
+                    {detail.config_dir.split("/").filter(Boolean).pop()}
+                  </span>
+                )}
                 {detail.models.map((m) => (
                   <span key={m} className="chr-chip">
                     {shortModel(m)}
@@ -121,11 +143,7 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
               <StatTile label="Prompts" value={String(detail.prompts)} hue="--chr-turns" />
               <StatTile label="Tool calls" value={String(detail.tool_calls)} hue="--chr-tools" />
               <StatTile label="Output tokens" value={formatTokens(detail.output_tokens)} hue="--chr-output" />
-              <StatTile
-                label="Context processed"
-                value={formatTokens(detail.context_tokens)}
-                note="input + cache, summed over turns"
-              />
+              <StatTile label="Total ctx" value={formatTokens(detail.context_tokens)} />
               <StatTile label="Span" value={formatDuration(detail.duration_s)} />
               <StatTile label="Active" value={formatActive(detail.active_ms)} />
               <StatTile label="Transcript" value={formatBytes(detail.transcript_bytes)} hue="--chr-tools" />
@@ -136,27 +154,29 @@ export default function SessionDrawer({ sessionId, onClose }: SessionDrawerProps
                 hue="--chr-cache"
               />
               <StatTile
-                label="API-equivalent cost"
-                value={formatUsd(detail.cost_usd)}
-                note={detail.unpriced_turns > 0 ? `${detail.unpriced_turns} turns unpriced` : "at list prices"}
+                label="API costs"
+                value={formatCostWithUnpriced(detail.cost_usd, detail.unpriced_turns)}
+                labelInfo="API-equivalent cost: what these calls would cost at Anthropic's list prices — a comparison yardstick, not a bill. Most Claude Code use is a subscription with a usage limit rather than per-call billing, so this figure won't match an invoice."
                 hue="--chr-cost"
               />
             </div>
 
             <section className="chr-panel">
               <h3 className="chr-panel__title">Context per turn</h3>
-              <p className="chr-panel__sub">
-                Tokens in the window on each API call
-                {coldTurns.length > 0 ? "; rings mark cold cache turns" : ""}
-                {markers.length > 0 ? "; hairlines mark compactions" : ""}.
-              </p>
+              <p className="chr-panel__sub">Tokens in the window on each API call; the marks are explained below the plot.</p>
               <LineChart
                 values={contextSeries}
                 format={formatTokens}
                 title="Context tokens per turn"
-                markers={markers}
-                dots={coldTurns}
+                events={events}
                 annotate={annotate}
+                tableColumn={{
+                  heading: "Since last turn",
+                  cell: (i) => {
+                    const gap = detail.turn_series[i]?.gap_s;
+                    return gap === null || gap === undefined ? null : formatDuration(gap);
+                  },
+                }}
                 hue="--chr-context"
               />
             </section>

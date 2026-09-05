@@ -63,19 +63,39 @@ since the cursor last saw them, parses only the bytes appended since, and record
 time. On a machine with ~50 sessions and ~180 transcript files a no-change sync is a
 directory walk that finishes in well under a second.
 
-### Hooks (optional live feed)
+### Several Claude accounts (config dirs)
 
-`hooks/hooks.json` registers fail-safe `SessionStart`, `Stop` and `SessionEnd` hooks that
-run the same incremental ingest as the session goes, so the chronicle is current without a
-sync and the session row gets a true end time and reason. They always exit 0 and print
-nothing — telemetry must never touch the session it observes. Nothing depends on them; if
-you would rather pull only, remove the entries.
+Claude Code keeps one account per config dir (`~/.claude`, or `CLAUDE_CONFIG_DIR`), each with
+its own `projects/`. To chronicle more than one, list the extra dirs once and every `sync`
+reads them all into the one store, each session row recording its `config_dir`:
+
+```
+overseer claude-dirs add ~/.claude-personal     # writes <primary>/overseer/config.json
+overseer claude-dirs list
+chronicle sync                                  # now walks both projects/ trees
+CLAUDE_CONFIG_DIRS=~/.claude-personal chronicle sync   # env alternative, os.pathsep-separated
+```
+
+The file is `{"claude_dirs": ["~/.claude-personal"]}`; chronicle reads it with its own small
+loader so it stays standalone. `--projects PATH` (repeatable) replaces the set for one run.
+
+### Pull only — no hooks
+
+Nothing in this plugin runs inside a Claude Code session. Rows arrive by `sync`, whether
+you run it or the dashboard does: the Chronicle page syncs when it opens and once a minute
+while it stays open, quietly, and the **Sync** button forces one. The earlier `SessionStart`
+/ `Stop` / `SessionEnd` hooks were removed on purpose — a Stop hook that runs code after
+every turn is a feedback loop waiting to happen, and with per-file cursors a poll costs a
+directory walk. The one thing the hooks knew that a transcript does not is a session's end
+reason, so `end_reason` is now always null and liveness rests on the activity horizon
+below.
 
 ### Dashboard
 
 With chronicle installed beside overseer (`plugins/chronicle` next to `plugins/overseer`),
 the dashboard offers a **Chronicle** button beside the Board|Atlas coins. The page carries a
-time window (7 / 30 / 90 days / all), a repo scope (this repo / all repos), stat tiles,
+time window (7 / 30 / 90 days / all) under Filters, the top bar's own repo selector (with an
+"All repos" choice on this page) and branch selector scoping every figure, stat tiles,
 context-per-day and output-per-day columns, turns by model, a tool leaderboard, session
 shape quantiles, and a sortable session table whose rows open a drawer with the session's
 context-per-turn line (compactions and cold cache turns marked), the biggest context jumps
@@ -96,19 +116,21 @@ table was last checked against the pricing page.
 
 Routes: `GET /api/chronicle/{status,summary,sessions,session/{id}}`, `POST /api/chronicle/sync`.
 Reads take the same `root` as `/api/board` (validated against the repo allowlist) or
-`scope=all`; the sync is account-wide and token-gated like a mutation.
+`scope=all`; the sync is account-wide and, unlike the board's mutations, not token-gated — it
+writes only what the transcripts already say, so any browser that can read the page can keep
+the chronicle current.
 
 ## Guarantees
 
 - **Idempotent.** Every fact row is keyed by a transcript-native id and written with
   `INSERT OR IGNORE`/`REPLACE`; rollups are recomputed, never incremented. Re-reading a file
   from byte 0 (a rewrite, a lost cursor, a deliberate backfill) converges on the same rows.
-- **Concurrency-safe.** WAL + busy timeout: hooks from every live session and a dashboard
-  sync can write at once; readers never block on a writer.
-- **Quarantine-safe.** Hook verbs swallow every error. Malformed lines are skipped; a
-  partial trailing line is deferred until it completes.
-- **Honest liveness.** A session with no recorded end counts as live only while it has been
-  active in the last 15 minutes (backfilled transcripts never see a `SessionEnd`).
+- **Concurrency-safe.** WAL + busy timeout: a manual sync and the dashboard's own can write
+  at once; readers never block on a writer.
+- **Tolerant of the transcript.** Malformed lines are skipped; a partial trailing line is
+  deferred until it completes.
+- **Honest liveness.** A session counts as live only while it has been active in the last
+  15 minutes — transcripts carry no end marker, so activity is the only signal.
 - **Synthetic records ignored.** Claude Code's locally generated `<synthetic>` assistant
   stand-ins are not API calls and are not counted.
 

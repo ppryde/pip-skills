@@ -1,16 +1,16 @@
 /**
  * The Chronicle — session telemetry from the optional chronicle plugin.
  *
- * Pull on demand: the page never ingests anything by itself. "Sync" asks the
- * backend to reconcile chronicle's store with the transcripts on disk, then
- * re-reads. Everything below the toolbar is scoped by the same filter row:
- * a time window and a repo scope (this repo = the dashboard's active root,
- * the same choke point the board uses; all = account-wide).
+ * Pull on demand: the page never ingests anything by itself. Its controls
+ * live in the top bar (App.tsx): "Sync" where the board's ＋ sits, and the
+ * time-window / repo-scope filters in the shared "Filters ▾" region
+ * (`<ChronicleFilterBar/>`). App owns that state and the `useChronicle`
+ * fetch, and hands this page the result — so this file is the reading of
+ * the data, not the fetching of it.
  */
 import { useCallback, useMemo, useState } from "react";
-import { syncChronicle } from "../../api/client";
-import type { ChronicleSession, ChronicleSyncResponse } from "../../api/types";
-import { useChronicle } from "../../board/chronicle/useChronicle";
+import type { ChronicleSession } from "../../api/types";
+import type { UseChronicleResult } from "../../board/chronicle/useChronicle";
 import {
   cacheVerdict,
   formatActive,
@@ -27,27 +27,25 @@ import {
   sessionName,
   shortModel,
 } from "../../board/chronicle/format";
-import { Button } from "../../ui";
+import { windowInsights } from "../../board/chronicle/insights";
+import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
-import { BarList, ColumnChart } from "./ChronicleCharts";
+import CounselPanel from "./CounselPanel";
+import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import StatTile from "./StatTile";
 
-export interface ChroniclePageProps {
-  /** The dashboard's active repo root (null = launch root). */
-  activeRoot: string | null;
-  /** False for an "unbegun" repo, whose root the backend refuses on every
-   * scoped read — the page then locks the scope to "All repos". */
-  repoScopable: boolean;
-}
+/** The `useChronicle` result, as App.tsx fetched it for the current window
+ * and scope, plus a retry for the fetch-failure banner. Sync lives in the
+ * top bar, so `refresh` itself is not needed here. */
+export type ChroniclePageProps = Omit<UseChronicleResult, "refresh"> & {
+  /** "Send a rider": re-fetch now after a failure. */
+  onRetry: () => void;
+};
 
-const WINDOWS: { label: string; days: number | undefined }[] = [
-  { label: "7 days", days: 7 },
-  { label: "30 days", days: 30 },
-  { label: "90 days", days: 90 },
-  { label: "All time", days: undefined },
-];
+/** useChronicle's poll cadence, for the fetch-failure banner's countdown. */
+const CHRONICLE_RETRY_SECONDS = 30;
 
 type SortKey =
   | "started_at"
@@ -85,40 +83,10 @@ function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc
   });
 }
 
-function syncSummary(res: ChronicleSyncResponse): string {
-  if (res.changed === 0) return `Synced — nothing new across ${res.scanned} files.`;
-  const noun = res.changed === 1 ? "session" : "sessions";
-  return `Synced — ${res.changed} ${noun} updated (${res.lines} new lines).`;
-}
-
-export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePageProps) {
-  const [days, setDays] = useState<number | undefined>(30);
-  const [scopeAll, setScopeAll] = useState(false);
-  const scope: "repo" | "all" = scopeAll || !repoScopable ? "all" : "repo";
-  const { summary, sessions, loading, error, refresh } = useChronicle(
-    activeRoot,
-    { days, scope },
-    true
-  );
+export default function ChroniclePage({ summary, sessions, loading, error, onRetry }: ChroniclePageProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("started_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [syncing, setSyncing] = useState(false);
-  const [syncNote, setSyncNote] = useState<string | null>(null);
-
-  const sync = useCallback(async () => {
-    setSyncing(true);
-    setSyncNote(null);
-    try {
-      const res = await syncChronicle();
-      setSyncNote(syncSummary(res));
-      await refresh();
-    } catch (err) {
-      setSyncNote(`Sync failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setSyncing(false);
-    }
-  }, [refresh]);
 
   const onSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -153,51 +121,12 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
 
   return (
     <div className={`chronicle${loading && summary ? " chronicle--refreshing" : ""}`}>
-      <div className="chronicle__toolbar" role="group" aria-label="Chronicle filters">
-        <div className="chronicle__segment" role="group" aria-label="Time window">
-          {WINDOWS.map((w) => (
-            <Button
-              key={w.label}
-              aria-pressed={days === w.days}
-              onClick={() => setDays(w.days)}
-              className="chronicle__seg-btn"
-            >
-              {w.label}
-            </Button>
-          ))}
-        </div>
-        <div className="chronicle__segment" role="group" aria-label="Repo scope">
-          <Button
-            aria-pressed={scope === "repo"}
-            disabled={!repoScopable}
-            title={repoScopable ? undefined : "This repo has no board yet; showing every repo"}
-            onClick={() => setScopeAll(false)}
-            className="chronicle__seg-btn"
-          >
-            This repo
-          </Button>
-          <Button
-            aria-pressed={scope === "all"}
-            onClick={() => setScopeAll(true)}
-            className="chronicle__seg-btn"
-          >
-            All repos
-          </Button>
-        </div>
-        <div className="chronicle__sync">
-          {syncNote && <span className="chronicle__sync-note" role="status">{syncNote}</span>}
-          <Button variant="primary" onClick={() => void sync()} disabled={syncing}>
-            {syncing ? "Syncing…" : "Sync"}
-          </Button>
-        </div>
-      </div>
-
-      {error && <p className="board-error">{error}</p>}
+      {error && <Waylaid error={error} retryEverySeconds={CHRONICLE_RETRY_SECONDS} onRetry={onRetry} />}
 
       {summary && totals === null && (
         <div className="chronicle__empty">
           <p className="chronicle__empty-title">The chronicle is blank.</p>
-          <p>Press <strong>Sync</strong> to read every session transcript on this machine into it.</p>
+          <p>Press <strong>Sync</strong> in the top bar to read every session transcript on this machine into it.</p>
         </div>
       )}
 
@@ -228,61 +157,78 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
               value={String(totals.sessions)}
               note={totals.live > 0 ? `${totals.live} live` : undefined}
             />
-            <StatTile
-              label="Turns"
-              value={formatTokens(totals.turns)}
-              note={`${formatTokens(totals.prompts)} prompts`}
-              hue="--chr-turns"
-            />
+            <StatTile label="Turns" value={formatTokens(totals.turns)} hue="--chr-turns" />
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
             <StatTile
-              label="Context processed"
+              label="Ctx processed"
               value={formatTokens(totals.input_tokens + totals.cache_read_tokens + totals.cache_creation_tokens)}
-              note={`${formatTokens(totals.cache_read_tokens)} from cache`}
             />
-            <StatTile
-              label="Output tokens"
-              value={formatTokens(totals.output_tokens)}
-              note={`${formatTokens(totals.thinking_tokens)} thinking`}
-              hue="--chr-output"
-            />
+            {/* The thinking share and the cache TTL split each get a ring
+                below instead of a footnote here: a long note wrapped to two
+                lines and threw every tile in its row out of height. */}
+            <StatTile label="Output tokens" value={formatTokens(totals.output_tokens)} hue="--chr-output" />
             <StatTile label="Active time" value={formatActive(totals.active_ms)} hue="--chr-turns" />
             <StatTile
               label="Transcripts"
               value={formatBytes(totals.transcript_bytes)}
               hue="--chr-tools"
             />
-            <StatTile
-              label="Subagents"
-              value={String(totals.subagents)}
-              note={`${totals.compactions} compactions`}
-              hue="--chr-peak"
-            />
+            <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
+            <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
             <StatTile
               label="Cache written"
               value={formatTokens(totals.cache_creation_tokens)}
-              note={`${formatTokens(totals.cache_1h_tokens)} at 1h · ${formatTokens(totals.cache_5m_tokens)} at 5m`}
               hue="--chr-cache"
             />
+            <StatTile label="Artifacts" value={String(totals.artifacts)} hue="--chr-output" />
             <StatTile
-              label="Artifacts"
-              value={String(totals.artifacts)}
-              note="distinct pages published"
-              hue="--chr-output"
-            />
-            <StatTile
-              label="API-equivalent cost"
-              value={formatUsd(totals.cost_usd)}
-              note={
-                totals.unpriced_turns > 0
-                  ? `${totals.unpriced_turns} turns on unpriced models`
-                  : `at list prices, ${formatMonth(totals.pricing_as_of)}`
-              }
+              label="API costs"
+              value={formatCostWithUnpriced(totals.cost_usd, totals.unpriced_turns)}
+              labelInfo={`API-equivalent cost at Anthropic's list prices as of ${formatMonth(totals.pricing_as_of)} — a comparison yardstick, not a bill. Most Claude Code use is a subscription with a usage limit rather than per-call billing, so this figure won't match an invoice.`}
               hue="--chr-cost"
             />
           </div>
 
           <div className="chronicle__grid">
+            <CounselPanel
+              insights={windowInsights({
+                totals,
+                models: summary?.by_model ?? [],
+                shape: summary?.shape ?? null,
+                sessions,
+              })}
+            />
+            <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
+              <h3 className="chr-panel__title">Where output went</h3>
+              <p className="chr-panel__sub">Tokens the model wrote: thinking versus replies and tool calls.</p>
+              <Donut
+                segments={[
+                  { label: "Thinking", value: totals.thinking_tokens },
+                  { label: "Replies & tools", value: Math.max(0, totals.output_tokens - totals.thinking_tokens) },
+                ]}
+                format={formatTokens}
+                title="Where output went"
+                centre={{ value: formatTokens(totals.output_tokens), label: "output" }}
+                hue="--chr-output"
+              />
+            </section>
+            <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-cache)" }}>
+              <h3 className="chr-panel__title">Cache written by TTL</h3>
+              <p className="chr-panel__sub">Prompt cache written this window, by how long it was kept.</p>
+              <Donut
+                segments={[
+                  { label: "1h cache", value: totals.cache_1h_tokens },
+                  { label: "5m cache", value: totals.cache_5m_tokens },
+                  ...(totals.cache_creation_tokens - totals.cache_1h_tokens - totals.cache_5m_tokens > 0
+                    ? [{ label: "Unlabelled", value: totals.cache_creation_tokens - totals.cache_1h_tokens - totals.cache_5m_tokens }]
+                    : []),
+                ]}
+                format={formatTokens}
+                title="Cache written by TTL"
+                centre={{ value: formatTokens(totals.cache_creation_tokens), label: "written" }}
+                hue="--chr-cache"
+              />
+            </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Context processed per day</h3>
               <p className="chr-panel__sub">Input + cache read + cache creation, every API call.</p>
@@ -310,6 +256,13 @@ export default function ChroniclePage({ activeRoot, repoScopable }: ChroniclePag
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
+              {/* The prompt count lives here, not on the Turns tile: the
+                  tile grid is full, and a prompt only means something
+                  next to the turns it spawned. */}
+              <p className="chr-panel__sub">
+                {formatTokens(totals.turns)} turns from {formatTokens(totals.prompts)} prompts
+                {totals.prompts > 0 && ` · about ${Math.round(totals.turns / totals.prompts)} turns per prompt`}
+              </p>
               <BarList
                 rows={(summary?.by_model ?? []).map((m) => ({
                   label: shortModel(m.model),

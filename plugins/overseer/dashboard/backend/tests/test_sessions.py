@@ -533,3 +533,39 @@ def test_sessions_numeric_string_active_at_agrees_with_census(
 
     assert resp.status_code == 200
     assert resp.json()["sessions"][0]["idle"] is False
+
+
+def test_sessions_merge_across_watched_config_dirs(
+    client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-account: with a second Claude config dir listed in the primary's
+    machine config, its census store's sessions join the same list, each
+    tagged with the dir it came from. `CENSUS_STORE` must be unset — pinned,
+    there is one store by definition."""
+    monkeypatch.delenv("CENSUS_STORE", raising=False)
+    primary = tmp_path / "claude"
+    personal = tmp_path / "claude-personal"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+    now = time.time()
+    cwd = os.path.realpath(str(root))
+
+    def _store(config_dir: Path, sid: str, name: str) -> None:
+        path = config_dir / "census" / "status.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "version": 1, "limits": {},
+            "sessions": {sid: {"worktree_cwd": cwd, "updated_at": now,
+                                "payload": {"session_name": name}}},
+        }))
+
+    _store(primary, "s-work", "work")
+    _store(personal, "s-home", "home")
+    (primary / "overseer").mkdir(parents=True, exist_ok=True)
+    (primary / "overseer" / "config.json").write_text(json.dumps({"claude_dirs": [str(personal)]}))
+
+    body = client.get("/api/sessions").json()
+    by_id = {s["id"]: s for s in body["sessions"]}
+    assert set(by_id) == {"s-work", "s-home"}
+    assert by_id["s-work"]["config_dir"] == str(primary)
+    assert by_id["s-home"]["config_dir"] == str(personal)
+    assert by_id["s-home"]["session_name"] == "home"

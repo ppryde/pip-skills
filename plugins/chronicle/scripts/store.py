@@ -37,12 +37,16 @@ is far below anything that would justify a columnar or graph engine.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
 
 DB_ENV = "CHRONICLE_DB"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+CLAUDE_DIRS_ENV = "CLAUDE_CONFIG_DIRS"
+# The machine-level config shared with the overseer plugin (see claude_dirs).
+MACHINE_CONFIG_RELPATH = ("overseer", "config.json")
 DB_RELPATH = ("chronicle", "sessions.db")
 SCHEMA_VERSION = 1
 BUSY_TIMEOUT_MS = 5000
@@ -175,6 +179,8 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("tool_calls", "result_chars", "INTEGER"),
     ("tool_calls", "result_ts", "REAL"),
     ("sessions", "artifacts", "INTEGER NOT NULL DEFAULT 0"),
+    # Which Claude config dir the transcript was read from (multi-account).
+    ("sessions", "config_dir", "TEXT"),
 )
 
 
@@ -186,14 +192,59 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def config_dir() -> Path:
-    """The active Claude config dir — the account isolation boundary."""
+    """The active Claude config dir — the account isolation boundary. The
+    store lives here; ``claude_dirs`` is where transcripts are read from."""
     override = os.environ.get(CONFIG_DIR_ENV)
     return Path(override) if override else Path.home() / ".claude"
 
 
+def claude_dirs() -> list[Path]:
+    """Every Claude config dir whose transcripts this chronicle records: the
+    primary first, then ``CLAUDE_CONFIG_DIRS`` (os.pathsep list), then the
+    ``claude_dirs`` list in the machine config the overseer plugin also
+    reads (``<primary>/overseer/config.json``) — deduplicated, order kept,
+    missing dirs dropped. A second account (``~/.claude-personal``) keeps
+    its own ``projects/``; listing it here folds its sessions into the one
+    store, each row remembering which dir it came from (``config_dir``).
+
+    Deliberately a small copy of overseer's loader rather than an import:
+    chronicle stands alone."""
+    primary = config_dir()
+    candidates: list[Path] = [primary]
+    env = os.environ.get(CLAUDE_DIRS_ENV, "")
+    candidates.extend(Path(p).expanduser() for p in env.split(os.pathsep) if p.strip())
+    machine = primary.joinpath(*MACHINE_CONFIG_RELPATH)
+    if machine.exists():
+        try:
+            data = json.loads(machine.read_text() or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        listed = data.get("claude_dirs") if isinstance(data, dict) else None
+        if isinstance(listed, list):
+            candidates.extend(Path(str(p)).expanduser() for p in listed if p)
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for c in candidates:
+        try:
+            key = c.resolve()
+        except OSError:
+            continue
+        if key in seen or not key.is_dir():
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
 def projects_dir() -> Path:
-    """Where Claude Code writes session transcripts (``<slug>/<session>.jsonl``)."""
+    """Where the PRIMARY account's Claude Code writes session transcripts
+    (``<slug>/<session>.jsonl``). ``projects_dirs`` is the full set."""
     return config_dir() / "projects"
+
+
+def projects_dirs() -> list[Path]:
+    """One ``projects/`` per watched config dir, primary first."""
+    return [d / "projects" for d in claude_dirs()]
 
 
 def db_path() -> Path:
