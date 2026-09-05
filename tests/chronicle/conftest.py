@@ -11,9 +11,13 @@ def _isolate_chronicle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ``CHRONICLE_DB`` is the store file; ``CLAUDE_CONFIG_DIR`` is where the
     projects (transcripts) dir is derived from. Without both, a test could
     read the developer's real transcripts or write a db into ``~/.claude``.
+    ``CLAUDE_CONFIG_DIRS`` (extra accounts' config dirs — multi-account) is
+    cleared for the same reason: left ambient, ``projects_dirs()`` would
+    fold the developer's real second account's transcripts into a test store.
     """
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("CHRONICLE_DB", str(tmp_path / "config" / "chronicle" / "sessions.db"))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
 
 
 def _assistant(message_id: str, *, ts: str, model: str = "claude-opus-5", blocks=None,
