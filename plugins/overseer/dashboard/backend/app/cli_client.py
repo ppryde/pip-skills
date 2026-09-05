@@ -141,17 +141,22 @@ def run_census_all(timeout: int = 10) -> dict[str, Any] | None:
     if os.environ.get("CENSUS_STORE"):
         return _census_read_all_in(None, timeout)
     merged: dict[str, Any] | None = None
-    for config_dir in overseer_config.claude_dirs():
+    for index, config_dir in enumerate(overseer_config.claude_dirs()):
         data = _census_read_all_in(config_dir, timeout)
+        if index == 0:
+            # The PRIMARY's store is the envelope (its `limits`, `version`…)
+            # even when it has no sessions yet; other stores only ever
+            # contribute sessions.
+            merged = {**(data or {}), "sessions": {}}
         if not data:
             continue
-        sessions = data.get("sessions") or {}
-        if merged is None:
-            merged = {**data, "sessions": {}}
-        for sid, entry in sessions.items():
+        assert merged is not None
+        for sid, entry in (data.get("sessions") or {}).items():
             if sid in merged["sessions"]:
                 continue  # the same session id in two stores: first (primary) wins
             merged["sessions"][sid] = {**entry, "config_dir": str(config_dir)}
+    if merged is None or (not merged["sessions"] and not merged.get("limits")):
+        return None
     return merged
 
 

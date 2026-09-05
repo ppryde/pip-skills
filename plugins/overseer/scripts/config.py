@@ -93,28 +93,29 @@ def claude_dirs() -> list[Path]:
     return out
 
 
-def add_claude_dir(path: Path) -> list[str]:
-    """Record an extra config dir in the machine config; returns the list."""
+def _update_claude_dirs(mutate) -> list[str]:
+    """Load the machine config, hand its `claude_dirs` list to `mutate`,
+    save what comes back, return it."""
     cfg = load_machine_config()
-    listed = [str(p) for p in (cfg.get("claude_dirs") or []) if p]
-    entry = str(path.expanduser())
-    if entry not in listed:
-        listed.append(entry)
+    listed = mutate([str(p) for p in (cfg.get("claude_dirs") or []) if p])
     cfg["claude_dirs"] = listed
     save_machine_config(cfg)
     return listed
+
+
+def add_claude_dir(path: Path) -> list[str]:
+    """Record an extra config dir in the machine config; returns the list.
+    Stored absolute (resolved): a relative path would mean something
+    different from every working directory the file is later read from."""
+    entry = str(path.expanduser().resolve())
+    return _update_claude_dirs(lambda listed: listed if entry in listed else [*listed, entry])
 
 
 def remove_claude_dir(path: Path) -> list[str]:
-    cfg = load_machine_config()
     target = path.expanduser().resolve()
-    listed = [
-        p for p in (cfg.get("claude_dirs") or [])
-        if p and Path(str(p)).expanduser().resolve() != target
-    ]
-    cfg["claude_dirs"] = listed
-    save_machine_config(cfg)
-    return listed
+    return _update_claude_dirs(
+        lambda listed: [p for p in listed if Path(p).expanduser().resolve() != target]
+    )
 
 
 def _short_hash(canonical_root: Path) -> str:

@@ -357,3 +357,41 @@ class TestStore:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"sessions", "turns", "tool_calls", "events", "cursors", "meta"} <= tables
+
+
+class TestClaudeDirsParity:
+    def test_chronicle_and_overseer_agree_on_the_watched_dirs(self, tmp_path, monkeypatch):
+        """chronicle keeps its own small copy of overseer's `claude_dirs()` so
+        it stands alone; this pins the two to the same answer on the same
+        machine state (primary + env list + machine config, dedup, missing
+        dropped) so they cannot drift apart unnoticed."""
+        import importlib
+        import os
+        import sys
+        overseer_root = str(Path(__file__).resolve().parents[2] / "plugins" / "overseer")
+        primary, personal, work = (tmp_path / n for n in ("claude", "personal", "work"))
+        for d in (primary, personal, work):
+            d.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", os.pathsep.join([str(work), str(tmp_path / "gone")]))
+        (primary / "overseer").mkdir()
+        (primary / "overseer" / "config.json").write_text(
+            json.dumps({"claude_dirs": [str(personal), str(primary)]})
+        )
+        # overseer's copy, imported from its own package without disturbing
+        # chronicle's `scripts` package binding.
+        saved = {k: v for k, v in sys.modules.items() if k == "scripts" or k.startswith("scripts.")}
+        for k in saved:
+            del sys.modules[k]
+        sys.path.insert(0, overseer_root)
+        try:
+            overseer_config = importlib.import_module("scripts.config")
+            expected = [p.resolve() for p in overseer_config.claude_dirs()]
+        finally:
+            sys.path.remove(overseer_root)
+            for k in [k for k in sys.modules if k == "scripts" or k.startswith("scripts.")]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+        assert [p.resolve() for p in store.claude_dirs()] == expected == [
+            primary.resolve(), work.resolve(), personal.resolve()
+        ]

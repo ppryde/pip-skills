@@ -150,6 +150,32 @@ class TestMergeBoards:
         assert old is not None and old.labels == [] and old.claim_nudged is False
         assert str(active) == result["target"]
 
+    def test_dry_run_creates_nothing_and_ignores_the_db_file_override(self, tmp_path, monkeypatch):
+        # The resolved folder does not exist yet (OVERSEER_CENTRAL names a
+        # fresh one — the env override wins resolution) while another
+        # account's board does. A dry run must report against an empty target
+        # without creating it — and the merge must open the RESOLVED folder
+        # even if OVERSEER_DB points elsewhere (find_boards and the merge agree).
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        _board_under(personal, repo, monkeypatch, [make_card("WF-1"), make_card("WF-2")])
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        config.add_claude_dir(personal)
+        monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "fresh-central"))
+        target = config.central_root(repo)
+        assert target == tmp_path / "fresh-central"
+        assert not target.exists()
+        monkeypatch.setenv("OVERSEER_DB", str(tmp_path / "somewhere-else.db"))
+        plan = boards.merge_boards(repo, dry_run=True)
+        assert plan["target"] == str(target)
+        assert plan["absorbed"][0]["added"] == 2
+        assert not target.exists()
+        assert not (tmp_path / "somewhere-else.db").exists()
+        # The real run creates the resolved folder and fills it.
+        result = boards.merge_boards(repo)
+        assert (target / "board.db").is_file()
+        assert result["absorbed"][0]["added"] == 2
+        assert not (tmp_path / "somewhere-else.db").exists()
+
     def test_cli_verbs(self, tmp_path, monkeypatch, capsys):
         primary, personal, repo = _setup(tmp_path, monkeypatch)
         _board_under(personal, repo, monkeypatch, [make_card("WF-1"), make_card("WF-2")])

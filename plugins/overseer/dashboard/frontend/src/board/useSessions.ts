@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getSessions, setActiveRoot } from "../api/client";
 import type { SessionSummary } from "../api/types";
+import { useVisibleInterval } from "./useDocumentVisible";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -100,15 +101,17 @@ export function useSessions(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [root, enabled]);
 
-  // Poll every 5 seconds, skipping ticks while disabled.
-  useEffect(() => {
-    const intervalId = setInterval(() => {
+  // Poll every 5 seconds while the tab is in the foreground, skipping ticks
+  // while disabled; a hidden tab polls nothing and catches up once on return.
+  useVisibleInterval(
+    () => {
       if (!enabledRef.current) return;
       void loadSessions();
-    }, POLL_INTERVAL_MS);
-
-    return () => clearInterval(intervalId);
-  }, []);
+    },
+    POLL_INTERVAL_MS,
+    true,
+    { immediate: "on-return" } // mount and root changes already load above
+  );
 
   // Most recently active first — sorted at render so the polled state stays
   // exactly what the API returned.

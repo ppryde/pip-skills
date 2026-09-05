@@ -96,3 +96,27 @@ describe("useChronicleSync", () => {
     expect(result.current.syncing).toBe(false); // the quiet path never shows busy
   });
 });
+
+describe("useChronicleSync — one at a time", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("a manual sync while one is in flight does not start a second", async () => {
+    let release: (v: unknown) => void = () => {};
+    mocked.syncChronicle.mockReturnValueOnce(new Promise((r) => (release = r)));
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useChronicleSync(refresh, true)); // the quiet sync starts on enable …
+    await act(async () => {});
+    expect(mocked.syncChronicle).toHaveBeenCalledTimes(1);
+    await act(() => result.current.sync()); // … and the button press while it runs is a no-op
+    expect(mocked.syncChronicle).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release(nothingNew);
+    });
+  });
+});

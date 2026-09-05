@@ -31,6 +31,7 @@ import type {
   ChronicleSummary,
   ChronicleSyncResponse,
 } from "../../api/types";
+import { useVisibleInterval } from "../useDocumentVisible";
 
 const POLL_INTERVAL_MS = 30_000;
 /** How often the open Chronicle page asks the backend to reconcile the
@@ -41,19 +42,6 @@ export const AUTO_SYNC_INTERVAL_MS = 60_000;
 /** Auto-syncs closer together than this are skipped — filter changes re-run
  * the effect that schedules them, and a sync per click is wasted work. */
 const AUTO_SYNC_MIN_GAP_MS = 15_000;
-
-/** Whether the page is in the foreground (Page Visibility API). Timers
- * that fetch or sync pause while a tab is hidden — a background tab has no
- * one to show anything to — and the callers catch up once on return. */
-export function useDocumentVisible(): boolean {
-  const [visible, setVisible] = useState(() => typeof document === "undefined" || !document.hidden);
-  useEffect(() => {
-    const onChange = () => setVisible(!document.hidden);
-    document.addEventListener("visibilitychange", onChange);
-    return () => document.removeEventListener("visibilitychange", onChange);
-  }, []);
-  return visible;
-}
 
 export function useChronicleStatus(): ChronicleStatus | null {
   const [status, setStatus] = useState<ChronicleStatus | null>(null);
@@ -96,16 +84,15 @@ export function useChronicle(
   const [sessions, setSessions] = useState<ChronicleSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
-  // Polls only while enabled AND in the foreground; a hidden tab's timer
-  // ticks are skipped, and coming back to the foreground reloads once.
-  const visible = useDocumentVisible();
-  const active = enabled && visible;
-  const activeRef = useRef(active);
-  activeRef.current = active;
+  // Every load takes a ticket; only the newest ticket's response lands. A
+  // filter change racing a poll tick, or a slow old query finishing after a
+  // fast new one, must not paint stale data over fresh (the same epoch
+  // guard useBoard uses). Unmount just means no ticket is current.
+  const requestIdRef = useRef(0);
   const { days, scope, branch } = query;
 
   const load = useCallback(async () => {
+    const id = ++requestIdRef.current;
     setActiveRoot(root);
     setLoading(true);
     try {
@@ -113,32 +100,32 @@ export function useChronicle(
         getChronicleSummary({ days, scope, branch }),
         getChronicleSessions({ days, scope, branch }),
       ]);
-      if (!mountedRef.current) return;
+      if (id !== requestIdRef.current) return;
       setSummary(sum);
       setSessions(list.sessions);
       setError(null);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (id !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (id === requestIdRef.current) setLoading(false);
     }
   }, [root, days, scope, branch]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    if (active) void load();
+    const ref = requestIdRef;
     return () => {
-      mountedRef.current = false;
+      ref.current += 1; // retire any in-flight response on unmount
     };
-  }, [load, active]);
+  }, []);
 
+  // Loads on enable and on every filter change (`load` is new then) …
   useEffect(() => {
-    const id = setInterval(() => {
-      if (activeRef.current) void load();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [load]);
+    if (enabled) void load();
+  }, [load, enabled]);
+  // … then every POLL_INTERVAL_MS while enabled and visible, with one
+  // catch-up load when a hidden tab comes back; a hidden tab polls nothing.
+  useVisibleInterval(() => void load(), POLL_INTERVAL_MS, enabled, { immediate: "on-return" });
 
   return { summary, sessions, loading, error, refresh: load };
 }
@@ -174,10 +161,11 @@ export function useChronicleSync(refresh: () => Promise<void>, enabled = false):
   const [note, setNote] = useState<string | null>(null);
   const inFlightRef = useRef(false);
   const lastAutoRef = useRef(0);
-  const visible = useDocumentVisible();
-  const active = enabled && visible;
 
   const sync = useCallback(async () => {
+    // One sync at a time against one SQLite store: a click while the timed
+    // sync is running just waits for its result.
+    if (inFlightRef.current) return;
     inFlightRef.current = true;
     setSyncing(true);
     setNote(null);
@@ -213,12 +201,10 @@ export function useChronicleSync(refresh: () => Promise<void>, enabled = false):
     }
   }, [refresh]);
 
-  useEffect(() => {
-    if (!active) return;
-    void syncQuietly();
-    const id = setInterval(() => void syncQuietly(), AUTO_SYNC_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [active, syncQuietly]);
+  // Quiet sync on enable/show and every minute while enabled and visible;
+  // the min-gap guard inside syncQuietly absorbs the immediate tick when a
+  // sync just ran.
+  useVisibleInterval(() => void syncQuietly(), AUTO_SYNC_INTERVAL_MS, enabled);
 
   return { sync, syncQuietly, syncing, note };
 }

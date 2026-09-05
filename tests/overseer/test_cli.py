@@ -1324,6 +1324,8 @@ class TestReposCommand:
         assert main(["--root", str(tmp_path), "claude-dirs", "remove", str(personal), "--json"]) == 0
         assert json.loads(capsys.readouterr().out)["claude_dirs"] == [str(primary)]
         assert main(["--root", str(tmp_path), "claude-dirs", "add", str(tmp_path / "nope")]) == 1
+        assert main(["--root", str(tmp_path), "claude-dirs", "add"]) == 1  # no path: an error, not a crash
+        assert main(["--root", str(tmp_path), "claude-dirs", "remove"]) == 1
 
     def test_skips_board_without_git_derived_repo_root(self, tmp_path, monkeypatch, capsys):
         monkeypatch.delenv("OVERSEER_DB", raising=False)

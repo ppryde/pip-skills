@@ -96,6 +96,27 @@ def find_boards(repo_root: Path) -> list[dict[str, Any]]:
     return found
 
 
+def _open_target(folder: Path, *, write: bool) -> sqlite3.Connection:
+    """The resolved board, by path. `write=False` never creates it: a missing
+    target reads as an empty board (an in-memory schema) so a dry run stays
+    a dry run."""
+    board = folder / "board.db"
+    if write:
+        folder.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(board, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        db.ensure_schema(conn)
+        return conn
+    if board.is_file():
+        conn = _read_only(board)
+        if conn is not None:
+            return conn
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    db.ensure_schema(conn)
+    return conn
+
+
 class _LenientRow(dict):
     """A card row from an OLDER board, read as ``row[column]`` by
     ``db.row_to_card``: a column the old schema never had reads as None
@@ -105,7 +126,12 @@ class _LenientRow(dict):
         return None
 
 
-def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection) -> dict[str, int]:
+def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection, *,
+                 apply: bool = True) -> dict[str, int]:
+    """Union `source`'s cards into `target` — a missing card is added, a
+    shared one is replaced only when the source copy is newer. With
+    ``apply=False`` (dry run) the same comparison is made and counted but
+    nothing is written, so the preview cannot drift from the real merge."""
     added = updated = kept = 0
     existing = {
         row["id"]: row["updated"] or ""
@@ -116,13 +142,14 @@ def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection) -> dict
         card = db.row_to_card(lenient)  # type: ignore[arg-type]
         archived = int(lenient["archived"] or 0)
         if card.id not in existing:
-            db._upsert(target, card, archived, commit=False)
             added += 1
         elif (card.updated or "") > existing[card.id]:
-            db._upsert(target, card, archived, commit=False)
             updated += 1
         else:
             kept += 1
+            continue
+        if apply:
+            db._upsert(target, card, archived, commit=False)
     return {"added": added, "updated": updated, "kept": kept}
 
 
@@ -157,7 +184,12 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
     if not others:
         return result
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now if now is not None else time.time()))
-    target_conn = None if dry_run else db.connect(repo_root)
+    # The target is opened BY PATH — the folder `find_boards` resolved — never
+    # via `db.connect(repo_root)`, which honours the OVERSEER_DB file override
+    # and could point somewhere else. A dry run reads it (or, if it does not
+    # exist yet, an empty in-memory stand-in) and creates nothing; the real
+    # merge creates/migrates it.
+    target_conn = _open_target(Path(result["target"]), write=not dry_run)
     try:
         for other in others:
             folder = Path(other["path"])
@@ -165,27 +197,9 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
             if source is None:
                 continue
             try:
-                if dry_run:
-                    # Count what WOULD happen without touching the target.
-                    stats = {"added": 0, "updated": 0, "kept": 0}
-                    probe = db.connect(repo_root, migrate=False)
-                    try:
-                        existing = {r["id"]: r["updated"] or ""
-                                    for r in probe.execute("SELECT id, updated FROM cards")}
-                    finally:
-                        probe.close()
-                    for row in source.execute("SELECT id, updated FROM cards"):
-                        if row["id"] not in existing:
-                            stats["added"] += 1
-                        elif (row["updated"] or "") > existing[row["id"]]:
-                            stats["updated"] += 1
-                        else:
-                            stats["kept"] += 1
-                    colours = 0
-                else:
-                    assert target_conn is not None
-                    stats = _merge_cards(target_conn, source)
-                    colours = _merge_label_colors(target_conn, source)
+                stats = _merge_cards(target_conn, source, apply=not dry_run)
+                colours = 0 if dry_run else _merge_label_colors(target_conn, source)
+                if not dry_run:
                     target_conn.commit()
             finally:
                 source.close()
@@ -214,6 +228,5 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
                 "left_behind": left_behind,
             })
     finally:
-        if target_conn is not None:
-            target_conn.close()
+        target_conn.close()
     return result

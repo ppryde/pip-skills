@@ -218,10 +218,15 @@ function App() {
   // every scoped read, so its scope is pinned to "all" regardless.
   const [chronicleDays, setChronicleDays] = useState<number | undefined>(30);
   const [chronicleAllRepos, setChronicleAllRepos] = useState(false);
+  // The Chronicle's branch is its OWN state, not the board's `activeBranch`:
+  // its list spans every repo, and a branch chosen there would otherwise dim
+  // the board's cards on return with no visible filter to clear (the
+  // board's selector shows "All" for a branch its own list lacks).
+  const [chronicleBranch, setChronicleBranch] = useState<string | null>(null);
   const chronicleScope: ChronicleScope = chronicleAllRepos || isUnbegun ? "all" : "repo";
   const chronicle = useChronicle(
     activeRoot,
-    { days: chronicleDays, scope: chronicleScope, branch: activeBranch },
+    { days: chronicleDays, scope: chronicleScope, branch: chronicleBranch },
     view === "chronicle"
   );
   // Chronicle is pull only (no hooks, by design) — while the page shows, the
@@ -240,7 +245,7 @@ function App() {
   // the same recency order the board's list and the repo selector use.
   const [chronicleBranchPool, setChronicleBranchPool] = useState<string[]>([]);
   useEffect(() => {
-    if (activeBranch !== null) return;
+    if (chronicleBranch !== null) return;
     const activity = new Map<string, number>();
     for (const s of chronicle.sessions) {
       if (!s.git_branch) continue;
@@ -248,13 +253,13 @@ function App() {
       activity.set(s.git_branch, Math.max(activity.get(s.git_branch) ?? 0, ts));
     }
     setChronicleBranchPool(orderBranchesByActivity(activity));
-  }, [chronicle.sessions, activeBranch]);
+  }, [chronicle.sessions, chronicleBranch]);
   const chronicleBranches = useMemo(
     () =>
-      activeBranch && !chronicleBranchPool.includes(activeBranch)
-        ? [...chronicleBranchPool, activeBranch]
+      chronicleBranch && !chronicleBranchPool.includes(chronicleBranch)
+        ? [...chronicleBranchPool, chronicleBranch]
         : chronicleBranchPool,
-    [chronicleBranchPool, activeBranch]
+    [chronicleBranchPool, chronicleBranch]
   );
   // WF-091: the Epic Atlas toolbar's toggles, lifted here from
   // EpicAtlas-local state — the controls that drive them now live in
@@ -363,8 +368,8 @@ function App() {
         activeRoot={activeRoot}
         onSelectRepo={handleSelectRepo}
         branches={view === "chronicle" ? chronicleBranches : branches}
-        activeBranch={activeBranch}
-        onSelectBranch={setActiveBranch}
+        activeBranch={view === "chronicle" ? chronicleBranch : activeBranch}
+        onSelectBranch={view === "chronicle" ? setChronicleBranch : setActiveBranch}
         // Task 10: an unbegun repo never populates `party` (sessions are
         // hard-gated off above), so source the questing pill from the SAME
         // `live_sessions` count `<UnbegunHolding/>` already shows below —

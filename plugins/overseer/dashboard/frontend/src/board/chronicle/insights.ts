@@ -46,6 +46,21 @@ export function leversFor(all: Resolution[], verdict: Verdict): Resolution[] {
   return all.filter((r) => SEVERITY[r.from] <= level);
 }
 
+/** A verdict band plus the words that go with it. */
+interface Band {
+  verdict: Verdict;
+  verdictWord: string;
+  counsel: string;
+}
+
+/** Pick the band for `value` against two ascending thresholds: below `low`
+ * is the first band, below `high` the second, else the third. Every banded
+ * insight uses this so the boundary rule (exclusive at both edges) is one
+ * rule, and a fourth band or an inclusive edge is one change. */
+export function bandByThreshold(value: number, low: number, high: number, bands: [Band, Band, Band]): Band {
+  return value < low ? bands[0] : value < high ? bands[1] : bands[2];
+}
+
 export interface InsightRow {
   label: string;
   value: string;
@@ -181,24 +196,25 @@ export function windowFill({ totals: t, sessions }: InsightInputs): Insight {
   if (compacted > 0) facts.push(`${plural(compacted, "session")} compacted, ${plural(t.compactions, "compaction")} in all.`);
   if (t.subagents > 0) facts.push(`${plural(t.subagents, "subagent")} ran in this window; their turns are counted here too.`);
 
-  const banded =
-    fill === null || fill < FILL_LEAN
-      ? {
-          verdict: "good" as const,
-          verdictWord: "lean",
-          counsel: "Typical turns carry a quarter of the window or less; keep clearing between tasks and they will stay that way.",
-        }
-      : fill < FILL_HEAVY
-        ? {
-            verdict: "mixed" as const,
-            verdictWord: "typical",
-            counsel: "Turns carry a fair share of the window; the long sessions are where it adds up.",
-          }
-        : {
-            verdict: "poor" as const,
-            verdictWord: "heavy",
-            counsel: "A typical turn is re-sending more than half the window. Clear or hand off sooner, and read narrower ranges.",
-          };
+  // An unknown window cannot be banded; it reads as lean rather than as a
+  // judgement it has no basis for.
+  const banded = bandByThreshold(fill ?? 0, FILL_LEAN, FILL_HEAVY, [
+    {
+      verdict: "good",
+      verdictWord: "lean",
+      counsel: "Typical turns carry a quarter of the window or less; keep clearing between tasks and they will stay that way.",
+    },
+    {
+      verdict: "mixed",
+      verdictWord: "typical",
+      counsel: "Turns carry a fair share of the window; the long sessions are where it adds up.",
+    },
+    {
+      verdict: "poor",
+      verdictWord: "heavy",
+      counsel: "A typical turn is re-sending more than half the window. Clear or hand off sooner, and read narrower ranges.",
+    },
+  ]);
   return { ...base, value, detail, facts, ...banded, resolutions: leversFor(FILL_RESOLUTIONS, banded.verdict) };
 }
 
@@ -421,24 +437,23 @@ export function thinkingShare({ totals: t, sessions }: InsightInputs): Insight {
   if (deepest && deepest.output_tokens > 0) {
     facts.push(`Deepest: ${sessionName(deepest)} at ${formatPct(deepest.thinking_tokens / deepest.output_tokens)}.`);
   }
-  const banded =
-    share < THINKING_LIGHT
-      ? {
-          verdict: "good" as const,
-          verdictWord: "light",
-          counsel: "Most of the output is the work itself; thinking is a small part of what you pay for.",
-        }
-      : share < THINKING_DEEP
-        ? {
-            verdict: "mixed" as const,
-            verdictWord: "balanced",
-            counsel: "A fair share of the output is deliberation, which is what design and review work looks like.",
-          }
-        : {
-            verdict: "poor" as const,
-            verdictWord: "deep",
-            counsel: "More than half of what you pay for as output is thinking. Worth checking that routine turns are not running at high effort.",
-          };
+  const banded = bandByThreshold(share, THINKING_LIGHT, THINKING_DEEP, [
+    {
+      verdict: "good",
+      verdictWord: "light",
+      counsel: "Most of the output is the work itself; thinking is a small part of what you pay for.",
+    },
+    {
+      verdict: "mixed",
+      verdictWord: "balanced",
+      counsel: "A fair share of the output is deliberation, which is what design and review work looks like.",
+    },
+    {
+      verdict: "poor",
+      verdictWord: "deep",
+      counsel: "More than half of what you pay for as output is thinking. Worth checking that routine turns are not running at high effort.",
+    },
+  ]);
   return { ...base, value, detail, facts, ...banded, resolutions: leversFor(THINKING_RESOLUTIONS, banded.verdict) };
 }
 

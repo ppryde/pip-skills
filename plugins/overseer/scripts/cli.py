@@ -1305,6 +1305,9 @@ def cmd_claude_dirs(args: argparse.Namespace) -> int:
     in the machine config `<primary>/overseer/config.json` that the chronicle
     plugin reads too. `list` shows the EFFECTIVE set (primary + env + file,
     existing dirs only); `add`/`remove` edit the file and print the set."""
+    if args.action in ("add", "remove") and not args.path:
+        print(f"overseer: claude-dirs {args.action} needs a path", file=sys.stderr)
+        return 1
     if args.action == "add":
         path = Path(args.path).expanduser()
         if not path.is_dir():

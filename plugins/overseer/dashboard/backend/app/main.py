@@ -16,6 +16,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -307,12 +308,16 @@ def _sessions_list(repo_root: Path) -> list[dict[str, Any]]:
 
 
 def _census_activity_by_root() -> dict[Path, dict[str, float]]:
-    """Per derived repo root, across every session census knows about:
-    ``live`` (the count within `_STALE_HORIZON_SECONDS`, as
-    `_live_session_counts_by_root`) and ``last_active`` (the newest
-    `_active_ts` of ANY session there, live or not) — the latter orders the
-    repo selector by recency. Ghosts (a `worktree_cwd` that no longer
-    resolves to a repo) are dropped. Soft-degrades to `{}`."""
+    """Per derived repo root, across every session census knows about (not
+    scoped to any single board): ``live`` — the count within
+    `_STALE_HORIZON_SECONDS`, mirroring `_session_summary`'s `stale` — and
+    ``last_active``, the newest `_active_ts` of ANY session there, live or
+    not, which orders the repo selector by recency. Feeds `GET /api/repos`'s
+    per-repo `live_sessions`, its "unbegun" union (a live session in a repo
+    with no board.db) and its ordering. Ghosts (a `worktree_cwd` that no
+    longer resolves to a repo) are dropped; `derive_repo_root` shells `git
+    rev-parse` per distinct cwd, memoized within this call. Soft-degrades to
+    `{}` when census is unavailable."""
     data = run_census_all()
     if not data:
         return {}
@@ -352,43 +357,6 @@ def _chronicle_last_activity_by_root() -> dict[Path, float]:
             except OSError:
                 continue
     return out
-
-
-def _live_session_counts_by_root() -> dict[Path, int]:
-    """Count LIVE (non-stale) census sessions per derived repo root, across
-    every repo on the machine census knows about (not scoped to any single
-    board) — feeds `GET /api/repos`'s per-repo `live_sessions` count and its
-    "unbegun" repo union (a live session in a repo with no board.db).
-
-    "Live" mirrors `_session_summary`'s `stale` computation: a session is
-    live when `(now - updated_at) <= _STALE_HORIZON_SECONDS`. Ghost sessions
-    (a `worktree_cwd` that no longer resolves to any repo — e.g. a removed
-    worktree) are dropped, same as `_sessions_list`. `derive_repo_root`
-    shells `git rev-parse` per distinct cwd; memoized within this call.
-
-    Soft-degrades to `{}` when census is unavailable — never raises, mirrors
-    every other census read in this module.
-    """
-    data = run_census_all()
-    if not data:
-        return {}
-    sessions_dict = data.get("sessions") or {}
-    now = time.time()
-    root_cache: dict[str, Path | None] = {}
-    counts: dict[Path, int] = {}
-    for entry in sessions_dict.values():
-        cwd = entry.get("worktree_cwd")
-        if not cwd:
-            continue
-        if cwd not in root_cache:
-            root_cache[cwd] = derive_repo_root(Path(cwd))
-        root = root_cache[cwd]
-        if root is None:
-            continue
-        if (now - _entry_ts(entry)) > _STALE_HORIZON_SECONDS:
-            continue
-        counts[root] = counts.get(root, 0) + 1
-    return counts
 
 
 def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
@@ -843,6 +811,11 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         except CliError as exc:
             raise _mutation_error(exc) from exc
 
+    # One chronicle sync at a time per server process (see chronicle_sync);
+    # on `app.state` so tests can hold it.
+    _chronicle_sync_lock = threading.Lock()
+    app.state.chronicle_sync_lock = _chronicle_sync_lock
+
     # --- Chronicle (optional sibling plugin) ---------------------------------
     # Session telemetry lives in chronicle's own account-scoped SQLite store,
     # not in board.db, and is read via chronicle's CLI report verbs (soft
@@ -918,7 +891,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         JSON on success only)."""
         if not chronicle_installed():
             raise HTTPException(status_code=503, detail="chronicle plugin is not installed")
-        data = run_chronicle("sync", timeout=120)
+        # Ungated, so cheap to trigger — but never twice at once: overlapping
+        # syncs would race one SQLite store and stack 120s subprocesses. A
+        # second caller while one runs is told to come back (the store will
+        # be current when the first finishes anyway).
+        if not _chronicle_sync_lock.acquire(blocking=False):
+            raise HTTPException(status_code=429, detail="a chronicle sync is already running")
+        try:
+            data = run_chronicle("sync", timeout=120)
+        finally:
+            _chronicle_sync_lock.release()
         if data is None:
             raise HTTPException(status_code=503, detail="chronicle sync failed")
         return data

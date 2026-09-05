@@ -178,3 +178,17 @@ def test_plugin_absent_degrades(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert client.get("/api/chronicle/sessions").json() == {"sessions": []}
     assert client.get("/api/chronicle/session/sess1").status_code == 404
     assert client.post("/api/chronicle/sync").status_code == 503
+
+
+def test_sync_refuses_to_overlap(client: TestClient, root: Path, tmp_path: Path) -> None:
+    """The ungated sync runs one at a time per server: a second request while
+    one is in flight is told to come back (429), never a second subprocess
+    racing the same store."""
+    _seed(root, tmp_path, repo_root=str(root.resolve()))
+    lock = client.app.state.chronicle_sync_lock
+    assert lock.acquire(blocking=False)
+    try:
+        assert client.post("/api/chronicle/sync").status_code == 429
+    finally:
+        lock.release()
+    assert client.post("/api/chronicle/sync").status_code == 200
