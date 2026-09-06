@@ -487,7 +487,7 @@ function App() {
             {/* WF-095: an empty board under a filter is not an empty repo —
                 say so, with the one-click way out, rather than leaving a
                 wall of bare lanes to be read as "no work here". */}
-            {board && view === "board" && allCards.length > 0 && visibleIds.size === 0 && !isDefaultFilter && (
+            {view === "board" && allCards.length > 0 && visibleIds.size === 0 && !isDefaultFilter && (
               <p className="board-filter-hint" role="status">
                 Your filters hide every one of the {allCards.length} cards here.{" "}
                 <button type="button" className="board-filter-hint__clear" onClick={clear}>

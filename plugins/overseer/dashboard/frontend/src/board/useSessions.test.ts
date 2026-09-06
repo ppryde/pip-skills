@@ -280,4 +280,28 @@ describe("useSessions(root, enabled) — task 10 unbegun-repo fetch gate", () =>
     expect(result.current.sessions).toEqual([]);
   });
 
+  it("WF-047: a slow fetch for an earlier repo never lands on a later repo's list", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    let resolveA: (r: { sessions: never[] }) => void = () => {};
+    mockGetSessions.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve as typeof resolveA; })
+    );
+    const { result, rerender } = renderHook(
+      ({ root, enabled }: { root: string; enabled: boolean }) => useSessions(root, enabled),
+      { initialProps: { root: "/repo-a", enabled: true } }
+    );
+    // A → unbegun B → C, while A's fetch is still out; C's answers first.
+    rerender({ root: "/unbegun-b", enabled: false });
+    mockGetSessions.mockResolvedValueOnce({
+      sessions: [{ session_id: "c1", updated_at: 1 } as never],
+    });
+    rerender({ root: "/repo-c", enabled: true });
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    // Now A's stale response arrives: ignored.
+    await act(async () => {
+      resolveA({ sessions: [{ session_id: "a1", updated_at: 1 }, { session_id: "a2", updated_at: 2 }] as never });
+    });
+    expect(result.current.sessions).toHaveLength(1);
+  });
+
 });

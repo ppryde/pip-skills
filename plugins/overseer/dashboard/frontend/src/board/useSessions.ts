@@ -71,11 +71,17 @@ export function useSessions(
   enabledRef.current = enabled;
   // The root the previous effect run served — see the root-change effect.
   const prevRootRef = useRef<string | null>(null);
+  // Epoch for in-flight fetches, as in `useBoard`: a response is applied
+  // only if no root switch (or disable) has happened since it was issued —
+  // otherwise a slow fetch for repo A could land on top of repo C's list
+  // after a fast A → B → C hop.
+  const requestIdRef = useRef(0);
 
   const loadSessions = async () => {
+    const id = requestIdRef.current;
     try {
       const res = await getSessions();
-      if (isMountedRef.current) {
+      if (isMountedRef.current && id === requestIdRef.current) {
         setSessions(res.sessions);
       }
     } catch {
@@ -101,7 +107,10 @@ export function useSessions(
   useEffect(() => {
     const switched = prevRootRef.current !== null && prevRootRef.current !== root;
     prevRootRef.current = root;
-    if (switched || !enabled) setSessions((prev) => (prev.length === 0 ? prev : []));
+    if (switched || !enabled) {
+      requestIdRef.current += 1;
+      setSessions((prev) => (prev.length === 0 ? prev : []));
+    }
     if (!enabled) return;
     isMountedRef.current = true;
     setActiveRoot(root);

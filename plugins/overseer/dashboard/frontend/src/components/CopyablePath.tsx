@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 export interface CopyablePathProps {
   path: string;
@@ -19,20 +19,18 @@ const COPIED_MS = 1500;
  */
 function CopyablePath({ path, copyLabel = "Copy path" }: CopyablePathProps) {
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<number | null>(null);
-  useEffect(
-    () => () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    },
-    []
-  );
+  // "copied" shows for a moment, then reverts; React's own cleanup covers
+  // an unmount mid-countdown.
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), COPIED_MS);
+    return () => window.clearTimeout(t);
+  }, [copied]);
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(path);
       setCopied(true);
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => setCopied(false), COPIED_MS);
     } catch {
       // No clipboard (insecure context, permission denied): the path is
       // still selectable text, so there is nothing more to do here.
@@ -46,13 +44,7 @@ function CopyablePath({ path, copyLabel = "Copy path" }: CopyablePathProps) {
       <code className="copyable-path__text" title={path} dir="rtl">
         &lrm;{path}&lrm;
       </code>
-      <button
-        type="button"
-        className="copyable-path__copy"
-        onClick={() => void copy()}
-        aria-label={copyLabel}
-        title={copyLabel}
-      >
+      <button type="button" className="copyable-path__copy" onClick={copy} aria-label={copyLabel}>
         {copied ? "copied" : "copy"}
       </button>
     </span>
