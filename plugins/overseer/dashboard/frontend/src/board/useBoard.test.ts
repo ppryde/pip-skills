@@ -509,4 +509,22 @@ describe("useBoard(root, enabled) — WF-032 unbegun-repo fetch gate", () => {
     await waitFor(() => expect(mockedGetBoard).toHaveBeenCalledTimes(1));
     expect(mockedSetActiveRoot).toHaveBeenLastCalledWith("/repo-a");
   });
+
+  it("WF-047: disabling drops the previous repo's board and context, keeping the account limits", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { result, rerender } = renderHook(
+      ({ root, enabled }: { root: string; enabled: boolean }) => useBoard(root, enabled),
+      { initialProps: { root: "/repo-a", enabled: true } }
+    );
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+    const limits = result.current.limits;
+
+    rerender({ root: "/unbegun", enabled: false });
+    expect(result.current.board).toBeNull();
+    expect(result.current.context).toBeNull();
+    expect(result.current.limits).toBe(limits);
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+  });
 });

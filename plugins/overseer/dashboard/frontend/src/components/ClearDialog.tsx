@@ -9,6 +9,7 @@ import type { ClearResponse } from "../api/types";
 // over the solid red. The scope radios stay bespoke (native form controls),
 // and `.party-sheet__close` stays the icon-only "×" affordance.
 import { Button, Input } from "../ui";
+import CopyablePath from "./CopyablePath";
 
 export interface ClearDialogProps {
   repoLabel: string;
@@ -117,6 +118,12 @@ function ClearDialog({
               </label>
             </fieldset>
             <p>This will remove {scopeSummary}.</p>
+            {/* WF-071: name the folder being cleared, one line however deep
+                it sits, with a copy button — never a bare path that blows
+                the sheet's width out. */}
+            <p className="clear-dialog__path">
+              Repo: <CopyablePath path={repoRoot} copyLabel="Copy repo path" />
+            </p>
             <p>
               A recovery snapshot will be taken first — undo with{" "}
               <code>overseer restore</code>.

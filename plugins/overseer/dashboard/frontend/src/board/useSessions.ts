@@ -89,8 +89,14 @@ export function useSessions(
   // false and consumers stuck on the empty state. `enabled: false` is a hard
   // skip: no `setActiveRoot`, no fetch — an unbegun root must never reach
   // `getSessions()` (it 400s the backend exactly like `/api/board` does).
+  // WF-047: disabling also DROPS the sessions in hand. They belong to the
+  // previously-selected repo; left in state, every consumer (party, the
+  // questing pill) would keep showing them against the unbegun one.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setSessions([]);
+      return;
+    }
     isMountedRef.current = true;
     setActiveRoot(root);
     void loadSessions();

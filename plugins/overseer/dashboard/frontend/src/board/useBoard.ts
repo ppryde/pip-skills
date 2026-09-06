@@ -162,8 +162,19 @@ export function useBoard(
   // change) targets the newly-selected repo. `enabled: false` is a hard
   // skip: no `setActiveRoot`, no `load()` — an unbegun root must never
   // reach `getBoard()` (see the doc comment on `useBoard` above).
+  // WF-047: disabling also DROPS the board and context in hand — they are
+  // the previously-selected repo's, and a consumer reading `board?.cards`
+  // for the unbegun one must see nothing, not a stale neighbour. `limits`
+  // (the account's rate windows) are not per repo and stay. Any response
+  // still in flight for the old root is retired by bumping the epoch.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setBoard(null);
+      setContext(null);
+      setError(null);
+      return;
+    }
     setActiveRoot(root);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps

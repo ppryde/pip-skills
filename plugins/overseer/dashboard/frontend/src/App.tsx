@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import TopBar from "./components/TopBar";
+import CopyablePath from "./components/CopyablePath";
 import type { View } from "./components/TopBar";
 import ChroniclePage from "./components/chronicle/ChroniclePage";
 import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
@@ -91,6 +93,14 @@ function App() {
   }, [repos]);
 
   function handleSelectRepo(root: string) {
+    // WF-095: the card filters belong to the board the person set them on.
+    // Carried across to another repo they can hide every card there, which
+    // reads as an empty repo — so a switch starts the destination clean.
+    // Done here, on the person's own choice, and NOT in an effect on
+    // `activeRoot`: the reconcile above also moves the root (a stale stored
+    // one, or the launch root resolving on load), and that must keep the
+    // filter that was persisted for exactly this board.
+    if (root !== activeRoot) clear();
     setActiveRootState(root);
     writeStoredRoot(root);
   }
@@ -152,11 +162,18 @@ function App() {
   // WF-031 branch filter: session-local only (no localStorage, unlike the
   // repo selector) — `null` means "All", clearing every dim/spotlight.
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
+  // WF-095: same reset as a repo switch (see `handleSelectRepo`) — a branch
+  // spotlight plus a stale label/search filter is the same "where did all
+  // the cards go" trap.
+  function handleSelectBoardBranch(branch: string | null) {
+    if (branch !== activeBranch) clear();
+    setActiveBranch(branch);
+  }
   // Task 7: App-owned ClearDialog open-state + post-clear success toast —
   // same App-level precedent as `partyOpen`/`openCardId` above (Decisions:
   // this state never lives on TopBar itself).
   const [clearOpen, setClearOpen] = useState(false);
-  const [clearToast, setClearToast] = useState<string | null>(null);
+  const [clearToast, setClearToast] = useState<ReactNode>(null);
   // Task 2/3: "Controls ▾" and "Filters ▾" are now two INDEPENDENT collapse
   // toggles (previously one shared `controlsOpen` drove both TopBar's own
   // secondary-controls group AND the separate <FilterBar/> below it — see
@@ -375,7 +392,7 @@ function App() {
         onSelectRepo={handleSelectRepo}
         branches={view === "chronicle" ? chronicleBranches : branches}
         activeBranch={view === "chronicle" ? chronicleBranch : activeBranch}
-        onSelectBranch={view === "chronicle" ? setChronicleBranch : setActiveBranch}
+        onSelectBranch={view === "chronicle" ? setChronicleBranch : handleSelectBoardBranch}
         // Task 10: an unbegun repo never populates `party` (sessions are
         // hard-gated off above), so source the questing pill from the SAME
         // `live_sessions` count `<UnbegunHolding/>` already shows below —
@@ -471,6 +488,17 @@ function App() {
             {error && (
               <Waylaid error={error} retryEverySeconds={BOARD_RETRY_SECONDS} onRetry={() => void refresh()} />
             )}
+            {/* WF-095: an empty board under a filter is not an empty repo —
+                say so, with the one-click way out, rather than leaving a
+                wall of bare lanes to be read as "no work here". */}
+            {board && view === "board" && allCards.length > 0 && visibleIds.size === 0 && !isDefaultFilter && (
+              <p className="board-filter-hint" role="status">
+                Your filters hide every one of the {allCards.length} cards here.{" "}
+                <button type="button" className="board-filter-hint__clear" onClick={clear}>
+                  Clear filters
+                </button>
+              </p>
+            )}
             {board && view === "board" && (
               <Board
                 board={board}
@@ -527,12 +555,19 @@ function App() {
           cardCount={board?.cards.length ?? 0}
           onClose={() => setClearOpen(false)}
           onCleared={(res) => {
+            // WF-071: the snapshot path is long; CopyablePath keeps it to
+            // one line (tail visible) with a copy button, since the path
+            // is what `overseer restore` needs.
             setClearToast(
-              res.noop
-                ? `Nothing to clear for ${res.label}.`
-                : `Cleared ${res.label}. Recovery snapshot: ${
-                    res.backup_path ?? "(none)"
-                  } — restore with \`overseer restore\`.`
+              res.noop ? (
+                `Nothing to clear for ${res.label}.`
+              ) : (
+                <>
+                  Cleared {res.label}. Recovery snapshot:{" "}
+                  {res.backup_path ? <CopyablePath path={res.backup_path} /> : "(none)"} — restore
+                  with <code>overseer restore</code>.
+                </>
+              )
             );
             // Task 7: a clear can change has_board/live_sessions (repos) and
             // always changes the board's own cards/sprints — refresh both so

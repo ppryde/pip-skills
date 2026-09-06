@@ -254,4 +254,22 @@ describe("useSessions(root, enabled) — task 10 unbegun-repo fetch gate", () =>
     await waitFor(() => expect(mockGetSessions).toHaveBeenCalled());
   });
 
+  it("WF-047: disabling drops the previous repo's sessions instead of leaving them in state", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    mockGetSessions.mockResolvedValue({
+      sessions: [{ session_id: "s1", updated_at: 1 } as never],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ root, enabled }: { root: string; enabled: boolean }) => useSessions(root, enabled),
+      { initialProps: { root: "/repo-a", enabled: true } }
+    );
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    // Switch to an unbegun repo: no fetch, and nothing left over from repo-a.
+    rerender({ root: "/unbegun", enabled: false });
+    expect(result.current.sessions).toEqual([]);
+    expect(mockGetSessions).toHaveBeenCalledTimes(1);
+  });
+
 });
