@@ -310,6 +310,50 @@ describe("<App/> — task 6: filter bar wiring (WF-059/060/061)", () => {
     expect(screen.getByText("The great migration")).toBeInTheDocument();
     expect(screen.getByText("Migration child")).toBeInTheDocument();
   });
+
+  it("WF-095: a search that hides every card says so, and switching repo clears the filters", async () => {
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [
+        repo({ label: "acme", root: "/acme", current: true, has_board: true }),
+        repo({ label: "beta", root: "/beta", has_board: true }),
+      ],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue({
+      board: {
+        project: "acme",
+        sprints: [],
+        quarantined: [],
+        label_colors: {},
+        cards: [card({ id: "WF-1", title: "Only card" })],
+      },
+      context: { pct: 10, threshold: 80 },
+      limits: null,
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByLabelText("Repo")).toBeInTheDocument());
+    expect(await screen.findByText("Only card")).toBeInTheDocument();
+    const HINT = /hide every one of the 1 cards/;
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+
+    toggleFilters();
+    fireEvent.change(screen.getByLabelText("search"), { target: { value: "zzz" } });
+    await waitFor(() => expect(screen.queryByText("Only card")).not.toBeInTheDocument());
+    expect(screen.getByText(HINT)).toHaveAttribute("role", "status");
+
+    // Switching repo starts the destination clean: the search is gone, the
+    // hint with it, and the card is back.
+    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "/beta" } });
+    await waitFor(() => expect(screen.getByLabelText("search")).toHaveValue(""));
+    expect(await screen.findByText("Only card")).toBeInTheDocument();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("overseer_board_filter") ?? "{}").query).toBe("");
+
+    // The hint's own button clears too.
+    fireEvent.change(screen.getByLabelText("search"), { target: { value: "zzz" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(screen.getByLabelText("search")).toHaveValue(""));
+  });
 });
 
 // Task 2/3: "Controls ▾" and "Filters ▾" are two INDEPENDENT App-owned

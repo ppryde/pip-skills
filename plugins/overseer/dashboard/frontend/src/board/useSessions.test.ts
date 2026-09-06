@@ -254,4 +254,54 @@ describe("useSessions(root, enabled) — task 10 unbegun-repo fetch gate", () =>
     await waitFor(() => expect(mockGetSessions).toHaveBeenCalled());
   });
 
+  it("WF-047: disabling drops the previous repo's sessions instead of leaving them in state", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    mockGetSessions.mockResolvedValue({
+      sessions: [{ session_id: "s1", updated_at: 1 } as never],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ root, enabled }: { root: string; enabled: boolean }) => useSessions(root, enabled),
+      { initialProps: { root: "/repo-a", enabled: true } }
+    );
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+    // Switch to an unbegun repo: no fetch, and nothing left over from repo-a.
+    rerender({ root: "/unbegun", enabled: false });
+    expect(result.current.sessions).toEqual([]);
+    expect(mockGetSessions).toHaveBeenCalledTimes(1);
+
+    // And a switch to another BEGUN repo drops them too, before its fetch
+    // lands — never repo-a's heroes attributed to repo-b.
+    rerender({ root: "/repo-a", enabled: true });
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    mockGetSessions.mockImplementationOnce(() => new Promise(() => {}));
+    rerender({ root: "/repo-b", enabled: true });
+    expect(result.current.sessions).toEqual([]);
+  });
+
+  it("WF-047: a slow fetch for an earlier repo never lands on a later repo's list", async () => {
+    const mockGetSessions = vi.mocked(client.getSessions);
+    let resolveA: (r: { sessions: never[] }) => void = () => {};
+    mockGetSessions.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveA = resolve as typeof resolveA; })
+    );
+    const { result, rerender } = renderHook(
+      ({ root, enabled }: { root: string; enabled: boolean }) => useSessions(root, enabled),
+      { initialProps: { root: "/repo-a", enabled: true } }
+    );
+    // A → unbegun B → C, while A's fetch is still out; C's answers first.
+    rerender({ root: "/unbegun-b", enabled: false });
+    mockGetSessions.mockResolvedValueOnce({
+      sessions: [{ session_id: "c1", updated_at: 1 } as never],
+    });
+    rerender({ root: "/repo-c", enabled: true });
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    // Now A's stale response arrives: ignored.
+    await act(async () => {
+      resolveA({ sessions: [{ session_id: "a1", updated_at: 1 }, { session_id: "a2", updated_at: 2 }] as never });
+    });
+    expect(result.current.sessions).toHaveLength(1);
+  });
+
 });

@@ -1599,6 +1599,25 @@ body {
   color: var(--qb-ink-400);
 }
 
+/* WF-095: "your filters hide every card" — sits above the lanes in the
+   board's own ink, with the clear action as an inline text button so it
+   reads as a sentence, not a second toolbar. */
+.board-filter-hint {
+  margin: 0 0 0.75rem;
+  color: var(--qb-ink-400);
+  font-size: 0.9rem;
+}
+
+.board-filter-hint__clear {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Same danger-red exception as .topbar__quarantine-banner above — no
    HANDOFF-sourced alert colour to convert to. */
 .board-error {
@@ -1771,6 +1790,45 @@ body {
 .board-toast--success {
   background: var(--legacy-color-15803d);
   color: var(--legacy-color-dcfce7);
+}
+
+/* --- WF-071: a long path on one line, tail visible, copy beside it -------
+   `direction: rtl` + `text-overflow: ellipsis` puts the ellipsis at the
+   START of the visible run, so the identifying tail of the path survives.
+   The component wraps the text in `&lrm;` marks so the characters
+   themselves keep left-to-right order. */
+.copyable-path {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.copyable-path__text {
+  display: inline-block;
+  max-width: min(28rem, 60vw);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-size: 0.95em;
+}
+
+.copyable-path__copy {
+  border: 1px solid currentColor;
+  border-radius: var(--legacy-radius-4px);
+  background: transparent;
+  color: inherit;
+  padding: 0 0.35rem;
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.copyable-path__copy:hover {
+  opacity: 1;
 }
 
 /* WF-092: the swim-lane fill is a soft wash of each column's OWN header

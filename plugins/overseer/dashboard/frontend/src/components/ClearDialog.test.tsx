@@ -35,6 +35,9 @@ describe("<ClearDialog/>", () => {
     open();
     expect(screen.getByText(/Dragons be here/i)).toBeInTheDocument();
     expect(screen.getByText(/3/)).toBeInTheDocument();
+    // WF-071: the repo's folder, as a copyable one-liner.
+    expect(screen.getByTitle("/repos/demo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy repo path" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /press on/i })
     ).toBeInTheDocument();
