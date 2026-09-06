@@ -173,6 +173,14 @@ export interface DependsBody {
   off?: string;
 }
 
+/** POST /api/card/{id}/attributes (WF-070) — only the keys PRESENT are
+ * changed; `null` clears one. */
+export interface AttributesBody {
+  complexity?: string | null;
+  sprint?: string | null;
+  estimate?: number | null;
+}
+
 export type MoveBody = { stage: Stage } | { status: Status; reason?: string };
 
 export interface ThresholdBody {

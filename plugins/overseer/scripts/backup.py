@@ -31,12 +31,11 @@ def _dump_table(conn, table: str) -> list[dict]:
 def _overseer_version() -> str:
     """Read the plugin's own version from plugin.json, for manifest
     provenance. Never lets a read failure break a backup — falls back to
-    an empty string on any error (missing file, malformed JSON, missing key)."""
-    plugin_json = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
-    try:
-        return json.loads(plugin_json.read_text())["version"]
-    except Exception:
-        return ""
+    an empty string on any error (missing file, malformed JSON, missing key).
+    One reader for the manifest: the dashboard's version stamp (WF-053)
+    reads it the same way."""
+    from scripts.dashboard_record import plugin_version
+    return plugin_version()
 
 
 def _atomic_replace_dir(staged: Path, dest: Path) -> None:

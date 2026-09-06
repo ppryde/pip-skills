@@ -15,6 +15,7 @@ import type {
   ClearResponse,
   CreateCardBody,
   CreateCardResponse,
+  AttributesBody,
   DependsBody,
   EditCardBody,
   MoveBody,
@@ -176,6 +177,12 @@ export function setParent(
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}/parent`), {
     parent,
   });
+}
+
+/** WF-070: complexity / sprint / estimate from the drawer. Send only the
+ * keys to change; `null` clears one. */
+export function setAttributes(id: string, body: AttributesBody): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", withRoot(`/api/card/${id}/attributes`), body);
 }
 
 export function setDepends(

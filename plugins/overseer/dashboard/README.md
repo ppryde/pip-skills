@@ -91,6 +91,7 @@ Options:
 | `--host HOST` | `127.0.0.1` | Bind host — local-only; do not change to `0.0.0.0` unless you understand the exposure |
 | `--port PORT` | `8770` | Bind port |
 | `--no-browser` | off | Don't auto-open a browser tab |
+| `--replace` | off | If the recorded dashboard is still running on this port, stop it and take over (otherwise the launch refuses) |
 
 ## Chronicle page (optional)
 
@@ -158,6 +159,23 @@ git pull        # in the worktree/checkout the server was launched from
 A restart (Ctrl-C, relaunch `serve.py`) is only needed when **backend
 Python** changes — `serve.py` runs uvicorn without `--reload`, and the app
 is built once at startup.
+
+### Restart-on-stale (WF-053)
+
+The server stamps itself on launch — pid, host, port, root, version and how
+to relaunch — at `<CLAUDE_CONFIG_DIR>/overseer/.dashboard.json`, removed on
+clean shutdown, and answers `GET /api/version` with what it is actually
+running. Overseer's SessionStart hook reads the stamp and, only when a
+**live** server is running an **older** version than the installed plugin,
+kills it and relaunches `serve.py` with the same host, port and root (never
+opening a browser), leaving one line in the session: `overseer dashboard
+restarted 0.21.0 → 0.22.0`. It never starts a dashboard that was not running,
+never downgrades, and fails open — any error is a silent no-op. Several
+sessions starting together are debounced by a short-lived lock, so one of
+them does the restart. A LAN-bound server comes back LAN-bound; note that
+its auto-generated token changes on restart unless `OVERSEER_DASHBOARD_TOKEN`
+is set in the environment the hook runs in. Output of the relaunched server
+goes to `<CLAUDE_CONFIG_DIR>/overseer/dashboard.log`.
 
 ## Hot reload (dev)
 

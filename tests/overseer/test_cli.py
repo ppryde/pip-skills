@@ -784,6 +784,39 @@ class TestOrderAndPriorityField:
         # argparse will handle this and exit with usage message
 
 
+class TestAttributesField:
+    """WF-070: complexity / sprint / estimate editable after creation."""
+
+    def test_complexity_round_trip_and_clear(self, repo, capsys):
+        run(repo, "new-card", "--title", "T", "--complexity", "S")
+        assert run(repo, "set-field", "WF-001", "--complexity", "XL") == 0
+        assert _card(repo).complexity == "XL"
+        assert run(repo, "set-field", "WF-001", "--complexity", "") == 0
+        assert _card(repo).complexity is None
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--complexity", "XXL") == 1
+        assert "unknown complexity" in capsys.readouterr().err
+
+    def test_sprint_round_trip_and_clear(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--sprint", "S-2026-09") == 0
+        assert _card(repo).sprint == "S-2026-09"
+        assert run(repo, "set-field", "WF-001", "--sprint", "  ") == 0
+        assert _card(repo).sprint is None
+
+    def test_estimate_parses_token_suffixes_and_clears(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--estimate", "400k") == 0
+        assert _card(repo).budget_estimate == 400_000
+        assert run(repo, "set-field", "WF-001", "--estimate", "1.5M") == 0
+        assert _card(repo).budget_estimate == 1_500_000
+        assert run(repo, "set-field", "WF-001", "--estimate", "") == 0
+        assert _card(repo).budget_estimate is None
+        capsys.readouterr()
+        assert run(repo, "set-field", "WF-001", "--estimate", "lots") == 1
+        assert "unparseable token count" in capsys.readouterr().err
+
+
 class TestChecklistFieldRegression:
     def test_mutation_preserves_checklist(self, repo):
         """CRITICAL: card writes serialize from the dataclass. Without the

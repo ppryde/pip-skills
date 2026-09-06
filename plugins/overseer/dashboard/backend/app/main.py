@@ -45,7 +45,10 @@ _OVERSEER_ROOT = Path(__file__).resolve().parents[3]
 if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
-from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402  (must follow sys.path setup above)
+from scripts.dashboard_record import (
+    plugin_version,  # noqa: E402  (must follow sys.path setup above)
+)
+from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -68,6 +71,15 @@ class PriorityBody(BaseModel):
 
 class ParentBody(BaseModel):
     parent: str | None = None
+
+
+class AttributesBody(BaseModel):
+    """WF-070: the create-time attributes, editable from the drawer. A field
+    that is ABSENT is left alone; one sent as null is cleared — so the
+    handler reads ``model_fields_set``, not the values."""
+    complexity: str | None = None
+    sprint: str | None = None
+    estimate: int | None = None
 
 
 class LabelsBody(BaseModel):
@@ -497,6 +509,15 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     # a git repo, git missing) — same as a launch root with no worktree.
     _derived_launch_root = (derive_repo_root(launch_root) or launch_root).resolve()
 
+    # WF-053: what THIS process is running — read at app construction, so
+    # the answer is the code actually serving, not what a record file claims.
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    version = plugin_version()
+
+    @app.get("/api/version")
+    def get_version() -> dict[str, Any]:
+        return {"version": version, "root": str(launch_root), "started_at": started_at}
+
     def _mutate(fn: Callable[[], None], effective_root: Path) -> dict[str, Any]:
         try:
             fn()
@@ -629,6 +650,28 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             check_id(card_id)
             value = body.priority if body.priority is not None else ""
             run_overseer(effective, "set-field", card_id, "--priority", value)
+
+        return _mutate(do, effective)
+
+    @app.post("/api/card/{card_id}/attributes", dependencies=[Depends(require_token)])
+    def set_attributes(card_id: str, body: AttributesBody, root: str | None = None) -> dict[str, Any]:
+        sent = body.model_fields_set
+        if not sent:
+            raise HTTPException(status_code=400, detail="nothing to set")
+        if body.estimate is not None and body.estimate < 0:
+            raise HTTPException(status_code=400, detail="estimate must not be negative")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            args = ["set-field", card_id]
+            if "complexity" in sent:
+                args += ["--complexity", body.complexity or ""]
+            if "sprint" in sent:
+                args += ["--sprint", body.sprint or ""]
+            if "estimate" in sent:
+                args += ["--estimate", "" if body.estimate is None else str(body.estimate)]
+            run_overseer(effective, *args)
 
         return _mutate(do, effective)
 

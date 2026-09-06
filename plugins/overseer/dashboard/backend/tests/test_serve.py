@@ -97,6 +97,83 @@ def test_main_passes_through_custom_host(monkeypatch: pytest.MonkeyPatch, tmp_pa
     fake_run.assert_called_once_with(fake_run.call_args.args[0], host="0.0.0.0", port=8080)
 
 
+# --- WF-053: runtime record + singleton --------------------------------------
+
+
+def _quiet(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    monkeypatch.delenv("OVERSEER_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(serve, "create_app", MagicMock(return_value=object()))
+    fake_run = MagicMock()
+    monkeypatch.setattr(serve.uvicorn, "run", fake_run)
+    monkeypatch.setattr(serve.threading, "Timer", MagicMock())
+    return fake_run
+
+
+def test_main_stamps_a_record_while_serving_and_removes_it_after(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dr = serve.dashboard_record
+    seen: dict = {}
+    fake_run = _quiet(monkeypatch)
+    fake_run.side_effect = lambda *a, **k: seen.update(record=dr.read_record())
+
+    rc = serve.main(["--root", str(tmp_path), "--host", "0.0.0.0", "--port", "9002", "--no-browser"])
+
+    assert rc == 0
+    rec = seen["record"]
+    assert (rec["host"], rec["port"], rec["root"]) == ("0.0.0.0", 9002, str(tmp_path.resolve()))
+    assert rec["pid"] == serve.os.getpid()
+    assert rec["serve"].endswith("serve.py") and rec["python"]
+    assert rec["version"] == dr.plugin_version()
+    assert dr.read_record() is None  # gone once the server returns
+
+
+def test_main_refuses_a_port_a_live_recorded_server_holds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dr = serve.dashboard_record
+    fake_run = _quiet(monkeypatch)
+    dr.write_record({"pid": 777, "host": "127.0.0.1", "port": 9003})
+    monkeypatch.setattr(dr, "pid_alive", lambda pid: pid == 777)
+
+    rc = serve.main(["--root", str(tmp_path), "--port", "9003", "--no-browser"])
+
+    assert rc == 1
+    assert "already running" in capsys.readouterr().err
+    fake_run.assert_not_called()
+    assert dr.read_record()["pid"] == 777  # the live server's record is untouched
+
+
+def test_main_replace_takes_over_a_live_recorded_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dr = serve.dashboard_record
+    fake_run = _quiet(monkeypatch)
+    dr.write_record({"pid": 777, "host": "127.0.0.1", "port": 9003})
+    monkeypatch.setattr(dr, "pid_alive", lambda pid: pid == 777)
+    killed: list[int] = []
+    monkeypatch.setattr(dr, "terminate_pid", lambda pid: (killed.append(pid), True)[1])
+
+    rc = serve.main(["--root", str(tmp_path), "--port", "9003", "--no-browser", "--replace"])
+
+    assert rc == 0
+    assert killed == [777]
+    fake_run.assert_called_once()
+
+
+def test_main_ignores_a_record_for_another_port_or_a_dead_pid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dr = serve.dashboard_record
+    fake_run = _quiet(monkeypatch)
+    dr.write_record({"pid": 777, "host": "127.0.0.1", "port": 9003})
+    monkeypatch.setattr(dr, "pid_alive", lambda pid: pid == 777)
+    assert serve.main(["--root", str(tmp_path), "--port", "9004", "--no-browser"]) == 0
+    monkeypatch.setattr(dr, "pid_alive", lambda pid: False)
+    assert serve.main(["--root", str(tmp_path), "--port", "9003", "--no-browser"]) == 0
+    assert fake_run.call_count == 2
+
+
 # --- browser open behaviour --------------------------------------------------
 
 

@@ -32,6 +32,25 @@ def test_order(client: TestClient, root: Path) -> None:
     assert _show(root, card_id)["order"] == 7
 
 
+def test_attributes_set_only_what_is_sent_and_clear_with_null(client: TestClient, root: Path) -> None:
+    # WF-070: complexity / sprint / estimate from the drawer.
+    card_id = _new_card(root)  # created with complexity S
+
+    resp = client.post(f"/api/card/{card_id}/attributes", json={"sprint": "S-1", "estimate": 400000})
+    assert resp.status_code == 200
+    shown = _show(root, card_id)
+    assert (shown["sprint"], shown["budget"]["estimate"], shown["complexity"]) == ("S-1", 400000, "S")
+
+    resp = client.post(f"/api/card/{card_id}/attributes", json={"complexity": "L", "estimate": None})
+    assert resp.status_code == 200
+    shown = _show(root, card_id)
+    assert (shown["sprint"], shown["budget"]["estimate"], shown["complexity"]) == ("S-1", None, "L")
+
+    assert client.post(f"/api/card/{card_id}/attributes", json={}).status_code == 400
+    assert client.post(f"/api/card/{card_id}/attributes", json={"estimate": -1}).status_code == 400
+    assert client.post(f"/api/card/{card_id}/attributes", json={"complexity": "XXL"}).status_code != 200
+
+
 def test_priority_set_and_clear(client: TestClient, root: Path) -> None:
     card_id = _new_card(root)
 
