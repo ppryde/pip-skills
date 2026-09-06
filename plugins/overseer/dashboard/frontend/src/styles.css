@@ -395,8 +395,10 @@
      scaled-up cousin of the `--qb-btn-wobble*` set the buttons/chips use) so
      the card CONTAINERS read as hand-drawn too, not just the controls —
      different horizontal/vertical radius per corner, alternated a/b by row
-     parity so neighbouring cards never share the exact silhouette. Used only
-     by `.card-tile` and `.atlas-rail-card`. */
+     parity so neighbouring cards never share the exact silhouette. Used by
+     `.card-tile`, `.atlas-rail-card`, and the Chronicle's `.chr-panel` /
+     `.chr-gauge` boxes (and its `.chr-tile` in the "torn note" look —
+     see the `--chr-tile-radius-*` tokens). */
   --qb-radius-card-a: 20px 26px 16px 24px / 24px 16px 26px 18px;
   --qb-radius-card-b: 26px 16px 24px 18px / 16px 26px 18px 22px;
   --qb-radius-modal: 26px;
@@ -1602,6 +1604,132 @@ body {
 .board-error {
   color: var(--legacy-color-b3261e);
 }
+
+/* --- "The messenger has been waylaid" (Waylaid.tsx) ------------------------
+   The fetch-failure banner: a torn-note box washed with the danger red (the
+   same mix recipe as the tinted Chronicle tiles, so text stays ink), the
+   redrawn compass whose needle seeks, and a "Send a rider" retry. */
+.waylaid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.8rem;
+  background: color-mix(in srgb, var(--legacy-color-b3261e) 7%, var(--qb-panel));
+  border: 1.5px solid color-mix(in srgb, var(--legacy-color-b3261e) 45%, var(--qb-card-border));
+  /* A strip, not a card: the button-scale wobble keeps it slim. */
+  border-radius: var(--qb-btn-wobble-2);
+}
+
+.waylaid__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.waylaid__text p {
+  margin: 0;
+}
+
+.waylaid__title {
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  color: var(--qb-ink-900);
+}
+
+.waylaid__body {
+  font-family: var(--qb-font-prose);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--qb-ink-700);
+}
+
+.waylaid__detail {
+  font-family: var(--qb-font-prose);
+  font-size: 0.7rem;
+  color: var(--qb-ink-400);
+}
+
+.waylaid__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.waylaid__pack {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* The compass, in the icon pack's palette. */
+.waylaid__compass {
+  display: block;
+  overflow: visible;
+}
+
+.waylaid__compass-face {
+  fill: #f3e1b8;
+  stroke: var(--qb-ink-700);
+  stroke-width: 2;
+}
+
+.waylaid__compass-ring {
+  fill: none;
+  stroke: var(--qb-card-border);
+  stroke-width: 1.2;
+}
+
+.waylaid__compass-pip {
+  fill: var(--qb-ink-700);
+}
+
+.waylaid__needle-north {
+  fill: #7a8b45;
+  stroke: #4a5a2a;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.waylaid__needle-south {
+  fill: #d9c9a0;
+  stroke: #8a7a52;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+/* The needle sweeps a full turn, overshoots north, settles, and goes round
+   again — searching, not a fan. */
+@keyframes waylaid-seek {
+  0% { transform: rotate(0deg); }
+  55% { transform: rotate(380deg); }
+  70% { transform: rotate(345deg); }
+  82% { transform: rotate(368deg); }
+  92% { transform: rotate(357deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.waylaid__needle {
+  transform-origin: 32px 32px;
+  animation: waylaid-seek 3.4s cubic-bezier(0.45, 0.05, 0.35, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waylaid__needle {
+    animation: none;
+  }
+}
+/* Its phone-width layout lives in the mobile layer at the END of this file:
+   the board's CSS regression guard (Board.test.tsx) treats the first 720px
+   media block in the file as the board's own — and matches the query text
+   even inside a comment, so it is not spelled out here. */
 
 /* Board: a flex row of lanes, horizontally scrollable. */
 .board {
@@ -3895,6 +4023,24 @@ a.card-drawer__pr-chip:hover {
   letter-spacing: normal;
   line-height: 1.35;
   color: var(--qb-ink-700);
+  /* Prose, however the host aligns its own text (the mobile tiles centre). */
+  text-align: left;
+}
+
+/* Flips, set by InfoTooltip after measuring the bubble against the viewport
+   (`data-align`/`data-side`): hang from the trigger's right edge when the
+   left-flush bubble would run off screen (the last tile in a row), and sit
+   above it when there is no room below (a trigger low in a scrolled drawer). */
+.info-tooltip__bubble[data-align="end"] {
+  left: auto;
+  right: 0;
+}
+
+.info-tooltip__bubble[data-side="top"] {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 0.35rem;
 }
 
 /* WF-090: Last Orders became a plain 5%-step `<select>` — no more number
@@ -4882,14 +5028,15 @@ a.card-drawer__pr-chip:hover {
    cascade convention (that section must load last to win).
    ========================================================================== */
 
-/* --- TopBar: Board|Atlas view toggle — "guild coin" stack -----------------
-   Two circular icon coins overlapping to the LEFT of the wordmark. The active
-   view is the FRONT coin (gold-chip fill); the inactive one peeks out behind
-   and to the right, shrunk and dimmed. Tapping the coin behind slides it
-   forward and swaps the view — transform + z-index driven purely by
-   `aria-pressed` — reading as one coin shuffling in front of the other. Two
-   coins only encode two views: fine while Board|Atlas are the only pages (a
-   third would need a real segmented control, per the JSX note).
+/* --- TopBar: view switcher — a row of overlapping "guild coins" ------------
+   One circular icon coin per page (Board, Atlas, and Chronicle when its
+   plugin is present), fanned out to the LEFT of the wordmark so each
+   overlaps its neighbour by half. The active view's coin is the FRONT coin
+   (gold-chip fill, full size); the others sit behind, shrunk and dimmed.
+   Tapping a back coin brings it forward and swaps the view — transform +
+   z-index driven purely by `aria-pressed`. Positions come from source order
+   (`:nth-child`), the row's width from `data-count`, so a coin added or
+   removed never needs the CSS touched beyond those two lists.
 
    Each coin's box is 44px (border included) — meeting the ≥44px touch-target
    floor directly. Active = the same gold-chip fill/border/text trio the
@@ -4897,9 +5044,31 @@ a.card-drawer__pr-chip:hover {
 .topbar__view-toggle {
   position: relative;
   flex: 0 0 auto;
-  /* 44px front coin + 16px peek of the coin behind it */
-  width: 60px;
+  /* 44px coin + 30px per further coin (each overlapping the last by about
+     a third) */
+  width: 74px;
   height: 44px;
+}
+
+.topbar__view-toggle[data-count="3"] {
+  width: 104px;
+}
+
+/* Stacking reads left to right: each coin lies over the one to its right,
+   like a fanned hand of cards, so on load the row is Board over Atlas over
+   Chronicle. The pressed coin's own z-index (below) still tops them all. */
+.topbar__view-toggle-btn:nth-child(1) {
+  z-index: 3;
+}
+
+.topbar__view-toggle-btn:nth-child(2) {
+  left: 30px;
+  z-index: 2;
+}
+
+.topbar__view-toggle-btn:nth-child(3) {
+  left: 60px;
+  z-index: 1;
 }
 
 .topbar__view-toggle-btn {
@@ -4932,26 +5101,25 @@ a.card-drawer__pr-chip:hover {
   }
 }
 
-/* Front coin — the active view: flush left, fully opaque, above its sibling. */
+/* Front coin — the active view: full size, fully opaque, above its siblings. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
-  transform: translateX(0) scale(1);
-  z-index: 2;
+  transform: scale(1);
+  z-index: 4;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
   color: var(--qb-gold-chip-text);
 }
 
-/* Back coin — the inactive view: peeks out to the right, shrunk and dimmed,
-   behind the front coin. */
+/* Back coins — the other views: in place and shrunk, behind the front coin,
+   keeping the left-over-right order set per coin above. Opaque: the gold
+   fill and the size step already single out the pressed coin, and a
+   dimmed coin made the icon behind it hard to read. */
 .topbar__view-toggle-btn[aria-pressed="false"] {
-  transform: translateX(16px) scale(0.9);
-  z-index: 1;
-  opacity: 0.7;
+  transform: scale(0.9);
 }
 
 .topbar__view-toggle-btn[aria-pressed="false"]:hover {
-  opacity: 1;
   border-color: var(--qb-btn-ink-hover);
 }
 
@@ -6833,6 +7001,25 @@ button.trail-tag:focus-visible {
   /* The active chart's hue, set per component via an inline custom property
      (see ChronicleCharts' `hue` prop); defaults to context blue. */
   --chr-hue: var(--chr-context);
+  /* The sticker drop shadow every Chronicle box (`.chr-tile`, `.chr-panel`,
+     `.chr-gauge`) wears. Defaults to the board card's recipe; a container
+     suppresses it by setting this to `0 0 0 transparent` — a zero-size
+     shadow rather than `none`, because the tile combines this with its
+     inset accent rule in one `box-shadow` list, and `none` inside a list
+     invalidates the whole declaration (accent included). */
+  --chr-box-shadow: var(--qb-shadow-card) var(--qb-card-border);
+  /* Weight of the hand-inked box. Defaults are the "sticker" look — 1.5px
+     ink, tiles on the 12px-scale button wobbles (cycled four ways by grid
+     position), panels and gauges on the 20-26px card radii. The "torn
+     note" look sets 2px ink and puts the card radii on the tiles too (a/b
+     alternated, so the four tile slots read a, b, a, b); its matching
+     shadow is `var(--qb-shadow-banner) var(--qb-card-border)`. A container
+     picks a look by overriding these, never by restyling the boxes. */
+  --chr-box-ink: 1.5px;
+  --chr-tile-radius-1: var(--qb-btn-wobble);
+  --chr-tile-radius-2: var(--qb-btn-wobble-2);
+  --chr-tile-radius-3: var(--qb-btn-wobble-3);
+  --chr-tile-radius-4: var(--qb-btn-wobble-4);
   --chr-grid: #eadfc6;
   --chr-axis: var(--qb-line-dashed);
   --chr-marker: var(--qb-ink-400);
@@ -6851,6 +7038,22 @@ button.trail-tag:focus-visible {
   transition: opacity 0.2s ease;
 }
 
+/* The Chronicle wears the "torn note" look: card-scale wobbles on every
+   box, 2px ink, and no drop shadow — a dozen tiles plus a grid of chart
+   panels all casting one made the page read as a sheet of stickers rather
+   than a ledger. Scoped here (the page) and on the session drawer, so the
+   box rules keep their sticker defaults for any other surface that adopts
+   them. See the `--chr-box-*` / `--chr-tile-radius-*` tokens. */
+.chronicle,
+.chr-drawer {
+  --chr-box-ink: 2px;
+  --chr-tile-radius-1: var(--qb-radius-card-a);
+  --chr-tile-radius-2: var(--qb-radius-card-b);
+  --chr-tile-radius-3: var(--qb-radius-card-a);
+  --chr-tile-radius-4: var(--qb-radius-card-b);
+  --chr-box-shadow: 0 0 0 transparent;
+}
+
 /* Refetch keeps the frame: dim, never skeleton. */
 .chronicle--refreshing .chr-tiles,
 .chronicle--refreshing .chronicle__grid,
@@ -6858,13 +7061,9 @@ button.trail-tag:focus-visible {
   opacity: 0.6;
 }
 
-.chronicle__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-}
-
+/* The window/scope segments render inside the shared `.filter-bar` region
+   (`<ChronicleFilterBar/>`, the board FilterBar's slot); Sync lives in the
+   top bar's toggle cluster. Only the segment chrome is Chronicle-specific. */
 .chronicle__segment {
   display: inline-flex;
   gap: 0.25rem;
@@ -6874,19 +7073,6 @@ button.trail-tag:focus-visible {
   background: var(--qb-gold-chip-bg);
   border-color: var(--qb-gold-chip-border);
   color: var(--qb-gold-chip-text);
-}
-
-.chronicle__sync {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.chronicle__sync-note {
-  font-family: var(--qb-font-prose);
-  font-size: 0.85rem;
-  color: var(--qb-ink-500);
 }
 
 .chronicle__empty {
@@ -6915,6 +7101,10 @@ button.trail-tag:focus-visible {
 .chr-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  /* Every row as tall as the tallest: a tile with a footnote and one
+     without would otherwise sit at different heights and the grid reads as
+     a ragged wall. Paired with the single-line note below. */
+  grid-auto-rows: 1fr;
   gap: 0.6rem;
 }
 
@@ -6923,6 +7113,10 @@ button.trail-tag:focus-visible {
   margin-bottom: 1rem;
 }
 
+/* Hand-inked silhouette, same recipe as `.card-tile`: an irregular radius
+   plus the hard sticker shadow. The radius cycles four ways by grid
+   position so no two neighbours match; which four, and how heavy the ink,
+   comes from the `--chr-tile-radius-*` / `--chr-box-ink` tokens. */
 .chr-tile {
   position: relative;
   display: flex;
@@ -6930,22 +7124,59 @@ button.trail-tag:focus-visible {
   gap: 0.15rem;
   padding: 0.7rem 0.85rem 0.7rem 1rem;
   background: var(--qb-panel);
-  border: 1.5px solid var(--qb-card-border);
-  border-radius: 12px;
-  overflow: hidden;
+  border: var(--chr-box-ink) solid var(--qb-card-border);
+  border-radius: var(--chr-tile-radius-1);
+  box-shadow: var(--chr-box-shadow);
 }
 
-/* Decorative accent grouping a tile with the chart that shares its measure.
-   Never encodes a value — the number beside it carries every meaning. */
-.chr-tile::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: var(--chr-hue);
+/* How a tile wears its hue (StatTile's `accent` prop). Decorative only —
+   the hue groups a tile with the chart sharing its measure; the number
+   carries every meaning, so either look can be dropped without loss. */
+
+/* `tint`: a pale wash of the hue as the fill and a stronger step of it as
+   the border, mixed against the panel/border tokens so every hue lands on
+   the same parchment footing. */
+.chr-tile--tint {
+  background: color-mix(in srgb, var(--chr-hue) 9%, var(--qb-panel));
+  border-color: color-mix(in srgb, var(--chr-hue) 55%, var(--qb-card-border));
+}
+
+/* `rule`: plain parchment with a 4px rule of the hue inset on the left. An
+   inset shadow rather than a `::before` stripe: it hugs whatever wobble the
+   corner has, so it never needs `overflow: hidden` (which clipped the
+   API-costs InfoTooltip) nor its own hand-matched radius. */
+.chr-tile--rule {
+  box-shadow:
+    inset 4px 0 0 var(--chr-hue),
+    var(--chr-box-shadow);
+}
+
+.chr-tiles > .chr-tile:nth-child(4n + 2) {
+  border-radius: var(--chr-tile-radius-2);
+}
+
+.chr-tiles > .chr-tile:nth-child(4n + 3) {
+  border-radius: var(--chr-tile-radius-3);
+}
+
+.chr-tiles > .chr-tile:nth-child(4n) {
+  border-radius: var(--chr-tile-radius-4);
+}
+
+/* Drawer tiles sit directly under the two gauges above them, which are
+   centered (`.chr-gauge { align-items: center; text-align: center }`) —
+   left-aligned tile text read as misaligned against that. The main
+   Chronicle page's tiles are untouched: they're a wider, looser grid with
+   longer notes where centering buys nothing. */
+.chr-tiles--drawer .chr-tile {
+  align-items: center;
+  text-align: center;
 }
 
 .chr-tile__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-family: var(--qb-font-prose);
   font-size: 0.75rem;
   color: var(--qb-ink-500);
@@ -6959,10 +7190,49 @@ button.trail-tag:focus-visible {
   color: var(--qb-ink-900);
 }
 
+/* One line, clipped: a footnote is a hint, never the figure. Anything that
+   needs a full sentence goes behind the label's InfoTooltip or into a
+   chart of its own (see the two rings at the top of the chart grid). */
 .chr-tile__note {
+  max-width: 100%;
   font-family: var(--qb-font-prose);
   font-size: 0.72rem;
   color: var(--qb-ink-400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Below 720px the tiles are the single biggest source of scrolling, on the
+   page and in the drawer alike (see the mobile-density pass, WF chronicle
+   follow-up): denser padding/type and a 4-up grid trade a little
+   legibility for roughly half the vertical space, matching the "I don't
+   mind a bit smaller, fit more on the same screen" call. The two hero
+   gauges shrink and sit side by side for the same reason — stacked, they
+   were a full screen before the first number. Kept beside the base rules,
+   not the file's early @media block, for the same cascade-order reason as
+   `.chr-table__scroll-hint` above: an unconditional rule later in the file
+   would otherwise win over an earlier media-gated one regardless of
+   viewport. */
+@media (max-width: 720px) {
+  .chr-tiles {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.4rem;
+  }
+  .chr-tile {
+    padding: 0.45rem 0.4rem 0.4rem;
+    align-items: center;
+    text-align: center;
+  }
+  .chr-tile__label {
+    font-size: 0.64rem;
+  }
+  .chr-tile__value {
+    font-size: 1.05rem;
+  }
+  .chr-tile__note {
+    font-size: 0.62rem;
+  }
 }
 
 /* --- panels & grid --------------------------------------------------------- */
@@ -6972,12 +7242,19 @@ button.trail-tag:focus-visible {
   gap: 0.75rem;
 }
 
+/* Same hand-inked recipe as `.card-tile`: the a/b card radii alternated by
+   sibling parity, plus the hard sticker shadow in the border's own colour. */
 .chr-panel {
   padding: 0.85rem 1rem 0.75rem;
   background: var(--qb-panel);
-  border: 1.5px solid var(--qb-card-border);
-  border-radius: var(--qb-radius-panel);
+  border: var(--chr-box-ink) solid var(--qb-card-border);
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--chr-box-shadow);
   min-width: 0;
+}
+
+.chr-panel:nth-child(even) {
+  border-radius: var(--qb-radius-card-b);
 }
 
 .chr-panel--wide {
@@ -7081,10 +7358,52 @@ button.trail-tag:focus-visible {
 }
 
 /* Cold-cache turn: an ink ring on the line (no second hue needed). */
-.chr-chart__ring {
+/* Event glyphs on the line — one stroke weight, ink outline, a pale fill
+   from the mark's own hue so each is recognisable at 14px without reading
+   as a data colour (the series hue stays on the line alone). */
+.chr-chart__glyph {
   fill: var(--qb-panel);
   stroke: var(--qb-ink-700);
-  stroke-width: 2;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.chr-chart__glyph--cold {
+  fill: color-mix(in srgb, #7fb8e6 45%, var(--qb-panel));
+}
+
+.chr-chart__glyph--jump {
+  fill: color-mix(in srgb, var(--chr-peak) 30%, var(--qb-panel));
+}
+
+.chr-chart__glyph--compaction {
+  fill: color-mix(in srgb, var(--qb-ink-400) 35%, var(--qb-panel));
+}
+
+.chr-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--qb-font-prose);
+  font-size: 0.75rem;
+  color: var(--qb-ink-500);
+}
+
+.chr-chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chr-chart__legend-glyph {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
 }
 
 .chr-chart__tooltip {
@@ -7189,6 +7508,369 @@ button.trail-tag:focus-visible {
 .chr-barlist__value {
   text-align: right;
   color: var(--qb-ink-900);
+}
+
+/* --- counsel (efficiency insights) ---------------------------------------- */
+.chr-counsel__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0.75rem 1.25rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chr-counsel__item {
+  min-width: 0;
+}
+
+/* The closed row: figure, title, counsel, chevron. A `<summary>` so the
+   whole row is the toggle; the default marker is replaced by the chevron on
+   the right so the figure keeps the left edge. */
+.chr-counsel__summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: start;
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--qb-btn-wobble-2);
+}
+
+.chr-counsel__summary::-webkit-details-marker {
+  display: none;
+}
+
+.chr-counsel__summary--static {
+  cursor: default;
+}
+
+.chr-counsel__summary:focus-visible {
+  outline: 2px solid var(--qb-ink-900);
+  outline-offset: 3px;
+}
+
+/* 45° is the closed "v"; a further half-turn makes the open "^". */
+.chr-counsel__disclosure[open] .chr-counsel__summary .chr-counsel__chevron {
+  transform: rotate(225deg);
+}
+
+.chr-counsel__chevron {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin-top: 0.6rem;
+  border-right: 2px solid var(--qb-ink-400);
+  border-bottom: 2px solid var(--qb-ink-400);
+  transform: rotate(45deg);
+  transform-origin: 60% 60%;
+  transition: transform 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chr-counsel__chevron {
+    transition: none;
+  }
+}
+
+.chr-counsel__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.chr-counsel__figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 5.5rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--qb-parchment-muted);
+  border-radius: var(--qb-btn-wobble-3);
+}
+
+/* The opened part sits under the head, indented past the figure so it reads
+   as belonging to the row above rather than as a new row. */
+.chr-counsel__more {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0 calc(5.5rem + 0.85rem);
+  padding-left: 0.6rem;
+  border-left: 2px dashed var(--qb-line-dashed-2);
+}
+
+.chr-counsel__more .chr-counsel__detail {
+  margin: 0;
+}
+
+.chr-counsel__levers-title {
+  margin: 0.2rem 0 0;
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--qb-ink-500);
+}
+
+.chr-counsel__lever-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Window facts: short lines about what drove the figure, one per line with
+   a quiet leading rule, so they read as evidence rather than as more advice. */
+.chr-counsel__fact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chr-counsel__fact {
+  position: relative;
+  padding-left: 0.85rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--qb-ink-700);
+}
+
+.chr-counsel__fact::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 0.45rem;
+  border-top: 1.5px solid var(--qb-ink-400);
+}
+
+.chr-counsel__lever {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.chr-counsel__lever-title {
+  font-family: var(--qb-font-prose);
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--qb-ink-700);
+}
+
+.chr-counsel__lever-body {
+  font-family: var(--qb-font-prose);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--qb-ink-500);
+}
+
+@media (max-width: 720px) {
+  .chr-counsel__more {
+    margin-left: 0;
+  }
+}
+
+.chr-counsel__value {
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 1.45rem;
+  line-height: 1.1;
+  color: var(--qb-ink-900);
+}
+
+/* The verdict word, tinted by band. Text carries the meaning; the tint is
+   a second cue, never the only one. Good/poor borrow the board's status
+   greens and reds so the vocabulary is the one the cards already use. */
+.chr-counsel__verdict {
+  font-family: var(--qb-font-prose);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-500);
+}
+
+.chr-counsel__item[data-verdict="good"] .chr-counsel__verdict {
+  color: var(--chr-cache);
+}
+
+.chr-counsel__item[data-verdict="poor"] .chr-counsel__verdict {
+  color: var(--chr-cost);
+}
+
+.chr-counsel__title {
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--qb-ink-900);
+}
+
+.chr-counsel__counsel {
+  font-family: var(--qb-font-prose);
+  font-size: 0.82rem;
+  color: var(--qb-ink-700);
+}
+
+.chr-counsel__detail {
+  font-family: var(--qb-font-prose);
+  font-size: 0.74rem;
+  color: var(--qb-ink-400);
+}
+
+.chr-counsel__rows {
+  margin: 0.3rem 0 0;
+  max-width: 22rem;
+  border-collapse: collapse;
+  font-family: var(--qb-font-prose);
+  font-size: 0.78rem;
+}
+
+.chr-counsel__rows th,
+.chr-counsel__rows td {
+  padding: 0.1rem 0 0.15rem;
+  text-align: left;
+  font-weight: 400;
+}
+
+.chr-counsel__rows th.chr-num,
+.chr-counsel__rows td.chr-num {
+  padding-left: 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.chr-counsel__rows thead th {
+  font-size: 0.68rem;
+  color: var(--qb-ink-400);
+}
+
+.chr-counsel__row {
+  border-bottom: 1px dashed var(--qb-line-dashed-2);
+}
+
+.chr-counsel__row th {
+  color: var(--qb-ink-700);
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chr-counsel__row td {
+  color: var(--qb-ink-900);
+}
+
+.chr-counsel__share {
+  color: var(--qb-ink-400);
+}
+
+/* --- donut (part-to-whole ring) ------------------------------------------- */
+.chr-donut {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chr-donut__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Track and segment steps are all one ramp of the measure's hue (meter
+   convention): darkest for the first part, paler for the rest, palest for
+   the empty track. Distinct in lightness, so the split survives colour-
+   vision deficits, and each part is labelled with its value beside it. */
+.chr-donut__track {
+  stroke: color-mix(in srgb, var(--chr-hue) 10%, var(--qb-parchment-muted));
+}
+
+.chr-donut__seg--1,
+.chr-donut__swatch--1 {
+  --chr-donut-step: var(--chr-hue);
+}
+
+.chr-donut__seg--2,
+.chr-donut__swatch--2 {
+  --chr-donut-step: color-mix(in srgb, var(--chr-hue) 46%, var(--qb-panel));
+}
+
+.chr-donut__seg--3,
+.chr-donut__swatch--3 {
+  --chr-donut-step: color-mix(in srgb, var(--chr-hue) 24%, var(--qb-panel));
+}
+
+.chr-donut__seg {
+  stroke: var(--chr-donut-step);
+  transition: stroke-dasharray 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chr-donut__seg {
+    transition: none;
+  }
+}
+
+.chr-donut__centre-value {
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 17px;
+  fill: var(--qb-ink-900);
+}
+
+.chr-donut__centre-label {
+  font-family: var(--qb-font-prose);
+  font-size: 9px;
+  fill: var(--qb-ink-500);
+}
+
+.chr-donut__legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--qb-font-prose);
+  font-size: 0.8rem;
+}
+
+.chr-donut__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto 3.2em;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chr-donut__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--chr-donut-step);
+}
+
+.chr-donut__label {
+  color: var(--qb-ink-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chr-donut__value {
+  color: var(--qb-ink-900);
+}
+
+.chr-donut__pct {
+  text-align: right;
+  color: var(--qb-ink-400);
 }
 
 /* --- tables ---------------------------------------------------------------- */
@@ -7382,38 +8064,6 @@ button.trail-tag:focus-visible {
   margin-bottom: 0.75rem;
 }
 
-/* --- topbar entry ---------------------------------------------------------- */
-.topbar__chronicle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin-left: 0.5rem;
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 0.3rem 0.7rem;
-  height: var(--qb-control-height);
-  border-radius: var(--qb-btn-wobble);
-  border: 1.5px solid var(--qb-btn-ink);
-  background: var(--qb-btn-face);
-  color: var(--qb-btn-text);
-  cursor: pointer;
-}
-
-.topbar__chronicle-btn[aria-pressed="true"] {
-  background: var(--qb-gold-chip-bg);
-  border-color: var(--qb-gold-chip-border);
-  color: var(--qb-gold-chip-text);
-}
-
-.topbar__chronicle-icon {
-  display: block;
-  width: 16px;
-  height: 16px;
-  object-fit: contain;
-  pointer-events: none;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -7443,9 +8093,16 @@ button.trail-tag:focus-visible {
   gap: 0.1rem;
   padding: 0.9rem 1rem 0.8rem;
   background: var(--qb-panel);
-  border: 1.5px solid var(--qb-card-border);
-  border-radius: var(--qb-radius-panel);
+  border: var(--chr-box-ink) solid var(--qb-card-border);
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--chr-box-shadow);
   text-align: center;
+}
+
+/* The two hero gauges sit side by side; mirror the second so the pair
+   reads as two hand-cut stickers rather than a stamped duplicate. */
+.chr-gauge:nth-child(even) {
+  border-radius: var(--qb-radius-card-b);
 }
 
 .chr-gauge__svg {
@@ -7501,6 +8158,35 @@ button.trail-tag:focus-visible {
   font-family: var(--qb-font-prose);
   font-size: 0.68rem;
   color: var(--qb-ink-400);
+}
+
+/* Mobile: the two hero gauges shrink and sit side by side — stacked at full
+   size they were a whole screen before the first tile. Lives AFTER the
+   gauge rules above for the cascade-order reason the tile media block
+   spells out: placed with the tile rules earlier in the file, every one of
+   these lost to the unconditional gauge rules that follow them. */
+@media (max-width: 720px) {
+  .chr-hero {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.4rem;
+  }
+  .chr-gauge {
+    padding: 0.5rem 0.4rem 0.5rem;
+  }
+  .chr-gauge__svg {
+    max-width: 112px;
+  }
+  .chr-gauge__value {
+    margin-top: -0.6rem;
+    font-size: 1.4rem;
+  }
+  .chr-gauge__label {
+    font-size: 0.7rem;
+  }
+  .chr-gauge__verdict,
+  .chr-gauge__note {
+    font-size: 0.62rem;
+  }
 }
 
 
@@ -7579,4 +8265,18 @@ button.trail-tag:focus-visible {
   background: var(--qb-parchment-muted);
   border-color: var(--qb-line-dashed);
   color: var(--qb-ink-500);
+}
+
+/* Waylaid (fetch-failure strip) on a phone: the button drops to its own
+   full-width row under the compass and text. Down here, not beside the
+   strip's own rules, for the cascade/guard reasons noted there. */
+@media (max-width: 720px) {
+  .waylaid {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+  .waylaid__btn {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
 }

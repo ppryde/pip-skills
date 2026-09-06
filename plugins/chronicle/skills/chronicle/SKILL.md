@@ -45,4 +45,4 @@ When the user wants to *see* it, the overseer dashboard (`/overseer:dashboard`) 
 
 ## Never
 - Never edit `sessions.db` by hand or through raw SQL from a session — the CLI is the writer.
-- Never run the hook verbs (`*-hook`) manually; they read a Claude Code hook payload on stdin.
+- Never add hooks to this plugin. It is pull only by design: a Stop hook that runs code after every turn risks a feedback loop, and `sync` is cheap enough to poll.

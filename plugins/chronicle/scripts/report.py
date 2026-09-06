@@ -41,12 +41,19 @@ def peak_context_pct(peak_tokens: int) -> float | None:
 
 
 def _session_filter(repo_root: str | None, since: float | None,
-                    alias: str = "s") -> tuple[str, list[Any]]:
+                    alias: str = "s", branch: str | None = None) -> tuple[str, list[Any]]:
+    """The WHERE clause every session-scoped read shares. ``branch`` is a
+    session-level filter: a session records the LAST branch it was seen on
+    (a session can check out several), so a branch-scoped read attributes
+    each session wholly to where it ended up. Turns carry no branch."""
     clauses: list[str] = []
     params: list[Any] = []
     if repo_root:
         clauses.append(f"{alias}.repo_root = ?")
         params.append(repo_root)
+    if branch:
+        clauses.append(f"{alias}.git_branch = ?")
+        params.append(branch)
     if since is not None:
         clauses.append(f"COALESCE({alias}.last_activity_at, {alias}.started_at, 0) >= ?")
         params.append(since)
@@ -160,8 +167,9 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
 
 
 def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
-             since: float | None = None, limit: int = 200) -> list[dict[str, Any]]:
-    where, params = _session_filter(repo_root, since)
+             since: float | None = None, limit: int = 200,
+             branch: str | None = None) -> list[dict[str, Any]]:
+    where, params = _session_filter(repo_root, since, branch=branch)
     rows = conn.execute(
         f"SELECT * FROM sessions s{where} "
         "ORDER BY COALESCE(s.last_activity_at, s.started_at, 0) DESC LIMIT ?",
@@ -179,10 +187,15 @@ def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
 
 
 def repos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """One row per repo root: session count, total tokens, and when it was
+    last active (the newest session activity). Listed busiest first (most
+    sessions); the dashboard re-orders its repo selector by
+    ``last_activity_at``, most recent first."""
     rows = conn.execute(
         """SELECT repo_root, COUNT(*) AS sessions,
                   SUM(input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens)
-                      AS total_tokens
+                      AS total_tokens,
+                  MAX(COALESCE(last_activity_at, started_at)) AS last_activity_at
            FROM sessions WHERE repo_root IS NOT NULL
            GROUP BY repo_root ORDER BY sessions DESC"""
     ).fetchall()
@@ -306,9 +319,10 @@ def artifacts_for(conn: sqlite3.Connection, session_id: str) -> list[dict[str, A
 
 
 def artifacts(conn: sqlite3.Connection, *, repo_root: str | None = None,
-              since: float | None = None, limit: int = 50) -> list[dict[str, Any]]:
+              since: float | None = None, limit: int = 50,
+              branch: str | None = None) -> list[dict[str, Any]]:
     """Most recently published pages across the filtered sessions."""
-    where, params = _session_filter(repo_root, since)
+    where, params = _session_filter(repo_root, since, branch=branch)
     clause = where.replace(" WHERE ", " AND ", 1) if where else ""
     return [
         _page_row(r) for r in conn.execute(
@@ -391,8 +405,8 @@ def _quantiles(values: list[float]) -> dict[str, float | None]:
 
 
 def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
-            since: float | None = None) -> dict[str, Any]:
-    where, params = _session_filter(repo_root, since)
+            since: float | None = None, branch: str | None = None) -> dict[str, Any]:
+    where, params = _session_filter(repo_root, since, branch=branch)
     totals_row = conn.execute(
         f"""SELECT COUNT(*) AS sessions,
                    COALESCE(SUM(turns), 0) AS turns,
@@ -526,5 +540,5 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_model": by_model,
         "tools": tools,
         "shape": shape,
-        "artifacts": artifacts(conn, repo_root=repo_root, since=since),
+        "artifacts": artifacts(conn, repo_root=repo_root, since=since, branch=branch),
     }

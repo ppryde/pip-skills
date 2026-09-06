@@ -93,3 +93,13 @@ describe("<BranchFilter/>", () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 });
+
+describe("<BranchFilter/> keepWhenEmpty", () => {
+  it("stays rendered with only All while the list is empty, so a page whose branches arrive with its data does not blink", () => {
+    render(<BranchFilter branches={[]} activeBranch={null} onSelect={() => {}} keepWhenEmpty />);
+    const select = screen.getByLabelText("Branch");
+    expect(select).toBeInTheDocument();
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All"]);
+    expect(select).toHaveValue("");
+  });
+});

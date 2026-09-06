@@ -14,8 +14,46 @@ vi.mock("../../api/client", async (importOriginal) => {
   };
 });
 
+import { useState } from "react";
 import * as client from "../../api/client";
+import { useChronicle, useChronicleSync } from "../../board/chronicle/useChronicle";
+import ChronicleFilterBar from "./ChronicleFilterBar";
 import ChroniclePage from "./ChroniclePage";
+
+/** App.tsx's wiring in miniature: the filter state, the fetch, the sync
+ * action and the two components they feed. The page itself only reads data
+ * now, so exercising filters and Sync means standing the owner up around it
+ * — the Sync, All-repos and branch controls here stand in for the top bar's
+ * (TopBarChronicle.test.tsx covers those). */
+function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repoScopable: boolean }) {
+  const [days, setDays] = useState<number | undefined>(30);
+  const [allRepos, setAllRepos] = useState(false);
+  const [branch, setBranch] = useState<string | null>(null);
+  const scope = allRepos || !repoScopable ? "all" : "repo";
+  const data = useChronicle(activeRoot, { days, scope, branch }, true);
+  const { sync, syncing, note } = useChronicleSync(data.refresh);
+  return (
+    <>
+      <button type="button" onClick={() => void sync()} disabled={syncing}>
+        Sync
+      </button>
+      <button type="button" onClick={() => setAllRepos(true)}>
+        All repos
+      </button>
+      <button type="button" onClick={() => setBranch("feat/x")}>
+        Branch feat/x
+      </button>
+      <ChronicleFilterBar days={days} onDays={setDays} syncNote={note} filtersOpen />
+      <ChroniclePage
+        summary={data.summary}
+        sessions={data.sessions}
+        loading={data.loading}
+        error={data.error}
+        onRetry={() => void data.refresh()}
+      />
+    </>
+  );
+}
 
 function session(overrides: Partial<ChronicleSession> & { session_id: string }): ChronicleSession {
   return {
@@ -115,7 +153,7 @@ afterEach(() => {
 
 describe("<ChroniclePage/>", () => {
   it("renders tiles, charts and the session table from the summary", async () => {
-    render(<ChroniclePage activeRoot="/repos/pip-skills" repoScopable />);
+    render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
     expect(screen.getByRole("table", { name: "Sessions" })).toBeInTheDocument();
     // Nowrap-everywhere fix (mobile horizontal scroll, not text-wrap collapse):
@@ -127,47 +165,78 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Cache hit rate per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "API-equivalent cost per day" })).toBeInTheDocument();
-    // Cost: the tile with its pricing date, and a Cost column per session.
+    // Cost: the tile (its pricing caveat lives behind the label's
+    // InfoTooltip, never as a footnote that wraps), and a Cost column per
+    // session.
     expect(screen.getAllByText("$12.30").length).toBeGreaterThan(0); // tile + the chart's data table
-    expect(screen.getByText("at list prices, Jun 2026")).toBeInTheDocument();
+    expect(screen.getByText("API costs")).toBeInTheDocument();
+    expect(screen.queryByText("at list prices, Jun 2026")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "About API costs" })).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "Sessions" })).getAllByText("$0.42")).toHaveLength(2);
     // Both gauges render: cache warmth and peak context against its window.
     expect(screen.getByRole("img", { name: "Cache hit rate: 90%" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Peak context used: 60%" })).toBeInTheDocument();
     expect(screen.getByText("warm")).toBeInTheDocument();
     expect(screen.getByText("120k of 200k")).toBeInTheDocument();
-    // Artifacts: the tile, and the page list with a real link + publish count.
-    expect(screen.getByText("distinct pages published")).toBeInTheDocument();
+    // Counsel: the window's efficiency insights, with a verdict word each.
+    expect(screen.getByText("Counsel from the elders")).toBeInTheDocument();
+    expect(screen.getByText("Read-to-write ratio")).toBeInTheDocument();
+    expect(screen.getAllByText("In this window").length).toBeGreaterThan(0);
+    expect(screen.getByText("Average cost per turn by model")).toBeInTheDocument();
+    expect(screen.getByText("one model")).toBeInTheDocument(); // only opus-5 in the fixture
+    expect(screen.getByText("Cost per prompt")).toBeInTheDocument();
+    expect(screen.getByText("Thinking share of output")).toBeInTheDocument();
+    // Levers are there but folded away: a closed <details> per row.
+    const disclosures = document.querySelectorAll(".chr-counsel__disclosure");
+    expect(disclosures.length).toBe(4);
+    disclosures.forEach((d) => expect(d).not.toHaveAttribute("open"));
+    expect(screen.getAllByText("What you could do").length).toBe(4);
+    // The two breakdowns that used to be tile footnotes are rings now: the
+    // thinking share of output, and the cache write split by TTL.
+    expect(screen.getByRole("img", { name: "Where output went" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Cache written by TTL" })).toBeInTheDocument();
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(screen.getByText("1h cache")).toBeInTheDocument();
+    expect(screen.queryByText(/thinking$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/at 1h/)).not.toBeInTheDocument();
+    // Artifacts: the tile (no footnote — the number is the whole story), and
+    // the page list with a real link + publish count.
+    expect(screen.queryByText("distinct pages published")).not.toBeInTheDocument();
     const link = screen.getByRole("link", { name: "Widget report" });
     expect(link).toHaveAttribute("href", "https://claude.ai/code/artifact/abc");
     expect(screen.getByText(/3 publishes/)).toBeInTheDocument();
-    expect(screen.getByText("opus-5")).toBeInTheDocument();
+    expect(screen.getAllByText("opus-5").length).toBeGreaterThan(0); // turns-by-model bar + counsel row
     expect(screen.getAllByText("bbbb2222").length).toBeGreaterThan(0);
     expect(mocked.setActiveRoot).toHaveBeenCalledWith("/repos/pip-skills");
-    expect(mocked.getChronicleSummary).toHaveBeenCalledWith({ days: 30, scope: "repo" });
+    expect(mocked.getChronicleSummary).toHaveBeenCalledWith({ days: 30, scope: "repo", branch: null });
   });
 
-  it("re-fetches with the chosen window and scope", async () => {
-    render(<ChroniclePage activeRoot={null} repoScopable />);
+  it("re-fetches with the chosen window, scope and branch", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
     await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "All time" }));
     await waitFor(() =>
-      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({ days: undefined, scope: "repo" })
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({ days: undefined, scope: "repo", branch: null })
     );
     fireEvent.click(screen.getByRole("button", { name: "All repos" }));
     await waitFor(() =>
-      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({ days: undefined, scope: "all" })
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({ days: undefined, scope: "all", branch: null })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Branch feat/x" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSessions).toHaveBeenLastCalledWith({ days: undefined, scope: "all", branch: "feat/x" })
     );
   });
 
-  it("locks scope to all repos when the repo is not scopable", async () => {
-    render(<ChroniclePage activeRoot="/unbegun" repoScopable={false} />);
-    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalledWith({ days: 30, scope: "all" }));
-    expect(screen.getByRole("button", { name: "This repo" })).toBeDisabled();
+  it("pins scope to all repos when the repo is not scopable", async () => {
+    render(<Harness activeRoot="/unbegun" repoScopable={false} />);
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenCalledWith({ days: 30, scope: "all", branch: null })
+    );
   });
 
   it("Sync posts, reports, and refreshes", async () => {
-    render(<ChroniclePage activeRoot={null} repoScopable />);
+    render(<Harness activeRoot={null} repoScopable />);
     await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "Sync" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("1 session updated (12 new lines)"));
@@ -178,12 +247,12 @@ describe("<ChroniclePage/>", () => {
   it("shows the blank-chronicle prompt when there is no store", async () => {
     mocked.getChronicleSummary.mockResolvedValue({ totals: null });
     mocked.getChronicleSessions.mockResolvedValue({ sessions: [] });
-    render(<ChroniclePage activeRoot={null} repoScopable />);
+    render(<Harness activeRoot={null} repoScopable />);
     await waitFor(() => expect(screen.getByText(/chronicle is blank/i)).toBeInTheDocument());
   });
 
   it("sorts the table when a column header is clicked", async () => {
-    render(<ChroniclePage activeRoot={null} repoScopable />);
+    render(<Harness activeRoot={null} repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
     const table = () => within(screen.getByRole("table", { name: "Sessions" }));
     fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
@@ -215,15 +284,30 @@ describe("<ChroniclePage/>", () => {
           landed: [], landed_chars: 0 },
       ],
     });
-    render(<ChroniclePage activeRoot={null} repoScopable />);
+    render(<Harness activeRoot={null} repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
     expect(mocked.getChronicleSession).toHaveBeenCalledWith("aaaa1111-x");
     expect(screen.getByRole("img", { name: "Context tokens per turn" })).toBeInTheDocument();
-    expect(within(screen.getByRole("dialog")).getByText("$0.42")).toBeInTheDocument();
-    expect(screen.getAllByTestId("chr-ring")).toHaveLength(1);
-    expect(screen.getByText(/rings mark cold cache turns/)).toBeInTheDocument();
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("$0.42")).toBeInTheDocument();
+    // Renamed drawer tiles (WF chronicle mobile-density pass): shorter
+    // labels, no footnote — the unpriced/list-price caveat now lives behind
+    // an InfoTooltip instead, so it survives the density cut.
+    expect(dialog.getByText("Total ctx")).toBeInTheDocument();
+    expect(dialog.getByText("API costs")).toBeInTheDocument();
+    expect(dialog.queryByText("Context processed")).not.toBeInTheDocument();
+    expect(dialog.queryByText("API-equivalent cost")).not.toBeInTheDocument();
+    expect(dialog.queryByText("at list prices")).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "About API costs" }));
+    expect(dialog.getByText(/comparison yardstick, not a bill/)).toBeInTheDocument();
+    // Marks: turn 1 is cold; turn 2, the first row of biggest_jumps, is THE
+    // biggest jump — only one gets a peak. Its 11-minute gap is tooltip-only.
+    // Named in the legend, never glyph-only.
+    const kinds = screen.getAllByTestId("chr-event").map((g) => g.getAttribute("data-kind")).sort();
+    expect(kinds).toEqual(["cold", "jump"]);
+    expect(screen.getByRole("list", { name: "Marks" })).toHaveTextContent("cold cache turn");
     expect(screen.getByText("Read")).toBeInTheDocument();
     // Biggest jumps: attribution text and the cold tag; a url-less artifact
     // renders as a dotted name, not a link.
@@ -234,5 +318,26 @@ describe("<ChroniclePage/>", () => {
     expect(screen.queryByRole("link", { name: "lost-page" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("drawer's API costs tile never reads as free when every turn is unpriced", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cost_usd: 0,
+      unpriced_turns: 3,
+      turn_series: [],
+      subagents: [],
+      tools: [],
+      compactions_at: [],
+      artifacts: [],
+      biggest_jumps: [],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("unpriced (3)")).toBeInTheDocument();
+    expect(dialog.queryByText("$0")).not.toBeInTheDocument();
   });
 });

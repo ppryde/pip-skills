@@ -38,11 +38,24 @@ function session(overrides: Partial<SessionSummary> & { id: string }): SessionSu
 }
 
 describe("distinctBranches", () => {
-  it("unions branch names across cards and sessions", () => {
+  it("unions branch names across cards and sessions, session branches (active) first", () => {
     const cards = [card({ id: "WF-1", branch: "feat/a" })];
     const sessions = [session({ id: "s1", branch: "feat/b" })];
 
-    expect(distinctBranches(cards, sessions)).toEqual(["feat/a", "feat/b"]);
+    // feat/b has a session behind it and so an activity instant; feat/a is
+    // card-only and trails.
+    expect(distinctBranches(cards, sessions)).toEqual(["feat/b", "feat/a"]);
+  });
+
+  it("orders session branches by their newest activity, newest first", () => {
+    const sessions = [
+      session({ id: "s1", branch: "old", updated_at: 100 }),
+      session({ id: "s2", branch: "new", updated_at: 50, active_at: 900 }), // active_at wins
+      session({ id: "s3", branch: "mid", updated_at: 500 }),
+      session({ id: "s4", branch: "old", updated_at: 120 }), // same branch: its max counts
+    ];
+    const cards = [card({ id: "WF-1", branch: "cards-only-b" }), card({ id: "WF-2", branch: "cards-only-a" })];
+    expect(distinctBranches(cards, sessions)).toEqual(["new", "mid", "old", "cards-only-a", "cards-only-b"]);
   });
 
   it("dedupes a branch shared by a card and a session", () => {

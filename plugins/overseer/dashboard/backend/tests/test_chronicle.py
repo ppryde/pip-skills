@@ -84,10 +84,13 @@ def test_sync_pulls_new_transcripts(client: TestClient, root: Path, tmp_path: Pa
     assert status["synced_at"] == again["synced_at"]
 
 
-def test_sync_is_token_gated(root: Path) -> None:
+def test_sync_is_not_token_gated(root: Path) -> None:
+    # Deliberate: sync writes only what the transcripts already say, is
+    # idempotent and cheap, so the page's timed sync must work from a browser
+    # that can read the page but holds no token. Board mutations stay gated.
     from app.main import create_app
     gated = TestClient(create_app(root, token="secret"))
-    assert gated.post("/api/chronicle/sync").status_code == 401
+    assert gated.post("/api/chronicle/sync").status_code == 200
     assert gated.post("/api/chronicle/sync", headers={"X-Overseer-Token": "secret"}).status_code == 200
 
 
@@ -128,6 +131,18 @@ def test_other_repo_is_hidden_unless_scope_all(client: TestClient, root: Path,
     assert len(client.get("/api/chronicle/sessions?scope=all").json()["sessions"]) == 1
 
 
+def test_branch_filter(client: TestClient, root: Path, tmp_path: Path) -> None:
+    # The seeded transcript records gitBranch "main" on every line.
+    _seed(root, tmp_path, repo_root=str(root.resolve()))
+    assert client.get("/api/chronicle/summary?branch=main").json()["totals"]["sessions"] == 1
+    assert client.get("/api/chronicle/summary?branch=feat/other").json()["totals"]["sessions"] == 0
+    assert client.get("/api/chronicle/sessions?branch=main").json()["sessions"][0]["git_branch"] == "main"
+    assert client.get("/api/chronicle/sessions?branch=feat/other").json()["sessions"] == []
+    # Composes with scope=all, and an absurd value is refused rather than passed on.
+    assert client.get("/api/chronicle/summary?scope=all&branch=main").json()["totals"]["sessions"] == 1
+    assert client.get(f"/api/chronicle/summary?branch={'x' * 300}").status_code == 400
+
+
 def test_days_window(client: TestClient, root: Path, tmp_path: Path) -> None:
     _seed(root, tmp_path, repo_root=str(root.resolve()))
     # The seeded session is dated 2026-09-01; a 1-day window from "now"
@@ -163,3 +178,17 @@ def test_plugin_absent_degrades(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert client.get("/api/chronicle/sessions").json() == {"sessions": []}
     assert client.get("/api/chronicle/session/sess1").status_code == 404
     assert client.post("/api/chronicle/sync").status_code == 503
+
+
+def test_sync_refuses_to_overlap(client: TestClient, root: Path, tmp_path: Path) -> None:
+    """The ungated sync runs one at a time per server: a second request while
+    one is in flight is told to come back (429), never a second subprocess
+    racing the same store."""
+    _seed(root, tmp_path, repo_root=str(root.resolve()))
+    lock = client.app.state.chronicle_sync_lock
+    assert lock.acquire(blocking=False)
+    try:
+        assert client.post("/api/chronicle/sync").status_code == 429
+    finally:
+        lock.release()
+    assert client.post("/api/chronicle/sync").status_code == 200

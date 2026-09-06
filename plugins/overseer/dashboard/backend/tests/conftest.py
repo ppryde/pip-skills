@@ -32,6 +32,10 @@ def _isolate_overseer_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)
+    # Multi-account: the extra-config-dirs list `config.claude_dirs()` reads
+    # (and the CLI subprocesses inherit). Left ambient, `central_root` could
+    # land a test's board in the developer's real second account's tree.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
     # chronicle (optional sibling plugin) resolves its store from CHRONICLE_DB
     # -> $CLAUDE_CONFIG_DIR/chronicle/sessions.db; the config dir is already
     # pinned above, but pin the file too so no test can reach a real store.

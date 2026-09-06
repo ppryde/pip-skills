@@ -319,3 +319,58 @@ def test_board_with_unbegun_root_is_still_rejected(
 
     assert resp.status_code == 400
     assert "unknown root" in resp.json()["detail"]
+
+
+def test_repos_include_boards_under_other_watched_config_dirs(
+    tmp_path: Path, isolated_config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-account: a board raised from a second account lives under that
+    account's config dir; once listed in the primary's machine config it is
+    discoverable and its root is allowed for reads."""
+    repo_a = _make_repo(tmp_path, isolated_config_dir, "repo-a")
+    personal = tmp_path / "claude-personal"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+    repo_b = _make_repo(tmp_path, personal, "repo-b")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(isolated_config_dir))
+    (isolated_config_dir / "overseer").mkdir(parents=True, exist_ok=True)
+    (isolated_config_dir / "overseer" / "config.json").write_text(
+        json.dumps({"claude_dirs": [str(personal)]})
+    )
+
+    client = TestClient(create_app(repo_a))
+    roots = {r["root"] for r in client.get("/api/repos").json()["repos"]}
+    assert roots == {str(repo_a), str(repo_b)}
+    # The other account's board is readable through the normal root param.
+    assert client.get(f"/api/board?root={repo_b}").status_code == 200
+
+
+def test_get_repos_orders_by_most_recent_activity(
+    repo_a: Path, repo_b: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The list arrives most-recently-active first (census `active_at`, else
+    `updated_at`), with `last_active_at` on each entry; a repo neither census
+    nor chronicle has seen trails with null."""
+    store = tmp_path / "census" / "status.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    store.write_text(json.dumps({
+        "version": 1, "limits": {},
+        "sessions": {
+            # repo_a: stale render but the newer activity — it wins the order.
+            "old-render-new-work": {"worktree_cwd": str(repo_a), "updated_at": now - 3600,
+                                    "active_at": now - 10, "payload": {}},
+            # repo_b: live, but last did anything an hour ago.
+            "live-but-idle": {"worktree_cwd": str(repo_b), "updated_at": now, "active_at": now - 3600,
+                              "payload": {}},
+        },
+    }))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+    client = TestClient(create_app(repo_a))
+
+    repos = client.get("/api/repos").json()["repos"]
+
+    assert [r["root"] for r in repos] == [str(repo_a), str(repo_b)]
+    assert repos[0]["last_active_at"] == pytest.approx(now - 10, abs=1)
+    assert repos[1]["last_active_at"] == pytest.approx(now - 3600, abs=1)
+    assert repos[0]["live_sessions"] == 0  # stale render: not live, yet most recently active
+    assert repos[1]["live_sessions"] == 1

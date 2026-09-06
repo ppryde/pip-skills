@@ -81,7 +81,8 @@ function withRoot(url: string): string {
 async function request<T>(
   method: "GET" | "POST",
   url: string,
-  body?: unknown
+  body?: unknown,
+  opts: { quiet?: boolean } = {}
 ): Promise<T> {
   const send = async (): Promise<Response> => {
     const headers: Record<string, string> = { ...authHeaders() };
@@ -95,7 +96,11 @@ async function request<T>(
 
   let res = await send();
 
-  if (res.status === 401) {
+  // A 401 asks the person for the token — unless the call is unattended
+  // (`quiet`: the Chronicle's timed sync), where a prompt popping up on its
+  // own every minute would be worse than the sync not happening. Quiet
+  // callers get the error and decide for themselves.
+  if (res.status === 401 && !opts.quiet) {
     const tok = window.prompt("This dashboard requires a token. Paste it:");
     if (tok) {
       localStorage.setItem(TOKEN_KEY, tok);
@@ -264,6 +269,7 @@ function chronicleQuery(base: string, query: ChronicleQuery = {}): string {
   const params: string[] = [];
   if (query.days !== undefined) params.push(`days=${encodeURIComponent(String(query.days))}`);
   if (query.scope === "all") params.push("scope=all");
+  if (query.branch) params.push(`branch=${encodeURIComponent(query.branch)}`);
   if (params.length === 0) return url;
   return `${url}${url.includes("?") ? "&" : "?"}${params.join("&")}`;
 }
@@ -297,7 +303,10 @@ export function getChronicleSession(id: string): Promise<ChronicleSessionDetail>
 }
 
 /** Pull-on-demand: chronicle stats every transcript on disk and ingests the
- * ones that moved. Account-wide (no root), token-gated like a mutation. */
-export function syncChronicle(): Promise<ChronicleSyncResponse> {
-  return request<ChronicleSyncResponse>("POST", "/api/chronicle/sync");
+ * ones that moved. Account-wide (no root) and NOT token-gated (the one
+ * ungated write — it stores only what the transcripts already say). `quiet`
+ * is for the page's unattended timer: should a 401 ever come back, it fails
+ * the call rather than prompting for a token. */
+export function syncChronicle(opts: { quiet?: boolean } = {}): Promise<ChronicleSyncResponse> {
+  return request<ChronicleSyncResponse>("POST", "/api/chronicle/sync", undefined, opts);
 }

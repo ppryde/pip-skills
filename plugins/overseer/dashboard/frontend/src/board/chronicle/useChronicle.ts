@@ -3,10 +3,11 @@
  *
  * `useChronicleStatus` — one fetch on mount; tells App whether to offer the
  * page at all. `useChronicle` — the page's summary + session list, re-fetched
- * whenever the selected root / time window / scope changes and polled every
- * 30s while enabled (sessions accrue turns at Stop-hook cadence, so a 5s poll
- * like `useSessions` would be wasted work). `useChronicleSession` — one
- * session's detail for the drawer.
+ * whenever the selected root / time window / scope / branch changes and
+ * polled every 30s while enabled. `useChronicleSync` — the Sync action, plus
+ * the quiet auto-sync the page runs while it shows: chronicle is pull only
+ * (no hooks, by design), so the dashboard is what keeps the store current.
+ * `useChronicleSession` — one session's detail for the drawer.
  *
  * All three follow the dashboard's data-hook conventions: `setActiveRoot`
  * is called synchronously before the fetch (see `useSessions`), errors are
@@ -20,6 +21,7 @@ import {
   getChronicleStatus,
   getChronicleSummary,
   setActiveRoot,
+  syncChronicle,
 } from "../../api/client";
 import type {
   ChronicleQuery,
@@ -27,9 +29,19 @@ import type {
   ChronicleSessionDetail,
   ChronicleStatus,
   ChronicleSummary,
+  ChronicleSyncResponse,
 } from "../../api/types";
+import { useVisibleInterval } from "../useDocumentVisible";
 
 const POLL_INTERVAL_MS = 30_000;
+/** How often the open Chronicle page asks the backend to reconcile the
+ * store with the transcripts on disk. A no-change sync is a directory walk
+ * (per-file cursors), so a minute is cheap; turns land at roughly that
+ * cadence anyway. */
+export const AUTO_SYNC_INTERVAL_MS = 60_000;
+/** Auto-syncs closer together than this are skipped — filter changes re-run
+ * the effect that schedules them, and a sync per click is wasted work. */
+const AUTO_SYNC_MIN_GAP_MS = 15_000;
 
 export function useChronicleStatus(): ChronicleStatus | null {
   const [status, setStatus] = useState<ChronicleStatus | null>(null);
@@ -72,47 +84,130 @@ export function useChronicle(
   const [sessions, setSessions] = useState<ChronicleSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
-  const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
-  const { days, scope } = query;
+  // Every load takes a ticket; only the newest ticket's response lands. A
+  // filter change racing a poll tick, or a slow old query finishing after a
+  // fast new one, must not paint stale data over fresh (the same epoch
+  // guard useBoard uses). Unmount just means no ticket is current.
+  const requestIdRef = useRef(0);
+  const { days, scope, branch } = query;
 
   const load = useCallback(async () => {
+    const id = ++requestIdRef.current;
     setActiveRoot(root);
     setLoading(true);
     try {
       const [sum, list] = await Promise.all([
-        getChronicleSummary({ days, scope }),
-        getChronicleSessions({ days, scope }),
+        getChronicleSummary({ days, scope, branch }),
+        getChronicleSessions({ days, scope, branch }),
       ]);
-      if (!mountedRef.current) return;
+      if (id !== requestIdRef.current) return;
       setSummary(sum);
       setSessions(list.sessions);
       setError(null);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (id !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (id === requestIdRef.current) setLoading(false);
     }
-  }, [root, days, scope]);
+  }, [root, days, scope, branch]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    if (enabled) void load();
+    const ref = requestIdRef;
     return () => {
-      mountedRef.current = false;
+      ref.current += 1; // retire any in-flight response on unmount
     };
-  }, [load, enabled]);
+  }, []);
 
+  // Loads on enable and on every filter change (`load` is new then) …
   useEffect(() => {
-    const id = setInterval(() => {
-      if (enabledRef.current) void load();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [load]);
+    if (enabled) void load();
+  }, [load, enabled]);
+  // … then every POLL_INTERVAL_MS while enabled and visible, with one
+  // catch-up load when a hidden tab comes back; a hidden tab polls nothing.
+  useVisibleInterval(() => void load(), POLL_INTERVAL_MS, enabled, { immediate: "on-return" });
 
   return { summary, sessions, loading, error, refresh: load };
+}
+
+export function formatSyncSummary(res: ChronicleSyncResponse): string {
+  if (res.changed === 0) return `Synced — nothing new across ${res.scanned} files.`;
+  const noun = res.changed === 1 ? "session" : "sessions";
+  return `Synced — ${res.changed} ${noun} updated (${res.lines} new lines).`;
+}
+
+export interface UseChronicleSyncResult {
+  /** Ask the backend to reconcile chronicle's store with the transcripts on
+   * disk, then re-read through `refresh`. The button's path: shows
+   * "Syncing…", always leaves a note. */
+  sync: () => Promise<void>;
+  /** The same reconcile, unattended: no busy state, a note only when
+   * something actually changed, failures swallowed (the next tick retries),
+   * and skipped entirely when one is in flight or ran moments ago. */
+  syncQuietly: () => Promise<void>;
+  syncing: boolean;
+  /** One line on the last sync's outcome (or failure); null before the
+   * first. */
+  note: string | null;
+}
+
+/** The "Sync" action, split from `useChronicle` because its button lives in
+ * the top bar while the data lives with the page — App owns both and hands
+ * each its half. `refresh` is the `useChronicle` result's. `enabled` runs
+ * the quiet auto-sync on a timer while true AND the page is in the
+ * foreground — a hidden tab syncs nothing, and catches up once on return. */
+export function useChronicleSync(refresh: () => Promise<void>, enabled = false): UseChronicleSyncResult {
+  const [syncing, setSyncing] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
+  const lastAutoRef = useRef(0);
+
+  const sync = useCallback(async () => {
+    // One sync at a time against one SQLite store: a click while the timed
+    // sync is running just waits for its result.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setSyncing(true);
+    setNote(null);
+    try {
+      const res = await syncChronicle();
+      setNote(formatSyncSummary(res));
+      await refresh();
+    } catch (err) {
+      setNote(`Sync failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      inFlightRef.current = false;
+      lastAutoRef.current = Date.now();
+      setSyncing(false);
+    }
+  }, [refresh]);
+
+  const syncQuietly = useCallback(async () => {
+    if (inFlightRef.current || Date.now() - lastAutoRef.current < AUTO_SYNC_MIN_GAP_MS) return;
+    inFlightRef.current = true;
+    try {
+      // quiet: an unattended timer must never pop the token prompt. The sync
+      // route is ungated today, so this is a guard against the gate ever
+      // returning — a 401 here fails silently; the manual Sync button prompts.
+      const res = await syncChronicle({ quiet: true });
+      if (res.changed > 0) {
+        setNote(formatSyncSummary(res));
+        await refresh();
+      }
+    } catch {
+      // Unattended: say nothing, the next tick tries again.
+    } finally {
+      inFlightRef.current = false;
+      lastAutoRef.current = Date.now();
+    }
+  }, [refresh]);
+
+  // Quiet sync on enable/show and every minute while enabled and visible;
+  // the min-gap guard inside syncQuietly absorbs the immediate tick when a
+  // sync just ran.
+  useVisibleInterval(() => void syncQuietly(), AUTO_SYNC_INTERVAL_MS, enabled);
+
+  return { sync, syncQuietly, syncing, note };
 }
 
 export interface UseChronicleSessionResult {

@@ -1,10 +1,10 @@
 {
   "name": "chronicle",
-  "version": "0.2.0",
-  "description": "Records every Claude Code session's toil into an account-scoped SQLite chronicle — per-turn token usage (input, cache read/creation, output, thinking), context growth, prompts, tool calls, subagents, compactions, duration and API-equivalent cost — via fail-safe SessionStart/Stop/SessionEnd hooks. Backfills from existing transcripts. The overseer dashboard grows a Chronicle page when it is present.",
+  "version": "0.3.0",
+  "description": "Records every Claude Code session's toil into an account-scoped SQLite chronicle — per-turn token usage (input, cache read/creation, output, thinking), context growth, prompts, tool calls, subagents, compactions, duration and API-equivalent cost — read from the transcripts on disk, pull only, no hooks. The overseer dashboard grows a Chronicle page when it is present and keeps the chronicle synced while it shows.",
   "author": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
   },
-  "keywords": ["sessions", "tokens", "usage", "telemetry", "sqlite", "metrics", "hooks", "dashboard", "cost"]
+  "keywords": ["sessions", "tokens", "usage", "telemetry", "sqlite", "metrics", "dashboard", "cost"]
 }

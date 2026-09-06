@@ -129,6 +129,25 @@ class TestIngestSession:
         assert ingest.ingest_session(conn, path)["lines"] == 1
         assert _session(conn)["prompts"] == 2
 
+    def test_resumed_session_lifts_a_stale_ended_stamp(self, builder):
+        # Stores from before the hooks were removed carry `ended_at` from the
+        # SessionEnd hook. A session resumed after that stamp is alive again:
+        # the stamp must go, or `is_live` reads it as ended for ever.
+        path = builder.prompt("u1", T0).turn("m1", T0).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        ended = _session(conn)["last_activity_at"] + 1
+        conn.execute("UPDATE sessions SET ended_at = ?, end_reason = 'exit' WHERE session_id = 's1'", (ended,))
+        conn.commit()
+        assert ingest.ingest_session(conn, path)["lines"] == 0
+        assert _session(conn)["ended_at"] == ended  # nothing new: still ended
+        builder.append(json.loads(json.dumps(
+            {"type": "user", "uuid": "u2", "timestamp": T2, "sessionId": "s1",
+             "message": {"role": "user", "content": "back again"}})))
+        ingest.ingest_session(conn, path)
+        row = _session(conn)
+        assert row["ended_at"] is None and row["end_reason"] is None
+
     def test_partial_trailing_line_is_deferred(self, builder):
         path = builder.prompt("u1", T0).write()
         with open(path, "a") as handle:
@@ -185,28 +204,6 @@ class TestIngestSession:
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
-class TestLifecycle:
-    def test_mark_started_then_ended(self, tmp_path):
-        conn = store.connect()
-        ingest.mark_started(conn, "s9", cwd=str(tmp_path), transcript_path=str(tmp_path / "x" / "s9.jsonl"), now=100.0)
-        row = _session(conn, "s9")
-        assert row["started_at"] == 100.0
-        assert row["cwd"] == str(tmp_path)
-        assert row["project_slug"] == "x"
-        ingest.mark_ended(conn, "s9", reason="exit", now=200.0)
-        row = _session(conn, "s9")
-        assert (row["ended_at"], row["end_reason"]) == (200.0, "exit")
-        # A resume re-opens the row.
-        ingest.mark_started(conn, "s9", cwd=None, transcript_path=None, now=300.0)
-        assert _session(conn, "s9")["ended_at"] is None
-
-    def test_mark_started_keeps_earliest_start(self):
-        conn = store.connect()
-        ingest.mark_started(conn, "s9", cwd=None, transcript_path=None, now=100.0)
-        ingest.mark_started(conn, "s9", cwd=None, transcript_path=None, now=500.0)
-        assert _session(conn, "s9")["started_at"] == 100.0
-
-
 class TestRepoRoot:
     def test_outside_git_is_none(self, tmp_path):
         assert ingest.repo_root_of(str(tmp_path)) is None
@@ -239,6 +236,47 @@ class TestSync:
         assert result["synced_at"] == 500.0
         assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 3
         assert conn.execute("SELECT value FROM meta WHERE key='synced_at'").fetchone()[0] == "500.0"
+
+    def test_sync_spans_several_projects_dirs_and_records_the_config_dir(self, tmp_path, projects):
+        # Multi-account: a second config dir's projects/ is folded into the
+        # same store; each session row remembers the dir it came from.
+        from .conftest import TranscriptBuilder
+        personal = tmp_path / "config-personal" / "projects"
+        personal.mkdir(parents=True)
+        TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        TranscriptBuilder(personal, "-a", "s2").turn("m1", T0).write()
+        conn = store.connect()
+        result = ingest.sync(conn, [projects, personal])
+        assert sorted(result["sessions"]) == ["s1", "s2"]
+        rows = dict(conn.execute("SELECT session_id, config_dir FROM sessions").fetchall())
+        assert rows == {
+            "s1": str(projects.parent.resolve()),
+            "s2": str(personal.parent.resolve()),
+        }
+
+    def test_sync_backfills_config_dir_on_rows_from_before_the_column(self, projects):
+        from .conftest import TranscriptBuilder
+        TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # As an upgraded store looks: rows without the column's value, and no
+        # record of the one-time sweep having run.
+        conn.execute("UPDATE sessions SET config_dir = NULL")
+        conn.execute("DELETE FROM meta WHERE key = 'config_dirs_backfilled'")
+        conn.commit()
+        result = ingest.sync(conn, projects)  # nothing on disk moved …
+        assert result["changed"] == 0
+        # … but the row is filled from its transcript path all the same.
+        assert conn.execute("SELECT config_dir FROM sessions").fetchone()[0] == str(projects.parent.resolve())
+        # The sweep is one-time: once recorded, a later sync does not repeat it.
+        conn.execute("UPDATE sessions SET config_dir = NULL")
+        conn.commit()
+        ingest.sync(conn, projects)
+        assert conn.execute("SELECT config_dir FROM sessions").fetchone()[0] is None
+
+    def test_config_dir_is_derived_from_the_transcript_layout(self, tmp_path):
+        assert ingest.config_dir_of(tmp_path / "cfg" / "projects" / "-slug" / "sid.jsonl") == str((tmp_path / "cfg").resolve())
+        assert ingest.config_dir_of(tmp_path / "elsewhere" / "sid.jsonl") is None
 
     def test_unchanged_files_are_skipped(self, projects, monkeypatch):
         from .conftest import TranscriptBuilder
@@ -346,3 +384,41 @@ class TestStore:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"sessions", "turns", "tool_calls", "events", "cursors", "meta"} <= tables
+
+
+class TestClaudeDirsParity:
+    def test_chronicle_and_overseer_agree_on_the_watched_dirs(self, tmp_path, monkeypatch):
+        """chronicle keeps its own small copy of overseer's `claude_dirs()` so
+        it stands alone; this pins the two to the same answer on the same
+        machine state (primary + env list + machine config, dedup, missing
+        dropped) so they cannot drift apart unnoticed."""
+        import importlib
+        import os
+        import sys
+        overseer_root = str(Path(__file__).resolve().parents[2] / "plugins" / "overseer")
+        primary, personal, work = (tmp_path / n for n in ("claude", "personal", "work"))
+        for d in (primary, personal, work):
+            d.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", os.pathsep.join([str(work), str(tmp_path / "gone")]))
+        (primary / "overseer").mkdir()
+        (primary / "overseer" / "config.json").write_text(
+            json.dumps({"claude_dirs": [str(personal), str(primary)]})
+        )
+        # overseer's copy, imported from its own package without disturbing
+        # chronicle's `scripts` package binding.
+        saved = {k: v for k, v in sys.modules.items() if k == "scripts" or k.startswith("scripts.")}
+        for k in saved:
+            del sys.modules[k]
+        sys.path.insert(0, overseer_root)
+        try:
+            overseer_config = importlib.import_module("scripts.config")
+            expected = [p.resolve() for p in overseer_config.claude_dirs()]
+        finally:
+            sys.path.remove(overseer_root)
+            for k in [k for k in sys.modules if k == "scripts" or k.startswith("scripts.")]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+        assert [p.resolve() for p in store.claude_dirs()] == expected == [
+            primary.resolve(), work.resolve(), personal.resolve()
+        ]

@@ -25,12 +25,105 @@ from scripts.store import derive_repo_label, derive_repo_root, slugify
 
 CENTRAL_ENV = "OVERSEER_CENTRAL"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+# Extra Claude config dirs to watch, os.pathsep-separated — an override for
+# the machine config file's `claude_dirs` list (both are honoured).
+CLAUDE_DIRS_ENV = "CLAUDE_CONFIG_DIRS"
 REPO_CONFIG_DIRNAME = ".overseer"
+# The ONE machine-level config file, under the primary config dir. Shared with
+# the chronicle plugin (which reads the same file with its own small loader):
+#   { "claude_dirs": ["~/.claude-personal", ...] }
+MACHINE_CONFIG_RELPATH = ("overseer", "config.json")
 
 
 def _config_dir() -> Path:
     override = os.environ.get(CONFIG_DIR_ENV)
     return Path(override) if override else Path.home() / ".claude"
+
+
+def machine_config_path() -> Path:
+    return _config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+
+
+def load_machine_config() -> dict:
+    """The machine-level config (per config dir, never committed). Missing or
+    empty is `{}`; malformed JSON raises so a typo is never silently ignored."""
+    path = machine_config_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text() or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path}: malformed config JSON: {exc}") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def save_machine_config(data: dict) -> Path:
+    path = machine_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    return path
+
+
+def claude_dirs() -> list[Path]:
+    """Every Claude config dir to watch: the primary (`CLAUDE_CONFIG_DIR` or
+    `~/.claude`) first, then the `CLAUDE_CONFIG_DIRS` env list, then the
+    machine config's `claude_dirs` — deduplicated, order kept, missing dirs
+    dropped. A second account (`~/.claude-personal`) writes its own
+    transcripts, census store and boards under its own dir; listing it here
+    is what lets the dashboard and chronicle see them as one machine."""
+    primary = _config_dir()
+    candidates: list[Path] = [primary]
+    env = os.environ.get(CLAUDE_DIRS_ENV, "")
+    candidates.extend(Path(p).expanduser() for p in env.split(os.pathsep) if p.strip())
+    try:
+        cfg = load_machine_config()
+    except ValueError:
+        # A hand-edited, broken machine config must not take every board on
+        # the machine down with it (this sits under the dashboard's repo
+        # list): watch the primary and the env list, and let `overseer
+        # claude-dirs` — which calls load_machine_config directly — be the
+        # place that reports the malformed file.
+        cfg = {}
+    listed = cfg.get("claude_dirs") or []
+    if isinstance(listed, list):
+        candidates.extend(Path(str(p)).expanduser() for p in listed if p)
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for c in candidates:
+        try:
+            key = c.resolve()
+        except OSError:
+            continue
+        if key in seen or not key.is_dir():
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+def _update_claude_dirs(mutate) -> list[str]:
+    """Load the machine config, hand its `claude_dirs` list to `mutate`,
+    save what comes back, return it."""
+    cfg = load_machine_config()
+    listed = mutate([str(p) for p in (cfg.get("claude_dirs") or []) if p])
+    cfg["claude_dirs"] = listed
+    save_machine_config(cfg)
+    return listed
+
+
+def add_claude_dir(path: Path) -> list[str]:
+    """Record an extra config dir in the machine config; returns the list.
+    Stored absolute (resolved): a relative path would mean something
+    different from every working directory the file is later read from."""
+    entry = str(path.expanduser().resolve())
+    return _update_claude_dirs(lambda listed: listed if entry in listed else [*listed, entry])
+
+
+def remove_claude_dir(path: Path) -> list[str]:
+    target = path.expanduser().resolve()
+    return _update_claude_dirs(
+        lambda listed: [p for p in listed if Path(p).expanduser().resolve() != target]
+    )
 
 
 def _short_hash(canonical_root: Path) -> str:
@@ -111,14 +204,20 @@ def central_root(repo_root: Path) -> Path:
     # keeps its legacy plain `<label>` folder — adopted in place, never moved.
     label = derive_repo_label(repo_root) or slugify(repo_root.resolve().name) or "repo"
     canonical = derive_repo_root(repo_root) or repo_root
-    base = _config_dir() / "overseer"
-    hashed = base / f"{label}-{_short_hash(canonical)}"
-    if hashed.exists():
-        return hashed
-    plain = base / label
-    if plain.exists() and _owns_plain(plain, canonical):
-        return plain  # adopt legacy/own folder in place — NO move
-    return hashed  # fresh repo, OR plain belongs to a DIFFERENT repo
+    # Search every watched config dir, primary first, for an EXISTING folder
+    # for this repo: a board raised from a second account's session lives
+    # under that account's dir, and must be found there rather than an empty
+    # twin being created under the primary. Only creation defaults to the
+    # primary (the fall-through below).
+    for config_dir in claude_dirs():
+        base = config_dir / "overseer"
+        hashed = base / f"{label}-{_short_hash(canonical)}"
+        if hashed.exists():
+            return hashed
+        plain = base / label
+        if plain.exists() and _owns_plain(plain, canonical):
+            return plain  # adopt legacy/own folder in place — NO move
+    return _config_dir() / "overseer" / f"{label}-{_short_hash(canonical)}"  # fresh repo
 
 
 def backup_dir(repo_root: Path) -> Path:

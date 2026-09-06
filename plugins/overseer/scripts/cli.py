@@ -1252,19 +1252,24 @@ def _read_repo_root_meta(db_path: Path) -> "str | None":
 
 def cmd_repos(args: argparse.Namespace) -> int:
     """`overseer repos --json` — enumerate every discoverable board at
-    `$CLAUDE_CONFIG_DIR/overseer/*/board.db` (one per repo, per the
-    per-repo board.db migration). Powers the dashboard's repo switcher.
+    `<config dir>/overseer/*/board.db` (one per repo, per the per-repo
+    board.db migration) across EVERY watched Claude config dir (see
+    `config.claude_dirs`; the machine config's file is skipped by name).
+    Powers the dashboard's repo switcher.
 
     A board is skipped when its `meta['repo_root']` is missing/None (an
     older board, or one whose repo_root was never derivable — e.g. no git)
     or when that recorded root no longer exists on disk (repo deleted or
-    moved since the board was written). Output is a JSON list of
-    `{"label": ..., "root": ...}`, sorted by label.
+    moved since the board was written). The same repo raised under two
+    accounts lists once, from the first dir that has it (primary wins).
+    Output is a JSON list of `{"label": ..., "root": ...}`, sorted by label.
     """
-    config_dir = config._config_dir()
-    overseer_dir = config_dir / "overseer"
     results: list[dict[str, str]] = []
-    if overseer_dir.is_dir():
+    seen_roots: set[str] = set()
+    for config_dir in config.claude_dirs():
+        overseer_dir = config_dir / "overseer"
+        if not overseer_dir.is_dir():
+            continue
         for label_dir in overseer_dir.iterdir():
             if not label_dir.is_dir():
                 continue
@@ -1276,6 +1281,10 @@ def cmd_repos(args: argparse.Namespace) -> int:
                 continue
             if not Path(root_str).exists():
                 continue
+            canonical = str(Path(root_str).resolve())
+            if canonical in seen_roots:
+                continue
+            seen_roots.add(canonical)
             # Display label comes from the repo root, never the folder name —
             # the default folder is now `<label>-<hash>` (see
             # config.central_root), so `label_dir.name` would leak the hash.
@@ -1287,6 +1296,81 @@ def cmd_repos(args: argparse.Namespace) -> int:
     else:
         for r in results:
             print(f"{r['label']}: {r['root']}")
+    return 0
+
+
+def cmd_claude_dirs(args: argparse.Namespace) -> int:
+    """`overseer claude-dirs {list,add,remove}` — the extra Claude config dirs
+    this machine watches (a second account's `~/.claude-personal`, say), kept
+    in the machine config `<primary>/overseer/config.json` that the chronicle
+    plugin reads too. `list` shows the EFFECTIVE set (primary + env + file,
+    existing dirs only); `add`/`remove` edit the file and print the set."""
+    if args.action in ("add", "remove") and not args.path:
+        print(f"overseer: claude-dirs {args.action} needs a path", file=sys.stderr)
+        return 1
+    try:
+        config.load_machine_config()  # the one place a broken file is reported
+    except ValueError as exc:
+        print(f"overseer: {exc}", file=sys.stderr)
+        return 1
+    if args.action == "add":
+        path = Path(args.path).expanduser()
+        if not path.is_dir():
+            print(f"overseer: {path} is not a directory", file=sys.stderr)
+            return 1
+        config.add_claude_dir(path)
+    elif args.action == "remove":
+        config.remove_claude_dir(Path(args.path))
+    dirs = [str(p) for p in config.claude_dirs()]
+    if args.json:
+        print(json.dumps({"claude_dirs": dirs, "config": str(config.machine_config_path())}))
+    else:
+        for d in dirs:
+            print(d)
+    return 0
+
+
+def cmd_boards(args: argparse.Namespace) -> int:
+    """`overseer boards [--json]` — every board folder this repo has across
+    the watched config dirs, the resolved (active) one first. More than one
+    means cards are split; `merge-boards` heals it."""
+    from scripts import boards as boards_mod
+    found = boards_mod.find_boards(args.root)
+    if args.json:
+        print(json.dumps({"boards": found}))
+        return 0
+    for b in found:
+        flag = "active" if b["active"] else "other "
+        extras = "".join(f" +{k}" for k in ("knowledge", "usage") if b.get(k))
+        print(f"{flag}  {b['cards']:4d} cards  updated {b['updated'] or '?':<16}  {b['path']}{extras}")
+    if len(found) > 1:
+        print(f"{len(found)} boards for one repo — `overseer merge-boards` folds the others into the active one.")
+    return 0
+
+
+def cmd_merge_boards(args: argparse.Namespace) -> int:
+    """`overseer merge-boards [--dry-run] [--json]` — fold every other board
+    for this repo into the resolved one: cards unioned by id (the newer
+    `updated` wins), label colours unioned, each absorbed folder renamed
+    `*.absorbed-<stamp>` rather than deleted."""
+    from scripts import boards as boards_mod
+    result = boards_mod.merge_boards(args.root, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps(result))
+        return 0
+    verb = "would absorb" if args.dry_run else "absorbed"
+    if not result["absorbed"]:
+        print(f"one board only ({result['target']}) — nothing to merge")
+        return 0
+    for a in result["absorbed"]:
+        moved = f"; moved {', '.join(a['moved'])} to the target" if a["moved"] else ""
+        left = f"; left behind in the absorbed folder: {', '.join(a['left_behind'])}" if a["left_behind"] else ""
+        print(f"{verb} {a['from']}: +{a['added']} cards, {a['updated']} newer, {a['kept']} kept, "
+              f"+{a['label_colors']} colours -> {a['renamed_to']}{moved}{left}")
+        if a["conflicts"]:
+            print(f"  kept the active board's copy of {len(a['conflicts'])} id(s) that name a DIFFERENT "
+                  f"card in the absorbed board (created stamps differ): {' '.join(a['conflicts'])}")
+    print(f"target: {result['target']}")
     return 0
 
 
@@ -1700,6 +1784,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("repos")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_repos)
+
+    p = sub.add_parser("boards", help="every board folder this repo has across watched config dirs")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_boards)
+
+    p = sub.add_parser("merge-boards", help="fold this repo's other boards into the active one")
+    p.add_argument("--dry-run", action="store_true", help="report what would happen; touch nothing")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_merge_boards)
+
+    p = sub.add_parser("claude-dirs", help="extra Claude config dirs to watch (multi-account)")
+    p.add_argument("action", nargs="?", choices=["list", "add", "remove"], default="list")
+    p.add_argument("path", nargs="?", help="the config dir, for add/remove")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_claude_dirs)
 
     p = sub.add_parser("log-usage")
     p.add_argument("card_id")

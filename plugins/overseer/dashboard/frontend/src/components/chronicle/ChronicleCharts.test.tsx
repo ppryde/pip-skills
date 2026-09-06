@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { BarList, ColumnChart, LineChart } from "./ChronicleCharts";
+import { BarList, ColumnChart, Donut, LineChart } from "./ChronicleCharts";
 
 const fmt = (n: number) => String(n);
 
@@ -69,22 +69,110 @@ describe("<BarList/>", () => {
   });
 });
 
+describe("<Donut/>", () => {
+  it("draws one arc per non-zero part, labels every part with value and share", () => {
+    render(
+      <Donut
+        title="Cache written by TTL"
+        format={fmt}
+        centre={{ value: "200", label: "written" }}
+        segments={[
+          { label: "1h cache", value: 150 },
+          { label: "5m cache", value: 50 },
+          { label: "Unlabelled", value: 0 },
+        ]}
+      />
+    );
+    expect(screen.getByRole("img", { name: "Cache written by TTL" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("chr-donut-seg")).toHaveLength(2); // the zero part draws nothing
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("Unlabelled")).toBeInTheDocument(); // but stays in the legend
+    expect(screen.getByText("written")).toBeInTheDocument();
+  });
+
+  it("keeps an arc's colour matched to its legend swatch across a zero part", () => {
+    // The middle part draws no arc; the third part's arc must still wear
+    // the THIRD colour (its legend swatch does), not slide into the second.
+    render(
+      <Donut
+        title="T"
+        format={fmt}
+        centre={{ value: "10", label: "x" }}
+        segments={[
+          { label: "a", value: 5 },
+          { label: "b", value: 0 },
+          { label: "c", value: 5 },
+        ]}
+      />
+    );
+    const arcs = screen.getAllByTestId("chr-donut-seg");
+    expect(arcs).toHaveLength(2);
+    expect(arcs[1]).toHaveClass("chr-donut__seg--3");
+    const swatch = screen.getByText("c").previousElementSibling;
+    expect(swatch).toHaveClass("chr-donut__swatch--3");
+  });
+
+  it("renders an empty note when the whole is zero", () => {
+    render(
+      <Donut title="T" format={fmt} centre={{ value: "0", label: "x" }} segments={[{ label: "a", value: 0 }]} />
+    );
+    expect(screen.getByText(/no data/i)).toBeInTheDocument();
+  });
+});
+
 describe("<LineChart/>", () => {
-  it("draws the series, compaction markers and cold rings", () => {
+  it("draws the series and one glyph per event, with a legend and table notes", () => {
     render(
       <LineChart
         title="Context"
         format={fmt}
         values={[100, 200, 50, 120]}
-        markers={[2]}
-        dots={[0, 2, 99]}
-        annotate={(i) => (i === 0 ? "cold" : null)}
+        events={[
+          { index: 2, kind: "compaction" },
+          { index: 0, kind: "cold" },
+          { index: 0, kind: "jump" },
+          { index: 99, kind: "cold" },
+        ]}
+        annotate={(i) => (i === 0 ? "wrote 90 to cache · idle 11m" : null)}
       />
     );
     expect(screen.getByTestId("chr-line")).toBeInTheDocument();
+    // A compaction is a hairline AND a glyph; the out-of-range event is dropped.
     expect(screen.getAllByTestId("chr-marker")).toHaveLength(1);
-    expect(screen.getAllByTestId("chr-ring")).toHaveLength(2); // out-of-range 99 dropped
-    expect(screen.getByText("turn 1 (cold)")).toBeInTheDocument();
-    expect(screen.getByText("turn 3")).toBeInTheDocument();
+    const glyphs = screen.getAllByTestId("chr-event");
+    expect(glyphs).toHaveLength(3);
+    expect(glyphs.map((g) => g.getAttribute("data-kind")).sort()).toEqual(["cold", "compaction", "jump"]);
+    // Two glyphs at turn 1 stack: the second sits higher than the first, and
+    // both sit above the point they mark.
+    const atOne = glyphs.filter((g) => g.getAttribute("aria-label")?.endsWith("at turn 1"));
+    expect(atOne).toHaveLength(2);
+    expect(Number(atOne[1].getAttribute("y"))).toBeLessThan(Number(atOne[0].getAttribute("y")));
+    // Legend names only the kinds present, in a fixed order.
+    const legend = screen.getByRole("list", { name: "Marks" });
+    expect(legend).toHaveTextContent("cold cache turnbiggest jumpcompaction");
+    // The table twin carries the marks as words, so nothing is glyph-only.
+    expect(screen.getByText("turn 1 (wrote 90 to cache · idle 11m · cold cache turn · biggest jump)")).toBeInTheDocument();
+    expect(screen.getByText("turn 3 (compaction)")).toBeInTheDocument();
+  });
+
+  it("adds an extra table column when asked, dashing the cells with nothing to say", () => {
+    render(
+      <LineChart
+        title="Context"
+        format={fmt}
+        values={[100, 200, 50]}
+        tableColumn={{ heading: "Since last turn", cell: (i) => (i === 0 ? null : `${i * 5}s`) }}
+      />
+    );
+    const table = screen.getByText("Table view").closest("details")!;
+    expect(table.querySelectorAll("thead th")[2]).toHaveTextContent("Since last turn");
+    const cells = [...table.querySelectorAll("tbody tr")].map((r) => r.querySelectorAll("td")[2].textContent);
+    expect(cells).toEqual(["—", "5s", "10s"]);
+  });
+
+  it("omits the legend when there are no events", () => {
+    render(<LineChart title="Context" format={fmt} values={[1, 2]} />);
+    expect(screen.queryByRole("list", { name: "Marks" })).not.toBeInTheDocument();
   });
 });

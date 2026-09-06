@@ -98,10 +98,21 @@ When the `chronicle` plugin sits beside overseer (`plugins/chronicle`), the
 top bar gains a **Chronicle** button next to the Board|Atlas coins: session
 telemetry (per-turn token usage, context growth, prompts, tool calls,
 subagents, compactions, duration) read from chronicle's own account-scoped
-SQLite store — never from `board.db`. The page is pull-on-demand: its
-**Sync** button (`POST /api/chronicle/sync`, token-gated) asks chronicle to
-reconcile its store with the transcripts on disk, ingesting only files that
-moved. Reads (`GET /api/chronicle/{status,summary,sessions,session/{id}}`)
+SQLite store — never from `board.db`.
+
+**Several Claude accounts.** `overseer claude-dirs add ~/.claude-personal` lists a second
+account's config dir in the machine config (`<primary>/overseer/config.json`, or the
+`CLAUDE_CONFIG_DIRS` env). The dashboard then discovers boards under every listed dir, merges
+each account's census store so a personal-account session on the same repo is one more live
+session (each tagged `config_dir`), and chronicle syncs every account's transcripts. Rate-limit
+pills stay the primary account's. Creation of a new board still lands under the primary.
+
+The page is pull-only: while it shows
+and the tab is in the foreground it syncs quietly on open and once a minute,
+and its **Sync** button (`POST /api/chronicle/sync`) forces one. Sync asks
+chronicle to reconcile its store with the transcripts on disk, ingesting
+only files that moved; it is not token-gated, since it writes only what the
+transcripts already say. Reads (`GET /api/chronicle/{status,summary,sessions,session/{id}}`)
 take the same validated `root` as `/api/board`, or `scope=all` for the whole
 account. Every route degrades to an "unavailable" shape when the plugin is
 absent, and the button is simply not rendered. See `../../chronicle/README.md`.

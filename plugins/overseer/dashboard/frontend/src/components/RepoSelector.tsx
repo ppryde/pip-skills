@@ -9,7 +9,17 @@ export interface RepoSelectorProps {
   repos: RepoEntry[];
   activeRoot: string | null;
   onSelect: (root: string) => void;
+  /** An "All repos" choice ahead of the list, for pages whose data is
+   * account-wide (the Chronicle). When `selected`, the select shows it in
+   * place of `activeRoot` — the board's root is untouched underneath, so
+   * switching back to the board page lands where it was. Choosing a real
+   * repo calls `onSelect` as usual AND `allOption.onSelect(false)`. */
+  allOption?: { selected: boolean; onSelect: (all: boolean) => void };
 }
+
+/** The `<option>` value standing for "every repo" — no real root can start
+ * with a space, so it can never collide with one. */
+export const ALL_REPOS_VALUE = " all";
 
 /**
  * An "unbegun" repo (WF-032) has live census sessions but no board.db yet
@@ -38,16 +48,17 @@ function optionLabel(r: RepoEntry): string {
  * fully selectable `<option>`s: choosing one is what routes App.tsx to the
  * `<UnbegunHolding/>` empty state instead of `<Board/>`.
  */
-function RepoSelector({ repos, activeRoot, onSelect }: RepoSelectorProps) {
+function RepoSelector({ repos, activeRoot, onSelect, allOption }: RepoSelectorProps) {
   if (repos.length === 0) return null;
 
   // Prefer the caller's selection if it's still a known root (survives a
   // repos refresh); else the backend's own launch root; else just the
   // first entry — always SOME valid, renderable value for `<select>`.
   const known = activeRoot && repos.some((r) => r.root === activeRoot);
-  const selected = known
+  const selectedRoot = known
     ? (activeRoot as string)
     : repos.find((r) => r.current)?.root ?? repos[0].root;
+  const selected = allOption?.selected ? ALL_REPOS_VALUE : selectedRoot;
 
   return (
     <label className="topbar__repo-select">
@@ -55,8 +66,20 @@ function RepoSelector({ repos, activeRoot, onSelect }: RepoSelectorProps) {
       <Select
         aria-label="Repo"
         value={selected}
-        onChange={(e) => onSelect(e.target.value)}
+        onChange={(e) => {
+          if (e.target.value === ALL_REPOS_VALUE) {
+            allOption?.onSelect(true);
+            return;
+          }
+          allOption?.onSelect(false);
+          onSelect(e.target.value);
+        }}
       >
+        {allOption && (
+          <option value={ALL_REPOS_VALUE} className="repo-option repo-option--all">
+            All repos
+          </option>
+        )}
         {repos.map((r) => (
           <option
             key={r.root}

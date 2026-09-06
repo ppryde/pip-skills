@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBoard, setActiveRoot } from "../api/client";
 import type { Board, BoardResponse, Context, Limits } from "../api/types";
+import { useVisibleInterval } from "./useDocumentVisible";
 
 /** Background poll cadence — paused while a drag or mutation is in flight. */
 const POLL_INTERVAL_MS = 5000;
@@ -207,13 +208,15 @@ export function useBoard(
     [applyResponse]
   );
 
-  // Background poll: every 5s, silently refresh unless a mutation, a drag,
-  // or a MANUAL load is in flight (a tick during a manual load would bump
-  // the shared epoch and stale-out the response the user is waiting on).
-  // All gates are read from refs at tick time so the interval itself never
-  // needs to be torn down/recreated when they toggle.
-  useEffect(() => {
-    const intervalId = setInterval(() => {
+  // Background poll: every 5s while the tab is in the foreground, silently
+  // refresh unless a mutation, a drag, or a MANUAL load is in flight (a tick
+  // during a manual load would bump the shared epoch and stale-out the
+  // response the user is waiting on). All gates are read from refs at tick
+  // time so the interval itself never needs to be torn down/recreated when
+  // they toggle. A hidden tab polls nothing and catches up once on return
+  // (`useVisibleInterval` fires immediately when the page is shown).
+  useVisibleInterval(
+    () => {
       if (
         !enabledRef.current ||
         inFlightRef.current ||
@@ -222,9 +225,11 @@ export function useBoard(
       )
         return;
       void load({ silent: true });
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(intervalId);
-  }, [load]);
+    },
+    POLL_INTERVAL_MS,
+    true,
+    { immediate: "on-return" } // mount and root changes already load above
+  );
 
   return {
     board,

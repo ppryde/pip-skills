@@ -44,3 +44,8 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)
+    # Multi-account: `config.claude_dirs()` (and so `central_root`) also reads
+    # this list of EXTRA config dirs. A developer building that very feature
+    # plausibly has it set — left ambient, tests would search (and write)
+    # their real second account's overseer tree.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)

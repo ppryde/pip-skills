@@ -146,7 +146,15 @@ def load_label_colors(conn: sqlite3.Connection) -> dict[str, str]:
 
 
 def connect(repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
-    path = board_db_path(repo_root)
+    return connect_at(board_db_path(repo_root), repo_root, migrate=migrate)
+
+
+def connect_at(path: Path, repo_root: Path, *, migrate: bool = True) -> sqlite3.Connection:
+    """Open the board file at an explicit ``path`` for ``repo_root`` — the
+    same pragmas, schema, repo-identity stamp and migrations as ``connect``,
+    which is this with the path resolved from the env/central layout. For the
+    one caller that must NOT honour the ``OVERSEER_DB`` override: the board
+    merge opens the folder ``find_boards`` resolved, by path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=5.0)
     conn.row_factory = sqlite3.Row

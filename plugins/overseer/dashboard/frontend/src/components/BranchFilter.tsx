@@ -9,6 +9,11 @@ export interface BranchFilterProps {
   branches: string[];
   activeBranch: string | null;
   onSelect: (branch: string | null) => void;
+  /** Stay rendered (with just "All") while `branches` is empty. For a page
+   * whose branch list arrives with its data — the Chronicle — so the
+   * control does not blink out and back in on every fetch. The board keeps
+   * the default: no branch-carrying cards or sessions, no control. */
+  keepWhenEmpty?: boolean;
 }
 
 /**
@@ -22,8 +27,8 @@ export interface BranchFilterProps {
  * nothing persists across a reload (unlike the repo selector's
  * localStorage choice).
  */
-function BranchFilter({ branches, activeBranch, onSelect }: BranchFilterProps) {
-  if (branches.length === 0) return null;
+function BranchFilter({ branches, activeBranch, onSelect, keepWhenEmpty = false }: BranchFilterProps) {
+  if (branches.length === 0 && !keepWhenEmpty) return null;
 
   const selected =
     activeBranch && branches.includes(activeBranch) ? activeBranch : ALL_VALUE;
