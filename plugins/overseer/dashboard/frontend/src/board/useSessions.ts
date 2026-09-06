@@ -69,6 +69,8 @@ export function useSessions(
   // be visible to it at tick time.
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+  // The root the previous effect run served — see the root-change effect.
+  const prevRootRef = useRef<string | null>(null);
 
   const loadSessions = async () => {
     try {
@@ -89,14 +91,18 @@ export function useSessions(
   // false and consumers stuck on the empty state. `enabled: false` is a hard
   // skip: no `setActiveRoot`, no fetch — an unbegun root must never reach
   // `getSessions()` (it 400s the backend exactly like `/api/board` does).
-  // WF-047: disabling also DROPS the sessions in hand. They belong to the
-  // previously-selected repo; left in state, every consumer (party, the
-  // questing pill) would keep showing them against the unbegun one.
+  // WF-047: a root change DROPS the sessions in hand first. They belong to
+  // the previously-selected repo; left in state until the new fetch lands
+  // (or for good, on an unbegun repo where no fetch follows), every
+  // consumer (party, the questing pill) would show them against the new
+  // one. The same empty array is kept while already empty, so a root
+  // change with nothing to drop re-renders no consumer. As in `useBoard`,
+  // `null` → a named root is the launch root resolving, not a switch.
   useEffect(() => {
-    if (!enabled) {
-      setSessions([]);
-      return;
-    }
+    const switched = prevRootRef.current !== null && prevRootRef.current !== root;
+    prevRootRef.current = root;
+    if (switched || !enabled) setSessions((prev) => (prev.length === 0 ? prev : []));
+    if (!enabled) return;
     isMountedRef.current = true;
     setActiveRoot(root);
     void loadSessions();

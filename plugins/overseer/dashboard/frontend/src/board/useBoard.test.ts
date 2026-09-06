@@ -527,4 +527,40 @@ describe("useBoard(root, enabled) — WF-032 unbegun-repo fetch gate", () => {
     expect(result.current.limits).toBe(limits);
     expect(mockedGetBoard).toHaveBeenCalledTimes(1);
   });
+
+  it("WF-047: a switch between two begun repos drops the old board before the new fetch lands", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { result, rerender } = renderHook(
+      ({ root }: { root: string }) => useBoard(root, true),
+      { initialProps: { root: "/repo-a" } }
+    );
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+
+    // Never repo A's cards under repo B's header, however briefly.
+    let pending: (r: ReturnType<typeof boardResponse>) => void = () => {};
+    mockedGetBoard.mockImplementationOnce(() => new Promise((resolve) => { pending = resolve; }));
+    rerender({ root: "/repo-b" });
+    expect(result.current.board).toBeNull();
+    pending(boardResponse(3));
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+  });
+
+  it("WF-047: the launch root resolving from null to its path is not a switch — no loading flash", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { result, rerender } = renderHook(
+      ({ root }: { root: string | null }) => useBoard(root, true),
+      { initialProps: { root: null as string | null } }
+    );
+    await waitFor(() => expect(result.current.board).not.toBeNull());
+    const loaded = result.current.board;
+
+    mockedGetBoard.mockImplementationOnce(() => new Promise(() => {}));
+    rerender({ root: "/launch-root" });
+    expect(result.current.board).toBe(loaded); // kept while the refetch is in flight
+    expect(mockedGetBoard).toHaveBeenCalledTimes(2);
+  });
 });

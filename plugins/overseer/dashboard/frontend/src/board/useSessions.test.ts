@@ -270,6 +270,14 @@ describe("useSessions(root, enabled) — task 10 unbegun-repo fetch gate", () =>
     rerender({ root: "/unbegun", enabled: false });
     expect(result.current.sessions).toEqual([]);
     expect(mockGetSessions).toHaveBeenCalledTimes(1);
+
+    // And a switch to another BEGUN repo drops them too, before its fetch
+    // lands — never repo-a's heroes attributed to repo-b.
+    rerender({ root: "/repo-a", enabled: true });
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    mockGetSessions.mockImplementationOnce(() => new Promise(() => {}));
+    rerender({ root: "/repo-b", enabled: true });
+    expect(result.current.sessions).toEqual([]);
   });
 
 });

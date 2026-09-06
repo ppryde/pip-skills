@@ -99,8 +99,11 @@ function App() {
     // Done here, on the person's own choice, and NOT in an effect on
     // `activeRoot`: the reconcile above also moves the root (a stale stored
     // one, or the launch root resolving on load), and that must keep the
-    // filter that was persisted for exactly this board.
-    if (root !== activeRoot) clear();
+    // filter that was persisted for exactly this board. A BRANCH switch is
+    // deliberately not the same: the branch spotlight dims cards rather
+    // than hiding them, so the trap cannot arise, and a typed search should
+    // survive narrowing to a branch.
+    if (root !== activeRoot && !isDefaultFilter) clear();
     setActiveRootState(root);
     writeStoredRoot(root);
   }
@@ -162,13 +165,6 @@ function App() {
   // WF-031 branch filter: session-local only (no localStorage, unlike the
   // repo selector) — `null` means "All", clearing every dim/spotlight.
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
-  // WF-095: same reset as a repo switch (see `handleSelectRepo`) — a branch
-  // spotlight plus a stale label/search filter is the same "where did all
-  // the cards go" trap.
-  function handleSelectBoardBranch(branch: string | null) {
-    if (branch !== activeBranch) clear();
-    setActiveBranch(branch);
-  }
   // Task 7: App-owned ClearDialog open-state + post-clear success toast —
   // same App-level precedent as `partyOpen`/`openCardId` above (Decisions:
   // this state never lives on TopBar itself).
@@ -392,7 +388,7 @@ function App() {
         onSelectRepo={handleSelectRepo}
         branches={view === "chronicle" ? chronicleBranches : branches}
         activeBranch={view === "chronicle" ? chronicleBranch : activeBranch}
-        onSelectBranch={view === "chronicle" ? setChronicleBranch : handleSelectBoardBranch}
+        onSelectBranch={view === "chronicle" ? setChronicleBranch : setActiveBranch}
         // Task 10: an unbegun repo never populates `party` (sessions are
         // hard-gated off above), so source the questing pill from the SAME
         // `live_sessions` count `<UnbegunHolding/>` already shows below —

@@ -95,6 +95,8 @@ export function useBoard(
   // interval without tearing it down and recreating it.
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+  // The root the previous effect run served — see the root-change effect.
+  const prevRootRef = useRef<string | null>(null);
   // Poll gate for MANUAL loads (mount fetch / refresh). A poll tick fired
   // while a manual load is in flight would bump the shared epoch and mark
   // the manual response stale — polling must never interfere with a manual
@@ -162,19 +164,28 @@ export function useBoard(
   // change) targets the newly-selected repo. `enabled: false` is a hard
   // skip: no `setActiveRoot`, no `load()` — an unbegun root must never
   // reach `getBoard()` (see the doc comment on `useBoard` above).
-  // WF-047: disabling also DROPS the board and context in hand — they are
-  // the previously-selected repo's, and a consumer reading `board?.cards`
-  // for the unbegun one must see nothing, not a stale neighbour. `limits`
-  // (the account's rate windows) are not per repo and stay. Any response
-  // still in flight for the old root is retired by bumping the epoch.
+  // WF-047: a root change DROPS the board and context in hand first — they
+  // are the previously-selected repo's, and until the new fetch lands a
+  // consumer reading `board?.cards` must see nothing (App shows its
+  // "Loading board…" line), never the old repo's cards under the new
+  // header. That covers the unbegun case for free: no fetch follows, so
+  // nothing replaces the emptiness. `limits` (the account's rate windows)
+  // are not per repo and stay. Any response still in flight for the old
+  // root is retired by bumping the epoch. `null` is "the launch root, not
+  // yet named": App's reconcile turns it into that repo's explicit path once
+  // `/api/repos` answers, and that is the SAME board, not a switch — so a
+  // change away from `null` keeps what is loaded (no second loading flash
+  // on every page open).
   useEffect(() => {
-    if (!enabled) {
+    const switched = prevRootRef.current !== null && prevRootRef.current !== root;
+    prevRootRef.current = root;
+    if (switched || !enabled) {
       requestIdRef.current += 1;
       setBoard(null);
       setContext(null);
       setError(null);
-      return;
     }
+    if (!enabled) return;
     setActiveRoot(root);
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
