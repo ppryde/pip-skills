@@ -1121,15 +1121,25 @@ def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
 
 def cmd_dashboard_refresh_hook(args: argparse.Namespace) -> int:
     """SessionStart hook verb (WF-053): if a dashboard is running from an
-    OLDER overseer than the one now installed, restart it in place. Fail-open
-    in every direction — a session start is never delayed or broken by it —
-    and silent unless a restart actually happened, in which case one
-    systemMessage line says so."""
+    OLDER overseer than the one now installed, restart it in place.
+
+    Fail-open in every direction — a session start is never delayed or broken
+    by it — and silent unless there is something to say. The slow half (kill
+    + relaunch) runs detached, so two things can be worth saying: a restart
+    just handed off, and a restart from an EARLIER session that stopped the
+    old server and then failed to start the new one. The second must not stay
+    buried: it means the dashboard is down and only a human can fix it, so
+    the note the worker left is reported here and cleared."""
     try:
         from scripts import dashboard_record
-        message = dashboard_record.restart_if_stale()
-        if message:
-            print(json.dumps({"systemMessage": message}))
+        note = dashboard_record.take_failure_note()
+        try:
+            handoff = dashboard_record.restart_if_stale()
+        except Exception:  # noqa: BLE001 — still report a note already taken
+            handoff = None
+        messages = [line for line in (note, handoff) if line]
+        if messages:
+            print(json.dumps({"systemMessage": "; ".join(messages)}))
         return 0
     except Exception:  # noqa: BLE001 — never break a session start
         return 0

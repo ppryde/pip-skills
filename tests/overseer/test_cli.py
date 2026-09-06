@@ -212,6 +212,15 @@ class TestLinearAndPr:
         assert "title cannot be empty" in capsys.readouterr().err
         assert _card(repo).title == "Old"  # unchanged
 
+    def test_set_field_estimate_suffix_is_case_insensitive(self, repo):
+        """The dashboard's estimate box accepts `1.5m` as readily as `1.5M`;
+        the CLI parser used to accept only the uppercase M."""
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-field", "WF-001", "--estimate", "1.5m") == 0
+        assert _card(repo).budget_estimate == 1_500_000
+        assert run(repo, "set-field", "WF-001", "--estimate", "400K") == 0
+        assert _card(repo).budget_estimate == 400_000
+
     def test_set_field_body_set_and_clear(self, repo):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-field", "WF-001", "--body", "## Goal\nShip it") == 0

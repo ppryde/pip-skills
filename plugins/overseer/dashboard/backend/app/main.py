@@ -24,7 +24,7 @@ from typing import Any, Callable
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.cli_client import (
     CliError,
@@ -80,6 +80,36 @@ class AttributesBody(BaseModel):
     complexity: str | None = None
     sprint: str | None = None
     estimate: int | None = None
+
+    @field_validator("complexity", "sprint")
+    @classmethod
+    def _plain_cli_value(cls, value: str | None) -> str | None:
+        """These reach the CLI as `--flag <value>`. A value starting with "-"
+        would be read by argparse as another flag and fail the whole
+        invocation as a 500-shaped CLI error, so reject it here as a 422.
+        Empty (like null) still clears the field."""
+        if value is None or value == "":
+            return value
+        if len(value) > 200:
+            raise ValueError("must be at most 200 characters")
+        if value.startswith("-"):
+            raise ValueError("must not start with '-'")
+        if any(ch < " " or ch == "\x7f" for ch in value):
+            raise ValueError("must not contain control characters")
+        return value
+
+    @field_validator("estimate")
+    @classmethod
+    def _sane_estimate(cls, value: int | None) -> int | None:
+        """A token estimate is a count. Negative is meaningless and anything
+        past 2^53 is beyond what JSON and SQLite round-trip safely."""
+        if value is None:
+            return value
+        if value < 0:
+            raise ValueError("must not be negative")
+        if value > 2**53:
+            raise ValueError("must be at most 2^53")
+        return value
 
 
 class LabelsBody(BaseModel):
@@ -658,8 +688,6 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         sent = body.model_fields_set
         if not sent:
             raise HTTPException(status_code=400, detail="nothing to set")
-        if body.estimate is not None and body.estimate < 0:
-            raise HTTPException(status_code=400, detail="estimate must not be negative")
         effective = _resolve_root(launch_root, _derived_launch_root, root)
 
         def do() -> None:

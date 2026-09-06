@@ -25,6 +25,9 @@ describe("parseTokens", () => {
     expect(parseTokens(" 999 ")).toBe(999);
     expect(parseTokens("")).toBeNull();
     expect(parseTokens("lots")).toBeUndefined();
+    // Case-insensitive suffixes, same as the CLI's parse_tokens.
+    expect(parseTokens("1.5m")).toBe(1_500_000);
+    expect(parseTokens("400K")).toBe(400_000);
   });
 });
 
@@ -73,6 +76,19 @@ describe("<AttributesEditor/>", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/400k/);
     expect(setAttributes).not.toHaveBeenCalled();
+  });
+
+  it("still sends a changed sprint when the estimate is unreadable", async () => {
+    const mutate = makeMutate();
+    render(<AttributesEditor cardId="WF-1" sprint={null} estimate={null} mutate={mutate} inFlight={false} />);
+
+    fireEvent.change(screen.getByLabelText("Sprint"), { target: { value: "S-3" } });
+    fireEvent.change(screen.getByLabelText("Estimate"), { target: { value: "lots" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // The sprint lands; the bad estimate is reported, not silently dropped.
+    await waitFor(() => expect(setAttributes).toHaveBeenCalledWith("WF-1", { sprint: "S-3" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/400k/);
   });
 
   it("resets its drafts when the card's values change underneath it", () => {

@@ -91,7 +91,7 @@ Options:
 | `--host HOST` | `127.0.0.1` | Bind host — local-only; do not change to `0.0.0.0` unless you understand the exposure |
 | `--port PORT` | `8770` | Bind port |
 | `--no-browser` | off | Don't auto-open a browser tab |
-| `--replace` | off | If the recorded dashboard is still running on this port, stop it and take over (otherwise the launch refuses) |
+| `--replace` | off | If the recorded dashboard is still answering (on any port), stop it and take over (otherwise the launch refuses) |
 
 ## Chronicle page (optional)
 
@@ -162,20 +162,44 @@ is built once at startup.
 
 ### Restart-on-stale (WF-053)
 
-The server stamps itself on launch — pid, host, port, root, version and how
-to relaunch — at `<CLAUDE_CONFIG_DIR>/overseer/.dashboard.json`, removed on
-clean shutdown, and answers `GET /api/version` with what it is actually
-running. Overseer's SessionStart hook reads the stamp and, only when a
-**live** server is running an **older** version than the installed plugin,
-kills it and relaunches `serve.py` with the same host, port and root (never
-opening a browser), leaving one line in the session: `overseer dashboard
-restarted 0.21.0 → 0.22.0`. It never starts a dashboard that was not running,
-never downgrades, and fails open — any error is a silent no-op. Several
-sessions starting together are debounced by a short-lived lock, so one of
-them does the restart. A LAN-bound server comes back LAN-bound; note that
-its auto-generated token changes on restart unless `OVERSEER_DASHBOARD_TOKEN`
-is set in the environment the hook runs in. Output of the relaunched server
-goes to `<CLAUDE_CONFIG_DIR>/overseer/dashboard.log`.
+The server stamps itself **once the bind succeeds** — pid, host, port, root,
+version and how to relaunch — at `<CLAUDE_CONFIG_DIR>/overseer/.dashboard.json`,
+removed on clean shutdown, and answers `GET /api/version` with what it is
+actually running. A launch that cannot bind never claims the stamp, so it
+cannot take a healthy server's record down with it.
+
+Overseer's SessionStart hook reads the stamp and, only when a server is
+**really there** and running an **older** version than the installed plugin,
+restarts it with the same host, port and root (never opening a browser),
+leaving one line in the session: `overseer dashboard restarting 0.21.0 →
+0.22.0`.
+
+"Really there" means it **answers `GET /api/version`** — a live pid is not
+enough. A record survives a reboot, after which its pid may belong to an
+unrelated process; killing that and starting a dashboard in its place would
+be two things this must never do. A pid that is alive but silent is treated
+as not running: the stale stamp is deleted and nothing is signalled. The
+same rule governs `serve.py --replace`.
+
+The version the hook compares is what the live server reports; the stamp only
+fills in an answer that omits it. Versions parse leading-dotted-numeric only,
+so `0.22.0-rc1` is release `0.22.0` and sorts *below* the `0.22.0` it
+precedes.
+
+The kill and relaunch run in a **detached worker**, so the hook returns at
+once and a session start never waits on a SIGTERM — hence "restarting", not
+"restarted". If that worker stops the old server and then cannot start the
+new one, it leaves a note that the next session's hook reports as
+`overseer dashboard restart FAILED …`; a dashboard that is down is never
+silently down. Everything else fails open — any error is a silent no-op.
+
+It never starts a dashboard that was not running and never downgrades.
+Several sessions starting together are debounced by a short-lived lock (the
+worker's, released when it finishes, and taken over atomically if it goes
+stale), so one of them does the restart. A LAN-bound server comes back
+LAN-bound; note that its auto-generated token changes on restart unless
+`OVERSEER_DASHBOARD_TOKEN` is set in the environment the hook runs in. Output
+of the relaunched server goes to `<CLAUDE_CONFIG_DIR>/overseer/dashboard.log`.
 
 ## Hot reload (dev)
 

@@ -16,6 +16,9 @@ class TestTokens:
         pytest.param("400k", 400_000, id="k-suffix"),
         pytest.param("2.1M", 2_100_000, id="decimal-m-suffix"),
         pytest.param(None, None, id="none"),
+        # The suffix is case-insensitive, matching the dashboard's parseTokens.
+        pytest.param("1.5m", 1_500_000, id="lowercase-m-suffix"),
+        pytest.param("400K", 400_000, id="uppercase-k-suffix"),
     ])
     def test_parse(self, raw, expected):
         assert parse_tokens(raw) == expected

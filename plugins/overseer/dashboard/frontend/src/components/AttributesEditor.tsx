@@ -59,15 +59,14 @@ function AttributesEditor({ cardId, sprint, estimate, mutate, inFlight, onMutate
   const dirty = sprintChanged || estimateChanged;
 
   async function save() {
-    if (nextEstimate === undefined) {
-      setError("Estimate should be a token count like 400k or 1.2M.");
-      return;
-    }
+    // An unparseable estimate must not swallow a sprint the user also
+    // changed: flag it inline, and send whatever else is valid and dirty.
+    const badEstimate = nextEstimate === undefined;
+    setError(badEstimate ? "Estimate should be a token count like 400k or 1.2M." : null);
     const body: AttributesBody = {};
     if (sprintChanged) body.sprint = nextSprint;
-    if (estimateChanged) body.estimate = nextEstimate;
+    if (estimateChanged && nextEstimate !== undefined) body.estimate = nextEstimate;
     if (Object.keys(body).length === 0) return;
-    setError(null);
     await mutate(() => setAttributes(cardId, body));
     onMutated?.();
   }
