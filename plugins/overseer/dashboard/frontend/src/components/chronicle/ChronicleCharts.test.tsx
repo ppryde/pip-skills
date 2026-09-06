@@ -91,6 +91,28 @@ describe("<Donut/>", () => {
     expect(screen.getByText("written")).toBeInTheDocument();
   });
 
+  it("keeps an arc's colour matched to its legend swatch across a zero part", () => {
+    // The middle part draws no arc; the third part's arc must still wear
+    // the THIRD colour (its legend swatch does), not slide into the second.
+    render(
+      <Donut
+        title="T"
+        format={fmt}
+        centre={{ value: "10", label: "x" }}
+        segments={[
+          { label: "a", value: 5 },
+          { label: "b", value: 0 },
+          { label: "c", value: 5 },
+        ]}
+      />
+    );
+    const arcs = screen.getAllByTestId("chr-donut-seg");
+    expect(arcs).toHaveLength(2);
+    expect(arcs[1]).toHaveClass("chr-donut__seg--3");
+    const swatch = screen.getByText("c").previousElementSibling;
+    expect(swatch).toHaveClass("chr-donut__swatch--3");
+  });
+
   it("renders an empty note when the whole is zero", () => {
     render(
       <Donut title="T" format={fmt} centre={{ value: "0", label: "x" }} segments={[{ label: "a", value: 0 }]} />

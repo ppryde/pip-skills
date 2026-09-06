@@ -129,6 +129,25 @@ class TestIngestSession:
         assert ingest.ingest_session(conn, path)["lines"] == 1
         assert _session(conn)["prompts"] == 2
 
+    def test_resumed_session_lifts_a_stale_ended_stamp(self, builder):
+        # Stores from before the hooks were removed carry `ended_at` from the
+        # SessionEnd hook. A session resumed after that stamp is alive again:
+        # the stamp must go, or `is_live` reads it as ended for ever.
+        path = builder.prompt("u1", T0).turn("m1", T0).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        ended = _session(conn)["last_activity_at"] + 1
+        conn.execute("UPDATE sessions SET ended_at = ?, end_reason = 'exit' WHERE session_id = 's1'", (ended,))
+        conn.commit()
+        assert ingest.ingest_session(conn, path)["lines"] == 0
+        assert _session(conn)["ended_at"] == ended  # nothing new: still ended
+        builder.append(json.loads(json.dumps(
+            {"type": "user", "uuid": "u2", "timestamp": T2, "sessionId": "s1",
+             "message": {"role": "user", "content": "back again"}})))
+        ingest.ingest_session(conn, path)
+        row = _session(conn)
+        assert row["ended_at"] is None and row["end_reason"] is None
+
     def test_partial_trailing_line_is_deferred(self, builder):
         path = builder.prompt("u1", T0).write()
         with open(path, "a") as handle:
@@ -240,12 +259,20 @@ class TestSync:
         TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
         conn = store.connect()
         ingest.sync(conn, projects)
-        conn.execute("UPDATE sessions SET config_dir = NULL")  # as an upgraded store looks
+        # As an upgraded store looks: rows without the column's value, and no
+        # record of the one-time sweep having run.
+        conn.execute("UPDATE sessions SET config_dir = NULL")
+        conn.execute("DELETE FROM meta WHERE key = 'config_dirs_backfilled'")
         conn.commit()
         result = ingest.sync(conn, projects)  # nothing on disk moved …
         assert result["changed"] == 0
         # … but the row is filled from its transcript path all the same.
         assert conn.execute("SELECT config_dir FROM sessions").fetchone()[0] == str(projects.parent.resolve())
+        # The sweep is one-time: once recorded, a later sync does not repeat it.
+        conn.execute("UPDATE sessions SET config_dir = NULL")
+        conn.commit()
+        ingest.sync(conn, projects)
+        assert conn.execute("SELECT config_dir FROM sessions").fetchone()[0] is None
 
     def test_config_dir_is_derived_from_the_transcript_layout(self, tmp_path):
         assert ingest.config_dir_of(tmp_path / "cfg" / "projects" / "-slug" / "sid.jsonl") == str((tmp_path / "cfg").resolve())

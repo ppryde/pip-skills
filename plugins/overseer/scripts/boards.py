@@ -96,17 +96,15 @@ def find_boards(repo_root: Path) -> list[dict[str, Any]]:
     return found
 
 
-def _open_target(folder: Path, *, write: bool) -> sqlite3.Connection:
-    """The resolved board, by path. `write=False` never creates it: a missing
-    target reads as an empty board (an in-memory schema) so a dry run stays
-    a dry run."""
+def _open_target(folder: Path, repo_root: Path, *, write: bool) -> sqlite3.Connection:
+    """The resolved board, by path. `write=True` opens it exactly as the
+    board's own sessions do (`db.connect_at`: WAL, busy timeout, foreign keys,
+    schema, the repo-identity stamp), creating it if need be. `write=False`
+    never creates it: a missing target reads as an empty board (an in-memory
+    schema) so a dry run stays a dry run."""
     board = folder / "board.db"
     if write:
-        folder.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(board, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        db.ensure_schema(conn)
-        return conn
+        return db.connect_at(board, repo_root)
     if board.is_file():
         conn = _read_only(board)
         if conn is not None:
@@ -126,12 +124,24 @@ class _LenientRow(dict):
         return None
 
 
-def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection, *,
-                 apply: bool = True) -> dict[str, Any]:
+def _card_index(target: sqlite3.Connection) -> dict[str, tuple[str, str]]:
+    """``id -> (updated, created)`` for every card the target holds."""
+    return {
+        row["id"]: (row["updated"] or "", row["created"] or "")
+        for row in target.execute("SELECT id, updated, created FROM cards")
+    }
+
+
+def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection,
+                 existing: dict[str, tuple[str, str]], *, apply: bool = True) -> dict[str, Any]:
     """Union `source`'s cards into `target` — a missing card is added, a
-    shared one is replaced only when the source copy is newer. With
+    shared one is replaced only when the source copy is newer. ``existing``
+    is the target's card index (``_card_index``), kept current as cards land
+    so it can be shared across every absorbed board of one run. With
     ``apply=False`` (dry run) the same comparison is made and counted but
-    nothing is written, so the preview cannot drift from the real merge.
+    nothing is written — the index still advances, so a card two absorbed
+    boards both hold previews as one add and one compare, exactly as the
+    real merge would land it.
 
     Two boards minted independently both start at WF-001, so a shared id is
     only the same card when its ``created`` stamp matches too. A shared id
@@ -141,10 +151,6 @@ def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection, *,
     overwrites one task with another on the strength of a timestamp."""
     added = updated = kept = 0
     conflicts: list[str] = []
-    existing = {
-        row["id"]: (row["updated"] or "", row["created"] or "")
-        for row in target.execute("SELECT id, updated, created FROM cards")
-    }
     for row in source.execute("SELECT * FROM cards"):
         lenient = _LenientRow(dict(row))
         card = db.row_to_card(lenient)  # type: ignore[arg-type]
@@ -161,6 +167,7 @@ def _merge_cards(target: sqlite3.Connection, source: sqlite3.Connection, *,
             else:
                 kept += 1
                 continue
+        existing[card.id] = (card.updated or "", card.created or "")
         if apply:
             db._upsert(target, card, archived, commit=False)
     return {"added": added, "updated": updated, "kept": kept, "conflicts": conflicts}
@@ -202,15 +209,16 @@ def merge_boards(repo_root: Path, *, dry_run: bool = False,
     # and could point somewhere else. A dry run reads it (or, if it does not
     # exist yet, an empty in-memory stand-in) and creates nothing; the real
     # merge creates/migrates it.
-    target_conn = _open_target(Path(result["target"]), write=not dry_run)
+    target_conn = _open_target(Path(result["target"]), repo_root, write=not dry_run)
     try:
+        existing = _card_index(target_conn)
         for other in others:
             folder = Path(other["path"])
             source = _read_only(folder / "board.db")
             if source is None:
                 continue
             try:
-                stats = _merge_cards(target_conn, source, apply=not dry_run)
+                stats = _merge_cards(target_conn, source, existing, apply=not dry_run)
                 colours = 0 if dry_run else _merge_label_colors(target_conn, source)
                 if not dry_run:
                     target_conn.commit()

@@ -42,10 +42,17 @@ export function useVisibleInterval(
   const active = enabled && visible;
   const tickRef = useRef(tick);
   tickRef.current = tick;
-  // Has the page been hidden since this hook mounted? Only then is an
-  // activation a "return" rather than the first showing.
+  // Has the page been hidden WHILE THIS HOOK WAS ENABLED? Only then is an
+  // activation a "return" rather than the first showing. A hide/show cycle
+  // that happens while the hook is disabled (another page was up) is not a
+  // return for it — the caller's own load-on-enable covers that — so the
+  // flag is neither raised then nor carried across a disabled stretch.
+  // (Kept during render, not in the effect below: that effect re-runs only
+  // when `active` changes, and enabled→disabled while hidden leaves `active`
+  // false throughout.)
   const wasHiddenRef = useRef(false);
-  if (!visible) wasHiddenRef.current = true;
+  if (!enabled) wasHiddenRef.current = false;
+  else if (!visible) wasHiddenRef.current = true;
   useEffect(() => {
     if (!active) return;
     if (immediate === "always" || wasHiddenRef.current) {

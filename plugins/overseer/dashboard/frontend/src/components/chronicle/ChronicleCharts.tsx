@@ -299,15 +299,18 @@ export function Donut({ segments, format, title, centre, hue = "--chr-context" }
   if (total <= 0) {
     return <p className="chr-chart__empty">No data in this window.</p>;
   }
-  const drawn = segments.filter((s) => s.value > 0);
+  // A zero segment draws no arc but keeps its legend row — so an arc's colour
+  // step is its index in `segments` (what the legend swatch uses), never its
+  // index among the arcs actually drawn.
+  const drawn = segments.map((s, step) => ({ s, step })).filter(({ s }) => s.value > 0);
   let offset = 0;
-  const arcs = drawn.map((s, i) => {
+  const arcs = drawn.map(({ s, step }) => {
     const len = (s.value / total) * DONUT_LEN;
     // Trim each end by half the gap so neighbours never touch; a lone
     // segment is a full ring and needs no trim.
     const trim = drawn.length > 1 ? DONUT_GAP / 2 : 0;
     const dash = Math.max(0, len - trim * 2);
-    const arc = { key: `${i}-${s.label}`, dash, start: offset + trim, step: i };
+    const arc = { key: `${step}-${s.label}`, dash, start: offset + trim, step };
     offset += len;
     return arc;
   });

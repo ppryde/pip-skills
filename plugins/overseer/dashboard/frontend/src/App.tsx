@@ -4,12 +4,7 @@ import type { View } from "./components/TopBar";
 import ChroniclePage from "./components/chronicle/ChroniclePage";
 import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
-
-/** useBoard's poll cadence, for the fetch-failure banner's countdown. */
-const BOARD_RETRY_SECONDS = 5;
 import type { ChronicleQuery } from "./api/types";
-
-type ChronicleScope = NonNullable<ChronicleQuery["scope"]>;
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
@@ -30,6 +25,11 @@ import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilt
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
+
+/** useBoard's poll cadence, for the fetch-failure banner's countdown. */
+const BOARD_RETRY_SECONDS = 5;
+
+type ChronicleScope = NonNullable<ChronicleQuery["scope"]>;
 
 function readStoredRoot(): string | null {
   try {
@@ -233,34 +233,40 @@ function App() {
   // dashboard is what keeps its store current: a quiet sync on open and
   // every minute after.
   const chronicleSync = useChronicleSync(chronicle.refresh, view === "chronicle");
-  // Branches chronicle saw in this window. Taken from the UNFILTERED session
-  // list only: once a branch filter is on, the fetched sessions all carry
-  // that one branch and the list would collapse to it, leaving no way to
-  // hop to another without clearing first. So the pool is refreshed while
-  // no branch is chosen and held while one is (a repo or window change made
-  // mid-filter shows the previous pool until the branch is cleared — the
-  // "All" option is always there to do that). The active branch is always
-  // listed, so the selector never shows a filter it cannot name.
-  // Ordered by each branch's newest session activity, most recent first —
-  // the same recency order the board's list and the repo selector use.
-  const [chronicleBranchPool, setChronicleBranchPool] = useState<string[]>([]);
+  // Branches chronicle saw in this window, each with its newest session
+  // activity. Grown from the UNFILTERED session list only: once a branch
+  // filter is on, the fetched sessions all carry that one branch and the
+  // list would collapse to it, leaving no way to hop to another without
+  // clearing first. So the pool grows while no branch is chosen and is held
+  // while one is — and it GROWS rather than being replaced, because when the
+  // filter is cleared the sessions in hand are still the filtered ones until
+  // the refetch lands; a replace would collapse the list for that moment.
+  // It starts over when the repo, scope or window changes (a branch from
+  // another repo must not linger). The active branch is always listed, so
+  // the selector never shows a filter it cannot name. Ordered most recent
+  // first — the same recency order the board's list and repo selector use.
+  const [chronicleBranchActivity, setChronicleBranchActivity] = useState<Map<string, number>>(
+    () => new Map()
+  );
+  useEffect(() => {
+    setChronicleBranchActivity(new Map());
+  }, [activeRoot, chronicleScope, chronicleDays]);
   useEffect(() => {
     if (chronicleBranch !== null) return;
-    const activity = new Map<string, number>();
-    for (const s of chronicle.sessions) {
-      if (!s.git_branch) continue;
-      const ts = s.last_activity_at ?? s.started_at ?? 0;
-      activity.set(s.git_branch, Math.max(activity.get(s.git_branch) ?? 0, ts));
-    }
-    setChronicleBranchPool(orderBranchesByActivity(activity));
+    setChronicleBranchActivity((prev) => {
+      const next = new Map(prev);
+      for (const s of chronicle.sessions) {
+        if (!s.git_branch) continue;
+        const ts = s.last_activity_at ?? s.started_at ?? 0;
+        next.set(s.git_branch, Math.max(next.get(s.git_branch) ?? 0, ts));
+      }
+      return next;
+    });
   }, [chronicle.sessions, chronicleBranch]);
-  const chronicleBranches = useMemo(
-    () =>
-      chronicleBranch && !chronicleBranchPool.includes(chronicleBranch)
-        ? [...chronicleBranchPool, chronicleBranch]
-        : chronicleBranchPool,
-    [chronicleBranchPool, chronicleBranch]
-  );
+  const chronicleBranches = useMemo(() => {
+    const pool = orderBranchesByActivity(chronicleBranchActivity);
+    return chronicleBranch && !pool.includes(chronicleBranch) ? [...pool, chronicleBranch] : pool;
+  }, [chronicleBranchActivity, chronicleBranch]);
   // WF-091: the Epic Atlas toolbar's toggles, lifted here from
   // EpicAtlas-local state — the controls that drive them now live in
   // TopBar's Controls group (shown only on `view === "atlas"`), so both

@@ -188,8 +188,9 @@ def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
 
 def repos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """One row per repo root: session count, total tokens, and when it was
-    last active (the newest session activity) — the dashboard orders its
-    repo selector by that, most recent first."""
+    last active (the newest session activity). Listed busiest first (most
+    sessions); the dashboard re-orders its repo selector by
+    ``last_activity_at``, most recent first."""
     rows = conn.execute(
         """SELECT repo_root, COUNT(*) AS sessions,
                   SUM(input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens)

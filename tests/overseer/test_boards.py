@@ -193,11 +193,48 @@ class TestMergeBoards:
         assert plan["absorbed"][0]["added"] == 2
         assert not target.exists()
         assert not (tmp_path / "somewhere-else.db").exists()
-        # The real run creates the resolved folder and fills it.
+        # The real run creates the resolved folder and fills it — opened as a
+        # session would open it (WAL, the repo-identity stamp), not as a bare
+        # sqlite file.
         result = boards.merge_boards(repo)
         assert (target / "board.db").is_file()
         assert result["absorbed"][0]["added"] == 2
         assert not (tmp_path / "somewhere-else.db").exists()
+        import sqlite3
+        raw = sqlite3.connect(target / "board.db")
+        assert raw.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert raw.execute("SELECT value FROM meta WHERE key = 'repo_root'").fetchone()[0] == str(repo.resolve())
+        raw.close()
+
+    def test_dry_run_counts_a_card_two_absorbed_boards_share_once(self, tmp_path, monkeypatch):
+        # Three boards: the active one, another account's, and the legacy
+        # plain folder — and the last two both hold WF-5 (same lineage). The
+        # preview must count it as ONE add then one compare, as the real merge
+        # lands it, not as an add from each.
+        primary, personal, repo = _setup(tmp_path, monkeypatch)
+        _board_under(personal, repo, monkeypatch, [
+            make_card("WF-5", title="older copy", created="2026-08-01", updated="2026-08-02T10:00"),
+        ])
+        active = _board_under(primary, repo, monkeypatch, [make_card("WF-1")])
+        plain = active.parent / active.name.rsplit("-", 1)[0]
+        plain.mkdir()
+        monkeypatch.setenv("OVERSEER_DB", str(plain / "board.db"))
+        c = db.connect(repo)
+        db.save_card(c, make_card("WF-5", title="newer copy", created="2026-08-01", updated="2026-08-03T10:00"))
+        c.close()
+        monkeypatch.delenv("OVERSEER_DB")
+        config.add_claude_dir(personal)
+
+        plan = boards.merge_boards(repo, dry_run=True)
+        counts = [(a["added"], a["updated"], a["kept"]) for a in plan["absorbed"]]
+        result = boards.merge_boards(repo)
+        assert [(a["added"], a["updated"], a["kept"]) for a in result["absorbed"]] == counts
+        assert sorted(counts) == [(0, 1, 0), (1, 0, 0)]
+        conn = db.connect(repo)
+        assert dict(conn.execute("SELECT id, title FROM cards").fetchall()) == {
+            "WF-1": make_card("WF-1").title, "WF-5": "newer copy",
+        }
+        conn.close()
 
     def test_cli_verbs(self, tmp_path, monkeypatch, capsys):
         primary, personal, repo = _setup(tmp_path, monkeypatch)

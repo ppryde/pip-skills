@@ -186,8 +186,9 @@ export function useChronicleSync(refresh: () => Promise<void>, enabled = false):
     if (inFlightRef.current || Date.now() - lastAutoRef.current < AUTO_SYNC_MIN_GAP_MS) return;
     inFlightRef.current = true;
     try {
-      // quiet: a tokened dashboard with no token in this browser must not
-      // pop the token prompt on a timer — the manual Sync button does that.
+      // quiet: an unattended timer must never pop the token prompt. The sync
+      // route is ungated today, so this is a guard against the gate ever
+      // returning — a 401 here fails silently; the manual Sync button prompts.
       const res = await syncChronicle({ quiet: true });
       if (res.changed > 0) {
         setNote(formatSyncSummary(res));

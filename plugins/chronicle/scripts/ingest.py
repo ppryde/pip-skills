@@ -231,6 +231,16 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
             "WHERE session_id = ?",
             (facts.last_ts, session_id),
         )
+        # A session the (since-removed) SessionEnd hook stamped as ended can
+        # be RESUMED: new transcript lines after that stamp mean it is alive
+        # again, so the stamp is lifted — otherwise ``is_live`` would read it
+        # as ended for good. Nothing writes ``ended_at`` any more; liveness
+        # is the activity horizon alone.
+        conn.execute(
+            "UPDATE sessions SET ended_at = NULL, end_reason = NULL "
+            "WHERE session_id = ? AND ended_at IS NOT NULL AND last_activity_at > ended_at",
+            (session_id,),
+        )
 
 
 def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id: str,
@@ -435,7 +445,12 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
         result = ingest_session(conn, transcript, sid, now=now)
         lines += result["lines"]
         changed.append(sid)
-    backfill_config_dirs(conn)
+    # One-time: fill `config_dir` on rows from before the column existed. Every
+    # row ingested since carries it, so once the sweep has run there is
+    # nothing left for it to find — the flag spares every later sync the scan.
+    if conn.execute("SELECT 1 FROM meta WHERE key = 'config_dirs_backfilled'").fetchone() is None:
+        backfill_config_dirs(conn)
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('config_dirs_backfilled', '1')")
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES ('synced_at', ?)", (str(now),)
     )
