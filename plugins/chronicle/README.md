@@ -101,13 +101,22 @@ and anything already ingested survives that pruning in the chronicle store.
 
 Give `--dest` and `--source` without trailing slashes if you like, or with — either is fine.
 
-**Docker Desktop only, for now.** The helper container runs as root and `cp -a` preserves the
+**Ownership, on a Linux host.** The helper container runs as root and `cp -a` preserves the
 source ownership and mode. On macOS and Windows the bind mount remaps uids, so the pulled files
-end up owned by you. On a **Linux host** there is no remapping: a `0600` root-owned transcript
-stays unreadable to whoever runs `chronicle sync`, and that ingest fails *silently* (an
-unreadable file is skipped, not reported). If you are on Linux, add
-`--user "$(id -u):$(id -g)"` to the `docker run` in `cmd_pull_volume` — after checking that
-uid can read the volume's contents.
+end up owned by you and this never bites. On Linux there is no remapping: a `0600` root-owned
+transcript stays unreadable to whoever runs `chronicle sync`, which would skip it *silently*.
+
+The pull checks for exactly that and tells you:
+
+```json
+{"transcripts": 412, "unreadable": 412,
+ "warning": "412 pulled transcript(s) are not readable by this user and would be skipped
+             silently by sync — re-run with `--user \"$(id -u):$(id -g)\"` on the docker
+             helper, or chown <dest>/projects"}
+```
+
+Take either remedy it names. The `--user` route needs that uid to be able to read the volume's
+contents; `chown` is the surer one if it cannot.
 
 If the container instead **bind-mounts** a host directory, none of this is needed — point
 `claude-dirs` straight at it.

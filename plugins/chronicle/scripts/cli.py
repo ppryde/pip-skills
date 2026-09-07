@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -212,14 +213,28 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         print(json.dumps({"error": (result.stderr or result.stdout).strip()[:500],
                           "returncode": result.returncode}), file=sys.stderr)
         return 1
-    transcripts = sum(1 for _ in projects.rglob("*.jsonl"))
-    print(json.dumps({
+    pulled = list(projects.rglob("*.jsonl"))
+    # A pulled transcript this user cannot read is the failure mode of the
+    # ownership caveat above (see the comment on `projects.mkdir`): `sync`
+    # would skip it inside `_read_new_lines`'s OSError guard and ingest
+    # nothing, reporting success. Counted here so the pull says so plainly
+    # rather than leaving a silent hole in the history.
+    unreadable = sum(1 for f in pulled if not os.access(f, os.R_OK))
+    out: dict[str, Any] = {
         "volume": args.volume,
         "dest": str(dest),
-        "transcripts": transcripts,
-        "bytes": sum(f.stat().st_size for f in projects.rglob("*.jsonl")),
+        "transcripts": len(pulled),
+        "bytes": sum(f.stat().st_size for f in pulled),
         "hint": f"watch it with: overseer claude-dirs add {dest}",
-    }))
+    }
+    if unreadable:
+        out["unreadable"] = unreadable
+        out["warning"] = (
+            f"{unreadable} pulled transcript(s) are not readable by this user and would be "
+            f"skipped silently by sync — re-run with `--user \"$(id -u):$(id -g)\"` on the "
+            f"docker helper, or chown {projects}"
+        )
+    print(json.dumps(out))
     return 0
 
 

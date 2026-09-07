@@ -18,8 +18,9 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
@@ -45,10 +46,9 @@ _OVERSEER_ROOT = Path(__file__).resolve().parents[3]
 if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
-from scripts.dashboard_record import (
-    plugin_version,  # noqa: E402  (must follow sys.path setup above)
-)
-from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402
+# Both must follow the sys.path setup above.
+from scripts.dashboard_record import plugin_version
+from scripts.store import derive_repo_label, derive_repo_root
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 

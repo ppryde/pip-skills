@@ -64,6 +64,52 @@ class TestPullVolume:
                      "--image", "ghcr.io/acme/helper:1.2.3"]) == 0
         assert "ghcr.io/acme/helper:1.2.3" in calls[0]
 
+    def test_warns_when_a_pulled_transcript_is_unreadable(self, monkeypatch, capsys, tmp_path):
+        """The Linux ownership case: `cp -a` as root preserves a 0600
+        root-owned mode, `sync` skips the file inside its OSError guard, and
+        the ingest is a silent no-op. The pull must say so."""
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, **k):
+            # Stand in for the helper container's copy, landing one readable
+            # transcript and one the invoking user cannot open.
+            projects = tmp_path / "projects"
+            (projects / "-repo").mkdir(parents=True, exist_ok=True)
+            (projects / "-repo" / "ok.jsonl").write_text("{}\n")
+            locked = projects / "-repo" / "locked.jsonl"
+            locked.write_text("{}\n")
+            locked.chmod(0o000)
+            return Result()
+
+        monkeypatch.setattr("scripts.cli.subprocess.run", fake_run)
+        assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path)]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["transcripts"] == 2
+        assert out["unreadable"] == 1
+        assert "skipped silently by sync" in out["warning"]
+        (tmp_path / "projects" / "-repo" / "locked.jsonl").chmod(0o644)  # so tmp cleanup works
+
+    def test_no_warning_when_everything_is_readable(self, monkeypatch, capsys, tmp_path):
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, **k):
+            projects = tmp_path / "projects"
+            (projects / "-repo").mkdir(parents=True, exist_ok=True)
+            (projects / "-repo" / "ok.jsonl").write_text("{}\n")
+            return Result()
+
+        monkeypatch.setattr("scripts.cli.subprocess.run", fake_run)
+        assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path)]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["transcripts"] == 1
+        assert "unreadable" not in out and "warning" not in out
+
     def test_rejects_a_traversing_source(self, monkeypatch, capsys, tmp_path):
         self._no_docker(monkeypatch)
         assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path),
