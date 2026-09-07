@@ -145,6 +145,17 @@ class Facts:
     results: dict[str, ToolResult] = field(default_factory=dict)
     # File changes seen, by tool_use_id (see `_file_edit`).
     file_edits: dict[str, FileEdit] = field(default_factory=dict)
+    # A SUBAGENT file's opening prompt: the task it was handed (see
+    # `_subagent_task`). None on a main transcript, whose first prompt is the
+    # user talking rather than an instruction handed down.
+    task: str | None = None
+    # From a `bridge-session` record: the account and organisation that owns
+    # the bridge. NOT written on every session — only ones bridged from
+    # claude.ai — so it is a sparse link, absent on most older transcripts.
+    # Named for what the record literally says rather than "the billed
+    # account", which is an interpretation the data does not state.
+    owner_account_uuid: str | None = None
+    owner_organization_uuid: str | None = None
     lines: int = 0
 
 
@@ -191,6 +202,45 @@ def _is_prompt(record: dict[str, Any], message: dict[str, Any]) -> bool:
         kinds = {b.get("type") for b in content if isinstance(b, dict)}
         return "text" in kinds and "tool_result" not in kinds
     return False
+
+
+# How much of a task line to keep. Long enough for the first clause of a
+# real instruction, short enough for one row of a drawer's rail.
+TASK_CHARS = 200
+
+# Agent-team prompts arrive wrapped by the orchestrator, and the wrapper's
+# `summary` attribute is already the short label a rail wants — the raw text
+# beneath it opens with markup and says nothing in its first 200 characters.
+_TEAMMATE_SUMMARY_RE = re.compile(r'<teammate-message\b[^>]*\bsummary="([^"]*)"')
+
+
+def _prompt_text(content: Any) -> str:
+    """The prose of a user message, whether it arrived as a bare string or as
+    content blocks. Non-text blocks contribute nothing."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+def _subagent_task(content: Any) -> str | None:
+    """One line naming what a subagent was asked to do.
+
+    Verbatim and truncated, never summarised — no model runs during ingest,
+    and a paraphrase of an instruction is a different claim from the
+    instruction. The wrapper's own summary wins when there is one.
+    """
+    text = " ".join(_prompt_text(content).split())
+    if not text:
+        return None
+    wrapped = _TEAMMATE_SUMMARY_RE.search(text)
+    if wrapped and wrapped.group(1).strip():
+        return wrapped.group(1).strip()[:TASK_CHARS]
+    return text[:TASK_CHARS] + "…" if len(text) > TASK_CHARS else text
 
 
 def _touch_ts(facts: Facts, ts: float | None) -> None:
@@ -409,6 +459,13 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
         if isinstance(title, str) and title.strip():
             facts.title = title.strip()
         return
+    if kind == "bridge-session":
+        for key, attr in (("ownerAccountUuid", "owner_account_uuid"),
+                          ("ownerOrganizationUuid", "owner_organization_uuid")):
+            value = record.get(key)
+            if isinstance(value, str) and value and getattr(facts, attr) is None:
+                setattr(facts, attr, value)
+        return
     if kind == "summary":  # older transcripts: {"type":"summary","summary":"..."}
         summary = record.get("summary")
         if facts.title is None and isinstance(summary, str) and summary.strip():
@@ -438,6 +495,10 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
         message = record.get("message")
         if isinstance(message, dict) and _is_prompt(record, message):
             facts.events.append(Event(uuid=uuid, kind="prompt", agent_id=agent_id, ts=ts))
+            # A subagent's FIRST prompt is the task it was handed. Later ones
+            # are the conversation, and the main agent's are the user talking.
+            if agent_id != MAIN_AGENT and facts.task is None:
+                facts.task = _subagent_task(message.get("content"))
         elif record.get("isCompactSummary"):
             facts.events.append(Event(uuid=uuid, kind="compaction", agent_id=agent_id, ts=ts))
         elif isinstance(message, dict):

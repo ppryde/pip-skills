@@ -1,6 +1,6 @@
 import json
 
-from scripts.transcript import fold, parse_ts
+from scripts.transcript import TASK_CHARS, fold, parse_ts
 
 from .conftest import _assistant, _user
 
@@ -295,3 +295,59 @@ class TestAttribution:
         facts = fold(_lines(self._turn()))
         turn = facts.turns[("", "m1")]
         assert (turn.skill, turn.plugin, turn.agent_type, turn.mcp_server) == (None,) * 4
+
+
+class TestSubagentTask:
+    """A subagent's transcript opens with the task it was handed. That text
+    is the only human-legible name a subagent has — its id is a hash — so it
+    is lifted verbatim and truncated, never summarised. No model is involved:
+    this is `json.loads` and a slice, like every other fact here."""
+
+    def _task(self, content, agent_id="a1"):
+        return fold(_lines(_user("u1", ts=T0, content=content, agentId=agent_id,
+                                 isSidechain=True)),
+                    default_agent=agent_id).task
+
+    def test_the_first_prompt_of_a_subagent_file_is_its_task(self):
+        assert self._task("Find the auth flow in this repo") == "Find the auth flow in this repo"
+
+    def test_whitespace_is_normalised_so_a_rail_row_stays_one_line(self):
+        assert self._task("Find the auth flow\n\n  and report back") == \
+            "Find the auth flow and report back"
+
+    def test_a_long_task_is_truncated_with_an_ellipsis(self):
+        task = self._task("x" * 500)
+        assert len(task) <= TASK_CHARS + 1
+        assert task.endswith("…")
+
+    def test_a_teammate_message_prefers_its_own_summary(self):
+        # Agent-team prompts arrive wrapped in `<teammate-message>`, whose
+        # summary attribute is already the short label a rail wants. The raw
+        # text would otherwise read as markup.
+        assert self._task(
+            '<teammate-message teammate_id="team-lead" summary="Verify code ground-truth claims">'
+            " You are in a worktree...</teammate-message>"
+        ) == "Verify code ground-truth claims"
+
+    def test_block_content_is_read_as_well_as_a_bare_string(self):
+        assert self._task([{"type": "text", "text": "Audit the ORM"}]) == "Audit the ORM"
+
+    def test_only_the_first_prompt_counts(self):
+        facts = fold(_lines(
+            _user("u1", ts=T0, content="First task", agentId="a1", isSidechain=True),
+            _user("u2", ts=T0, content="A later message", agentId="a1", isSidechain=True),
+        ), default_agent="a1")
+        assert facts.task == "First task"
+
+    def test_a_main_transcript_records_no_task(self):
+        # The main agent was handed nothing; its first prompt is the user
+        # talking, which the session title already covers.
+        assert fold(_lines(_user("u1", ts=T0, content="hello"))).task is None
+
+    def test_a_tool_result_is_not_mistaken_for_a_task(self):
+        facts = fold(_lines(_user("u1", ts=T0, agentId="a1", isSidechain=True,
+                                  content=[{"type": "tool_result", "tool_use_id": "t1",
+                                            "content": "output"}],
+                                  toolUseResult={"stdout": "output"})),
+                     default_agent="a1")
+        assert facts.task is None

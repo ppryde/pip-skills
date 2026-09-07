@@ -270,6 +270,46 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     )
 
 
+def _plan_snapshot(conn: sqlite3.Connection, config_dir: str | None,
+                   now: float) -> dict[str, Any]:
+    """The plan columns to stamp on a session, and the `accounts` upsert that
+    goes with them. `{}` when the config dir holds no readable account.
+
+    Read at INGEST time and stamped per session, because a plan changes: an
+    account that moves from Max to Enterprise would otherwise have every
+    session it ever ran relabelled by the move. `plan_observed_at` records
+    when the claim was true, so a row is legible as a snapshot rather than a
+    standing fact.
+
+    Only the identity half goes in `accounts` — the half that does not change.
+    Everything read here is whitelisted by name in `store.account_profile`;
+    nothing personal reaches the database.
+    """
+    if not config_dir:
+        return {}
+    profile = store.account_profile(Path(config_dir))
+    if not profile:      # None (no/unreadable file) or {} (API key: no oauthAccount)
+        return {}
+    account_uuid = profile.get("accountUuid")
+    if account_uuid:
+        conn.execute(
+            """INSERT INTO accounts(account_uuid, organization_uuid, first_seen, last_seen)
+                    VALUES (?,?,?,?)
+               ON CONFLICT(account_uuid) DO UPDATE SET
+                    organization_uuid = COALESCE(excluded.organization_uuid, organization_uuid),
+                    last_seen = MAX(COALESCE(last_seen, 0), excluded.last_seen)""",
+            (account_uuid, profile.get("organizationUuid"), now, now),
+        )
+    snapshot: dict[str, Any] = {
+        column: profile[key]
+        for key, column in store.ACCOUNT_PLAN_FIELDS.items()
+        if profile.get(key)
+    }
+    if snapshot:
+        snapshot["plan_observed_at"] = now
+    return snapshot
+
+
 def config_dir_of(transcript_path: Path) -> str | None:
     """The Claude config dir a main transcript belongs to, from its layout
     ``<config>/projects/<slug>/<session>.jsonl`` — None for any other shape
@@ -289,16 +329,18 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         (session_id, now),
     )
     cwd = facts.cwd
+    config = config_dir_of(transcript_path)
     updates: dict[str, Any] = {
         "project_slug": project_slug_of(transcript_path),
         "transcript_path": str(transcript_path),
-        "config_dir": config_dir_of(transcript_path),
+        "config_dir": config,
         "cwd": cwd,
         "repo_root": repo_root_of(cwd) if cwd else None,
         "git_branch": facts.git_branch,
         "version": facts.version,
         "entrypoint": facts.entrypoint,
         "title": facts.title,
+        "owner_account_uuid": facts.owner_account_uuid,
     }
     for column, value in updates.items():
         if value is None:
@@ -306,6 +348,19 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         conn.execute(
             f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
         )
+    # Write-once, unlike every column above. The plan columns record what was
+    # true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on a later ingest
+    # would let `sync --full` quietly relabel the whole back catalogue with
+    # today's plan — destroying the very history the snapshot exists to keep.
+    # Guarded on plan_observed_at, which is set if and only if a snapshot was.
+    already = conn.execute(
+        "SELECT plan_observed_at FROM sessions WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    if already is None or already[0] is None:
+        for column, value in _plan_snapshot(conn, config, now).items():
+            conn.execute(
+                f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
+            )
     if facts.first_ts is not None:
         conn.execute(
             "UPDATE sessions SET started_at = MIN(COALESCE(started_at, ?), ?) WHERE session_id = ?",

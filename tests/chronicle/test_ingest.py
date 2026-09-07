@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -323,6 +324,125 @@ class TestPathMapConfig:
     def test_non_string_entries_are_dropped(self, tmp_path):
         self._write(tmp_path, json.dumps({"path_map": {"/w/a": None, "": "/x", "/w/b": "/host/b"}}))
         assert store.path_map() == [("/w/b", "/host/b")]
+
+
+class TestAccountProfile:
+    """`.claude.json` also holds emailAddress, fullName, displayName and
+    organizationName, and this store is read by the dashboard — so the reader
+    whitelists by name rather than filtering out what it happens to know is
+    personal today."""
+
+    def _write(self, tmp_path, payload):
+        d = tmp_path / "cfg"
+        d.mkdir(exist_ok=True)
+        (d / ".claude.json").write_text(payload)
+        return d
+
+    def test_reads_only_whitelisted_fields(self, tmp_path):
+        d = self._write(tmp_path, json.dumps({"oauthAccount": {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_max", "seatTier": "seat",
+            "billingType": "stripe_subscription",
+            "organizationRateLimitTier": "default_claude_max_5x",
+            # None of the following may ever reach the database.
+            "emailAddress": "someone@example.com", "fullName": "A Person",
+            "displayName": "A", "organizationName": "Some Org",
+        }}))
+        got = store.account_profile(d)
+        assert got == {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_max", "seatTier": "seat",
+            "billingType": "stripe_subscription",
+            "organizationRateLimitTier": "default_claude_max_5x",
+        }
+        blob = json.dumps(got)
+        for personal in ("example.com", "A Person", "Some Org"):
+            assert personal not in blob
+
+    def test_no_oauth_account_is_empty_not_none(self, tmp_path):
+        # An API-key session has no oauthAccount at all — the one positive
+        # signal separating key auth from a subscription. Distinct from None,
+        # which means "could not read".
+        assert store.account_profile(self._write(tmp_path, json.dumps({"userID": "x"}))) == {}
+
+    def test_unreadable_or_malformed_is_none(self, tmp_path):
+        assert store.account_profile(tmp_path / "nope") is None
+        assert store.account_profile(self._write(tmp_path, "{not json")) is None
+
+
+class TestAccountAndPlan:
+    def _session(self, projects, plan, session_id="s-plan"):
+        from .conftest import TranscriptBuilder
+        Path(os.environ["CLAUDE_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
+        Path(os.environ["CLAUDE_CONFIG_DIR"], ".claude.json").write_text(
+            json.dumps({"oauthAccount": plan}) if plan is not None else "{}")
+        path = TranscriptBuilder(projects, session_id=session_id).turn("m1", ts=T0).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        return conn
+
+    def test_plan_is_stamped_on_the_session_and_identity_on_the_account(self, projects):
+        conn = self._session(projects, {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_max",
+            "organizationRateLimitTier": "default_claude_max_5x",
+        })
+        row = conn.execute(
+            "SELECT plan_organization_type, plan_rate_limit_tier, plan_observed_at "
+            "FROM sessions WHERE session_id = 's-plan'").fetchone()
+        assert row[0] == "claude_max"
+        assert row[1] == "default_claude_max_5x"
+        assert row[2] is not None
+        # The account row carries identity ONLY — no plan, because a plan changes.
+        acct = conn.execute("SELECT * FROM accounts").fetchone()
+        assert acct["account_uuid"] == "acc-1"
+        assert acct["organization_uuid"] == "org-1"
+        assert "plan_organization_type" not in acct.keys()
+
+    def test_the_plan_is_write_once(self, projects):
+        conn = self._session(projects,
+                             {"accountUuid": "acc-1", "organizationType": "claude_max"})
+        # The account moves to a different plan, then the transcript is re-read
+        # (`sync --full`). The session must keep the plan it actually ran under.
+        Path(os.environ["CLAUDE_CONFIG_DIR"], ".claude.json").write_text(json.dumps(
+            {"oauthAccount": {"accountUuid": "acc-1", "organizationType": "claude_enterprise"}}))
+        path = Path(conn.execute(
+            "SELECT transcript_path FROM sessions WHERE session_id = 's-plan'").fetchone()[0])
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT plan_organization_type FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] == "claude_max"
+
+    def test_an_api_key_config_stamps_no_plan(self, projects):
+        conn = self._session(projects, None)
+        row = conn.execute("SELECT plan_organization_type, plan_observed_at "
+                           "FROM sessions WHERE session_id = 's-plan'").fetchone()
+        assert row[0] is None and row[1] is None
+        assert conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0
+
+    def test_owner_uuid_comes_from_the_bridge_session_record(self, projects):
+        path = projects / "-repo" / "s-bridge.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join([
+            json.dumps({"type": "bridge-session", "sessionId": "s-bridge",
+                        "ownerAccountUuid": "acc-9", "ownerOrganizationUuid": "org-9"}),
+            json.dumps(_assistant("m1", ts=T0, session_id="s-bridge")),
+        ]) + "\n")
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-bridge'"
+        ).fetchone()[0] == "acc-9"
+
+    def test_a_session_without_that_record_has_no_owner(self, projects):
+        from .conftest import TranscriptBuilder
+        path = TranscriptBuilder(projects, session_id="s-plain").turn("m1", ts=T0).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        # NULL means "not stated", never "no account" — the badge shows nothing.
+        assert conn.execute(
+            "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-plain'"
+        ).fetchone()[0] is None
 
 
 class TestSync:

@@ -187,6 +187,22 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_session_kind ON events(session_id, kind);
 
+CREATE TABLE IF NOT EXISTS accounts (
+    -- Identity only, and deliberately only the parts that do not change and
+    -- do not identify a person. The mutable half of an account — which plan
+    -- it is on — is NOT here: a plan changes, and a row here would silently
+    -- rewrite history for every session already recorded against it. That
+    -- lives on `sessions` as a snapshot of what was true when it ran.
+    --
+    -- NOTHING personal is ever written: `.claude.json` also holds
+    -- emailAddress, fullName, displayName and organizationName, and this
+    -- store is read by the dashboard. The reader whitelists fields by name.
+    account_uuid      TEXT PRIMARY KEY,
+    organization_uuid TEXT,
+    first_seen        REAL,
+    last_seen         REAL
+);
+
 CREATE TABLE IF NOT EXISTS cursors (
     path        TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL,
@@ -217,6 +233,20 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # plugin-qualified name, an Agent's subagent type. Backfilled by
     # `chronicle sync --full`, which re-reads every transcript from byte 0.
     ("tool_calls", "qualifier", "TEXT"),
+    # The account that owns this session's bridge, from its `bridge-session`
+    # record. Sparse: only sessions bridged from claude.ai carry one, so NULL
+    # is the common case and means "not stated", never "no account".
+    ("sessions", "owner_account_uuid", "TEXT"),
+    # The plan AS IT WAS when this session was ingested, read from the config
+    # dir the transcript came from. Pinned per session rather than per account
+    # on purpose: an account moves between plans, and attributing today's plan
+    # to a session that ran under a previous one would be a confident lie.
+    # `plan_observed_at` is what makes the snapshot legible as a snapshot.
+    ("sessions", "plan_organization_type", "TEXT"),
+    ("sessions", "plan_seat_tier", "TEXT"),
+    ("sessions", "plan_billing_type", "TEXT"),
+    ("sessions", "plan_rate_limit_tier", "TEXT"),
+    ("sessions", "plan_observed_at", "REAL"),
     # Churn rollup, recomputed from `file_edits` by ingest.rollup.
     ("sessions", "lines_added", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "lines_removed", "INTEGER NOT NULL DEFAULT 0"),
@@ -280,6 +310,51 @@ def claude_dirs() -> list[Path]:
             continue
         seen.add(key)
         out.append(c)
+    return out
+
+
+# The ONLY fields ever read out of `.claude.json`. A whitelist, not a
+# blacklist: that file also holds emailAddress, fullName, displayName,
+# organizationName and more, and this store is read by the dashboard and can
+# be copied around. Anything not named here never enters the database, so a
+# new personal field appearing upstream cannot leak by default.
+ACCOUNT_IDENTITY_FIELDS = ("accountUuid", "organizationUuid")
+ACCOUNT_PLAN_FIELDS = {
+    "organizationType": "plan_organization_type",
+    "seatTier": "plan_seat_tier",
+    "billingType": "plan_billing_type",
+    "organizationRateLimitTier": "plan_rate_limit_tier",
+}
+
+
+def account_profile(config_dir: Path) -> dict[str, str] | None:
+    """The non-personal account facts a config dir currently holds, or None.
+
+    Source is `<config_dir>/.claude.json`'s `oauthAccount`, which describes the
+    account LOGGED IN THERE NOW — it carries no history, so what it says is
+    only ever true of the present. Callers stamp it onto sessions as they are
+    ingested, with the time of observation, rather than treating it as a
+    property of the account for all time.
+
+    An API-key session has no `oauthAccount` at all, which is the one positive
+    signal that distinguishes key auth from a subscription; that case returns
+    an empty dict, distinct from None (no file / unreadable / malformed).
+    """
+    path = config_dir / ".claude.json"
+    try:
+        data = json.loads(path.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    oauth = data.get("oauthAccount")
+    if not isinstance(oauth, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in (*ACCOUNT_IDENTITY_FIELDS, *ACCOUNT_PLAN_FIELDS):
+        value = oauth.get(key)
+        if isinstance(value, str) and value:
+            out[key] = value
     return out
 
 
