@@ -88,9 +88,15 @@ function RepoSelector({ repos, activeRoot, onSelect, allOption }: RepoSelectorPr
               r.has_board === false ? "repo-option repo-option--unbegun" : "repo-option"
             }
             title={
-              r.has_board === false
-                ? `Quest not yet begun — ${r.live_sessions} adventurer(s) present, no Guild Board raised`
-                : undefined
+              r.has_board !== false
+                ? undefined
+                : r.live_sessions > 0
+                  ? `Quest not yet begun — ${r.live_sessions} adventurer(s) present, no Guild Board raised`
+                  // Chronicled but boardless: the old copy promised adventurers
+                  // that are not there. These repos are in the list because the
+                  // Chronicle can be scoped to them, not because anyone is in
+                  // them right now.
+                  : "No Guild Board raised — chronicled deeds only"
             }
           >
             {optionLabel(r)}

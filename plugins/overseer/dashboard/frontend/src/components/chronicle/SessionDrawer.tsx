@@ -24,6 +24,7 @@ import { BarList, LineChart } from "./ChronicleCharts";
 import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
+import UsagePanel from "./UsagePanel";
 
 export interface SessionDrawerProps {
   sessionId: string | null;
@@ -238,6 +239,28 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
                 hue="--chr-tools"
               />
             </section>
+
+            <UsagePanel
+              title="MCP"
+              subtitle={`${detail.mcp?.calls ?? 0} calls in this session — by server.`}
+              rows={(detail.mcp?.servers ?? []).map((s) => ({
+                label: s.server,
+                detail: `${s.provenance} · ${s.tools} tools`,
+                value: s.calls,
+              }))}
+              hue="--chr-tools"
+              emptyHint="No MCP calls in this session."
+            />
+            <UsagePanel
+              title="Plugins"
+              subtitle="Plugin MCP servers and plugin skills used in this session."
+              rows={(detail.plugins?.items ?? []).map((p) => ({
+                label: `${p.plugin} · ${p.kind}`,
+                value: p.calls,
+              }))}
+              hue="--chr-peak"
+              emptyHint="No plugin usage recorded. Older sessions need a `chronicle sync --full` to backfill."
+            />
 
             {detail.subagents.length > 0 && (
               <section className="chr-panel">

@@ -134,6 +134,56 @@ class TestSummary:
         assert out["by_day"] == []
         assert out["shape"]["turns"] == {"p50": None, "p90": None, "max": None, "mean": None}
 
+    def test_mcp_and_plugin_blocks(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=[
+            "mcp__plugin_playwright_playwright__browser_click",
+            "mcp__plugin_playwright_playwright__browser_click",
+            "mcp__claude_ai_Snowflake__sql_exec_tool",
+            "mcp__claude-in-chrome__computer",
+            ("Skill", {"skill": "tribunal:reckoning"}),
+            ("Skill", {"skill": "code-review"}),
+            "Bash",
+        ]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        out = report.summary(conn)
+        mcp, plugins = out["mcp"], out["plugins"]
+
+        assert mcp["calls"] == 4
+        assert mcp["sessions"] == 1
+        assert mcp["by_provenance"] == {"plugin": 2, "connector": 1, "local": 1}
+        assert mcp["servers"][0] == {
+            "server": "plugin_playwright_playwright", "provenance": "plugin",
+            "tools": 1, "calls": 2, "sessions": 1, "result_chars": 0,
+        }
+        assert {t["tool"] for t in mcp["tools"]} == {
+            "browser_click", "sql_exec_tool", "computer",
+        }
+
+        # The playwright MCP calls count in BOTH boxes (deliberate overlap);
+        # `code-review` is a builtin skill and is in neither.
+        assert plugins["calls"] == 3
+        assert plugins["items"] == [
+            {"plugin": "playwright", "kind": "mcp", "calls": 2, "sessions": 1},
+            {"plugin": "tribunal", "kind": "skill", "calls": 1, "sessions": 1},
+        ]
+
+    def test_usage_blocks_respect_the_repo_filter(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["mcp__claude-in-chrome__computer"]).write()
+        TranscriptBuilder(projects, "-b", "s3").prompt("u1", T1).turn(
+            "m1", T1, tools=["mcp__claude_ai_Notion__notion-fetch"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a' WHERE session_id = 's1'")
+        conn.execute("UPDATE sessions SET repo_root = '/repo/b' WHERE session_id = 's3'")
+        conn.commit()
+
+        out = report.summary(conn, repo_root="/repo/a")
+        assert out["mcp"]["calls"] == 1
+        assert out["mcp"]["servers"][0]["server"] == "claude-in-chrome"
+
 
 class TestContextWindow:
     def test_window_is_the_smallest_standard_size_that_fits(self):
@@ -203,6 +253,38 @@ class TestSessionDetail:
     def test_missing(self):
         conn = store.connect()
         assert report.session_detail(conn, "nope") is None
+
+    def test_mcp_and_plugin_blocks_per_session(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=[
+            "mcp__plugin_linear_linear__save_issue",
+            "mcp__claude_ai_Notion__notion-fetch",
+            ("Skill", {"skill": "overseer:ledger"}),
+            "Read",
+        ]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        detail = report.session_detail(conn, "s1")
+        assert detail["mcp"]["calls"] == 2
+        assert detail["mcp"]["by_provenance"] == {"plugin": 1, "connector": 1}
+        # Single-session read: a `sessions` count would always be 1, so it is
+        # omitted rather than rendered as noise.
+        assert "sessions" not in detail["mcp"]
+        assert detail["plugins"]["items"] == [
+            {"plugin": "linear", "kind": "mcp", "calls": 1},
+            {"plugin": "overseer", "kind": "skill", "calls": 1},
+        ]
+
+    def test_blocks_are_empty_not_missing_for_a_session_with_no_mcp(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        detail = report.session_detail(conn, "s1")
+        assert detail["mcp"] == {"calls": 0, "result_chars": 0, "by_provenance": {},
+                                 "servers": [], "tools": []}
+        assert detail["plugins"] == {"calls": 0, "items": []}
 
 
 class TestRepos:
@@ -281,3 +363,95 @@ class TestArtifactsReport:
         detail = report.session_detail(conn, "s2")
         assert [a["title"] for a in detail["artifacts"]] == ["Board v3", "lost"]
         assert [t["turn"] for t in detail["biggest_jumps"]] == [1, 2]
+
+
+class TestUnmigratedStore:
+    """`qualifier` shipped after `tool_calls` did, and the report verbs open
+    the store READ-ONLY — a path that returns before `_migrate` can add it.
+    So an upgraded-but-never-synced store still lacks the column, and a read
+    that names it unconditionally takes the whole page down."""
+
+    def test_summary_and_detail_survive_a_missing_qualifier_column(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["mcp__claude-in-chrome__computer", "Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("ALTER TABLE tool_calls DROP COLUMN qualifier")
+        conn.commit()
+
+        out = report.summary(conn)
+        # MCP still reads correctly: it comes from tool_name, never dropped.
+        assert out["mcp"]["calls"] == 1
+        # No qualifier column means no plugin SKILL attribution — reported as
+        # none, which is true of the data, rather than raising.
+        assert out["plugins"]["items"] == []
+
+        detail = report.session_detail(conn, "s1")
+        assert detail["mcp"]["calls"] == 1
+        assert detail["plugins"] == {"calls": 0, "items": []}
+
+
+class TestClassify:
+    def test_plugin_mcp_server_is_both_mcp_and_plugin(self):
+        c = report.classify("mcp__plugin_playwright_playwright__browser_evaluate", None)
+        assert c.mcp is not None
+        assert c.mcp.server == "plugin_playwright_playwright"
+        assert c.mcp.tool == "browser_evaluate"
+        assert c.mcp.provenance == "plugin"
+        # The overlap the spec asks for: it counts in BOTH boxes.
+        assert c.plugin == "playwright"
+
+    def test_hyphenated_plugin_name_splits_on_the_last_underscore(self):
+        c = report.classify("mcp__plugin_agent-ui-telemetry_agent-ui__health_check", None)
+        assert c.mcp.server == "plugin_agent-ui-telemetry_agent-ui"
+        assert c.mcp.tool == "health_check"
+        assert c.plugin == "agent-ui-telemetry"
+
+    def test_connector_server_is_mcp_but_not_a_plugin(self):
+        c = report.classify("mcp__claude_ai_Snowflake__sql_exec_tool", None)
+        assert c.mcp.server == "claude_ai_Snowflake"
+        assert c.mcp.tool == "sql_exec_tool"
+        assert c.mcp.provenance == "connector"
+        assert c.plugin is None
+
+    def test_local_server_is_mcp_but_not_a_plugin(self):
+        c = report.classify("mcp__claude-in-chrome__computer", None)
+        assert c.mcp.server == "claude-in-chrome"
+        assert c.mcp.tool == "computer"
+        assert c.mcp.provenance == "local"
+        assert c.plugin is None
+
+    def test_tool_name_containing_a_double_underscore_keeps_its_tail(self):
+        c = report.classify("mcp__wayflyer-dev__run__query", None)
+        assert c.mcp.server == "wayflyer-dev"
+        assert c.mcp.tool == "run__query"
+
+    def test_malformed_mcp_name_falls_back_to_the_raw_string(self):
+        # No second `__`: never drop the row, attribute it to itself.
+        c = report.classify("mcp__brokenname", None)
+        assert c.mcp.server == "mcp__brokenname"
+        assert c.mcp.tool == "mcp__brokenname"
+        assert c.mcp.provenance == "local"
+
+    def test_qualified_skill_is_a_plugin(self):
+        c = report.classify("Skill", "tribunal:reckoning")
+        assert c.mcp is None
+        assert c.plugin == "tribunal"
+        assert c.skill == "tribunal:reckoning"
+
+    def test_unqualified_skill_is_builtin_not_a_plugin(self):
+        c = report.classify("Skill", "code-review")
+        assert c.plugin is None
+        assert c.skill == "code-review"
+
+    def test_qualified_agent_is_a_plugin(self):
+        c = report.classify("Agent", "pr-review-toolkit:code-reviewer")
+        assert c.plugin == "pr-review-toolkit"
+        assert c.skill is None
+
+    def test_unqualified_agent_is_not_a_plugin(self):
+        assert report.classify("Agent", "general-purpose").plugin is None
+
+    def test_ordinary_tool_is_neither(self):
+        c = report.classify("Bash", None)
+        assert c.mcp is None and c.plugin is None and c.skill is None

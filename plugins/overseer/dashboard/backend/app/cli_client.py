@@ -25,7 +25,8 @@ _OVERSEER_CLI = _OVERSEER_ROOT / "scripts" / "cli.py"
 # arrangement main.py uses for `scripts.store`.
 if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
-from scripts import config as overseer_config  # noqa: E402  (must follow sys.path setup above)
+from scripts import config as overseer_config  # must follow the sys.path setup above
+
 # parents[4]=plugins
 _VIGIL_CLI = Path(__file__).resolve().parents[4] / "vigil" / "scripts" / "cli.py"
 _CENSUS_CLI = Path(__file__).resolve().parents[4] / "census" / "scripts" / "cli.py"
@@ -54,7 +55,9 @@ def _run(cli_py: Path, cli_name: str, root: Path, args: tuple[str, ...],
     try:
         result = subprocess.run(
             [sys.executable, str(cli_py), "--root", str(root), *args],
-            capture_output=True, text=True, timeout=timeout,
+            # check=False is the default, stated explicitly: a non-zero exit
+            # is inspected below and turned into a CliError, never raised.
+            capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
         raise CliError(504, f"{cli_name} {' '.join(args)} timed out") from None
@@ -92,7 +95,10 @@ def _census_read(args: list[str], config_dir: Path | None, timeout: int) -> dict
     try:
         result = subprocess.run(
             [sys.executable, str(_CENSUS_CLI), "read", *args],
+            # check=False is the default, stated explicitly: census is a soft
+            # dependency, so a non-zero exit degrades to None below.
             capture_output=True, text=True, timeout=timeout, env=_census_env(config_dir),
+            check=False,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None

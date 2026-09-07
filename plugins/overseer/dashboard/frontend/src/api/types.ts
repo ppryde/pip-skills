@@ -268,6 +268,15 @@ export interface RepoEntry {
   current: boolean;
   has_board: boolean;
   live_sessions: number;
+  /** Whether chronicle has sessions for this root — i.e. whether the Chronicle
+   * page may be SCOPED to it. Independent of `has_board`: a repo Claude Code
+   * ran in but no board was ever raised for is `has_board: false` and
+   * `chronicled: true`, and before WF-108 was unreachable from the selector
+   * despite being the largest repo in the store.
+   *
+   * Optional: a frontend talking to a backend from before WF-108 gets nothing
+   * here, and callers fall back to `has_board` — exactly the old behaviour. */
+  chronicled?: boolean;
   /** Epoch seconds of the repo's most recent session activity, from census
    * (live/recent) and chronicle (history) — whichever is newer. Null when
    * neither knows the repo. The list arrives sorted by it, newest first. */
@@ -398,6 +407,48 @@ export interface ChronicleTool {
   sessions?: number;
 }
 
+export interface ChronicleMcpServer {
+  server: string;
+  /** "plugin" | "connector" | "local" — where the server comes from. */
+  provenance: string;
+  tools: number;
+  calls: number;
+  result_chars: number;
+  /** Absent on a single-session read, where it would always be 1. */
+  sessions?: number;
+}
+
+export interface ChronicleMcpTool {
+  server: string;
+  tool: string;
+  calls: number;
+  result_chars: number;
+  sessions?: number;
+}
+
+export interface ChronicleMcp {
+  calls: number;
+  result_chars: number;
+  by_provenance: Record<string, number>;
+  servers: ChronicleMcpServer[];
+  tools: ChronicleMcpTool[];
+  sessions?: number;
+}
+
+export interface ChroniclePluginItem {
+  plugin: string;
+  /** "mcp" | "skill" — how this plugin was used. */
+  kind: string;
+  calls: number;
+  sessions?: number;
+}
+
+export interface ChroniclePlugins {
+  calls: number;
+  items: ChroniclePluginItem[];
+  sessions?: number;
+}
+
 export interface ChronicleQuantiles {
   p50: number | null;
   p90: number | null;
@@ -452,6 +503,8 @@ export interface ChronicleSummary {
   by_day?: ChronicleDay[];
   by_model?: ChronicleModel[];
   tools?: ChronicleTool[];
+  mcp?: ChronicleMcp;
+  plugins?: ChroniclePlugins;
   shape?: ChronicleShape;
   artifacts?: ChronicleArtifact[];
 }
@@ -548,6 +601,8 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
   turn_series: ChronicleTurn[];
   subagents: ChronicleSubagent[];
   tools: ChronicleTool[];
+  mcp?: ChronicleMcp;
+  plugins?: ChroniclePlugins;
   compactions_at: number[];
   artifacts: ChronicleArtifact[];
   biggest_jumps: ChronicleJump[];

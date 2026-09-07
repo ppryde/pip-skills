@@ -111,6 +111,22 @@ function summary(): ChronicleSummary {
     by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
+    mcp: {
+      calls: 4, sessions: 1, result_chars: 900,
+      by_provenance: { plugin: 2, connector: 1, local: 1 },
+      servers: [
+        { server: "plugin_playwright_playwright", provenance: "plugin", tools: 1, calls: 2, sessions: 1, result_chars: 500 },
+        { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, sessions: 1, result_chars: 400 },
+      ],
+      tools: [],
+    },
+    plugins: {
+      calls: 3, sessions: 1,
+      items: [
+        { plugin: "playwright", kind: "mcp", calls: 2, sessions: 1 },
+        { plugin: "tribunal", kind: "skill", calls: 1, sessions: 1 },
+      ],
+    },
     artifacts: [
       // A distinct session_title: the list echoes it as a button, and the
       // tests below look "Fix the widget" up by text.
@@ -151,7 +167,22 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** Position of the Subagents cell in a session row: the two leading columns
+ * (Session, Repo · branch) plus its place among the sortable ones. Named so
+ * the assertion reads as a column rather than a magic number. */
+const COLUMN_INDEX_SUBAGENTS = 2 + 5;
+
 describe("<ChroniclePage/>", () => {
+  it("renders the MCP and plugin panels from the summary", async () => {
+    render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
+    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Plugins" })).toBeInTheDocument();
+    expect(screen.getByText("plugin_playwright_playwright")).toBeInTheDocument();
+    // A plugin's MCP calls appear in BOTH panels — the deliberate overlap.
+    expect(screen.getByText("playwright · mcp")).toBeInTheDocument();
+    expect(screen.getByText("tribunal · skill")).toBeInTheDocument();
+  });
+
   it("renders tiles, charts and the session table from the summary", async () => {
     render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
@@ -261,6 +292,104 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
     rows = table().getAllByRole("row").slice(1);
     expect(rows[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("shows a Subagents column, em-dashing the sessions that delegated none", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "Fix the widget", subagents: 4 }),
+        session({ session_id: "bbbb2222-x", subagents: 0 }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    expect(table().getByRole("button", { name: /^Subagents/ })).toBeInTheDocument();
+
+    // Sorted by Subagents desc: the delegating session leads, and the one
+    // that spawned none reads "—" rather than a bare 0.
+    fireEvent.click(table().getByRole("button", { name: /^Subagents/ }));
+    const rows = table().getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Fix the widget");
+    // By cell index, not by text: Artifacts em-dashes a zero too, so a bare
+    // getByText("—") matches two cells in the same row.
+    const subagentCell = (row: HTMLElement) =>
+      within(row).getAllByRole("cell")[COLUMN_INDEX_SUBAGENTS];
+    expect(subagentCell(rows[0])).toHaveTextContent("4");
+    expect(subagentCell(rows[1])).toHaveTextContent("—");
+  });
+
+  it("filters the table to live sessions, without touching the tiles above", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    const activity = () => within(screen.getByRole("group", { name: "Session activity" }));
+
+    // One of the two fixture sessions is live, and the toggle says so.
+    expect(table().getAllByRole("row").slice(1)).toHaveLength(2);
+    fireEvent.click(activity().getByRole("button", { name: "Live (1)" }));
+
+    const rows = table().getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("bbbb2222");
+    expect(rows[0]).not.toHaveTextContent("Fix the widget");
+    // The summary is fetched, not derived from the rows, so narrowing the
+    // table must not restate the totals: still "1 live" of 2 sessions.
+    expect(screen.getByText("1 live")).toBeInTheDocument();
+    expect(mocked.getChronicleSessions).toHaveBeenCalledTimes(1); // filter is local, no re-fetch
+
+    fireEvent.click(activity().getByRole("button", { name: "All" }));
+    expect(table().getAllByRole("row").slice(1)).toHaveLength(2);
+  });
+
+  it("disables the live filter when nothing is live", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [session({ session_id: "aaaa1111-x", title: "Fix the widget", live: false })],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const activity = within(screen.getByRole("group", { name: "Session activity" }));
+    // Enabled, it could only ever empty the table — so it reads "Live", uncounted.
+    expect(activity.getByRole("button", { name: "Live" })).toBeDisabled();
+  });
+
+  it("renders the MCP and plugin panels in the session drawer", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cold_turns: 0,
+      subagents: [],
+      turn_series: [],
+      tools: [{ tool_name: "Read", calls: 1 }],
+      compactions_at: [],
+      artifacts: [],
+      biggest_jumps: [],
+      mcp: {
+        calls: 2, result_chars: 100,
+        by_provenance: { plugin: 1, connector: 1 },
+        servers: [
+          { server: "plugin_linear_linear", provenance: "plugin", tools: 1, calls: 1, result_chars: 60 },
+          { server: "claude_ai_Notion", provenance: "connector", tools: 1, calls: 1, result_chars: 40 },
+        ],
+        tools: [],
+      },
+      plugins: {
+        calls: 2,
+        items: [
+          { plugin: "linear", kind: "mcp", calls: 1 },
+          { plugin: "overseer", kind: "skill", calls: 1 },
+        ],
+      },
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+    // Scoped to the dialog: the page behind it carries panels of the same name.
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("plugin_linear_linear")).toBeInTheDocument();
+    expect(dialog.getByText("claude_ai_Notion")).toBeInTheDocument();
+    expect(dialog.getByText("overseer · skill")).toBeInTheDocument();
   });
 
   it("opens the session drawer from a row", async () => {

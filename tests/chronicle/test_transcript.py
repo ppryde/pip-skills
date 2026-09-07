@@ -42,7 +42,7 @@ class TestFold:
         assert turn.output_tokens == 40
         assert turn.thinking_tokens == 10
         assert turn.context_tokens == 1203
-        assert turn.tool_uses == [("t1", "Bash")]
+        assert turn.tool_uses == [("t1", "Bash", None)]
         assert turn.model == "claude-opus-5"
         assert turn.request_id == "req-m1"
 
@@ -171,3 +171,26 @@ class TestToolResultsAndArtifacts:
         assert set(turn.artifacts) == {"a1"}
         assert turn.artifacts["a1"].redeploy is True
         assert len(turn.tool_uses) == 3  # still counted as tool calls
+
+
+class TestQualifier:
+    def test_skill_call_keeps_its_skill_name(self):
+        facts = fold(_lines(_assistant("m1", ts=T0, blocks=[
+            {"type": "tool_use", "id": "t1", "name": "Skill",
+             "input": {"skill": "tribunal:reckoning", "args": "355"}},
+        ])))
+        assert facts.turns[("", "m1")].tool_uses == [("t1", "Skill", "tribunal:reckoning")]
+
+    def test_agent_call_keeps_its_subagent_type_not_its_prompt(self):
+        facts = fold(_lines(_assistant("m1", ts=T0, blocks=[
+            {"type": "tool_use", "id": "t1", "name": "Agent",
+             "input": {"subagent_type": "Explore", "prompt": "a very long prompt"}},
+        ])))
+        assert facts.turns[("", "m1")].tool_uses == [("t1", "Agent", "Explore")]
+
+    def test_ordinary_tool_keeps_no_qualifier(self):
+        facts = fold(_lines(_assistant("m1", ts=T0, blocks=[
+            {"type": "tool_use", "id": "t1", "name": "Bash",
+             "input": {"command": "ls -la /secret"}},
+        ])))
+        assert facts.turns[("", "m1")].tool_uses == [("t1", "Bash", None)]

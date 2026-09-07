@@ -43,21 +43,27 @@ describe("<UnbegunHolding/>", () => {
     expect(screen.getByText(/1 adventurer already roam/i)).toBeInTheDocument();
   });
 
-  it("pluralises 'adventurers' for 0 or more than 1 live sessions", () => {
-    const { rerender } = render(
+  it("pluralises 'adventurers' for more than 1 live session", () => {
+    render(
       <UnbegunHolding
         repo={repo({ label: "sandbox", root: "/repos/sandbox" })}
         liveSessions={6}
       />
     );
     expect(screen.getByText(/6 adventurers already roam/i)).toBeInTheDocument();
+  });
 
-    rerender(
+  it("claims no company at all when nothing is live", () => {
+    // A chronicle-only repo (WF-108) lands here with zero live sessions, and
+    // "0 adventurers already roam these lands" was both false and absurd.
+    render(
       <UnbegunHolding
         repo={repo({ label: "sandbox", root: "/repos/sandbox" })}
         liveSessions={0}
       />
     );
-    expect(screen.getByText(/0 adventurers already roam/i)).toBeInTheDocument();
+    expect(screen.queryByText(/0 adventurers/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/No Guild Board has been raised in these lands yet/i))
+      .toBeInTheDocument();
   });
 });

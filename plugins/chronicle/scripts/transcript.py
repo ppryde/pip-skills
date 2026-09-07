@@ -53,7 +53,8 @@ class Turn:
     cache_1h_tokens: int = 0
     stop_reason: str | None = None
     effort: str | None = None
-    tool_uses: list[tuple[str, str]] = field(default_factory=list)  # (tool_use_id, name)
+    # (tool_use_id, name, qualifier) — see `_qualifier`.
+    tool_uses: list[tuple[str, str, str | None]] = field(default_factory=list)
     # Artifact publishes issued in this turn, keyed by tool_use_id.
     artifacts: dict[str, ArtifactUse] = field(default_factory=dict)
 
@@ -224,8 +225,8 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             tool_id = block.get("id")
             name = block.get("name")
             if (isinstance(tool_id, str) and isinstance(name, str)
-                    and all(existing != tool_id for existing, _ in turn.tool_uses)):
-                turn.tool_uses.append((tool_id, name))
+                    and all(existing != tool_id for existing, _, _ in turn.tool_uses)):
+                turn.tool_uses.append((tool_id, name, _qualifier(name, block.get("input"))))
                 if name == ARTIFACT_TOOL:
                     artifact = _artifact_use(tool_id, block.get("input"))
                     if artifact is not None:
@@ -252,6 +253,22 @@ def _artifact_use(tool_id: str, raw: Any) -> ArtifactUse | None:
         favicon=_opt_str(inp.get("favicon")),
         redeploy=bool(inp.get("url")),
     )
+
+
+# Tools whose identity is in their input, and the input key that carries it.
+# Kept deliberately narrow: the transcript is the durable record and chronicle
+# is a projection over it, so copying arbitrary inputs (an Agent's full prompt,
+# a Write's file body) would make the store a second copy of the conversation.
+QUALIFIED_TOOLS: dict[str, str] = {"Skill": "skill", "Agent": "subagent_type"}
+
+
+def _qualifier(name: str, raw: Any) -> str | None:
+    """The short identifier distinguishing one `Skill`/`Agent` call from
+    another — `tribunal:reckoning`, `Explore`. None for every other tool."""
+    key = QUALIFIED_TOOLS.get(name)
+    if key is None or not isinstance(raw, dict):
+        return None
+    return _opt_str(raw.get(key))
 
 
 def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, Any],

@@ -192,3 +192,66 @@ def test_sync_refuses_to_overlap(client: TestClient, root: Path, tmp_path: Path)
     finally:
         lock.release()
     assert client.post("/api/chronicle/sync").status_code == 200
+
+
+class TestChronicleOnlyRoots:
+    """WF-108. Chronicle records sessions for any repo Claude Code ran in,
+    board or no board. Refusing to NAME those made the largest repo in a real
+    store reachable only under "All repos" — present in the data, unreachable
+    from the UI. The chronicle routes now validate against the union of board
+    roots and chronicle's own; the board's routes are deliberately unchanged.
+    """
+
+    def _boardless(self, tmp_path: Path) -> Path:
+        other = tmp_path / "boardless-repo"
+        other.mkdir()
+        return other.resolve()
+
+    def test_chronicle_can_be_scoped_to_a_repo_with_no_board(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        other = self._boardless(tmp_path)
+        _seed(root, tmp_path, repo_root=str(other))
+
+        body = client.get("/api/chronicle/sessions", params={"root": str(other)})
+        assert body.status_code == 200          # was 400 "unknown root"
+        assert [s["repo_root"] for s in body.json()["sessions"]] == [str(other)]
+
+        summary = client.get("/api/chronicle/summary", params={"root": str(other)})
+        assert summary.status_code == 200
+        assert summary.json()["totals"]["sessions"] == 1
+
+    def test_the_board_still_refuses_that_root(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        # The point of the change is that ONE route family widened. A root with
+        # no board.db has no board to serve, and this server can bind 0.0.0.0
+        # with no auth — so /api/board must still refuse it.
+        other = self._boardless(tmp_path)
+        _seed(root, tmp_path, repo_root=str(other))
+        assert client.get("/api/board", params={"root": str(other)}).status_code == 400
+        assert client.get("/api/sessions", params={"root": str(other)}).status_code == 400
+
+    def test_a_root_neither_source_knows_is_still_refused(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        _seed(root, tmp_path, repo_root=str(root.resolve()))
+        stranger = tmp_path / "never-heard-of-it"
+        stranger.mkdir()
+        for route in ("/api/chronicle/sessions", "/api/chronicle/summary"):
+            resp = client.get(route, params={"root": str(stranger)})
+            assert resp.status_code == 400, route
+            assert "unknown root" in resp.json()["detail"]
+
+    def test_repos_lists_a_chronicle_only_root_and_flags_it(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        other = self._boardless(tmp_path)
+        _seed(root, tmp_path, repo_root=str(other))
+        # Keyed by root, not label: `derive_repo_label` resolves a tmp dir to
+        # its parent's name, which is a fixture artefact, not the thing under test.
+        repos = {r["root"]: r for r in client.get("/api/repos").json()["repos"]}
+        entry = repos[str(other)]
+        assert entry["has_board"] is False       # no board.db — the holding page still applies
+        assert entry["chronicled"] is True       # but the Chronicle may be scoped to it
+        assert entry["live_sessions"] == 0       # census knows nothing of it

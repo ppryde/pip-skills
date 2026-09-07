@@ -111,8 +111,12 @@ class TranscriptBuilder:
         """One API call. With ``split`` (the real shape) every content block is
         its own JSONL line sharing the message id and usage."""
         blocks = [{"type": "text", "text": "thinking..."}]
-        for i, name in enumerate(tools):
-            blocks.append({"type": "tool_use", "id": f"{message_id}-tool{i}", "name": name, "input": {}})
+        for i, spec in enumerate(tools):
+            # `tools` entries are either a bare name or (name, input) — the
+            # latter for tools whose identity lives in their input (Skill).
+            name, inp = spec if isinstance(spec, tuple) else (spec, {})
+            blocks.append({"type": "tool_use", "id": f"{message_id}-tool{i}",
+                           "name": name, "input": inp})
         if split:
             for block in blocks:
                 self.records.append(_assistant(message_id, ts=ts, blocks=[block],

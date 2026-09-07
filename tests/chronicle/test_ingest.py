@@ -4,7 +4,7 @@ from pathlib import Path
 
 from scripts import ingest, store
 
-from .conftest import _assistant
+from .conftest import TranscriptBuilder, _assistant
 
 T0 = "2026-09-01T10:00:00.000Z"
 T1 = "2026-09-01T10:05:00.000Z"
@@ -223,6 +223,108 @@ class TestRepoRoot:
         assert ingest.repo_root_of(str(main)) == str(main.resolve())
 
 
+class TestResolveOnHost:
+    """A recorded cwd need not exist where the transcript is later read."""
+
+    def test_path_map_rewrites_a_container_path(self, tmp_path, monkeypatch):
+        host = tmp_path / "repos" / "app"
+        host.mkdir(parents=True)
+        monkeypatch.setattr(store, "path_map", lambda: [("/workspaces/app", str(host))])
+        assert ingest.resolve_on_host("/workspaces/app") == str(host)
+        sub = host / "src"
+        sub.mkdir()
+        assert ingest.resolve_on_host("/workspaces/app/src") == str(sub)
+
+    def test_longest_prefix_wins(self, tmp_path, monkeypatch):
+        outer, inner = tmp_path / "outer", tmp_path / "inner"
+        outer.mkdir(); inner.mkdir()
+        # store.path_map() sorts longest-source-first; resolve takes the first hit.
+        monkeypatch.setattr(store, "path_map",
+                            lambda: [("/w/app/sub", str(inner)), ("/w/app", str(outer))])
+        assert ingest.resolve_on_host("/w/app/sub") == str(inner)
+        assert ingest.resolve_on_host("/w/app") == str(outer)
+
+    def test_a_trailing_slash_in_the_mapping_does_not_mangle_the_splice(self, tmp_path, monkeypatch):
+        """`{"/workspaces/app/": "<host>"}` is the natural thing to type, and
+        the boundary test already tolerated it — but the splice used the raw
+        source length, eating the separator and yielding `<host>repos` style
+        paths. The ancestor walk then climbed to a real but UNRELATED
+        directory, so a wrong answer was returned confidently."""
+        host = tmp_path / "repos" / "app"
+        (host / "src").mkdir(parents=True)
+        monkeypatch.setattr(store, "path_map", lambda: [("/workspaces/app/", str(host) + "/")])
+        assert ingest.resolve_on_host("/workspaces/app/src") == str(host / "src")
+        assert ingest.resolve_on_host("/workspaces/app") == str(host)
+
+    def test_prefix_matches_only_on_a_path_boundary(self, tmp_path, monkeypatch):
+        host = tmp_path / "app"
+        host.mkdir()
+        monkeypatch.setattr(store, "path_map", lambda: [("/w/app", str(host))])
+        # "/w/app-other" must NOT be rewritten by the "/w/app" mapping.
+        assert ingest.resolve_on_host("/w/app-other") is None
+
+    def test_missing_worktree_falls_back_to_its_nearest_existing_ancestor(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(store, "path_map", list)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        gone = repo / ".claude" / "worktrees" / "feature"
+        assert ingest.resolve_on_host(str(gone)) == str(repo)
+
+    def test_the_walk_is_bounded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(store, "path_map", list)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        # One level deeper than _ANCESTOR_LIMIT allows: the walk gives up rather
+        # than climbing far enough to blame a repo that has nothing to do with it.
+        too_deep = repo.joinpath(*["a"] * (ingest._ANCESTOR_LIMIT + 1))
+        assert ingest.resolve_on_host(str(too_deep)) is None
+
+    def test_no_mapping_and_nothing_existing_is_none(self, monkeypatch):
+        monkeypatch.setattr(store, "path_map", list)
+        assert ingest.resolve_on_host("/definitely/not/here/at/all") is None
+        assert ingest.resolve_on_host(None) is None
+        assert ingest.resolve_on_host("") is None
+
+    def test_a_mapped_container_path_attributes_to_the_real_repo(self, tmp_path, monkeypatch):
+        import subprocess
+        repo = tmp_path / "wayflyer"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+                        "--allow-empty", "-m", "init"], cwd=repo, check=True)
+        monkeypatch.setattr(store, "path_map", lambda: [("/workspaces/wayflyer", str(repo))])
+        # The whole point: a session that only ever saw a container path is
+        # credited to the repo on this machine, worktree or not.
+        assert ingest.repo_root_of("/workspaces/wayflyer") == str(repo.resolve())
+        assert ingest.repo_root_of(
+            "/workspaces/wayflyer/.claude/worktrees/gone") == str(repo.resolve())
+
+
+class TestPathMapConfig:
+    def _write(self, tmp_path, payload):
+        cfg = tmp_path / "config" / "overseer"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "config.json").write_text(payload)
+
+    def test_reads_and_orders_longest_first(self, tmp_path):
+        self._write(tmp_path, json.dumps(
+            {"path_map": {"/w/a": "/host/a", "/w/a/deep/er": "/host/deep"}}))
+        assert store.path_map() == [("/w/a/deep/er", "/host/deep"), ("/w/a", "/host/a")]
+
+    def test_absent_config_and_absent_key_are_empty(self, tmp_path):
+        assert store.path_map() == []
+        self._write(tmp_path, json.dumps({"claude_dirs": []}))
+        assert store.path_map() == []
+
+    def test_malformed_json_degrades_rather_than_raising(self, tmp_path):
+        self._write(tmp_path, "{not json")
+        assert store.path_map() == []
+
+    def test_non_string_entries_are_dropped(self, tmp_path):
+        self._write(tmp_path, json.dumps({"path_map": {"/w/a": None, "": "/x", "/w/b": "/host/b"}}))
+        assert store.path_map() == [("/w/b", "/host/b")]
+
+
 class TestSync:
     def test_first_sync_ingests_every_slug(self, projects):
         from .conftest import TranscriptBuilder
@@ -422,3 +524,58 @@ class TestClaudeDirsParity:
         assert [p.resolve() for p in store.claude_dirs()] == expected == [
             primary.resolve(), work.resolve(), personal.resolve()
         ]
+
+
+class TestQualifierColumn:
+    def test_qualifier_is_stored_and_a_reingest_does_not_duplicate(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=[("Skill", {"skill": "overseer:ledger"}), "Bash"]
+        ).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        ingest.sync(conn, projects, full=True)  # re-read from byte 0
+        rows = dict(conn.execute(
+            "SELECT tool_name, qualifier FROM tool_calls WHERE session_id = 's1'"
+        ).fetchall())
+        assert rows == {"Skill": "overseer:ledger", "Bash": None}
+        assert conn.execute(
+            "SELECT COUNT(*) FROM tool_calls WHERE session_id = 's1'"
+        ).fetchone()[0] == 2
+
+    def test_full_resync_fills_a_qualifier_left_null_by_an_older_ingest(self, projects):
+        """The backfill case: rows written before the column existed carry a
+        NULL qualifier. `sync --full` re-reads the transcript, but an
+        `INSERT OR IGNORE` would skip the existing row and leave it NULL —
+        so the write must fill a NULL qualifier rather than ignore the row."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=[("Skill", {"skill": "tribunal:reckoning"})]
+        ).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # Simulate a store ingested before `qualifier` was captured.
+        conn.execute("UPDATE tool_calls SET qualifier = NULL")
+        conn.commit()
+
+        ingest.sync(conn, projects, full=True)
+
+        assert conn.execute(
+            "SELECT qualifier FROM tool_calls WHERE session_id = 's1'"
+        ).fetchone()[0] == "tribunal:reckoning"
+
+    def test_a_resync_does_not_clobber_a_result_recorded_earlier(self, projects):
+        """Filling the qualifier must not disturb the columns a later pass
+        owns: `result_chars`/`result_ts` land in a separate UPDATE, and an
+        upsert that reset them would lose the context cost of every call."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Bash"]
+        ).tool_result("u2", T1, tool_use_id="m1-tool0", content="x" * 40).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        before = conn.execute(
+            "SELECT result_chars FROM tool_calls WHERE session_id = 's1'").fetchone()[0]
+        assert before == 40
+
+        ingest.sync(conn, projects, full=True)
+
+        assert conn.execute(
+            "SELECT result_chars FROM tool_calls WHERE session_id = 's1'").fetchone()[0] == 40

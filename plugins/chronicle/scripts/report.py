@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from scripts import pricing
@@ -23,6 +25,174 @@ LIVE_HORIZON_SECONDS = 15 * 60
 # and one that peaked at 190k on a 200k window. A session that never got near
 # a boundary reads as 200k, the default for every current model.
 STANDARD_WINDOWS = (200_000, 1_000_000)
+
+MCP_PREFIX = "mcp__"
+# Tools whose identity lives in their input rather than their name. The value
+# is the input key ingest keeps as the row's `qualifier` (see transcript.py).
+QUALIFIED_TOOLS: dict[str, str] = {"Skill": "skill", "Agent": "subagent_type"}
+
+
+@dataclass(frozen=True)
+class McpRef:
+    server: str
+    tool: str
+    provenance: str  # "plugin" | "connector" | "local"
+
+
+@dataclass(frozen=True)
+class Classified:
+    """What one tool call contributes to each box. The fields are independent,
+    not a single `kind`: a plugin-provided MCP server populates BOTH `mcp` and
+    `plugin`, which is the overlap the two panels deliberately show."""
+    mcp: McpRef | None = None
+    plugin: str | None = None
+    skill: str | None = None
+
+
+def _plugin_of_server(server: str) -> str | None:
+    """The plugin supplying an MCP server, from Claude Code's own naming:
+    ``plugin_<plugin>_<server>``. Split on the LAST underscore, so
+    ``plugin_agent-ui-telemetry_agent-ui`` yields ``agent-ui-telemetry``.
+
+    A heuristic, because a plugin whose own name contains an underscore is
+    indistinguishable from the server suffix. It degrades to naming the whole
+    remainder rather than guessing wrong halves — attribution can be coarse,
+    never fabricated."""
+    if not server.startswith("plugin_"):
+        return None
+    rest = server[len("plugin_"):]
+    plugin, _, suffix = rest.rpartition("_")
+    return plugin if plugin and suffix else rest or None
+
+
+def classify(tool_name: str, qualifier: str | None) -> Classified:
+    """Attribute one tool call to the MCP and/or plugin boxes."""
+    if tool_name.startswith(MCP_PREFIX):
+        rest = tool_name[len(MCP_PREFIX):]
+        server, sep, tool = rest.partition("__")
+        if not sep or not server or not tool:
+            # Unsplittable: attribute the row to itself rather than dropping it.
+            server = tool = tool_name
+            provenance = "local"
+        elif server.startswith("plugin_"):
+            provenance = "plugin"
+        elif server.startswith("claude_ai_"):
+            provenance = "connector"
+        else:
+            provenance = "local"
+        return Classified(
+            mcp=McpRef(server=server, tool=tool, provenance=provenance),
+            plugin=_plugin_of_server(server),
+        )
+    if tool_name in QUALIFIED_TOOLS and qualifier:
+        plugin, sep, _ = qualifier.partition(":")
+        return Classified(
+            plugin=plugin if sep and plugin else None,
+            skill=qualifier if tool_name == "Skill" else None,
+        )
+    return Classified()
+
+
+def _qualifier_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
+    """The SQL expression for a row's `qualifier`, or a NULL literal when the
+    column is not there yet.
+
+    `qualifier` was added to `tool_calls` after the table shipped, and
+    `store.connect(readonly=True)` — the ONLY path the CLI's report verbs
+    take — returns before `_migrate` can add it. So a store upgraded but not
+    yet synced still lacks the column, and naming it unconditionally raises
+    `OperationalError` for every read: `chronicle summary` exits non-zero,
+    `run_chronicle` soft-degrades that to None, and the dashboard reports an
+    empty account to someone with a thousand transcripts.
+
+    Substituting NULL degrades to "no plugin skills recorded", which is what
+    an un-backfilled store honestly holds. MCP is unaffected either way — it
+    is derived from `tool_name`, which was never missing."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(tool_calls)")}
+    return f"{prefix}qualifier" if "qualifier" in columns else "NULL"
+
+
+def _usage_blocks(rows: Iterable[sqlite3.Row], *,
+                  with_sessions: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fold classified tool-call rows into the `mcp` and `plugins` blocks.
+
+    Rows need `tool_name`, `qualifier`, `result_chars` and (when
+    `with_sessions`) `session_id`. A plugin-provided MCP server lands in BOTH
+    blocks: the two answer different questions — what MCP costs, and which
+    plugins get used — so the overlap is the point, not a bug.
+
+    `with_sessions` is False for a single-session read, where every count
+    would be 1 and the key is noise.
+    """
+    servers: dict[str, dict[str, Any]] = {}
+    tools: dict[tuple[str, str], dict[str, Any]] = {}
+    plugins: dict[tuple[str, str], dict[str, Any]] = {}
+    server_tools: dict[str, set[str]] = {}
+    seen: dict[str, set[str]] = {}  # bucket key -> session ids, for `sessions`
+    provenance: dict[str, int] = {}
+    mcp_calls = mcp_chars = plugin_calls = 0
+
+    def _touch(bucket: dict[str, Any], key: str, session_id: str | None) -> None:
+        if with_sessions and session_id is not None:
+            ids = seen.setdefault(key, set())
+            ids.add(session_id)
+            bucket["sessions"] = len(ids)
+
+    for row in rows:
+        c = classify(row["tool_name"], row["qualifier"])
+        chars = int(row["result_chars"] or 0)
+        session_id = row["session_id"] if with_sessions else None
+        if c.mcp is not None:
+            mcp_calls += 1
+            mcp_chars += chars
+            provenance[c.mcp.provenance] = provenance.get(c.mcp.provenance, 0) + 1
+            server_tools.setdefault(c.mcp.server, set()).add(c.mcp.tool)
+            s = servers.setdefault(c.mcp.server, {
+                "server": c.mcp.server, "provenance": c.mcp.provenance,
+                "tools": 0, "calls": 0, "result_chars": 0,
+            })
+            s["calls"] += 1
+            s["result_chars"] += chars
+            s["tools"] = len(server_tools[c.mcp.server])
+            _touch(s, f"server:{c.mcp.server}", session_id)
+
+            t = tools.setdefault((c.mcp.server, c.mcp.tool), {
+                "server": c.mcp.server, "tool": c.mcp.tool,
+                "calls": 0, "result_chars": 0,
+            })
+            t["calls"] += 1
+            t["result_chars"] += chars
+            _touch(t, f"tool:{c.mcp.server}/{c.mcp.tool}", session_id)
+        if c.plugin is not None:
+            plugin_calls += 1
+            kind = "mcp" if c.mcp is not None else "skill"
+            p = plugins.setdefault((c.plugin, kind), {
+                "plugin": c.plugin, "kind": kind, "calls": 0,
+            })
+            p["calls"] += 1
+            _touch(p, f"plugin:{c.plugin}/{kind}", session_id)
+
+    def _ranked(values: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Calls descending, then name ascending so equal counts are stable.
+        return sorted(values, key=lambda d: (-d["calls"],
+                                             d.get("server") or d.get("plugin") or ""))
+
+    mcp_block: dict[str, Any] = {
+        "calls": mcp_calls,
+        "result_chars": mcp_chars,
+        "by_provenance": provenance,
+        "servers": _ranked(servers.values()),
+        "tools": _ranked(tools.values()),
+    }
+    plugins_block: dict[str, Any] = {"calls": plugin_calls, "items": _ranked(plugins.values())}
+    if with_sessions:
+        mcp_block["sessions"] = len(
+            {sid for key, ids in seen.items() if key.startswith("server:") for sid in ids}
+        )
+        plugins_block["sessions"] = len(
+            {sid for key, ids in seen.items() if key.startswith("plugin:") for sid in ids}
+        )
+    return mcp_block, plugins_block
 
 
 def context_window_for(peak_tokens: int) -> int:
@@ -258,6 +428,15 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             (session_id,),
         )
     ]
+    detail["mcp"], detail["plugins"] = _usage_blocks(
+        conn.execute(
+            f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
+                       result_chars FROM tool_calls
+                WHERE session_id = ?""",
+            (session_id,),
+        ).fetchall(),
+        with_sessions=False,
+    )
     detail["compactions_at"] = [
         r[0] for r in conn.execute(
             "SELECT ts FROM events WHERE session_id = ? AND kind = 'compaction' ORDER BY ts",
@@ -500,6 +679,14 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             params,
         )
     ]
+    usage_rows = conn.execute(
+        f"""SELECT c.session_id AS session_id, c.tool_name AS tool_name,
+                   {_qualifier_sql(conn, "c.")} AS qualifier,
+                   c.result_chars AS result_chars
+            FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
+        params,
+    ).fetchall()
+    mcp_block, plugins_block = _usage_blocks(usage_rows, with_sessions=True)
     shape_rows = conn.execute(
         f"""SELECT session_id, turns, prompts, transcript_bytes, peak_context_tokens, started_at,
                    last_activity_at
@@ -539,6 +726,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_day": by_day,
         "by_model": by_model,
         "tools": tools,
+        "mcp": mcp_block,
+        "plugins": plugins_block,
         "shape": shape,
         "artifacts": artifacts(conn, repo_root=repo_root, since=since, branch=branch),
     }

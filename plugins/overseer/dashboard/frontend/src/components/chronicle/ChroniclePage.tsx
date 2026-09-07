@@ -28,6 +28,7 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
+import { Button } from "../../ui";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
@@ -35,6 +36,7 @@ import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import StatTile from "./StatTile";
+import UsagePanel from "./UsagePanel";
 
 /** The `useChronicle` result, as App.tsx fetched it for the current window
  * and scope, plus a retry for the fetch-failure banner. Sync lives in the
@@ -53,6 +55,7 @@ type SortKey =
   | "turns"
   | "prompts"
   | "tool_calls"
+  | "subagents"
   | "peak_context_tokens"
   | "peak_context_pct"
   | "output_tokens"
@@ -66,6 +69,10 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "turns", label: "Turns", render: (s) => String(s.turns) },
   { key: "prompts", label: "Prompts", render: (s) => String(s.prompts) },
   { key: "tool_calls", label: "Tools", render: (s) => String(s.tool_calls) },
+  // Beside Tools: both count what the session DID. An em dash rather than a
+  // bare 0 so a session that never delegated reads as "none", matching the
+  // Artifacts column's treatment of the same case.
+  { key: "subagents", label: "Subagents", render: (s) => (s.subagents > 0 ? String(s.subagents) : "—") },
   { key: "peak_context_tokens", label: "Peak ctx", render: (s) => formatTokens(s.peak_context_tokens) },
   { key: "peak_context_pct", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
@@ -96,7 +103,17 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
     }
   };
 
-  const ordered = useMemo(() => sortSessions(sessions, sortKey, sortDir), [sessions, sortKey, sortDir]);
+  // Table-local, unlike the window/scope/branch filters: those change what is
+  // FETCHED (and so what every tile and chart above counts), while this only
+  // narrows the rows already on screen. Keeping it here means toggling it can
+  // never silently reshape the totals the reader just looked at.
+  const [liveOnly, setLiveOnly] = useState(false);
+  const visible = useMemo(
+    () => (liveOnly ? sessions.filter((s) => s.live) : sessions),
+    [sessions, liveOnly],
+  );
+  const liveCount = useMemo(() => sessions.filter((s) => s.live).length, [sessions]);
+  const ordered = useMemo(() => sortSessions(visible, sortKey, sortDir), [visible, sortKey, sortDir]);
   const totals = summary?.totals ?? null;
   // The Counsel's four insights each walk the session list; recompute only
   // when the data does, not on every sort click or drawer open.
@@ -172,8 +189,17 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               value={String(totals.sessions)}
               note={totals.live > 0 ? `${totals.live} live` : undefined}
             />
+            {/* Beside Sessions, not eight tiles down: these are the two
+                population counts on the page — sessions started, and agents
+                they delegated to. Split apart they read as unrelated trivia,
+                which undersells the second: subagents outnumber sessions
+                several times over and account for most of the Turns tile
+                immediately to their right. */}
+            <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Turns" value={formatTokens(totals.turns)} hue="--chr-turns" />
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
+            <StatTile label="MCP calls" value={formatTokens(summary?.mcp?.calls ?? 0)} hue="--chr-tools" />
+            <StatTile label="Plugin calls" value={formatTokens(summary?.plugins?.calls ?? 0)} hue="--chr-peak" />
             <StatTile
               label="Ctx processed"
               value={formatTokens(totals.input_tokens + totals.cache_read_tokens + totals.cache_creation_tokens)}
@@ -188,7 +214,6 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               value={formatBytes(totals.transcript_bytes)}
               hue="--chr-tools"
             />
-            <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
             <StatTile
               label="Cache written"
@@ -204,8 +229,17 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             />
           </div>
 
-          <div className="chronicle__grid">
+          {/* Three fixed rows rather than one auto-fit flow: the panels pair
+              up by what they answer — two rings and the money beside them,
+              then the four per-day series, then the four ranked lists — and
+              an auto-fit grid reflowed them into whatever the viewport
+              allowed, splitting those groups at arbitrary widths. Each row
+              collapses 3/4-up → 2-up → 1-up on its own. */}
+          <div className="chronicle__grid chronicle__grid--wide">
             <CounselPanel insights={insights} />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--3">
             <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Where output went</h3>
               <p className="chr-panel__sub">Tokens the model wrote: thinking versus replies and tool calls.</p>
@@ -238,6 +272,14 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               />
             </section>
             <section className="chr-panel">
+              <h3 className="chr-panel__title">Cost per day</h3>
+              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
+              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+            </section>
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--4">
+            <section className="chr-panel">
               <h3 className="chr-panel__title">Context processed per day</h3>
               <p className="chr-panel__sub">Input + cache read + cache creation, every API call.</p>
               <ColumnChart points={contextPerDay} format={formatTokens} title="Context tokens per day" hue="--chr-context" />
@@ -257,11 +299,9 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">Share of context read back from cache; hover for cold turns.</p>
               <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" hue="--chr-cache" />
             </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Cost per day</h3>
-              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
-              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
-            </section>
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
               {/* The prompt count lives here, not on the Turns tile: the
@@ -295,6 +335,31 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                 hue="--chr-tools"
               />
             </section>
+            <UsagePanel
+              title="MCP"
+              subtitle={`${summary?.mcp?.calls ?? 0} calls across ${summary?.mcp?.sessions ?? 0} sessions — by server.`}
+              rows={(summary?.mcp?.servers ?? []).slice(0, 10).map((s) => ({
+                label: s.server,
+                detail: `${s.provenance} · ${s.tools} tools · ${s.calls} calls`,
+                value: s.calls,
+              }))}
+              hue="--chr-tools"
+              emptyHint="No MCP calls in this window."
+            />
+            <UsagePanel
+              title="Plugins"
+              subtitle="Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are also counted in the MCP panel."
+              rows={(summary?.plugins?.items ?? []).slice(0, 10).map((p) => ({
+                label: `${p.plugin} · ${p.kind}`,
+                detail: `${p.calls} calls across ${p.sessions ?? "?"} sessions`,
+                value: p.calls,
+              }))}
+              hue="--chr-peak"
+              emptyHint="No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill."
+            />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--wide">
             <section className="chr-panel chr-panel--wide" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Artifacts</h3>
               <p className="chr-panel__sub">Pages published from these sessions, newest first.</p>
@@ -342,9 +407,34 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
           </div>
 
           <section className="chr-panel chr-panel--wide">
-            <h3 className="chr-panel__title">Sessions</h3>
+            <div className="chr-panel__head">
+              <h3 className="chr-panel__title">Sessions</h3>
+              {/* Reuses the filter bar's segment styling so it reads as a
+                  filter rather than as a table control of its own invention.
+                  Disabled with nothing live: an enabled toggle that can only
+                  ever empty the table is a trap. */}
+              <div className="chronicle__segment" role="group" aria-label="Session activity">
+                <Button
+                  aria-pressed={!liveOnly}
+                  onClick={() => setLiveOnly(false)}
+                  className="chronicle__seg-btn"
+                >
+                  All
+                </Button>
+                <Button
+                  aria-pressed={liveOnly}
+                  onClick={() => setLiveOnly(true)}
+                  disabled={liveCount === 0}
+                  className="chronicle__seg-btn"
+                >
+                  {liveCount > 0 ? `Live (${liveCount})` : "Live"}
+                </Button>
+              </div>
+            </div>
             {ordered.length === 0 ? (
-              <p className="chr-chart__empty">No sessions in this window.</p>
+              <p className="chr-chart__empty">
+                {liveOnly ? "No live sessions right now." : "No sessions in this window."}
+              </p>
             ) : (
               <>
                 <p className="chr-table__scroll-hint">Scroll sideways for more columns →</p>

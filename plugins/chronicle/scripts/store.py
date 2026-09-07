@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     agent_id     TEXT NOT NULL DEFAULT '',
     message_id   TEXT NOT NULL,
     tool_name    TEXT NOT NULL,
+    qualifier    TEXT,
     ts           REAL,
     result_chars INTEGER,
     result_ts    REAL,
@@ -181,6 +182,10 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("sessions", "artifacts", "INTEGER NOT NULL DEFAULT 0"),
     # Which Claude config dir the transcript was read from (multi-account).
     ("sessions", "config_dir", "TEXT"),
+    # Identity for tools whose name alone does not say what ran: a Skill's
+    # plugin-qualified name, an Agent's subagent type. Backfilled by
+    # `chronicle sync --full`, which re-reads every transcript from byte 0.
+    ("tool_calls", "qualifier", "TEXT"),
 )
 
 
@@ -234,6 +239,41 @@ def claude_dirs() -> list[Path]:
         seen.add(key)
         out.append(c)
     return out
+
+
+def path_map() -> list[tuple[str, str]]:
+    """Prefix rewrites from a recorded ``cwd`` to a path on THIS filesystem,
+    longest prefix first.
+
+    A session run inside a container records the cwd it saw — ``/workspaces/foo``
+    — which does not exist on the host reading its transcript. Without a rewrite
+    every such session resolves to no repo at all and becomes invisible to any
+    repo-scoped view. Configured beside ``claude_dirs`` in the same machine
+    config::
+
+        {"path_map": {"/workspaces/foo": "/Users/me/repos/foo"}}
+
+    Sorted longest-source-first so a more specific mapping wins over a more
+    general one that shares its prefix. Malformed config yields no mappings
+    rather than raising: a bad rewrite must degrade attribution, never stop
+    the ingest.
+    """
+    machine = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    if not machine.exists():
+        return []
+    try:
+        data = json.loads(machine.read_text() or "{}")
+    except json.JSONDecodeError:
+        return []
+    raw = data.get("path_map") if isinstance(data, dict) else None
+    if not isinstance(raw, dict):
+        return []
+    pairs = [
+        (str(src), str(dst))
+        for src, dst in raw.items()
+        if isinstance(src, str) and isinstance(dst, str) and src and dst
+    ]
+    return sorted(pairs, key=lambda kv: len(kv[0]), reverse=True)
 
 
 def projects_dir() -> Path:

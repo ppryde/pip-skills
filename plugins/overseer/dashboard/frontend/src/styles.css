@@ -7202,16 +7202,22 @@ button.trail-tag:focus-visible {
    plus the hard sticker shadow. The radius cycles four ways by grid
    position so no two neighbours match; which four, and how heavy the ink,
    comes from the `--chr-tile-radius-*` / `--chr-box-ink` tokens. */
+/* Centred label and figure everywhere — the drawer and the sub-720px page
+   already read this way, and a left-aligned desktop tile beside them made
+   the same component look like two. The number is the tile's subject, so it
+   sits on the tile's axis rather than against one edge. */
 .chr-tile {
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0.15rem;
   padding: 0.7rem 0.85rem 0.7rem 1rem;
   background: var(--qb-panel);
   border: var(--chr-box-ink) solid var(--qb-card-border);
   border-radius: var(--chr-tile-radius-1);
   box-shadow: var(--chr-box-shadow);
+  text-align: center;
 }
 
 /* How a tile wears its hue (StatTile's `accent` prop). Decorative only —
@@ -7253,11 +7259,6 @@ button.trail-tag:focus-visible {
    left-aligned tile text read as misaligned against that. The main
    Chronicle page's tiles are untouched: they're a wider, looser grid with
    longer notes where centering buys nothing. */
-.chr-tiles--drawer .chr-tile {
-  align-items: center;
-  text-align: center;
-}
-
 .chr-tile__label {
   display: inline-flex;
   align-items: center;
@@ -7306,8 +7307,6 @@ button.trail-tag:focus-visible {
   }
   .chr-tile {
     padding: 0.45rem 0.4rem 0.4rem;
-    align-items: center;
-    text-align: center;
   }
   .chr-tile__label {
     font-size: 0.64rem;
@@ -7325,6 +7324,46 @@ button.trail-tag:focus-visible {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 0.75rem;
+}
+
+/* The page's chart grid is three FIXED rows, not one auto-fit flow, because
+   the panels group by the question they answer: the two rings and the money
+   beside them, the four per-day series, the four ranked lists. An auto-fit
+   grid split those groups at whatever width the viewport happened to be.
+   Each row is its own container, so a row collapses on its own terms and
+   `.chr-panel--wide` (grid-column 1 / -1) still spans its own row.
+
+   Stacked immediately before the media queries that relax them: an
+   unconditional rule later in the file would beat an earlier media-gated
+   one at every viewport (same cascade trap the tile rules note above). */
+.chronicle__grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.chronicle__grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.chronicle__grid--wide {
+  grid-template-columns: 1fr;
+}
+
+/* Below the point where a quarter-width column stops holding a legible
+   chart, both fixed rows fall to 2-up, then to a single column — the four
+   ranked lists are the first to suffer, since a truncated tool name is
+   worse than a taller page. */
+@media (max-width: 1180px) {
+  .chronicle__grid--3,
+  .chronicle__grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .chronicle__grid--3,
+  .chronicle__grid--4 {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Same hand-inked recipe as `.card-tile`: the a/b card radii alternated by
@@ -7355,6 +7394,18 @@ button.trail-tag:focus-visible {
   font-weight: 700;
   font-size: 1rem;
   color: var(--qb-ink-900);
+}
+
+/* Panel title with a control alongside it (the Sessions table's activity
+   filter). Wraps rather than squeezing the title on a narrow viewport, where
+   the segment would otherwise crush the heading it belongs to. */
+.chr-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.35rem;
 }
 
 /* A small hue dot before each panel title, matching that panel's chart —

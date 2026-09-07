@@ -18,8 +18,9 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
@@ -45,10 +46,9 @@ _OVERSEER_ROOT = Path(__file__).resolve().parents[3]
 if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
-from scripts.dashboard_record import (
-    plugin_version,  # noqa: E402  (must follow sys.path setup above)
-)
-from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402
+# Both must follow the sys.path setup above.
+from scripts.dashboard_record import plugin_version
+from scripts.store import derive_repo_label, derive_repo_root
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -413,10 +413,39 @@ def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
-def _resolve_root(launch_root: Path, default_root: Path, requested: str | None) -> Path:
+# The last non-empty answer from `_chronicle_roots`, reused when a later call
+# comes back empty. `run_chronicle` soft-degrades a timeout or a non-zero exit
+# to None, which collapses the set and would 400 "unknown root" for a
+# chronicle-only repo that resolved a second earlier — turning a transient CLI
+# hiccup into a hard client error. Reusing a stale set is safe: every entry was
+# a root chronicle itself reported, never client input, and roots only accrue.
+_CHRONICLE_ROOTS_CACHE: set[Path] = set()
+
+
+def _chronicle_roots() -> set[Path]:
+    """Repo roots chronicle has sessions for. `set()` when chronicle is absent."""
+    global _CHRONICLE_ROOTS_CACHE
+    if not chronicle_installed():
+        return set()
+    roots = set(_chronicle_last_activity_by_root())
+    if roots:
+        _CHRONICLE_ROOTS_CACHE = roots
+    return roots or _CHRONICLE_ROOTS_CACHE
+
+
+def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
+                  also_allowed: set[Path] | None = None) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
     client-supplied ``root`` against the ``repos`` discovery allowlist
     before it is ever used to shell the CLI.
+
+    ``also_allowed`` widens that allowlist for routes whose data covers repos
+    the BOARD has never heard of — chronicle records sessions for any repo
+    Claude Code ran in, board or no board, and refusing to name those made
+    the largest repo in the store reachable only under "All repos" (WF-108).
+    It stays a server-computed set (``_chronicle_roots``), recomputed per
+    request from the same CLI the data comes from, never a client-supplied
+    path — so the boundary is unchanged in kind, only in extent.
 
     Security-critical: this server can bind 0.0.0.0 with no auth (see
     module docstring), so an unvalidated ``root`` would let any LAN client
@@ -438,6 +467,7 @@ def _resolve_root(launch_root: Path, default_root: Path, requested: str | None) 
         for entry in _discover_roots(launch_root)
         if isinstance(entry, dict) and entry.get("root")
     }
+    allowed |= also_allowed or set()
     if candidate not in allowed:
         raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
     return candidate
@@ -564,12 +594,16 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def get_repos() -> dict[str, Any]:
         """Board repos (from `repos --json`, `has_board:true`) UNIONED with
         "unbegun" repos — repos with live census sessions but no board.db
-        yet (`has_board:false`). Unbegun roots are a display-only addition:
-        they are never added to `_resolve_root`'s allowlist (that allowlist
-        is recomputed fresh, from `_discover_roots` only, on every request),
-        so `/api/board` etc. still 400 an unbegun root — the dashboard never
-        fetches the board for one (see docs/superpowers/specs/2026-07-28
-        -overseer-worktree-branch-distinction.md).
+        yet (`has_board:false`), and with repos only CHRONICLE knows (Claude
+        Code ran there, board or no board — WF-108), flagged `chronicled`.
+
+        For the BOARD routes these extra roots remain a display-only addition:
+        `_resolve_root`'s allowlist is recomputed fresh from `_discover_roots`
+        alone, so `/api/board` etc. still 400 an unbegun root — the dashboard
+        never fetches the board for one (see docs/superpowers/specs/2026-07-28
+        -overseer-worktree-branch-distinction.md). The CHRONICLE routes are
+        the one exception: they pass `also_allowed=_chronicle_roots()`, so a
+        chronicled root may be named there and only there.
         """
         census = _census_activity_by_root()
         history = _chronicle_last_activity_by_root()
@@ -604,6 +638,30 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                 "live_sessions": int(stats["live"]),
                 "last_active_at": last_active(root),
             })
+
+        # Repos only chronicle knows: Claude Code ran there, but no board was
+        # ever raised and census has nothing live. Without these the Chronicle
+        # cannot be scoped to its own largest repos — they exist in the data
+        # and are unreachable from the selector (WF-108).
+        listed = {Path(r["root"]).resolve() for r in repos_list}
+        for root in sorted(history):
+            if root in listed:
+                continue
+            repos_list.append({
+                "label": derive_repo_label(root) or root.name,
+                "root": str(root),
+                "current": False,
+                "has_board": False,
+                "live_sessions": 0,
+                "last_active_at": last_active(root),
+            })
+
+        # Which repos the Chronicle may be SCOPED to — the same set
+        # `_chronicle_scope` will validate against. The board's own routes
+        # still refuse a boardless root; this flag is only about chronicle.
+        chronicled = set(history)
+        for item in repos_list:
+            item["chronicled"] = Path(item["root"]).resolve() in chronicled
 
         # Most recently active first; repos nobody has touched (as far as
         # census or chronicle know) trail, alphabetically.
@@ -894,14 +952,24 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     # the plugin is absent, never a 500). Scoping: by default a request is
     # scoped to the resolved repo root exactly like /api/board; `scope=all`
     # drops the root filter for an account-wide view. `root` still goes
-    # through `_resolve_root`'s allowlist — chronicle knows about repos the
-    # board discovery doesn't, but a client may only NAME roots the board
-    # discovery allows (same trust boundary as every other route).
+    # through `_resolve_root`'s allowlist — which for these routes is the
+    # board discovery list WIDENED by the roots chronicle itself reports
+    # (WF-108), since chronicle records sessions for any repo Claude Code ran
+    # in. Still server-computed, never client-supplied: the boundary changed
+    # in extent, not in kind.
 
     def _chronicle_scope(root: str | None, scope: str | None) -> list[str]:
         if scope == "all":
             return []
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        # Computed ONLY when a root is actually named: `_resolve_root` returns
+        # the server's own default without consulting the allowlist when
+        # `root` is None, and `_chronicle_roots()` spawns a subprocess — so
+        # evaluating it eagerly cost one `chronicle repos` per request on the
+        # commonest path, for a value that was then discarded.
+        effective = _resolve_root(
+            launch_root, _derived_launch_root, root,
+            also_allowed=_chronicle_roots() if root is not None else None,
+        )
         return ["--root", str(effective)]
 
     def _days_args(days: int | None) -> list[str]:
