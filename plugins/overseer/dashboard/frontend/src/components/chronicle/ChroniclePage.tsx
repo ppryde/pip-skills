@@ -53,6 +53,7 @@ type SortKey =
   | "turns"
   | "prompts"
   | "tool_calls"
+  | "subagents"
   | "peak_context_tokens"
   | "peak_context_pct"
   | "output_tokens"
@@ -66,6 +67,10 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "turns", label: "Turns", render: (s) => String(s.turns) },
   { key: "prompts", label: "Prompts", render: (s) => String(s.prompts) },
   { key: "tool_calls", label: "Tools", render: (s) => String(s.tool_calls) },
+  // Beside Tools: both count what the session DID. An em dash rather than a
+  // bare 0 so a session that never delegated reads as "none", matching the
+  // Artifacts column's treatment of the same case.
+  { key: "subagents", label: "Subagents", render: (s) => (s.subagents > 0 ? String(s.subagents) : "—") },
   { key: "peak_context_tokens", label: "Peak ctx", render: (s) => formatTokens(s.peak_context_tokens) },
   { key: "peak_context_pct", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
@@ -172,6 +177,13 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               value={String(totals.sessions)}
               note={totals.live > 0 ? `${totals.live} live` : undefined}
             />
+            {/* Beside Sessions, not eight tiles down: these are the two
+                population counts on the page — sessions started, and agents
+                they delegated to. Split apart they read as unrelated trivia,
+                which undersells the second: subagents outnumber sessions
+                several times over and account for most of the Turns tile
+                immediately to their right. */}
+            <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Turns" value={formatTokens(totals.turns)} hue="--chr-turns" />
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
             <StatTile
@@ -188,7 +200,6 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               value={formatBytes(totals.transcript_bytes)}
               hue="--chr-tools"
             />
-            <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
             <StatTile
               label="Cache written"

@@ -151,6 +151,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** Position of the Subagents cell in a session row: the two leading columns
+ * (Session, Repo · branch) plus its place among the sortable ones. Named so
+ * the assertion reads as a column rather than a magic number. */
+const COLUMN_INDEX_SUBAGENTS = 2 + 5;
+
 describe("<ChroniclePage/>", () => {
   it("renders tiles, charts and the session table from the summary", async () => {
     render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
@@ -261,6 +266,31 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
     rows = table().getAllByRole("row").slice(1);
     expect(rows[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("shows a Subagents column, em-dashing the sessions that delegated none", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "Fix the widget", subagents: 4 }),
+        session({ session_id: "bbbb2222-x", subagents: 0 }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    expect(table().getByRole("button", { name: /^Subagents/ })).toBeInTheDocument();
+
+    // Sorted by Subagents desc: the delegating session leads, and the one
+    // that spawned none reads "—" rather than a bare 0.
+    fireEvent.click(table().getByRole("button", { name: /^Subagents/ }));
+    const rows = table().getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Fix the widget");
+    // By cell index, not by text: Artifacts em-dashes a zero too, so a bare
+    // getByText("—") matches two cells in the same row.
+    const subagentCell = (row: HTMLElement) =>
+      within(row).getAllByRole("cell")[COLUMN_INDEX_SUBAGENTS];
+    expect(subagentCell(rows[0])).toHaveTextContent("4");
+    expect(subagentCell(rows[1])).toHaveTextContent("—");
   });
 
   it("opens the session drawer from a row", async () => {
