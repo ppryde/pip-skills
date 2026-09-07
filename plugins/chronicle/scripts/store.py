@@ -176,6 +176,18 @@ CREATE TABLE IF NOT EXISTS file_edits (
 CREATE INDEX IF NOT EXISTS file_edits_session ON file_edits(session_id);
 CREATE INDEX IF NOT EXISTS file_edits_path ON file_edits(file_path);
 
+-- One row per SUBAGENT, holding the only human-legible name it has: the task
+-- its own transcript opens with. Nothing derived lives here — an agent's
+-- turns, tokens, tools and churn are already keyed by `agent_id` on the fact
+-- tables and stay computed from them. A row with a NULL task is still a row:
+-- an agent whose opening prompt was pruned must remain listable.
+CREATE TABLE IF NOT EXISTS agents (
+    session_id TEXT NOT NULL,
+    agent_id   TEXT NOT NULL,
+    task       TEXT,
+    PRIMARY KEY (session_id, agent_id)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     session_id TEXT NOT NULL,
     uuid       TEXT NOT NULL,

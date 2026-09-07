@@ -8,6 +8,7 @@ import type {
   CardDetail,
   ChronicleQuery,
   ChronicleSyncResponse,
+  ChronicleAgentDetail,
   ChronicleSessionDetail,
   ChronicleSessionsResponse,
   ChronicleStatus,
@@ -306,6 +307,16 @@ export function getChronicleSession(id: string): Promise<ChronicleSessionDetail>
   return request<ChronicleSessionDetail>(
     "GET",
     `/api/chronicle/session/${encodeURIComponent(id)}`
+  );
+}
+
+export function getChronicleAgent(
+  sessionId: string,
+  agentId: string
+): Promise<ChronicleAgentDetail> {
+  return request<ChronicleAgentDetail>(
+    "GET",
+    `/api/chronicle/session/${encodeURIComponent(sessionId)}/agent/${encodeURIComponent(agentId)}`
   );
 }
 

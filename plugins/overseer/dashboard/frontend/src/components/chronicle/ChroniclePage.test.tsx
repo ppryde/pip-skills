@@ -9,6 +9,7 @@ vi.mock("../../api/client", async (importOriginal) => {
     getChronicleSummary: vi.fn(),
     getChronicleSessions: vi.fn(),
     getChronicleSession: vi.fn(),
+    getChronicleAgent: vi.fn(),
     syncChronicle: vi.fn(),
     setActiveRoot: vi.fn(),
   };
@@ -151,6 +152,7 @@ const mocked = client as unknown as {
   getChronicleSummary: ReturnType<typeof vi.fn>;
   getChronicleSessions: ReturnType<typeof vi.fn>;
   getChronicleSession: ReturnType<typeof vi.fn>;
+  getChronicleAgent: ReturnType<typeof vi.fn>;
   syncChronicle: ReturnType<typeof vi.fn>;
   setActiveRoot: ReturnType<typeof vi.fn>;
 };
@@ -174,6 +176,12 @@ afterEach(() => {
  * (Session, Repo · branch) plus its place among the sortable ones. Named so
  * the assertion reads as a column rather than a magic number. */
 const COLUMN_INDEX_SUBAGENTS = 2 + 5;
+
+/** The page renders from props alone; these tests drive it directly rather
+ * than through the fetch harness, since only the scope prop is under test. */
+function pageProps(sessions: ChronicleSession[]) {
+  return { summary: summary(), sessions, loading: false, error: null, onRetry: () => {} };
+}
 
 describe("<ChroniclePage/>", () => {
   it("puts tools, MCP and plugins behind one usage callout", async () => {
@@ -499,6 +507,103 @@ describe("<ChroniclePage/>", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
     // Three bars all reading 0% say nothing; the panel stays away.
     expect(within(screen.getByRole("dialog")).queryByText("Delegation")).not.toBeInTheDocument();
+  });
+
+  it("badges the plan a session ran on, and shows nothing when it is unknown", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "On Max", plan_organization_type: "claude_max" }),
+        session({ session_id: "bbbb2222-x", title: "No plan", plan_organization_type: null }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("On Max")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    const rows = table().getAllByRole("row").slice(1);
+    expect(within(rows[0]).getByText("Max")).toBeInTheDocument();
+    // The unknown case renders NO badge — never the word "unknown".
+    expect(within(rows[1]).queryByText(/unknown/i)).not.toBeInTheDocument();
+    expect(within(rows[1]).queryByText("Max")).not.toBeInTheDocument();
+  });
+
+  it("offers a plan filter only across all repos, and only when plans actually differ", async () => {
+    const mixed = {
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "On Max", plan_organization_type: "claude_max" }),
+        session({ session_id: "bbbb2222-x", title: "On Ent", plan_organization_type: "claude_enterprise" }),
+      ],
+    };
+    mocked.getChronicleSessions.mockResolvedValue(mixed);
+
+    // Within one repo the sessions are near-always one plan, so the control
+    // would be a permanent no-op: absent by design, not merely empty.
+    const one = render(<ChroniclePage {...pageProps(mixed.sessions)} scope="repo" />);
+    expect(screen.queryByRole("group", { name: "Plan" })).not.toBeInTheDocument();
+    one.unmount();
+
+    render(<ChroniclePage {...pageProps(mixed.sessions)} scope="all" />);
+    const plan = within(screen.getByRole("group", { name: "Plan" }));
+    fireEvent.click(plan.getByRole("button", { name: "Enterprise (1)" }));
+    const rows = within(screen.getByRole("table", { name: "Sessions" })).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("On Ent");
+  });
+
+  it("hides the plan filter when every session shares one plan", () => {
+    // One plan is a label, not a choice.
+    const same = [
+      session({ session_id: "aaaa1111-x", plan_organization_type: "claude_max" }),
+      session({ session_id: "bbbb2222-x", plan_organization_type: "claude_max" }),
+    ];
+    render(<ChroniclePage {...pageProps(same)} scope="all" />);
+    expect(screen.queryByRole("group", { name: "Plan" })).not.toBeInTheDocument();
+  });
+
+  it("opens a subagent over the session drawer, and unwinds one layer at a time", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cold_turns: 0, turn_series: [], tools: [], compactions_at: [],
+      artifacts: [], biggest_jumps: [],
+      subagents: [
+        { agent_id: "a11111111aaaa", turns: 10, context_tokens: 1000, output_tokens: 500,
+          tool_calls: 4, first_ts: 1, last_ts: 2, task: "Find the auth flow",
+          agent_type: "Explore" },
+        { agent_id: "a22222222bbbb", turns: 4, context_tokens: 100, output_tokens: 50,
+          tool_calls: 1, first_ts: 1, last_ts: 2, task: "Audit the ORM",
+          agent_type: "general-purpose" },
+      ],
+    });
+    mocked.getChronicleAgent.mockResolvedValue({
+      session_id: "aaaa1111-x", agent_id: "a11111111aaaa", task: "Find the auth flow",
+      agent_type: "Explore", turns: 10, context_tokens: 1000, input_tokens: 10,
+      cache_read_tokens: 900, cache_creation_tokens: 90, output_tokens: 500,
+      thinking_tokens: 20, tool_calls: 4, peak_context_tokens: 900,
+      first_ts: 1, last_ts: 2, duration_s: 1, cache_hit_rate: 0.9,
+      cost_usd: 0.42, unpriced_turns: 0, turn_series: [], tools: [], artifacts: [],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+    // The session's Subagents table names each agent by its task, and is the
+    // way in to the second sheet.
+    fireEvent.click(screen.getByRole("button", { name: "Find the auth flow" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("subagent-drawer-overlay")).toBeInTheDocument());
+    // Layered, not replacing: the session drawer is still mounted beneath.
+    expect(screen.getByTestId("chronicle-drawer-overlay")).toBeInTheDocument();
+
+    // Escape unwinds ONE layer — the subagent closes, the session stays.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-drawer-overlay")).not.toBeInTheDocument());
+    expect(screen.getByTestId("chronicle-drawer-overlay")).toBeInTheDocument();
+
+    // A second Escape closes the session drawer.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("chronicle-drawer-overlay")).not.toBeInTheDocument());
   });
 
   it("opens the session drawer from a row", async () => {

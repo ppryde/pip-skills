@@ -416,6 +416,18 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
             "INSERT OR IGNORE INTO sessions(session_id, updated_at) VALUES (?, ?)",
             (session_id, now),
         )
+        # The agent row exists whether or not this batch saw its task: an
+        # agent whose opening prompt was pruned must still be listable.
+        # COALESCE, not a plain SET — an incremental sync reads only the TAIL,
+        # where the opening prompt is not, so overwriting with the NULL it
+        # just saw would erase the label on every subsequent sync. Same trap
+        # that once shipped 3 qualifiers out of 1,265.
+        conn.execute(
+            """INSERT INTO agents(session_id, agent_id, task) VALUES (?,?,?)
+               ON CONFLICT(session_id, agent_id) DO UPDATE SET
+                   task = COALESCE(excluded.task, agents.task)""",
+            (session_id, agent_id, facts.task),
+        )
     _write_facts(conn, session_id, facts)
     conn.execute(
         "INSERT OR REPLACE INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, "

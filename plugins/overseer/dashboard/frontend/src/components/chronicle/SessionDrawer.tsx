@@ -4,7 +4,7 @@
  * `.card-drawer`) so the two sheets read as one family. Page-local state
  * (ChroniclePage owns `openId`); Escape and the backdrop close it.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useChronicleSession } from "../../board/chronicle/useChronicle";
 import {
   cacheVerdict,
@@ -25,6 +25,7 @@ import { LineChart } from "./ChronicleCharts";
 import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
+import SubagentDrawer, { agentLabel } from "./SubagentDrawer";
 import UsageCallout from "./UsageCallout";
 
 export interface SessionDrawerProps {
@@ -43,17 +44,30 @@ const IDLE_GAP_S = 300;
  * largest; the table beneath lists the rest. */
 const JUMPS_MARKED = 1;
 
-export default function SessionDrawer({ sessionId, onClose, showAccount = false }: SessionDrawerProps) {
+export default function SessionDrawer({
+  sessionId, onClose, showAccount = false,
+}: SessionDrawerProps) {
   const { detail, loading, error } = useChronicleSession(sessionId);
+  // The subagent layer is owned here, not by the page: its rail is a list of
+  // THIS session's agents, which only this component has fetched.
+  const [openAgent, setOpenAgent] = useState<string | null>(null);
+  const closeAgent = useCallback(() => setOpenAgent(null), []);
+
+  // A session change must not leave the layer above showing the previous
+  // session's agent.
+  useEffect(() => setOpenAgent(null), [sessionId]);
 
   useEffect(() => {
     if (sessionId === null) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      // Escape unwinds ONE layer. While a subagent is open it owns the key,
+      // and this drawer stays put — asked as a state question rather than
+      // fought over as an event, since this component knows both answers.
+      if (e.key === "Escape" && openAgent === null) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessionId, onClose]);
+  }, [sessionId, onClose, openAgent]);
 
   if (sessionId === null) return null;
 
@@ -267,6 +281,10 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
             {detail.subagents.length > 0 && (
               <section className="chr-panel">
                 <h3 className="chr-panel__title">Subagents</h3>
+                <p className="chr-panel__sub">
+                  Open one for its own turns, tools and cost. The name is the task it was
+                  handed; an agent whose opening prompt was pruned shows its id instead.
+                </p>
                 <table className="chr-table chr-table--compact">
                   <thead>
                     <tr>
@@ -279,8 +297,19 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
                   </thead>
                   <tbody>
                     {detail.subagents.map((a) => (
-                      <tr key={a.agent_id}>
-                        <td className="chr-mono">{a.agent_id.replace(/^a/, "").split("-").slice(0, -1).join("-") || a.agent_id}</td>
+                      <tr key={a.agent_id} className="chr-table__row">
+                        <td>
+                          <button
+                            type="button"
+                            className="chr-table__open"
+                            onClick={() => setOpenAgent(a.agent_id)}
+                          >
+                            {agentLabel(a)}
+                          </button>
+                          {a.agent_type && (
+                            <span className="chr-table__sub">{a.agent_type}</span>
+                          )}
+                        </td>
                         <td className="chr-num">{a.turns}</td>
                         <td className="chr-num">{formatTokens(a.context_tokens)}</td>
                         <td className="chr-num">{formatTokens(a.output_tokens)}</td>
@@ -294,6 +323,16 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
           </>
         )}
       </aside>
+      {detail && openAgent !== null && (
+        <SubagentDrawer
+          sessionId={detail.session_id}
+          agents={detail.subagents}
+          agentId={openAgent}
+          onSelect={setOpenAgent}
+          onBack={closeAgent}
+          sessionLabel={sessionName(detail)}
+        />
+      )}
     </div>
   );
 }

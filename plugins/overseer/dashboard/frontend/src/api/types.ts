@@ -637,6 +637,11 @@ export interface ChronicleSession {
   cold_turns: number;
   artifacts: number;
   subagents: number;
+  /** The plan this session RAN ON, snapshotted at ingest — `claude_max`,
+   * `claude_enterprise`, … Absent/null when unknown (no account file, or an
+   * API-key config, which has no oauthAccount at all). Consumers render
+   * nothing rather than guessing: null means "not stated", not "no plan". */
+  plan_organization_type?: string | null;
   active_ms: number;
   models: string[];
   cache_hit_rate: number | null;
@@ -693,6 +698,46 @@ export interface ChronicleSubagent {
   tool_calls: number;
   first_ts: number | null;
   last_ts: number | null;
+  /** What the agent was handed, lifted verbatim from the first prompt of its
+   * own transcript and truncated. The only legible name an agent has — its
+   * id is a hash. Null for an agent whose opening prompt was pruned, or in a
+   * store not yet resynced with `chronicle sync --full`.
+   *
+   * UNTRUSTED transcript text: render as a text node, never as markup. */
+  task: string | null;
+  /** "Explore", "general-purpose", … as attribution records it. */
+  agent_type: string | null;
+}
+
+/** `GET /api/chronicle/session/{sid}/agent/{aid}` — one subagent in detail.
+ * The same shape the session drawer reads, narrowed to one agent: its own
+ * turns, tool calls, edits and cost. */
+export interface ChronicleAgentDetail {
+  session_id: string;
+  agent_id: string;
+  task: string | null;
+  agent_type: string | null;
+  turns: number;
+  context_tokens: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  tool_calls: number;
+  peak_context_tokens: number;
+  first_ts: number | null;
+  last_ts: number | null;
+  duration_s: number | null;
+  cache_hit_rate: number | null;
+  cost_usd: number;
+  unpriced_turns: number;
+  turn_series: ChronicleTurn[];
+  tools: ChronicleTool[];
+  mcp?: ChronicleMcp;
+  plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
+  artifacts: ChronicleArtifact[];
 }
 
 /** `GET /api/chronicle/session/{id}` — the session row plus its per-turn

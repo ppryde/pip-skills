@@ -704,6 +704,60 @@ class TestAttribution:
             == ["tribunal"]
 
 
+class TestAgentDetail:
+    """One subagent in detail — the same questions the session drawer asks,
+    narrowed to an agent. Every fact table already carries `agent_id`, so
+    this is a WHERE clause rather than new plumbing."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.write()
+        b.subagent("aexplore-1", ["x1", "x2"], T1, task="Find the auth flow",
+                   tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b.subagent("aexplore-2", ["y1"], T1, task="Audit the ORM", tools=["Bash"])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        return conn
+
+    def test_the_session_lists_its_agents_with_their_tasks(self, projects):
+        agents = report.session_detail(self._seed(projects), "s1")["subagents"]
+        assert [(a["agent_id"], a["task"]) for a in agents] == [
+            ("aexplore-1", "Find the auth flow"),
+            ("aexplore-2", "Audit the ORM"),
+        ]
+
+    def test_an_agent_reports_only_its_own_turns_and_calls(self, projects):
+        detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
+        assert detail["turns"] == 2
+        assert len(detail["turn_series"]) == 2
+        assert [t["tool_name"] for t in detail["tools"]] == \
+            ["mcp__claude_ai_Notion__notion-fetch"]
+        # The main agent's Read and the sibling's Bash belong to neither.
+        assert [s["server"] for s in detail["mcp"]["servers"]] == ["claude_ai_Notion"]
+
+    def test_an_agent_carries_its_task_and_type(self, projects):
+        conn = self._seed(projects)
+        conn.execute("UPDATE turns SET agent_type = 'Explore' WHERE agent_id = 'aexplore-1'")
+        conn.commit()
+        detail = report.agent_detail(conn, "s1", "aexplore-1")
+        assert detail["task"] == "Find the auth flow"
+        assert detail["agent_type"] == "Explore"
+        assert detail["session_id"] == "s1"
+
+    def test_an_agent_is_priced_on_its_own_turns_alone(self, projects):
+        detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
+        assert round(detail["cost_usd"], 6) == round(2 * TURN_USD, 6)
+
+    def test_an_unknown_agent_is_none_rather_than_an_empty_shell(self, projects):
+        assert report.agent_detail(self._seed(projects), "s1", "nope") is None
+
+    def test_an_agent_that_edited_nothing_reports_no_churn(self, projects):
+        detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
+        assert detail["churn"]["lines_added"] == 0
+        assert detail["churn"]["files_by_churn"] == []
+
+
 class TestDerivedMetrics:
     """Figures the new slices make possible — each with a denominator that
     matches its numerator, which is the whole difficulty."""

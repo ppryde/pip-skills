@@ -31,6 +31,7 @@ import {
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
 import { Button } from "../../ui";
+import { planLabel, plansPresent } from "../../board/chronicle/plan";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
@@ -48,6 +49,10 @@ import UsageCallout from "./UsageCallout";
 export type ChroniclePageProps = Omit<UseChronicleResult, "refresh"> & {
   /** "Send a rider": re-fetch now after a failure. */
   onRetry: () => void;
+  /** The active scope. The plan filter only appears under "all": within one
+   * repo the sessions are nearly always a single plan, so the control would
+   * be a permanent no-op taking up room. */
+  scope?: "repo" | "all";
 };
 
 /** useChronicle's poll cadence, for the fetch-failure banner's countdown. */
@@ -126,7 +131,7 @@ function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc
   });
 }
 
-export default function ChroniclePage({ summary, sessions, loading, error, onRetry }: ChroniclePageProps) {
+export default function ChroniclePage({ summary, sessions, loading, error, onRetry, scope = "repo" }: ChroniclePageProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("started_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -144,10 +149,19 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
   // narrows the rows already on screen. Keeping it here means toggling it can
   // never silently reshape the totals the reader just looked at.
   const [liveOnly, setLiveOnly] = useState(false);
-  const visible = useMemo(
-    () => (liveOnly ? sessions.filter((s) => s.live) : sessions),
-    [sessions, liveOnly],
-  );
+  const [planFilter, setPlanFilter] = useState<string | null>(null);
+  // Offered only across repos, and only when there is actually a split to
+  // show — one plan is not a choice, it is a label.
+  const planOptions = useMemo(() => plansPresent(sessions), [sessions]);
+  const showPlanFilter = scope === "all" && planOptions.length > 1;
+  // A filter left set while its control is hidden would silently narrow the
+  // table with nothing on screen explaining why.
+  const activePlan = showPlanFilter ? planFilter : null;
+  const visible = useMemo(() => {
+    let rows = liveOnly ? sessions.filter((s) => s.live) : sessions;
+    if (activePlan) rows = rows.filter((s) => s.plan_organization_type === activePlan);
+    return rows;
+  }, [sessions, liveOnly, activePlan]);
   const liveCount = useMemo(() => sessions.filter((s) => s.live).length, [sessions]);
   const ordered = useMemo(() => sortSessions(visible, sortKey, sortDir), [visible, sortKey, sortDir]);
   const totals = summary?.totals ?? null;
@@ -502,10 +516,35 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                   {liveCount > 0 ? `Live (${liveCount})` : "Live"}
                 </Button>
               </div>
+              {showPlanFilter && (
+                <div className="chronicle__segment" role="group" aria-label="Plan">
+                  <Button
+                    aria-pressed={activePlan === null}
+                    onClick={() => setPlanFilter(null)}
+                    className="chronicle__seg-btn"
+                  >
+                    All plans
+                  </Button>
+                  {planOptions.map((p) => (
+                    <Button
+                      key={p.plan}
+                      aria-pressed={activePlan === p.plan}
+                      onClick={() => setPlanFilter(p.plan)}
+                      className="chronicle__seg-btn"
+                    >
+                      {`${p.label} (${p.count})`}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
             {ordered.length === 0 ? (
               <p className="chr-chart__empty">
-                {liveOnly ? "No live sessions right now." : "No sessions in this window."}
+                {activePlan
+                  ? `No ${planLabel(activePlan)} sessions${liveOnly ? " live right now" : " in this window"}.`
+                  : liveOnly
+                    ? "No live sessions right now."
+                    : "No sessions in this window."}
               </p>
             ) : (
               <>
@@ -540,6 +579,11 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                           </button>
                           <span className="chr-table__sub chr-mono">{s.session_id.slice(0, 8)}</span>
                           {s.live && <span className="chr-live">live</span>}
+                          {/* Only ever rendered for a KNOWN plan — an unknown
+                              one shows nothing at all, never the word. */}
+                          {planLabel(s.plan_organization_type) && (
+                            <span className="chr-plan">{planLabel(s.plan_organization_type)}</span>
+                          )}
                         </td>
                         <td>
                           <span>{repoLabel(s.repo_root)}</span>

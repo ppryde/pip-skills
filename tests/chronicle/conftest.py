@@ -138,15 +138,27 @@ class TranscriptBuilder:
         with open(self.path, "a") as handle:
             handle.write(json.dumps(record) + "\n")
 
-    def subagent(self, agent_id: str, message_ids: list[str], ts: str) -> Path:
+    def subagent(self, agent_id: str, message_ids: list[str], ts: str,
+                 task: str | None = None, tools=()) -> Path:
+        """A subagent transcript. `task` writes the opening prompt Claude Code
+        hands the agent — the real files always have one, so a test that cares
+        about the rail's label asks for it explicitly."""
         folder = self.dir / self.session_id / "subagents"
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"agent-{agent_id}.jsonl"
-        lines = [
-            json.dumps(_assistant(mid, ts=ts, session_id=self.session_id, agent_id=agent_id))
+        records = []
+        if task is not None:
+            records.append(_user(f"{agent_id}-task", ts=ts, content=task,
+                                 session_id=self.session_id, agentId=agent_id,
+                                 isSidechain=True))
+        records += [
+            _assistant(mid, ts=ts, session_id=self.session_id, agent_id=agent_id,
+                       blocks=([{"type": "text", "text": "hi"}]
+                               + [{"type": "tool_use", "id": f"{mid}-t{i}", "name": n,
+                                   "input": {}} for i, n in enumerate(tools)]))
             for mid in message_ids
         ]
-        path.write_text("".join(line + "\n" for line in lines))
+        path.write_text("".join(json.dumps(r) + "\n" for r in records))
         return path
 
 

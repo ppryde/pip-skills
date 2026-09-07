@@ -238,6 +238,23 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent(args: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
+        return 1
+    try:
+        detail = report.agent_detail(conn, args.session_id, args.agent_id)
+    finally:
+        conn.close()
+    if detail is None:
+        print(f"chronicle: no agent {args.agent_id} in session {args.session_id}",
+              file=sys.stderr)
+        return 1
+    print(json.dumps(detail))
+    return 0
+
+
 def cmd_repos(_: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
@@ -291,6 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("session", help="one session in detail, with its turn series (JSON)")
     p.add_argument("session_id")
     p.set_defaults(fn=cmd_session)
+
+    p = sub.add_parser("agent", help="one subagent of a session in detail (JSON)")
+    p.add_argument("session_id")
+    p.add_argument("agent_id")
+    p.set_defaults(fn=cmd_agent)
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
 

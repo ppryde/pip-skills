@@ -469,6 +469,7 @@ function App() {
             scope to "All repos" since a boardless root can't be named. */}
         {view === "chronicle" ? (
           <ChroniclePage
+            scope={chronicleScope}
             summary={chronicle.summary}
             sessions={chronicle.sessions}
             loading={chronicle.loading}

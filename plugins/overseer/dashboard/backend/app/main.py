@@ -1055,6 +1055,23 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=404, detail=f"no chronicle session {session_id!r}")
         return data
 
+    @app.get("/api/chronicle/session/{session_id}/agent/{agent_id}")
+    def chronicle_agent(session_id: str, agent_id: str) -> dict[str, Any]:
+        """One subagent of a session. Fetched only when its drawer opens —
+        folding every agent into the session payload would triple it for a
+        panel usually left closed."""
+        try:
+            check_id(session_id)
+            check_id(agent_id)
+        except CliError as exc:
+            raise HTTPException(status_code=400, detail="invalid id") from exc
+        data = run_chronicle("agent", session_id, agent_id)
+        if data is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no chronicle agent {agent_id!r} in session {session_id!r}")
+        return data
+
     if mount_frontend:
         _mount_frontend(app, dist_dir)
 

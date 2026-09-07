@@ -397,7 +397,11 @@ class TestAccountAndPlan:
         acct = conn.execute("SELECT * FROM accounts").fetchone()
         assert acct["account_uuid"] == "acc-1"
         assert acct["organization_uuid"] == "org-1"
-        assert "plan_organization_type" not in acct.keys()
+        # Asserted against the table's columns, not the row: `in` on a
+        # sqlite3.Row tests VALUES, so the obvious spelling would quietly
+        # check the wrong thing (and ruff's SIM118 fix would introduce it).
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}
+        assert "plan_organization_type" not in columns
 
     def test_the_plan_is_write_once(self, projects):
         conn = self._session(projects,
@@ -772,3 +776,62 @@ class TestAttributionColumns:
         assert conn.execute(
             "SELECT agent_type FROM turns WHERE message_id = 'm2'").fetchone()[0] == "Explore"
         assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2
+
+
+class TestSubagentTasks:
+    """A subagent's id is a hash, so the store keeps the one legible name it
+    has: the task its own transcript opens with."""
+
+    def _agents(self, conn):
+        return {r["agent_id"]: r["task"] for r in conn.execute(
+            "SELECT agent_id, task FROM agents ORDER BY agent_id")}
+
+    def test_each_subagent_records_the_task_it_was_handed(self, builder, projects):
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        builder.subagent("aexplore-1", ["a1"], T1, task="Find the auth flow")
+        builder.subagent("aexplore-2", ["b1"], T1, task="Audit the ORM")
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {
+            "aexplore-1": "Find the auth flow",
+            "aexplore-2": "Audit the ORM",
+        }
+
+    def test_the_main_transcript_is_not_an_agent(self, builder, projects):
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {}
+
+    def test_a_subagent_with_no_prompt_still_gets_a_row(self, builder, projects):
+        # A transcript whose opening prompt was pruned: the agent exists and
+        # must remain clickable, it simply has no label to show.
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        builder.subagent("aexplore-1", ["a1"], T1)
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {"aexplore-1": None}
+
+    def test_a_later_tail_read_does_not_erase_the_task(self, builder, projects):
+        """The trap that shipped 3 qualifiers out of 1,265: an incremental
+        sync re-reads only the TAIL, where the opening prompt is not, so the
+        write must COALESCE rather than overwrite with the NULL it just saw."""
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        path = builder.subagent("aexplore-1", ["a1"], T1, task="Find the auth flow")
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        with open(path, "a") as handle:
+            handle.write(json.dumps(_assistant("a2", ts=T1, session_id="s1",
+                                               agent_id="aexplore-1")) + "\n")
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {"aexplore-1": "Find the auth flow"}
+
+    def test_a_full_resync_backfills_a_task_the_store_lacks(self, builder, projects):
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        builder.subagent("aexplore-1", ["a1"], T1, task="Find the auth flow")
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE agents SET task = NULL")
+        conn.commit()
+        ingest.sync(conn, projects, full=True)
+        assert self._agents(conn) == {"aexplore-1": "Find the auth flow"}

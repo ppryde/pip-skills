@@ -7139,6 +7139,166 @@ button.trail-tag:focus-visible {
   --chr-box-shadow: 0 0 0 transparent;
 }
 
+/* --- subagent drawer (the second sheet) ---------------------------------- */
+
+/* Layered over the session drawer rather than replacing it: a subagent is
+   only ever read in the context of the session that spawned it, and the
+   sheet beneath stays visible at its own edge to say so. */
+.drawer-overlay--stacked {
+  z-index: 21;
+  /* The first sheet's backdrop is already blurring the board; a second blur
+     over it turns the whole screen to soup. */
+  backdrop-filter: none;
+}
+
+/* Wider than the session sheet by exactly the rail, so the drawer beneath
+   keeps its own right edge in view and the layering is legible. */
+.chr-drawer--agent {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: 1rem;
+  width: min(41rem, 100%);
+  padding: 26px 28px 26px 0;
+}
+
+.chr-drawer__pane {
+  min-width: 0;
+}
+
+/* The rail: where you are, what else there is, and the way back. Sticky, so
+   a long agent scrolls under a list that stays reachable. */
+.chr-rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 52px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-left: 26px;
+  border-right: 2px dashed var(--qb-line-dashed-2);
+  padding-right: 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chr-rail__back {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--qb-ink-700);
+  background: none;
+  border: none;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--qb-btn-wobble-2);
+  cursor: pointer;
+}
+
+.chr-rail__back:hover,
+.chr-rail__back:focus-visible {
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-900);
+}
+
+.chr-rail__count {
+  margin: 0 0 0 0.4rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+.chr-rail__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chr-rail__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.45rem;
+  background: none;
+  border: none;
+  border-radius: var(--qb-btn-wobble-3);
+  cursor: pointer;
+}
+
+.chr-rail__item:hover {
+  background: var(--qb-parchment-muted);
+}
+
+.chr-rail__item[aria-current="true"] {
+  background: var(--qb-parchment-muted);
+  box-shadow: inset 3px 0 0 var(--chr-turns);
+}
+
+.chr-rail__type {
+  font-family: var(--qb-font-prose);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+/* Two lines of the task, then an ellipsis: enough to tell agents apart
+   without letting one long instruction own the rail. */
+.chr-rail__task {
+  font-family: var(--qb-font-prose);
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: var(--qb-ink-900);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.chr-rail__meta {
+  font-family: var(--qb-font-prose);
+  font-size: 0.68rem;
+  color: var(--qb-ink-400);
+}
+
+/* The task as a heading is prose, not a name — it wraps rather than
+   truncating, and sits at a size a sentence can carry. */
+.chr-drawer__title--task {
+  font-size: 1.05rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Below this the rail and pane cannot both hold their width; the rail goes
+   full-width above the pane so the way back is never lost. */
+@media (max-width: 760px) {
+  .chr-drawer--agent {
+    grid-template-columns: 1fr;
+    padding: 26px 28px;
+  }
+
+  .chr-rail {
+    position: static;
+    max-height: 14rem;
+    padding-left: 0;
+    padding-right: 0;
+    border-right: none;
+    border-bottom: 2px dashed var(--qb-line-dashed-2);
+    padding-bottom: 0.5rem;
+  }
+}
+
 /* Refetch keeps the frame: dim, never skeleton. */
 .chronicle--refreshing .chr-tiles,
 .chronicle--refreshing .chronicle__grid,
@@ -8253,6 +8413,23 @@ button.trail-tag:focus-visible {
   font-family: var(--qb-font-prose);
   font-size: 0.68rem;
   font-weight: 700;
+}
+
+/* Plan badge, beside `live`. Quieter than `live` on purpose: liveness is
+   news, the plan is standing context, and two loud chips on one row compete.
+   Neutral ink rather than a status colour — a plan is not good or bad. */
+.chr-plan {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--qb-parchment-shade, transparent);
+  border: 1px solid var(--qb-rule);
+  color: var(--qb-ink-600);
+  font-family: var(--qb-font-prose);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .chr-chip {

@@ -291,6 +291,27 @@ def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     ).fetchone() is not None
 
 
+def _agent_type_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
+    """`MAX(<prefix>agent_type)`, or NULL when the column is not there yet.
+    Same read-only migration trap as `_qualifier_sql`: the report verbs open
+    the store on a path that returns before `_migrate` runs."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    return f"MAX({prefix}agent_type)" if "agent_type" in have else "NULL"
+
+
+def _agents_join(conn: sqlite3.Connection, prefix: str = "t.") -> str:
+    """LEFT JOIN onto `agents` when the table exists, else nothing — the task
+    is a label, and a store that predates it must still list its agents."""
+    if not _has_table(conn, "agents"):
+        return ""
+    return (f" LEFT JOIN agents ag ON ag.session_id = {prefix}session_id"
+            f" AND ag.agent_id = {prefix}agent_id")
+
+
+def _task_sql(conn: sqlite3.Connection) -> str:
+    return "MAX(ag.task)" if _has_table(conn, "agents") else "NULL"
+
+
 _EMPTY_CHURN: dict[str, Any] = {
     "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
     "sessions": 0, "output_tokens": 0, "by_day": [],
@@ -298,7 +319,7 @@ _EMPTY_CHURN: dict[str, Any] = {
 
 
 def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
-           limit: int = 50) -> dict[str, Any]:
+           limit: int = 50, agent: str | None = None) -> dict[str, Any]:
     """Lines added/removed and the files that moved most, from `file_edits`.
 
     A measure of editing DONE, not of lines surviving in the repo: ten edits
@@ -306,16 +327,22 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
     shipped" git is the truthful source; this answers "how much editing
     happened", which is a different question.
 
-    ``where`` is a SESSIONS-side filter (``s.``-prefixed) in both callers, so
+    ``where`` is a SESSIONS-side filter (``s.``-prefixed) in every caller, so
     every query here can share it — each joins `sessions s`.
+
+    ``agent`` narrows to one subagent's edits. It is applied to the FILE-side
+    queries only: the per-session denominator below counts sessions, which an
+    agent-side clause cannot filter and would not mean anything for.
     """
     if not _has_table(conn, "file_edits"):
         return dict(_EMPTY_CHURN)
-    join = f"FROM file_edits f JOIN sessions s ON s.session_id = f.session_id{where}"
+    scope = f"{where}{' AND' if where else ' WHERE'} f.agent_id = ?" if agent else where
+    scoped = [*params, agent] if agent else params
+    join = f"FROM file_edits f JOIN sessions s ON s.session_id = f.session_id{scope}"
     total = conn.execute(
         f"""SELECT COALESCE(SUM(f.lines_added), 0), COALESCE(SUM(f.lines_removed), 0),
                    COUNT(DISTINCT f.file_path), COUNT(*) {join}""",
-        params,
+        scoped,
     ).fetchone()
     files = [
         {
@@ -336,7 +363,7 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
                 GROUP BY f.file_path
                 ORDER BY SUM(f.lines_added + f.lines_removed) DESC, f.file_path
                 LIMIT {int(limit)}""",
-            params,
+            scoped,
         )
     ]
     # Sessions that actually changed a file, and the output they produced —
@@ -355,9 +382,9 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
                        SUM(f.lines_added) AS lines_added,
                        SUM(f.lines_removed) AS lines_removed,
                        COUNT(*) AS edits
-                {join}{' AND' if where else ' WHERE'} f.ts IS NOT NULL
+                {join}{' AND' if scope else ' WHERE'} f.ts IS NOT NULL
                 GROUP BY day ORDER BY day""",
-            params,
+            scoped,
         )
     ]
     return {
@@ -695,14 +722,20 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
         if ts is not None:
             previous_ts = ts
     detail["turn_series"] = series
+    # The rail's rows. `task` is the only legible name an agent has — its id
+    # is a hash — and `agent_type` says what KIND it was; both are LEFT-joined
+    # so an agent predating either still lists, unnamed.
     detail["subagents"] = [
         dict(r) for r in conn.execute(
-            """SELECT agent_id, COUNT(*) AS turns,
-                      SUM(input_tokens + cache_read_tokens + cache_creation_tokens) AS context_tokens,
-                      SUM(output_tokens) AS output_tokens, SUM(tool_calls) AS tool_calls,
-                      MIN(ts) AS first_ts, MAX(ts) AS last_ts
-               FROM turns WHERE session_id = ? AND agent_id <> ''
-               GROUP BY agent_id ORDER BY first_ts""",
+            f"""SELECT t.agent_id AS agent_id, COUNT(*) AS turns,
+                      SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                          AS context_tokens,
+                      SUM(t.output_tokens) AS output_tokens, SUM(t.tool_calls) AS tool_calls,
+                      MIN(t.ts) AS first_ts, MAX(t.ts) AS last_ts,
+                      {_agent_type_sql(conn, 't.')} AS agent_type, {_task_sql(conn)} AS task
+               FROM turns t{_agents_join(conn)}
+               WHERE t.session_id = ? AND t.agent_id <> ''
+               GROUP BY t.agent_id ORDER BY first_ts""",
             (session_id,),
         )
     ]
@@ -763,6 +796,102 @@ _ARTIFACT_PAGE_SQL = """
         WHERE q.url = a.url AND q.session_id = a.session_id
         ORDER BY q.ts DESC, q.rowid DESC LIMIT 1))
 """
+
+
+def agent_detail(conn: sqlite3.Connection, session_id: str,
+                 agent_id: str) -> dict[str, Any] | None:
+    """One subagent in detail, or None when the session never ran it.
+
+    The same questions `session_detail` answers, narrowed to an agent: its own
+    turns, its own tool calls, its own edits, its own cost. Every fact table
+    carries `agent_id`, so each is a WHERE clause on the query that already
+    existed rather than a new join.
+
+    Deliberately NOT folded into `session_detail`: a session with eight agents
+    at a hundred turns each would triple that payload for a drawer usually
+    left unopened, so the caller fetches this only when one is.
+    """
+    row = conn.execute(
+        f"""SELECT t.agent_id AS agent_id, COUNT(*) AS turns,
+                   SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                       AS context_tokens,
+                   SUM(t.input_tokens) AS input_tokens,
+                   SUM(t.cache_read_tokens) AS cache_read_tokens,
+                   SUM(t.cache_creation_tokens) AS cache_creation_tokens,
+                   SUM(t.output_tokens) AS output_tokens,
+                   SUM(t.thinking_tokens) AS thinking_tokens,
+                   SUM(t.tool_calls) AS tool_calls,
+                   MIN(t.ts) AS first_ts, MAX(t.ts) AS last_ts,
+                   {_agent_type_sql(conn, 't.')} AS agent_type, {_task_sql(conn)} AS task
+            FROM turns t{_agents_join(conn)}
+            WHERE t.session_id = ? AND t.agent_id = ?""",
+        (session_id, agent_id),
+    ).fetchone()
+    # An agent that ran no turn has no row to show. COUNT(*) makes the
+    # aggregate return one line regardless, so the emptiness is read off
+    # `turns` rather than off the row's existence.
+    if row is None or not row["turns"]:
+        return None
+
+    detail = dict(row)
+    detail["session_id"] = session_id
+    started, last = detail["first_ts"], detail["last_ts"]
+    detail["duration_s"] = (
+        round(last - started) if started and last and last >= started else None)
+    detail["cache_hit_rate"] = cache_hit_rate(
+        detail["input_tokens"], detail["cache_read_tokens"], detail["cache_creation_tokens"])
+    where, params = " WHERE t.session_id = ? AND t.agent_id = ?", [session_id, agent_id]
+    _attach_cost(detail, _costs_by(conn, "t.agent_id", where, params), agent_id)
+
+    series: list[dict[str, Any]] = []
+    previous_ts: float | None = None
+    for r in conn.execute(
+        "SELECT * FROM turns WHERE session_id = ? AND agent_id = ? ORDER BY ts, rowid",
+        (session_id, agent_id),
+    ):
+        ts = r["ts"]
+        series.append({
+            "ts": ts,
+            "message_id": r["message_id"],
+            "model": r["model"],
+            "context_tokens": r["input_tokens"] + r["cache_read_tokens"] + r["cache_creation_tokens"],
+            "input_tokens": r["input_tokens"],
+            "cache_read_tokens": r["cache_read_tokens"],
+            "cache_creation_tokens": r["cache_creation_tokens"],
+            "cache_5m_tokens": r["cache_5m_tokens"],
+            "cache_1h_tokens": r["cache_1h_tokens"],
+            "output_tokens": r["output_tokens"],
+            "thinking_tokens": r["thinking_tokens"],
+            "tool_calls": r["tool_calls"],
+            "stop_reason": r["stop_reason"],
+            "cold": r["cache_creation_tokens"] > r["cache_read_tokens"],
+            "gap_s": round(ts - previous_ts) if ts is not None and previous_ts is not None else None,
+            "cost_usd": _cost_of(r),
+        })
+        if ts is not None:
+            previous_ts = ts
+    detail["turn_series"] = series
+    detail["peak_context_tokens"] = max((t["context_tokens"] for t in series), default=0)
+
+    detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
+        conn.execute(
+            f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
+                       result_chars, ts, result_ts, agent_id FROM tool_calls
+                WHERE session_id = ? AND agent_id = ?""",
+            (session_id, agent_id),
+        ).fetchall(),
+        with_sessions=False,
+        server_names=mcp_server_names(conn),
+    )
+    detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id], agent=agent_id)
+    detail["artifacts"] = [
+        _page_row(r) for r in conn.execute(
+            _ARTIFACT_PAGE_SQL + " AND a.session_id = ? AND a.agent_id = ?"
+            " ORDER BY COALESCE(first_ts, a.ts)",
+            (session_id, agent_id),
+        )
+    ]
+    return detail
 
 
 def _page_row(r: sqlite3.Row) -> dict[str, Any]:
