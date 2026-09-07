@@ -28,6 +28,7 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
+import { Button } from "../../ui";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
@@ -101,7 +102,17 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
     }
   };
 
-  const ordered = useMemo(() => sortSessions(sessions, sortKey, sortDir), [sessions, sortKey, sortDir]);
+  // Table-local, unlike the window/scope/branch filters: those change what is
+  // FETCHED (and so what every tile and chart above counts), while this only
+  // narrows the rows already on screen. Keeping it here means toggling it can
+  // never silently reshape the totals the reader just looked at.
+  const [liveOnly, setLiveOnly] = useState(false);
+  const visible = useMemo(
+    () => (liveOnly ? sessions.filter((s) => s.live) : sessions),
+    [sessions, liveOnly],
+  );
+  const liveCount = useMemo(() => sessions.filter((s) => s.live).length, [sessions]);
+  const ordered = useMemo(() => sortSessions(visible, sortKey, sortDir), [visible, sortKey, sortDir]);
   const totals = summary?.totals ?? null;
   // The Counsel's four insights each walk the session list; recompute only
   // when the data does, not on every sort click or drawer open.
@@ -353,9 +364,34 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
           </div>
 
           <section className="chr-panel chr-panel--wide">
-            <h3 className="chr-panel__title">Sessions</h3>
+            <div className="chr-panel__head">
+              <h3 className="chr-panel__title">Sessions</h3>
+              {/* Reuses the filter bar's segment styling so it reads as a
+                  filter rather than as a table control of its own invention.
+                  Disabled with nothing live: an enabled toggle that can only
+                  ever empty the table is a trap. */}
+              <div className="chronicle__segment" role="group" aria-label="Session activity">
+                <Button
+                  aria-pressed={!liveOnly}
+                  onClick={() => setLiveOnly(false)}
+                  className="chronicle__seg-btn"
+                >
+                  All
+                </Button>
+                <Button
+                  aria-pressed={liveOnly}
+                  onClick={() => setLiveOnly(true)}
+                  disabled={liveCount === 0}
+                  className="chronicle__seg-btn"
+                >
+                  {liveCount > 0 ? `Live (${liveCount})` : "Live"}
+                </Button>
+              </div>
+            </div>
             {ordered.length === 0 ? (
-              <p className="chr-chart__empty">No sessions in this window.</p>
+              <p className="chr-chart__empty">
+                {liveOnly ? "No live sessions right now." : "No sessions in this window."}
+              </p>
             ) : (
               <>
                 <p className="chr-table__scroll-hint">Scroll sideways for more columns →</p>

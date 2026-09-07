@@ -7357,6 +7357,18 @@ button.trail-tag:focus-visible {
   color: var(--qb-ink-900);
 }
 
+/* Panel title with a control alongside it (the Sessions table's activity
+   filter). Wraps rather than squeezing the title on a narrow viewport, where
+   the segment would otherwise crush the heading it belongs to. */
+.chr-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
 /* A small hue dot before each panel title, matching that panel's chart —
    decorative grouping, same role as the tile accent. */
 .chr-panel__title::before {

@@ -293,6 +293,40 @@ describe("<ChroniclePage/>", () => {
     expect(subagentCell(rows[1])).toHaveTextContent("—");
   });
 
+  it("filters the table to live sessions, without touching the tiles above", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    const activity = () => within(screen.getByRole("group", { name: "Session activity" }));
+
+    // One of the two fixture sessions is live, and the toggle says so.
+    expect(table().getAllByRole("row").slice(1)).toHaveLength(2);
+    fireEvent.click(activity().getByRole("button", { name: "Live (1)" }));
+
+    const rows = table().getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("bbbb2222");
+    expect(rows[0]).not.toHaveTextContent("Fix the widget");
+    // The summary is fetched, not derived from the rows, so narrowing the
+    // table must not restate the totals: still "1 live" of 2 sessions.
+    expect(screen.getByText("1 live")).toBeInTheDocument();
+    expect(mocked.getChronicleSessions).toHaveBeenCalledTimes(1); // filter is local, no re-fetch
+
+    fireEvent.click(activity().getByRole("button", { name: "All" }));
+    expect(table().getAllByRole("row").slice(1)).toHaveLength(2);
+  });
+
+  it("disables the live filter when nothing is live", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [session({ session_id: "aaaa1111-x", title: "Fix the widget", live: false })],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const activity = within(screen.getByRole("group", { name: "Session activity" }));
+    // Enabled, it could only ever empty the table — so it reads "Live", uncounted.
+    expect(activity.getByRole("button", { name: "Live" })).toBeDisabled();
+  });
+
   it("opens the session drawer from a row", async () => {
     mocked.getChronicleSession.mockResolvedValue({
       ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
