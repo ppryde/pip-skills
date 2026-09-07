@@ -376,6 +376,9 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
               <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
             </section>
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
               {/* The prompt count lives here, not on the Turns tile: the

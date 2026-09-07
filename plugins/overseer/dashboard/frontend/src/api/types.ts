@@ -542,6 +542,48 @@ export interface ChroniclePlugins {
   sessions?: number;
 }
 
+export interface ChronicleMcpServer {
+  server: string;
+  /** "plugin" | "connector" | "local" — where the server comes from. */
+  provenance: string;
+  tools: number;
+  calls: number;
+  result_chars: number;
+  /** Absent on a single-session read, where it would always be 1. */
+  sessions?: number;
+}
+
+export interface ChronicleMcpTool {
+  server: string;
+  tool: string;
+  calls: number;
+  result_chars: number;
+  sessions?: number;
+}
+
+export interface ChronicleMcp {
+  calls: number;
+  result_chars: number;
+  by_provenance: Record<string, number>;
+  servers: ChronicleMcpServer[];
+  tools: ChronicleMcpTool[];
+  sessions?: number;
+}
+
+export interface ChroniclePluginItem {
+  plugin: string;
+  /** "mcp" | "skill" — how this plugin was used. */
+  kind: string;
+  calls: number;
+  sessions?: number;
+}
+
+export interface ChroniclePlugins {
+  calls: number;
+  items: ChroniclePluginItem[];
+  sessions?: number;
+}
+
 export interface ChronicleQuantiles {
   p50: number | null;
   p90: number | null;

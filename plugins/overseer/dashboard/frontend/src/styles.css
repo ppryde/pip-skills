@@ -7496,6 +7496,10 @@ button.trail-tag:focus-visible {
    Stacked immediately before the media queries that relax them: an
    unconditional rule later in the file would beat an earlier media-gated
    one at every viewport (same cascade trap the tile rules note above). */
+.chronicle__grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .chronicle__grid--4 {
   grid-template-columns: repeat(4, 1fr);
 }
@@ -7601,6 +7605,7 @@ button.trail-tag:focus-visible {
    worse than a taller page. */
 @media (max-width: 1180px) {
   .chronicle__grid--2,
+  .chronicle__grid--3,
   .chronicle__grid--4 {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -7608,6 +7613,7 @@ button.trail-tag:focus-visible {
 
 @media (max-width: 720px) {
   .chronicle__grid--2,
+  .chronicle__grid--3,
   .chronicle__grid--4 {
     grid-template-columns: 1fr;
   }
