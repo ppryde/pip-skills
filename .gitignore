@@ -3,6 +3,10 @@ __pycache__/
 *.pyc
 .workflow/
 .vigil/
+# Anywhere, not just the frontend's own: `plugins/overseer/dashboard/`
+# grows a `node_modules/.vite` cache that a repo-wide `git add -A` will
+# otherwise stage.
+node_modules/
 
 # RPG icon source library (17MB) — only the used subset is committed into the overseer dashboard bundle
 /assets/rpg-icons/

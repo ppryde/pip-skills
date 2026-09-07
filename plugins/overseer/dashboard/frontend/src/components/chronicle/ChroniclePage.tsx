@@ -53,7 +53,8 @@ export type ChroniclePageProps = Omit<UseChronicleResult, "refresh"> & {
 /** useChronicle's poll cadence, for the fetch-failure banner's countdown. */
 const CHRONICLE_RETRY_SECONDS = 30;
 
-type SortKey =
+/** Columns that sort on a field of the row, by that field's name. */
+type RowSortKey =
   | "started_at"
   | "artifacts"
   | "turns"
@@ -65,7 +66,31 @@ type SortKey =
   | "output_tokens"
   | "duration_s"
   | "transcript_bytes"
+  | "files_touched"
   | "cost_usd";
+
+/** Columns that sort on something the row does not carry as a field. Every
+ * one of these MUST appear in `SORT_VALUE` — the type says so, so adding a
+ * derived column without its comparator is a compile error rather than a
+ * column that silently refuses to sort. */
+type DerivedSortKey = "lines";
+
+type SortKey = RowSortKey | DerivedSortKey;
+
+/** "Lines" shows `+a / -r` and ranks on the two summed: a big deletion is as
+ * much editing as a big addition. */
+const SORT_VALUE: Record<DerivedSortKey, (s: ChronicleSession) => number> = {
+  lines: (s) => s.lines_added + s.lines_removed,
+};
+
+/** Churn is zero both when a session edited nothing and when its transcript
+ * was pruned before ingest, and the store cannot tell those apart — so zero
+ * reads as "—", the same treatment Artifacts and Subagents already give it,
+ * rather than as a claim that no editing happened. */
+function churnCell(s: ChronicleSession): string {
+  if (s.lines_added === 0 && s.lines_removed === 0) return "—";
+  return `+${formatTokens(s.lines_added)} / -${formatTokens(s.lines_removed)}`;
+}
 
 const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => string }[] = [
   { key: "started_at", label: "Started", render: (s) => formatWhen(s.started_at) },
@@ -81,15 +106,22 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "peak_context_pct", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
   { key: "transcript_bytes", label: "Size", render: (s) => formatBytes(s.transcript_bytes) },
+  // The churn pair sits beside the work columns rather than the token ones:
+  // it measures what the session DID to the repo, not what it spent.
+  { key: "files_touched", label: "Files", render: (s) => (s.files_touched > 0 ? String(s.files_touched) : "—") },
+  { key: "lines", label: "Lines", render: churnCell },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
   { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {
   const sign = dir === "asc" ? 1 : -1;
+  const derived = key in SORT_VALUE ? SORT_VALUE[key as DerivedSortKey] : null;
+  const valueOf = (s: ChronicleSession) =>
+    derived ? derived(s) : s[key as RowSortKey] ?? -Infinity;
   return [...rows].sort((a, b) => {
-    const av = a[key] ?? -Infinity;
-    const bv = b[key] ?? -Infinity;
+    const av = valueOf(a);
+    const bv = valueOf(b);
     return av === bv ? 0 : av > bv ? sign : -sign;
   });
 }

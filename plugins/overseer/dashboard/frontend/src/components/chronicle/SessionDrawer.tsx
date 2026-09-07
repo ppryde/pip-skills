@@ -20,6 +20,7 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import ArtifactList from "./ArtifactList";
+import DelegationPanel from "./DelegationPanel";
 import { LineChart } from "./ChronicleCharts";
 import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
@@ -152,6 +153,21 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
               <StatTile label="Active" value={formatActive(detail.active_ms)} />
               <StatTile label="Transcript" value={formatBytes(detail.transcript_bytes)} hue="--chr-tools" />
               <StatTile label="Compactions" value={String(detail.compactions)} hue="--chr-peak" />
+              {/* Churn: editing DONE in this session, from the diffs its own
+                  transcript carries. A pruned transcript leaves zero here and
+                  is indistinguishable from a session that edited nothing, so
+                  neither tile is shown at zero rather than claiming "0". */}
+              {detail.files_touched > 0 && (
+                <StatTile label="Files touched" value={String(detail.files_touched)} hue="--chr-cache" />
+              )}
+              {(detail.lines_added > 0 || detail.lines_removed > 0) && (
+                <StatTile
+                  label="Lines"
+                  value={`+${detail.lines_added.toLocaleString()} / -${detail.lines_removed.toLocaleString()}`}
+                  labelInfo="Lines added and removed across every edit in this session — editing done, not lines surviving. A later revert still counts, so git is the source for what shipped."
+                  hue="--chr-cache"
+                />
+              )}
               <StatTile
                 label="Cache written"
                 value={formatTokens(detail.cache_creation_tokens)}
@@ -238,8 +254,15 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
               mcp={detail.mcp}
               plugins={detail.plugins}
               churn={detail.churn}
+              attribution={detail.attribution}
               perSession
             />
+
+            {/* Only where something was actually delegated: on a session that
+                ran no subagent all three bars are zero, which says nothing. */}
+            {detail.delegation && detail.delegation.subagent_turns > 0 && (
+              <DelegationPanel delegation={detail.delegation} />
+            )}
 
             {detail.subagents.length > 0 && (
               <section className="chr-panel">

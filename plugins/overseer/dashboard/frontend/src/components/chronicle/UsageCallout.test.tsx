@@ -32,6 +32,10 @@ const CHURN = {
       lines_added: 5951, lines_removed: 2542, operations: ["edit"], sessions: 9 },
     { file_path: "/repos/pip-skills/src/New.tsx", edits: 1,
       lines_added: 40, lines_removed: 0, operations: ["create"], sessions: 1 },
+    // Same last two segments as the first row, a different file. The real
+    // store has three of these; labels are not unique, paths are.
+    { file_path: "/repos/other/src/styles.css", edits: 3,
+      lines_added: 12, lines_removed: 4, operations: ["edit"], sessions: 1 },
   ],
 };
 
@@ -86,8 +90,10 @@ describe("<UsageCallout/>", () => {
     const { container } = render(<UsageCallout tools={TOOLS} churn={CHURN} />);
     fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
     // Label is trimmed to the last two segments so a deep path stays legible;
-    // the full path lives in the hover detail rather than being lost.
-    expect(screen.getByText("src/styles.css")).toBeInTheDocument();
+    // the full path lives in the hover detail rather than being lost. Two
+    // different files share this label, which is exactly why the row is keyed
+    // by path.
+    expect(screen.getAllByText("src/styles.css")).toHaveLength(2);
     const row = container.querySelector(".chr-barlist__row") as HTMLElement;
     expect(row.title).toContain("/repos/pip-skills/src/styles.css");
     expect(row.title).toContain("472 edits");
@@ -183,6 +189,39 @@ describe("<UsageCallout/>", () => {
     expect(container.querySelectorAll(".chr-barlist__row")).toHaveLength(40);
     expect(container.querySelector(".chr-usage__scroll")).not.toBeNull();
     expect(screen.getByText("Tool39")).toBeInTheDocument();
+  });
+
+  it("leaves nothing of the file list behind when the tab changes", () => {
+    // Two of the churn rows shorten to the same label. Keyed by label, React
+    // could not tell them apart and left one stranded in the DOM when the
+    // list was replaced — so switching off Files showed file rows among the
+    // tools. Keyed by path, the swap is clean.
+    const { container } = render(<UsageCallout tools={TOOLS} churn={CHURN} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
+    expect(container.querySelectorAll(".chr-barlist__row")).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Tools/ }));
+    expect(container.querySelectorAll(".chr-barlist__row")).toHaveLength(1);
+    expect(screen.queryByText("src/styles.css")).not.toBeInTheDocument();
+    expect(screen.queryByText("src/New.tsx")).not.toBeInTheDocument();
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+  });
+
+  it("keeps both files that shorten to the same label", () => {
+    const { container } = render(<UsageCallout tools={TOOLS} churn={CHURN} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
+    const titles = [...container.querySelectorAll(".chr-barlist__row")]
+      .map((r) => (r as HTMLElement).title);
+    expect(titles.some((t) => t.startsWith("/repos/pip-skills/src/styles.css"))).toBe(true);
+    expect(titles.some((t) => t.startsWith("/repos/other/src/styles.css"))).toBe(true);
+  });
+
+  it("breaks skills out on their own tab, built-ins included", () => {
+    // A built-in skill carries no plugin at all, so the Plugins tab can never
+    // show it — this tab is the only place it appears.
+    render(<UsageCallout tools={TOOLS} attribution={ATTRIBUTION} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Skills/ }));
+    expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
   it("survives a payload from a backend that predates the blocks", () => {

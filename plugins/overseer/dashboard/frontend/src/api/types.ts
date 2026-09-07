@@ -644,6 +644,13 @@ export interface ChronicleSession {
   /** API-equivalent cost at list prices, every agent's turns included. */
   cost_usd: number;
   unpriced_turns: number;
+  /** Editing done in this session, from the diffs in its transcript. Zero
+   * on a session whose transcript was pruned before ingest as well as on one
+   * that genuinely edited nothing — the two are indistinguishable here, so
+   * the table renders zero as "—" rather than as a claim of no work. */
+  lines_added: number;
+  lines_removed: number;
+  files_touched: number;
 }
 
 export interface ChronicleSessionsResponse {
@@ -693,6 +700,10 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  /** The window-level blocks, narrowed to this session. Optional: a store
+   * that predates the attribution columns returns neither. */
+  attribution?: ChronicleAttribution;
+  delegation?: ChronicleDelegation;
   compactions_at: number[];
   artifacts: ChronicleArtifact[];
   biggest_jumps: ChronicleJump[];

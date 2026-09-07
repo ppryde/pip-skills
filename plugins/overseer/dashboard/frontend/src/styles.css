@@ -7735,6 +7735,12 @@ button.trail-tag:focus-visible {
 
 /* --- counsel (efficiency insights) ---------------------------------------- */
 .chr-counsel__list {
+  /* One badge width for the whole panel, named once. The figure is fixed to
+     it and the opened block is indented past it, so the two cannot drift —
+     they did, and a long verdict ("reading, not writing") widened the badge
+     past the 5.5rem the indent assumed, leaving every open row misaligned
+     and squeezing that row's title column. */
+  --chr-figure-w: 6.5rem;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 0.75rem 1.25rem;
@@ -7803,12 +7809,17 @@ button.trail-tag:focus-visible {
   min-width: 0;
 }
 
+/* Fixed, not `min-width`: the badge is a column the eye reads down, so every
+   row's figure must start and end on the same two edges. A long verdict wraps
+   inside it rather than pushing it wider. */
 .chr-counsel__figure {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 5.5rem;
-  padding: 0.5rem 0.6rem;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--chr-figure-w, 6.5rem);
+  padding: 0.5rem 0.4rem;
   background: var(--qb-parchment-muted);
   border-radius: var(--qb-btn-wobble-3);
 }
@@ -7819,7 +7830,7 @@ button.trail-tag:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin: 0.35rem 0 0 calc(5.5rem + 0.85rem);
+  margin: 0.35rem 0 0 calc(var(--chr-figure-w, 6.5rem) + 0.85rem);
   padding-left: 0.6rem;
   border-left: 2px dashed var(--qb-line-dashed-2);
 }
@@ -7906,16 +7917,26 @@ button.trail-tag:focus-visible {
   font-size: 1.45rem;
   line-height: 1.1;
   color: var(--qb-ink-900);
+  /* A figure is never broken across lines; "<$0.01" is the longest one these
+     formatters produce and it fits. */
+  white-space: nowrap;
 }
 
 /* The verdict word, tinted by band. Text carries the meaning; the tint is
    a second cue, never the only one. Good/poor borrow the board's status
-   greens and reds so the vocabulary is the one the cards already use. */
+   greens and reds so the vocabulary is the one the cards already use.
+   It is prose and may be a whole phrase, so it wraps inside the fixed badge
+   and stays centred on both lines — balanced, so "reading, not writing"
+   breaks evenly rather than stranding one word. */
 .chr-counsel__verdict {
   font-family: var(--qb-font-prose);
   font-size: 0.7rem;
   font-weight: 700;
+  line-height: 1.25;
   text-transform: uppercase;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
   letter-spacing: 0.04em;
   color: var(--qb-ink-500);
 }

@@ -659,6 +659,12 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     ]
 
     detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id])
+    # The same two blocks the page computes for a whole window, narrowed to
+    # this session: which plugins, skills, agent types and MCP servers its
+    # tokens went to, and how much of it ran inside a subagent. Both take a
+    # sessions-side filter, so nothing here is a special case.
+    detail["attribution"] = _attribution(conn, " WHERE s.session_id = ?", [session_id])
+    detail["delegation"] = _delegation(conn, " WHERE s.session_id = ?", [session_id])
     detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
             f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,

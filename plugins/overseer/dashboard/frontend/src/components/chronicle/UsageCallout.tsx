@@ -10,9 +10,9 @@ import type {
   ChronicleTool,
 } from "../../api/types";
 import { Button } from "../../ui";
-import { BarList } from "./ChronicleCharts";
+import { BarList, type BarRow } from "./ChronicleCharts";
 
-type View = "tools" | "mcp" | "plugins" | "agents" | "files";
+type View = "tools" | "mcp" | "plugins" | "skills" | "agents" | "files";
 
 interface UsageCalloutProps {
   tools?: ChronicleTool[];
@@ -25,11 +25,7 @@ interface UsageCalloutProps {
   perSession?: boolean;
 }
 
-interface Row {
-  label: string;
-  value: number;
-  detail?: string;
-}
+type Row = BarRow;
 
 /**
  * The three "what did it call" breakdowns — every tool, MCP by server, and
@@ -96,6 +92,9 @@ export default function UsageCallout({
   // is added+removed, since a big deletion is as much editing as a big
   // addition.
   const fileRows: Row[] = (churn?.files_by_churn ?? []).map((f) => ({
+    // The path is the key: two files can share their last two segments
+    // (three `src/styles.css` in this store), and duplicate keys strand rows.
+    id: f.file_path,
     label: f.file_path.split("/").slice(-2).join("/"),
     detail: `${f.file_path} — ${f.edits} edits · +${f.lines_added} / -${f.lines_removed}`
       + (f.operations.includes("create") ? " · created here" : "")
@@ -163,6 +162,18 @@ export default function UsageCallout({
           + "Built-in skills carry no plugin and are excluded."
         : "Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are counted on the MCP tab too.",
       empty: "No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill.",
+    },
+    {
+      // Skills are stamped on the turn like plugins, and a built-in skill
+      // carries no plugin at all — so it is only ever visible here. The
+      // plugin it came from rides along in the detail line.
+      key: "skills",
+      label: "Skills",
+      count: attribution?.skills.length ?? 0,
+      rows: attributedRows(attribution?.skills),
+      hue: "--chr-output",
+      sub: "Turns and tokens spent under each skill, built-in ones included.",
+      empty: "No skill usage recorded. Historical sessions need a `chronicle sync --full` to backfill.",
     },
     {
       key: "agents",

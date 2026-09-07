@@ -40,6 +40,7 @@ function session(overrides: Partial<ChronicleSession> & { session_id: string }):
     cache_creation_tokens: 0, output_tokens: 100, thinking_tokens: 10, peak_context_tokens: 0, compactions: 0,
     cold_turns: 0, artifacts: 0, subagents: 0, active_ms: 0, models: [], cache_hit_rate: null, peak_context_pct: 0.1,
     context_window: 1_000_000, duration_s: 0, context_tokens: 0, live: false, cost_usd: 1, unpriced_turns: 0,
+    lines_added: 0, lines_removed: 0, files_touched: 0,
     ...overrides,
   };
 }

@@ -626,6 +626,28 @@ class TestAttribution:
         assert attr["plugins"] == [] and attr["skills"] == [] and attr["agents"] == []
         assert attr["attributed_turns"] == 0
 
+    def test_session_detail_attributes_that_session_alone(self, projects):
+        """The drawer asks the same question of one session that the page asks
+        of a window, so it gets the same two blocks — narrowed by session, not
+        recomputed differently."""
+        conn = self._seed(projects)
+        detail = report.session_detail(conn, "s1")
+        assert [p["name"] for p in detail["attribution"]["plugins"]] == ["superpowers"]
+        assert detail["attribution"]["attributed_turns"] == 4
+        assert detail["attribution"]["turns"] == 5
+        assert detail["delegation"]["turns"] == 5
+
+    def test_session_detail_attribution_excludes_other_sessions(self, projects):
+        conn = self._seed(projects)
+        b = TranscriptBuilder(projects, "-a", "s2").prompt("u1", T0)
+        b.turn("n1", T0, attributionPlugin="tribunal", attributionSkill="tribunal:reckoning")
+        b.write()
+        ingest.sync(conn, projects)
+        assert [p["name"] for p in report.session_detail(conn, "s1")["attribution"]["plugins"]] \
+            == ["superpowers"]
+        assert [p["name"] for p in report.session_detail(conn, "s2")["attribution"]["plugins"]] \
+            == ["tribunal"]
+
 
 class TestDerivedMetrics:
     """Figures the new slices make possible — each with a denominator that

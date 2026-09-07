@@ -94,6 +94,9 @@ function session(overrides: Partial<ChronicleSession> & { session_id: string }):
     live: false,
     cost_usd: 0.42,
     unpriced_turns: 0,
+    lines_added: 0,
+    lines_removed: 0,
+    files_touched: 0,
     ...overrides,
   };
 }
@@ -300,6 +303,41 @@ describe("<ChroniclePage/>", () => {
     expect(rows[0]).toHaveTextContent("bbbb2222");
   });
 
+  it("shows what each session changed, ranked by lines moved", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "Fix the widget",
+                  files_touched: 13, lines_added: 720, lines_removed: 179 }),
+        session({ session_id: "bbbb2222-x", files_touched: 32,
+                  lines_added: 995, lines_removed: 87 }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    expect(table().getByText("+720 / -179")).toBeInTheDocument();
+
+    // Ranked on added PLUS removed: a big deletion is as much editing as a
+    // big addition, so 995/87 leads 720/179.
+    fireEvent.click(table().getByRole("button", { name: /^Lines/ }));
+    expect(table().getAllByRole("row").slice(1)[0]).toHaveTextContent("bbbb2222");
+    fireEvent.click(table().getByRole("button", { name: /^Files/ }));
+    expect(table().getAllByRole("row").slice(1)[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("em-dashes churn rather than claiming a session changed nothing", async () => {
+    // Zero is what a pruned transcript leaves behind as well as what a
+    // session that edited nothing leaves — the store cannot tell them apart,
+    // so the table must not read as "0 lines changed".
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [session({ session_id: "aaaa1111-x", title: "Fix the widget" })],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const row = within(screen.getByRole("table", { name: "Sessions" })).getAllByRole("row")[1];
+    expect(row).not.toHaveTextContent("+0 / -0");
+  });
+
   it("shows a Subagents column, em-dashing the sessions that delegated none", async () => {
     mocked.getChronicleSessions.mockResolvedValue({
       sessions: [
@@ -399,6 +437,68 @@ describe("<ChroniclePage/>", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: /^Plugins/ }));
     expect(dialog.getByText("overseer · skill")).toBeInTheDocument();
+  });
+
+  it("shows a session's own churn, attribution and delegation in the drawer", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget",
+                   files_touched: 13, lines_added: 720, lines_removed: 179 }),
+      cold_turns: 0,
+      subagents: [],
+      turn_series: [],
+      tools: [{ tool_name: "Read", calls: 1, result_chars: 400, median_s: 1, subagent_calls: 0 }],
+      compactions_at: [],
+      artifacts: [],
+      biggest_jumps: [],
+      attribution: {
+        turns: 427, attributed_turns: 17, cost_usd: 1.5, unattributed_cost_usd: 8.5,
+        plugins: [{ name: "superpowers", turns: 17, context_tokens: 1000,
+                    output_tokens: 50, cost_usd: 1.5, skills: 1 }],
+        skills: [{ name: "superpowers:brainstorming", turns: 17, context_tokens: 1000,
+                   output_tokens: 50, cost_usd: 1.5, plugin: "superpowers" }],
+        agents: [], mcp: [],
+      },
+      delegation: {
+        turns: 427, subagent_turns: 233, output_tokens: 183_669,
+        subagent_output_tokens: 29_263, tool_calls: 446, subagent_tool_calls: 245,
+      },
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    const dialog = within(screen.getByRole("dialog"));
+
+    expect(dialog.getByText("+720 / -179")).toBeInTheDocument();
+    expect(dialog.getByText("Files touched")).toBeInTheDocument();
+
+    // Attribution reaches the drawer now, so the Plugins tab answers "what
+    // did this session's tokens go to" rather than counting invocations.
+    fireEvent.click(dialog.getByRole("button", { name: /^Skills/ }));
+    expect(dialog.getByText("superpowers:brainstorming")).toBeInTheDocument();
+
+    // 233 of 427 turns ran inside a subagent — worth stating per session,
+    // not only for the whole window.
+    expect(dialog.getByText("Delegation")).toBeInTheDocument();
+    expect(dialog.getByLabelText(/^Turns: 55% delegated/)).toBeInTheDocument();
+  });
+
+  it("omits the delegation panel for a session that spawned nothing", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cold_turns: 0, subagents: [], turn_series: [], tools: [],
+      compactions_at: [], artifacts: [], biggest_jumps: [],
+      delegation: {
+        turns: 10, subagent_turns: 0, output_tokens: 100,
+        subagent_output_tokens: 0, tool_calls: 5, subagent_tool_calls: 0,
+      },
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    // Three bars all reading 0% say nothing; the panel stays away.
+    expect(within(screen.getByRole("dialog")).queryByText("Delegation")).not.toBeInTheDocument();
   });
 
   it("opens the session drawer from a row", async () => {
