@@ -36,7 +36,7 @@ import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import StatTile from "./StatTile";
-import UsagePanel from "./UsagePanel";
+import UsageCallout from "./UsageCallout";
 
 /** The `useChronicle` result, as App.tsx fetched it for the current window
  * and scope, plus a retry for the fetch-failure banner. Sync lives in the
@@ -239,7 +239,7 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <CounselPanel insights={insights} />
           </div>
 
-          <div className="chronicle__grid chronicle__grid--3">
+          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Where output went</h3>
               <p className="chr-panel__sub">Tokens the model wrote: thinking versus replies and tool calls.</p>
@@ -276,6 +276,26 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
               <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
             </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Turns by model</h3>
+              {/* The prompt count lives here, not on the Turns tile: the
+                  tile grid is full, and a prompt only means something
+                  next to the turns it spawned. */}
+              <p className="chr-panel__sub">
+                {formatTokens(totals.turns)} turns from {formatTokens(totals.prompts)} prompts
+                {totals.prompts > 0 && ` · about ${Math.round(totals.turns / totals.prompts)} turns per prompt`}
+              </p>
+              <BarList
+                rows={(summary?.by_model ?? []).map((m) => ({
+                  label: shortModel(m.model),
+                  detail: `${m.model} · ${m.sessions} sessions · ${formatTokens(m.output_tokens)} output · ${m.cost_usd === null ? "unpriced" : formatUsd(m.cost_usd)}`,
+                  value: m.turns,
+                }))}
+                format={formatTokens}
+                title="Turns by model"
+                hue="--chr-turns"
+              />
+            </section>
           </div>
 
           <div className="chronicle__grid chronicle__grid--4">
@@ -301,62 +321,12 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             </section>
           </div>
 
-          <div className="chronicle__grid chronicle__grid--4">
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Turns by model</h3>
-              {/* The prompt count lives here, not on the Turns tile: the
-                  tile grid is full, and a prompt only means something
-                  next to the turns it spawned. */}
-              <p className="chr-panel__sub">
-                {formatTokens(totals.turns)} turns from {formatTokens(totals.prompts)} prompts
-                {totals.prompts > 0 && ` · about ${Math.round(totals.turns / totals.prompts)} turns per prompt`}
-              </p>
-              <BarList
-                rows={(summary?.by_model ?? []).map((m) => ({
-                  label: shortModel(m.model),
-                  detail: `${m.model} · ${m.sessions} sessions · ${formatTokens(m.output_tokens)} output · ${m.cost_usd === null ? "unpriced" : formatUsd(m.cost_usd)}`,
-                  value: m.turns,
-                }))}
-                format={formatTokens}
-                title="Turns by model"
-                hue="--chr-turns"
-              />
-            </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Tool calls</h3>
-              <BarList
-                rows={(summary?.tools ?? []).slice(0, 10).map((t) => ({
-                  label: t.tool_name,
-                  detail: `${t.calls} calls across ${t.sessions ?? "?"} sessions`,
-                  value: t.calls,
-                }))}
-                format={formatTokens}
-                title="Tool calls"
-                hue="--chr-tools"
-              />
-            </section>
-            <UsagePanel
-              title="MCP"
-              subtitle={`${summary?.mcp?.calls ?? 0} calls across ${summary?.mcp?.sessions ?? 0} sessions — by server.`}
-              rows={(summary?.mcp?.servers ?? []).slice(0, 10).map((s) => ({
-                label: s.server,
-                detail: `${s.provenance} · ${s.tools} tools · ${s.calls} calls`,
-                value: s.calls,
-              }))}
-              hue="--chr-tools"
-              emptyHint="No MCP calls in this window."
-            />
-            <UsagePanel
-              title="Plugins"
-              subtitle="Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are also counted in the MCP panel."
-              rows={(summary?.plugins?.items ?? []).slice(0, 10).map((p) => ({
-                label: `${p.plugin} · ${p.kind}`,
-                detail: `${p.calls} calls across ${p.sessions ?? "?"} sessions`,
-                value: p.calls,
-              }))}
-              hue="--chr-peak"
-              emptyHint="No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill."
-            />
+          {/* One box, three grains — see UsageCallout. Full width because
+              these lists are the only place on the page where the LABEL is
+              the datum, and a quarter-width panel clipped `claude_ai_Notion`
+              to `claude_ai_N…`. */}
+          <div className="chronicle__grid chronicle__grid--wide">
+            <UsageCallout tools={summary?.tools} mcp={summary?.mcp} plugins={summary?.plugins} />
           </div>
 
           <div className="chronicle__grid chronicle__grid--wide">

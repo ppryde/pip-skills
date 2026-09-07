@@ -173,12 +173,18 @@ afterEach(() => {
 const COLUMN_INDEX_SUBAGENTS = 2 + 5;
 
 describe("<ChroniclePage/>", () => {
-  it("renders the MCP and plugin panels from the summary", async () => {
+  it("puts tools, MCP and plugins behind one usage callout", async () => {
     render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
-    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Plugins" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Usage breakdown" })).toBeInTheDocument();
+    // Tools first; the other two are a click away, and full width means the
+    // server name arrives whole rather than clipped.
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^MCP/ }));
     expect(screen.getByText("plugin_playwright_playwright")).toBeInTheDocument();
-    // A plugin's MCP calls appear in BOTH panels — the deliberate overlap.
+
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
+    // A plugin's MCP calls are counted on BOTH tabs — the deliberate overlap.
     expect(screen.getByText("playwright · mcp")).toBeInTheDocument();
     expect(screen.getByText("tribunal · skill")).toBeInTheDocument();
   });
@@ -353,7 +359,7 @@ describe("<ChroniclePage/>", () => {
     expect(activity.getByRole("button", { name: "Live" })).toBeDisabled();
   });
 
-  it("renders the MCP and plugin panels in the session drawer", async () => {
+  it("renders the usage callout in the session drawer", async () => {
     mocked.getChronicleSession.mockResolvedValue({
       ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
       cold_turns: 0,
@@ -385,10 +391,13 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
 
-    // Scoped to the dialog: the page behind it carries panels of the same name.
+    // Scoped to the dialog: the page behind it carries a callout of its own.
     const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: /^MCP/ }));
     expect(dialog.getByText("plugin_linear_linear")).toBeInTheDocument();
     expect(dialog.getByText("claude_ai_Notion")).toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole("button", { name: /^Plugins/ }));
     expect(dialog.getByText("overseer · skill")).toBeInTheDocument();
   });
 

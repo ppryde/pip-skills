@@ -20,11 +20,11 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import ArtifactList from "./ArtifactList";
-import { BarList, LineChart } from "./ChronicleCharts";
+import { LineChart } from "./ChronicleCharts";
 import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
-import UsagePanel from "./UsagePanel";
+import UsageCallout from "./UsageCallout";
 
 export interface SessionDrawerProps {
   sessionId: string | null;
@@ -230,36 +230,14 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
               </section>
             )}
 
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Tools</h3>
-              <BarList
-                rows={detail.tools.slice(0, 12).map((t) => ({ label: t.tool_name, value: t.calls }))}
-                format={(n) => String(n)}
-                title="Tool calls in this session"
-                hue="--chr-tools"
-              />
-            </section>
-
-            <UsagePanel
-              title="MCP"
-              subtitle={`${detail.mcp?.calls ?? 0} calls in this session — by server.`}
-              rows={(detail.mcp?.servers ?? []).map((s) => ({
-                label: s.server,
-                detail: `${s.provenance} · ${s.tools} tools`,
-                value: s.calls,
-              }))}
-              hue="--chr-tools"
-              emptyHint="No MCP calls in this session."
-            />
-            <UsagePanel
-              title="Plugins"
-              subtitle="Plugin MCP servers and plugin skills used in this session."
-              rows={(detail.plugins?.items ?? []).map((p) => ({
-                label: `${p.plugin} · ${p.kind}`,
-                value: p.calls,
-              }))}
-              hue="--chr-peak"
-              emptyHint="No plugin usage recorded. Older sessions need a `chronicle sync --full` to backfill."
+            {/* Same one-box treatment as the page: the drawer is narrower
+                still, so three separate lists clipped their labels worst of
+                all here. */}
+            <UsageCallout
+              tools={detail.tools}
+              mcp={detail.mcp}
+              plugins={detail.plugins}
+              perSession
             />
 
             {detail.subagents.length > 0 && (
