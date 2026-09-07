@@ -111,6 +111,22 @@ function summary(): ChronicleSummary {
     by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
+    mcp: {
+      calls: 4, sessions: 1, result_chars: 900,
+      by_provenance: { plugin: 2, connector: 1, local: 1 },
+      servers: [
+        { server: "plugin_playwright_playwright", provenance: "plugin", tools: 1, calls: 2, sessions: 1, result_chars: 500 },
+        { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, sessions: 1, result_chars: 400 },
+      ],
+      tools: [],
+    },
+    plugins: {
+      calls: 3, sessions: 1,
+      items: [
+        { plugin: "playwright", kind: "mcp", calls: 2, sessions: 1 },
+        { plugin: "tribunal", kind: "skill", calls: 1, sessions: 1 },
+      ],
+    },
     artifacts: [
       // A distinct session_title: the list echoes it as a button, and the
       // tests below look "Fix the widget" up by text.
@@ -157,6 +173,16 @@ afterEach(() => {
 const COLUMN_INDEX_SUBAGENTS = 2 + 5;
 
 describe("<ChroniclePage/>", () => {
+  it("renders the MCP and plugin panels from the summary", async () => {
+    render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
+    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Plugins" })).toBeInTheDocument();
+    expect(screen.getByText("plugin_playwright_playwright")).toBeInTheDocument();
+    // A plugin's MCP calls appear in BOTH panels — the deliberate overlap.
+    expect(screen.getByText("playwright · mcp")).toBeInTheDocument();
+    expect(screen.getByText("tribunal · skill")).toBeInTheDocument();
+  });
+
   it("renders tiles, charts and the session table from the summary", async () => {
     render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());

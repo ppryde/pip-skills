@@ -36,6 +36,7 @@ import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import StatTile from "./StatTile";
+import UsagePanel from "./UsagePanel";
 
 /** The `useChronicle` result, as App.tsx fetched it for the current window
  * and scope, plus a retry for the fetch-failure banner. Sync lives in the
@@ -197,6 +198,8 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Turns" value={formatTokens(totals.turns)} hue="--chr-turns" />
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
+            <StatTile label="MCP calls" value={formatTokens(summary?.mcp?.calls ?? 0)} hue="--chr-tools" />
+            <StatTile label="Plugin calls" value={formatTokens(summary?.plugins?.calls ?? 0)} hue="--chr-peak" />
             <StatTile
               label="Ctx processed"
               value={formatTokens(totals.input_tokens + totals.cache_read_tokens + totals.cache_creation_tokens)}
@@ -317,6 +320,28 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                 hue="--chr-tools"
               />
             </section>
+            <UsagePanel
+              title="MCP"
+              subtitle={`${summary?.mcp?.calls ?? 0} calls across ${summary?.mcp?.sessions ?? 0} sessions — by server.`}
+              rows={(summary?.mcp?.servers ?? []).slice(0, 10).map((s) => ({
+                label: s.server,
+                detail: `${s.provenance} · ${s.tools} tools · ${s.calls} calls`,
+                value: s.calls,
+              }))}
+              hue="--chr-tools"
+              emptyHint="No MCP calls in this window."
+            />
+            <UsagePanel
+              title="Plugins"
+              subtitle="Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are also counted in the MCP panel."
+              rows={(summary?.plugins?.items ?? []).slice(0, 10).map((p) => ({
+                label: `${p.plugin} · ${p.kind}`,
+                detail: `${p.calls} calls across ${p.sessions ?? "?"} sessions`,
+                value: p.calls,
+              }))}
+              hue="--chr-peak"
+              emptyHint="No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill."
+            />
             <section className="chr-panel chr-panel--wide" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Artifacts</h3>
               <p className="chr-panel__sub">Pages published from these sessions, newest first.</p>
