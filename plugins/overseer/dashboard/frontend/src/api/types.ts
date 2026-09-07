@@ -449,6 +449,27 @@ export interface ChroniclePluginItem extends ChronicleUsage {
   kind: string;
 }
 
+export interface ChronicleFileChurn {
+  file_path: string;
+  edits: number;
+  lines_added: number;
+  lines_removed: number;
+  /** "edit" | "create" | "update", deduplicated. */
+  operations: string[];
+  sessions: number;
+}
+
+/** Editing DONE, not lines surviving in the repo: ten edits to one line are
+ * ten edits, and a later revert still counts. For "what shipped", git is the
+ * truthful source. */
+export interface ChronicleChurn {
+  lines_added: number;
+  lines_removed: number;
+  files: number;
+  edits: number;
+  files_by_churn: ChronicleFileChurn[];
+}
+
 export interface ChroniclePlugins {
   calls: number;
   items: ChroniclePluginItem[];
@@ -511,6 +532,7 @@ export interface ChronicleSummary {
   tools?: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
   shape?: ChronicleShape;
   artifacts?: ChronicleArtifact[];
 }
@@ -609,6 +631,7 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
   tools: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
   compactions_at: number[];
   artifacts: ChronicleArtifact[];
   biggest_jumps: ChronicleJump[];

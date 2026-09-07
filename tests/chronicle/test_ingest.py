@@ -579,3 +579,53 @@ class TestQualifierColumn:
 
         assert conn.execute(
             "SELECT result_chars FROM tool_calls WHERE session_id = 's1'").fetchone()[0] == 40
+
+
+class TestFileEdits:
+    def _patch_result(self, uuid, ts, tool_use_id, path, added, removed, kind=None):
+        tur = {"filePath": path, "structuredPatch": [
+            {"lines": ["+x"] * added + ["-y"] * removed}]}
+        if kind:
+            tur["type"] = kind
+        return {
+            "type": "user", "uuid": uuid, "sessionId": "s1", "timestamp": ts,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}]},
+            "toolUseResult": tur,
+        }
+
+    def test_churn_is_stored_and_rolled_up(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit", "Edit", "Write"])
+        b.raw(self._patch_result("r1", T1, "m1-tool0", "/repo/a.py", 10, 2))
+        b.raw(self._patch_result("r2", T1, "m1-tool1", "/repo/a.py", 5, 1))
+        b.raw(self._patch_result("r3", T1, "m1-tool2", "/repo/new.py", 40, 0, kind="create"))
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        rows = conn.execute(
+            "SELECT file_path, operation, lines_added, lines_removed FROM file_edits "
+            "WHERE session_id = 's1' ORDER BY file_path, lines_added DESC"
+        ).fetchall()
+        assert [tuple(r) for r in rows] == [
+            ("/repo/a.py", "edit", 10, 2),
+            ("/repo/a.py", "edit", 5, 1),
+            ("/repo/new.py", "create", 40, 0),
+        ]
+        session = _session(conn)
+        assert session["lines_added"] == 55
+        assert session["lines_removed"] == 3
+        assert session["files_touched"] == 2   # a.py counted once, not twice
+
+    def test_a_reingest_does_not_double_count(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit"])
+        b.raw(self._patch_result("r1", T1, "m1-tool0", "/repo/a.py", 7, 3))
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        ingest.sync(conn, projects, full=True)
+        assert conn.execute("SELECT COUNT(*) FROM file_edits").fetchone()[0] == 1
+        assert _session(conn)["lines_added"] == 7

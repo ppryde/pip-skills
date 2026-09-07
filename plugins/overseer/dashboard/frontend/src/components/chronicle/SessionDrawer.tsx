@@ -237,6 +237,7 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
               tools={detail.tools}
               mcp={detail.mcp}
               plugins={detail.plugins}
+              churn={detail.churn}
               perSession
             />
 

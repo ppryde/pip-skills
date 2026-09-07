@@ -19,6 +19,9 @@ Tables (see ``_SCHEMA``):
 - ``tool_calls`` one row per ``tool_use`` block, with the size and time of its
                  ``tool_result`` once that lands (the result is what grows the
                  next turn's context — see ``report.biggest_turns``).
+- ``file_edits`` one row per file change, with the added/removed line counts
+                 taken from the diff the transcript carries (counts only —
+                 never the diff content).
 - ``artifacts``  one row per Artifact publish (title, description, favicon,
                  published URL parsed from the tool result).
 - ``events``     prompts, compactions and turn durations, keyed by record uuid
@@ -88,6 +91,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     cold_turns            INTEGER NOT NULL DEFAULT 0,
     artifacts             INTEGER NOT NULL DEFAULT 0,
     subagents             INTEGER NOT NULL DEFAULT 0,
+    lines_added           INTEGER NOT NULL DEFAULT 0,
+    lines_removed         INTEGER NOT NULL DEFAULT 0,
+    files_touched         INTEGER NOT NULL DEFAULT 0,
     active_ms             INTEGER NOT NULL DEFAULT 0,
     models                TEXT NOT NULL DEFAULT '[]'
 );
@@ -145,6 +151,26 @@ CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_name ON tool_calls(tool_name);
 
+-- One row per file change, from the unified diff Claude Code writes with
+-- every Edit/Write result. Counts only: the diff CONTENT is deliberately not
+-- kept, so the store stays a facts table rather than a second copy of the
+-- source. Note this measures editing DONE, not lines surviving in the repo —
+-- ten edits to one line are ten rows, and a later revert still counts. For
+-- "what shipped", git is the truthful source.
+CREATE TABLE IF NOT EXISTS file_edits (
+    session_id    TEXT NOT NULL,
+    tool_use_id   TEXT NOT NULL,
+    agent_id      TEXT NOT NULL DEFAULT '',
+    ts            REAL,
+    file_path     TEXT NOT NULL,
+    operation     TEXT NOT NULL DEFAULT 'edit',
+    lines_added   INTEGER NOT NULL DEFAULT 0,
+    lines_removed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, tool_use_id)
+);
+CREATE INDEX IF NOT EXISTS file_edits_session ON file_edits(session_id);
+CREATE INDEX IF NOT EXISTS file_edits_path ON file_edits(file_path);
+
 CREATE TABLE IF NOT EXISTS events (
     session_id TEXT NOT NULL,
     uuid       TEXT NOT NULL,
@@ -186,6 +212,10 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # plugin-qualified name, an Agent's subagent type. Backfilled by
     # `chronicle sync --full`, which re-reads every transcript from byte 0.
     ("tool_calls", "qualifier", "TEXT"),
+    # Churn rollup, recomputed from `file_edits` by ingest.rollup.
+    ("sessions", "lines_added", "INTEGER NOT NULL DEFAULT 0"),
+    ("sessions", "lines_removed", "INTEGER NOT NULL DEFAULT 0"),
+    ("sessions", "files_touched", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

@@ -201,6 +201,12 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <StatTile label="MCP calls" value={formatTokens(summary?.mcp?.calls ?? 0)} hue="--chr-tools" />
             <StatTile label="Plugin calls" value={formatTokens(summary?.plugins?.calls ?? 0)} hue="--chr-peak" />
             <StatTile
+              label="Lines changed"
+              value={`+${formatTokens(summary?.churn?.lines_added ?? 0)} / -${formatTokens(summary?.churn?.lines_removed ?? 0)}`}
+              note={`${formatTokens(summary?.churn?.files ?? 0)} files`}
+              hue="--chr-cache"
+            />
+            <StatTile
               label="Ctx processed"
               value={formatTokens(totals.input_tokens + totals.cache_read_tokens + totals.cache_creation_tokens)}
             />
@@ -326,7 +332,12 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               the datum, and a quarter-width panel clipped `claude_ai_Notion`
               to `claude_ai_N…`. */}
           <div className="chronicle__grid chronicle__grid--wide">
-            <UsageCallout tools={summary?.tools} mcp={summary?.mcp} plugins={summary?.plugins} />
+            <UsageCallout
+              tools={summary?.tools}
+              mcp={summary?.mcp}
+              plugins={summary?.plugins}
+              churn={summary?.churn}
+            />
           </div>
 
           <div className="chronicle__grid chronicle__grid--wide">

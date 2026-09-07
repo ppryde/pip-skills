@@ -496,3 +496,68 @@ class TestClassify:
     def test_ordinary_tool_is_neither(self):
         c = report.classify("Bash", None)
         assert c.mcp is None and c.plugin is None and c.skill is None
+
+
+class TestChurn:
+    """Per-file churn, from the diffs the transcripts carry."""
+
+    def _edit(self, uuid, ts, tool_use_id, path, added, removed, kind=None):
+        tur = {"filePath": path,
+               "structuredPatch": [{"lines": ["+x"] * added + ["-y"] * removed}]}
+        if kind:
+            tur["type"] = kind
+        return {
+            "type": "user", "uuid": uuid, "sessionId": "s1", "timestamp": ts,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}]},
+            "toolUseResult": tur,
+        }
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit", "Edit", "Write"])
+        b.raw(self._edit("r1", T0, "m1-tool0", "/repo/hot.py", 30, 5))
+        b.raw(self._edit("r2", T0, "m1-tool1", "/repo/hot.py", 20, 5))
+        b.raw(self._edit("r3", T0, "m1-tool2", "/repo/new.py", 12, 0, kind="create"))
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_summary_churn_totals_and_hottest_files(self, projects):
+        churn = report.summary(self._seed(projects))["churn"]
+        assert churn["lines_added"] == 62
+        assert churn["lines_removed"] == 10
+        assert churn["files"] == 2
+        assert churn["edits"] == 3
+        # Hottest first, and the two edits to hot.py are ONE file row.
+        assert [(f["file_path"], f["edits"], f["lines_added"], f["lines_removed"])
+                for f in churn["files_by_churn"]] == [
+            ("/repo/hot.py", 2, 50, 10),
+            ("/repo/new.py", 1, 12, 0),
+        ]
+
+    def test_churn_respects_the_repo_filter(self, projects):
+        conn = self._seed(projects)
+        assert report.summary(conn, repo_root="/repo/a")["churn"]["lines_added"] == 62
+        assert report.summary(conn, repo_root="/repo/b")["churn"]["lines_added"] == 0
+
+    def test_session_detail_lists_the_files_it_touched(self, projects):
+        detail = report.session_detail(self._seed(projects), "s1")
+        assert detail["churn"]["lines_added"] == 62
+        assert [f["file_path"] for f in detail["churn"]["files_by_churn"]] == [
+            "/repo/hot.py", "/repo/new.py"]
+        assert detail["churn"]["files_by_churn"][1]["operations"] == ["create"]
+
+    def test_a_store_without_the_table_reports_no_churn(self, projects):
+        """Same read-only migration trap as `qualifier`: the report verbs open
+        the store before `_migrate` could add anything."""
+        conn = self._seed(projects)
+        conn.execute("DROP TABLE file_edits")
+        conn.commit()
+        assert report.summary(conn)["churn"] == {
+            "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": []}
+        assert report.session_detail(conn, "s1")["churn"]["files_by_churn"] == []

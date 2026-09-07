@@ -1,16 +1,17 @@
 import { useState } from "react";
 
 import { formatBytes, formatDuration, formatTokens } from "../../board/chronicle/format";
-import type { ChronicleMcp, ChroniclePlugins, ChronicleTool } from "../../api/types";
+import type { ChronicleChurn, ChronicleMcp, ChroniclePlugins, ChronicleTool } from "../../api/types";
 import { Button } from "../../ui";
 import { BarList } from "./ChronicleCharts";
 
-type View = "tools" | "mcp" | "plugins";
+type View = "tools" | "mcp" | "plugins" | "files";
 
 interface UsageCalloutProps {
   tools?: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
   /** Per-session copy drops the "across N sessions" clauses, which would all
    * read "across 1 sessions" in the drawer. */
   perSession?: boolean;
@@ -37,7 +38,7 @@ interface Row {
  * question at three grains, so they are read one at a time and compared
  * against each other, never scanned together.
  */
-export default function UsageCallout({ tools, mcp, plugins, perSession }: UsageCalloutProps) {
+export default function UsageCallout({ tools, mcp, plugins, churn, perSession }: UsageCalloutProps) {
   const [view, setView] = useState<View>("tools");
 
   const sessionsOf = (n: number | undefined) =>
@@ -81,6 +82,17 @@ export default function UsageCallout({ tools, mcp, plugins, perSession }: UsageC
     value: p.calls,
   }));
 
+  // Ranked by total churn, so the file that moved most is first — the value
+  // is added+removed, since a big deletion is as much editing as a big
+  // addition.
+  const fileRows: Row[] = (churn?.files_by_churn ?? []).map((f) => ({
+    label: f.file_path.split("/").slice(-2).join("/"),
+    detail: `${f.file_path} — ${f.edits} edits · +${f.lines_added} / -${f.lines_removed}`
+      + (f.operations.includes("create") ? " · created here" : "")
+      + sessionsOf(f.sessions),
+    value: f.lines_added + f.lines_removed,
+  }));
+
   const provenance = mcp?.by_provenance ?? {};
   const provenanceNote = ["plugin", "connector", "local"]
     .filter((k) => provenance[k])
@@ -118,6 +130,19 @@ export default function UsageCallout({ tools, mcp, plugins, perSession }: UsageC
       // Names the overlap rather than letting the two tabs look inconsistent.
       sub: "Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are counted on the MCP tab too.",
       empty: "No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill.",
+    },
+    {
+      key: "files",
+      label: "Files",
+      count: churn?.files ?? 0,
+      rows: fileRows,
+      hue: "--chr-cache",
+      sub: churn
+        ? `+${churn.lines_added.toLocaleString()} / -${churn.lines_removed.toLocaleString()} across `
+          + `${churn.edits.toLocaleString()} edits. Editing done, not lines surviving — a reverted `
+          + `change still counts, so git is the source for what shipped.`
+        : "Files changed, ranked by how much moved.",
+      empty: "No file changes recorded. Historical sessions need a `chronicle sync --full` to backfill.",
     },
   ];
 

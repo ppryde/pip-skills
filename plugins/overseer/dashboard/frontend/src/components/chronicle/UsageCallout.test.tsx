@@ -24,7 +24,45 @@ const PLUGINS = {
   ],
 };
 
+const CHURN = {
+  lines_added: 5951, lines_removed: 2542, files: 2, edits: 472,
+  files_by_churn: [
+    { file_path: "/repos/pip-skills/src/styles.css", edits: 472,
+      lines_added: 5951, lines_removed: 2542, operations: ["edit"], sessions: 9 },
+    { file_path: "/repos/pip-skills/src/New.tsx", edits: 1,
+      lines_added: 40, lines_removed: 0, operations: ["create"], sessions: 1 },
+  ],
+};
+
 describe("<UsageCallout/>", () => {
+  it("ranks files by how much moved, and keeps the full path in the detail", () => {
+    const { container } = render(<UsageCallout tools={TOOLS} churn={CHURN} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
+    // Label is trimmed to the last two segments so a deep path stays legible;
+    // the full path lives in the hover detail rather than being lost.
+    expect(screen.getByText("src/styles.css")).toBeInTheDocument();
+    const row = container.querySelector(".chr-barlist__row") as HTMLElement;
+    expect(row.title).toContain("/repos/pip-skills/src/styles.css");
+    expect(row.title).toContain("472 edits");
+    expect(row.title).toContain("+5951 / -2542");
+  });
+
+  it("marks a file the session created rather than edited", () => {
+    const { container } = render(<UsageCallout tools={TOOLS} churn={CHURN} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
+    const rows = container.querySelectorAll(".chr-barlist__row");
+    expect((rows[1] as HTMLElement).title).toContain("created here");
+    expect((rows[0] as HTMLElement).title).not.toContain("created here");
+  });
+
+  it("says churn is editing done, not what shipped", () => {
+    render(<UsageCallout tools={TOOLS} churn={CHURN} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Files/ }));
+    // The measure is easy to misread as "lines of code written", so the
+    // caveat sits on the tab itself rather than in a doc nobody opens.
+    expect(screen.getByText(/git is the source for what shipped/)).toBeInTheDocument();
+  });
+
   it("shows tool calls first, with MCP and plugins a click away", () => {
     render(<UsageCallout tools={TOOLS} mcp={MCP} plugins={PLUGINS} />);
     const group = screen.getByRole("group", { name: "Usage breakdown" });

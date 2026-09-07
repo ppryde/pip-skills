@@ -83,6 +83,18 @@ class ArtifactUse:
 
 
 @dataclass
+class FileEdit:
+    """One file change, from the unified diff Claude Code writes alongside
+    every Edit/Write result (`toolUseResult.structuredPatch`)."""
+    tool_use_id: str
+    file_path: str
+    operation: str  # "edit" | "create" | "update"
+    lines_added: int = 0
+    lines_removed: int = 0
+    ts: float | None = None
+
+
+@dataclass
 class ToolResult:
     tool_use_id: str
     chars: int
@@ -116,6 +128,8 @@ class Facts:
     # tool_result blocks seen, by tool_use_id (results usually follow their
     # call within the same file, but may land in a later ingest).
     results: dict[str, ToolResult] = field(default_factory=dict)
+    # File changes seen, by tool_use_id (see `_file_edit`).
+    file_edits: dict[str, FileEdit] = field(default_factory=dict)
     lines: int = 0
 
 
@@ -287,11 +301,56 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
         url = artifact_url(text)
         facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
                                             artifact_url=url)
+        edit = _file_edit(tool_id, record.get("toolUseResult"), ts)
+        if edit is not None:
+            facts.file_edits[tool_id] = edit
         if url:
             for turn in facts.turns.values():
                 artifact = turn.artifacts.get(tool_id)
                 if artifact is not None:
                     artifact.url = url
+
+
+# Diff lines that are not changes: the ---/+++ file headers a unified diff
+# opens with, and git's marker for a missing trailing newline. Counting them
+# would inflate every file's churn by a constant.
+_DIFF_HEADERS = ("---", "+++", "\\")
+
+
+def _file_edit(tool_id: str, raw: Any, ts: float | None) -> FileEdit | None:
+    """The file change carried by one `toolUseResult`, or None if it carries
+    no diff (a Bash result, a Read, a tool that touched nothing).
+
+    Both Edit and Write produce a `structuredPatch`; `type` distinguishes a
+    creation from an in-place change. Counting the +/- lines of the hunks is
+    the whole measurement — the diff CONTENT is deliberately not kept, so the
+    store stays counts and ids rather than a second copy of the source.
+    """
+    if not isinstance(raw, dict):
+        return None
+    patch = raw.get("structuredPatch")
+    file_path = _opt_str(raw.get("filePath"))
+    if not isinstance(patch, list) or not file_path:
+        return None
+    added = removed = 0
+    for hunk in patch:
+        if not isinstance(hunk, dict):
+            continue
+        for line in hunk.get("lines") or []:
+            if not isinstance(line, str) or line.startswith(_DIFF_HEADERS):
+                continue
+            if line.startswith("+"):
+                added += 1
+            elif line.startswith("-"):
+                removed += 1
+    return FileEdit(
+        tool_use_id=tool_id,
+        file_path=file_path,
+        operation=_opt_str(raw.get("type")) or "edit",
+        lines_added=added,
+        lines_removed=removed,
+        ts=ts,
+    )
 
 
 def artifact_url(text: str) -> str | None:

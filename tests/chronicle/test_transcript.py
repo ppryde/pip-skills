@@ -194,3 +194,57 @@ class TestQualifier:
              "input": {"command": "ls -la /secret"}},
         ])))
         assert facts.turns[("", "m1")].tool_uses == [("t1", "Bash", None)]
+
+
+class TestFileEdits:
+    """Claude Code writes a real unified diff on every edit result
+    (`toolUseResult.structuredPatch`). The fold kept only its length."""
+
+    def _result(self, tool_id, patch, *, file_path="/repo/a.py", kind=None):
+        tur = {"filePath": file_path, "structuredPatch": patch}
+        if kind:
+            tur["type"] = kind
+        return {
+            "type": "user", "uuid": f"u-{tool_id}", "sessionId": "s1",
+            "timestamp": T0,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_id, "content": "ok"}]},
+            "toolUseResult": tur,
+        }
+
+    def test_counts_added_and_removed_lines_from_the_patch(self):
+        facts = fold(_lines(self._result("t1", [
+            {"oldStart": 1, "oldLines": 3, "newStart": 1, "newLines": 4,
+             "lines": [" keep", "-gone", "+new", "+also new"]},
+            {"oldStart": 20, "oldLines": 1, "newStart": 21, "newLines": 1,
+             "lines": ["-old", "+fresh"]},
+        ])))
+        edit = facts.file_edits["t1"]
+        assert edit.file_path == "/repo/a.py"
+        assert (edit.lines_added, edit.lines_removed) == (3, 2)
+        assert edit.operation == "edit"
+
+    def test_a_diff_marker_line_is_not_counted_as_a_change(self):
+        # `---`/`+++` headers and the `\ No newline` marker must not inflate
+        # the count; only real +/- content lines are changes.
+        facts = fold(_lines(self._result("t1", [
+            {"lines": ["--- a/x", "+++ b/x", "+real", "-gone",
+                       "\\ No newline at end of file"]},
+        ])))
+        edit = facts.file_edits["t1"]
+        assert (edit.lines_added, edit.lines_removed) == (1, 1)
+
+    def test_a_write_records_its_operation(self):
+        facts = fold(_lines(self._result("t1", [
+            {"lines": ["+one", "+two"]}], file_path="/repo/new.py", kind="create")))
+        assert facts.file_edits["t1"].operation == "create"
+
+    def test_a_result_without_a_patch_records_no_file_edit(self):
+        facts = fold(_lines({
+            "type": "user", "uuid": "u1", "sessionId": "s1", "timestamp": T0,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+            "toolUseResult": {"stdout": "hi", "stderr": ""},
+        }))
+        assert facts.file_edits == {}
+        assert facts.results["t1"].chars == 2   # still measured as before

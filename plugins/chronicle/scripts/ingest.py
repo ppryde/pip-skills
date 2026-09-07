@@ -229,6 +229,17 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         "WHERE session_id = ? AND tool_use_id = ?",
         [(r.chars, r.ts, session_id, r.tool_use_id) for r in facts.results.values()],
     )
+    # Keyed by tool_use_id like every other fact table, so a re-read of the
+    # same transcript converges rather than double-counting the churn.
+    conn.executemany(
+        """INSERT OR REPLACE INTO file_edits(session_id, tool_use_id, agent_id, ts, file_path,
+               operation, lines_added, lines_removed) VALUES (?,?,?,?,?,?,?,?)""",
+        [
+            (session_id, e.tool_use_id, MAIN_AGENT, e.ts, e.file_path, e.operation,
+             e.lines_added, e.lines_removed)
+            for e in facts.file_edits.values()
+        ],
+    )
     conn.executemany(
         """INSERT OR REPLACE INTO artifacts(session_id, tool_use_id, agent_id, ts, url, title,
                description, favicon, redeploy) VALUES (?,?,?,?,?,?,?,?,?)""",
@@ -406,6 +417,12 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         "SELECT COUNT(DISTINCT COALESCE(url, tool_use_id)) FROM artifacts WHERE session_id = ?",
         (session_id,),
     ).fetchone()[0]
+    churn = conn.execute(
+        """SELECT COALESCE(SUM(lines_added), 0), COALESCE(SUM(lines_removed), 0),
+                  COUNT(DISTINCT file_path)
+           FROM file_edits WHERE session_id = ?""",
+        (session_id,),
+    ).fetchone()
     prompts = conn.execute(
         "SELECT COUNT(*) FROM events WHERE session_id = ? AND kind = 'prompt' AND agent_id = ''",
         (session_id,),
@@ -438,9 +455,11 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         """UPDATE sessions SET turns=?, input_tokens=?, cache_read_tokens=?, cache_creation_tokens=?,
                output_tokens=?, thinking_tokens=?, tool_calls=?, subagents=?, peak_context_tokens=?,
                cold_turns=?, artifacts=?, prompts=?, compactions=?, active_ms=?, models=?,
+               lines_added=?, lines_removed=?, files_touched=?,
                transcript_bytes=?, updated_at=?
            WHERE session_id = ?""",
         (*totals, peak, cold, artifacts, prompts, compactions, active_ms, json.dumps(models),
+         int(churn[0]), int(churn[1]), int(churn[2]),
          size, now, session_id),
     )
 

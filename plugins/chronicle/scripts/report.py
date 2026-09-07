@@ -126,6 +126,66 @@ def _median(values: list[float]) -> float | None:
     return (values[mid - 1] + values[mid]) / 2
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Whether the store has `name` yet. The report verbs open the store
+    READ-ONLY, a path that returns before `_migrate` runs, so a store upgraded
+    but not yet synced can be missing a table this code names — see
+    `_qualifier_sql` for the same trap on a column."""
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone() is not None
+
+
+_EMPTY_CHURN: dict[str, Any] = {
+    "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
+}
+
+
+def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
+           limit: int = 50) -> dict[str, Any]:
+    """Lines added/removed and the files that moved most, from `file_edits`.
+
+    A measure of editing DONE, not of lines surviving in the repo: ten edits
+    to one line are ten edits, and a later revert still counts. For "what
+    shipped" git is the truthful source; this answers "how much editing
+    happened", which is a different question.
+    """
+    if not _has_table(conn, "file_edits"):
+        return dict(_EMPTY_CHURN)
+    join = f"FROM file_edits f JOIN sessions s ON s.session_id = f.session_id{where}"
+    total = conn.execute(
+        f"""SELECT COALESCE(SUM(f.lines_added), 0), COALESCE(SUM(f.lines_removed), 0),
+                   COUNT(DISTINCT f.file_path), COUNT(*) {join}""",
+        params,
+    ).fetchone()
+    files = [
+        {
+            "file_path": r["file_path"],
+            "edits": r["edits"],
+            "lines_added": r["lines_added"],
+            "lines_removed": r["lines_removed"],
+            "operations": sorted(set((r["operations"] or "").split(","))),
+            "sessions": r["sessions"],
+        }
+        for r in conn.execute(
+            f"""SELECT f.file_path AS file_path, COUNT(*) AS edits,
+                       SUM(f.lines_added) AS lines_added,
+                       SUM(f.lines_removed) AS lines_removed,
+                       GROUP_CONCAT(DISTINCT f.operation) AS operations,
+                       COUNT(DISTINCT f.session_id) AS sessions
+                {join}
+                GROUP BY f.file_path
+                ORDER BY SUM(f.lines_added + f.lines_removed) DESC, f.file_path
+                LIMIT {int(limit)}""",
+            params,
+        )
+    ]
+    return {
+        "lines_added": int(total[0]), "lines_removed": int(total[1]),
+        "files": int(total[2]), "edits": int(total[3]), "files_by_churn": files,
+    }
+
+
 def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
                   limit: int = 50) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Fold classified tool-call rows into the `tools`, `mcp` and `plugins`
@@ -454,6 +514,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
         )
     ]
 
+    detail["churn"] = _churn(conn, " WHERE f.session_id = ?", [session_id])
     detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
             f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
@@ -743,6 +804,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_day": by_day,
         "by_model": by_model,
         "tools": tools,
+        "churn": _churn(conn, where, params),
         "mcp": mcp_block,
         "plugins": plugins_block,
         "shape": shape,
