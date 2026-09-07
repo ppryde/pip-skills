@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ChronicleModel, ChronicleSession, ChronicleTotals } from "../../api/types";
 import type { InsightInputs } from "./insights";
-import { costPerPrompt, costPerTurnByModel, readWriteRatio, thinkingShare, windowFill, windowInsights } from "./insights";
+import {
+  costPerPrompt,
+  costPerTurnByModel,
+  delegationBalance,
+  readWriteRatio,
+  reworkShare,
+  thinkingShare,
+  windowFill,
+  windowInsights,
+} from "./insights";
 
 function totals(overrides: Partial<ChronicleTotals> = {}): ChronicleTotals {
   return {
@@ -237,8 +246,70 @@ describe("thinkingShare", () => {
 describe("windowInsights", () => {
   it("returns the page's counsel in display order, each with its levers", () => {
     const all = windowInsights(inputs());
-    expect(all.map((i) => i.id)).toEqual(["window-fill", "cost-per-turn", "cost-per-prompt", "thinking-share"]);
+    expect(all.map((i) => i.id)).toEqual([
+      "window-fill", "cost-per-turn", "cost-per-prompt", "thinking-share",
+      "rework-share", "delegation-balance",
+    ]);
     // Every banded insight offers levers; only the no-data model row goes without.
     expect(all.filter((i) => i.verdict !== "none").every((i) => (i.resolutions?.length ?? 0) > 0)).toBe(true);
+  });
+});
+
+describe("reworkShare", () => {
+  const churn = (added: number, removed: number, over = { files: 10, edits: 40, sessions: 5 }) => ({
+    lines_added: added, lines_removed: removed, files: over.files, edits: over.edits,
+    files_by_churn: [], sessions: over.sessions, output_tokens: 0, by_day: [],
+  });
+
+  it("reads a low removed/added ratio as building", () => {
+    const i = reworkShare({ churn: churn(1000, 50) });
+    expect(i.verdict).toBe("good");
+    expect(i.value).toBe("5%");
+  });
+
+  it("reads a high ratio as rewriting", () => {
+    const i = reworkShare({ churn: churn(1000, 700) });
+    expect(i.verdict).toBe("poor");
+    expect(i.verdictWord).toBe("rewriting");
+  });
+
+  it("has no reading without churn data", () => {
+    expect(reworkShare({ churn: undefined }).verdict).toBe("none");
+    expect(reworkShare({ churn: churn(0, 0) }).verdict).toBe("none");
+  });
+
+  it("names the files that absorbed the most rework", () => {
+    const i = reworkShare({
+      churn: {
+        ...churn(1000, 400),
+        files_by_churn: [
+          { file_path: "/r/styles.css", edits: 472, lines_added: 500, lines_removed: 300,
+            operations: ["edit"], sessions: 9 },
+        ],
+      },
+    });
+    expect(i.facts?.join(" ")).toMatch(/styles\.css/);
+  });
+});
+
+describe("delegationBalance", () => {
+  const d = (turnPct: number, outPct: number) => ({
+    turns: 1000, subagent_turns: turnPct * 10,
+    output_tokens: 1000, subagent_output_tokens: outPct * 10,
+    tool_calls: 1000, subagent_tool_calls: turnPct * 10,
+  });
+
+  it("names the gap between turns delegated and output produced", () => {
+    const i = delegationBalance({ delegation: d(60, 13) });
+    expect(i.value).toBe("60%");
+    expect(i.detail).toMatch(/13%/);
+  });
+
+  it("reads heavy delegation with little output as reading work", () => {
+    expect(delegationBalance({ delegation: d(60, 13) }).verdictWord).toMatch(/read|search|gather/i);
+  });
+
+  it("has no reading with no turns", () => {
+    expect(delegationBalance({ delegation: undefined }).verdict).toBe("none");
   });
 });

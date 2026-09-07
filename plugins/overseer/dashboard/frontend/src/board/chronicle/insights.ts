@@ -16,7 +16,14 @@
  * researched Sept 2026 — see scratch notes "context-levers-research". Where a
  * lever depends on a version-specific behaviour the body says so.
  */
-import type { ChronicleModel, ChronicleSession, ChronicleShape, ChronicleTotals } from "../../api/types";
+import type {
+  ChronicleChurn,
+  ChronicleDelegation,
+  ChronicleModel,
+  ChronicleSession,
+  ChronicleShape,
+  ChronicleTotals,
+} from "../../api/types";
 import { formatPct, formatTokens, formatUsd, sessionName, shortModel } from "./format";
 
 /** `info` is a figure with no band — worth knowing, not a judgement. */
@@ -99,6 +106,10 @@ export interface InsightInputs {
   models: ChronicleModel[];
   shape: ChronicleShape | null;
   sessions: ChronicleSession[];
+  /** Optional: absent on a store not yet resynced for churn/attribution, and
+   * the insights that need them return `none` rather than inventing a zero. */
+  churn?: ChronicleChurn;
+  delegation?: ChronicleDelegation;
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -457,7 +468,164 @@ export function thinkingShare({ totals: t, sessions }: InsightInputs): Insight {
   return { ...base, value, detail, facts, ...banded, resolutions: leversFor(THINKING_RESOLUTIONS, banded.verdict) };
 }
 
+/* --- rework ------------------------------------------------------------------ */
+
+/** Lines removed for every line added. Some undoing is what editing IS — a
+ * refactor deletes as it goes — so a low figure is not automatically better.
+ * Above HEAVY, though, most of the writing is replacing earlier writing, and
+ * that usually means the shape was settled at the keyboard rather than before
+ * it. Advisory bands, like every other here. */
+export const REWORK_LIGHT = 0.2;
+export const REWORK_HEAVY = 0.5;
+
+const REWORK_RESOLUTIONS: Resolution[] = [
+  {
+    title: "Settle the shape before the keyboard",
+    body: "Rework is cheapest as a paragraph. Brainstorming or a short design agreed up front costs a few hundred tokens; discovering the same thing through three rewrites costs the writing, the reading back, and the context both occupy for the rest of the session.",
+    from: "mixed",
+  },
+  {
+    title: "Look at what the churn concentrates on",
+    body: "One file absorbing most of the rework is usually a file doing too much, or one whose interface was never agreed. The Files tab of the usage breakdown ranks them.",
+    from: "mixed",
+  },
+  {
+    title: "Write the test first",
+    body: "A failing test fixes the shape before the implementation exists, so the first version is written against a decided interface rather than a guessed one.",
+    from: "poor",
+  },
+];
+
+export function reworkShare({ churn }: Pick<InsightInputs, "churn">): Insight {
+  const base = { id: "rework-share", title: "Rework" };
+  if (!churn || churn.lines_added <= 0) {
+    return {
+      ...base, value: "—", verdict: "none", verdictWord: "no data",
+      counsel: "No file changes recorded in this window. A `chronicle sync --full` backfills history that is still on disk.",
+    };
+  }
+  const share = churn.lines_removed / churn.lines_added;
+  const worst = [...churn.files_by_churn]
+    .filter((f) => f.lines_added > 0)
+    .sort((a, b) => b.lines_removed - a.lines_removed)[0];
+  const facts: string[] = [
+    `${formatTokens(churn.lines_added)} added, ${formatTokens(churn.lines_removed)} removed across ${plural(churn.files, "file")}.`,
+  ];
+  if (churn.files > 0) {
+    facts.push(`${(churn.edits / churn.files).toFixed(1)} edits per file on average.`);
+  }
+  if (worst) {
+    facts.push(`Most rework: ${worst.file_path.split("/").slice(-2).join("/")}, ${formatTokens(worst.lines_removed)} removed over ${plural(worst.edits, "edit")}.`);
+  }
+  const banded = bandByThreshold(share, REWORK_LIGHT, REWORK_HEAVY, [
+    {
+      verdict: "good",
+      verdictWord: "building",
+      counsel: "Most of the writing is new code rather than replacing earlier code — the shape is holding as you go.",
+    },
+    {
+      verdict: "mixed",
+      verdictWord: "iterating",
+      counsel: "A normal amount of undoing for real work: refactors delete as they go, and revisions are how a design lands.",
+    },
+    {
+      verdict: "poor",
+      verdictWord: "rewriting",
+      counsel: "More than half of what is written is replacing earlier writing. Rework is far cheaper agreed in a paragraph than discovered through three drafts.",
+    },
+  ]);
+  return {
+    ...base,
+    value: `${Math.round(share * 100)}%`,
+    detail: `${formatTokens(churn.lines_removed)} removed for every ${formatTokens(churn.lines_added)} added, over ${plural(churn.sessions, "session")} that changed a file`,
+    facts,
+    ...banded,
+    resolutions: leversFor(REWORK_RESOLUTIONS, banded.verdict),
+  };
+}
+
+/* --- delegation --------------------------------------------------------------- */
+
+/** The GAP between the share of turns a subagent runs and the share of output
+ * it writes. A subagent that reads, greps and reports back produces little
+ * prose for many turns — that is delegation working, and the gap is the proof
+ * of it. A narrow gap at high delegation means the subagents are doing the
+ * writing too, which is a different (and more expensive) arrangement. */
+export const DELEGATION_LIGHT = 0.2;
+export const DELEGATION_HEAVY = 0.5;
+
+const DELEGATION_RESOLUTIONS: Resolution[] = [
+  {
+    title: "Keep the sweeps delegated",
+    body: "A subagent reads in its own window and hands back a paragraph, so the searching never lands in the main context. That is the whole saving, and it shows up as many delegated turns producing little output.",
+    from: "good",
+  },
+  {
+    title: "Put the cheap work on a cheap model",
+    body: "Since Claude Code 2.1.198 a subagent inherits the main model unless told otherwise. CLAUDE_CODE_SUBAGENT_MODEL keeps the sweeps off the expensive one.",
+    from: "mixed",
+  },
+];
+
+export function delegationBalance({ delegation: d }: Pick<InsightInputs, "delegation">): Insight {
+  const base = { id: "delegation-balance", title: "Work delegated" };
+  if (!d || d.turns <= 0) {
+    return {
+      ...base, value: "—", verdict: "none", verdictWord: "no data",
+      counsel: "No turns in this window.",
+    };
+  }
+  const turnShare = d.subagent_turns / d.turns;
+  const outputShare = d.output_tokens > 0 ? d.subagent_output_tokens / d.output_tokens : 0;
+  const facts = [
+    `${formatTokens(d.subagent_turns)} of ${formatTokens(d.turns)} turns ran inside a subagent.`,
+    `${formatTokens(d.subagent_tool_calls)} of ${formatTokens(d.tool_calls)} tool calls were delegated.`,
+    `Subagents wrote ${formatTokens(d.subagent_output_tokens)} of ${formatTokens(d.output_tokens)} output tokens.`,
+  ];
+  // The gap matters more than the level: heavy delegation that writes little
+  // is the pattern paying off, so it must not read as a warning.
+  const gathering = turnShare >= DELEGATION_HEAVY && outputShare < turnShare / 2;
+  const banded: Band = gathering
+    ? {
+        verdict: "good",
+        verdictWord: "reading, not writing",
+        counsel: "Subagents run most of the turns but write little of the output — they are gathering in their own windows and reporting back, which is the arrangement that keeps the main context small.",
+      }
+    : bandByThreshold(turnShare, DELEGATION_LIGHT, DELEGATION_HEAVY, [
+        {
+          verdict: "info",
+          verdictWord: "mostly inline",
+          counsel: "Almost everything runs in the main window, so every file read stays in context for the rest of the session.",
+        },
+        {
+          verdict: "good",
+          verdictWord: "shared",
+          counsel: "A fair slice of the work runs in its own window and reports back.",
+        },
+        {
+          verdict: "mixed",
+          verdictWord: "writing too",
+          counsel: "Subagents run most of the turns AND write much of the output. That is a heavier arrangement than delegating the reading alone — worth checking the model they inherit.",
+        },
+      ]);
+  return {
+    ...base,
+    value: `${Math.round(turnShare * 100)}%`,
+    detail: `${Math.round(turnShare * 100)}% of turns, ${Math.round(outputShare * 100)}% of the output written`,
+    facts,
+    ...banded,
+    resolutions: leversFor(DELEGATION_RESOLUTIONS, banded.verdict),
+  };
+}
+
 /** The page's counsel, in display order. */
 export function windowInsights(inputs: InsightInputs): Insight[] {
-  return [windowFill(inputs), costPerTurnByModel(inputs), costPerPrompt(inputs), thinkingShare(inputs)];
+  return [
+    windowFill(inputs),
+    costPerTurnByModel(inputs),
+    costPerPrompt(inputs),
+    thinkingShare(inputs),
+    reworkShare(inputs),
+    delegationBalance(inputs),
+  ];
 }

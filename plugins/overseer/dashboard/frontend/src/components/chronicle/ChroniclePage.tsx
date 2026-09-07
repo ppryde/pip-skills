@@ -124,9 +124,16 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
   const insights = useMemo(
     () =>
       totals
-        ? windowInsights({ totals, models: summary?.by_model ?? [], shape: summary?.shape ?? null, sessions })
+        ? windowInsights({
+            totals,
+            models: summary?.by_model ?? [],
+            shape: summary?.shape ?? null,
+            sessions,
+            churn: summary?.churn,
+            delegation: summary?.delegation,
+          })
         : [],
-    [totals, summary?.by_model, summary?.shape, sessions]
+    [totals, summary?.by_model, summary?.shape, sessions, summary?.churn, summary?.delegation]
   );
   // More than one Claude account in this window? Then the drawer names each
   // session's; otherwise the chip would say the same thing on every one.
@@ -236,10 +243,16 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               hue="--chr-cache"
             />
             <StatTile
-              label="Lines changed"
-              value={`+${formatTokens(summary?.churn?.lines_added ?? 0)} / -${formatTokens(summary?.churn?.lines_removed ?? 0)}`}
+              label="Lines added"
+              value={formatTokens(summary?.churn?.lines_added ?? 0)}
               note={`${formatTokens(summary?.churn?.files ?? 0)} files`}
               hue="--chr-cache"
+            />
+            <StatTile
+              label="Lines removed"
+              value={formatTokens(summary?.churn?.lines_removed ?? 0)}
+              note={`${formatTokens(summary?.churn?.edits ?? 0)} edits`}
+              hue="--chr-peak"
             />
             <StatTile
               label="Ctx processed"
