@@ -4135,6 +4135,33 @@ a.card-drawer__pr-chip:hover {
   border-bottom: 2px dashed var(--qb-line-dashed);
 }
 
+/* WF-070: sprint + estimate editor — two short fields and a Save, in the
+   controls row beside the link editor; the error line takes the full width
+   below them. */
+.attributes-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.attributes-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.attributes-editor__field .qb-input {
+  width: 7.5rem;
+}
+
+.attributes-editor__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--legacy-color-b3261e);
+  font-size: 0.85rem;
+}
+
 .status-menu {
   display: flex;
   align-items: center;

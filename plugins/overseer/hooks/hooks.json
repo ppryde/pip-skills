@@ -22,6 +22,17 @@
         ]
       }
     ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/dashboard-refresh.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

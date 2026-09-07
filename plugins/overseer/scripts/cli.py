@@ -40,6 +40,7 @@ from scripts.knowledge import (
     save_fact,
 )
 from scripts.models import (
+    COMPLEXITIES,
     LABEL_PALETTE_KEYS,
     PRIORITIES,
     Card,
@@ -516,6 +517,27 @@ def cmd_set_field(args: argparse.Namespace) -> int:
         card.title = args.title.strip()
     if args.body is not None:
         card.body = args.body
+    # WF-070: the create-time attributes, editable after the fact. Empty
+    # string clears each, as for --priority / --parent above.
+    if args.complexity is not None:
+        if args.complexity == "":
+            card.complexity = None
+        elif args.complexity not in COMPLEXITIES:
+            print(f"error: unknown complexity: {args.complexity!r}", file=sys.stderr)
+            return 1
+        else:
+            card.complexity = args.complexity
+    if args.sprint is not None:
+        card.sprint = args.sprint.strip() or None
+    if args.estimate is not None:
+        if args.estimate.strip() == "":
+            card.budget_estimate = None
+        else:
+            try:
+                card.budget_estimate = parse_tokens(args.estimate)
+            except CardParseError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
     card.updated = _now()
     _sync(args.root, card)
     print(f"{card.id} updated")
@@ -1094,6 +1116,32 @@ def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
         }))
         return 0
     except Exception:
+        return 0
+
+
+def cmd_dashboard_refresh_hook(args: argparse.Namespace) -> int:
+    """SessionStart hook verb (WF-053): if a dashboard is running from an
+    OLDER overseer than the one now installed, restart it in place.
+
+    Fail-open in every direction — a session start is never delayed or broken
+    by it — and silent unless there is something to say. The slow half (kill
+    + relaunch) runs detached, so two things can be worth saying: a restart
+    just handed off, and a restart from an EARLIER session that stopped the
+    old server and then failed to start the new one. The second must not stay
+    buried: it means the dashboard is down and only a human can fix it, so
+    the note the worker left is reported here and cleared."""
+    try:
+        from scripts import dashboard_record
+        note = dashboard_record.take_failure_note()
+        try:
+            handoff = dashboard_record.restart_if_stale()
+        except Exception:  # noqa: BLE001 — still report a note already taken
+            handoff = None
+        messages = [line for line in (note, handoff) if line]
+        if messages:
+            print(json.dumps({"systemMessage": "; ".join(messages)}))
+        return 0
+    except Exception:  # noqa: BLE001 — never break a session start
         return 0
 
 
@@ -1683,6 +1731,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo", help="empty string clears")
     p.add_argument("--title", help="new card title (non-empty)")
     p.add_argument("--body", help="new card body (markdown); empty string clears")
+    p.add_argument("--complexity", help="S/M/L/XL; empty string clears")
+    p.add_argument("--sprint", help="sprint id; empty string clears")
+    p.add_argument("--estimate", help="token estimate, e.g. 400k or 1.2M; empty string clears")
     p.set_defaults(func=cmd_set_field)
 
     p = sub.add_parser("depends")
@@ -1728,6 +1779,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("claim-stop-hook").set_defaults(func=cmd_claim_stop_hook)
     sub.add_parser("claim-prompt-hook").set_defaults(func=cmd_claim_prompt_hook)
+    sub.add_parser(
+        "dashboard-refresh-hook",
+        help="SessionStart: restart a running dashboard that is older than the installed overseer (WF-053)",
+    ).set_defaults(func=cmd_dashboard_refresh_hook)
 
     p = sub.add_parser("log-progress")
     p.add_argument("card_id")

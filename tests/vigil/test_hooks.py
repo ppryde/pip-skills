@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -272,7 +273,11 @@ class TestPackaging:
     def test_plugin_manifest_valid(self):
         data = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())
         assert data["name"] == "vigil"
-        assert data["version"] == "0.2.0"
+        # Shape, not a literal: pinning the exact string meant every release
+        # bump broke this test (it sat red from v0.2.1 onwards asserting
+        # "0.2.0"). What packaging actually requires is that a semver version
+        # is PRESENT and well-formed — the value itself is the release's business.
+        assert re.fullmatch(r"\d+\.\d+\.\d+", data["version"]), data["version"]
 
     def test_marketplace_lists_vigil(self):
         mkt = PLUGIN_ROOT.parent.parent / ".claude-plugin" / "marketplace.json"

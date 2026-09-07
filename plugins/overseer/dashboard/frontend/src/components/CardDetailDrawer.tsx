@@ -13,6 +13,8 @@ import BudgetMeter from "./BudgetMeter";
 import DependencyBadge from "./DependencyBadge";
 import ClaimControl from "./ClaimControl";
 import PrioritySelect from "./PrioritySelect";
+import ComplexitySelect from "./ComplexitySelect";
+import AttributesEditor from "./AttributesEditor";
 import LinkEditor from "./LinkEditor";
 import StatusMenu from "./StatusMenu";
 import MarkdownView from "./MarkdownView";
@@ -412,6 +414,15 @@ function CardDetailDrawer({
                   inFlight={inFlight}
                   onMutated={refetchDetail}
                 />
+                {/* WF-070: complexity beside priority — the same twin
+                    select, the same mutate → refetch routing. */}
+                <ComplexitySelect
+                  cardId={detail.id}
+                  value={detail.complexity}
+                  mutate={mutate}
+                  inFlight={inFlight}
+                  onMutated={refetchDetail}
+                />
                 <BudgetMeter budget={detail.budget} />
                 {detail.claimed_by && (
                   <span
@@ -476,6 +487,16 @@ function CardDetailDrawer({
               <ClaimControl
                 cardId={detail.id}
                 claimedBy={detail.claimed_by}
+                mutate={mutate}
+                inFlight={inFlight}
+                onMutated={refetchDetail}
+              />
+              {/* WF-070: sprint + estimate, the two create-time attributes
+                  that were board-only until now. */}
+              <AttributesEditor
+                cardId={detail.id}
+                sprint={detail.sprint}
+                estimate={detail.budget.estimate}
                 mutate={mutate}
                 inFlight={inFlight}
                 onMutated={refetchDetail}

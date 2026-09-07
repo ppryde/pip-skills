@@ -24,7 +24,7 @@ from typing import Any, Callable
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.cli_client import (
     CliError,
@@ -45,7 +45,10 @@ _OVERSEER_ROOT = Path(__file__).resolve().parents[3]
 if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 
-from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402  (must follow sys.path setup above)
+from scripts.dashboard_record import (
+    plugin_version,  # noqa: E402  (must follow sys.path setup above)
+)
+from scripts.store import derive_repo_label, derive_repo_root  # noqa: E402
 
 _PCT_RE = re.compile(r"ctx (\d+)%")
 
@@ -68,6 +71,45 @@ class PriorityBody(BaseModel):
 
 class ParentBody(BaseModel):
     parent: str | None = None
+
+
+class AttributesBody(BaseModel):
+    """WF-070: the create-time attributes, editable from the drawer. A field
+    that is ABSENT is left alone; one sent as null is cleared — so the
+    handler reads ``model_fields_set``, not the values."""
+    complexity: str | None = None
+    sprint: str | None = None
+    estimate: int | None = None
+
+    @field_validator("complexity", "sprint")
+    @classmethod
+    def _plain_cli_value(cls, value: str | None) -> str | None:
+        """These reach the CLI as `--flag <value>`. A value starting with "-"
+        would be read by argparse as another flag and fail the whole
+        invocation as a 500-shaped CLI error, so reject it here as a 422.
+        Empty (like null) still clears the field."""
+        if value is None or value == "":
+            return value
+        if len(value) > 200:
+            raise ValueError("must be at most 200 characters")
+        if value.startswith("-"):
+            raise ValueError("must not start with '-'")
+        if any(ch < " " or ch == "\x7f" for ch in value):
+            raise ValueError("must not contain control characters")
+        return value
+
+    @field_validator("estimate")
+    @classmethod
+    def _sane_estimate(cls, value: int | None) -> int | None:
+        """A token estimate is a count. Negative is meaningless and anything
+        past 2^53 is beyond what JSON and SQLite round-trip safely."""
+        if value is None:
+            return value
+        if value < 0:
+            raise ValueError("must not be negative")
+        if value > 2**53:
+            raise ValueError("must be at most 2^53")
+        return value
 
 
 class LabelsBody(BaseModel):
@@ -497,6 +539,15 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     # a git repo, git missing) — same as a launch root with no worktree.
     _derived_launch_root = (derive_repo_root(launch_root) or launch_root).resolve()
 
+    # WF-053: what THIS process is running — read at app construction, so
+    # the answer is the code actually serving, not what a record file claims.
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    version = plugin_version()
+
+    @app.get("/api/version")
+    def get_version() -> dict[str, Any]:
+        return {"version": version, "root": str(launch_root), "started_at": started_at}
+
     def _mutate(fn: Callable[[], None], effective_root: Path) -> dict[str, Any]:
         try:
             fn()
@@ -629,6 +680,26 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             check_id(card_id)
             value = body.priority if body.priority is not None else ""
             run_overseer(effective, "set-field", card_id, "--priority", value)
+
+        return _mutate(do, effective)
+
+    @app.post("/api/card/{card_id}/attributes", dependencies=[Depends(require_token)])
+    def set_attributes(card_id: str, body: AttributesBody, root: str | None = None) -> dict[str, Any]:
+        sent = body.model_fields_set
+        if not sent:
+            raise HTTPException(status_code=400, detail="nothing to set")
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            check_id(card_id)
+            args = ["set-field", card_id]
+            if "complexity" in sent:
+                args += ["--complexity", body.complexity or ""]
+            if "sprint" in sent:
+                args += ["--sprint", body.sprint or ""]
+            if "estimate" in sent:
+                args += ["--estimate", "" if body.estimate is None else str(body.estimate)]
+            run_overseer(effective, *args)
 
         return _mutate(do, effective)
 

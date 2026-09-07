@@ -63,32 +63,56 @@ process's version, not just what a stale file claims).
 A new hook (or an addition to overseer's hooks) that runs on session start:
 
 1. Read `.dashboard.json`. If absent → **do nothing** (no server managed).
-2. If `pid` is not alive → treat as not-running → do nothing (optionally clean
-   the stale record).
-3. Compare the running version (prefer `GET /api/version` on the recorded
-   host:port; fall back to the record's `version`) to the **installed** plugin
-   version. If installed <= running → do nothing.
-4. If installed **>** running → **restart in place**: kill the old pid, then
-   relaunch `serve.py` with the recorded `--host`/`--port`/`--root`
-   (and `--no-browser`). Preserve the LAN binding if it was set.
-5. Print a one-line systemMessage: `overseer dashboard restarted x.y.z → a.b.c`.
+2. If `pid` is not alive → treat as not-running → do nothing (clean the stale
+   record).
+3. Probe `GET /api/version` on the recorded host:port. **No answer → treat as
+   not-running:** delete the record, kill nothing, start nothing. A live pid
+   is NOT evidence — the record outlives a reboot, and the pid may by then
+   belong to an unrelated process; terminating it would both kill a stranger
+   and auto-start a dashboard, which is the stated non-goal.
+4. Compare the running version (what the probe reports; the record's `version`
+   fills in only an answer that omits the field) to the **installed** plugin
+   version. If installed <= running → do nothing. Version comparison reads the
+   leading dotted-numeric run only, and ranks a prerelease/suffix below the
+   bare release (`0.22.0-rc1` < `0.22.0`).
+5. If installed **>** running → **restart in place**, handed to a **detached
+   worker**: kill the old pid, then relaunch `serve.py` with the recorded
+   `--host`/`--port`/`--root` (and `--no-browser`). Preserve the LAN binding
+   if it was set.
+6. Print a one-line systemMessage: `overseer dashboard restarting x.y.z →
+   a.b.c` ("restarting", because the hook does not wait for the worker).
+7. If the worker kills the old server and the relaunch then fails, it leaves a
+   note; the next session's hook reports it as `overseer dashboard restart
+   FAILED …` and clears it. A dashboard that is down is never silently down.
 
 Constraints:
 - **Fail-open / non-blocking:** never delay or block session start; any error
-  → do nothing.
+  → do nothing (except the failure note above, which is the one thing that
+  must be said out loud). The hook itself only reads a file and makes one
+  short-timeout probe; every wait-on-a-process is the detached worker's.
 - **Debounce:** multiple sessions starting at once must not fight to restart.
-  Guard with a short lock (e.g. an atomic marker with a TTL) so only one
-  session performs the restart; others no-op.
+  Guard with a short lock (an atomic marker with a TTL) so only one session
+  performs the restart; others no-op. The lock names its owner, is taken over
+  on staleness by rename (never unlink-then-create, which reopens the race),
+  and is released only by that owner — the detached worker, when it is done.
 - **Respect the binding:** if the old server was LAN-bound, the restart stays
   LAN-bound (carry host/port from the record) — do not silently drop to
   localhost, and do not silently expose a localhost server to the LAN.
 
 ## B4. serve.py singleton behaviour (supporting change)
 
-On launch, if `.dashboard.json` points at a LIVE pid on the same port, either
-refuse ("already running at …") or take over after killing it (flag-controlled,
-`--replace`). Prevents port collisions and duplicate servers. The restart hook
-uses `--replace`.
+On launch, if `.dashboard.json` points at a server that ANSWERS the probe —
+same evidence rule as B3, a live pid alone is never enough — refuse ("already
+running at …") or take over after killing it (flag-controlled, `--replace`).
+This holds for **any** port, not just the one being claimed: a second launch
+elsewhere would otherwise stamp over the live server's record and leave it
+unmanaged. A record that does not answer is a leftover: delete it and launch,
+signalling nothing. The restart worker uses `--replace`.
+
+The stamp is written from the ASGI lifespan `startup.complete` message, i.e.
+after the socket is listening — never before `uvicorn.run` — so a launch that
+dies on "address already in use" neither claims to be the running dashboard
+nor deletes the real one's record on its way out.
 
 ## Edge cases
 

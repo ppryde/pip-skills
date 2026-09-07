@@ -32,6 +32,56 @@ def test_order(client: TestClient, root: Path) -> None:
     assert _show(root, card_id)["order"] == 7
 
 
+def test_attributes_set_only_what_is_sent_and_clear_with_null(client: TestClient, root: Path) -> None:
+    # WF-070: complexity / sprint / estimate from the drawer.
+    card_id = _new_card(root)  # created with complexity S
+
+    resp = client.post(f"/api/card/{card_id}/attributes", json={"sprint": "S-1", "estimate": 400000})
+    assert resp.status_code == 200
+    shown = _show(root, card_id)
+    assert (shown["sprint"], shown["budget"]["estimate"], shown["complexity"]) == ("S-1", 400000, "S")
+
+    resp = client.post(f"/api/card/{card_id}/attributes", json={"complexity": "L", "estimate": None})
+    assert resp.status_code == 200
+    shown = _show(root, card_id)
+    assert (shown["sprint"], shown["budget"]["estimate"], shown["complexity"]) == ("S-1", None, "L")
+
+    assert client.post(f"/api/card/{card_id}/attributes", json={}).status_code == 400
+    assert client.post(f"/api/card/{card_id}/attributes", json={"estimate": -1}).status_code == 422
+    assert client.post(f"/api/card/{card_id}/attributes", json={"complexity": "XXL"}).status_code != 200
+
+
+def test_attributes_rejects_values_the_cli_would_choke_on(client: TestClient, root: Path) -> None:
+    """A sprint reaching the CLI as `--sprint <value>` must not be able to look
+    like another flag or smuggle control characters, and an estimate has to stay
+    inside the range SQLite and JSON round-trip. All are 422, not a CLI error."""
+    card_id = _new_card(root)
+    client.post(f"/api/card/{card_id}/attributes", json={"sprint": "S-1", "estimate": 400000})
+
+    for body in (
+        {"sprint": "--root=/etc"},
+        {"sprint": "-x"},
+        {"sprint": "S\n1"},
+        {"sprint": "S" * 201},
+        {"complexity": "-L"},
+        {"estimate": 2**53 + 1},
+        {"estimate": -1},
+    ):
+        resp = client.post(f"/api/card/{card_id}/attributes", json=body)
+        assert resp.status_code == 422, (body, resp.status_code)
+
+    # Nothing above touched the card.
+    shown = _show(root, card_id)
+    assert (shown["sprint"], shown["budget"]["estimate"]) == ("S-1", 400000)
+
+    # A leading "-" is the only shape refused: a sprint that merely contains
+    # one is ordinary, and empty still clears.
+    assert client.post(f"/api/card/{card_id}/attributes", json={"sprint": "2026-07-S1"}).status_code == 200
+    assert _show(root, card_id)["sprint"] == "2026-07-S1"
+    assert client.post(f"/api/card/{card_id}/attributes", json={"sprint": None}).status_code == 200
+    assert _show(root, card_id)["sprint"] is None
+
+
 def test_priority_set_and_clear(client: TestClient, root: Path) -> None:
     card_id = _new_card(root)
 

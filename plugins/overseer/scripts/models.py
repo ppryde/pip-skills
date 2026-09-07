@@ -35,7 +35,7 @@ LABEL_PALETTE_KEYS = (
 )
 
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
-_TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kM])?")
+_TOKENS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([kKmM])?")
 
 
 class CardParseError(ValueError):
@@ -43,7 +43,11 @@ class CardParseError(ValueError):
 
 
 def parse_tokens(value: str | int | float | None) -> int | None:
-    """'400k' -> 400_000, '2.1M' -> 2_100_000, 999 -> 999. None passes through."""
+    """'400k' -> 400_000, '2.1M' -> 2_100_000, 999 -> 999. None passes through.
+
+    The suffix is case-insensitive ('1.5m' == '1.5M'), matching the dashboard's
+    `parseTokens` in AttributesEditor.tsx.
+    """
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -51,7 +55,7 @@ def parse_tokens(value: str | int | float | None) -> int | None:
     match = _TOKENS_RE.fullmatch(str(value).strip())
     if match is None:
         raise CardParseError(f"unparseable token count: {value!r}")
-    multiplier = {"k": 1_000, "M": 1_000_000}.get(match.group(2) or "", 1)
+    multiplier = {"k": 1_000, "m": 1_000_000}.get((match.group(2) or "").lower(), 1)
     return int(float(match.group(1)) * multiplier)
 
 

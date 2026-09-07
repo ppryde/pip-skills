@@ -13,6 +13,7 @@ vi.mock("../api/client", () => ({
   getCard: vi.fn(),
   editCard: vi.fn(),
   setPriority: vi.fn(),
+  setAttributes: vi.fn(),
   setParent: vi.fn(),
   setDepends: vi.fn(),
   park: vi.fn(),
@@ -436,7 +437,7 @@ describe("<CardDetailDrawer/>", () => {
 
     await screen.findByText(`Title WF-A`);
     expect(container.querySelector(".label-editor__chip")).toBeNull();
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("label")).toBeInTheDocument();
   });
 
   it("saves an added label through mutate() (board tiles) AND re-fetches the open card (refetchDetail), same as the sibling controls", async () => {
@@ -472,7 +473,7 @@ describe("<CardDetailDrawer/>", () => {
     await screen.findByText("Label me");
     expect(getCard).toHaveBeenCalledTimes(1);
 
-    const input = screen.getByRole("textbox");
+    const input = screen.getByPlaceholderText("label");
     await act(async () => {
       fireEvent.change(input, { target: { value: "arch" } });
       fireEvent.keyDown(input, { key: "Enter" });
