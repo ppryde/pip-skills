@@ -76,9 +76,19 @@ export default function UsageCallout({
     value: t.calls,
   }));
 
+  // The label is the server's REAL name where attribution recorded one —
+  // "claude.ai Snowflake", not the `claude_ai_Snowflake` slug that the tool
+  // name happens to spell it with. The slug is the row's key and stays in
+  // the detail line, so nothing that has to be searched for is lost.
   const mcpRows: Row[] = (mcp?.servers ?? []).map((s) => ({
-    label: s.server,
-    detail: `${s.provenance} · ${s.tools} tools · ${measures(s)}`,
+    id: s.server,
+    label: s.name ?? s.server,
+    detail: [
+      s.provenance,
+      `${s.tools} tools`,
+      measures(s),
+      s.name && s.name !== s.server ? s.server : null,
+    ].filter(Boolean).join(" · "),
     value: s.calls,
   }));
 

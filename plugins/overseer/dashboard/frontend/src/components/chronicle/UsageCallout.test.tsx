@@ -9,8 +9,8 @@ const MCP = {
   result_chars: 900,
   by_provenance: { plugin: 2, connector: 1, local: 1 },
   servers: [
-    { server: "claude_ai_Notion", provenance: "connector", tools: 6, calls: 3, result_chars: 500, median_s: 1.5, subagent_calls: 0 },
-    { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, result_chars: 400, median_s: 1.5, subagent_calls: 0 },
+    { server: "claude_ai_Notion", name: "claude.ai Notion", provenance: "connector", tools: 6, calls: 3, result_chars: 500, median_s: 1.5, subagent_calls: 0 },
+    { server: "claude-in-chrome", name: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, result_chars: 400, median_s: 1.5, subagent_calls: 0 },
   ],
   tools: [],
   sessions: 1,
@@ -128,13 +128,37 @@ describe("<UsageCallout/>", () => {
   });
 
   it("switches to the MCP breakdown, showing server names in full", () => {
-    render(<UsageCallout tools={TOOLS} mcp={MCP} plugins={PLUGINS} />);
+    const { container } = render(<UsageCallout tools={TOOLS} mcp={MCP} plugins={PLUGINS} />);
     fireEvent.click(screen.getByRole("button", { name: /^MCP/ }));
     // The whole point of the consolidation: a full-width row has the space
-    // for `claude_ai_Notion` rather than clipping it to `claude_ai_N…`.
-    expect(screen.getByText("claude_ai_Notion")).toBeInTheDocument();
+    // for the whole name rather than clipping it to `claude_ai_N…`. And the
+    // name shown is the one attribution recorded — `claude.ai Notion`, not
+    // the slug the tool name spells it with.
+    expect(screen.getByText("claude.ai Notion")).toBeInTheDocument();
     expect(screen.getByText("claude-in-chrome")).toBeInTheDocument();
     expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    // The slug is still there to search for, in the detail line.
+    const row = container.querySelector(".chr-barlist__row") as HTMLElement;
+    expect(row.title).toContain("claude_ai_Notion");
+  });
+
+  it("falls back to the slug for a server attribution never named", () => {
+    render(<UsageCallout tools={TOOLS} mcp={{
+      ...MCP,
+      servers: [{ server: "claude_ai_Wayflyer_Staff", provenance: "connector", tools: 1,
+                  calls: 1, result_chars: 0, median_s: null, subagent_calls: 0 }],
+    }} />);
+    fireEvent.click(screen.getByRole("button", { name: /^MCP/ }));
+    expect(screen.getByText("claude_ai_Wayflyer_Staff")).toBeInTheDocument();
+  });
+
+  it("does not repeat the slug when it is already the name", () => {
+    const { container } = render(<UsageCallout tools={TOOLS} mcp={MCP} />);
+    fireEvent.click(screen.getByRole("button", { name: /^MCP/ }));
+    const rows = container.querySelectorAll(".chr-barlist__row");
+    // "claude-in-chrome" needs no slugging, so its detail says it once.
+    const chrome = [...rows].find((r) => r.textContent?.includes("claude-in-chrome")) as HTMLElement;
+    expect(chrome.title.match(/claude-in-chrome/g)).toBeNull();
   });
 
   it("switches to the plugin breakdown", () => {

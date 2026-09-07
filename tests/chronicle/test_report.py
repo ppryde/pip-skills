@@ -626,6 +626,61 @@ class TestAttribution:
         assert attr["plugins"] == [] and attr["skills"] == [] and attr["agents"] == []
         assert attr["attributed_turns"] == 0
 
+    def test_an_mcp_server_is_shown_by_its_real_name(self, projects):
+        """The tool name spells a server as a slug; the turn carries the name
+        Claude Code actually uses. `_slug` is the transform between them, so
+        the breakdown can show `claude.ai Notion` rather than
+        `claude_ai_Notion` without guessing at any of it."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionMcpServer="claude.ai Notion",
+               tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b.turn("m2", T0, attributionMcpServer="plugin:linear:linear",
+               tools=["mcp__plugin_linear_linear__save_issue"])
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        servers = {s["server"]: s["name"] for s in report.summary(conn)["mcp"]["servers"]}
+        assert servers == {
+            "claude_ai_Notion": "claude.ai Notion",
+            "plugin_linear_linear": "plugin:linear:linear",
+        }
+
+    def test_a_server_attribution_never_named_keeps_its_slug(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["mcp__claude_ai_Wayflyer_Staff__find"])
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        server = report.summary(conn)["mcp"]["servers"][0]
+        assert server["name"] == server["server"] == "claude_ai_Wayflyer_Staff"
+
+    def test_two_names_slugging_alike_leave_the_slug_alone(self, projects):
+        """An ambiguous label is worse than a coarse one: the key is dropped
+        rather than resolved to whichever name was seen first."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionMcpServer="claude.ai Notion",
+               tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b.turn("m2", T0, attributionMcpServer="claude:ai:Notion")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert report.mcp_server_names(conn) == {}
+        assert report.summary(conn)["mcp"]["servers"][0]["name"] == "claude_ai_Notion"
+
+    def test_session_detail_names_servers_from_the_whole_store(self, projects):
+        """A name is a label, not a measure: a session whose own turns carry
+        no attribution still gets the good label from what the store knows."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionMcpServer="claude.ai Notion")
+        b.write()
+        b2 = TranscriptBuilder(projects, "-a", "s2").prompt("u1", T0)
+        b2.turn("n1", T0, tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b2.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        detail = report.session_detail(conn, "s2")
+        assert detail["mcp"]["servers"][0]["name"] == "claude.ai Notion"
+
     def test_session_detail_attributes_that_session_alone(self, projects):
         """The drawer asks the same question of one session that the page asks
         of a window, so it gets the same two blocks — narrowed by session, not

@@ -6,6 +6,7 @@ returns plain dicts/lists (JSON-ready); filtering is by main repo root and a
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Iterable
@@ -63,6 +64,43 @@ def _plugin_of_server(server: str) -> str | None:
     rest = server[len("plugin_"):]
     plugin, _, suffix = rest.rpartition("_")
     return plugin if plugin and suffix else rest or None
+
+
+def _slug(name: str) -> str:
+    """A server name as Claude Code writes it into a tool name: every
+    character outside ``[A-Za-z0-9-]`` becomes an underscore. So
+    ``claude.ai Snowflake`` -> ``claude_ai_Snowflake`` and
+    ``plugin:linear:linear`` -> ``plugin_linear_linear``."""
+    return re.sub(r"[^A-Za-z0-9-]", "_", name)
+
+
+def mcp_server_names(conn: sqlite3.Connection) -> dict[str, str]:
+    """Slug -> the server's real name, from the attribution on turns.
+
+    The MCP breakdown is derived from tool names, which carry only the slug
+    (`mcp__claude_ai_Snowflake__sql_exec_tool`), so it could show nothing
+    better than `claude_ai_Snowflake`. Claude Code also stamps the server's
+    actual name on the TURN — `claude.ai Snowflake` — and `_slug` is exactly
+    the transform between them, so this is a join rather than a guess.
+
+    Built from the WHOLE store, not the filtered window: a name is a label,
+    not a measure, so a wider lookup skews no denominator, and a window whose
+    own turns happen to carry no attribution still gets the good label.
+
+    Two different names slugging to one key would make the label ambiguous;
+    that key is dropped and the slug stands, since a coarse name is honest
+    and a wrong one is not.
+    """
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    if "mcp_server" not in have:
+        return {}
+    names: dict[str, set[str]] = {}
+    for (name,) in conn.execute(
+        "SELECT DISTINCT mcp_server FROM turns WHERE mcp_server IS NOT NULL"
+    ):
+        if name:
+            names.setdefault(_slug(name), set()).add(name)
+    return {slug: next(iter(v)) for slug, v in names.items() if len(v) == 1}
 
 
 def classify(tool_name: str, qualifier: str | None) -> Classified:
@@ -331,7 +369,9 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
 
 
 def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
-                  limit: int = 50) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+                  limit: int = 50,
+                  server_names: dict[str, str] | None = None,
+                  ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Fold classified tool-call rows into the `tools`, `mcp` and `plugins`
     breakdowns the Usage callout reads.
 
@@ -351,7 +391,13 @@ def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
 
     `with_sessions` is False for a single-session read, where every count
     would be 1 and the key is noise.
+
+    `server_names` (see `mcp_server_names`) supplies each MCP server's real
+    name for display. `server` stays the slug — it is the key everything
+    joins on — and `name` falls back to it for a server attribution never
+    named.
     """
+    names = server_names or {}
     buckets: dict[tuple[str, str], dict[str, Any]] = {}
     durations: dict[tuple[str, str], list[float]] = {}
     seen: dict[tuple[str, str], set[str]] = {}
@@ -388,13 +434,16 @@ def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
             provenance[c.mcp.provenance] = provenance.get(c.mcp.provenance, 0) + 1
             server_tools.setdefault(c.mcp.server, set()).add(c.mcp.tool)
             bucket = _add("mcp", c.mcp.server,
-                          {"server": c.mcp.server, "provenance": c.mcp.provenance, "tools": 0},
+                          {"server": c.mcp.server,
+                           "name": names.get(c.mcp.server, c.mcp.server),
+                           "provenance": c.mcp.provenance, "tools": 0},
                           row, session_id)
             bucket["tools"] = len(server_tools[c.mcp.server])
             # Per-TOOL granularity too: the callout ranks servers, but "which
             # of playwright's 17 tools" is a different and useful question.
             _add("mcptool", f"{c.mcp.server}/{c.mcp.tool}",
-                 {"server": c.mcp.server, "tool": c.mcp.tool}, row, session_id)
+                 {"server": c.mcp.server, "name": names.get(c.mcp.server, c.mcp.server),
+                  "tool": c.mcp.tool}, row, session_id)
             if session_id is not None:
                 mcp_sessions.add(session_id)
         if c.plugin is not None:
@@ -673,6 +722,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             (session_id,),
         ).fetchall(),
         with_sessions=False,
+        server_names=mcp_server_names(conn),
     )
     detail["compactions_at"] = [
         r[0] for r in conn.execute(
@@ -914,7 +964,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
         params,
     ).fetchall()
-    tools, mcp_block, plugins_block = _usage_blocks(usage_rows, with_sessions=True)
+    tools, mcp_block, plugins_block = _usage_blocks(
+        usage_rows, with_sessions=True, server_names=mcp_server_names(conn))
     shape_rows = conn.execute(
         f"""SELECT session_id, turns, prompts, transcript_bytes, peak_context_tokens, started_at,
                    last_activity_at

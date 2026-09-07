@@ -422,7 +422,13 @@ export interface ChronicleTool extends ChronicleUsage {
 }
 
 export interface ChronicleMcpServer extends ChronicleUsage {
+  /** The slug the tool name carries (`claude_ai_Snowflake`). The key
+   * everything joins on, and the label of last resort. */
   server: string;
+  /** The server's real name as attribution records it — `claude.ai
+   * Snowflake` for that slug. Falls back to the slug server-side, and is
+   * absent altogether from a backend that predates the join. */
+  name?: string;
   /** "plugin" | "connector" | "local" — where the server comes from. */
   provenance: string;
   /** How many distinct tools of that server were called. */
@@ -431,6 +437,7 @@ export interface ChronicleMcpServer extends ChronicleUsage {
 
 export interface ChronicleMcpTool extends ChronicleUsage {
   server: string;
+  name?: string;
   tool: string;
 }
 
