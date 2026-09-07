@@ -229,8 +229,17 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             />
           </div>
 
-          <div className="chronicle__grid">
+          {/* Three fixed rows rather than one auto-fit flow: the panels pair
+              up by what they answer — two rings and the money beside them,
+              then the four per-day series, then the four ranked lists — and
+              an auto-fit grid reflowed them into whatever the viewport
+              allowed, splitting those groups at arbitrary widths. Each row
+              collapses 3/4-up → 2-up → 1-up on its own. */}
+          <div className="chronicle__grid chronicle__grid--wide">
             <CounselPanel insights={insights} />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--3">
             <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Where output went</h3>
               <p className="chr-panel__sub">Tokens the model wrote: thinking versus replies and tool calls.</p>
@@ -263,6 +272,14 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               />
             </section>
             <section className="chr-panel">
+              <h3 className="chr-panel__title">Cost per day</h3>
+              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
+              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+            </section>
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--4">
+            <section className="chr-panel">
               <h3 className="chr-panel__title">Context processed per day</h3>
               <p className="chr-panel__sub">Input + cache read + cache creation, every API call.</p>
               <ColumnChart points={contextPerDay} format={formatTokens} title="Context tokens per day" hue="--chr-context" />
@@ -282,11 +299,9 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">Share of context read back from cache; hover for cold turns.</p>
               <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" hue="--chr-cache" />
             </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Cost per day</h3>
-              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
-              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
-            </section>
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
               {/* The prompt count lives here, not on the Turns tile: the
@@ -342,6 +357,9 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               hue="--chr-peak"
               emptyHint="No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill."
             />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--wide">
             <section className="chr-panel chr-panel--wide" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Artifacts</h3>
               <p className="chr-panel__sub">Pages published from these sessions, newest first.</p>
