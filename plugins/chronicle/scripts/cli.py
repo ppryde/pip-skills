@@ -147,6 +147,52 @@ _IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-/:@]*$")
 _PULL_TIMEOUT_SECONDS = 900
 
 
+def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
+    """Copy the volume's NON-PERSONAL account fields to `<dest>/.claude.json`.
+
+    Without this the pulled transcripts resolve to no plan at all: the plan is
+    read per config dir from `.claude.json`, and the pull copies only
+    `projects/`. On this machine that left 75 of 342 sessions unattributable.
+
+    Only `store.account_profile`'s whitelist is written. The volume's own file
+    also holds emailAddress, fullName, displayName and organizationName, and
+    none of that should be copied onto the host — still less into a directory
+    the dashboard reads. Returns the plan for the caller to report, or None.
+
+    Soft-failing throughout: transcripts are the point of the pull, and an
+    account we could not read costs a badge, not the data.
+    """
+    from scripts import store
+    config_root = args.source.strip("/").rsplit("/", 1)[0]   # ".../projects" -> "..."
+    try:
+        read = subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{args.volume}:/v:ro", args.image,
+             "cat", f"/v/{config_root}/.claude.json"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if read.returncode != 0 or not read.stdout.strip():
+        return None
+    try:
+        data = json.loads(read.stdout)
+    except json.JSONDecodeError:
+        return None
+    oauth = data.get("oauthAccount") if isinstance(data, dict) else None
+    if not isinstance(oauth, dict):
+        return None
+    kept = {k: v for k, v in oauth.items()
+            if k in (*store.ACCOUNT_IDENTITY_FIELDS, *store.ACCOUNT_PLAN_FIELDS)
+            and isinstance(v, str) and v}
+    if not kept:
+        return None
+    try:
+        (dest / ".claude.json").write_text(json.dumps({"oauthAccount": kept}, indent=2) + "\n")
+    except OSError:
+        return None
+    return kept.get("organizationType")
+
+
 def cmd_pull_volume(args: argparse.Namespace) -> int:
     """`chronicle pull-volume` — copy transcripts out of a docker named volume
     onto this filesystem, so a containerised account can be watched like any
@@ -213,6 +259,7 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         print(json.dumps({"error": (result.stderr or result.stdout).strip()[:500],
                           "returncode": result.returncode}), file=sys.stderr)
         return 1
+    account_plan = _pull_account_profile(args, dest)
     pulled = list(projects.rglob("*.jsonl"))
     # A pulled transcript this user cannot read is the failure mode of the
     # ownership caveat above (see the comment on `projects.mkdir`): `sync`
@@ -227,6 +274,8 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         "bytes": sum(f.stat().st_size for f in pulled),
         "hint": f"watch it with: overseer claude-dirs add {dest}",
     }
+    if account_plan:
+        out["plan"] = account_plan
     if unreadable:
         out["unreadable"] = unreadable
         out["warning"] = (

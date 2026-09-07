@@ -417,10 +417,54 @@ def projects_dirs() -> list[Path]:
 
 
 def db_path() -> Path:
+    """The one store this machine should be writing to.
+
+    NOT simply `<primary>/chronicle/sessions.db`. That resolves per account, so
+    a second account running `sync` quietly raised a RIVAL store: this machine
+    had 342 sessions in one and a stale 238-session subset in another, and
+    which you saw depended on who launched the dashboard. Reading was always
+    multi-account (`claude_dirs`); only writing was not, and that asymmetry is
+    what split the history.
+
+    So: among the stores that already exist across the watched dirs, take the
+    FULLEST — the one with the most sessions. Every account computes the same
+    answer from the same files, so they converge on one store instead of each
+    preferring its own; and a second account joins the existing history rather
+    than starting a rival to it. Ties go to the primary. When none exists yet,
+    the primary is where a new one is created.
+
+    `CHRONICLE_DB` still overrides everything — tests pin it, and a caller who
+    means a specific file is not to be second-guessed.
+    """
     override = os.environ.get(DB_ENV)
     if override:
         return Path(override)
+    found = [(_session_count(d.joinpath(*DB_RELPATH)), -index, d.joinpath(*DB_RELPATH))
+             for index, d in enumerate(claude_dirs())]
+    # Negative index as the tiebreak, so an equal count prefers the earlier
+    # dir — the primary, which `claude_dirs` lists first.
+    usable = [entry for entry in found if entry[0] is not None]
+    if usable:
+        return max(usable)[2]
     return config_dir().joinpath(*DB_RELPATH)
+
+
+def _session_count(path: Path) -> int | None:
+    """Sessions in a chronicle store, or None if it is not one we can read —
+    absent, locked, corrupt, or some other file entirely. None never wins the
+    comparison in `db_path` and never raises out of it."""
+    if not path.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except (sqlite3.Error, ValueError, OSError):
+        return None
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0])
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 
 
 def connect(path: Path | None = None, *, readonly: bool = False) -> sqlite3.Connection:

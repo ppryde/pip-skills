@@ -326,6 +326,71 @@ class TestPathMapConfig:
         assert store.path_map() == [("/w/b", "/host/b")]
 
 
+class TestStoreResolution:
+    """One machine, one store. `<primary>/chronicle/sessions.db` resolves per
+    ACCOUNT, so a second account running `sync` quietly raised a rival store —
+    342 sessions in one and a stale 238-session subset in another, and which
+    you saw depended on who launched the dashboard."""
+
+    def _store(self, directory: Path, sessions: int) -> Path:
+        path = directory / "chronicle" / "sessions.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE sessions (session_id TEXT PRIMARY KEY)")
+        conn.executemany("INSERT INTO sessions VALUES (?)", [(f"s{i}",) for i in range(sessions)])
+        conn.commit()
+        conn.close()
+        return path
+
+    def test_the_fullest_store_wins_from_either_account(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        self._store(a, 3)
+        big = self._store(b, 9)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", os.pathsep.join([str(a), str(b)]))
+        # Both accounts compute the same answer from the same files, so they
+        # converge instead of each preferring its own.
+        for primary in (a, b):
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+            assert store.db_path() == big
+
+    def test_a_tie_prefers_the_primary(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        mine = self._store(a, 4)
+        self._store(b, 4)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(a))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", str(b))
+        assert store.db_path() == mine
+
+    def test_a_file_that_is_not_a_store_never_wins(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        real = self._store(a, 1)
+        junk = b / "chronicle" / "sessions.db"
+        junk.parent.mkdir(parents=True)
+        junk.write_text("not a database")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(a))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", str(b))
+        assert store.db_path() == real
+
+    def test_none_yet_creates_under_the_primary(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+        monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
+        assert store.db_path() == tmp_path / "chronicle" / "sessions.db"
+
+    def test_the_env_override_still_wins(self, tmp_path, monkeypatch):
+        # Tests pin it, and a caller who names a file is not second-guessed.
+        self._store(tmp_path, 99)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setenv("CHRONICLE_DB", "/x/y.db")
+        assert store.db_path() == Path("/x/y.db")
+
+
 class TestAccountProfile:
     """`.claude.json` also holds emailAddress, fullName, displayName and
     organizationName, and this store is read by the dashboard — so the reader

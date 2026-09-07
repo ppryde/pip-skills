@@ -164,6 +164,62 @@ class TestPullVolume:
         assert "docker not found" in capsys.readouterr().err
 
 
+class TestPullVolumeAccount:
+    """The pull copies `projects/` only, so pulled transcripts resolved to no
+    plan at all — 75 of 342 sessions on the machine this was built for. The
+    account fields come across too, whitelisted."""
+
+    def _run(self, monkeypatch, tmp_path, oauth, *, cat_rc=0):
+        class Copy:
+            returncode, stdout, stderr = 0, "", ""
+
+        class Cat:
+            returncode = cat_rc
+            stdout = json.dumps({"oauthAccount": oauth, "userID": "x"}) if oauth is not None else ""
+            stderr = ""
+
+        calls = []
+
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            return Cat() if "cat" in cmd else Copy()
+
+        monkeypatch.setattr("scripts.cli.subprocess.run", fake)
+        code = main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path)])
+        return code, calls
+
+    def test_writes_only_the_whitelisted_fields(self, monkeypatch, tmp_path, capsys):
+        code, _ = self._run(monkeypatch, tmp_path, {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_enterprise", "seatTier": "enterprise_usage_based",
+            "billingType": "b", "organizationRateLimitTier": "t",
+            # Must never be copied onto the host, still less where the
+            # dashboard reads.
+            "emailAddress": "someone@example.com", "fullName": "A Person",
+            "displayName": "A", "organizationName": "Some Org",
+        })
+        assert code == 0
+        written = (tmp_path / ".claude.json").read_text()
+        for personal in ("example.com", "A Person", "Some Org", "displayName"):
+            assert personal not in written
+        assert json.loads(written)["oauthAccount"]["organizationType"] == "claude_enterprise"
+        assert json.loads(capsys.readouterr().out)["plan"] == "claude_enterprise"
+
+    def test_an_unreadable_account_costs_a_badge_not_the_pull(self, monkeypatch, tmp_path, capsys):
+        # Transcripts are the point of the pull; a missing account file must
+        # not fail it.
+        code, _ = self._run(monkeypatch, tmp_path, None, cat_rc=1)
+        assert code == 0
+        assert not (tmp_path / ".claude.json").exists()
+        assert "plan" not in json.loads(capsys.readouterr().out)
+
+    def test_an_api_key_volume_writes_nothing(self, monkeypatch, tmp_path, capsys):
+        # No oauthAccount at all is what an API-key config looks like.
+        code, _ = self._run(monkeypatch, tmp_path, {})
+        assert code == 0
+        assert not (tmp_path / ".claude.json").exists()
+
+
 class TestCli:
     def test_status_without_store(self, capsys):
         assert main(["status"]) == 0

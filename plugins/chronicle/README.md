@@ -143,6 +143,25 @@ is what stops a nonsense path becoming a confident wrong answer.
 Existing rows keep the `repo_root` they were ingested with. Adding a mapping affects sessions
 ingested *after* it, and any whose transcript later changes.
 
+### One store, whichever account you run under
+
+The store used to live at `<primary>/chronicle/sessions.db`, which resolves per
+ACCOUNT — so a second account running `sync` quietly raised a rival store.
+Reading was always multi-account (`claude_dirs`); only writing was not, and that
+asymmetry split the history: this machine had 342 sessions in one store and a
+stale 238-session subset in another, and which you saw depended on who launched
+the dashboard.
+
+`db_path` now takes the FULLEST store that already exists across the watched
+dirs — most sessions wins, ties to the primary. Every account computes the same
+answer from the same files, so they converge rather than each preferring its
+own, and a second account joins the existing history instead of starting a
+rival. A new store is only created under the primary when none exists.
+`CHRONICLE_DB` still overrides everything.
+
+`chronicle status` prints the `db` it resolved to; if that is not the file you
+expect, the other one is probably fuller.
+
 ### Accounts and plans
 
 Two questions the store can now answer: *which account owns a session*, and
@@ -179,6 +198,13 @@ rather than guessing.
 An **API-key session has no `oauthAccount` at all**, which is the one positive
 signal separating key auth from a subscription. That case stamps no plan and
 adds no account row.
+
+`pull-volume` copies the account's whitelisted fields to `<dest>/.claude.json`
+alongside the transcripts, so a containerised account resolves its plan too —
+without it those sessions have transcripts but no account to read, which left
+75 of 342 sessions here unattributable. Only the whitelist crosses; the
+volume's own file holds email, full name and organisation name, and none of
+that is copied onto the host.
 
 Note that a config dir is not an account: the same dir can hold sessions from
 different accounts over time, so nothing here is inferred from the dir itself.
