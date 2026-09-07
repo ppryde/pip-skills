@@ -244,6 +244,18 @@ class TestResolveOnHost:
         assert ingest.resolve_on_host("/w/app/sub") == str(inner)
         assert ingest.resolve_on_host("/w/app") == str(outer)
 
+    def test_a_trailing_slash_in_the_mapping_does_not_mangle_the_splice(self, tmp_path, monkeypatch):
+        """`{"/workspaces/app/": "<host>"}` is the natural thing to type, and
+        the boundary test already tolerated it — but the splice used the raw
+        source length, eating the separator and yielding `<host>repos` style
+        paths. The ancestor walk then climbed to a real but UNRELATED
+        directory, so a wrong answer was returned confidently."""
+        host = tmp_path / "repos" / "app"
+        (host / "src").mkdir(parents=True)
+        monkeypatch.setattr(store, "path_map", lambda: [("/workspaces/app/", str(host) + "/")])
+        assert ingest.resolve_on_host("/workspaces/app/src") == str(host / "src")
+        assert ingest.resolve_on_host("/workspaces/app") == str(host)
+
     def test_prefix_matches_only_on_a_path_boundary(self, tmp_path, monkeypatch):
         host = tmp_path / "app"
         host.mkdir()

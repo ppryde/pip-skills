@@ -19,6 +19,16 @@ describe("chronicle scope", () => {
     expect(chronicleScopeFor(repo({ has_board: false, chronicled: false }), false)).toBe("all");
   });
 
+  it("scopes to a boarded repo chronicle has no sessions for", () => {
+    // The backend allowlist is the UNION of board roots and chronicle roots,
+    // so a freshly `overseer init`'d repo — board, no sessions yet — is
+    // nameable. The backend sets `chronicled` explicitly on every entry, so
+    // `?? has_board` never fired here and the page pinned it to All repos,
+    // showing account-wide totals under a specific repo selection.
+    expect(isChronicleScopable(repo({ has_board: true, chronicled: false }))).toBe(true);
+    expect(chronicleScopeFor(repo({ has_board: true, chronicled: false }), false)).toBe("repo");
+  });
+
   it("falls back to has_board when the backend predates the flag", () => {
     expect(isChronicleScopable(repo({ has_board: true }))).toBe(true);
     expect(isChronicleScopable(repo({ has_board: false }))).toBe(false);

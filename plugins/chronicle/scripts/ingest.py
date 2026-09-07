@@ -62,7 +62,14 @@ def resolve_on_host(cwd: str | None) -> str | None:
     if not cwd:
         return None
     for src, dst in store.path_map():
-        if cwd == src or cwd.startswith(src.rstrip("/") + "/"):
+        # Normalise BOTH sides before splicing. The boundary test tolerated a
+        # trailing slash on the source, but the splice used the raw length —
+        # so `/workspaces/app/` + `/workspaces/app/src` ate the separator and
+        # produced `<host>src`. That path does not exist, the ancestor walk
+        # below then climbed to a real but unrelated directory, and the
+        # session was attributed to it with full confidence.
+        src, dst = src.rstrip("/"), dst.rstrip("/")
+        if cwd == src or cwd.startswith(src + "/"):
             cwd = dst + cwd[len(src):]
             break
     path = Path(cwd)
@@ -165,10 +172,10 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     # or a dashboard Sync landing mid-write) folds into two DISJOINT Turn
     # objects, one per call, each seeing only the tool_use blocks that were
     # on disk at the time — so len(t.tool_uses) is only THIS batch's count,
-    # not the message's total. tool_calls rows are keyed by tool_use_id and
-    # never overwritten (INSERT OR IGNORE), so they accumulate correctly
-    # across ingests; turns.tool_calls below is then a COUNT(*) against that
-    # already-correct table, not the batch-local len().
+    # not the message's total. tool_calls rows are keyed by tool_use_id, so
+    # they accumulate correctly across ingests (the upsert below fills a
+    # missing qualifier and changes nothing else); turns.tool_calls is then a
+    # COUNT(*) against that already-correct table, not the batch-local len().
     conn.executemany(
         # Not INSERT OR IGNORE: a store ingested before `qualifier` existed has
         # the row already, so ignoring the conflict would leave it NULL forever

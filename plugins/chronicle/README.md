@@ -99,6 +99,16 @@ The copy is incremental (`cp -au`), so the first pull is the expensive one. Re-r
 a sync to pick up new turns. A useful side effect: Claude Code prunes its own old transcripts,
 and anything already ingested survives that pruning in the chronicle store.
 
+Give `--dest` and `--source` without trailing slashes if you like, or with — either is fine.
+
+**Docker Desktop only, for now.** The helper container runs as root and `cp -a` preserves the
+source ownership and mode. On macOS and Windows the bind mount remaps uids, so the pulled files
+end up owned by you. On a **Linux host** there is no remapping: a `0600` root-owned transcript
+stays unreadable to whoever runs `chronicle sync`, and that ingest fails *silently* (an
+unreadable file is skipped, not reported). If you are on Linux, add
+`--user "$(id -u):$(id -g)"` to the `docker run` in `cmd_pull_volume` — after checking that
+uid can read the volume's contents.
+
 If the container instead **bind-mounts** a host directory, none of this is needed — point
 `claude-dirs` straight at it.
 

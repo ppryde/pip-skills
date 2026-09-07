@@ -93,6 +93,25 @@ def classify(tool_name: str, qualifier: str | None) -> Classified:
     return Classified()
 
 
+def _qualifier_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
+    """The SQL expression for a row's `qualifier`, or a NULL literal when the
+    column is not there yet.
+
+    `qualifier` was added to `tool_calls` after the table shipped, and
+    `store.connect(readonly=True)` — the ONLY path the CLI's report verbs
+    take — returns before `_migrate` can add it. So a store upgraded but not
+    yet synced still lacks the column, and naming it unconditionally raises
+    `OperationalError` for every read: `chronicle summary` exits non-zero,
+    `run_chronicle` soft-degrades that to None, and the dashboard reports an
+    empty account to someone with a thousand transcripts.
+
+    Substituting NULL degrades to "no plugin skills recorded", which is what
+    an un-backfilled store honestly holds. MCP is unaffected either way — it
+    is derived from `tool_name`, which was never missing."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(tool_calls)")}
+    return f"{prefix}qualifier" if "qualifier" in columns else "NULL"
+
+
 def _usage_blocks(rows: Iterable[sqlite3.Row], *,
                   with_sessions: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     """Fold classified tool-call rows into the `mcp` and `plugins` blocks.
@@ -411,8 +430,9 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     ]
     detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
-            """SELECT session_id, tool_name, qualifier, result_chars FROM tool_calls
-               WHERE session_id = ?""",
+            f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
+                       result_chars FROM tool_calls
+                WHERE session_id = ?""",
             (session_id,),
         ).fetchall(),
         with_sessions=False,
@@ -661,7 +681,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
     ]
     usage_rows = conn.execute(
         f"""SELECT c.session_id AS session_id, c.tool_name AS tool_name,
-                   c.qualifier AS qualifier, c.result_chars AS result_chars
+                   {_qualifier_sql(conn, "c.")} AS qualifier,
+                   c.result_chars AS result_chars
             FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
         params,
     ).fetchall()

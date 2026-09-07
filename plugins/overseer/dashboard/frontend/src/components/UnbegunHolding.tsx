@@ -38,9 +38,14 @@ function UnbegunHolding({ repo, liveSessions }: UnbegunHoldingProps) {
         <h2 className="unbegun-holding__title">
           Your quest has not yet begun in <em>{repo.label}</em>.
         </h2>
+        {/* A chronicle-only repo (WF-108) reaches this page with no live
+            sessions at all, and "0 adventurers already roam these lands" is
+            both false and faintly absurd. Only claim company when there is
+            some. */}
         <p className="unbegun-holding__body">
-          {liveSessions} {adventurerWord} already roam these lands, but no
-          Guild Board has been raised here.
+          {liveSessions > 0
+            ? `${liveSessions} ${adventurerWord} already roam these lands, but no Guild Board has been raised here.`
+            : "No Guild Board has been raised in these lands yet."}
         </p>
         <p className="unbegun-holding__body">
           To open the board and begin chronicling quests, run{" "}

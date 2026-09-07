@@ -365,6 +365,32 @@ class TestArtifactsReport:
         assert [t["turn"] for t in detail["biggest_jumps"]] == [1, 2]
 
 
+class TestUnmigratedStore:
+    """`qualifier` shipped after `tool_calls` did, and the report verbs open
+    the store READ-ONLY — a path that returns before `_migrate` can add it.
+    So an upgraded-but-never-synced store still lacks the column, and a read
+    that names it unconditionally takes the whole page down."""
+
+    def test_summary_and_detail_survive_a_missing_qualifier_column(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["mcp__claude-in-chrome__computer", "Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("ALTER TABLE tool_calls DROP COLUMN qualifier")
+        conn.commit()
+
+        out = report.summary(conn)
+        # MCP still reads correctly: it comes from tool_name, never dropped.
+        assert out["mcp"]["calls"] == 1
+        # No qualifier column means no plugin SKILL attribution — reported as
+        # none, which is true of the data, rather than raising.
+        assert out["plugins"]["items"] == []
+
+        detail = report.session_detail(conn, "s1")
+        assert detail["mcp"]["calls"] == 1
+        assert detail["plugins"] == {"calls": 0, "items": []}
+
+
 class TestClassify:
     def test_plugin_mcp_server_is_both_mcp_and_plugin(self):
         c = report.classify("mcp__plugin_playwright_playwright__browser_evaluate", None)

@@ -137,6 +137,12 @@ _VOLUME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 # segment is not: the helper mounts the volume read-only, but a traversal would
 # still let the copy read the helper image's own filesystem.
 _SOURCE_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9_./-]*$")
+# The helper image, validated for the same reason and more urgently: it sits at
+# the one argv position where docker is still parsing its OWN options, so an
+# unvalidated value is the easiest of the three to turn into a flag. Registry
+# host, port, path segments, a `:tag` and an `@sha256:` digest all pass; a
+# space or a leading dash does not.
+_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-/:@]*$")
 _PULL_TIMEOUT_SECONDS = 900
 
 
@@ -160,14 +166,26 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     if not _SOURCE_RE.match(source) or ".." in Path(source).parts:
         print(json.dumps({"error": f"invalid source path: {args.source!r}"}), file=sys.stderr)
         return 2
+    if not _IMAGE_RE.match(args.image):
+        print(json.dumps({"error": f"invalid image: {args.image!r}"}), file=sys.stderr)
+        return 2
     dest = Path(args.dest).expanduser()
     if not dest.is_absolute():
         print(json.dumps({"error": "dest must be an absolute path (docker requires one)"}),
               file=sys.stderr)
         return 2
-    # Created HERE, not by the container: it keeps the ownership of everything
-    # under dest as the invoking user (the helper runs as root), and it means
-    # the container needs no shell to mkdir, so nothing is interpolated into one.
+    # Created HERE, not by the container: the container needs no shell to
+    # mkdir, so nothing is interpolated into one.
+    #
+    # Ownership caveat — this is a Docker DESKTOP recipe. On macOS and Windows
+    # the bind mount remaps uids, so what the root helper writes lands owned by
+    # the invoking user. On a Linux host there is no remapping: `cp -a`
+    # preserves the source uid and mode, so a 0600 root-owned transcript stays
+    # unreadable to whoever later runs `chronicle sync` — and `_read_new_lines`
+    # catches that OSError and returns [], making the ingest a SILENT no-op
+    # rather than an error. Verified only on Docker Desktop; a Linux user
+    # wanting this should add `--user "$(id -u):$(id -g)"` below, having first
+    # checked that uid can read the volume's contents.
     projects = dest / "projects"
     try:
         projects.mkdir(parents=True, exist_ok=True)

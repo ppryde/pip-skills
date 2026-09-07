@@ -40,6 +40,30 @@ class TestPullVolume:
         assert main(["pull-volume", "--volume", "wf state:/etc", "--dest", str(tmp_path)]) == 2
         assert "invalid volume name" in capsys.readouterr().err
 
+    def test_rejects_an_image_ref_docker_would_read_as_an_option(self, monkeypatch, capsys, tmp_path):
+        self._no_docker(monkeypatch)
+        # --image lands in the same argv as --volume and --source, at the one
+        # position where docker is still parsing its OWN options, and was the
+        # only one of the three left unvalidated.
+        assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path),
+                     "--image", "alpine --privileged"]) == 2
+        assert "invalid image" in capsys.readouterr().err
+
+    def test_accepts_a_normal_image_ref(self, monkeypatch, tmp_path):
+        # Registry, path segments and a tag must still reach docker unaltered.
+        calls = []
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr("scripts.cli.subprocess.run",
+                            lambda cmd, **k: calls.append(cmd) or Result())
+        assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path),
+                     "--image", "ghcr.io/acme/helper:1.2.3"]) == 0
+        assert "ghcr.io/acme/helper:1.2.3" in calls[0]
+
     def test_rejects_a_traversing_source(self, monkeypatch, capsys, tmp_path):
         self._no_docker(monkeypatch)
         assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path),
