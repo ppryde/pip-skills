@@ -34,7 +34,53 @@ const CHURN = {
   ],
 };
 
+const ATTRIBUTION = {
+  turns: 100, attributed_turns: 12,
+  plugins: [
+    { name: "superpowers", turns: 2987, context_tokens: 427_400_000,
+      output_tokens: 1_694_000, sessions: 31, cost_usd: 292.52, skills: 9 },
+  ],
+  skills: [
+    { name: "code-review", turns: 9, context_tokens: 1000, output_tokens: 50,
+      sessions: 4, cost_usd: 1.2, plugin: null },
+  ],
+  agents: [
+    { name: "general-purpose", turns: 10619, context_tokens: 1_032_000_000,
+      output_tokens: 847_000, sessions: 60, cost_usd: 390.35 },
+  ],
+  mcp: [],
+};
+
 describe("<UsageCallout/>", () => {
+  it("prefers attribution on the Plugins tab — cost, not invocation count", () => {
+    const { container } = render(
+      <UsageCallout tools={TOOLS} plugins={PLUGINS} attribution={ATTRIBUTION} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
+    expect(screen.getByText("superpowers")).toBeInTheDocument();
+    const row = container.querySelector(".chr-barlist__row") as HTMLElement;
+    expect(row.title).toContain("2987 turns");
+    // formatUsd rounds above $100 — the shared formatter's call, not ours.
+    expect(row.title).toContain("$293");
+    // The old call-count row is NOT what is shown when attribution exists.
+    expect(screen.queryByText("playwright · mcp")).not.toBeInTheDocument();
+  });
+
+  it("falls back to call counts when the store has no attribution yet", () => {
+    render(<UsageCallout tools={TOOLS} plugins={PLUGINS} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
+    expect(screen.getByText("playwright · mcp")).toBeInTheDocument();
+  });
+
+  it("accounts for subagents by type, and says how many turns were attributed", () => {
+    render(<UsageCallout tools={TOOLS} attribution={ATTRIBUTION} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Agents/ }));
+    expect(screen.getByText("general-purpose")).toBeInTheDocument();
+    // The denominator is stated: most turns have nothing in scope, and a
+    // reader must not take 12 attributed turns for the whole picture.
+    expect(screen.getByText(/12 of 100 turns had anything in scope/)).toBeInTheDocument();
+  });
+
   it("ranks files by how much moved, and keeps the full path in the detail", () => {
     const { container } = render(<UsageCallout tools={TOOLS} churn={CHURN} />);
     fireEvent.click(screen.getByRole("button", { name: /^Files/ }));

@@ -561,3 +561,65 @@ class TestChurn:
         assert report.summary(conn)["churn"] == {
             "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": []}
         assert report.session_detail(conn, "s1")["churn"]["files_by_churn"] == []
+
+
+class TestAttribution:
+    """Attribution sits on turns, so it accounts for TOKENS and COST — the
+    step up from counting invocations."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionSkill="superpowers:test-driven-development",
+               attributionPlugin="superpowers")
+        b.turn("m2", T0, attributionSkill="superpowers:brainstorming",
+               attributionPlugin="superpowers")
+        b.turn("m3", T0, attributionSkill="code-review", attributionPlugin=None)
+        b.turn("m4", T0, attributionAgent="Explore")
+        b.turn("m5", T0)  # nothing in scope
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_plugins_are_accounted_by_turns_tokens_and_cost(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        sp = next(p for p in attr["plugins"] if p["name"] == "superpowers")
+        assert sp["turns"] == 2
+        # Each seeded turn is 3 in + 1000 read + 200 written = 1203 context.
+        assert sp["context_tokens"] == 2 * 1203
+        assert sp["output_tokens"] == 2 * 40
+        assert round(sp["cost_usd"], 6) == round(2 * TURN_USD, 6)
+        assert sp["skills"] == 2   # two distinct skills of the one plugin
+
+    def test_a_builtin_skill_is_listed_but_attributed_to_no_plugin(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        assert [p["name"] for p in attr["plugins"]] == ["superpowers"]
+        # It still appears among skills — it ran, it cost tokens.
+        review = next(s for s in attr["skills"] if s["name"] == "code-review")
+        assert review["turns"] == 1 and review["plugin"] is None
+
+    def test_agents_are_accounted_separately(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        assert [(a["name"], a["turns"]) for a in attr["agents"]] == [("Explore", 1)]
+
+    def test_an_unattributed_turn_is_in_no_bucket(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        assert sum(p["turns"] for p in attr["plugins"]) == 2
+        assert attr["attributed_turns"] == 4      # of 5 turns
+        assert attr["turns"] == 5
+
+    def test_attribution_respects_the_repo_filter(self, projects):
+        conn = self._seed(projects)
+        assert report.summary(conn, repo_root="/repo/a")["attribution"]["plugins"]
+        assert report.summary(conn, repo_root="/repo/b")["attribution"]["plugins"] == []
+
+    def test_a_store_without_the_columns_reports_no_attribution(self, projects):
+        conn = self._seed(projects)
+        for col in ("skill", "plugin", "agent_type", "mcp_server", "mcp_tool"):
+            conn.execute(f"ALTER TABLE turns DROP COLUMN {col}")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        assert attr["plugins"] == [] and attr["skills"] == [] and attr["agents"] == []
+        assert attr["attributed_turns"] == 0

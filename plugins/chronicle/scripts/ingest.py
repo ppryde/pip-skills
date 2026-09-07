@@ -195,11 +195,12 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     conn.executemany(
         """INSERT INTO turns(session_id, agent_id, message_id, request_id, ts, model,
                input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
-               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort)
+               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort,
+               skill, plugin, agent_type, mcp_server, mcp_tool)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,
                (SELECT COUNT(*) FROM tool_calls
                 WHERE session_id = ? AND agent_id = ? AND message_id = ?),
-               ?,?)
+               ?,?,?,?,?,?,?)
            ON CONFLICT(session_id, agent_id, message_id) DO UPDATE SET
                request_id = excluded.request_id, ts = excluded.ts, model = excluded.model,
                input_tokens = excluded.input_tokens, cache_read_tokens = excluded.cache_read_tokens,
@@ -207,13 +208,22 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                output_tokens = excluded.output_tokens, thinking_tokens = excluded.thinking_tokens,
                cache_5m_tokens = excluded.cache_5m_tokens, cache_1h_tokens = excluded.cache_1h_tokens,
                tool_calls = excluded.tool_calls, stop_reason = excluded.stop_reason,
-               effort = excluded.effort""",
+               effort = excluded.effort,
+               -- COALESCE, like tool_calls.qualifier: a store ingested before
+               -- these columns existed has the row already, and overwriting
+               -- with a fresh NULL would undo a backfill rather than do one.
+               skill = COALESCE(excluded.skill, turns.skill),
+               plugin = COALESCE(excluded.plugin, turns.plugin),
+               agent_type = COALESCE(excluded.agent_type, turns.agent_type),
+               mcp_server = COALESCE(excluded.mcp_server, turns.mcp_server),
+               mcp_tool = COALESCE(excluded.mcp_tool, turns.mcp_tool)""",
         [
             (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
              t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
              t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens,
              session_id, t.agent_id, t.message_id,
-             t.stop_reason, t.effort)
+             t.stop_reason, t.effort,
+             t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool)
             for t in facts.turns.values()
         ],
     )

@@ -337,6 +337,7 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               mcp={summary?.mcp}
               plugins={summary?.plugins}
               churn={summary?.churn}
+              attribution={summary?.attribution}
             />
           </div>
 

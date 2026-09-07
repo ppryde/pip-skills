@@ -629,3 +629,26 @@ class TestFileEdits:
         ingest.sync(conn, projects, full=True)
         assert conn.execute("SELECT COUNT(*) FROM file_edits").fetchone()[0] == 1
         assert _session(conn)["lines_added"] == 7
+
+
+class TestAttributionColumns:
+    def test_attribution_is_stored_and_backfills_on_a_full_resync(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionSkill="overseer:ledger", attributionPlugin="overseer")
+        b.turn("m2", T0, attributionAgent="Explore")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # A store ingested before the columns existed carries NULLs.
+        conn.execute("UPDATE turns SET skill = NULL, plugin = NULL, agent_type = NULL")
+        conn.commit()
+
+        ingest.sync(conn, projects, full=True)
+
+        rows = dict(conn.execute(
+            "SELECT message_id, COALESCE(plugin, '') FROM turns WHERE session_id = 's1'"
+        ).fetchall())
+        assert rows == {"m1": "overseer", "m2": ""}
+        assert conn.execute(
+            "SELECT agent_type FROM turns WHERE message_id = 'm2'").fetchone()[0] == "Explore"
+        assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2

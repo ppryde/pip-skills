@@ -126,6 +126,84 @@ def _median(values: list[float]) -> float | None:
     return (values[mid - 1] + values[mid]) / 2
 
 
+_ATTRIBUTION_COLUMNS = ("skill", "plugin", "agent_type", "mcp_server", "mcp_tool")
+
+_EMPTY_ATTRIBUTION: dict[str, Any] = {
+    "turns": 0, "attributed_turns": 0, "plugins": [], "skills": [], "agents": [], "mcp": [],
+}
+
+
+def _attribution(conn: sqlite3.Connection, where: str, params: list[Any], *,
+                 limit: int = 50) -> dict[str, Any]:
+    """Turns, tokens and cost grouped by what was in scope.
+
+    Claude Code stamps `attributionSkill` / `attributionPlugin` /
+    `attributionAgent` / `attributionMcpServer` onto ASSISTANT records, so
+    these land on turns — which carry usage. That is the difference between
+    "superpowers was invoked 80 times" and "superpowers cost 427M context
+    tokens across 2,987 turns", and it is why this is grouped here rather
+    than folded into the tool-call breakdowns.
+
+    `plugin` is NULL for a built-in skill: the transcript states that, so a
+    built-in is counted among skills and attributed to no plugin, rather than
+    being guessed at from whether its name contains a colon.
+
+    A turn with nothing in scope is in no bucket — most turns, correctly.
+    """
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    if not any(c in have for c in _ATTRIBUTION_COLUMNS):
+        return {**_EMPTY_ATTRIBUTION, "turns": _attributed_totals(conn, where, params)[0]}
+
+    def _group(column: str, extra: str = "") -> list[dict[str, Any]]:
+        rows = conn.execute(
+            f"""SELECT t.{column} AS name, COUNT(*) AS turns,
+                       SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                           AS context_tokens,
+                       SUM(t.output_tokens) AS output_tokens,
+                       COUNT(DISTINCT t.session_id) AS sessions{extra}
+                FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}
+                {'AND' if where else 'WHERE'} t.{column} IS NOT NULL
+                GROUP BY t.{column}
+                ORDER BY context_tokens DESC, name
+                LIMIT {int(limit)}""",
+            params,
+        ).fetchall()
+        costs = _costs_by(conn, f"t.{column}", where, params, extra=f"t.{column} IS NOT NULL")
+        out = []
+        for r in rows:
+            item = dict(r)
+            _attach_cost(item, costs, r["name"])
+            out.append(item)
+        return out
+
+    plugins = _group("plugin", extra=", COUNT(DISTINCT t.skill) AS skills")
+    skills = _group("skill", extra=", MAX(t.plugin) AS plugin")
+    total_turns, attributed = _attributed_totals(conn, where, params)
+    return {
+        "turns": total_turns,
+        "attributed_turns": attributed,
+        "plugins": plugins,
+        "skills": skills,
+        "agents": _group("agent_type"),
+        "mcp": _group("mcp_server"),
+    }
+
+
+def _attributed_totals(conn: sqlite3.Connection, where: str,
+                       params: list[Any]) -> tuple[int, int]:
+    """(all turns, turns with anything in scope) — the denominator that keeps
+    a plugin's share honest."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    cols = [c for c in _ATTRIBUTION_COLUMNS if c in have]
+    any_set = " OR ".join(f"t.{c} IS NOT NULL" for c in cols) if cols else "0"
+    row = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN {any_set} THEN 1 ELSE 0 END), 0)
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}""",
+        params,
+    ).fetchone()
+    return int(row[0]), int(row[1])
+
+
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     """Whether the store has `name` yet. The report verbs open the store
     READ-ONLY, a path that returns before `_migrate` runs, so a store upgraded
@@ -805,6 +883,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_model": by_model,
         "tools": tools,
         "churn": _churn(conn, where, params),
+        "attribution": _attribution(conn, where, params),
         "mcp": mcp_block,
         "plugins": plugins_block,
         "shape": shape,

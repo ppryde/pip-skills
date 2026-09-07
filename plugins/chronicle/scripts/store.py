@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS turns (
     tool_calls            INTEGER NOT NULL DEFAULT 0,
     stop_reason           TEXT,
     effort                TEXT,
+    skill                 TEXT,
+    plugin                TEXT,
+    agent_type            TEXT,
+    mcp_server            TEXT,
+    mcp_tool              TEXT,
     PRIMARY KEY (session_id, agent_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts);
@@ -216,6 +221,13 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("sessions", "lines_added", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "lines_removed", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "files_touched", "INTEGER NOT NULL DEFAULT 0"),
+    # What was in scope for a call, as the transcript stamps it. On the TURN,
+    # so these account for tokens rather than counting invocations.
+    ("turns", "skill", "TEXT"),
+    ("turns", "plugin", "TEXT"),
+    ("turns", "agent_type", "TEXT"),
+    ("turns", "mcp_server", "TEXT"),
+    ("turns", "mcp_tool", "TEXT"),
 )
 
 

@@ -248,3 +248,50 @@ class TestFileEdits:
         }))
         assert facts.file_edits == {}
         assert facts.results["t1"].chars == 2   # still measured as before
+
+
+class TestAttribution:
+    """Claude Code stamps what was in scope onto the ASSISTANT record — so
+    attribution lands on turns, which carry usage, and therefore accounts for
+    tokens rather than merely counting invocations."""
+
+    def _turn(self, **attrs):
+        return _assistant("m1", ts=T0, **attrs)
+
+    def test_a_plugin_skill_attributes_both(self):
+        facts = fold(_lines(self._turn(attributionSkill="tribunal:reckoning",
+                                       attributionPlugin="tribunal")))
+        turn = facts.turns[("", "m1")]
+        assert turn.skill == "tribunal:reckoning"
+        assert turn.plugin == "tribunal"
+
+    def test_a_builtin_skill_has_no_plugin(self):
+        # Claude Code sends attributionPlugin: null for a built-in. That is
+        # the system stating "not from a plugin", not a gap to be inferred.
+        facts = fold(_lines(self._turn(attributionSkill="code-review",
+                                       attributionPlugin=None)))
+        turn = facts.turns[("", "m1")]
+        assert turn.skill == "code-review"
+        assert turn.plugin is None
+
+    def test_a_subagent_turn_attributes_its_type(self):
+        facts = fold(_lines(self._turn(attributionAgent="Explore")))
+        assert facts.turns[("", "m1")].agent_type == "Explore"
+
+    def test_a_skill_running_inside_a_subagent_attributes_both(self):
+        facts = fold(_lines(self._turn(attributionAgent="general-purpose",
+                                       attributionSkill="superpowers:test-driven-development",
+                                       attributionPlugin="superpowers")))
+        turn = facts.turns[("", "m1")]
+        assert turn.agent_type == "general-purpose"
+        assert turn.plugin == "superpowers"
+
+    def test_mcp_scope_is_attributed(self):
+        facts = fold(_lines(self._turn(attributionMcpServer="claude.ai Snowflake",
+                                       attributionMcpTool="sql_exec_tool")))
+        assert facts.turns[("", "m1")].mcp_server == "claude.ai Snowflake"
+
+    def test_an_unattributed_turn_carries_nothing(self):
+        facts = fold(_lines(self._turn()))
+        turn = facts.turns[("", "m1")]
+        assert (turn.skill, turn.plugin, turn.agent_type, turn.mcp_server) == (None,) * 4

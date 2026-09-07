@@ -1,17 +1,25 @@
 import { useState } from "react";
 
-import { formatBytes, formatDuration, formatTokens } from "../../board/chronicle/format";
-import type { ChronicleChurn, ChronicleMcp, ChroniclePlugins, ChronicleTool } from "../../api/types";
+import { formatBytes, formatDuration, formatTokens, formatUsd } from "../../board/chronicle/format";
+import type {
+  ChronicleAttributed,
+  ChronicleAttribution,
+  ChronicleChurn,
+  ChronicleMcp,
+  ChroniclePlugins,
+  ChronicleTool,
+} from "../../api/types";
 import { Button } from "../../ui";
 import { BarList } from "./ChronicleCharts";
 
-type View = "tools" | "mcp" | "plugins" | "files";
+type View = "tools" | "mcp" | "plugins" | "agents" | "files";
 
 interface UsageCalloutProps {
   tools?: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  attribution?: ChronicleAttribution;
   /** Per-session copy drops the "across N sessions" clauses, which would all
    * read "across 1 sessions" in the drawer. */
   perSession?: boolean;
@@ -38,7 +46,9 @@ interface Row {
  * question at three grains, so they are read one at a time and compared
  * against each other, never scanned together.
  */
-export default function UsageCallout({ tools, mcp, plugins, churn, perSession }: UsageCalloutProps) {
+export default function UsageCallout({
+  tools, mcp, plugins, churn, attribution, perSession,
+}: UsageCalloutProps) {
   const [view, setView] = useState<View>("tools");
 
   const sessionsOf = (n: number | undefined) =>
@@ -93,6 +103,23 @@ export default function UsageCallout({ tools, mcp, plugins, churn, perSession }:
     value: f.lines_added + f.lines_removed,
   }));
 
+  /** An attributed bucket as a row: ranked by context tokens, because the
+   * point of attribution is what a thing COST, not how often it ran. */
+  const attributedRows = (items: ChronicleAttributed[] | undefined, label?: string): Row[] =>
+    (items ?? []).map((a) => ({
+      label: label ? `${a.name} · ${label}` : a.name,
+      detail: [
+        `${a.turns} turns`,
+        `${formatTokens(a.context_tokens)} context`,
+        `${formatTokens(a.output_tokens)} output`,
+        a.cost_usd === null ? "unpriced" : formatUsd(a.cost_usd),
+        a.skills ? `${a.skills} skills` : null,
+        a.plugin ? `from ${a.plugin}` : null,
+      ].filter(Boolean).join(" · ") + sessionsOf(a.sessions),
+      value: a.context_tokens,
+    }));
+
+  const attributed = attribution?.plugins ?? [];
   const provenance = mcp?.by_provenance ?? {};
   const provenanceNote = ["plugin", "connector", "local"]
     .filter((k) => provenance[k])
@@ -122,14 +149,32 @@ export default function UsageCallout({ tools, mcp, plugins, churn, perSession }:
       empty: "No MCP calls in this window.",
     },
     {
+      // Attribution when the store has it: Claude Code stamps the plugin in
+      // scope onto every TURN, so this is what a plugin COST, not how often
+      // it was invoked. Falls back to the call counts for a store that has
+      // not been resynced since the columns landed.
       key: "plugins",
       label: "Plugins",
-      count: plugins?.calls ?? 0,
-      rows: pluginRows,
+      count: attributed.length ? attributed.length : (plugins?.calls ?? 0),
+      rows: attributed.length ? attributedRows(attribution?.plugins) : pluginRows,
       hue: "--chr-peak",
-      // Names the overlap rather than letting the two tabs look inconsistent.
-      sub: "Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are counted on the MCP tab too.",
+      sub: attributed.length
+        ? "Turns and tokens spent under each plugin — what it cost, not how often it ran. "
+          + "Built-in skills carry no plugin and are excluded."
+        : "Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are counted on the MCP tab too.",
       empty: "No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill.",
+    },
+    {
+      key: "agents",
+      label: "Agents",
+      count: attribution?.agents.length ?? 0,
+      rows: attributedRows(attribution?.agents),
+      hue: "--chr-turns",
+      sub: attribution
+        ? `Turns and tokens spent inside subagents, by type. ${formatTokens(attribution.attributed_turns)} `
+          + `of ${formatTokens(attribution.turns)} turns had anything in scope — most have nothing, correctly.`
+        : "Turns and tokens spent inside subagents, by type.",
+      empty: "No subagent attribution recorded. Historical sessions need a `chronicle sync --full` to backfill.",
     },
     {
       key: "files",

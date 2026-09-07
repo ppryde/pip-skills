@@ -462,6 +462,34 @@ export interface ChronicleFileChurn {
 /** Editing DONE, not lines surviving in the repo: ten edits to one line are
  * ten edits, and a later revert still counts. For "what shipped", git is the
  * truthful source. */
+/** One thing that was in scope, with the turns and tokens spent under it.
+ * Attribution rides on TURNS, so these are token and cost figures — not
+ * invocation counts. `plugin` is null for a built-in skill. */
+export interface ChronicleAttributed {
+  name: string;
+  turns: number;
+  context_tokens: number;
+  output_tokens: number;
+  sessions: number;
+  cost_usd: number | null;
+  unpriced_turns?: number;
+  /** Skills tab only: the plugin supplying it, null for a built-in. */
+  plugin?: string | null;
+  /** Plugins tab only: how many distinct skills of that plugin ran. */
+  skills?: number;
+}
+
+export interface ChronicleAttribution {
+  turns: number;
+  /** Turns with anything in scope — the honest denominator. Most turns have
+   * nothing, correctly. */
+  attributed_turns: number;
+  plugins: ChronicleAttributed[];
+  skills: ChronicleAttributed[];
+  agents: ChronicleAttributed[];
+  mcp: ChronicleAttributed[];
+}
+
 export interface ChronicleChurn {
   lines_added: number;
   lines_removed: number;
@@ -533,6 +561,7 @@ export interface ChronicleSummary {
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  attribution?: ChronicleAttribution;
   shape?: ChronicleShape;
   artifacts?: ChronicleArtifact[];
 }

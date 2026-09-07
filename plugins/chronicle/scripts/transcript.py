@@ -20,6 +20,11 @@ Transcript shape (observed, Claude Code 2.1.x):
 - ``ai-title`` records carry the auto-generated session title.
 - Subagent transcripts (``<session>/subagents/agent-*.jsonl``) have the same
   shape with ``isSidechain: true`` and an ``agentId``.
+- ``assistant`` records may carry ``attributionSkill`` / ``attributionPlugin``
+  / ``attributionAgent`` / ``attributionMcpServer`` / ``attributionMcpTool``,
+  naming what was in scope for that call. They nest (a plugin skill running
+  inside a subagent sets three), and are absent on an ordinary turn with
+  nothing in scope.
 """
 from __future__ import annotations
 
@@ -53,6 +58,16 @@ class Turn:
     cache_1h_tokens: int = 0
     stop_reason: str | None = None
     effort: str | None = None
+    # What was in scope for this call, as Claude Code stamps it on the record.
+    # On the TURN rather than the tool call, so these account for tokens —
+    # "what did superpowers cost" — not merely how often it was invoked.
+    # `plugin` is None for a BUILT-IN skill (`code-review`): the transcript
+    # says so outright rather than leaving it to be guessed from the name.
+    skill: str | None = None
+    plugin: str | None = None
+    agent_type: str | None = None
+    mcp_server: str | None = None
+    mcp_tool: str | None = None
     # (tool_use_id, name, qualifier) — see `_qualifier`.
     tool_uses: list[tuple[str, str, str | None]] = field(default_factory=list)
     # Artifact publishes issued in this turn, keyed by tool_use_id.
@@ -223,6 +238,11 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             cache_1h_tokens=_int(creation.get("ephemeral_1h_input_tokens")),
             stop_reason=_opt_str(message.get("stop_reason")),
             effort=_opt_str(record.get("effort")),
+            skill=_opt_str(record.get("attributionSkill")),
+            plugin=_opt_str(record.get("attributionPlugin")),
+            agent_type=_opt_str(record.get("attributionAgent")),
+            mcp_server=_opt_str(record.get("attributionMcpServer")),
+            mcp_tool=_opt_str(record.get("attributionMcpTool")),
         )
         facts.turns[key] = turn
     else:
