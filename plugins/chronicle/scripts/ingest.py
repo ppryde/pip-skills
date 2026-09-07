@@ -170,8 +170,15 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     # across ingests; turns.tool_calls below is then a COUNT(*) against that
     # already-correct table, not the batch-local len().
     conn.executemany(
-        """INSERT OR IGNORE INTO tool_calls(session_id, tool_use_id, agent_id, message_id,
-               tool_name, qualifier, ts) VALUES (?,?,?,?,?,?,?)""",
+        # Not INSERT OR IGNORE: a store ingested before `qualifier` existed has
+        # the row already, so ignoring the conflict would leave it NULL forever
+        # and `sync --full` would silently fail to backfill. COALESCE fills only
+        # what is missing, and touches nothing else — `result_chars`/`result_ts`
+        # are owned by the separate UPDATE below and must survive a re-sync.
+        """INSERT INTO tool_calls(session_id, tool_use_id, agent_id, message_id,
+               tool_name, qualifier, ts) VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(session_id, tool_use_id) DO UPDATE SET
+               qualifier = COALESCE(tool_calls.qualifier, excluded.qualifier)""",
         [
             (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts)
             for t in facts.turns.values()

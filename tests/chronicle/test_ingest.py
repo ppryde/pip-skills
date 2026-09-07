@@ -529,3 +529,41 @@ class TestQualifierColumn:
         assert conn.execute(
             "SELECT COUNT(*) FROM tool_calls WHERE session_id = 's1'"
         ).fetchone()[0] == 2
+
+    def test_full_resync_fills_a_qualifier_left_null_by_an_older_ingest(self, projects):
+        """The backfill case: rows written before the column existed carry a
+        NULL qualifier. `sync --full` re-reads the transcript, but an
+        `INSERT OR IGNORE` would skip the existing row and leave it NULL —
+        so the write must fill a NULL qualifier rather than ignore the row."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=[("Skill", {"skill": "tribunal:reckoning"})]
+        ).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # Simulate a store ingested before `qualifier` was captured.
+        conn.execute("UPDATE tool_calls SET qualifier = NULL")
+        conn.commit()
+
+        ingest.sync(conn, projects, full=True)
+
+        assert conn.execute(
+            "SELECT qualifier FROM tool_calls WHERE session_id = 's1'"
+        ).fetchone()[0] == "tribunal:reckoning"
+
+    def test_a_resync_does_not_clobber_a_result_recorded_earlier(self, projects):
+        """Filling the qualifier must not disturb the columns a later pass
+        owns: `result_chars`/`result_ts` land in a separate UPDATE, and an
+        upsert that reset them would lose the context cost of every call."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Bash"]
+        ).tool_result("u2", T1, tool_use_id="m1-tool0", content="x" * 40).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        before = conn.execute(
+            "SELECT result_chars FROM tool_calls WHERE session_id = 's1'").fetchone()[0]
+        assert before == 40
+
+        ingest.sync(conn, projects, full=True)
+
+        assert conn.execute(
+            "SELECT result_chars FROM tool_calls WHERE session_id = 's1'").fetchone()[0] == 40
