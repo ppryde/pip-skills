@@ -254,6 +254,38 @@ class TestSessionDetail:
         conn = store.connect()
         assert report.session_detail(conn, "nope") is None
 
+    def test_mcp_and_plugin_blocks_per_session(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=[
+            "mcp__plugin_linear_linear__save_issue",
+            "mcp__claude_ai_Notion__notion-fetch",
+            ("Skill", {"skill": "overseer:ledger"}),
+            "Read",
+        ]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        detail = report.session_detail(conn, "s1")
+        assert detail["mcp"]["calls"] == 2
+        assert detail["mcp"]["by_provenance"] == {"plugin": 1, "connector": 1}
+        # Single-session read: a `sessions` count would always be 1, so it is
+        # omitted rather than rendered as noise.
+        assert "sessions" not in detail["mcp"]
+        assert detail["plugins"]["items"] == [
+            {"plugin": "linear", "kind": "mcp", "calls": 1},
+            {"plugin": "overseer", "kind": "skill", "calls": 1},
+        ]
+
+    def test_blocks_are_empty_not_missing_for_a_session_with_no_mcp(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        detail = report.session_detail(conn, "s1")
+        assert detail["mcp"] == {"calls": 0, "result_chars": 0, "by_provenance": {},
+                                 "servers": [], "tools": []}
+        assert detail["plugins"] == {"calls": 0, "items": []}
+
 
 class TestRepos:
     def test_counts(self, projects):

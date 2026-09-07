@@ -409,6 +409,14 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             (session_id,),
         )
     ]
+    detail["mcp"], detail["plugins"] = _usage_blocks(
+        conn.execute(
+            """SELECT session_id, tool_name, qualifier, result_chars FROM tool_calls
+               WHERE session_id = ?""",
+            (session_id,),
+        ).fetchall(),
+        with_sessions=False,
+    )
     detail["compactions_at"] = [
         r[0] for r in conn.execute(
             "SELECT ts FROM events WHERE session_id = ? AND kind = 'compaction' ORDER BY ts",
