@@ -26,6 +26,7 @@ const PLUGINS = {
 
 const CHURN = {
   lines_added: 5951, lines_removed: 2542, files: 2, edits: 472,
+  sessions: 9, output_tokens: 1_000_000, by_day: [],
   files_by_churn: [
     { file_path: "/repos/pip-skills/src/styles.css", edits: 472,
       lines_added: 5951, lines_removed: 2542, operations: ["edit"], sessions: 9 },
@@ -35,7 +36,7 @@ const CHURN = {
 };
 
 const ATTRIBUTION = {
-  turns: 100, attributed_turns: 12,
+  turns: 100, attributed_turns: 12, cost_usd: 683.0, unattributed_cost_usd: 14095.0,
   plugins: [
     { name: "superpowers", turns: 2987, context_tokens: 427_400_000,
       output_tokens: 1_694_000, sessions: 31, cost_usd: 292.52, skills: 9 },

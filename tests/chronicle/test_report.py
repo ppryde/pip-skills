@@ -323,6 +323,7 @@ class TestSessionDetail:
         detail = report.session_detail(conn, "s1")
         assert detail["mcp"] == {"calls": 0, "result_chars": 0, "by_provenance": {},
                                  "servers": [], "tools": []}
+        assert detail["churn"]["files_by_churn"] == []
         assert detail["plugins"] == {"calls": 0, "items": []}
         # The tool itself still lands in the tools breakdown.
         assert [t["tool_name"] for t in detail["tools"]] == ["Bash"]
@@ -559,7 +560,8 @@ class TestChurn:
         conn.execute("DROP TABLE file_edits")
         conn.commit()
         assert report.summary(conn)["churn"] == {
-            "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": []}
+            "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
+            "sessions": 0, "output_tokens": 0, "by_day": []}
         assert report.session_detail(conn, "s1")["churn"]["files_by_churn"] == []
 
 
@@ -623,3 +625,70 @@ class TestAttribution:
         attr = report.summary(conn)["attribution"]
         assert attr["plugins"] == [] and attr["skills"] == [] and attr["agents"] == []
         assert attr["attributed_turns"] == 0
+
+
+class TestDerivedMetrics:
+    """Figures the new slices make possible — each with a denominator that
+    matches its numerator, which is the whole difficulty."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit"])
+        b.raw({"type": "user", "uuid": "r1", "sessionId": "s1", "timestamp": T0,
+               "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+               "message": {"role": "user", "content": [
+                   {"type": "tool_result", "tool_use_id": "m1-tool0", "content": "ok"}]},
+               "toolUseResult": {"filePath": "/repo/a.py", "structuredPatch": [
+                   {"lines": ["+x"] * 20 + ["-y"] * 5}]}})
+        b.subagent("agent-1", ["a1"], T0)
+        b.write()
+        # A second session with NO file edits: it must not dilute the
+        # churn-derived averages.
+        TranscriptBuilder(projects, "-a", "s2").prompt("u1", T1).turn("m1", T1).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_churn_averages_use_only_churn_bearing_sessions(self, projects):
+        """s2 changed no files. Including it would halve every per-session
+        churn figure and quietly understate the real editing rate."""
+        churn = report.summary(self._seed(projects))["churn"]
+        assert churn["sessions"] == 1          # not 2
+        assert churn["lines_added"] == 20 and churn["lines_removed"] == 5
+        # Output tokens summed over the SAME sessions, so output-per-line is
+        # a ratio of two comparable numbers.
+        assert churn["output_tokens"] == 80    # 2 turns x 40 (main + subagent)
+
+    def test_churn_by_day(self, projects):
+        by_day = report.summary(self._seed(projects))["churn"]["by_day"]
+        assert by_day == [{"day": "2026-09-01", "lines_added": 20, "lines_removed": 5, "edits": 1}]
+
+    def test_delegation_contrasts_turns_with_output(self, projects):
+        d = report.summary(self._seed(projects))["delegation"]
+        # 3 turns total (s1 main, s1 subagent, s2 main), 1 of them delegated.
+        assert d["turns"] == 3 and d["subagent_turns"] == 1
+        assert d["output_tokens"] == 120 and d["subagent_output_tokens"] == 40
+        assert d["tool_calls"] == 1 and d["subagent_tool_calls"] == 0
+
+    def test_attribution_reports_its_own_cost_and_the_remainder(self, projects):
+        conn = self._seed(projects)
+        conn.execute("UPDATE turns SET plugin = 'overseer' WHERE message_id = 'm1' "
+                     "AND session_id = 's1' AND agent_id = ''")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        # One attributed turn of three: its cost, and the rest named as
+        # unattributed rather than left for a reader to infer a total from.
+        assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)
+        assert round(attr["unattributed_cost_usd"], 6) == round(2 * TURN_USD, 6)
+
+    def test_attribution_cost_counts_a_turn_once_despite_overlap(self, projects):
+        """A plugin skill running inside a subagent sets BOTH plugin and
+        agent_type. Summing the two lists would bill that turn twice."""
+        conn = self._seed(projects)
+        conn.execute("UPDATE turns SET plugin = 'overseer', agent_type = 'Explore' "
+                     "WHERE message_id = 'm1' AND session_id = 's1' AND agent_id = ''")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)   # once, not twice

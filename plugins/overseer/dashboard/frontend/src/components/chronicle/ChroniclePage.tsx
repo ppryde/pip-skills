@@ -16,12 +16,14 @@ import {
   formatActive,
   formatBytes,
   formatCostWithUnpriced,
+  churnRatio,
   formatDay,
   formatDuration,
   formatMonth,
   formatPct,
   formatTokens,
   formatUsd,
+  perUnit,
   formatWhen,
   repoLabel,
   sessionName,
@@ -35,6 +37,8 @@ import CounselPanel from "./CounselPanel";
 import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
+import CostAttributionPanel from "./CostAttributionPanel";
+import DelegationPanel from "./DelegationPanel";
 import StatTile from "./StatTile";
 import UsageCallout from "./UsageCallout";
 
@@ -148,6 +152,11 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
     value: d.cache_hit_rate ?? 0,
   }));
   const costPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.cost_usd }));
+  const churnPerDay = (summary?.churn?.by_day ?? []).map((d) => ({
+    label: formatDay(d.day),
+    detail: `${d.day} · +${d.lines_added} / -${d.lines_removed} · ${d.edits} edits`,
+    value: d.lines_added + d.lines_removed,
+  }));
   const shape = summary?.shape;
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
@@ -200,6 +209,32 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
             <StatTile label="MCP calls" value={formatTokens(summary?.mcp?.calls ?? 0)} hue="--chr-tools" />
             <StatTile label="Plugin calls" value={formatTokens(summary?.plugins?.calls ?? 0)} hue="--chr-peak" />
+            <StatTile
+              label="Rework"
+              value={churnRatio(summary?.churn?.lines_removed, summary?.churn?.lines_added)}
+              note={`${formatTokens(summary?.churn?.lines_removed ?? 0)} undone`}
+              hue="--chr-peak"
+            />
+            <StatTile
+              label="Edits / file"
+              value={perUnit(summary?.churn?.edits, summary?.churn?.files, 1)}
+              note={`${formatTokens(summary?.churn?.edits ?? 0)} edits`}
+              hue="--chr-tools"
+            />
+            <StatTile
+              label="Output / line"
+              value={perUnit(summary?.churn?.output_tokens,
+                (summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0), 0)}
+              note="tokens written"
+              hue="--chr-output"
+            />
+            <StatTile
+              label="Lines / session"
+              value={perUnit((summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0),
+                summary?.churn?.sessions, 0)}
+              note={`over ${formatTokens(summary?.churn?.sessions ?? 0)} sessions`}
+              hue="--chr-cache"
+            />
             <StatTile
               label="Lines changed"
               value={`+${formatTokens(summary?.churn?.lines_added ?? 0)} / -${formatTokens(summary?.churn?.lines_removed ?? 0)}`}
@@ -325,12 +360,22 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">Share of context read back from cache; hover for cold turns.</p>
               <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" hue="--chr-cache" />
             </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Lines changed per day</h3>
+              <p className="chr-panel__sub">Added plus removed — editing done, not lines surviving.</p>
+              <ColumnChart points={churnPerDay} format={formatTokens} title="Lines changed per day" hue="--chr-peak" />
+            </section>
           </div>
 
           {/* One box, three grains — see UsageCallout. Full width because
               these lists are the only place on the page where the LABEL is
               the datum, and a quarter-width panel clipped `claude_ai_Notion`
               to `claude_ai_N…`. */}
+          <div className="chronicle__grid chronicle__grid--2">
+            <DelegationPanel delegation={summary?.delegation} />
+            <CostAttributionPanel attribution={summary?.attribution} />
+          </div>
+
           <div className="chronicle__grid chronicle__grid--wide">
             <UsageCallout
               tools={summary?.tools}

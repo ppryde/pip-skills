@@ -481,6 +481,10 @@ export interface ChronicleAttributed {
 
 export interface ChronicleAttribution {
   turns: number;
+  /** Cost of turns with anything in scope, counted ONCE — a plugin skill
+   * inside a subagent sets both fields, so summing the lists double-bills. */
+  cost_usd: number;
+  unattributed_cost_usd: number;
   /** Turns with anything in scope — the honest denominator. Most turns have
    * nothing, correctly. */
   attributed_turns: number;
@@ -490,12 +494,39 @@ export interface ChronicleAttribution {
   mcp: ChronicleAttributed[];
 }
 
+export interface ChronicleChurnDay {
+  day: string;
+  lines_added: number;
+  lines_removed: number;
+  edits: number;
+}
+
 export interface ChronicleChurn {
   lines_added: number;
   lines_removed: number;
   files: number;
   edits: number;
   files_by_churn: ChronicleFileChurn[];
+  /** Sessions that actually changed a file — the only honest denominator for
+   * a per-session average, since a session that edited nothing would
+   * otherwise drag every such figure down. */
+  sessions: number;
+  /** Output tokens over those same sessions, so output-per-line compares
+   * two numbers drawn from the same set. */
+  output_tokens: number;
+  by_day: ChronicleChurnDay[];
+}
+
+/** What subagents DO against what they PRODUCE. Counted from `agent_id`,
+ * which every turn and tool call carries — so unlike attribution this covers
+ * the whole store. Raw pairs, not percentages: the caller renders them. */
+export interface ChronicleDelegation {
+  turns: number;
+  subagent_turns: number;
+  output_tokens: number;
+  subagent_output_tokens: number;
+  tool_calls: number;
+  subagent_tool_calls: number;
 }
 
 export interface ChroniclePlugins {
@@ -562,6 +593,7 @@ export interface ChronicleSummary {
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
   attribution?: ChronicleAttribution;
+  delegation?: ChronicleDelegation;
   shape?: ChronicleShape;
   artifacts?: ChronicleArtifact[];
 }

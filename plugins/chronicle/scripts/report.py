@@ -129,7 +129,8 @@ def _median(values: list[float]) -> float | None:
 _ATTRIBUTION_COLUMNS = ("skill", "plugin", "agent_type", "mcp_server", "mcp_tool")
 
 _EMPTY_ATTRIBUTION: dict[str, Any] = {
-    "turns": 0, "attributed_turns": 0, "plugins": [], "skills": [], "agents": [], "mcp": [],
+    "turns": 0, "attributed_turns": 0, "cost_usd": 0.0, "unattributed_cost_usd": 0.0,
+    "plugins": [], "skills": [], "agents": [], "mcp": [],
 }
 
 
@@ -176,12 +177,23 @@ def _attribution(conn: sqlite3.Connection, where: str, params: list[Any], *,
             out.append(item)
         return out
 
+    # Cost of turns with ANYTHING in scope, counted once. Summing the plugin
+    # and agent lists would bill a plugin skill running inside a subagent
+    # twice, since it sets both.
+    any_set = " OR ".join(f"t.{c} IS NOT NULL" for c in _ATTRIBUTION_COLUMNS if c in have)
+    attributed_costs = _costs_by(conn, "1", where, params, extra=any_set)
+    attributed_cost = sum(c["cost_usd"] for c in attributed_costs.values())
+    all_costs = _costs_by(conn, "1", where, params)
+    total_cost = sum(c["cost_usd"] for c in all_costs.values())
+
     plugins = _group("plugin", extra=", COUNT(DISTINCT t.skill) AS skills")
     skills = _group("skill", extra=", MAX(t.plugin) AS plugin")
     total_turns, attributed = _attributed_totals(conn, where, params)
     return {
         "turns": total_turns,
         "attributed_turns": attributed,
+        "cost_usd": round(attributed_cost, 6),
+        "unattributed_cost_usd": round(total_cost - attributed_cost, 6),
         "plugins": plugins,
         "skills": skills,
         "agents": _group("agent_type"),
@@ -204,6 +216,33 @@ def _attributed_totals(conn: sqlite3.Connection, where: str,
     return int(row[0]), int(row[1])
 
 
+def _delegation(conn: sqlite3.Connection, where: str, params: list[Any]) -> dict[str, Any]:
+    """What subagents DO against what they PRODUCE.
+
+    Kept as raw pairs rather than percentages so the caller can render either,
+    and so a zero denominator is the caller's problem to display rather than
+    a None to unpick. Counted from `agent_id`, which every turn and tool call
+    carries — unlike attribution, this covers the whole store.
+    """
+    turns = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN t.agent_id <> '' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(t.output_tokens), 0),
+                   COALESCE(SUM(CASE WHEN t.agent_id <> '' THEN t.output_tokens ELSE 0 END), 0)
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}""",
+        params,
+    ).fetchone()
+    calls = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN c.agent_id <> '' THEN 1 ELSE 0 END), 0)
+            FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
+        params,
+    ).fetchone()
+    return {
+        "turns": int(turns[0]), "subagent_turns": int(turns[1]),
+        "output_tokens": int(turns[2]), "subagent_output_tokens": int(turns[3]),
+        "tool_calls": int(calls[0]), "subagent_tool_calls": int(calls[1]),
+    }
+
+
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     """Whether the store has `name` yet. The report verbs open the store
     READ-ONLY, a path that returns before `_migrate` runs, so a store upgraded
@@ -216,6 +255,7 @@ def _has_table(conn: sqlite3.Connection, name: str) -> bool:
 
 _EMPTY_CHURN: dict[str, Any] = {
     "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
+    "sessions": 0, "output_tokens": 0, "by_day": [],
 }
 
 
@@ -227,6 +267,9 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
     to one line are ten edits, and a later revert still counts. For "what
     shipped" git is the truthful source; this answers "how much editing
     happened", which is a different question.
+
+    ``where`` is a SESSIONS-side filter (``s.``-prefixed) in both callers, so
+    every query here can share it — each joins `sessions s`.
     """
     if not _has_table(conn, "file_edits"):
         return dict(_EMPTY_CHURN)
@@ -258,9 +301,32 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
             params,
         )
     ]
+    # Sessions that actually changed a file, and the output they produced —
+    # the ONLY honest denominators for a per-session or per-line average.
+    # Sessions with no file edits would otherwise halve every such figure.
+    per_session = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(s.output_tokens), 0)
+            FROM sessions s{where}{' AND' if where else ' WHERE'} s.files_touched > 0""",
+        params,
+    ).fetchone()
+    by_day = [
+        {"day": r["day"], "lines_added": int(r["lines_added"]),
+         "lines_removed": int(r["lines_removed"]), "edits": int(r["edits"])}
+        for r in conn.execute(
+            f"""SELECT date(f.ts, 'unixepoch', 'localtime') AS day,
+                       SUM(f.lines_added) AS lines_added,
+                       SUM(f.lines_removed) AS lines_removed,
+                       COUNT(*) AS edits
+                {join}{' AND' if where else ' WHERE'} f.ts IS NOT NULL
+                GROUP BY day ORDER BY day""",
+            params,
+        )
+    ]
     return {
         "lines_added": int(total[0]), "lines_removed": int(total[1]),
         "files": int(total[2]), "edits": int(total[3]), "files_by_churn": files,
+        "sessions": int(per_session[0]), "output_tokens": int(per_session[1]),
+        "by_day": by_day,
     }
 
 
@@ -592,7 +658,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
         )
     ]
 
-    detail["churn"] = _churn(conn, " WHERE f.session_id = ?", [session_id])
+    detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id])
     detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
             f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
@@ -884,6 +950,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "tools": tools,
         "churn": _churn(conn, where, params),
         "attribution": _attribution(conn, where, params),
+        "delegation": _delegation(conn, where, params),
         "mcp": mcp_block,
         "plugins": plugins_block,
         "shape": shape,
