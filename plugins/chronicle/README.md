@@ -79,6 +79,51 @@ CLAUDE_CONFIG_DIRS=~/.claude-personal chronicle sync   # env alternative, os.pat
 The file is `{"claude_dirs": ["~/.claude-personal"]}`; chronicle reads it with its own small
 loader so it stays standalone. `--projects PATH` (repeatable) replaces the set for one run.
 
+### Sessions from a container
+
+A containerised dev environment writes its transcripts inside the container, and records the
+paths it saw there. Two things are then in the way, and both have to be dealt with:
+
+**1. The files are not on this filesystem.** If the container's config dir is a Docker *named
+volume*, its contents live inside the Docker VM — on macOS `/var/lib/docker/volumes/...` is
+not a host path at all, so it cannot simply be listed in `claude_dirs`. Copy it out with a
+helper container, then watch the copy:
+
+```
+chronicle pull-volume --volume wf-state --dest ~/.claude-wayflyer
+overseer claude-dirs add ~/.claude-wayflyer
+chronicle sync
+```
+
+The copy is incremental (`cp -au`), so the first pull is the expensive one. Re-run it before
+a sync to pick up new turns. A useful side effect: Claude Code prunes its own old transcripts,
+and anything already ingested survives that pruning in the chronicle store.
+
+If the container instead **bind-mounts** a host directory, none of this is needed — point
+`claude-dirs` straight at it.
+
+**2. The recorded paths do not exist here.** A session that ran at `/workspaces/foo` resolves
+to no repo on the host, so it lands with a null `repo_root` and is invisible to every
+repo-scoped view. Map the prefix, beside `claude_dirs` in the same config file:
+
+```json
+{
+  "claude_dirs": ["~/.claude-wayflyer"],
+  "path_map": {"/workspaces/foo": "/Users/me/repos/foo"}
+}
+```
+
+The longest matching prefix wins, and matching is on path boundaries (`/w/app` never rewrites
+`/w/app-other`). A mapped path that still does not exist — a worktree under
+`<repo>/.claude/worktrees/<name>` that only ever existed in the container, or one since
+deleted here — falls back to its nearest existing ancestor, so the session is credited to its
+repo rather than to nothing. The walk is bounded, refuses the filesystem root, and its result
+must still satisfy `git rev-parse`; an ancestor that is not a repo attributes nothing, which
+is what stops a nonsense path becoming a confident wrong answer.
+
+Existing rows keep the `repo_root` they were ingested with. Adding a mapping affects sessions
+ingested *after* it, and any whose transcript later changes.
+
 ### Pull only — no hooks
 
 Nothing in this plugin runs inside a Claude Code session. Rows arrive by `sync`, whether

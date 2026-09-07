@@ -26,17 +26,68 @@ import time
 from pathlib import Path
 from typing import Any
 
+from scripts import store
 from scripts.transcript import MAIN_AGENT, Facts, fold
 
 _GIT_TIMEOUT_SECONDS = 2
 _AGENT_FILE_RE = re.compile(r"^agent-(?P<agent>[^.]+)\.jsonl$")
 
 
+# How far up from a recorded cwd we will look for a directory that exists here.
+# Deep enough for the paths that actually go missing — a worktree under
+# `<repo>/.claude/worktrees/<name>` is three levels down — and shallow enough
+# that a wildly wrong path cannot climb to some unrelated repo far above it.
+_ANCESTOR_LIMIT = 4
+
+
+def resolve_on_host(cwd: str | None) -> str | None:
+    """``cwd`` as a directory that exists on THIS machine, or None.
+
+    A recorded cwd need not exist where the transcript is read. Two cases, and
+    both used to yield no repo at all:
+
+    1. **Another filesystem.** A containerised session records ``/workspaces/foo``;
+       the host has it at ``~/repos/foo``. ``store.path_map`` rewrites the prefix.
+    2. **A path since removed.** A git worktree under ``<repo>/.claude/worktrees/<name>``
+       is deleted when the work lands, or exists only inside the container. The
+       directory is gone but its PARENT repo is right there, and that is the
+       answer the caller wants — a session is attributed to its repo, not to the
+       working copy it happened to use.
+
+    So: rewrite, then walk up to the nearest existing ancestor. The walk is
+    bounded (``_ANCESTOR_LIMIT``) and its result still has to satisfy git in
+    ``repo_root_of`` — an ancestor that is not a repo attributes nothing, which
+    is what stops the walk turning a nonsense path into a confident wrong answer.
+    """
+    if not cwd:
+        return None
+    for src, dst in store.path_map():
+        if cwd == src or cwd.startswith(src.rstrip("/") + "/"):
+            cwd = dst + cwd[len(src):]
+            break
+    path = Path(cwd)
+    for _ in range(_ANCESTOR_LIMIT + 1):
+        parent = path.parent
+        if parent == path:
+            # The filesystem root. It exists on every machine, so accepting it
+            # would turn any unrecognised absolute path into a confident "/"
+            # — the exact wrong answer this walk is bounded to avoid.
+            return None
+        if path.is_dir():
+            return str(path)
+        path = parent
+    return None
+
+
 def repo_root_of(cwd: str | None) -> str | None:
     """The MAIN repo root ``cwd`` belongs to (worktrees resolve to their
     primary checkout via the shared git common dir), or None outside git /
-    on any failure. Bounded so a stalled git never stalls a hook."""
-    if not cwd or not os.path.isdir(cwd):
+    on any failure. Bounded so a stalled git never stalls a hook.
+
+    ``cwd`` is first resolved onto this filesystem (see ``resolve_on_host``):
+    it may name a container path, or a worktree that no longer exists."""
+    cwd = resolve_on_host(cwd)
+    if not cwd:
         return None
     try:
         result = subprocess.run(
