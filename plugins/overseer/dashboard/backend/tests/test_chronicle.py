@@ -116,7 +116,8 @@ def test_summary_and_sessions_scoped_to_launch_root(client: TestClient, root: Pa
     assert summary["totals"]["sessions"] == 1
     assert summary["totals"]["turns"] == 2
     assert summary["totals"]["cache_read_tokens"] == 1000
-    assert summary["tools"] == [{"tool_name": "Bash", "calls": 1, "sessions": 1}]
+    assert [(t["tool_name"], t["calls"], t["sessions"]) for t in summary["tools"]] == [
+        ("Bash", 1, 1)]
     sessions = client.get("/api/chronicle/sessions").json()["sessions"]
     assert [s["session_id"] for s in sessions] == ["sess1"]
     assert sessions[0]["repo_root"] == str(root.resolve())
@@ -163,7 +164,7 @@ def test_session_detail(client: TestClient, root: Path, tmp_path: Path) -> None:
     detail = client.get("/api/chronicle/session/sess1").json()
     assert detail["session_id"] == "sess1"
     assert [t["context_tokens"] for t in detail["turn_series"]] == [555, 555]
-    assert detail["tools"] == [{"tool_name": "Bash", "calls": 1}]
+    assert [(t["tool_name"], t["calls"]) for t in detail["tools"]] == [("Bash", 1)]
 
 
 def test_session_detail_missing_and_invalid(client: TestClient) -> None:

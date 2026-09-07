@@ -7344,6 +7344,50 @@ button.trail-tag:focus-visible {
   grid-template-columns: 1fr;
 }
 
+/* --- usage callout (tools / MCP / plugins) --------------------------------- */
+
+/* Each tab carries its own measure's hue whether pressed or not. The previous
+   segment styling greyed the unpressed pair, which read as "disabled" rather
+   than "click me" — the switch was the one control on the page nobody could
+   see was a control. Unpressed: hue as border and text on parchment. Pressed:
+   hue as fill. */
+.chr-usage__tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.chr-usage__tab {
+  border: 2px solid color-mix(in srgb, var(--chr-hue) 60%, var(--qb-card-border));
+  background: color-mix(in srgb, var(--chr-hue) 10%, var(--qb-panel));
+  color: color-mix(in srgb, var(--chr-hue) 70%, var(--qb-ink-900));
+  font-size: 0.78rem;
+}
+
+.chr-usage__tab[aria-pressed="true"] {
+  background: var(--chr-hue);
+  border-color: var(--chr-hue);
+  /* Fixed near-parchment rather than a token: the fill is a saturated hue in
+     both themes, so the label must not follow the theme's ink. */
+  color: #fdfaf3;
+}
+
+/* The count reads as secondary to the name it follows. */
+.chr-usage__count {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The long tail stays reachable instead of being cut at an arbitrary twelve:
+   about nine rows visible, the rest a scroll away. Capped in rem so it tracks
+   the row height rather than a guessed pixel count. */
+.chr-usage__scroll {
+  max-height: 19rem;
+  overflow-y: auto;
+  /* Room for the scrollbar so it never sits on top of the value column. */
+  padding-right: 0.35rem;
+}
+
 /* Below the point where a quarter-width column stops holding a legible
    chart, both fixed rows fall to 2-up, then to a single column — the four
    ranked lists are the first to suffer, since a truncated tool name is

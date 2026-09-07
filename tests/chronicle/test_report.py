@@ -39,7 +39,10 @@ class TestSummary:
         assert out["by_day"][1]["turns"] == 3
         assert out["by_model"][0]["model"] == "claude-opus-5"
         assert out["by_model"][0]["turns"] == 4
-        assert out["tools"][0] == {"tool_name": "Read", "calls": 2, "sessions": 1}
+        read = out["tools"][0]
+        assert read["tool_name"] == "Read" and read["calls"] == 2 and read["sessions"] == 1
+        # Every bucket now also carries what it cost and how long it took.
+        assert set(read) >= {"result_chars", "median_s", "subagent_calls"}
         assert out["shape"]["turns"]["max"] == 2.0
         assert out["shape"]["turns"]["p50"] == 1.0
         # Every seeded turn reads 1000 of a 1203-token context: warm.
@@ -94,9 +97,8 @@ class TestSummary:
         out = report.summary(conn, repo_root="/repo/a")
         assert out["totals"]["sessions"] == 2
         assert out["totals"]["turns"] == 3
-        assert out["tools"] == [
-            {"tool_name": "Read", "calls": 2, "sessions": 1},
-            {"tool_name": "Bash", "calls": 1, "sessions": 1},
+        assert [(t["tool_name"], t["calls"], t["sessions"]) for t in out["tools"]] == [
+            ("Read", 2, 1), ("Bash", 1, 1),
         ]
 
     def test_since_filter(self, projects):
@@ -115,7 +117,7 @@ class TestSummary:
         # s1 (1 turn, /repo/a) + s3 (1 turn, /repo/b): whole sessions, across repos.
         assert out["totals"]["sessions"] == 2
         assert out["totals"]["turns"] == 2
-        assert out["tools"] == [{"tool_name": "Bash", "calls": 1, "sessions": 1}]
+        assert [(t["tool_name"], t["calls"]) for t in out["tools"]] == [("Bash", 1)]
         # Composes with the repo filter.
         out = report.summary(conn, repo_root="/repo/a", branch="feat/x")
         assert out["totals"]["sessions"] == 1
@@ -153,10 +155,11 @@ class TestSummary:
         assert mcp["calls"] == 4
         assert mcp["sessions"] == 1
         assert mcp["by_provenance"] == {"plugin": 2, "connector": 1, "local": 1}
-        assert mcp["servers"][0] == {
-            "server": "plugin_playwright_playwright", "provenance": "plugin",
-            "tools": 1, "calls": 2, "sessions": 1, "result_chars": 0,
-        }
+        server = mcp["servers"][0]
+        assert server["server"] == "plugin_playwright_playwright"
+        assert (server["provenance"], server["tools"], server["calls"], server["sessions"]) == (
+            "plugin", 1, 2, 1)
+        assert server["result_chars"] == 0 and server["subagent_calls"] == 0
         assert {t["tool"] for t in mcp["tools"]} == {
             "browser_click", "sql_exec_tool", "computer",
         }
@@ -164,10 +167,46 @@ class TestSummary:
         # The playwright MCP calls count in BOTH boxes (deliberate overlap);
         # `code-review` is a builtin skill and is in neither.
         assert plugins["calls"] == 3
-        assert plugins["items"] == [
-            {"plugin": "playwright", "kind": "mcp", "calls": 2, "sessions": 1},
-            {"plugin": "tribunal", "kind": "skill", "calls": 1, "sessions": 1},
+        assert [(p["plugin"], p["kind"], p["calls"], p["sessions"]) for p in plugins["items"]] == [
+            ("playwright", "mcp", 2, 1), ("tribunal", "skill", 1, 1),
         ]
+
+    def test_each_bucket_carries_volume_wall_time_and_delegated_share(self, projects):
+        """`result_chars`, `result_ts - ts` and `agent_id` were all stored and
+        none were reported. A cheap-looking tool can be the expensive one."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read", "Read"])
+        # Two results: 100 chars after 2s, 300 chars after 8s. Median of the
+        # two durations is 5s; the mean would be the same here, so a third
+        # call pins that it is really the middle one being taken.
+        b.tool_result("r1", "2026-09-01T10:00:02.000Z", tool_use_id="m1-tool0", content="x" * 100)
+        b.tool_result("r2", "2026-09-01T10:00:08.000Z", tool_use_id="m1-tool1", content="x" * 300)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        read = next(t for t in report.summary(conn)["tools"] if t["tool_name"] == "Read")
+        assert read["calls"] == 2
+        assert read["result_chars"] == 400
+        assert read["median_s"] == 5.0
+        assert read["subagent_calls"] == 0
+
+    def test_median_ignores_a_call_that_waited_on_a_human(self, projects):
+        """The mean is a fiction here: one `AskUserQuestion` left open
+        overnight would put every tool's 'typical' time somewhere no call ever
+        was. The middle call is the honest one."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Bash", "Bash", "Bash"])
+        b.tool_result("r1", "2026-09-01T10:00:01.000Z", tool_use_id="m1-tool0")
+        b.tool_result("r2", "2026-09-01T10:00:03.000Z", tool_use_id="m1-tool1")
+        b.tool_result("r3", "2026-09-02T10:00:00.000Z", tool_use_id="m1-tool2")  # +24h
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        bash = next(t for t in report.summary(conn)["tools"] if t["tool_name"] == "Bash")
+        assert bash["median_s"] == 3.0          # not the ~28,801s mean
+        assert bash["calls"] == 3
 
     def test_usage_blocks_respect_the_repo_filter(self, projects):
         TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
@@ -244,7 +283,8 @@ class TestSessionDetail:
         assert round(detail["cache_hit_rate"], 3) == round(1000 / 1203, 3)
         assert detail["subagents"][0]["agent_id"] == "agent-1"
         assert detail["subagents"][0]["turns"] == 1
-        assert detail["tools"] == [{"tool_name": "Read", "calls": 2}]
+        assert [(t["tool_name"], t["calls"]) for t in detail["tools"]] == [("Read", 2)]
+        assert "sessions" not in detail["tools"][0]   # always 1 here, so omitted
         assert detail["compactions_at"] == []
         # The subagent's turn is money too: 2 main turns + 1 subagent turn.
         assert round(detail["cost_usd"], 6) == round(3 * TURN_USD, 6)
@@ -270,9 +310,8 @@ class TestSessionDetail:
         # Single-session read: a `sessions` count would always be 1, so it is
         # omitted rather than rendered as noise.
         assert "sessions" not in detail["mcp"]
-        assert detail["plugins"]["items"] == [
-            {"plugin": "linear", "kind": "mcp", "calls": 1},
-            {"plugin": "overseer", "kind": "skill", "calls": 1},
+        assert [(p["plugin"], p["kind"], p["calls"]) for p in detail["plugins"]["items"]] == [
+            ("linear", "mcp", 1), ("overseer", "skill", 1),
         ]
 
     def test_blocks_are_empty_not_missing_for_a_session_with_no_mcp(self, projects):
@@ -285,6 +324,8 @@ class TestSessionDetail:
         assert detail["mcp"] == {"calls": 0, "result_chars": 0, "by_provenance": {},
                                  "servers": [], "tools": []}
         assert detail["plugins"] == {"calls": 0, "items": []}
+        # The tool itself still lands in the tools breakdown.
+        assert [t["tool_name"] for t in detail["tools"]] == ["Bash"]
 
 
 class TestRepos:

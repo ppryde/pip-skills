@@ -110,21 +110,21 @@ function summary(): ChronicleSummary {
     },
     by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
-    tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
+    tools: [{ tool_name: "Bash", calls: 6, sessions: 2, result_chars: 1200, median_s: 2.5, subagent_calls: 3 }],
     mcp: {
       calls: 4, sessions: 1, result_chars: 900,
       by_provenance: { plugin: 2, connector: 1, local: 1 },
       servers: [
-        { server: "plugin_playwright_playwright", provenance: "plugin", tools: 1, calls: 2, sessions: 1, result_chars: 500 },
-        { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, sessions: 1, result_chars: 400 },
+        { server: "plugin_playwright_playwright", provenance: "plugin", tools: 1, calls: 2, sessions: 1, result_chars: 500, median_s: 1.5, subagent_calls: 0 },
+        { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, sessions: 1, result_chars: 400, median_s: 1.5, subagent_calls: 0 },
       ],
       tools: [],
     },
     plugins: {
       calls: 3, sessions: 1,
       items: [
-        { plugin: "playwright", kind: "mcp", calls: 2, sessions: 1 },
-        { plugin: "tribunal", kind: "skill", calls: 1, sessions: 1 },
+        { plugin: "playwright", kind: "mcp", calls: 2, sessions: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
+        { plugin: "tribunal", kind: "skill", calls: 1, sessions: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
       ],
     },
     artifacts: [
@@ -365,7 +365,7 @@ describe("<ChroniclePage/>", () => {
       cold_turns: 0,
       subagents: [],
       turn_series: [],
-      tools: [{ tool_name: "Read", calls: 1 }],
+      tools: [{ tool_name: "Read", calls: 1, result_chars: 400, median_s: 1, subagent_calls: 0 }],
       compactions_at: [],
       artifacts: [],
       biggest_jumps: [],
@@ -373,16 +373,16 @@ describe("<ChroniclePage/>", () => {
         calls: 2, result_chars: 100,
         by_provenance: { plugin: 1, connector: 1 },
         servers: [
-          { server: "plugin_linear_linear", provenance: "plugin", tools: 1, calls: 1, result_chars: 60 },
-          { server: "claude_ai_Notion", provenance: "connector", tools: 1, calls: 1, result_chars: 40 },
+          { server: "plugin_linear_linear", provenance: "plugin", tools: 1, calls: 1, result_chars: 60, median_s: 1.5, subagent_calls: 0 },
+          { server: "claude_ai_Notion", provenance: "connector", tools: 1, calls: 1, result_chars: 40, median_s: 1.5, subagent_calls: 0 },
         ],
         tools: [],
       },
       plugins: {
         calls: 2,
         items: [
-          { plugin: "linear", kind: "mcp", calls: 1 },
-          { plugin: "overseer", kind: "skill", calls: 1 },
+          { plugin: "linear", kind: "mcp", calls: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
+          { plugin: "overseer", kind: "skill", calls: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
         ],
       },
     });
@@ -410,7 +410,7 @@ describe("<ChroniclePage/>", () => {
         { ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 99, cache_5m_tokens: 99, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn", cold: true, gap_s: null, cost_usd: 0.0007 },
         { ts: 700, model: "claude-opus-5", context_tokens: 120, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 20, cache_5m_tokens: 20, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 0, stop_reason: "end_turn", cold: false, gap_s: 699, cost_usd: 0.0003 },
       ],
-      tools: [{ tool_name: "Read", calls: 1 }],
+      tools: [{ tool_name: "Read", calls: 1, result_chars: 400, median_s: 1, subagent_calls: 0 }],
       compactions_at: [],
       artifacts: [
         { session_id: "aaaa1111-x", ts: 5, first_ts: 5, url: null, title: "lost-page", description: null, favicon: null, publishes: 1 },

@@ -401,29 +401,37 @@ export interface ChronicleModel {
   cost_usd: number | null;
 }
 
-export interface ChronicleTool {
-  tool_name: string;
+/** Measures every usage bucket carries, so the callout's three tabs are
+ * directly comparable. `median_s` is null when no call in the bucket had both
+ * a start and a result timestamp. */
+export interface ChronicleUsage {
   calls: number;
-  sessions?: number;
-}
-
-export interface ChronicleMcpServer {
-  server: string;
-  /** "plugin" | "connector" | "local" — where the server comes from. */
-  provenance: string;
-  tools: number;
-  calls: number;
+  /** Characters the tool's results poured back into the context. */
   result_chars: number;
+  /** Wall time of the MIDDLE call — never the mean, which one overnight
+   * `AskUserQuestion` would drag somewhere no call ever was. */
+  median_s: number | null;
+  /** How many of these calls came from a subagent rather than the main loop. */
+  subagent_calls: number;
   /** Absent on a single-session read, where it would always be 1. */
   sessions?: number;
 }
 
-export interface ChronicleMcpTool {
+export interface ChronicleTool extends ChronicleUsage {
+  tool_name: string;
+}
+
+export interface ChronicleMcpServer extends ChronicleUsage {
+  server: string;
+  /** "plugin" | "connector" | "local" — where the server comes from. */
+  provenance: string;
+  /** How many distinct tools of that server were called. */
+  tools: number;
+}
+
+export interface ChronicleMcpTool extends ChronicleUsage {
   server: string;
   tool: string;
-  calls: number;
-  result_chars: number;
-  sessions?: number;
 }
 
 export interface ChronicleMcp {
@@ -435,12 +443,10 @@ export interface ChronicleMcp {
   sessions?: number;
 }
 
-export interface ChroniclePluginItem {
+export interface ChroniclePluginItem extends ChronicleUsage {
   plugin: string;
   /** "mcp" | "skill" — how this plugin was used. */
   kind: string;
-  calls: number;
-  sessions?: number;
 }
 
 export interface ChroniclePlugins {

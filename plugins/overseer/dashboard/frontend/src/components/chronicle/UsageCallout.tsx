@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { formatTokens } from "../../board/chronicle/format";
+import { formatBytes, formatDuration, formatTokens } from "../../board/chronicle/format";
 import type { ChronicleMcp, ChroniclePlugins, ChronicleTool } from "../../api/types";
 import { Button } from "../../ui";
 import { BarList } from "./ChronicleCharts";
@@ -43,21 +43,41 @@ export default function UsageCallout({ tools, mcp, plugins, perSession }: UsageC
   const sessionsOf = (n: number | undefined) =>
     perSession || n === undefined ? "" : ` across ${n} ${n === 1 ? "session" : "sessions"}`;
 
-  const toolRows: Row[] = (tools ?? []).slice(0, 12).map((t) => ({
+  /** The three measures every bucket carries, as one line. Only what is
+   * actually known: a bucket whose calls never landed a result has no median,
+   * and saying "0s" there would be a different claim from "we don't know". */
+  const measures = (u: {
+    calls: number; result_chars?: number; median_s?: number | null; subagent_calls?: number;
+    sessions?: number;
+  }) =>
+    [
+      `${u.calls} calls${sessionsOf(u.sessions)}`,
+      u.result_chars ? `${formatBytes(u.result_chars)} returned` : null,
+      u.median_s != null ? `${formatDuration(u.median_s)} typical` : null,
+      u.subagent_calls
+        ? `${Math.round((u.subagent_calls / u.calls) * 100)}% delegated`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+  // No slicing: the list scrolls instead, so a long tail stays reachable
+  // rather than being silently cut at an arbitrary twelve.
+  const toolRows: Row[] = (tools ?? []).map((t) => ({
     label: t.tool_name,
-    detail: `${t.calls} calls${sessionsOf(t.sessions)}`,
+    detail: measures(t),
     value: t.calls,
   }));
 
-  const mcpRows: Row[] = (mcp?.servers ?? []).slice(0, 12).map((s) => ({
+  const mcpRows: Row[] = (mcp?.servers ?? []).map((s) => ({
     label: s.server,
-    detail: `${s.provenance} · ${s.tools} tools · ${s.calls} calls${sessionsOf(s.sessions)}`,
+    detail: `${s.provenance} · ${s.tools} tools · ${measures(s)}`,
     value: s.calls,
   }));
 
-  const pluginRows: Row[] = (plugins?.items ?? []).slice(0, 12).map((p) => ({
+  const pluginRows: Row[] = (plugins?.items ?? []).map((p) => ({
     label: `${p.plugin} · ${p.kind}`,
-    detail: `${p.calls} calls${sessionsOf(p.sessions)}`,
+    detail: measures(p),
     value: p.calls,
   }));
 
@@ -110,15 +130,21 @@ export default function UsageCallout({ tools, mcp, plugins, perSession }: UsageC
     >
       <div className="chr-panel__head">
         <h3 className="chr-panel__title">Usage breakdown</h3>
-        <div className="chronicle__segment" role="group" aria-label="Usage breakdown">
+        {/* Each tab wears its own measure's hue, pressed or not, so the
+            three read as a switch rather than as one button with two greyed
+            neighbours — the previous look, which hid that they were even
+            selectable. The pressed one fills; the others keep the hue as a
+            border and text only. */}
+        <div className="chr-usage__tabs" role="group" aria-label="Usage breakdown">
           {views.map((v) => (
             <Button
               key={v.key}
               aria-pressed={view === v.key}
               onClick={() => setView(v.key)}
-              className="chronicle__seg-btn"
+              className="chr-usage__tab"
+              style={{ ["--chr-hue" as string]: `var(${v.hue})` }}
             >
-              {v.label} {formatTokens(v.count)}
+              {v.label} <span className="chr-usage__count">{formatTokens(v.count)}</span>
             </Button>
           ))}
         </div>
@@ -127,12 +153,14 @@ export default function UsageCallout({ tools, mcp, plugins, perSession }: UsageC
       {active.rows.length === 0 ? (
         <p className="chr-chart__empty">{active.empty}</p>
       ) : (
-        <BarList
-          rows={active.rows}
-          format={formatTokens}
-          title={`${active.label} breakdown`}
-          hue={active.hue}
-        />
+        <div className="chr-usage__scroll">
+          <BarList
+            rows={active.rows}
+            format={formatTokens}
+            title={`${active.label} breakdown`}
+            hue={active.hue}
+          />
+        </div>
       )}
     </section>
   );
