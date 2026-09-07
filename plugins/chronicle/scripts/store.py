@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     agent_id     TEXT NOT NULL DEFAULT '',
     message_id   TEXT NOT NULL,
     tool_name    TEXT NOT NULL,
+    qualifier    TEXT,
     ts           REAL,
     result_chars INTEGER,
     result_ts    REAL,
@@ -181,6 +182,10 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("sessions", "artifacts", "INTEGER NOT NULL DEFAULT 0"),
     # Which Claude config dir the transcript was read from (multi-account).
     ("sessions", "config_dir", "TEXT"),
+    # Identity for tools whose name alone does not say what ran: a Skill's
+    # plugin-qualified name, an Agent's subagent type. Backfilled by
+    # `chronicle sync --full`, which re-reads every transcript from byte 0.
+    ("tool_calls", "qualifier", "TEXT"),
 )
 
 

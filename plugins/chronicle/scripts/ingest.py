@@ -171,11 +171,11 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     # already-correct table, not the batch-local len().
     conn.executemany(
         """INSERT OR IGNORE INTO tool_calls(session_id, tool_use_id, agent_id, message_id,
-               tool_name, ts) VALUES (?,?,?,?,?,?)""",
+               tool_name, qualifier, ts) VALUES (?,?,?,?,?,?,?)""",
         [
-            (session_id, tool_id, t.agent_id, t.message_id, name, t.ts)
+            (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts)
             for t in facts.turns.values()
-            for tool_id, name in t.tool_uses
+            for tool_id, name, qualifier in t.tool_uses
         ],
     )
     conn.executemany(

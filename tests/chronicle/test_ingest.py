@@ -4,7 +4,7 @@ from pathlib import Path
 
 from scripts import ingest, store
 
-from .conftest import _assistant
+from .conftest import TranscriptBuilder, _assistant
 
 T0 = "2026-09-01T10:00:00.000Z"
 T1 = "2026-09-01T10:05:00.000Z"
@@ -512,3 +512,20 @@ class TestClaudeDirsParity:
         assert [p.resolve() for p in store.claude_dirs()] == expected == [
             primary.resolve(), work.resolve(), personal.resolve()
         ]
+
+
+class TestQualifierColumn:
+    def test_qualifier_is_stored_and_a_reingest_does_not_duplicate(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=[("Skill", {"skill": "overseer:ledger"}), "Bash"]
+        ).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        ingest.sync(conn, projects, full=True)  # re-read from byte 0
+        rows = dict(conn.execute(
+            "SELECT tool_name, qualifier FROM tool_calls WHERE session_id = 's1'"
+        ).fetchall())
+        assert rows == {"Skill": "overseer:ledger", "Bash": None}
+        assert conn.execute(
+            "SELECT COUNT(*) FROM tool_calls WHERE session_id = 's1'"
+        ).fetchone()[0] == 2
