@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from scripts import pricing
@@ -23,6 +25,72 @@ LIVE_HORIZON_SECONDS = 15 * 60
 # and one that peaked at 190k on a 200k window. A session that never got near
 # a boundary reads as 200k, the default for every current model.
 STANDARD_WINDOWS = (200_000, 1_000_000)
+
+MCP_PREFIX = "mcp__"
+# Tools whose identity lives in their input rather than their name. The value
+# is the input key ingest keeps as the row's `qualifier` (see transcript.py).
+QUALIFIED_TOOLS: dict[str, str] = {"Skill": "skill", "Agent": "subagent_type"}
+
+
+@dataclass(frozen=True)
+class McpRef:
+    server: str
+    tool: str
+    provenance: str  # "plugin" | "connector" | "local"
+
+
+@dataclass(frozen=True)
+class Classified:
+    """What one tool call contributes to each box. The fields are independent,
+    not a single `kind`: a plugin-provided MCP server populates BOTH `mcp` and
+    `plugin`, which is the overlap the two panels deliberately show."""
+    mcp: McpRef | None = None
+    plugin: str | None = None
+    skill: str | None = None
+
+
+def _plugin_of_server(server: str) -> str | None:
+    """The plugin supplying an MCP server, from Claude Code's own naming:
+    ``plugin_<plugin>_<server>``. Split on the LAST underscore, so
+    ``plugin_agent-ui-telemetry_agent-ui`` yields ``agent-ui-telemetry``.
+
+    A heuristic, because a plugin whose own name contains an underscore is
+    indistinguishable from the server suffix. It degrades to naming the whole
+    remainder rather than guessing wrong halves — attribution can be coarse,
+    never fabricated."""
+    if not server.startswith("plugin_"):
+        return None
+    rest = server[len("plugin_"):]
+    plugin, _, suffix = rest.rpartition("_")
+    return plugin if plugin and suffix else rest or None
+
+
+def classify(tool_name: str, qualifier: str | None) -> Classified:
+    """Attribute one tool call to the MCP and/or plugin boxes."""
+    if tool_name.startswith(MCP_PREFIX):
+        rest = tool_name[len(MCP_PREFIX):]
+        server, sep, tool = rest.partition("__")
+        if not sep or not server or not tool:
+            # Unsplittable: attribute the row to itself rather than dropping it.
+            server = tool = tool_name
+            provenance = "local"
+        elif server.startswith("plugin_"):
+            provenance = "plugin"
+        elif server.startswith("claude_ai_"):
+            provenance = "connector"
+        else:
+            provenance = "local"
+        return Classified(
+            mcp=McpRef(server=server, tool=tool, provenance=provenance),
+            plugin=_plugin_of_server(server),
+        )
+    if tool_name in QUALIFIED_TOOLS and qualifier:
+        plugin, sep, _ = qualifier.partition(":")
+        return Classified(
+            plugin=plugin if sep and plugin else None,
+            skill=qualifier if tool_name == "Skill" else None,
+        )
+    return Classified()
 
 
 def context_window_for(peak_tokens: int) -> int:
