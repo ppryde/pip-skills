@@ -413,10 +413,24 @@ def _discover_roots(launch_root: Path) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
-def _resolve_root(launch_root: Path, default_root: Path, requested: str | None) -> Path:
+def _chronicle_roots() -> set[Path]:
+    """Repo roots chronicle has sessions for. `set()` when chronicle is absent."""
+    return set(_chronicle_last_activity_by_root())
+
+
+def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
+                  also_allowed: set[Path] | None = None) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
     client-supplied ``root`` against the ``repos`` discovery allowlist
     before it is ever used to shell the CLI.
+
+    ``also_allowed`` widens that allowlist for routes whose data covers repos
+    the BOARD has never heard of — chronicle records sessions for any repo
+    Claude Code ran in, board or no board, and refusing to name those made
+    the largest repo in the store reachable only under "All repos" (WF-108).
+    It stays a server-computed set (``_chronicle_roots``), recomputed per
+    request from the same CLI the data comes from, never a client-supplied
+    path — so the boundary is unchanged in kind, only in extent.
 
     Security-critical: this server can bind 0.0.0.0 with no auth (see
     module docstring), so an unvalidated ``root`` would let any LAN client
@@ -438,6 +452,7 @@ def _resolve_root(launch_root: Path, default_root: Path, requested: str | None) 
         for entry in _discover_roots(launch_root)
         if isinstance(entry, dict) and entry.get("root")
     }
+    allowed |= also_allowed or set()
     if candidate not in allowed:
         raise HTTPException(status_code=400, detail=f"unknown root: {requested!r}")
     return candidate
@@ -604,6 +619,30 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
                 "live_sessions": int(stats["live"]),
                 "last_active_at": last_active(root),
             })
+
+        # Repos only chronicle knows: Claude Code ran there, but no board was
+        # ever raised and census has nothing live. Without these the Chronicle
+        # cannot be scoped to its own largest repos — they exist in the data
+        # and are unreachable from the selector (WF-108).
+        listed = {Path(r["root"]).resolve() for r in repos_list}
+        for root in sorted(history):
+            if root in listed:
+                continue
+            repos_list.append({
+                "label": derive_repo_label(root) or root.name,
+                "root": str(root),
+                "current": False,
+                "has_board": False,
+                "live_sessions": 0,
+                "last_active_at": last_active(root),
+            })
+
+        # Which repos the Chronicle may be SCOPED to — the same set
+        # `_chronicle_scope` will validate against. The board's own routes
+        # still refuse a boardless root; this flag is only about chronicle.
+        chronicled = set(history)
+        for item in repos_list:
+            item["chronicled"] = Path(item["root"]).resolve() in chronicled
 
         # Most recently active first; repos nobody has touched (as far as
         # census or chronicle know) trail, alphabetically.
@@ -901,7 +940,8 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
     def _chronicle_scope(root: str | None, scope: str | None) -> list[str]:
         if scope == "all":
             return []
-        effective = _resolve_root(launch_root, _derived_launch_root, root)
+        effective = _resolve_root(launch_root, _derived_launch_root, root,
+                                  also_allowed=_chronicle_roots())
         return ["--root", str(effective)]
 
     def _days_args(days: int | None) -> list[str]:

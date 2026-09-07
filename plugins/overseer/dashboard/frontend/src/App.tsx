@@ -8,6 +8,7 @@ import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
 import type { ChronicleQuery } from "./api/types";
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
+import { chronicleScopeFor } from "./board/chronicle/scope";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
 import FilterBar from "./components/FilterBar";
@@ -236,7 +237,10 @@ function App() {
   // the board's cards on return with no visible filter to clear (the
   // board's selector shows "All" for a branch its own list lacks).
   const [chronicleBranch, setChronicleBranch] = useState<string | null>(null);
-  const chronicleScope: ChronicleScope = chronicleAllRepos || isUnbegun ? "all" : "repo";
+  // What the Chronicle may be scoped to is no longer "does it have a board"
+  // but "does chronicle know it" (WF-108). The rule and its back-compat
+  // fallback live in `scope.ts`, named and unit-tested.
+  const chronicleScope: ChronicleScope = chronicleScopeFor(selectedRepo, chronicleAllRepos);
   const chronicle = useChronicle(
     activeRoot,
     { days: chronicleDays, scope: chronicleScope, branch: chronicleBranch },

@@ -268,6 +268,15 @@ export interface RepoEntry {
   current: boolean;
   has_board: boolean;
   live_sessions: number;
+  /** Whether chronicle has sessions for this root — i.e. whether the Chronicle
+   * page may be SCOPED to it. Independent of `has_board`: a repo Claude Code
+   * ran in but no board was ever raised for is `has_board: false` and
+   * `chronicled: true`, and before WF-108 was unreachable from the selector
+   * despite being the largest repo in the store.
+   *
+   * Optional: a frontend talking to a backend from before WF-108 gets nothing
+   * here, and callers fall back to `has_board` — exactly the old behaviour. */
+  chronicled?: boolean;
   /** Epoch seconds of the repo's most recent session activity, from census
    * (live/recent) and chronicle (history) — whichever is newer. Null when
    * neither knows the repo. The list arrives sorted by it, newest first. */
