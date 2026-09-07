@@ -93,6 +93,89 @@ def classify(tool_name: str, qualifier: str | None) -> Classified:
     return Classified()
 
 
+def _usage_blocks(rows: Iterable[sqlite3.Row], *,
+                  with_sessions: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fold classified tool-call rows into the `mcp` and `plugins` blocks.
+
+    Rows need `tool_name`, `qualifier`, `result_chars` and (when
+    `with_sessions`) `session_id`. A plugin-provided MCP server lands in BOTH
+    blocks: the two answer different questions — what MCP costs, and which
+    plugins get used — so the overlap is the point, not a bug.
+
+    `with_sessions` is False for a single-session read, where every count
+    would be 1 and the key is noise.
+    """
+    servers: dict[str, dict[str, Any]] = {}
+    tools: dict[tuple[str, str], dict[str, Any]] = {}
+    plugins: dict[tuple[str, str], dict[str, Any]] = {}
+    server_tools: dict[str, set[str]] = {}
+    seen: dict[str, set[str]] = {}  # bucket key -> session ids, for `sessions`
+    provenance: dict[str, int] = {}
+    mcp_calls = mcp_chars = plugin_calls = 0
+
+    def _touch(bucket: dict[str, Any], key: str, session_id: str | None) -> None:
+        if with_sessions and session_id is not None:
+            ids = seen.setdefault(key, set())
+            ids.add(session_id)
+            bucket["sessions"] = len(ids)
+
+    for row in rows:
+        c = classify(row["tool_name"], row["qualifier"])
+        chars = int(row["result_chars"] or 0)
+        session_id = row["session_id"] if with_sessions else None
+        if c.mcp is not None:
+            mcp_calls += 1
+            mcp_chars += chars
+            provenance[c.mcp.provenance] = provenance.get(c.mcp.provenance, 0) + 1
+            server_tools.setdefault(c.mcp.server, set()).add(c.mcp.tool)
+            s = servers.setdefault(c.mcp.server, {
+                "server": c.mcp.server, "provenance": c.mcp.provenance,
+                "tools": 0, "calls": 0, "result_chars": 0,
+            })
+            s["calls"] += 1
+            s["result_chars"] += chars
+            s["tools"] = len(server_tools[c.mcp.server])
+            _touch(s, f"server:{c.mcp.server}", session_id)
+
+            t = tools.setdefault((c.mcp.server, c.mcp.tool), {
+                "server": c.mcp.server, "tool": c.mcp.tool,
+                "calls": 0, "result_chars": 0,
+            })
+            t["calls"] += 1
+            t["result_chars"] += chars
+            _touch(t, f"tool:{c.mcp.server}/{c.mcp.tool}", session_id)
+        if c.plugin is not None:
+            plugin_calls += 1
+            kind = "mcp" if c.mcp is not None else "skill"
+            p = plugins.setdefault((c.plugin, kind), {
+                "plugin": c.plugin, "kind": kind, "calls": 0,
+            })
+            p["calls"] += 1
+            _touch(p, f"plugin:{c.plugin}/{kind}", session_id)
+
+    def _ranked(values: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Calls descending, then name ascending so equal counts are stable.
+        return sorted(values, key=lambda d: (-d["calls"],
+                                             d.get("server") or d.get("plugin") or ""))
+
+    mcp_block: dict[str, Any] = {
+        "calls": mcp_calls,
+        "result_chars": mcp_chars,
+        "by_provenance": provenance,
+        "servers": _ranked(servers.values()),
+        "tools": _ranked(tools.values()),
+    }
+    plugins_block: dict[str, Any] = {"calls": plugin_calls, "items": _ranked(plugins.values())}
+    if with_sessions:
+        mcp_block["sessions"] = len(
+            {sid for key, ids in seen.items() if key.startswith("server:") for sid in ids}
+        )
+        plugins_block["sessions"] = len(
+            {sid for key, ids in seen.items() if key.startswith("plugin:") for sid in ids}
+        )
+    return mcp_block, plugins_block
+
+
 def context_window_for(peak_tokens: int) -> int:
     """Smallest standard context window the observed peak fits inside."""
     for window in STANDARD_WINDOWS:
@@ -568,6 +651,13 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             params,
         )
     ]
+    usage_rows = conn.execute(
+        f"""SELECT c.session_id AS session_id, c.tool_name AS tool_name,
+                   c.qualifier AS qualifier, c.result_chars AS result_chars
+            FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
+        params,
+    ).fetchall()
+    mcp_block, plugins_block = _usage_blocks(usage_rows, with_sessions=True)
     shape_rows = conn.execute(
         f"""SELECT session_id, turns, prompts, transcript_bytes, peak_context_tokens, started_at,
                    last_activity_at
@@ -607,6 +697,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_day": by_day,
         "by_model": by_model,
         "tools": tools,
+        "mcp": mcp_block,
+        "plugins": plugins_block,
         "shape": shape,
         "artifacts": artifacts(conn, repo_root=repo_root, since=since, branch=branch),
     }

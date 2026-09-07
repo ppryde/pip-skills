@@ -134,6 +134,56 @@ class TestSummary:
         assert out["by_day"] == []
         assert out["shape"]["turns"] == {"p50": None, "p90": None, "max": None, "mean": None}
 
+    def test_mcp_and_plugin_blocks(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=[
+            "mcp__plugin_playwright_playwright__browser_click",
+            "mcp__plugin_playwright_playwright__browser_click",
+            "mcp__claude_ai_Snowflake__sql_exec_tool",
+            "mcp__claude-in-chrome__computer",
+            ("Skill", {"skill": "tribunal:reckoning"}),
+            ("Skill", {"skill": "code-review"}),
+            "Bash",
+        ]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        out = report.summary(conn)
+        mcp, plugins = out["mcp"], out["plugins"]
+
+        assert mcp["calls"] == 4
+        assert mcp["sessions"] == 1
+        assert mcp["by_provenance"] == {"plugin": 2, "connector": 1, "local": 1}
+        assert mcp["servers"][0] == {
+            "server": "plugin_playwright_playwright", "provenance": "plugin",
+            "tools": 1, "calls": 2, "sessions": 1, "result_chars": 0,
+        }
+        assert {t["tool"] for t in mcp["tools"]} == {
+            "browser_click", "sql_exec_tool", "computer",
+        }
+
+        # The playwright MCP calls count in BOTH boxes (deliberate overlap);
+        # `code-review` is a builtin skill and is in neither.
+        assert plugins["calls"] == 3
+        assert plugins["items"] == [
+            {"plugin": "playwright", "kind": "mcp", "calls": 2, "sessions": 1},
+            {"plugin": "tribunal", "kind": "skill", "calls": 1, "sessions": 1},
+        ]
+
+    def test_usage_blocks_respect_the_repo_filter(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["mcp__claude-in-chrome__computer"]).write()
+        TranscriptBuilder(projects, "-b", "s3").prompt("u1", T1).turn(
+            "m1", T1, tools=["mcp__claude_ai_Notion__notion-fetch"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a' WHERE session_id = 's1'")
+        conn.execute("UPDATE sessions SET repo_root = '/repo/b' WHERE session_id = 's3'")
+        conn.commit()
+
+        out = report.summary(conn, repo_root="/repo/a")
+        assert out["mcp"]["calls"] == 1
+        assert out["mcp"]["servers"][0]["server"] == "claude-in-chrome"
+
 
 class TestContextWindow:
     def test_window_is_the_smallest_standard_size_that_fits(self):
