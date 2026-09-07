@@ -7172,9 +7172,10 @@ button.trail-tag:focus-visible {
   top: 0;
   /* Opaque, because it is sticky: anything that stays put while content
      scrolls beneath it must hide that content, or the two render on top of
-     each other. Observed on a phone — the agent's title read straight through
-     the sibling list. */
-  background: var(--qb-parchment);
+     each other. `--qb-panel` is the drawer's own surface (`.card-drawer`);
+     an earlier attempt named `--qb-parchment`, which does not exist, so the
+     declaration was dropped and the bleed-through survived the "fix". */
+  background: var(--qb-panel);
   align-self: start;
   max-height: calc(100vh - 52px);
   display: flex;
@@ -7310,8 +7311,15 @@ button.trail-tag:focus-visible {
    full-width above the pane so the way back is never lost. */
 @media (max-width: 760px) {
   .chr-drawer--agent {
-    grid-template-columns: 1fr;
+    /* Block, not a one-column grid. Two children in one grid area render on
+       top of each other; in block flow that cannot happen, and the rail is
+       simply a box above the pane. */
+    display: block;
     padding: 26px 28px;
+  }
+
+  .chr-drawer__pane {
+    margin-top: 1rem;
   }
 
   .chr-rail {
