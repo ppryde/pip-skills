@@ -353,6 +353,45 @@ describe("<ChroniclePage/>", () => {
     expect(activity.getByRole("button", { name: "Live" })).toBeDisabled();
   });
 
+  it("renders the MCP and plugin panels in the session drawer", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cold_turns: 0,
+      subagents: [],
+      turn_series: [],
+      tools: [{ tool_name: "Read", calls: 1 }],
+      compactions_at: [],
+      artifacts: [],
+      biggest_jumps: [],
+      mcp: {
+        calls: 2, result_chars: 100,
+        by_provenance: { plugin: 1, connector: 1 },
+        servers: [
+          { server: "plugin_linear_linear", provenance: "plugin", tools: 1, calls: 1, result_chars: 60 },
+          { server: "claude_ai_Notion", provenance: "connector", tools: 1, calls: 1, result_chars: 40 },
+        ],
+        tools: [],
+      },
+      plugins: {
+        calls: 2,
+        items: [
+          { plugin: "linear", kind: "mcp", calls: 1 },
+          { plugin: "overseer", kind: "skill", calls: 1 },
+        ],
+      },
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+    // Scoped to the dialog: the page behind it carries panels of the same name.
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("plugin_linear_linear")).toBeInTheDocument();
+    expect(dialog.getByText("claude_ai_Notion")).toBeInTheDocument();
+    expect(dialog.getByText("overseer · skill")).toBeInTheDocument();
+  });
+
   it("opens the session drawer from a row", async () => {
     mocked.getChronicleSession.mockResolvedValue({
       ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
