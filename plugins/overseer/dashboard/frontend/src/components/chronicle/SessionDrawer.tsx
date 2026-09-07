@@ -297,12 +297,21 @@ export default function SessionDrawer({
                   </thead>
                   <tbody>
                     {detail.subagents.map((a) => (
-                      <tr key={a.agent_id} className="chr-table__row">
+                      // The whole row opens the agent, as the sessions table
+                      // does. `.chr-table__row` already paints a pointer and a
+                      // hover, so a row that did nothing was advertising a
+                      // click it would not honour.
+                      <tr
+                        key={a.agent_id}
+                        className="chr-table__row"
+                        title={agentLabel(a)}
+                        onClick={() => setOpenAgent(a.agent_id)}
+                      >
                         <td>
                           <button
                             type="button"
-                            className="chr-table__open"
-                            onClick={() => setOpenAgent(a.agent_id)}
+                            className="chr-table__open chr-table__clamp"
+                            onClick={(e) => { e.stopPropagation(); setOpenAgent(a.agent_id); }}
                           >
                             {agentLabel(a)}
                           </button>

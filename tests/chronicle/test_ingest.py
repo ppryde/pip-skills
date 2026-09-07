@@ -326,6 +326,71 @@ class TestPathMapConfig:
         assert store.path_map() == [("/w/b", "/host/b")]
 
 
+class TestAgentDescription:
+    """`task` is the agent's opening PROMPT — 1,200 to 3,500 characters. Claude
+    Code writes a purpose-built short label beside the transcript; that is the
+    name, and the prompt is not."""
+
+    def test_reads_the_short_description_from_the_meta_file(self, projects):
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        agent = b.subagent("abc123", ["m2"], ts=T0)
+        agent.with_suffix(".meta.json").write_text(json.dumps({
+            "description": "Review balance package correctness",
+            "agentType": "general-purpose", "model": "sonnet",
+            # Present in the real file, and none of it is a label.
+            "teamName": "session-1", "color": "blue", "permissionMode": "auto",
+        }))
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        row = conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'abc123'").fetchone()
+        assert row[0] == "Review balance package correctness"
+
+    def test_no_meta_file_leaves_it_null_rather_than_failing(self, projects):
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent2")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        b.subagent("nometa", ["m2"], ts=T0)     # no .meta.json written
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'nometa'").fetchone()[0] is None
+
+    def test_a_malformed_meta_file_is_ignored(self, projects, tmp_path):
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent3")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        agent = b.subagent("bad", ["m2"], ts=T0)
+        agent.with_suffix(".meta.json").write_text("{not json")
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'bad'").fetchone()[0] is None
+
+    def test_a_tail_read_does_not_erase_it(self, projects):
+        # The meta file is read every ingest, but an incremental read that
+        # somehow loses it must not blank the label — same COALESCE trap that
+        # once shipped 3 qualifiers out of 1,265.
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent4")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        agent = b.subagent("keep", ["m2"], ts=T0)
+        meta = agent.with_suffix(".meta.json")
+        meta.write_text(json.dumps({"description": "Map the auth flow"}))
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        meta.unlink()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'keep'").fetchone()[0] == "Map the auth flow"
+
+
 class TestStoreResolution:
     """One machine, one store. `<primary>/chronicle/sessions.db` resolves per
     ACCOUNT, so a second account running `sync` quietly raised a rival store —

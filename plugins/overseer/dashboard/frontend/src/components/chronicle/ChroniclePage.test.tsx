@@ -586,8 +586,17 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
 
-    // The session's Subagents table names each agent by its task, and is the
-    // way in to the second sheet.
+    // The whole ROW opens it, as on the sessions table. `.chr-table__row`
+    // paints a pointer and a hover, so a row that only responded on its
+    // name button was advertising a click it would not honour.
+    fireEvent.click(screen.getByRole("row", { name: /Audit the ORM/ }));
+    await waitFor(() =>
+      expect(screen.getByTestId("subagent-drawer-overlay")).toBeInTheDocument());
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-drawer-overlay")).not.toBeInTheDocument());
+
+    // The name button still works, and must not fire the row handler twice.
     fireEvent.click(screen.getByRole("button", { name: "Find the auth flow" }));
     await waitFor(() =>
       expect(screen.getByTestId("subagent-drawer-overlay")).toBeInTheDocument());

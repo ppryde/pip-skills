@@ -423,10 +423,11 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
         # just saw would erase the label on every subsequent sync. Same trap
         # that once shipped 3 qualifiers out of 1,265.
         conn.execute(
-            """INSERT INTO agents(session_id, agent_id, task) VALUES (?,?,?)
+            """INSERT INTO agents(session_id, agent_id, task, description) VALUES (?,?,?,?)
                ON CONFLICT(session_id, agent_id) DO UPDATE SET
-                   task = COALESCE(excluded.task, agents.task)""",
-            (session_id, agent_id, facts.task),
+                   task = COALESCE(excluded.task, agents.task),
+                   description = COALESCE(excluded.description, agents.description)""",
+            (session_id, agent_id, facts.task, agent_description(path)),
         )
     _write_facts(conn, session_id, facts)
     conn.execute(
@@ -440,6 +441,31 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
             (stat[0], session_id),
         )
     return len(lines)
+
+
+def agent_description(transcript_path: Path) -> str | None:
+    """The agent's short label, from `agent-<id>.meta.json` beside its transcript.
+
+    Claude Code writes that file for all but a handful of agents (979 of 980 on
+    the machine this was built for), and its `description` is a purpose-built
+    three-to-five word summary — "Review balance package correctness". The
+    `task` column, by contrast, holds the agent's opening PROMPT: 1,200 to 3,500
+    characters, which as a name blows a table column apart and truncates into a
+    mangled paragraph.
+
+    None on any failure, and None for a main transcript, which has no meta file.
+    Only `description` is read: the file also names the team, the colour and the
+    permission mode, none of which is a label.
+    """
+    meta = transcript_path.with_suffix(".meta.json")
+    if not meta.is_file():
+        return None
+    try:
+        data = json.loads(meta.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = data.get("description") if isinstance(data, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def subagent_files(transcript_path: Path, session_id: str) -> list[tuple[Path, str]]:

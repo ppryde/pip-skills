@@ -259,6 +259,12 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("sessions", "plan_billing_type", "TEXT"),
     ("sessions", "plan_rate_limit_tier", "TEXT"),
     ("sessions", "plan_observed_at", "REAL"),
+    # The agent's own short label, from `agent-<id>.meta.json` beside its
+    # transcript. Claude Code writes a purpose-built 3-5 word `description`
+    # there; the `task` column holds its opening PROMPT, which runs to
+    # thousands of characters and makes a poor name. Backfilled by
+    # `chronicle sync --full`.
+    ("agents", "description", "TEXT"),
     # Churn rollup, recomputed from `file_edits` by ingest.rollup.
     ("sessions", "lines_added", "INTEGER NOT NULL DEFAULT 0"),
     ("sessions", "lines_removed", "INTEGER NOT NULL DEFAULT 0"),

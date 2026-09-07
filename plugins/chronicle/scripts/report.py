@@ -312,6 +312,17 @@ def _task_sql(conn: sqlite3.Connection) -> str:
     return "MAX(ag.task)" if _has_table(conn, "agents") else "NULL"
 
 
+def _agent_description_sql(conn: sqlite3.Connection) -> str:
+    """The agent's short label. NULL where the column predates the store, so a
+    store not yet resynced degrades to the task prompt rather than erroring —
+    the same guard `qualifier` needed, for the same reason: report verbs open
+    the store READ-ONLY, a path that returns before `_migrate` can add it."""
+    if not _has_table(conn, "agents"):
+        return "NULL"
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+    return "MAX(ag.description)" if "description" in columns else "NULL"
+
+
 _EMPTY_CHURN: dict[str, Any] = {
     "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
     "sessions": 0, "output_tokens": 0, "by_day": [],
@@ -732,7 +743,8 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
                           AS context_tokens,
                       SUM(t.output_tokens) AS output_tokens, SUM(t.tool_calls) AS tool_calls,
                       MIN(t.ts) AS first_ts, MAX(t.ts) AS last_ts,
-                      {_agent_type_sql(conn, 't.')} AS agent_type, {_task_sql(conn)} AS task
+                      {_agent_type_sql(conn, 't.')} AS agent_type, {_task_sql(conn)} AS task,
+                      {_agent_description_sql(conn)} AS description
                FROM turns t{_agents_join(conn)}
                WHERE t.session_id = ? AND t.agent_id <> ''
                GROUP BY t.agent_id ORDER BY first_ts""",

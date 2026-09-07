@@ -53,7 +53,13 @@ export function shortAgent(agentId: string): string {
 /** The rail's label: the task if the store has one, else the id. Never a
  * fabricated summary — an unnamed agent says so by showing its id. */
 export function agentLabel(agent: ChronicleSubagent): string {
-  return agent.task ?? shortAgent(agent.agent_id);
+  // `description` first: Claude Code writes a three-to-five word summary for
+  // almost every agent, and it is a NAME. `task` is the opening prompt —
+  // 1,200 to 3,500 characters — which as a label truncates into a mangled
+  // paragraph and dictates the width of the column it sits in. It stays as
+  // the fallback for agents with no meta file, and for a store not yet
+  // resynced with `--full`.
+  return agent.description ?? agent.task ?? shortAgent(agent.agent_id);
 }
 
 export default function SubagentDrawer({

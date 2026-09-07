@@ -749,6 +749,11 @@ export interface ChronicleSubagent {
   task: string | null;
   /** "Explore", "general-purpose", … as attribution records it. */
   agent_type: string | null;
+  /** The agent's SHORT label, from `agent-<id>.meta.json` — a purpose-built
+   * three-to-five word summary. Prefer this over `task`, which is the opening
+   * prompt and runs to thousands of characters. Null on the handful of agents
+   * with no meta file, and in a store not yet resynced with `--full`. */
+  description?: string | null;
 }
 
 /** `GET /api/chronicle/session/{sid}/agent/{aid}` — one subagent in detail.

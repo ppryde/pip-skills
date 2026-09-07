@@ -7170,6 +7170,11 @@ button.trail-tag:focus-visible {
 .chr-rail {
   position: sticky;
   top: 0;
+  /* Opaque, because it is sticky: anything that stays put while content
+     scrolls beneath it must hide that content, or the two render on top of
+     each other. Observed on a phone — the agent's title read straight through
+     the sibling list. */
+  background: var(--qb-parchment);
   align-self: start;
   max-height: calc(100vh - 52px);
   display: flex;
@@ -7266,6 +7271,24 @@ button.trail-tag:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The agent cell holds a task prompt, which can run to hundreds of
+   characters. Left to itself it sets the column width and shoves the numeric
+   columns off a phone screen entirely. Clamped to two lines; the full text is
+   on the row's `title`, and one click away in the drawer. */
+.chr-table__clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 22rem;
+}
+
+@media (max-width: 760px) {
+  .chr-table__clamp {
+    max-width: 14rem;
+  }
+}
+
 .chr-rail__meta {
   font-family: var(--qb-font-prose);
   font-size: 0.68rem;
@@ -7274,7 +7297,10 @@ button.trail-tag:focus-visible {
 
 /* The task as a heading is prose, not a name — it wraps rather than
    truncating, and sits at a size a sentence can carry. */
-.chr-drawer__title--task {
+/* Doubled class deliberately: the base `.chr-drawer__title` is declared LATER
+   in this file, so at equal specificity it won and this modifier never
+   applied — the task rendered at heading size. */
+.chr-drawer__title.chr-drawer__title--task {
   font-size: 1.05rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
