@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.29.0",
+  "version": "1.30.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -164,7 +164,7 @@
     {
       "name": "chronicle",
       "source": "./plugins/chronicle",
-      "description": "Session telemetry from Claude Code transcripts: per-turn token usage, context growth, prompts, tool calls, subagents, compactions and duration in an account-scoped SQLite chronicle, synced on demand. The overseer dashboard grows a Chronicle page when it is present.",
+      "description": "Session telemetry from Claude Code transcripts: per-turn token usage, context growth, prompts, tool calls, subagents, compactions and duration in an account-scoped SQLite chronicle, synced on demand. Turns carry attribution, so tokens and cost are accounted to the plugin, skill, subagent type and MCP server that spent them, and edits carry their diffs for per-file churn. The overseer dashboard grows a Chronicle page when it is present.",
       "category": "engineering",
       "tags": [
         "sessions",
