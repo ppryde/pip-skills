@@ -269,21 +269,24 @@ class TestSiblingPluginContract:
     mode of `run_chronicle` is deliberately soft.
     """
 
-    def test_the_sibling_plugin_layout_still_holds(self) -> None:
-        assert cli_client._CHRONICLE_CLI.is_file(), (
-            f"chronicle CLI not at {cli_client._CHRONICLE_CLI} — the parents[4]/'chronicle' "
-            "resolution in cli_client.py no longer matches the repo layout, and the "
-            "Chronicle page will degrade to 'not installed' with nothing to say why"
+    def test_chronicle_resolves_from_wherever_this_is_running(self) -> None:
+        assert cli_client._CHRONICLE_CLI is not None, (
+            "chronicle CLI not found by find_plugin — the Chronicle page will "
+            "degrade to 'not installed' with nothing to say why"
         )
         assert cli_client.chronicle_installed() is True
 
     def test_every_optional_sibling_resolves_the_same_way(self) -> None:
-        # vigil and census are reached by the identical parents[4] walk, so
-        # they stand or fall together — pin all three rather than the one
-        # this suite happens to be about.
-        for cli in (cli_client._CHRONICLE_CLI, cli_client._VIGIL_CLI, cli_client._CENSUS_CLI):
-            assert cli.is_file(), f"optional sibling plugin CLI missing: {cli}"
-            assert cli.parent.parent.parent.name == "plugins"
+        # All three go through `find_plugin`, so they stand or fall together.
+        # Deliberately NOT asserting the shape of the path: this test used to
+        # require `.../plugins/<name>/scripts/cli.py`, which is only one of
+        # the two real layouts and is exactly the assumption that hid the bug
+        # (see tests/test_plugin_discovery.py). What matters is that a CLI was
+        # found, not where.
+        for name, cli in (("chronicle", cli_client._CHRONICLE_CLI),
+                          ("vigil", cli_client._VIGIL_CLI),
+                          ("census", cli_client._CENSUS_CLI)):
+            assert cli is not None and cli.is_file(), f"sibling plugin not found: {name}"
 
     def test_overseer_never_imports_chronicle(self) -> None:
         """The decoupling is a PROCESS boundary. An import would make the
