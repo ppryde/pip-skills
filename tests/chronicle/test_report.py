@@ -432,6 +432,23 @@ class TestUnmigratedStore:
         assert detail["mcp"]["calls"] == 1
         assert detail["plugins"] == {"calls": 0, "items": []}
 
+    def test_summary_and_detail_survive_a_missing_result_chars_column(self, projects):
+        """`result_chars` shipped after the table too, and the context-growth
+        block is built entirely from it. Missing means "no sizes recorded",
+        which is the truth of such a store — not an exception that empties
+        the whole page."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Read", "Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("ALTER TABLE tool_calls DROP COLUMN result_chars")
+        conn.commit()
+
+        empty = {"result_chars": 0, "calls": 0, "measured_calls": 0,
+                 "tools_total": 0, "tools": []}
+        assert report.summary(conn)["context_growth"] == empty
+        assert report.session_detail(conn, "s1")["context_growth"] == empty
+
 
 class TestClassify:
     def test_plugin_mcp_server_is_both_mcp_and_plugin(self):
@@ -563,6 +580,107 @@ class TestChurn:
             "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
             "sessions": 0, "output_tokens": 0, "by_day": []}
         assert report.session_detail(conn, "s1")["churn"]["files_by_churn"] == []
+
+
+class TestContextGrowth:
+    """What GREW the context, per tool. The ranking is by characters returned,
+    not by call count and emphatically not by dollars — a turn's cost was paid
+    on the prompt it carried, before any of its tools ran."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Bash", "Bash", "Bash",
+                                "mcp__claude-in-chrome__computer"])
+        for i in range(3):
+            b.tool_result(f"r{i}", T0, tool_use_id=f"m1-tool{i}", content="x" * 100)
+        b.tool_result("r3", T0, tool_use_id="m1-tool3", content="x" * 9000)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_the_rarely_called_tool_that_returns_most_ranks_first(self, projects):
+        """The whole point of the block. Ranked by calls, Bash wins 3 to 1;
+        ranked by what entered the context, it is not close — and the browser
+        tool would have been cut entirely from a top-N-by-calls list."""
+        growth = report.summary(self._seed(projects))["context_growth"]
+        assert [t["tool_name"] for t in growth["tools"]] == [
+            "mcp__claude-in-chrome__computer", "Bash",
+        ]
+        assert [t["result_chars"] for t in growth["tools"]] == [9000, 300]
+        assert [t["calls"] for t in growth["tools"]] == [1, 3]
+
+    def test_each_tool_carries_its_share_and_its_typical_size(self, projects):
+        """`share` is of characters returned; `avg_chars` is the finding —
+        one call of 9,000 against three of 100."""
+        growth = report.summary(self._seed(projects))["context_growth"]
+        assert growth["result_chars"] == 9300
+        assert growth["calls"] == 4
+        assert growth["measured_calls"] == 4
+        assert growth["tools_total"] == 2
+        assert [t["avg_chars"] for t in growth["tools"]] == [9000, 100]
+        assert [t["share"] for t in growth["tools"]] == [
+            round(9000 / 9300, 6), round(300 / 9300, 6),
+        ]
+        assert round(sum(t["share"] for t in growth["tools"]), 4) == 1.0
+
+    def test_a_call_that_recorded_no_result_is_counted_but_not_averaged(self, projects):
+        """A call still in flight has no size. Counting it in the denominator
+        would understate the tool; excluding it from `calls` would lose it."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read", "Read"])
+        b.tool_result("r1", T0, tool_use_id="m1-tool0", content="x" * 500)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        read = report.summary(conn)["context_growth"]["tools"][0]
+        assert read["tool_name"] == "Read"
+        assert (read["calls"], read["measured_calls"]) == (2, 1)
+        assert read["avg_chars"] == 500
+
+    def test_a_tool_that_returned_nothing_measurable_has_no_average(self, projects):
+        """None, not 0 — "we don't know" and "it returned nothing" are
+        different claims, and only one of them is true here."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        growth = report.summary(conn)["context_growth"]
+        assert growth["result_chars"] == 0
+        assert growth["tools"][0]["avg_chars"] is None
+        # No total means no denominator, so every share is 0.0 rather than a
+        # ZeroDivisionError taking the page down.
+        assert growth["tools"][0]["share"] == 0.0
+
+    def test_it_respects_the_repo_filter(self, projects):
+        conn = self._seed(projects)
+        assert report.summary(conn, repo_root="/repo/a")["context_growth"]["result_chars"] == 9300
+        assert report.summary(conn, repo_root="/repo/b")["context_growth"]["result_chars"] == 0
+
+    def test_a_session_reports_its_own_growth(self, projects):
+        detail = report.session_detail(self._seed(projects), "s1")
+        assert detail["context_growth"]["result_chars"] == 9300
+        assert detail["context_growth"]["tools"][0]["tool_name"] == \
+            "mcp__claude-in-chrome__computer"
+
+    def test_an_agent_reports_only_what_it_pulled_in_itself(self, projects):
+        """The main agent's Read belongs to the session, not to the agent."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.tool_result("r1", T0, tool_use_id="m1-tool0", content="x" * 4000)
+        b.write()
+        b.subagent("aexplore-1", ["x1"], T1, task="Find the auth flow", tools=["Bash"])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        assert report.session_detail(conn, "s1")["context_growth"]["result_chars"] == 4000
+        agent = report.agent_detail(conn, "s1", "aexplore-1")["context_growth"]
+        assert [t["tool_name"] for t in agent["tools"]] == ["Bash"]
+        assert agent["result_chars"] == 0
 
 
 class TestAttribution:

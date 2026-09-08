@@ -150,6 +150,20 @@ def _qualifier_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
     return f"{prefix}qualifier" if "qualifier" in columns else "NULL"
 
 
+def _result_chars_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
+    """The SQL expression for a call's `result_chars`, or NULL where the
+    column is not there yet — the same read-only migration trap
+    `_qualifier_sql` documents, on the column right beside it.
+
+    `result_chars` was in every usage query unguarded, so an upgraded-but-
+    never-synced store raised `OperationalError` on the whole summary, not
+    just on the sizes. NULL folds to 0 in `_usage_blocks` and to an empty
+    block in `_context_growth`, which is what such a store honestly holds.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(tool_calls)")}
+    return f"{prefix}result_chars" if "result_chars" in columns else "NULL"
+
+
 def _median(values: list[float]) -> float | None:
     """Median, because the mean of a tool's wall time is a fiction: an
     `AskUserQuestion` that waited 60 hours for a human, or a `Bash` left
@@ -407,7 +421,7 @@ def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
 
 
 def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
-                  limit: int = 50,
+                  limit: int = 50, tool_limit: int = 400,
                   server_names: dict[str, str] | None = None,
                   ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Fold classified tool-call rows into the `tools`, `mcp` and `plugins`
@@ -496,26 +510,106 @@ def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
         median = _median(durations.get(key, []))
         bucket["median_s"] = None if median is None else round(median, 2)
 
-    def _ranked(kind: str) -> list[dict[str, Any]]:
+    def _ranked(kind: str, cap: int | None = None) -> list[dict[str, Any]]:
         # Calls descending, then name ascending so equal counts are stable.
         values = [b for (k, _), b in buckets.items() if k == kind]
         values.sort(key=lambda d: (-d["calls"],
                                    d.get("tool_name") or d.get("plugin")
                                    or f"{d.get('server')}/{d.get('tool', '')}"))
-        return values[:limit]
+        return values[:limit if cap is None else cap]
 
     mcp_block: dict[str, Any] = {
         "calls": mcp_calls,
         "result_chars": mcp_chars,
         "by_provenance": provenance,
         "servers": _ranked("mcp"),
-        "tools": _ranked("mcptool"),
+        # A per-SERVER cap in disguise: `limit` ranks the whole flat list, so
+        # at 50 a store with a dozen servers loses the quiet ones entirely and
+        # the UI's server picker offers a name with no rows behind it. This
+        # list is read one server at a time, not as a top-N, so it gets a cap
+        # that clears the sum of every server's tool count instead.
+        "tools": _ranked("mcptool", tool_limit),
     }
     plugins_block: dict[str, Any] = {"calls": plugin_calls, "items": _ranked("plugin")}
     if with_sessions:
         mcp_block["sessions"] = len(mcp_sessions)
         plugins_block["sessions"] = len(plugin_sessions)
     return _ranked("tool"), mcp_block, plugins_block
+
+
+_EMPTY_CONTEXT_GROWTH: dict[str, Any] = {
+    "result_chars": 0, "calls": 0, "measured_calls": 0, "tools_total": 0, "tools": [],
+}
+
+
+def _context_growth(conn: sqlite3.Connection, where: str, params: list[Any], *,
+                    limit: int = 50, agent: str | None = None) -> dict[str, Any]:
+    """What actually grew the context, per tool, from `tool_calls.result_chars`.
+
+    Deliberately NOT "cost by tool". A turn's cost is the prompt it carried,
+    and that was paid before any of its tools ran — a turn that calls five
+    tools did not pay five times, so splitting its dollars across them would
+    be invention. The other direction IS sound: a tool RESULT is text that
+    enters the context, and every turn after it carries that text again. So
+    this ranks tools by how much they poured in, which is the part a reader
+    can actually act on.
+
+    Shares are of characters returned, never of dollars, for the same reason:
+    a result re-sent at cache-read rates costs a fraction of one at creation
+    rates, and a compaction drops some of it entirely. A per-tool $ figure
+    would overclaim by a factor nobody could see.
+
+    `calls` counts every call in the window; `measured_calls` only those that
+    recorded a result size. `avg_chars` divides by the latter — dividing by
+    the former would understate a tool whose results went unrecorded, and it
+    is the average that carries the finding: a tool called rarely and
+    returning enormously beats a chatty one that returns almost nothing.
+
+    `tools_total` is how many distinct tools the window holds, so a truncated
+    list can say what it is a truncation of. `where` is the same
+    sessions-side filter every other block takes; `agent` narrows to one
+    subagent's calls.
+    """
+    # `result_chars` was added to `tool_calls` after the table shipped, and
+    # the report verbs open the store READ-ONLY — a path that returns before
+    # `_migrate` runs. See `_qualifier_sql` for the full trap: naming a
+    # missing column here would report an EMPTY account to someone with a
+    # thousand transcripts.
+    if _result_chars_sql(conn) == "NULL":
+        return dict(_EMPTY_CONTEXT_GROWTH)
+
+    scope = f"{where}{' AND' if where else ' WHERE'} c.agent_id = ?" if agent else where
+    scoped = [*params, agent] if agent else params
+    rows = conn.execute(
+        f"""SELECT c.tool_name AS tool_name, COUNT(*) AS calls,
+                   COUNT(c.result_chars) AS measured_calls,
+                   COALESCE(SUM(c.result_chars), 0) AS result_chars
+            FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{scope}
+            GROUP BY c.tool_name
+            ORDER BY COALESCE(SUM(c.result_chars), 0) DESC, c.tool_name""",
+        scoped,
+    ).fetchall()
+    total_chars = sum(int(r["result_chars"]) for r in rows)
+    return {
+        "result_chars": total_chars,
+        "calls": sum(int(r["calls"]) for r in rows),
+        "measured_calls": sum(int(r["measured_calls"]) for r in rows),
+        "tools_total": len(rows),
+        "tools": [
+            {
+                "tool_name": r["tool_name"],
+                "calls": int(r["calls"]),
+                "measured_calls": int(r["measured_calls"]),
+                "result_chars": int(r["result_chars"]),
+                "share": round(int(r["result_chars"]) / total_chars, 6) if total_chars else 0.0,
+                # None, not 0, where nothing was measured: "we don't know" and
+                # "it returned nothing" are different claims.
+                "avg_chars": (round(int(r["result_chars"]) / int(r["measured_calls"]))
+                              if r["measured_calls"] else None),
+            }
+            for r in rows[:limit]
+        ],
+    }
 
 
 def context_window_for(peak_tokens: int) -> int:
@@ -753,6 +847,8 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     ]
 
     detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id])
+    detail["context_growth"] = _context_growth(
+        conn, " WHERE s.session_id = ?", [session_id])
     # The same two blocks the page computes for a whole window, narrowed to
     # this session: which plugins, skills, agent types and MCP servers its
     # tokens went to, and how much of it ran inside a subagent. Both take a
@@ -762,7 +858,8 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
             f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
-                       result_chars, ts, result_ts, agent_id FROM tool_calls
+                       {_result_chars_sql(conn)} AS result_chars,
+                       ts, result_ts, agent_id FROM tool_calls
                 WHERE session_id = ?""",
             (session_id,),
         ).fetchall(),
@@ -777,7 +874,8 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     ]
     detail["artifacts"] = artifacts_for(conn, session_id)
     tool_rows = conn.execute(
-        """SELECT tool_name, message_id, result_chars, result_ts FROM tool_calls
+        f"""SELECT tool_name, message_id, {_result_chars_sql(conn)} AS result_chars,
+                   result_ts FROM tool_calls
            WHERE session_id = ? AND agent_id = ''""",
         (session_id,),
     ).fetchall()
@@ -888,7 +986,8 @@ def agent_detail(conn: sqlite3.Connection, session_id: str,
     detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
             f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
-                       result_chars, ts, result_ts, agent_id FROM tool_calls
+                       {_result_chars_sql(conn)} AS result_chars,
+                       ts, result_ts, agent_id FROM tool_calls
                 WHERE session_id = ? AND agent_id = ?""",
             (session_id, agent_id),
         ).fetchall(),
@@ -896,6 +995,8 @@ def agent_detail(conn: sqlite3.Connection, session_id: str,
         server_names=mcp_server_names(conn),
     )
     detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id], agent=agent_id)
+    detail["context_growth"] = _context_growth(
+        conn, " WHERE s.session_id = ?", [session_id], agent=agent_id)
     detail["artifacts"] = [
         _page_row(r) for r in conn.execute(
             _ARTIFACT_PAGE_SQL + " AND a.session_id = ? AND a.agent_id = ?"
@@ -1100,7 +1201,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
     usage_rows = conn.execute(
         f"""SELECT c.session_id AS session_id, c.tool_name AS tool_name,
                    {_qualifier_sql(conn, "c.")} AS qualifier,
-                   c.result_chars AS result_chars, c.ts AS ts, c.result_ts AS result_ts,
+                   {_result_chars_sql(conn, "c.")} AS result_chars,
+                   c.ts AS ts, c.result_ts AS result_ts,
                    c.agent_id AS agent_id
             FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
         params,
@@ -1146,6 +1248,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_day": by_day,
         "by_model": by_model,
         "tools": tools,
+        "context_growth": _context_growth(conn, where, params),
         "churn": _churn(conn, where, params),
         "attribution": _attribution(conn, where, params),
         "delegation": _delegation(conn, where, params),
