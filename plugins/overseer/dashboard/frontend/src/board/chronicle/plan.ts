@@ -42,7 +42,13 @@ export function plansPresent(
     const plan = s.plan_organization_type;
     if (plan) counts.set(plan, (counts.get(plan) ?? 0) + 1);
   }
+  // Filter on the LABEL, not on the raw plan. A truthy value can still tidy
+  // to nothing — "_", "-" and "claude_" all pass the `if (plan)` guard above
+  // and come back null — and the old `as string` assertion carried that null
+  // into `localeCompare`, taking down the whole Chronicle page rather than
+  // dropping one badge.
   return [...counts.entries()]
-    .map(([plan, count]) => ({ plan, label: planLabel(plan) as string, count }))
+    .map(([plan, count]) => ({ plan, label: planLabel(plan), count }))
+    .filter((p): p is { plan: string; label: string; count: number } => p.label !== null)
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }

@@ -245,7 +245,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         """INSERT OR REPLACE INTO file_edits(session_id, tool_use_id, agent_id, ts, file_path,
                operation, lines_added, lines_removed) VALUES (?,?,?,?,?,?,?,?)""",
         [
-            (session_id, e.tool_use_id, MAIN_AGENT, e.ts, e.file_path, e.operation,
+            (session_id, e.tool_use_id, e.agent_id, e.ts, e.file_path, e.operation,
              e.lines_added, e.lines_removed)
             for e in facts.file_edits.values()
         ],

@@ -107,6 +107,12 @@ class FileEdit:
     lines_added: int = 0
     lines_removed: int = 0
     ts: float | None = None
+    # Who made the edit. `tool_calls`, `artifacts` and `events` all record
+    # this; `file_edits` did not carry it at all and the insert wrote the main
+    # agent for every row, so no subagent could ever own an edit — which made
+    # `agent_detail`'s churn permanently empty and inflated the main agent's
+    # by every subagent's work.
+    agent_id: str = MAIN_AGENT
 
 
 @dataclass
@@ -301,6 +307,26 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
         stop = message.get("stop_reason")
         if isinstance(stop, str):
             turn.stop_reason = stop
+        # ...and a later, LARGER output count. Claude Code writes one line per
+        # content block as the response streams, all sharing the message id,
+        # and the usage on the early lines is a partial snapshot: a real
+        # subagent message read [3, 1337] across its two lines. Freezing the
+        # first under-counted that agent's output by 21x (222 recorded against
+        # 4,702 actual), and every subagent in the store the same way.
+        #
+        # MAX, not last: line order is not guaranteed, and a partial snapshot
+        # arriving after the total must never lower it. The input side needs
+        # no such handling — `input_tokens`/`cache_read`/`cache_creation`
+        # describe the prompt, which is settled before the first token is
+        # streamed and is identical on every line of the message.
+        raw_later = message.get("usage")
+        if isinstance(raw_later, dict):
+            turn.output_tokens = max(turn.output_tokens, _int(raw_later.get("output_tokens")))
+            later_details = raw_later.get("output_tokens_details")
+            if isinstance(later_details, dict):
+                turn.thinking_tokens = max(
+                    turn.thinking_tokens, _int(later_details.get("thinking_tokens"))
+                )
     content = message.get("content")
     if isinstance(content, list):
         for block in content:
@@ -356,7 +382,7 @@ def _qualifier(name: str, raw: Any) -> str | None:
 
 
 def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, Any],
-                       ts: float | None) -> None:
+                       ts: float | None, agent_id: str = MAIN_AGENT) -> None:
     content = message.get("content")
     if not isinstance(content, list):
         return
@@ -371,7 +397,7 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
         url = artifact_url(text)
         facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
                                             artifact_url=url)
-        edit = _file_edit(tool_id, record.get("toolUseResult"), ts)
+        edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
         if edit is not None:
             facts.file_edits[tool_id] = edit
         if url:
@@ -381,13 +407,20 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
                     artifact.url = url
 
 
-# Diff lines that are not changes: the ---/+++ file headers a unified diff
-# opens with, and git's marker for a missing trailing newline. Counting them
-# would inflate every file's churn by a constant.
-_DIFF_HEADERS = ("---", "+++", "\\")
+# Git's marker for a missing trailing newline, which is not a change.
+#
+# The ---/+++ file headers a unified diff opens with USED to be listed here
+# too, and that was a bug: `structuredPatch` hunks carry only +/-/space-
+# prefixed CONTENT, never those headers, so the guard caught nothing it was
+# aimed at — while a removed line whose own text begins `--` arrives as
+# `-` + `--flag` = `---flag` and was silently dropped. Deleting `--flag` from
+# a shell script, or adding `++i;`, undercounted the churn feeding the Rework
+# tile and the Files ranking.
+_DIFF_HEADERS = ("\\",)
 
 
-def _file_edit(tool_id: str, raw: Any, ts: float | None) -> FileEdit | None:
+def _file_edit(tool_id: str, raw: Any, ts: float | None,
+               agent_id: str = MAIN_AGENT) -> FileEdit | None:
     """The file change carried by one `toolUseResult`, or None if it carries
     no diff (a Bash result, a Read, a tool that touched nothing).
 
@@ -416,6 +449,7 @@ def _file_edit(tool_id: str, raw: Any, ts: float | None) -> FileEdit | None:
     return FileEdit(
         tool_use_id=tool_id,
         file_path=file_path,
+        agent_id=agent_id,
         operation=_opt_str(raw.get("type")) or "edit",
         lines_added=added,
         lines_removed=removed,
@@ -502,7 +536,7 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
         elif record.get("isCompactSummary"):
             facts.events.append(Event(uuid=uuid, kind="compaction", agent_id=agent_id, ts=ts))
         elif isinstance(message, dict):
-            _fold_tool_results(facts, record, message, ts)
+            _fold_tool_results(facts, record, message, ts, agent_id)
         return
     if kind == "system":
         subtype = record.get("subtype")

@@ -208,6 +208,15 @@ def _attribution(conn: sqlite3.Connection, where: str, params: list[Any], *,
         return {**_EMPTY_ATTRIBUTION, "turns": _attributed_totals(conn, where, params)[0]}
 
     def _group(column: str, extra: str = "") -> list[dict[str, Any]]:
+        # Per-column, not just "any column present". The five attribution
+        # columns arrived as five separate ALTERs and the report verbs open
+        # the store READ-ONLY (see `_qualifier_sql`), so a store can genuinely
+        # hold some and not others — an interrupted `_migrate`, or one touched
+        # by an intermediate build. Naming an absent column raised
+        # `OperationalError` out of the whole summary; an absent column simply
+        # has nothing attributed to it, which is what the store honestly says.
+        if column not in have:
+            return []
         rows = conn.execute(
             f"""SELECT t.{column} AS name, COUNT(*) AS turns,
                        SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
@@ -238,8 +247,13 @@ def _attribution(conn: sqlite3.Connection, where: str, params: list[Any], *,
     all_costs = _costs_by(conn, "1", where, params)
     total_cost = sum(c["cost_usd"] for c in all_costs.values())
 
-    plugins = _group("plugin", extra=", COUNT(DISTINCT t.skill) AS skills")
-    skills = _group("skill", extra=", MAX(t.plugin) AS plugin")
+    # The `extra` sub-selects name a column OTHER than the one being grouped,
+    # so each is guarded on its own: a store with `plugin` but no `skill` can
+    # still report plugins, just without the distinct-skill count.
+    plugins = _group("plugin",
+                     extra=", COUNT(DISTINCT t.skill) AS skills" if "skill" in have else "")
+    skills = _group("skill",
+                    extra=", MAX(t.plugin) AS plugin" if "plugin" in have else "")
     total_turns, attributed = _attributed_totals(conn, where, params)
     return {
         "turns": total_turns,
@@ -689,7 +703,14 @@ def _costs_by(conn: sqlite3.Connection, key_sql: str, where: str, params: list[A
     ``unpriced_turns`` rather than priced as something else. Subagent turns
     are included — they cost the same money as the main agent's.
     """
-    clause = f"{where}{' AND' if where else ' WHERE'} {extra}" if extra else where
+    # Parenthesised, always. `extra` is caller-supplied SQL and `_attribution`
+    # passes a multi-clause `a OR b OR c` — spliced bare after the window's own
+    # `s.repo_root = ?` that degrades to `(repo_root = ? AND a) OR b OR c`,
+    # because SQL binds AND tighter than OR, and every attributed turn in the
+    # WHOLE store gets priced into one repo's figure (18x on a real store).
+    # The parens cost nothing for the single-clause callers and make the
+    # multi-clause ones correct by construction.
+    clause = f"{where}{' AND' if where else ' WHERE'} ({extra})" if extra else where
     out: dict[Any, dict[str, Any]] = {}
     for r in conn.execute(
         f"""SELECT {key_sql} AS key, t.model AS model, {_COST_COLUMNS}

@@ -163,11 +163,18 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
     account we could not read costs a badge, not the data.
     """
     from scripts import store
-    config_root = args.source.strip("/").rsplit("/", 1)[0]   # ".../projects" -> "..."
+    # ".../projects" -> "...", and a single-segment source -> "" (the volume
+    # root). `rsplit` alone returns the input unchanged when there is no "/",
+    # so `--source projects` — which `_SOURCE_RE` accepts — read
+    # `/v/projects/.claude.json` instead of `/v/.claude.json`, soft-failed to
+    # None, and reported no plan: the exact unattributable-sessions failure
+    # this function exists to fix.
+    source = args.source.strip("/")
+    config_root = source.rsplit("/", 1)[0] if "/" in source else ""
     try:
         read = subprocess.run(
             ["docker", "run", "--rm", "-v", f"{args.volume}:/v:ro", args.image,
-             "cat", f"/v/{config_root}/.claude.json"],
+             "cat", f"/v/{config_root}/.claude.json" if config_root else "/v/.claude.json"],
             capture_output=True, text=True, timeout=60, check=False,
         )
     except (OSError, subprocess.SubprocessError):

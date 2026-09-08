@@ -1,6 +1,6 @@
 import json
 
-from scripts.transcript import TASK_CHARS, fold, parse_ts
+from scripts.transcript import MAIN_AGENT, TASK_CHARS, fold, parse_ts
 
 from .conftest import _assistant, _user
 
@@ -224,15 +224,32 @@ class TestFileEdits:
         assert (edit.lines_added, edit.lines_removed) == (3, 2)
         assert edit.operation == "edit"
 
-    def test_a_diff_marker_line_is_not_counted_as_a_change(self):
-        # `---`/`+++` headers and the `\ No newline` marker must not inflate
-        # the count; only real +/- content lines are changes.
+    def test_the_no_newline_marker_is_not_counted_as_a_change(self):
+        # git's `\ No newline at end of file` is the ONE non-change line that
+        # actually appears in a `structuredPatch` hunk.
         facts = fold(_lines(self._result("t1", [
-            {"lines": ["--- a/x", "+++ b/x", "+real", "-gone",
-                       "\\ No newline at end of file"]},
+            {"lines": ["+real", "-gone", "\\ No newline at end of file"]},
         ])))
         edit = facts.file_edits["t1"]
         assert (edit.lines_added, edit.lines_removed) == (1, 1)
+
+    def test_a_removed_line_that_looks_like_a_diff_header_still_counts(self):
+        """This test used to assert the opposite, on a false premise.
+
+        `structuredPatch` hunks carry only +/-/space-prefixed CONTENT — they
+        never contain the `---`/`+++` file headers a full unified diff opens
+        with, so the guard that skipped them caught nothing it was aimed at.
+        What it DID catch was real work: a removed SQL comment arrives as
+        `-` + `-- text` = `--- text`. A scan of 40,645 hunk lines from real
+        transcripts found zero `+++` lines and 129 beginning `---`, every one
+        of them a removed SQL comment — silently dropped from the churn
+        feeding the Rework tile and the Files ranking."""
+        facts = fold(_lines(self._result("t1", [
+            {"lines": ["--- Import app events into EVENTS.", "-ordinary",
+                       "+++i;", "+ordinary"]},
+        ])))
+        edit = facts.file_edits["t1"]
+        assert (edit.lines_added, edit.lines_removed) == (2, 2)
 
     def test_a_write_records_its_operation(self):
         facts = fold(_lines(self._result("t1", [
@@ -351,3 +368,103 @@ class TestSubagentTask:
                                   toolUseResult={"stdout": "output"})),
                      default_agent="a1")
         assert facts.task is None
+
+
+class TestFileEditOwnership:
+    """A file edit belongs to whoever made it. `tool_calls`, `artifacts` and
+    `events` all record the real agent; `file_edits` used to write the main
+    agent for every row, so no subagent could ever own one."""
+
+    def _result(self, tool_use_id: str, *, added: int, removed: int, agent_id=None):
+        record = {
+            "type": "user", "uuid": f"r-{tool_use_id}", "sessionId": "s1",
+            "timestamp": "2026-09-01T10:00:00.000Z", "cwd": "/repo",
+            "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}]},
+            "toolUseResult": {
+                "filePath": "/repo/x.py",
+                "structuredPatch": [{"lines": ["+a"] * added + ["-b"] * removed}],
+            },
+        }
+        if agent_id:
+            record["agentId"] = agent_id
+            record["isSidechain"] = True
+        return record
+
+    def test_an_edit_carries_the_agent_that_made_it(self):
+        facts = fold([json.dumps(self._result("t1", added=3, removed=1, agent_id="a1"))],
+                     default_agent="a1")
+        assert facts.file_edits["t1"].agent_id == "a1"
+
+    def test_a_main_loop_edit_carries_the_main_agent(self):
+        facts = fold([json.dumps(self._result("t1", added=3, removed=1))])
+        assert facts.file_edits["t1"].agent_id == MAIN_AGENT
+
+
+class TestDiffLineCounting:
+    """The hunk lines are already +/-/space-prefixed CONTENT — they are never
+    the `---`/`+++` file headers a unified diff opens with, which
+    `structuredPatch` does not carry at all."""
+
+    def _patch(self, lines):
+        return {
+            "type": "user", "uuid": "r1", "sessionId": "s1",
+            "timestamp": "2026-09-01T10:00:00.000Z", "cwd": "/repo",
+            "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+            "toolUseResult": {"filePath": "/repo/run.sh",
+                              "structuredPatch": [{"lines": lines}]},
+        }
+
+    def test_counts_a_line_whose_own_text_starts_with_dashes(self):
+        # Removing `--flag` from a shell script produces the hunk line
+        # `-` + `--flag` = `---flag`, which the old header guard skipped.
+        facts = fold([json.dumps(self._patch(["---flag", "-ordinary"]))])
+        assert facts.file_edits["t1"].lines_removed == 2
+
+    def test_counts_a_line_whose_own_text_starts_with_pluses(self):
+        facts = fold([json.dumps(self._patch(["+++i;", "+ordinary"]))])
+        assert facts.file_edits["t1"].lines_added == 2
+
+    def test_still_ignores_gits_no_trailing_newline_marker(self):
+        facts = fold([json.dumps(self._patch(["+a", "\\ No newline at end of file"]))])
+        assert facts.file_edits["t1"].lines_added == 1
+
+
+class TestStreamedUsage:
+    """Claude Code writes one JSONL line per content block as a response
+    streams, all sharing a message id — and the usage on the EARLY lines is a
+    partial snapshot. Only the last line carries the finished totals."""
+
+    def _line(self, out: int, block: str, thinking: int = 0):
+        return json.dumps(_assistant(
+            "m1", ts=T0, blocks=[{"type": block, "text": "x"}],
+            usage={"input_tokens": 3, "cache_read_input_tokens": 1000,
+                   "cache_creation_input_tokens": 200, "output_tokens": out,
+                   "output_tokens_details": {"thinking_tokens": thinking}},
+        ))
+
+    def test_keeps_the_finished_output_count_not_the_first_snapshot(self):
+        # Observed verbatim in a real subagent transcript: a message whose
+        # lines read [3, 1337]. Taking the first under-counted that agent's
+        # whole output by 21x (222 recorded against 4,702 actual).
+        facts = fold([self._line(3, "thinking"), self._line(1337, "text")])
+        turn = next(iter(facts.turns.values()))
+        assert turn.output_tokens == 1337
+
+    def test_keeps_the_finished_thinking_count_too(self):
+        facts = fold([self._line(3, "thinking", thinking=2),
+                      self._line(1337, "text", thinking=900)])
+        assert next(iter(facts.turns.values())).thinking_tokens == 900
+
+    def test_a_later_line_never_lowers_the_count(self):
+        # Order is not guaranteed and a partial must never overwrite a total.
+        facts = fold([self._line(1337, "text"), self._line(3, "thinking")])
+        assert next(iter(facts.turns.values())).output_tokens == 1337
+
+    def test_a_single_line_message_is_unchanged(self):
+        facts = fold([self._line(40, "text", thinking=10)])
+        turn = next(iter(facts.turns.values()))
+        assert (turn.output_tokens, turn.thinking_tokens) == (40, 10)

@@ -169,7 +169,7 @@ class TestPullVolumeAccount:
     plan at all — 75 of 342 sessions on the machine this was built for. The
     account fields come across too, whitelisted."""
 
-    def _run(self, monkeypatch, tmp_path, oauth, *, cat_rc=0):
+    def _run(self, monkeypatch, tmp_path, oauth, *, cat_rc=0, source=None):
         class Copy:
             returncode, stdout, stderr = 0, "", ""
 
@@ -185,7 +185,10 @@ class TestPullVolumeAccount:
             return Cat() if "cat" in cmd else Copy()
 
         monkeypatch.setattr("scripts.cli.subprocess.run", fake)
-        code = main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path)])
+        argv = ["pull-volume", "--volume", "wf", "--dest", str(tmp_path)]
+        if source is not None:
+            argv += ["--source", source]
+        code = main(argv)
         return code, calls
 
     def test_writes_only_the_whitelisted_fields(self, monkeypatch, tmp_path, capsys):
@@ -212,6 +215,24 @@ class TestPullVolumeAccount:
         assert code == 0
         assert not (tmp_path / ".claude.json").exists()
         assert "plan" not in json.loads(capsys.readouterr().out)
+
+    def test_a_single_segment_source_reads_the_volume_root(self, monkeypatch, tmp_path, capsys):
+        """`--source projects` is a valid value (`_SOURCE_RE` accepts it), and
+        the config file sits BESIDE the source dir. Deriving the parent with a
+        bare `rsplit` returned the input unchanged, so it read
+        `/v/projects/.claude.json`, found nothing, and silently reported no
+        plan — the very failure this account pull was written to fix."""
+        _, calls = self._run(monkeypatch, tmp_path,
+                             {"organizationType": "claude_max"}, source="projects")
+        cat = next(c for c in calls if "cat" in c)
+        assert cat[-1] == "/v/.claude.json"
+        assert json.loads(capsys.readouterr().out)["plan"] == "claude_max"
+
+    def test_a_nested_source_reads_beside_it(self, monkeypatch, tmp_path):
+        _, calls = self._run(monkeypatch, tmp_path,
+                             {"organizationType": "claude_max"}, source="home/.claude/projects")
+        cat = next(c for c in calls if "cat" in c)
+        assert cat[-1] == "/v/home/.claude/.claude.json"
 
     def test_an_api_key_volume_writes_nothing(self, monkeypatch, tmp_path, capsys):
         # No oauthAccount at all is what an API-key config looks like.

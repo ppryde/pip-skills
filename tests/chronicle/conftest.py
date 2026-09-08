@@ -139,7 +139,7 @@ class TranscriptBuilder:
             handle.write(json.dumps(record) + "\n")
 
     def subagent(self, agent_id: str, message_ids: list[str], ts: str,
-                 task: str | None = None, tools=()) -> Path:
+                 task: str | None = None, tools=(), edits=()) -> Path:
         """A subagent transcript. `task` writes the opening prompt Claude Code
         hands the agent — the real files always have one, so a test that cares
         about the rail's label asks for it explicitly."""
@@ -158,6 +158,23 @@ class TranscriptBuilder:
                                    "input": {}} for i, n in enumerate(tools)]))
             for mid in message_ids
         ]
+        # `edits` are (tool_use_id, added, removed) — the tool_result record
+        # Claude Code writes into the AGENT's own transcript after an
+        # Edit/Write, so a test can assert that a subagent's churn is
+        # recorded against that agent rather than the main loop.
+        for i, (tool_use_id, added, removed) in enumerate(edits):
+            records.append({
+                "type": "user", "uuid": f"{agent_id}-edit{i}", "sessionId": self.session_id,
+                "timestamp": ts, "cwd": "/repo", "gitBranch": "main",
+                "version": "2.1.258", "entrypoint": "cli",
+                "agentId": agent_id, "isSidechain": True,
+                "message": {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}]},
+                "toolUseResult": {
+                    "filePath": f"/repo/{agent_id}.py",
+                    "structuredPatch": [{"lines": ["+x"] * added + ["-y"] * removed}],
+                },
+            })
         path.write_text("".join(json.dumps(r) + "\n" for r in records))
         return path
 

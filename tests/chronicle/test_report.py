@@ -753,6 +753,56 @@ class TestAttribution:
         assert report.summary(conn, repo_root="/repo/a")["attribution"]["plugins"]
         assert report.summary(conn, repo_root="/repo/b")["attribution"]["plugins"] == []
 
+    def test_attributed_cost_is_confined_to_the_window(self, projects):
+        """The scope clause and the "anything in scope" clause are ANDed, and
+        SQL binds AND tighter than OR — so an unparenthesised `a OR b OR c`
+        spliced after `repo_root = ?` degrades to
+        `(repo_root = ? AND a) OR b OR c`, pricing in every attributed turn
+        in the WHOLE store. A repo that owns no attributed turns must report
+        no attributed cost, not the other repo's."""
+        conn = self._seed(projects)
+        # A second repo, with attribution of its own that /repo/b must never see.
+        b = TranscriptBuilder(projects, "-c", "s9").prompt("u1", T1)
+        b.turn("m9", T1, attributionPlugin="tribunal", attributionAgent="Explore")
+        b.write()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/c' WHERE session_id = 's9'")
+        conn.commit()
+
+        attr = report.summary(conn, repo_root="/repo/b")["attribution"]
+        assert attr["plugins"] == []
+        assert attr["cost_usd"] == 0.0
+        # And never a negative dollar figure, which is what the leak produced
+        # once the borrowed attributed cost exceeded the window's own total.
+        assert attr["unattributed_cost_usd"] >= 0.0
+
+    def test_attributed_cost_of_one_repo_excludes_the_other(self, projects):
+        conn = self._seed(projects)
+        b = TranscriptBuilder(projects, "-c", "s9").prompt("u1", T1)
+        b.turn("m9", T1, attributionPlugin="tribunal")
+        b.write()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/c' WHERE session_id = 's9'")
+        conn.commit()
+
+        # /repo/a's four attributed turns, and not /repo/c's fifth.
+        assert round(report.summary(conn, repo_root="/repo/a")["attribution"]["cost_usd"], 6) \
+            == round(4 * TURN_USD, 6)
+
+    def test_a_partially_migrated_store_degrades_rather_than_raising(self, projects):
+        """The guard is `any(column present)`, but `_group` names `t.skill`
+        and `t.plugin` unconditionally. A store where only SOME of the five
+        ALTERs landed must still answer — the same read-only-migration trap
+        `_qualifier_sql` and `_result_chars_sql` each guard against."""
+        conn = self._seed(projects)
+        conn.execute("ALTER TABLE turns DROP COLUMN skill")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        # `skill` is gone, so nothing can be attributed to a skill; the
+        # columns that survive still report.
+        assert attr["skills"] == []
+        assert [a["name"] for a in attr["agents"]] == ["Explore"]
+
     def test_a_store_without_the_columns_reports_no_attribution(self, projects):
         conn = self._seed(projects)
         for col in ("skill", "plugin", "agent_type", "mcp_server", "mcp_tool"):
@@ -892,6 +942,38 @@ class TestAgentDetail:
         detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
         assert detail["churn"]["lines_added"] == 0
         assert detail["churn"]["files_by_churn"] == []
+
+    def test_an_agents_own_edits_are_recorded_against_it(self, projects):
+        """`file_edits` used to write the main agent for EVERY row, so
+        `agent_detail`'s `f.agent_id = ?` filter could never match and every
+        agent's churn was empty however much it edited — while the main
+        agent's was inflated by all of it."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.write()
+        b.subagent("aeditor", ["e1"], T1, task="Fix it",
+                   tools=["Edit"], edits=[("e1-edit", 30, 4)])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        churn = report.agent_detail(conn, "s1", "aeditor")["churn"]
+        assert churn["lines_added"] == 30
+        assert churn["lines_removed"] == 4
+        assert [f["file_path"] for f in churn["files_by_churn"]] == ["/repo/aeditor.py"]
+
+    def test_a_subagents_edits_are_not_billed_to_the_main_agent(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.write()
+        b.subagent("aeditor", ["e1"], T1, tools=["Edit"], edits=[("e1-edit", 30, 4)])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        # The session as a whole still owns the work — it happened in there.
+        assert report.session_detail(conn, "s1")["churn"]["lines_added"] == 30
+        # But the row belongs to the agent, not to the main loop.
+        rows = conn.execute("SELECT agent_id FROM file_edits").fetchall()
+        assert [r[0] for r in rows] == ["aeditor"]
 
 
 class TestDerivedMetrics:

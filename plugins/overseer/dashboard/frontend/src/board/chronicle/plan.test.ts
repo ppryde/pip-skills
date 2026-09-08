@@ -39,3 +39,25 @@ describe("plansPresent", () => {
     expect(plansPresent([s(null), s(null)])).toEqual([]);
   });
 });
+
+describe("plansPresent — a plan that tidies to nothing", () => {
+  it("drops it rather than crashing the sort", () => {
+    // `planLabel` returns null for a value that tidies away, but the raw
+    // value is truthy so it passes the counting guard. Asserted to `string`
+    // and handed to `localeCompare`, that null took down the whole page.
+    expect(() =>
+      plansPresent([{ plan_organization_type: "_" }, { plan_organization_type: "claude_max" }])
+    ).not.toThrow();
+    expect(plansPresent([
+      { plan_organization_type: "_" },
+      { plan_organization_type: "-" },
+      { plan_organization_type: "claude_" },
+      { plan_organization_type: "claude_max" },
+    ])).toEqual([{ plan: "claude_max", label: "Max", count: 1 }]);
+  });
+
+  it("still keeps an unrecognised plan that DOES tidy to something", () => {
+    expect(plansPresent([{ plan_organization_type: "claude_something_new" }]))
+      .toEqual([{ plan: "claude_something_new", label: "Something New", count: 1 }]);
+  });
+});
