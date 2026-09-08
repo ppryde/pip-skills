@@ -153,3 +153,19 @@ export function niceTicks(max: number, count = 4): number[] {
   }
   return ticks;
 }
+
+
+/** A ratio of two churn figures as a percentage, or "—" when there is nothing
+ * to divide by. A tile must never render "NaN%" or invent a 0% that reads as
+ * a measured result. */
+export function churnRatio(part: number | undefined, whole: number | undefined): string {
+  if (!whole) return "—";
+  return `${Math.round(((part ?? 0) / whole) * 100)}%`;
+}
+
+/** `part / whole` to `dp` places, or "—" when the denominator is missing or
+ * zero — same reasoning as `churnRatio`. */
+export function perUnit(part: number | undefined, whole: number | undefined, dp: number): string {
+  if (!whole) return "—";
+  return ((part ?? 0) / whole).toFixed(dp);
+}

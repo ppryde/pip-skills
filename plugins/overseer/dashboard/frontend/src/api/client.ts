@@ -8,6 +8,7 @@ import type {
   CardDetail,
   ChronicleQuery,
   ChronicleSyncResponse,
+  ChronicleAgentDetail,
   ChronicleSessionDetail,
   ChronicleSessionsResponse,
   ChronicleStatus,
@@ -28,6 +29,34 @@ import type {
  * until this is set; ungated deployments (the default) never 401, so
  * this key stays empty and every request below is header-free. */
 const TOKEN_KEY = "overseer_dashboard_token";
+
+/**
+ * A non-2xx response, carrying the status alongside the message.
+ *
+ * `request` used to throw a bare `Error(detail)`, which threw the status
+ * away — so nothing downstream could tell a refused token from a dead
+ * network, and the retry loop treated both as "try again in a moment",
+ * forever. `status` is what lets `board/retry.ts` call a 401 terminal.
+ *
+ * A fetch that never reached the server (offline, server down) rejects with
+ * the browser's own `TypeError: Failed to fetch` and is NOT an ApiError —
+ * absence of a status is itself the signal that the request never landed.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/** The dashboard token gate refused us. Retrying an identical request can
+ * only be refused identically, so callers must alert rather than re-ride. */
+export function isAuthError(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 401 || e.status === 403);
+}
 
 /** `X-Overseer-Token` header, present only when a token has been stored —
  * the ungated-by-default backend never requires it, so the happy path
@@ -83,11 +112,15 @@ async function request<T>(
   method: "GET" | "POST",
   url: string,
   body?: unknown,
-  opts: { quiet?: boolean } = {}
+  opts: { quiet?: boolean; signal?: AbortSignal } = {}
 ): Promise<T> {
   const send = async (): Promise<Response> => {
     const headers: Record<string, string> = { ...authHeaders() };
-    const init: RequestInit = { method, headers };
+    // `signal` lets a caller abandon a request that is still hanging — the
+    // Waylaid banner's Cancel. An abort rejects this promise with the
+    // browser's `AbortError`, which the retry layer treats as a deliberate
+    // stop, never as a failure worth another rider.
+    const init: RequestInit = { method, headers, signal: opts.signal };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body);
@@ -117,14 +150,16 @@ async function request<T>(
     } catch {
       // response wasn't JSON (or was empty) — fall back below.
     }
-    throw new Error(detail ?? res.statusText);
+    throw new ApiError(res.status, detail ?? res.statusText);
   }
 
   return (await res.json()) as T;
 }
 
-export function getBoard(): Promise<BoardResponse> {
-  return request<BoardResponse>("GET", withRoot("/api/board"));
+export function getBoard(opts?: { signal?: AbortSignal }): Promise<BoardResponse> {
+  return request<BoardResponse>("GET", withRoot("/api/board"), undefined, {
+    signal: opts?.signal,
+  });
 }
 
 /** Repo discovery — always global (never itself root-scoped); the backend
@@ -153,6 +188,13 @@ export function createCard(body: CreateCardBody): Promise<CreateCardResponse> {
 /** Edits an existing card's title and/or body markdown. */
 export function editCard(id: string, body: EditCardBody): Promise<BoardResponse> {
   return request<BoardResponse>("POST", withRoot(`/api/card/${id}`), body);
+}
+
+/** Restamps a whole lane's manual order in one call — see `cmd_reorder` in
+ * the overseer CLI for why a single-card write cannot do this job. `ids` is
+ * the lane top-first. */
+export function reorderLane(ids: string[]): Promise<BoardResponse> {
+  return request<BoardResponse>("POST", withRoot("/api/lane/order"), { ids });
 }
 
 export function setOrder(id: string, order: number): Promise<BoardResponse> {
@@ -306,6 +348,16 @@ export function getChronicleSession(id: string): Promise<ChronicleSessionDetail>
   return request<ChronicleSessionDetail>(
     "GET",
     `/api/chronicle/session/${encodeURIComponent(id)}`
+  );
+}
+
+export function getChronicleAgent(
+  sessionId: string,
+  agentId: string
+): Promise<ChronicleAgentDetail> {
+  return request<ChronicleAgentDetail>(
+    "GET",
+    `/api/chronicle/session/${encodeURIComponent(sessionId)}/agent/${encodeURIComponent(agentId)}`
   );
 }
 

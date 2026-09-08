@@ -223,8 +223,20 @@ export function ColumnChart({
   );
 }
 
+export interface BarRow {
+  label: string;
+  value: number;
+  detail?: string;
+  /** React key, when the label is not unique. File rows shorten a path to
+   * its last two segments, so `src/styles.css` names three different files —
+   * duplicate keys leave React unable to remove the old rows, and switching
+   * away from Files stranded them among the next list. Anything with a
+   * genuinely unique label may omit it. */
+  id?: string;
+}
+
 interface BarListProps {
-  rows: { label: string; value: number; detail?: string }[];
+  rows: BarRow[];
   format: (n: number) => string;
   title: string;
   hue?: string;
@@ -245,7 +257,7 @@ export function BarList({ rows, format, title, hue = "--chr-context" }: BarListP
       style={{ ["--chr-hue" as string]: `var(${hue})` }}
     >
       {rows.map((row) => (
-        <div className="chr-barlist__row" role="listitem" key={row.label} title={row.detail}>
+        <div className="chr-barlist__row" role="listitem" key={row.id ?? row.label} title={row.detail}>
           <span className="chr-barlist__label">{row.label}</span>
           <span className="chr-barlist__track" aria-hidden="true">
             <span

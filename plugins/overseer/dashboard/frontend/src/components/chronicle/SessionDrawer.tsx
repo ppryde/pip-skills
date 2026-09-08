@@ -4,7 +4,7 @@
  * `.card-drawer`) so the two sheets read as one family. Page-local state
  * (ChroniclePage owns `openId`); Escape and the backdrop close it.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useChronicleSession } from "../../board/chronicle/useChronicle";
 import {
   cacheVerdict,
@@ -20,11 +20,14 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import ArtifactList from "./ArtifactList";
-import { BarList, LineChart } from "./ChronicleCharts";
+import DelegationPanel from "./DelegationPanel";
+import { LineChart } from "./ChronicleCharts";
 import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
-import UsagePanel from "./UsagePanel";
+import SubagentDrawer, { agentLabel } from "./SubagentDrawer";
+import McpExplorer from "./McpExplorer";
+import UsageCallout from "./UsageCallout";
 
 export interface SessionDrawerProps {
   sessionId: string | null;
@@ -42,17 +45,30 @@ const IDLE_GAP_S = 300;
  * largest; the table beneath lists the rest. */
 const JUMPS_MARKED = 1;
 
-export default function SessionDrawer({ sessionId, onClose, showAccount = false }: SessionDrawerProps) {
+export default function SessionDrawer({
+  sessionId, onClose, showAccount = false,
+}: SessionDrawerProps) {
   const { detail, loading, error } = useChronicleSession(sessionId);
+  // The subagent layer is owned here, not by the page: its rail is a list of
+  // THIS session's agents, which only this component has fetched.
+  const [openAgent, setOpenAgent] = useState<string | null>(null);
+  const closeAgent = useCallback(() => setOpenAgent(null), []);
+
+  // A session change must not leave the layer above showing the previous
+  // session's agent.
+  useEffect(() => setOpenAgent(null), [sessionId]);
 
   useEffect(() => {
     if (sessionId === null) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      // Escape unwinds ONE layer. While a subagent is open it owns the key,
+      // and this drawer stays put — asked as a state question rather than
+      // fought over as an event, since this component knows both answers.
+      if (e.key === "Escape" && openAgent === null) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessionId, onClose]);
+  }, [sessionId, onClose, openAgent]);
 
   if (sessionId === null) return null;
 
@@ -152,6 +168,21 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
               <StatTile label="Active" value={formatActive(detail.active_ms)} />
               <StatTile label="Transcript" value={formatBytes(detail.transcript_bytes)} hue="--chr-tools" />
               <StatTile label="Compactions" value={String(detail.compactions)} hue="--chr-peak" />
+              {/* Churn: editing DONE in this session, from the diffs its own
+                  transcript carries. A pruned transcript leaves zero here and
+                  is indistinguishable from a session that edited nothing, so
+                  neither tile is shown at zero rather than claiming "0". */}
+              {detail.files_touched > 0 && (
+                <StatTile label="Files touched" value={String(detail.files_touched)} hue="--chr-cache" />
+              )}
+              {(detail.lines_added > 0 || detail.lines_removed > 0) && (
+                <StatTile
+                  label="Lines"
+                  value={`+${detail.lines_added.toLocaleString()} / -${detail.lines_removed.toLocaleString()}`}
+                  labelInfo="Lines added and removed across every edit in this session — editing done, not lines surviving. A later revert still counts, so git is the source for what shipped."
+                  hue="--chr-cache"
+                />
+              )}
               <StatTile
                 label="Cache written"
                 value={formatTokens(detail.cache_creation_tokens)}
@@ -230,41 +261,34 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
               </section>
             )}
 
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Tools</h3>
-              <BarList
-                rows={detail.tools.slice(0, 12).map((t) => ({ label: t.tool_name, value: t.calls }))}
-                format={(n) => String(n)}
-                title="Tool calls in this session"
-                hue="--chr-tools"
-              />
-            </section>
+            {/* Same one-box treatment as the page: the drawer is narrower
+                still, so three separate lists clipped their labels worst of
+                all here. */}
+            <UsageCallout
+              tools={detail.tools}
+              mcp={detail.mcp}
+              plugins={detail.plugins}
+              churn={detail.churn}
+              contextGrowth={detail.context_growth}
+              attribution={detail.attribution}
+              perSession
+            />
 
-            <UsagePanel
-              title="MCP"
-              subtitle={`${detail.mcp?.calls ?? 0} calls in this session — by server.`}
-              rows={(detail.mcp?.servers ?? []).map((s) => ({
-                label: s.server,
-                detail: `${s.provenance} · ${s.tools} tools`,
-                value: s.calls,
-              }))}
-              hue="--chr-tools"
-              emptyHint="No MCP calls in this session."
-            />
-            <UsagePanel
-              title="Plugins"
-              subtitle="Plugin MCP servers and plugin skills used in this session."
-              rows={(detail.plugins?.items ?? []).map((p) => ({
-                label: `${p.plugin} · ${p.kind}`,
-                value: p.calls,
-              }))}
-              hue="--chr-peak"
-              emptyHint="No plugin usage recorded. Older sessions need a `chronicle sync --full` to backfill."
-            />
+            <McpExplorer mcp={detail.mcp} perSession />
+
+            {/* Only where something was actually delegated: on a session that
+                ran no subagent all three bars are zero, which says nothing. */}
+            {detail.delegation && detail.delegation.subagent_turns > 0 && (
+              <DelegationPanel delegation={detail.delegation} />
+            )}
 
             {detail.subagents.length > 0 && (
               <section className="chr-panel">
                 <h3 className="chr-panel__title">Subagents</h3>
+                <p className="chr-panel__sub">
+                  Open one for its own turns, tools and edits. The name is the task it was
+                  handed; an agent whose opening prompt was pruned shows its id instead.
+                </p>
                 <table className="chr-table chr-table--compact">
                   <thead>
                     <tr>
@@ -273,16 +297,45 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
                       <th scope="col" className="chr-num">Context</th>
                       <th scope="col" className="chr-num">Output</th>
                       <th scope="col" className="chr-num">Tools</th>
+                      {/* Last, and the reason the list is scanned at all:
+                          "which of these was expensive?" was previously only
+                          answerable by opening every agent in turn. */}
+                      <th scope="col" className="chr-num">Cost</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detail.subagents.map((a) => (
-                      <tr key={a.agent_id}>
-                        <td className="chr-mono">{a.agent_id.replace(/^a/, "").split("-").slice(0, -1).join("-") || a.agent_id}</td>
+                      // The whole row opens the agent, as the sessions table
+                      // does. `.chr-table__row` already paints a pointer and a
+                      // hover, so a row that did nothing was advertising a
+                      // click it would not honour.
+                      <tr
+                        key={a.agent_id}
+                        className="chr-table__row"
+                        title={agentLabel(a)}
+                        onClick={() => setOpenAgent(a.agent_id)}
+                      >
+                        <td>
+                          <button
+                            type="button"
+                            className="chr-table__open chr-table__clamp"
+                            onClick={(e) => { e.stopPropagation(); setOpenAgent(a.agent_id); }}
+                          >
+                            {agentLabel(a)}
+                          </button>
+                          {a.agent_type && (
+                            <span className="chr-table__sub">{a.agent_type}</span>
+                          )}
+                        </td>
                         <td className="chr-num">{a.turns}</td>
                         <td className="chr-num">{formatTokens(a.context_tokens)}</td>
                         <td className="chr-num">{formatTokens(a.output_tokens)}</td>
                         <td className="chr-num">{a.tool_calls}</td>
+                        <td className="chr-num">
+                          {a.cost_usd === undefined
+                            ? "—"
+                            : formatCostWithUnpriced(a.cost_usd, a.unpriced_turns ?? 0)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -292,6 +345,16 @@ export default function SessionDrawer({ sessionId, onClose, showAccount = false 
           </>
         )}
       </aside>
+      {detail && openAgent !== null && (
+        <SubagentDrawer
+          sessionId={detail.session_id}
+          agents={detail.subagents}
+          agentId={openAgent}
+          onSelect={setOpenAgent}
+          onBack={closeAgent}
+          sessionLabel={sessionName(detail)}
+        />
+      )}
     </div>
   );
 }

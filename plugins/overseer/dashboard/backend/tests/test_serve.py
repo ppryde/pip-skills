@@ -20,7 +20,7 @@ _DASHBOARD_DIR = Path(__file__).resolve().parents[2]
 if str(_DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(_DASHBOARD_DIR))
 
-import serve  # noqa: E402  (import must follow the sys.path setup above)
+import serve  # must follow the sys.path setup above
 
 FAKE_FD = 42
 

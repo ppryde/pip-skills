@@ -16,12 +16,14 @@ import {
   formatActive,
   formatBytes,
   formatCostWithUnpriced,
+  churnRatio,
   formatDay,
   formatDuration,
   formatMonth,
   formatPct,
   formatTokens,
   formatUsd,
+  perUnit,
   formatWhen,
   repoLabel,
   sessionName,
@@ -29,14 +31,18 @@ import {
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
 import { Button } from "../../ui";
+import { planLabel, plansPresent } from "../../board/chronicle/plan";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
 import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
+import CostAttributionPanel from "./CostAttributionPanel";
+import DelegationPanel from "./DelegationPanel";
 import StatTile from "./StatTile";
-import UsagePanel from "./UsagePanel";
+import McpExplorer from "./McpExplorer";
+import UsageCallout from "./UsageCallout";
 
 /** The `useChronicle` result, as App.tsx fetched it for the current window
  * and scope, plus a retry for the fetch-failure banner. Sync lives in the
@@ -44,12 +50,15 @@ import UsagePanel from "./UsagePanel";
 export type ChroniclePageProps = Omit<UseChronicleResult, "refresh"> & {
   /** "Send a rider": re-fetch now after a failure. */
   onRetry: () => void;
+  /** The active scope. The plan filter only appears under "all": within one
+   * repo the sessions are nearly always a single plan, so the control would
+   * be a permanent no-op taking up room. */
+  scope?: "repo" | "all";
 };
 
-/** useChronicle's poll cadence, for the fetch-failure banner's countdown. */
-const CHRONICLE_RETRY_SECONDS = 30;
 
-type SortKey =
+/** Columns that sort on a field of the row, by that field's name. */
+type RowSortKey =
   | "started_at"
   | "artifacts"
   | "turns"
@@ -61,7 +70,31 @@ type SortKey =
   | "output_tokens"
   | "duration_s"
   | "transcript_bytes"
+  | "files_touched"
   | "cost_usd";
+
+/** Columns that sort on something the row does not carry as a field. Every
+ * one of these MUST appear in `SORT_VALUE` — the type says so, so adding a
+ * derived column without its comparator is a compile error rather than a
+ * column that silently refuses to sort. */
+type DerivedSortKey = "lines";
+
+type SortKey = RowSortKey | DerivedSortKey;
+
+/** "Lines" shows `+a / -r` and ranks on the two summed: a big deletion is as
+ * much editing as a big addition. */
+const SORT_VALUE: Record<DerivedSortKey, (s: ChronicleSession) => number> = {
+  lines: (s) => s.lines_added + s.lines_removed,
+};
+
+/** Churn is zero both when a session edited nothing and when its transcript
+ * was pruned before ingest, and the store cannot tell those apart — so zero
+ * reads as "—", the same treatment Artifacts and Subagents already give it,
+ * rather than as a claim that no editing happened. */
+function churnCell(s: ChronicleSession): string {
+  if (s.lines_added === 0 && s.lines_removed === 0) return "—";
+  return `+${formatTokens(s.lines_added)} / -${formatTokens(s.lines_removed)}`;
+}
 
 const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => string }[] = [
   { key: "started_at", label: "Started", render: (s) => formatWhen(s.started_at) },
@@ -77,20 +110,27 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "peak_context_pct", label: "Peak %", render: (s) => formatPct(s.peak_context_pct) },
   { key: "output_tokens", label: "Output", render: (s) => formatTokens(s.output_tokens) },
   { key: "transcript_bytes", label: "Size", render: (s) => formatBytes(s.transcript_bytes) },
+  // The churn pair sits beside the work columns rather than the token ones:
+  // it measures what the session DID to the repo, not what it spent.
+  { key: "files_touched", label: "Files", render: (s) => (s.files_touched > 0 ? String(s.files_touched) : "—") },
+  { key: "lines", label: "Lines", render: churnCell },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
   { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {
   const sign = dir === "asc" ? 1 : -1;
+  const derived = key in SORT_VALUE ? SORT_VALUE[key as DerivedSortKey] : null;
+  const valueOf = (s: ChronicleSession) =>
+    derived ? derived(s) : s[key as RowSortKey] ?? -Infinity;
   return [...rows].sort((a, b) => {
-    const av = a[key] ?? -Infinity;
-    const bv = b[key] ?? -Infinity;
+    const av = valueOf(a);
+    const bv = valueOf(b);
     return av === bv ? 0 : av > bv ? sign : -sign;
   });
 }
 
-export default function ChroniclePage({ summary, sessions, loading, error, onRetry }: ChroniclePageProps) {
+export default function ChroniclePage({ summary, sessions, loading, error, onRetry, scope = "repo" }: ChroniclePageProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("started_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -108,10 +148,19 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
   // narrows the rows already on screen. Keeping it here means toggling it can
   // never silently reshape the totals the reader just looked at.
   const [liveOnly, setLiveOnly] = useState(false);
-  const visible = useMemo(
-    () => (liveOnly ? sessions.filter((s) => s.live) : sessions),
-    [sessions, liveOnly],
-  );
+  const [planFilter, setPlanFilter] = useState<string | null>(null);
+  // Offered only across repos, and only when there is actually a split to
+  // show — one plan is not a choice, it is a label.
+  const planOptions = useMemo(() => plansPresent(sessions), [sessions]);
+  const showPlanFilter = scope === "all" && planOptions.length > 1;
+  // A filter left set while its control is hidden would silently narrow the
+  // table with nothing on screen explaining why.
+  const activePlan = showPlanFilter ? planFilter : null;
+  const visible = useMemo(() => {
+    let rows = liveOnly ? sessions.filter((s) => s.live) : sessions;
+    if (activePlan) rows = rows.filter((s) => s.plan_organization_type === activePlan);
+    return rows;
+  }, [sessions, liveOnly, activePlan]);
   const liveCount = useMemo(() => sessions.filter((s) => s.live).length, [sessions]);
   const ordered = useMemo(() => sortSessions(visible, sortKey, sortDir), [visible, sortKey, sortDir]);
   const totals = summary?.totals ?? null;
@@ -120,9 +169,16 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
   const insights = useMemo(
     () =>
       totals
-        ? windowInsights({ totals, models: summary?.by_model ?? [], shape: summary?.shape ?? null, sessions })
+        ? windowInsights({
+            totals,
+            models: summary?.by_model ?? [],
+            shape: summary?.shape ?? null,
+            sessions,
+            churn: summary?.churn,
+            delegation: summary?.delegation,
+          })
         : [],
-    [totals, summary?.by_model, summary?.shape, sessions]
+    [totals, summary?.by_model, summary?.shape, sessions, summary?.churn, summary?.delegation]
   );
   // More than one Claude account in this window? Then the drawer names each
   // session's; otherwise the chip would say the same thing on every one.
@@ -148,12 +204,17 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
     value: d.cache_hit_rate ?? 0,
   }));
   const costPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.cost_usd }));
+  const churnPerDay = (summary?.churn?.by_day ?? []).map((d) => ({
+    label: formatDay(d.day),
+    detail: `${d.day} · +${d.lines_added} / -${d.lines_removed} · ${d.edits} edits`,
+    value: d.lines_added + d.lines_removed,
+  }));
   const shape = summary?.shape;
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
   return (
     <div className={`chronicle${loading && summary ? " chronicle--refreshing" : ""}`}>
-      {error && <Waylaid error={error} retryEverySeconds={CHRONICLE_RETRY_SECONDS} onRetry={onRetry} />}
+      {error && <Waylaid error={error} onRetry={onRetry} />}
 
       {summary && totals === null && (
         <div className="chronicle__empty">
@@ -183,7 +244,15 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             />
           </div>
 
+          {/* Twenty tiles in a five-column grid: four full rows, and each row
+              is a loose category read left to right — scale, reach, code,
+              tokens. They were ordered by nothing in particular and flowed
+              through an auto-fit grid, which on a wide page opened about
+              thirteen tracks and left the second row stopping halfway across
+              with bare parchment beside it. Grouping them costs nothing and
+              gives each row a reason to be a row. */}
           <div className="chr-tiles">
+            {/* Row 1 — scale: how much happened, and over how long. */}
             <StatTile
               label="Sessions"
               value={String(totals.sessions)}
@@ -198,8 +267,55 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Turns" value={formatTokens(totals.turns)} hue="--chr-turns" />
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
+            <StatTile label="Active time" value={formatActive(totals.active_ms)} hue="--chr-turns" />
+
+            {/* Row 2 — reach: what the work touched, and what it left behind. */}
             <StatTile label="MCP calls" value={formatTokens(summary?.mcp?.calls ?? 0)} hue="--chr-tools" />
             <StatTile label="Plugin calls" value={formatTokens(summary?.plugins?.calls ?? 0)} hue="--chr-peak" />
+            <StatTile label="Artifacts" value={String(totals.artifacts)} hue="--chr-output" />
+            <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
+            <StatTile
+              label="Transcripts"
+              value={formatBytes(totals.transcript_bytes)}
+              hue="--chr-tools"
+            />
+
+            {/* Row 3 — code: what actually moved on disk. Editing DONE, not
+                lines surviving — a reverted change still counts here. */}
+            <StatTile
+              label="Lines added"
+              value={formatTokens(summary?.churn?.lines_added ?? 0)}
+              note={`${formatTokens(summary?.churn?.files ?? 0)} files`}
+              hue="--chr-cache"
+            />
+            <StatTile
+              label="Lines removed"
+              value={formatTokens(summary?.churn?.lines_removed ?? 0)}
+              note={`${formatTokens(summary?.churn?.edits ?? 0)} edits`}
+              hue="--chr-peak"
+            />
+            <StatTile
+              label="Rework"
+              value={churnRatio(summary?.churn?.lines_removed, summary?.churn?.lines_added)}
+              note={`${formatTokens(summary?.churn?.lines_removed ?? 0)} undone`}
+              hue="--chr-peak"
+            />
+            <StatTile
+              label="Edits / file"
+              value={perUnit(summary?.churn?.edits, summary?.churn?.files, 1)}
+              note={`${formatTokens(summary?.churn?.edits ?? 0)} edits`}
+              hue="--chr-tools"
+            />
+            <StatTile
+              label="Lines / session"
+              value={perUnit((summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0),
+                summary?.churn?.sessions, 0)}
+              note={`over ${formatTokens(summary?.churn?.sessions ?? 0)} sessions`}
+              hue="--chr-cache"
+            />
+
+            {/* Row 4 — tokens and what they cost, with the one ratio that
+                ties the two halves of the page together (tokens per line). */}
             <StatTile
               label="Ctx processed"
               value={formatTokens(totals.input_tokens + totals.cache_read_tokens + totals.cache_creation_tokens)}
@@ -208,19 +324,18 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                 below instead of a footnote here: a long note wrapped to two
                 lines and threw every tile in its row out of height. */}
             <StatTile label="Output tokens" value={formatTokens(totals.output_tokens)} hue="--chr-output" />
-            <StatTile label="Active time" value={formatActive(totals.active_ms)} hue="--chr-turns" />
-            <StatTile
-              label="Transcripts"
-              value={formatBytes(totals.transcript_bytes)}
-              hue="--chr-tools"
-            />
-            <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
             <StatTile
               label="Cache written"
               value={formatTokens(totals.cache_creation_tokens)}
               hue="--chr-cache"
             />
-            <StatTile label="Artifacts" value={String(totals.artifacts)} hue="--chr-output" />
+            <StatTile
+              label="Output / line"
+              value={perUnit(summary?.churn?.output_tokens,
+                (summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0), 0)}
+              note="tokens written"
+              hue="--chr-output"
+            />
             <StatTile
               label="API costs"
               value={formatCostWithUnpriced(totals.cost_usd, totals.unpriced_turns)}
@@ -239,6 +354,13 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <CounselPanel insights={insights} />
           </div>
 
+          {/* Nine chart panels in ONE three-up grid. They were three separate
+              four-up rows grouped by the question they answer, which left the
+              middle row a single panel stranded in a four-wide track and the
+              last row 4 + 1 — the grouping was invisible and the ragged
+              remainders were not. Nine divides exactly by three, so a single
+              container fills every slot; DOM order is unchanged, so the
+              grouping still reads down the rows. */}
           <div className="chronicle__grid chronicle__grid--3">
             <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Where output went</h3>
@@ -276,32 +398,6 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
               <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
             </section>
-          </div>
-
-          <div className="chronicle__grid chronicle__grid--4">
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Context processed per day</h3>
-              <p className="chr-panel__sub">Input + cache read + cache creation, every API call.</p>
-              <ColumnChart points={contextPerDay} format={formatTokens} title="Context tokens per day" hue="--chr-context" />
-            </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Output per day</h3>
-              <p className="chr-panel__sub">Tokens the model wrote, thinking included.</p>
-              <ColumnChart points={outputPerDay} format={formatTokens} title="Output tokens per day" hue="--chr-output" />
-            </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Peak context per day</h3>
-              <p className="chr-panel__sub">Largest single window any session reached that day.</p>
-              <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
-            </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Cache hit rate per day</h3>
-              <p className="chr-panel__sub">Share of context read back from cache; hover for cold turns.</p>
-              <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" hue="--chr-cache" />
-            </section>
-          </div>
-
-          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
               {/* The prompt count lives here, not on the Turns tile: the
@@ -323,40 +419,56 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               />
             </section>
             <section className="chr-panel">
-              <h3 className="chr-panel__title">Tool calls</h3>
-              <BarList
-                rows={(summary?.tools ?? []).slice(0, 10).map((t) => ({
-                  label: t.tool_name,
-                  detail: `${t.calls} calls across ${t.sessions ?? "?"} sessions`,
-                  value: t.calls,
-                }))}
-                format={formatTokens}
-                title="Tool calls"
-                hue="--chr-tools"
-              />
+              <h3 className="chr-panel__title">Context processed per day</h3>
+              <p className="chr-panel__sub">Input + cache read + cache creation, every API call.</p>
+              <ColumnChart points={contextPerDay} format={formatTokens} title="Context tokens per day" hue="--chr-context" />
             </section>
-            <UsagePanel
-              title="MCP"
-              subtitle={`${summary?.mcp?.calls ?? 0} calls across ${summary?.mcp?.sessions ?? 0} sessions — by server.`}
-              rows={(summary?.mcp?.servers ?? []).slice(0, 10).map((s) => ({
-                label: s.server,
-                detail: `${s.provenance} · ${s.tools} tools · ${s.calls} calls`,
-                value: s.calls,
-              }))}
-              hue="--chr-tools"
-              emptyHint="No MCP calls in this window."
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Output per day</h3>
+              <p className="chr-panel__sub">Tokens the model wrote, thinking included.</p>
+              <ColumnChart points={outputPerDay} format={formatTokens} title="Output tokens per day" hue="--chr-output" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Peak context per day</h3>
+              <p className="chr-panel__sub">Largest single window any session reached that day.</p>
+              <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Cache hit rate per day</h3>
+              <p className="chr-panel__sub">Share of context read back from cache; hover for cold turns.</p>
+              <ColumnChart points={hitRatePerDay} format={formatPct} title="Cache hit rate per day" hue="--chr-cache" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Lines changed per day</h3>
+              <p className="chr-panel__sub">Added plus removed — editing done, not lines surviving.</p>
+              <ColumnChart points={churnPerDay} format={formatTokens} title="Lines changed per day" hue="--chr-peak" />
+            </section>
+          </div>
+
+          {/* One box, three grains — see UsageCallout. Full width because
+              these lists are the only place on the page where the LABEL is
+              the datum, and a quarter-width panel clipped `claude_ai_Notion`
+              to `claude_ai_N…`. */}
+          <div className="chronicle__grid chronicle__grid--2">
+            <DelegationPanel delegation={summary?.delegation} />
+            <CostAttributionPanel attribution={summary?.attribution} />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--wide">
+            <UsageCallout
+              tools={summary?.tools}
+              mcp={summary?.mcp}
+              plugins={summary?.plugins}
+              churn={summary?.churn}
+              contextGrowth={summary?.context_growth}
+              attribution={summary?.attribution}
             />
-            <UsagePanel
-              title="Plugins"
-              subtitle="Plugin-provided MCP servers and plugin skills. A plugin's MCP calls are also counted in the MCP panel."
-              rows={(summary?.plugins?.items ?? []).slice(0, 10).map((p) => ({
-                label: `${p.plugin} · ${p.kind}`,
-                detail: `${p.calls} calls across ${p.sessions ?? "?"} sessions`,
-                value: p.calls,
-              }))}
-              hue="--chr-peak"
-              emptyHint="No plugin usage recorded. Historical sessions need a `chronicle sync --full` to backfill."
-            />
+          </div>
+
+          {/* One grain below the callout's MCP tab, in its own box: which of
+              a server's tools were called, and what each cost. */}
+          <div className="chronicle__grid chronicle__grid--wide">
+            <McpExplorer mcp={summary?.mcp} />
           </div>
 
           <div className="chronicle__grid chronicle__grid--wide">
@@ -430,10 +542,35 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                   {liveCount > 0 ? `Live (${liveCount})` : "Live"}
                 </Button>
               </div>
+              {showPlanFilter && (
+                <div className="chronicle__segment" role="group" aria-label="Plan">
+                  <Button
+                    aria-pressed={activePlan === null}
+                    onClick={() => setPlanFilter(null)}
+                    className="chronicle__seg-btn"
+                  >
+                    All plans
+                  </Button>
+                  {planOptions.map((p) => (
+                    <Button
+                      key={p.plan}
+                      aria-pressed={activePlan === p.plan}
+                      onClick={() => setPlanFilter(p.plan)}
+                      className="chronicle__seg-btn"
+                    >
+                      {`${p.label} (${p.count})`}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
             {ordered.length === 0 ? (
               <p className="chr-chart__empty">
-                {liveOnly ? "No live sessions right now." : "No sessions in this window."}
+                {activePlan
+                  ? `No ${planLabel(activePlan)} sessions${liveOnly ? " live right now" : " in this window"}.`
+                  : liveOnly
+                    ? "No live sessions right now."
+                    : "No sessions in this window."}
               </p>
             ) : (
               <>
@@ -468,6 +605,11 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                           </button>
                           <span className="chr-table__sub chr-mono">{s.session_id.slice(0, 8)}</span>
                           {s.live && <span className="chr-live">live</span>}
+                          {/* Only ever rendered for a KNOWN plan — an unknown
+                              one shows nothing at all, never the word. */}
+                          {planLabel(s.plan_organization_type) && (
+                            <span className="chr-plan">{planLabel(s.plan_organization_type)}</span>
+                          )}
                         </td>
                         <td>
                           <span>{repoLabel(s.repo_root)}</span>

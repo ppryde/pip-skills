@@ -20,6 +20,11 @@ Transcript shape (observed, Claude Code 2.1.x):
 - ``ai-title`` records carry the auto-generated session title.
 - Subagent transcripts (``<session>/subagents/agent-*.jsonl``) have the same
   shape with ``isSidechain: true`` and an ``agentId``.
+- ``assistant`` records may carry ``attributionSkill`` / ``attributionPlugin``
+  / ``attributionAgent`` / ``attributionMcpServer`` / ``attributionMcpTool``,
+  naming what was in scope for that call. They nest (a plugin skill running
+  inside a subagent sets three), and are absent on an ordinary turn with
+  nothing in scope.
 """
 from __future__ import annotations
 
@@ -53,6 +58,16 @@ class Turn:
     cache_1h_tokens: int = 0
     stop_reason: str | None = None
     effort: str | None = None
+    # What was in scope for this call, as Claude Code stamps it on the record.
+    # On the TURN rather than the tool call, so these account for tokens —
+    # "what did superpowers cost" — not merely how often it was invoked.
+    # `plugin` is None for a BUILT-IN skill (`code-review`): the transcript
+    # says so outright rather than leaving it to be guessed from the name.
+    skill: str | None = None
+    plugin: str | None = None
+    agent_type: str | None = None
+    mcp_server: str | None = None
+    mcp_tool: str | None = None
     # (tool_use_id, name, qualifier) — see `_qualifier`.
     tool_uses: list[tuple[str, str, str | None]] = field(default_factory=list)
     # Artifact publishes issued in this turn, keyed by tool_use_id.
@@ -80,6 +95,24 @@ class ArtifactUse:
     favicon: str | None = None
     redeploy: bool = False
     url: str | None = None  # filled from the tool_result, when it lands
+
+
+@dataclass
+class FileEdit:
+    """One file change, from the unified diff Claude Code writes alongside
+    every Edit/Write result (`toolUseResult.structuredPatch`)."""
+    tool_use_id: str
+    file_path: str
+    operation: str  # "edit" | "create" | "update"
+    lines_added: int = 0
+    lines_removed: int = 0
+    ts: float | None = None
+    # Who made the edit. `tool_calls`, `artifacts` and `events` all record
+    # this; `file_edits` did not carry it at all and the insert wrote the main
+    # agent for every row, so no subagent could ever own an edit — which made
+    # `agent_detail`'s churn permanently empty and inflated the main agent's
+    # by every subagent's work.
+    agent_id: str = MAIN_AGENT
 
 
 @dataclass
@@ -116,6 +149,19 @@ class Facts:
     # tool_result blocks seen, by tool_use_id (results usually follow their
     # call within the same file, but may land in a later ingest).
     results: dict[str, ToolResult] = field(default_factory=dict)
+    # File changes seen, by tool_use_id (see `_file_edit`).
+    file_edits: dict[str, FileEdit] = field(default_factory=dict)
+    # A SUBAGENT file's opening prompt: the task it was handed (see
+    # `_subagent_task`). None on a main transcript, whose first prompt is the
+    # user talking rather than an instruction handed down.
+    task: str | None = None
+    # From a `bridge-session` record: the account and organisation that owns
+    # the bridge. NOT written on every session — only ones bridged from
+    # claude.ai — so it is a sparse link, absent on most older transcripts.
+    # Named for what the record literally says rather than "the billed
+    # account", which is an interpretation the data does not state.
+    owner_account_uuid: str | None = None
+    owner_organization_uuid: str | None = None
     lines: int = 0
 
 
@@ -164,6 +210,45 @@ def _is_prompt(record: dict[str, Any], message: dict[str, Any]) -> bool:
     return False
 
 
+# How much of a task line to keep. Long enough for the first clause of a
+# real instruction, short enough for one row of a drawer's rail.
+TASK_CHARS = 200
+
+# Agent-team prompts arrive wrapped by the orchestrator, and the wrapper's
+# `summary` attribute is already the short label a rail wants — the raw text
+# beneath it opens with markup and says nothing in its first 200 characters.
+_TEAMMATE_SUMMARY_RE = re.compile(r'<teammate-message\b[^>]*\bsummary="([^"]*)"')
+
+
+def _prompt_text(content: Any) -> str:
+    """The prose of a user message, whether it arrived as a bare string or as
+    content blocks. Non-text blocks contribute nothing."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+def _subagent_task(content: Any) -> str | None:
+    """One line naming what a subagent was asked to do.
+
+    Verbatim and truncated, never summarised — no model runs during ingest,
+    and a paraphrase of an instruction is a different claim from the
+    instruction. The wrapper's own summary wins when there is one.
+    """
+    text = " ".join(_prompt_text(content).split())
+    if not text:
+        return None
+    wrapped = _TEAMMATE_SUMMARY_RE.search(text)
+    if wrapped and wrapped.group(1).strip():
+        return wrapped.group(1).strip()[:TASK_CHARS]
+    return text[:TASK_CHARS] + "…" if len(text) > TASK_CHARS else text
+
+
 def _touch_ts(facts: Facts, ts: float | None) -> None:
     if ts is None:
         return
@@ -209,6 +294,11 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             cache_1h_tokens=_int(creation.get("ephemeral_1h_input_tokens")),
             stop_reason=_opt_str(message.get("stop_reason")),
             effort=_opt_str(record.get("effort")),
+            skill=_opt_str(record.get("attributionSkill")),
+            plugin=_opt_str(record.get("attributionPlugin")),
+            agent_type=_opt_str(record.get("attributionAgent")),
+            mcp_server=_opt_str(record.get("attributionMcpServer")),
+            mcp_tool=_opt_str(record.get("attributionMcpTool")),
         )
         facts.turns[key] = turn
     else:
@@ -217,6 +307,26 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
         stop = message.get("stop_reason")
         if isinstance(stop, str):
             turn.stop_reason = stop
+        # ...and a later, LARGER output count. Claude Code writes one line per
+        # content block as the response streams, all sharing the message id,
+        # and the usage on the early lines is a partial snapshot: a real
+        # subagent message read [3, 1337] across its two lines. Freezing the
+        # first under-counted that agent's output by 21x (222 recorded against
+        # 4,702 actual), and every subagent in the store the same way.
+        #
+        # MAX, not last: line order is not guaranteed, and a partial snapshot
+        # arriving after the total must never lower it. The input side needs
+        # no such handling — `input_tokens`/`cache_read`/`cache_creation`
+        # describe the prompt, which is settled before the first token is
+        # streamed and is identical on every line of the message.
+        raw_later = message.get("usage")
+        if isinstance(raw_later, dict):
+            turn.output_tokens = max(turn.output_tokens, _int(raw_later.get("output_tokens")))
+            later_details = raw_later.get("output_tokens_details")
+            if isinstance(later_details, dict):
+                turn.thinking_tokens = max(
+                    turn.thinking_tokens, _int(later_details.get("thinking_tokens"))
+                )
     content = message.get("content")
     if isinstance(content, list):
         for block in content:
@@ -272,7 +382,7 @@ def _qualifier(name: str, raw: Any) -> str | None:
 
 
 def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, Any],
-                       ts: float | None) -> None:
+                       ts: float | None, agent_id: str = MAIN_AGENT) -> None:
     content = message.get("content")
     if not isinstance(content, list):
         return
@@ -287,11 +397,64 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
         url = artifact_url(text)
         facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
                                             artifact_url=url)
+        edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
+        if edit is not None:
+            facts.file_edits[tool_id] = edit
         if url:
             for turn in facts.turns.values():
                 artifact = turn.artifacts.get(tool_id)
                 if artifact is not None:
                     artifact.url = url
+
+
+# Git's marker for a missing trailing newline, which is not a change.
+#
+# The ---/+++ file headers a unified diff opens with USED to be listed here
+# too, and that was a bug: `structuredPatch` hunks carry only +/-/space-
+# prefixed CONTENT, never those headers, so the guard caught nothing it was
+# aimed at — while a removed line whose own text begins `--` arrives as
+# `-` + `--flag` = `---flag` and was silently dropped. Deleting `--flag` from
+# a shell script, or adding `++i;`, undercounted the churn feeding the Rework
+# tile and the Files ranking.
+_DIFF_HEADERS = ("\\",)
+
+
+def _file_edit(tool_id: str, raw: Any, ts: float | None,
+               agent_id: str = MAIN_AGENT) -> FileEdit | None:
+    """The file change carried by one `toolUseResult`, or None if it carries
+    no diff (a Bash result, a Read, a tool that touched nothing).
+
+    Both Edit and Write produce a `structuredPatch`; `type` distinguishes a
+    creation from an in-place change. Counting the +/- lines of the hunks is
+    the whole measurement — the diff CONTENT is deliberately not kept, so the
+    store stays counts and ids rather than a second copy of the source.
+    """
+    if not isinstance(raw, dict):
+        return None
+    patch = raw.get("structuredPatch")
+    file_path = _opt_str(raw.get("filePath"))
+    if not isinstance(patch, list) or not file_path:
+        return None
+    added = removed = 0
+    for hunk in patch:
+        if not isinstance(hunk, dict):
+            continue
+        for line in hunk.get("lines") or []:
+            if not isinstance(line, str) or line.startswith(_DIFF_HEADERS):
+                continue
+            if line.startswith("+"):
+                added += 1
+            elif line.startswith("-"):
+                removed += 1
+    return FileEdit(
+        tool_use_id=tool_id,
+        file_path=file_path,
+        agent_id=agent_id,
+        operation=_opt_str(raw.get("type")) or "edit",
+        lines_added=added,
+        lines_removed=removed,
+        ts=ts,
+    )
 
 
 def artifact_url(text: str) -> str | None:
@@ -330,6 +493,13 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
         if isinstance(title, str) and title.strip():
             facts.title = title.strip()
         return
+    if kind == "bridge-session":
+        for key, attr in (("ownerAccountUuid", "owner_account_uuid"),
+                          ("ownerOrganizationUuid", "owner_organization_uuid")):
+            value = record.get(key)
+            if isinstance(value, str) and value and getattr(facts, attr) is None:
+                setattr(facts, attr, value)
+        return
     if kind == "summary":  # older transcripts: {"type":"summary","summary":"..."}
         summary = record.get("summary")
         if facts.title is None and isinstance(summary, str) and summary.strip():
@@ -359,10 +529,14 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
         message = record.get("message")
         if isinstance(message, dict) and _is_prompt(record, message):
             facts.events.append(Event(uuid=uuid, kind="prompt", agent_id=agent_id, ts=ts))
+            # A subagent's FIRST prompt is the task it was handed. Later ones
+            # are the conversation, and the main agent's are the user talking.
+            if agent_id != MAIN_AGENT and facts.task is None:
+                facts.task = _subagent_task(message.get("content"))
         elif record.get("isCompactSummary"):
             facts.events.append(Event(uuid=uuid, kind="compaction", agent_id=agent_id, ts=ts))
         elif isinstance(message, dict):
-            _fold_tool_results(facts, record, message, ts)
+            _fold_tool_results(facts, record, message, ts, agent_id)
         return
     if kind == "system":
         subtype = record.get("subtype")

@@ -39,7 +39,10 @@ class TestSummary:
         assert out["by_day"][1]["turns"] == 3
         assert out["by_model"][0]["model"] == "claude-opus-5"
         assert out["by_model"][0]["turns"] == 4
-        assert out["tools"][0] == {"tool_name": "Read", "calls": 2, "sessions": 1}
+        read = out["tools"][0]
+        assert read["tool_name"] == "Read" and read["calls"] == 2 and read["sessions"] == 1
+        # Every bucket now also carries what it cost and how long it took.
+        assert set(read) >= {"result_chars", "median_s", "subagent_calls"}
         assert out["shape"]["turns"]["max"] == 2.0
         assert out["shape"]["turns"]["p50"] == 1.0
         # Every seeded turn reads 1000 of a 1203-token context: warm.
@@ -94,9 +97,8 @@ class TestSummary:
         out = report.summary(conn, repo_root="/repo/a")
         assert out["totals"]["sessions"] == 2
         assert out["totals"]["turns"] == 3
-        assert out["tools"] == [
-            {"tool_name": "Read", "calls": 2, "sessions": 1},
-            {"tool_name": "Bash", "calls": 1, "sessions": 1},
+        assert [(t["tool_name"], t["calls"], t["sessions"]) for t in out["tools"]] == [
+            ("Read", 2, 1), ("Bash", 1, 1),
         ]
 
     def test_since_filter(self, projects):
@@ -115,7 +117,7 @@ class TestSummary:
         # s1 (1 turn, /repo/a) + s3 (1 turn, /repo/b): whole sessions, across repos.
         assert out["totals"]["sessions"] == 2
         assert out["totals"]["turns"] == 2
-        assert out["tools"] == [{"tool_name": "Bash", "calls": 1, "sessions": 1}]
+        assert [(t["tool_name"], t["calls"]) for t in out["tools"]] == [("Bash", 1)]
         # Composes with the repo filter.
         out = report.summary(conn, repo_root="/repo/a", branch="feat/x")
         assert out["totals"]["sessions"] == 1
@@ -153,10 +155,11 @@ class TestSummary:
         assert mcp["calls"] == 4
         assert mcp["sessions"] == 1
         assert mcp["by_provenance"] == {"plugin": 2, "connector": 1, "local": 1}
-        assert mcp["servers"][0] == {
-            "server": "plugin_playwright_playwright", "provenance": "plugin",
-            "tools": 1, "calls": 2, "sessions": 1, "result_chars": 0,
-        }
+        server = mcp["servers"][0]
+        assert server["server"] == "plugin_playwright_playwright"
+        assert (server["provenance"], server["tools"], server["calls"], server["sessions"]) == (
+            "plugin", 1, 2, 1)
+        assert server["result_chars"] == 0 and server["subagent_calls"] == 0
         assert {t["tool"] for t in mcp["tools"]} == {
             "browser_click", "sql_exec_tool", "computer",
         }
@@ -164,10 +167,46 @@ class TestSummary:
         # The playwright MCP calls count in BOTH boxes (deliberate overlap);
         # `code-review` is a builtin skill and is in neither.
         assert plugins["calls"] == 3
-        assert plugins["items"] == [
-            {"plugin": "playwright", "kind": "mcp", "calls": 2, "sessions": 1},
-            {"plugin": "tribunal", "kind": "skill", "calls": 1, "sessions": 1},
+        assert [(p["plugin"], p["kind"], p["calls"], p["sessions"]) for p in plugins["items"]] == [
+            ("playwright", "mcp", 2, 1), ("tribunal", "skill", 1, 1),
         ]
+
+    def test_each_bucket_carries_volume_wall_time_and_delegated_share(self, projects):
+        """`result_chars`, `result_ts - ts` and `agent_id` were all stored and
+        none were reported. A cheap-looking tool can be the expensive one."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read", "Read"])
+        # Two results: 100 chars after 2s, 300 chars after 8s. Median of the
+        # two durations is 5s; the mean would be the same here, so a third
+        # call pins that it is really the middle one being taken.
+        b.tool_result("r1", "2026-09-01T10:00:02.000Z", tool_use_id="m1-tool0", content="x" * 100)
+        b.tool_result("r2", "2026-09-01T10:00:08.000Z", tool_use_id="m1-tool1", content="x" * 300)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        read = next(t for t in report.summary(conn)["tools"] if t["tool_name"] == "Read")
+        assert read["calls"] == 2
+        assert read["result_chars"] == 400
+        assert read["median_s"] == 5.0
+        assert read["subagent_calls"] == 0
+
+    def test_median_ignores_a_call_that_waited_on_a_human(self, projects):
+        """The mean is a fiction here: one `AskUserQuestion` left open
+        overnight would put every tool's 'typical' time somewhere no call ever
+        was. The middle call is the honest one."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Bash", "Bash", "Bash"])
+        b.tool_result("r1", "2026-09-01T10:00:01.000Z", tool_use_id="m1-tool0")
+        b.tool_result("r2", "2026-09-01T10:00:03.000Z", tool_use_id="m1-tool1")
+        b.tool_result("r3", "2026-09-02T10:00:00.000Z", tool_use_id="m1-tool2")  # +24h
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        bash = next(t for t in report.summary(conn)["tools"] if t["tool_name"] == "Bash")
+        assert bash["median_s"] == 3.0          # not the ~28,801s mean
+        assert bash["calls"] == 3
 
     def test_usage_blocks_respect_the_repo_filter(self, projects):
         TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
@@ -244,11 +283,30 @@ class TestSessionDetail:
         assert round(detail["cache_hit_rate"], 3) == round(1000 / 1203, 3)
         assert detail["subagents"][0]["agent_id"] == "agent-1"
         assert detail["subagents"][0]["turns"] == 1
-        assert detail["tools"] == [{"tool_name": "Read", "calls": 2}]
+        assert [(t["tool_name"], t["calls"]) for t in detail["tools"]] == [("Read", 2)]
+        assert "sessions" not in detail["tools"][0]   # always 1 here, so omitted
         assert detail["compactions_at"] == []
         # The subagent's turn is money too: 2 main turns + 1 subagent turn.
         assert round(detail["cost_usd"], 6) == round(3 * TURN_USD, 6)
         assert [round(t["cost_usd"], 6) for t in detail["turn_series"]] == [round(TURN_USD, 6)] * 2
+
+    def test_each_subagent_carries_its_own_cost(self, projects):
+        # The rail and the session drawer's Subagents table are scanned for
+        # exactly one thing — which agent spent the money — and neither could
+        # answer it without the figure on the row.
+        conn = _seed(projects)
+        builder = TranscriptBuilder(projects, "-a", "s2")
+        builder.path.touch()
+        builder.subagent("agent-1", ["a1"], T1)
+        ingest.ingest_session(conn, builder.path)
+        agents = report.session_detail(conn, "s2")["subagents"]
+
+        assert round(agents[0]["cost_usd"], 6) == round(TURN_USD, 6)
+        # Zero, not absent: a priced agent must not read as "unknown".
+        assert agents[0]["unpriced_turns"] == 0
+        # And the parts still sum to the whole the session reports.
+        detail = report.session_detail(conn, "s2")
+        assert sum(a["cost_usd"] for a in detail["subagents"]) <= detail["cost_usd"]
 
     def test_missing(self):
         conn = store.connect()
@@ -270,9 +328,8 @@ class TestSessionDetail:
         # Single-session read: a `sessions` count would always be 1, so it is
         # omitted rather than rendered as noise.
         assert "sessions" not in detail["mcp"]
-        assert detail["plugins"]["items"] == [
-            {"plugin": "linear", "kind": "mcp", "calls": 1},
-            {"plugin": "overseer", "kind": "skill", "calls": 1},
+        assert [(p["plugin"], p["kind"], p["calls"]) for p in detail["plugins"]["items"]] == [
+            ("linear", "mcp", 1), ("overseer", "skill", 1),
         ]
 
     def test_blocks_are_empty_not_missing_for_a_session_with_no_mcp(self, projects):
@@ -284,7 +341,10 @@ class TestSessionDetail:
         detail = report.session_detail(conn, "s1")
         assert detail["mcp"] == {"calls": 0, "result_chars": 0, "by_provenance": {},
                                  "servers": [], "tools": []}
+        assert detail["churn"]["files_by_churn"] == []
         assert detail["plugins"] == {"calls": 0, "items": []}
+        # The tool itself still lands in the tools breakdown.
+        assert [t["tool_name"] for t in detail["tools"]] == ["Bash"]
 
 
 class TestRepos:
@@ -390,6 +450,23 @@ class TestUnmigratedStore:
         assert detail["mcp"]["calls"] == 1
         assert detail["plugins"] == {"calls": 0, "items": []}
 
+    def test_summary_and_detail_survive_a_missing_result_chars_column(self, projects):
+        """`result_chars` shipped after the table too, and the context-growth
+        block is built entirely from it. Missing means "no sizes recorded",
+        which is the truth of such a store — not an exception that empties
+        the whole page."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Read", "Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("ALTER TABLE tool_calls DROP COLUMN result_chars")
+        conn.commit()
+
+        empty = {"result_chars": 0, "calls": 0, "measured_calls": 0,
+                 "tools_total": 0, "tools": []}
+        assert report.summary(conn)["context_growth"] == empty
+        assert report.session_detail(conn, "s1")["context_growth"] == empty
+
 
 class TestClassify:
     def test_plugin_mcp_server_is_both_mcp_and_plugin(self):
@@ -455,3 +532,512 @@ class TestClassify:
     def test_ordinary_tool_is_neither(self):
         c = report.classify("Bash", None)
         assert c.mcp is None and c.plugin is None and c.skill is None
+
+
+class TestChurn:
+    """Per-file churn, from the diffs the transcripts carry."""
+
+    def _edit(self, uuid, ts, tool_use_id, path, added, removed, kind=None):
+        tur = {"filePath": path,
+               "structuredPatch": [{"lines": ["+x"] * added + ["-y"] * removed}]}
+        if kind:
+            tur["type"] = kind
+        return {
+            "type": "user", "uuid": uuid, "sessionId": "s1", "timestamp": ts,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}]},
+            "toolUseResult": tur,
+        }
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit", "Edit", "Write"])
+        b.raw(self._edit("r1", T0, "m1-tool0", "/repo/hot.py", 30, 5))
+        b.raw(self._edit("r2", T0, "m1-tool1", "/repo/hot.py", 20, 5))
+        b.raw(self._edit("r3", T0, "m1-tool2", "/repo/new.py", 12, 0, kind="create"))
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_summary_churn_totals_and_hottest_files(self, projects):
+        churn = report.summary(self._seed(projects))["churn"]
+        assert churn["lines_added"] == 62
+        assert churn["lines_removed"] == 10
+        assert churn["files"] == 2
+        assert churn["edits"] == 3
+        # Hottest first, and the two edits to hot.py are ONE file row.
+        assert [(f["file_path"], f["edits"], f["lines_added"], f["lines_removed"])
+                for f in churn["files_by_churn"]] == [
+            ("/repo/hot.py", 2, 50, 10),
+            ("/repo/new.py", 1, 12, 0),
+        ]
+
+    def test_churn_respects_the_repo_filter(self, projects):
+        conn = self._seed(projects)
+        assert report.summary(conn, repo_root="/repo/a")["churn"]["lines_added"] == 62
+        assert report.summary(conn, repo_root="/repo/b")["churn"]["lines_added"] == 0
+
+    def test_session_detail_lists_the_files_it_touched(self, projects):
+        detail = report.session_detail(self._seed(projects), "s1")
+        assert detail["churn"]["lines_added"] == 62
+        assert [f["file_path"] for f in detail["churn"]["files_by_churn"]] == [
+            "/repo/hot.py", "/repo/new.py"]
+        assert detail["churn"]["files_by_churn"][1]["operations"] == ["create"]
+
+    def test_a_store_without_the_table_reports_no_churn(self, projects):
+        """Same read-only migration trap as `qualifier`: the report verbs open
+        the store before `_migrate` could add anything."""
+        conn = self._seed(projects)
+        conn.execute("DROP TABLE file_edits")
+        conn.commit()
+        assert report.summary(conn)["churn"] == {
+            "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
+            "sessions": 0, "output_tokens": 0, "by_day": []}
+        assert report.session_detail(conn, "s1")["churn"]["files_by_churn"] == []
+
+
+class TestContextGrowth:
+    """What GREW the context, per tool. The ranking is by characters returned,
+    not by call count and emphatically not by dollars — a turn's cost was paid
+    on the prompt it carried, before any of its tools ran."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Bash", "Bash", "Bash",
+                                "mcp__claude-in-chrome__computer"])
+        for i in range(3):
+            b.tool_result(f"r{i}", T0, tool_use_id=f"m1-tool{i}", content="x" * 100)
+        b.tool_result("r3", T0, tool_use_id="m1-tool3", content="x" * 9000)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_the_rarely_called_tool_that_returns_most_ranks_first(self, projects):
+        """The whole point of the block. Ranked by calls, Bash wins 3 to 1;
+        ranked by what entered the context, it is not close — and the browser
+        tool would have been cut entirely from a top-N-by-calls list."""
+        growth = report.summary(self._seed(projects))["context_growth"]
+        assert [t["tool_name"] for t in growth["tools"]] == [
+            "mcp__claude-in-chrome__computer", "Bash",
+        ]
+        assert [t["result_chars"] for t in growth["tools"]] == [9000, 300]
+        assert [t["calls"] for t in growth["tools"]] == [1, 3]
+
+    def test_each_tool_carries_its_share_and_its_typical_size(self, projects):
+        """`share` is of characters returned; `avg_chars` is the finding —
+        one call of 9,000 against three of 100."""
+        growth = report.summary(self._seed(projects))["context_growth"]
+        assert growth["result_chars"] == 9300
+        assert growth["calls"] == 4
+        assert growth["measured_calls"] == 4
+        assert growth["tools_total"] == 2
+        assert [t["avg_chars"] for t in growth["tools"]] == [9000, 100]
+        assert [t["share"] for t in growth["tools"]] == [
+            round(9000 / 9300, 6), round(300 / 9300, 6),
+        ]
+        assert round(sum(t["share"] for t in growth["tools"]), 4) == 1.0
+
+    def test_a_call_that_recorded_no_result_is_counted_but_not_averaged(self, projects):
+        """A call still in flight has no size. Counting it in the denominator
+        would understate the tool; excluding it from `calls` would lose it."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read", "Read"])
+        b.tool_result("r1", T0, tool_use_id="m1-tool0", content="x" * 500)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        read = report.summary(conn)["context_growth"]["tools"][0]
+        assert read["tool_name"] == "Read"
+        assert (read["calls"], read["measured_calls"]) == (2, 1)
+        assert read["avg_chars"] == 500
+
+    def test_a_tool_that_returned_nothing_measurable_has_no_average(self, projects):
+        """None, not 0 — "we don't know" and "it returned nothing" are
+        different claims, and only one of them is true here."""
+        TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn(
+            "m1", T0, tools=["Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        growth = report.summary(conn)["context_growth"]
+        assert growth["result_chars"] == 0
+        assert growth["tools"][0]["avg_chars"] is None
+        # No total means no denominator, so every share is 0.0 rather than a
+        # ZeroDivisionError taking the page down.
+        assert growth["tools"][0]["share"] == 0.0
+
+    def test_it_respects_the_repo_filter(self, projects):
+        conn = self._seed(projects)
+        assert report.summary(conn, repo_root="/repo/a")["context_growth"]["result_chars"] == 9300
+        assert report.summary(conn, repo_root="/repo/b")["context_growth"]["result_chars"] == 0
+
+    def test_a_session_reports_its_own_growth(self, projects):
+        detail = report.session_detail(self._seed(projects), "s1")
+        assert detail["context_growth"]["result_chars"] == 9300
+        assert detail["context_growth"]["tools"][0]["tool_name"] == \
+            "mcp__claude-in-chrome__computer"
+
+    def test_an_agent_reports_only_what_it_pulled_in_itself(self, projects):
+        """The main agent's Read belongs to the session, not to the agent."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.tool_result("r1", T0, tool_use_id="m1-tool0", content="x" * 4000)
+        b.write()
+        b.subagent("aexplore-1", ["x1"], T1, task="Find the auth flow", tools=["Bash"])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        assert report.session_detail(conn, "s1")["context_growth"]["result_chars"] == 4000
+        agent = report.agent_detail(conn, "s1", "aexplore-1")["context_growth"]
+        assert [t["tool_name"] for t in agent["tools"]] == ["Bash"]
+        assert agent["result_chars"] == 0
+
+
+class TestAttribution:
+    """Attribution sits on turns, so it accounts for TOKENS and COST — the
+    step up from counting invocations."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionSkill="superpowers:test-driven-development",
+               attributionPlugin="superpowers")
+        b.turn("m2", T0, attributionSkill="superpowers:brainstorming",
+               attributionPlugin="superpowers")
+        b.turn("m3", T0, attributionSkill="code-review", attributionPlugin=None)
+        b.turn("m4", T0, attributionAgent="Explore")
+        b.turn("m5", T0)  # nothing in scope
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_plugins_are_accounted_by_turns_tokens_and_cost(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        sp = next(p for p in attr["plugins"] if p["name"] == "superpowers")
+        assert sp["turns"] == 2
+        # Each seeded turn is 3 in + 1000 read + 200 written = 1203 context.
+        assert sp["context_tokens"] == 2 * 1203
+        assert sp["output_tokens"] == 2 * 40
+        assert round(sp["cost_usd"], 6) == round(2 * TURN_USD, 6)
+        assert sp["skills"] == 2   # two distinct skills of the one plugin
+
+    def test_a_builtin_skill_is_listed_but_attributed_to_no_plugin(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        assert [p["name"] for p in attr["plugins"]] == ["superpowers"]
+        # It still appears among skills — it ran, it cost tokens.
+        review = next(s for s in attr["skills"] if s["name"] == "code-review")
+        assert review["turns"] == 1 and review["plugin"] is None
+
+    def test_agents_are_accounted_separately(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        assert [(a["name"], a["turns"]) for a in attr["agents"]] == [("Explore", 1)]
+
+    def test_an_unattributed_turn_is_in_no_bucket(self, projects):
+        attr = report.summary(self._seed(projects))["attribution"]
+        assert sum(p["turns"] for p in attr["plugins"]) == 2
+        assert attr["attributed_turns"] == 4      # of 5 turns
+        assert attr["turns"] == 5
+
+    def test_attribution_respects_the_repo_filter(self, projects):
+        conn = self._seed(projects)
+        assert report.summary(conn, repo_root="/repo/a")["attribution"]["plugins"]
+        assert report.summary(conn, repo_root="/repo/b")["attribution"]["plugins"] == []
+
+    def test_attributed_cost_is_confined_to_the_window(self, projects):
+        """The scope clause and the "anything in scope" clause are ANDed, and
+        SQL binds AND tighter than OR — so an unparenthesised `a OR b OR c`
+        spliced after `repo_root = ?` degrades to
+        `(repo_root = ? AND a) OR b OR c`, pricing in every attributed turn
+        in the WHOLE store. A repo that owns no attributed turns must report
+        no attributed cost, not the other repo's."""
+        conn = self._seed(projects)
+        # A second repo, with attribution of its own that /repo/b must never see.
+        b = TranscriptBuilder(projects, "-c", "s9").prompt("u1", T1)
+        b.turn("m9", T1, attributionPlugin="tribunal", attributionAgent="Explore")
+        b.write()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/c' WHERE session_id = 's9'")
+        conn.commit()
+
+        attr = report.summary(conn, repo_root="/repo/b")["attribution"]
+        assert attr["plugins"] == []
+        assert attr["cost_usd"] == 0.0
+        # And never a negative dollar figure, which is what the leak produced
+        # once the borrowed attributed cost exceeded the window's own total.
+        assert attr["unattributed_cost_usd"] >= 0.0
+
+    def test_attributed_cost_of_one_repo_excludes_the_other(self, projects):
+        conn = self._seed(projects)
+        b = TranscriptBuilder(projects, "-c", "s9").prompt("u1", T1)
+        b.turn("m9", T1, attributionPlugin="tribunal")
+        b.write()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/c' WHERE session_id = 's9'")
+        conn.commit()
+
+        # /repo/a's four attributed turns, and not /repo/c's fifth.
+        assert round(report.summary(conn, repo_root="/repo/a")["attribution"]["cost_usd"], 6) \
+            == round(4 * TURN_USD, 6)
+
+    def test_a_partially_migrated_store_degrades_rather_than_raising(self, projects):
+        """The guard is `any(column present)`, but `_group` names `t.skill`
+        and `t.plugin` unconditionally. A store where only SOME of the five
+        ALTERs landed must still answer — the same read-only-migration trap
+        `_qualifier_sql` and `_result_chars_sql` each guard against."""
+        conn = self._seed(projects)
+        conn.execute("ALTER TABLE turns DROP COLUMN skill")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        # `skill` is gone, so nothing can be attributed to a skill; the
+        # columns that survive still report.
+        assert attr["skills"] == []
+        assert [a["name"] for a in attr["agents"]] == ["Explore"]
+
+    def test_a_store_without_the_columns_reports_no_attribution(self, projects):
+        conn = self._seed(projects)
+        for col in ("skill", "plugin", "agent_type", "mcp_server", "mcp_tool"):
+            conn.execute(f"ALTER TABLE turns DROP COLUMN {col}")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        assert attr["plugins"] == [] and attr["skills"] == [] and attr["agents"] == []
+        assert attr["attributed_turns"] == 0
+
+    def test_an_mcp_server_is_shown_by_its_real_name(self, projects):
+        """The tool name spells a server as a slug; the turn carries the name
+        Claude Code actually uses. `_slug` is the transform between them, so
+        the breakdown can show `claude.ai Notion` rather than
+        `claude_ai_Notion` without guessing at any of it."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionMcpServer="claude.ai Notion",
+               tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b.turn("m2", T0, attributionMcpServer="plugin:linear:linear",
+               tools=["mcp__plugin_linear_linear__save_issue"])
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        servers = {s["server"]: s["name"] for s in report.summary(conn)["mcp"]["servers"]}
+        assert servers == {
+            "claude_ai_Notion": "claude.ai Notion",
+            "plugin_linear_linear": "plugin:linear:linear",
+        }
+
+    def test_a_server_attribution_never_named_keeps_its_slug(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["mcp__claude_ai_Wayflyer_Staff__find"])
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        server = report.summary(conn)["mcp"]["servers"][0]
+        assert server["name"] == server["server"] == "claude_ai_Wayflyer_Staff"
+
+    def test_two_names_slugging_alike_leave_the_slug_alone(self, projects):
+        """An ambiguous label is worse than a coarse one: the key is dropped
+        rather than resolved to whichever name was seen first."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionMcpServer="claude.ai Notion",
+               tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b.turn("m2", T0, attributionMcpServer="claude:ai:Notion")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert report.mcp_server_names(conn) == {}
+        assert report.summary(conn)["mcp"]["servers"][0]["name"] == "claude_ai_Notion"
+
+    def test_session_detail_names_servers_from_the_whole_store(self, projects):
+        """A name is a label, not a measure: a session whose own turns carry
+        no attribution still gets the good label from what the store knows."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionMcpServer="claude.ai Notion")
+        b.write()
+        b2 = TranscriptBuilder(projects, "-a", "s2").prompt("u1", T0)
+        b2.turn("n1", T0, tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b2.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        detail = report.session_detail(conn, "s2")
+        assert detail["mcp"]["servers"][0]["name"] == "claude.ai Notion"
+
+    def test_session_detail_attributes_that_session_alone(self, projects):
+        """The drawer asks the same question of one session that the page asks
+        of a window, so it gets the same two blocks — narrowed by session, not
+        recomputed differently."""
+        conn = self._seed(projects)
+        detail = report.session_detail(conn, "s1")
+        assert [p["name"] for p in detail["attribution"]["plugins"]] == ["superpowers"]
+        assert detail["attribution"]["attributed_turns"] == 4
+        assert detail["attribution"]["turns"] == 5
+        assert detail["delegation"]["turns"] == 5
+
+    def test_session_detail_attribution_excludes_other_sessions(self, projects):
+        conn = self._seed(projects)
+        b = TranscriptBuilder(projects, "-a", "s2").prompt("u1", T0)
+        b.turn("n1", T0, attributionPlugin="tribunal", attributionSkill="tribunal:reckoning")
+        b.write()
+        ingest.sync(conn, projects)
+        assert [p["name"] for p in report.session_detail(conn, "s1")["attribution"]["plugins"]] \
+            == ["superpowers"]
+        assert [p["name"] for p in report.session_detail(conn, "s2")["attribution"]["plugins"]] \
+            == ["tribunal"]
+
+
+class TestAgentDetail:
+    """One subagent in detail — the same questions the session drawer asks,
+    narrowed to an agent. Every fact table already carries `agent_id`, so
+    this is a WHERE clause rather than new plumbing."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.write()
+        b.subagent("aexplore-1", ["x1", "x2"], T1, task="Find the auth flow",
+                   tools=["mcp__claude_ai_Notion__notion-fetch"])
+        b.subagent("aexplore-2", ["y1"], T1, task="Audit the ORM", tools=["Bash"])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        return conn
+
+    def test_the_session_lists_its_agents_with_their_tasks(self, projects):
+        agents = report.session_detail(self._seed(projects), "s1")["subagents"]
+        assert [(a["agent_id"], a["task"]) for a in agents] == [
+            ("aexplore-1", "Find the auth flow"),
+            ("aexplore-2", "Audit the ORM"),
+        ]
+
+    def test_an_agent_reports_only_its_own_turns_and_calls(self, projects):
+        detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
+        assert detail["turns"] == 2
+        assert len(detail["turn_series"]) == 2
+        assert [t["tool_name"] for t in detail["tools"]] == \
+            ["mcp__claude_ai_Notion__notion-fetch"]
+        # The main agent's Read and the sibling's Bash belong to neither.
+        assert [s["server"] for s in detail["mcp"]["servers"]] == ["claude_ai_Notion"]
+
+    def test_an_agent_carries_its_task_and_type(self, projects):
+        conn = self._seed(projects)
+        conn.execute("UPDATE turns SET agent_type = 'Explore' WHERE agent_id = 'aexplore-1'")
+        conn.commit()
+        detail = report.agent_detail(conn, "s1", "aexplore-1")
+        assert detail["task"] == "Find the auth flow"
+        assert detail["agent_type"] == "Explore"
+        assert detail["session_id"] == "s1"
+
+    def test_an_agent_is_priced_on_its_own_turns_alone(self, projects):
+        detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
+        assert round(detail["cost_usd"], 6) == round(2 * TURN_USD, 6)
+
+    def test_an_unknown_agent_is_none_rather_than_an_empty_shell(self, projects):
+        assert report.agent_detail(self._seed(projects), "s1", "nope") is None
+
+    def test_an_agent_that_edited_nothing_reports_no_churn(self, projects):
+        detail = report.agent_detail(self._seed(projects), "s1", "aexplore-1")
+        assert detail["churn"]["lines_added"] == 0
+        assert detail["churn"]["files_by_churn"] == []
+
+    def test_an_agents_own_edits_are_recorded_against_it(self, projects):
+        """`file_edits` used to write the main agent for EVERY row, so
+        `agent_detail`'s `f.agent_id = ?` filter could never match and every
+        agent's churn was empty however much it edited — while the main
+        agent's was inflated by all of it."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.write()
+        b.subagent("aeditor", ["e1"], T1, task="Fix it",
+                   tools=["Edit"], edits=[("e1-edit", 30, 4)])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        churn = report.agent_detail(conn, "s1", "aeditor")["churn"]
+        assert churn["lines_added"] == 30
+        assert churn["lines_removed"] == 4
+        assert [f["file_path"] for f in churn["files_by_churn"]] == ["/repo/aeditor.py"]
+
+    def test_a_subagents_edits_are_not_billed_to_the_main_agent(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Read"])
+        b.write()
+        b.subagent("aeditor", ["e1"], T1, tools=["Edit"], edits=[("e1-edit", 30, 4)])
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        # The session as a whole still owns the work — it happened in there.
+        assert report.session_detail(conn, "s1")["churn"]["lines_added"] == 30
+        # But the row belongs to the agent, not to the main loop.
+        rows = conn.execute("SELECT agent_id FROM file_edits").fetchall()
+        assert [r[0] for r in rows] == ["aeditor"]
+
+
+class TestDerivedMetrics:
+    """Figures the new slices make possible — each with a denominator that
+    matches its numerator, which is the whole difficulty."""
+
+    def _seed(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit"])
+        b.raw({"type": "user", "uuid": "r1", "sessionId": "s1", "timestamp": T0,
+               "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+               "message": {"role": "user", "content": [
+                   {"type": "tool_result", "tool_use_id": "m1-tool0", "content": "ok"}]},
+               "toolUseResult": {"filePath": "/repo/a.py", "structuredPatch": [
+                   {"lines": ["+x"] * 20 + ["-y"] * 5}]}})
+        b.subagent("agent-1", ["a1"], T0)
+        b.write()
+        # A second session with NO file edits: it must not dilute the
+        # churn-derived averages.
+        TranscriptBuilder(projects, "-a", "s2").prompt("u1", T1).turn("m1", T1).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
+        conn.commit()
+        return conn
+
+    def test_churn_averages_use_only_churn_bearing_sessions(self, projects):
+        """s2 changed no files. Including it would halve every per-session
+        churn figure and quietly understate the real editing rate."""
+        churn = report.summary(self._seed(projects))["churn"]
+        assert churn["sessions"] == 1          # not 2
+        assert churn["lines_added"] == 20 and churn["lines_removed"] == 5
+        # Output tokens summed over the SAME sessions, so output-per-line is
+        # a ratio of two comparable numbers.
+        assert churn["output_tokens"] == 80    # 2 turns x 40 (main + subagent)
+
+    def test_churn_by_day(self, projects):
+        by_day = report.summary(self._seed(projects))["churn"]["by_day"]
+        assert by_day == [{"day": "2026-09-01", "lines_added": 20, "lines_removed": 5, "edits": 1}]
+
+    def test_delegation_contrasts_turns_with_output(self, projects):
+        d = report.summary(self._seed(projects))["delegation"]
+        # 3 turns total (s1 main, s1 subagent, s2 main), 1 of them delegated.
+        assert d["turns"] == 3 and d["subagent_turns"] == 1
+        assert d["output_tokens"] == 120 and d["subagent_output_tokens"] == 40
+        assert d["tool_calls"] == 1 and d["subagent_tool_calls"] == 0
+
+    def test_attribution_reports_its_own_cost_and_the_remainder(self, projects):
+        conn = self._seed(projects)
+        conn.execute("UPDATE turns SET plugin = 'overseer' WHERE message_id = 'm1' "
+                     "AND session_id = 's1' AND agent_id = ''")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        # One attributed turn of three: its cost, and the rest named as
+        # unattributed rather than left for a reader to infer a total from.
+        assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)
+        assert round(attr["unattributed_cost_usd"], 6) == round(2 * TURN_USD, 6)
+
+    def test_attribution_cost_counts_a_turn_once_despite_overlap(self, projects):
+        """A plugin skill running inside a subagent sets BOTH plugin and
+        agent_type. Summing the two lists would bill that turn twice."""
+        conn = self._seed(projects)
+        conn.execute("UPDATE turns SET plugin = 'overseer', agent_type = 'Explore' "
+                     "WHERE message_id = 'm1' AND session_id = 's1' AND agent_id = ''")
+        conn.commit()
+        attr = report.summary(conn)["attribution"]
+        assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)   # once, not twice

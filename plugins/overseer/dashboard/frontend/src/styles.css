@@ -1595,6 +1595,38 @@ body {
   border-top: 2px dashed var(--qb-line-dashed);
 }
 
+/* The waylaid strip steals height from the board without `.board` or
+   `.lane` knowing it.
+
+   Both size themselves as a PERCENTAGE of `.board-region` (`.board` is
+   `height: 100%`, `.lane` is `min-height`/`max-height: 100%`), but the strip
+   renders as a sibling ABOVE `.board` inside that same region — so the board
+   still claims the region's full height while now starting below the banner,
+   and overhangs the bottom by exactly the banner's height. `.board-region`
+   is `overflow-y: hidden`, so that overhang is clipped: a lane's internal
+   scroller runs past the visible area and its last card cannot be reached.
+
+   Switching to a column flexbox for this case makes `.board` claim what is
+   LEFT rather than the whole, which is what the percentages were reaching
+   for all along. Scoped with `:has()` (the same idiom `.board-region:has(
+   .atlas-chart)` already uses below) so the ordinary no-banner layout is
+   byte-for-byte untouched. */
+.board-region:has(> .waylaid) {
+  display: flex;
+  flex-direction: column;
+}
+
+.board-region:has(> .waylaid) > .board {
+  flex: 1 1 auto;
+  /* `height: 100%` on the base rule would otherwise still resolve against
+     the whole region and undo the point of the flex box. */
+  height: auto;
+  /* A flex item's `min-height: auto` floors it at its content, which for a
+     column of cards is taller than the space available — the overflow would
+     come straight back. */
+  min-height: 0;
+}
+
 .board-placeholder {
   color: var(--qb-ink-400);
 }
@@ -1638,6 +1670,38 @@ body {
   border: 1.5px solid color-mix(in srgb, var(--legacy-color-b3261e) 45%, var(--qb-card-border));
   /* A strip, not a card: the button-scale wobble keeps it slim. */
   border-radius: var(--qb-btn-wobble-2);
+  /* An alert is read once, in the middle, and then acted on — stretched the
+     full width of a 1900px board it became a red rule across the top of the
+     page, which reads as chrome rather than as something to answer. Bounded
+     and centred instead; below ~46rem the max-width stops binding and it
+     goes back to being full-bleed on its own, so the phone layer needs no
+     override for this. */
+  max-width: 46rem;
+  margin-inline: auto;
+  margin-bottom: 0.75rem;
+}
+
+/* Retry and Cancel, kept together in the strip's third column so the grid
+   stays three-up whether or not there is anything to call back. */
+.waylaid__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Cancel is the lesser of the two: same size, no fill, so "Send a rider"
+   stays the obvious action and calling them back is available rather than
+   advertised. */
+.waylaid__btn--quiet {
+  background: transparent;
+  color: var(--qb-ink-600);
+}
+
+/* The needle stops when nothing is actually riding — a spinning compass
+   under "no rider made it through" would promise motion that isn't
+   happening. */
+.waylaid__needle--still {
+  animation: none;
 }
 
 .waylaid__text {
@@ -1754,6 +1818,21 @@ body {
 .board {
   display: flex;
   align-items: flex-start;
+  /* Centre the lane row in the region rather than pinning it left. Desktop
+     shows the COLLAPSED set — Backlog / In Progress / Parked / Done, plus
+     Abandoned when toggled on (Board.tsx applies `collapseStagesForMobile`
+     at every viewport) — so four or five columns sat hard against the left
+     edge with a few hundred px of dead parchment to their right.
+
+     Centring a flex row inside a scroller is normally the bug where the
+     leading item overflows past scrollLeft: 0 and can never be reached.
+     `min-width: max-content` below is what makes it safe HERE: the moment
+     the lanes are wider than the region, that floor sizes `.board` to
+     exactly its content, leaving zero free space for `justify-content` to
+     distribute — so this silently degrades to `flex-start` at precisely
+     the point where centring would start hiding a column. The mobile layer
+     drops `min-width` to 0 and so must (and does) override this back. */
+  justify-content: center;
   gap: 0.75rem;
   height: 100%;
   min-width: max-content;
@@ -1838,7 +1917,13 @@ body {
    keep their own parchment status fill instead; that's a deliberate
    distinction, so no accent tint is written for those keys. */
 .lane {
-  flex: 0 0 260px;
+  /* 280px, up from 260. Deliberately a small step: at five lanes the row
+     measures ~1492px including the gaps, Parked's 1.5rem separation and the
+     region's own padding — which still fits a 1512px laptop, so the centring
+     above survives on the narrowest desktop this board is used on. Much past
+     280 and five lanes overflow there instead, trading the centred row for a
+     scrollbar. Mobile overrides this to `88vw` in its own layer. */
+  flex: 0 0 280px;
   display: flex;
   flex-direction: column;
   border-radius: var(--legacy-radius-6px);
@@ -6578,6 +6663,12 @@ button.trail-tag:focus-visible {
     min-width: 0;
     width: 100%;
     max-width: 100vw;
+    /* Undo the desktop centring. That rule leans on `min-width: max-content`
+       to zero out the free space once the lanes overflow; dropping the floor
+       to 0 on the line above removes exactly that protection, and a centred
+       88vw snap track would push the FIRST lane off the left edge with no
+       scroll position able to reach it. */
+    justify-content: flex-start;
     overflow-x: auto;
     /* Item 8: was `visible` — Board.tsx now pins this box's height to the
        ACTIVE lane's own content height (inline style, `activeLaneHeight`
@@ -7139,6 +7230,200 @@ button.trail-tag:focus-visible {
   --chr-box-shadow: 0 0 0 transparent;
 }
 
+/* --- subagent drawer (the second sheet) ---------------------------------- */
+
+/* Layered over the session drawer rather than replacing it: a subagent is
+   only ever read in the context of the session that spawned it, and the
+   sheet beneath stays visible at its own edge to say so. */
+.drawer-overlay--stacked {
+  z-index: 21;
+  /* The first sheet's backdrop is already blurring the board; a second blur
+     over it turns the whole screen to soup. */
+  backdrop-filter: none;
+}
+
+/* Wider than the session sheet by exactly the rail, so the drawer beneath
+   keeps its own right edge in view and the layering is legible. */
+.chr-drawer--agent {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: 1rem;
+  width: min(41rem, 100%);
+  padding: 26px 28px 26px 0;
+}
+
+.chr-drawer__pane {
+  min-width: 0;
+}
+
+/* The rail: where you are, what else there is, and the way back. Sticky, so
+   a long agent scrolls under a list that stays reachable. */
+.chr-rail {
+  position: sticky;
+  top: 0;
+  /* Opaque, because it is sticky: anything that stays put while content
+     scrolls beneath it must hide that content, or the two render on top of
+     each other. `--qb-panel` is the drawer's own surface (`.card-drawer`);
+     an earlier attempt named `--qb-parchment`, which does not exist, so the
+     declaration was dropped and the bleed-through survived the "fix". */
+  background: var(--qb-panel);
+  align-self: start;
+  max-height: calc(100vh - 52px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-left: 26px;
+  border-right: 2px dashed var(--qb-line-dashed-2);
+  padding-right: 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chr-rail__back {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--qb-ink-700);
+  background: none;
+  border: none;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--qb-btn-wobble-2);
+  cursor: pointer;
+}
+
+.chr-rail__back:hover,
+.chr-rail__back:focus-visible {
+  background: var(--qb-parchment-muted);
+  color: var(--qb-ink-900);
+}
+
+.chr-rail__count {
+  margin: 0 0 0 0.4rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+.chr-rail__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chr-rail__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.45rem;
+  background: none;
+  border: none;
+  border-radius: var(--qb-btn-wobble-3);
+  cursor: pointer;
+}
+
+.chr-rail__item:hover {
+  background: var(--qb-parchment-muted);
+}
+
+.chr-rail__item[aria-current="true"] {
+  background: var(--qb-parchment-muted);
+  box-shadow: inset 3px 0 0 var(--chr-turns);
+}
+
+.chr-rail__type {
+  font-family: var(--qb-font-prose);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--qb-ink-400);
+}
+
+/* Two lines of the task, then an ellipsis: enough to tell agents apart
+   without letting one long instruction own the rail. */
+.chr-rail__task {
+  font-family: var(--qb-font-prose);
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: var(--qb-ink-900);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* The agent cell holds a task prompt, which can run to hundreds of
+   characters. Left to itself it sets the column width and shoves the numeric
+   columns off a phone screen entirely. Clamped to two lines; the full text is
+   on the row's `title`, and one click away in the drawer. */
+.chr-table__clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 22rem;
+}
+
+@media (max-width: 760px) {
+  .chr-table__clamp {
+    max-width: 14rem;
+  }
+}
+
+.chr-rail__meta {
+  font-family: var(--qb-font-prose);
+  font-size: 0.68rem;
+  color: var(--qb-ink-400);
+}
+
+/* The task as a heading is prose, not a name — it wraps rather than
+   truncating, and sits at a size a sentence can carry. */
+/* Doubled class deliberately: the base `.chr-drawer__title` is declared LATER
+   in this file, so at equal specificity it won and this modifier never
+   applied — the task rendered at heading size. */
+.chr-drawer__title.chr-drawer__title--task {
+  font-size: 1.05rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Below this the rail and pane cannot both hold their width; the rail goes
+   full-width above the pane so the way back is never lost. */
+@media (max-width: 760px) {
+  .chr-drawer--agent {
+    /* Block, not a one-column grid. Two children in one grid area render on
+       top of each other; in block flow that cannot happen, and the rail is
+       simply a box above the pane. */
+    display: block;
+    padding: 26px 28px;
+  }
+
+  .chr-drawer__pane {
+    margin-top: 1rem;
+  }
+
+  .chr-rail {
+    position: static;
+    max-height: 14rem;
+    padding-left: 0;
+    padding-right: 0;
+    border-right: none;
+    border-bottom: 2px dashed var(--qb-line-dashed-2);
+    padding-bottom: 0.5rem;
+  }
+}
+
 /* Refetch keeps the frame: dim, never skeleton. */
 .chronicle--refreshing .chr-tiles,
 .chronicle--refreshing .chronicle__grid,
@@ -7185,7 +7470,16 @@ button.trail-tag:focus-visible {
 /* --- stat tiles ----------------------------------------------------------- */
 .chr-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  /* FIVE fixed columns, not an auto-fit flow. The page is capped at 1280px,
+     so auto-fit at `minmax(140px, …)` opened about thirteen tracks on a wide
+     screen — and twenty tiles over thirteen columns left the second row
+     stopping halfway across the page with a bald half-width of parchment
+     beside it. Twenty divides exactly by five, so every row is full, and
+     five tracks of ~248px sit the label and figure comfortably rather than
+     cramming them into 146px. The tiles are ordered in fives by what they
+     measure (see ChroniclePage), so a row is now a loose category as well as
+     a row. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   /* Every row as tall as the tallest: a tile with a footnote and one
      without would otherwise sit at different heights and the grid reads as
      a ragged wall. Paired with the single-line note below. */
@@ -7211,6 +7505,14 @@ button.trail-tag:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* On the cross axis too. `.chr-tiles` sets `grid-auto-rows: 1fr` so every
+     tile is as tall as the tallest in its row — which means a tile with no
+     footnote had its label and figure pinned to the top with the borrowed
+     height hanging empty beneath, and a row of mixed tiles read as a set of
+     numbers sitting at different heights. Centring puts each figure on its
+     own tile's axis in BOTH directions, which is what the horizontal
+     centring above was already reaching for. */
+  justify-content: center;
   gap: 0.15rem;
   padding: 0.7rem 0.85rem 0.7rem 1rem;
   background: var(--qb-panel);
@@ -7242,6 +7544,9 @@ button.trail-tag:focus-visible {
     var(--chr-box-shadow);
 }
 
+/* The radius cycles on a FOUR-step against a five-column grid on purpose:
+   coprime counts mean the wobble never lines up into columns of identical
+   corners, which is what a hand-inked sheet should look like. */
 .chr-tiles > .chr-tile:nth-child(4n + 2) {
   border-radius: var(--chr-tile-radius-2);
 }
@@ -7326,12 +7631,17 @@ button.trail-tag:focus-visible {
   gap: 0.75rem;
 }
 
-/* The page's chart grid is three FIXED rows, not one auto-fit flow, because
-   the panels group by the question they answer: the two rings and the money
-   beside them, the four per-day series, the four ranked lists. An auto-fit
-   grid split those groups at whatever width the viewport happened to be.
-   Each row is its own container, so a row collapses on its own terms and
-   `.chr-panel--wide` (grid-column 1 / -1) still spans its own row.
+/* FIXED column counts, not one auto-fit flow: an auto-fit grid split the
+   page's groups at whatever width the viewport happened to be. Each block is
+   its own container, so it collapses on its own terms and `.chr-panel--wide`
+   (grid-column 1 / -1) still spans its own row.
+
+   The nine chart panels take `--3` as a single container. They were three
+   `--4` rows, one per question — the rings and the money, the per-day
+   series, the ranked lists — but the grouping was invisible on screen while
+   the remainders were not: the middle row held ONE panel in a four-wide
+   track and the last row broke 4 + 1. Nine over three fills every slot, and
+   DOM order still reads the groups down the rows.
 
    Stacked immediately before the media queries that relax them: an
    unconditional rule later in the file would beat an earlier media-gated
@@ -7344,15 +7654,152 @@ button.trail-tag:focus-visible {
   grid-template-columns: repeat(4, 1fr);
 }
 
+.chronicle__grid--2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .chronicle__grid--wide {
   grid-template-columns: 1fr;
 }
 
-/* Below the point where a quarter-width column stops holding a legible
-   chart, both fixed rows fall to 2-up, then to a single column — the four
-   ranked lists are the first to suffer, since a truncated tool name is
-   worse than a taller page. */
+/* Three shares of one population, read against each other — the gap between
+   them IS the finding (most of the turns, little of the prose), so they share
+   one axis and one hue rather than becoming three separate dials. */
+.chr-shares {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.5rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.8rem;
+}
+
+.chr-shares__row {
+  display: grid;
+  grid-template-columns: minmax(80px, 30%) 1fr 48px;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chr-shares__label {
+  color: var(--qb-ink-700);
+}
+
+.chr-shares__track {
+  display: block;
+  height: 12px;
+  background: color-mix(in srgb, var(--chr-hue) 14%, var(--qb-parchment-muted));
+  border-radius: 0 4px 4px 0;
+}
+
+.chr-shares__fill {
+  display: block;
+  height: 100%;
+  background: var(--chr-hue);
+  border-radius: 0 4px 4px 0;
+}
+
+.chr-shares__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--qb-ink-900);
+}
+
+/* --- usage callout (tools / MCP / plugins) --------------------------------- */
+
+/* Each tab carries its own measure's hue whether pressed or not. The previous
+   segment styling greyed the unpressed pair, which read as "disabled" rather
+   than "click me" — the switch was the one control on the page nobody could
+   see was a control. Unpressed: hue as border and text on parchment. Pressed:
+   hue as fill. */
+.chr-usage__tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.chr-usage__tab {
+  border: 2px solid color-mix(in srgb, var(--chr-hue) 60%, var(--qb-card-border));
+  background: color-mix(in srgb, var(--chr-hue) 10%, var(--qb-panel));
+  color: color-mix(in srgb, var(--chr-hue) 70%, var(--qb-ink-900));
+  font-size: 0.78rem;
+}
+
+.chr-usage__tab[aria-pressed="true"] {
+  background: var(--chr-hue);
+  border-color: var(--chr-hue);
+  /* Fixed near-parchment rather than a token: the fill is a saturated hue in
+     both themes, so the label must not follow the theme's ink. */
+  color: #fdfaf3;
+}
+
+/* The count reads as secondary to the name it follows. */
+.chr-usage__count {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The long tail stays reachable instead of being cut at an arbitrary twelve:
+   about nine rows visible, the rest a scroll away. Capped in rem so it tracks
+   the row height rather than a guessed pixel count. */
+.chr-usage__scroll {
+  max-height: 19rem;
+  overflow-y: auto;
+  /* Room for the scrollbar so it never sits on top of the value column. */
+  padding-right: 0.35rem;
+}
+
+/* --- MCP tools panel ------------------------------------------------------- */
+
+/* The server picker sits in `.chr-panel__head` beside the title, so its
+   caption has to run inline rather than stack above it the way `.qb-label`
+   does by default. */
+.chr-mcp__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* A real server name is long ("plugin agent-ui-telemetry agent-ui"), and a
+   native select will happily push the panel head to two lines. Bound it and
+   let the ellipsis fall inside the control, where the full value is still
+   one click away. */
+.chr-mcp__picker {
+  max-width: min(22rem, 60vw);
+}
+
+/* The table shares `.chr-usage__scroll` with the callout's bar lists, so its
+   header would scroll out of a long tool list. Pin it — the column meanings
+   are not guessable from the values (calls, bytes, seconds and a percentage
+   are four different kinds of number). */
+.chr-mcp__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--qb-panel);
+}
+
+/* The tile grid steps down before the chart grid does: a tile is a label and
+   a figure, so it survives being narrow far longer than a chart with day
+   ticks, but five across a tablet leaves nothing legible either. */
 @media (max-width: 1180px) {
+  .chr-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .chr-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Below the point where a third of the page stops holding a legible chart,
+   every fixed grid falls to 2-up, then to a single column. A taller page is
+   always the better trade: these panels carry axis labels and day ticks,
+   and a squeezed column smears them into an unreadable band. */
+@media (max-width: 1180px) {
+  .chronicle__grid--2,
   .chronicle__grid--3,
   .chronicle__grid--4 {
     grid-template-columns: repeat(2, 1fr);
@@ -7360,6 +7807,7 @@ button.trail-tag:focus-visible {
 }
 
 @media (max-width: 720px) {
+  .chronicle__grid--2,
   .chronicle__grid--3,
   .chronicle__grid--4 {
     grid-template-columns: 1fr;
@@ -7648,6 +8096,12 @@ button.trail-tag:focus-visible {
 
 /* --- counsel (efficiency insights) ---------------------------------------- */
 .chr-counsel__list {
+  /* One badge width for the whole panel, named once. The figure is fixed to
+     it and the opened block is indented past it, so the two cannot drift —
+     they did, and a long verdict ("reading, not writing") widened the badge
+     past the 5.5rem the indent assumed, leaving every open row misaligned
+     and squeezing that row's title column. */
+  --chr-figure-w: 6.5rem;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 0.75rem 1.25rem;
@@ -7716,12 +8170,17 @@ button.trail-tag:focus-visible {
   min-width: 0;
 }
 
+/* Fixed, not `min-width`: the badge is a column the eye reads down, so every
+   row's figure must start and end on the same two edges. A long verdict wraps
+   inside it rather than pushing it wider. */
 .chr-counsel__figure {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 5.5rem;
-  padding: 0.5rem 0.6rem;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--chr-figure-w, 6.5rem);
+  padding: 0.5rem 0.4rem;
   background: var(--qb-parchment-muted);
   border-radius: var(--qb-btn-wobble-3);
 }
@@ -7732,7 +8191,7 @@ button.trail-tag:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin: 0.35rem 0 0 calc(5.5rem + 0.85rem);
+  margin: 0.35rem 0 0 calc(var(--chr-figure-w, 6.5rem) + 0.85rem);
   padding-left: 0.6rem;
   border-left: 2px dashed var(--qb-line-dashed-2);
 }
@@ -7819,16 +8278,26 @@ button.trail-tag:focus-visible {
   font-size: 1.45rem;
   line-height: 1.1;
   color: var(--qb-ink-900);
+  /* A figure is never broken across lines; "<$0.01" is the longest one these
+     formatters produce and it fits. */
+  white-space: nowrap;
 }
 
 /* The verdict word, tinted by band. Text carries the meaning; the tint is
    a second cue, never the only one. Good/poor borrow the board's status
-   greens and reds so the vocabulary is the one the cards already use. */
+   greens and reds so the vocabulary is the one the cards already use.
+   It is prose and may be a whole phrase, so it wraps inside the fixed badge
+   and stays centred on both lines — balanced, so "reading, not writing"
+   breaks evenly rather than stranding one word. */
 .chr-counsel__verdict {
   font-family: var(--qb-font-prose);
   font-size: 0.7rem;
   font-weight: 700;
+  line-height: 1.25;
   text-transform: uppercase;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
   letter-spacing: 0.04em;
   color: var(--qb-ink-500);
 }
@@ -8145,6 +8614,23 @@ button.trail-tag:focus-visible {
   font-family: var(--qb-font-prose);
   font-size: 0.68rem;
   font-weight: 700;
+}
+
+/* Plan badge, beside `live`. Quieter than `live` on purpose: liveness is
+   news, the plan is standing context, and two loud chips on one row compete.
+   Neutral ink rather than a status colour — a plan is not good or bad. */
+.chr-plan {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--qb-parchment-shade, transparent);
+  border: 1px solid var(--qb-rule);
+  color: var(--qb-ink-600);
+  font-family: var(--qb-font-prose);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .chr-chip {

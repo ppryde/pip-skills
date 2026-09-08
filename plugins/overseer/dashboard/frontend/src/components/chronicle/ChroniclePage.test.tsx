@@ -9,6 +9,7 @@ vi.mock("../../api/client", async (importOriginal) => {
     getChronicleSummary: vi.fn(),
     getChronicleSessions: vi.fn(),
     getChronicleSession: vi.fn(),
+    getChronicleAgent: vi.fn(),
     syncChronicle: vi.fn(),
     setActiveRoot: vi.fn(),
   };
@@ -94,6 +95,9 @@ function session(overrides: Partial<ChronicleSession> & { session_id: string }):
     live: false,
     cost_usd: 0.42,
     unpriced_turns: 0,
+    lines_added: 0,
+    lines_removed: 0,
+    files_touched: 0,
     ...overrides,
   };
 }
@@ -110,21 +114,21 @@ function summary(): ChronicleSummary {
     },
     by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
-    tools: [{ tool_name: "Bash", calls: 6, sessions: 2 }],
+    tools: [{ tool_name: "Bash", calls: 6, sessions: 2, result_chars: 1200, median_s: 2.5, subagent_calls: 3 }],
     mcp: {
       calls: 4, sessions: 1, result_chars: 900,
       by_provenance: { plugin: 2, connector: 1, local: 1 },
       servers: [
-        { server: "plugin_playwright_playwright", provenance: "plugin", tools: 1, calls: 2, sessions: 1, result_chars: 500 },
-        { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, sessions: 1, result_chars: 400 },
+        { server: "plugin_playwright_playwright", provenance: "plugin", tools: 1, calls: 2, sessions: 1, result_chars: 500, median_s: 1.5, subagent_calls: 0 },
+        { server: "claude-in-chrome", provenance: "local", tools: 1, calls: 1, sessions: 1, result_chars: 400, median_s: 1.5, subagent_calls: 0 },
       ],
       tools: [],
     },
     plugins: {
       calls: 3, sessions: 1,
       items: [
-        { plugin: "playwright", kind: "mcp", calls: 2, sessions: 1 },
-        { plugin: "tribunal", kind: "skill", calls: 1, sessions: 1 },
+        { plugin: "playwright", kind: "mcp", calls: 2, sessions: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
+        { plugin: "tribunal", kind: "skill", calls: 1, sessions: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
       ],
     },
     artifacts: [
@@ -148,6 +152,7 @@ const mocked = client as unknown as {
   getChronicleSummary: ReturnType<typeof vi.fn>;
   getChronicleSessions: ReturnType<typeof vi.fn>;
   getChronicleSession: ReturnType<typeof vi.fn>;
+  getChronicleAgent: ReturnType<typeof vi.fn>;
   syncChronicle: ReturnType<typeof vi.fn>;
   setActiveRoot: ReturnType<typeof vi.fn>;
 };
@@ -172,13 +177,25 @@ afterEach(() => {
  * the assertion reads as a column rather than a magic number. */
 const COLUMN_INDEX_SUBAGENTS = 2 + 5;
 
+/** The page renders from props alone; these tests drive it directly rather
+ * than through the fetch harness, since only the scope prop is under test. */
+function pageProps(sessions: ChronicleSession[]) {
+  return { summary: summary(), sessions, loading: false, error: null, onRetry: () => {} };
+}
+
 describe("<ChroniclePage/>", () => {
-  it("renders the MCP and plugin panels from the summary", async () => {
+  it("puts tools, MCP and plugins behind one usage callout", async () => {
     render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
-    expect(await screen.findByRole("heading", { name: "MCP" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Plugins" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Usage breakdown" })).toBeInTheDocument();
+    // Tools first; the other two are a click away, and full width means the
+    // server name arrives whole rather than clipped.
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^MCP/ }));
     expect(screen.getByText("plugin_playwright_playwright")).toBeInTheDocument();
-    // A plugin's MCP calls appear in BOTH panels — the deliberate overlap.
+
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
+    // A plugin's MCP calls are counted on BOTH tabs — the deliberate overlap.
     expect(screen.getByText("playwright · mcp")).toBeInTheDocument();
     expect(screen.getByText("tribunal · skill")).toBeInTheDocument();
   });
@@ -294,6 +311,41 @@ describe("<ChroniclePage/>", () => {
     expect(rows[0]).toHaveTextContent("bbbb2222");
   });
 
+  it("shows what each session changed, ranked by lines moved", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "Fix the widget",
+                  files_touched: 13, lines_added: 720, lines_removed: 179 }),
+        session({ session_id: "bbbb2222-x", files_touched: 32,
+                  lines_added: 995, lines_removed: 87 }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    expect(table().getByText("+720 / -179")).toBeInTheDocument();
+
+    // Ranked on added PLUS removed: a big deletion is as much editing as a
+    // big addition, so 995/87 leads 720/179.
+    fireEvent.click(table().getByRole("button", { name: /^Lines/ }));
+    expect(table().getAllByRole("row").slice(1)[0]).toHaveTextContent("bbbb2222");
+    fireEvent.click(table().getByRole("button", { name: /^Files/ }));
+    expect(table().getAllByRole("row").slice(1)[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("em-dashes churn rather than claiming a session changed nothing", async () => {
+    // Zero is what a pruned transcript leaves behind as well as what a
+    // session that edited nothing leaves — the store cannot tell them apart,
+    // so the table must not read as "0 lines changed".
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [session({ session_id: "aaaa1111-x", title: "Fix the widget" })],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    const row = within(screen.getByRole("table", { name: "Sessions" })).getAllByRole("row")[1];
+    expect(row).not.toHaveTextContent("+0 / -0");
+  });
+
   it("shows a Subagents column, em-dashing the sessions that delegated none", async () => {
     mocked.getChronicleSessions.mockResolvedValue({
       sessions: [
@@ -353,13 +405,13 @@ describe("<ChroniclePage/>", () => {
     expect(activity.getByRole("button", { name: "Live" })).toBeDisabled();
   });
 
-  it("renders the MCP and plugin panels in the session drawer", async () => {
+  it("renders the usage callout in the session drawer", async () => {
     mocked.getChronicleSession.mockResolvedValue({
       ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
       cold_turns: 0,
       subagents: [],
       turn_series: [],
-      tools: [{ tool_name: "Read", calls: 1 }],
+      tools: [{ tool_name: "Read", calls: 1, result_chars: 400, median_s: 1, subagent_calls: 0 }],
       compactions_at: [],
       artifacts: [],
       biggest_jumps: [],
@@ -367,16 +419,16 @@ describe("<ChroniclePage/>", () => {
         calls: 2, result_chars: 100,
         by_provenance: { plugin: 1, connector: 1 },
         servers: [
-          { server: "plugin_linear_linear", provenance: "plugin", tools: 1, calls: 1, result_chars: 60 },
-          { server: "claude_ai_Notion", provenance: "connector", tools: 1, calls: 1, result_chars: 40 },
+          { server: "plugin_linear_linear", provenance: "plugin", tools: 1, calls: 1, result_chars: 60, median_s: 1.5, subagent_calls: 0 },
+          { server: "claude_ai_Notion", provenance: "connector", tools: 1, calls: 1, result_chars: 40, median_s: 1.5, subagent_calls: 0 },
         ],
         tools: [],
       },
       plugins: {
         calls: 2,
         items: [
-          { plugin: "linear", kind: "mcp", calls: 1 },
-          { plugin: "overseer", kind: "skill", calls: 1 },
+          { plugin: "linear", kind: "mcp", calls: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
+          { plugin: "overseer", kind: "skill", calls: 1, result_chars: 0, median_s: null, subagent_calls: 0 },
         ],
       },
     });
@@ -385,11 +437,182 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
 
-    // Scoped to the dialog: the page behind it carries panels of the same name.
+    // Scoped to the dialog: the page behind it carries a callout of its own.
     const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: /^MCP/ }));
     expect(dialog.getByText("plugin_linear_linear")).toBeInTheDocument();
     expect(dialog.getByText("claude_ai_Notion")).toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole("button", { name: /^Plugins/ }));
     expect(dialog.getByText("overseer · skill")).toBeInTheDocument();
+  });
+
+  it("shows a session's own churn, attribution and delegation in the drawer", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget",
+                   files_touched: 13, lines_added: 720, lines_removed: 179 }),
+      cold_turns: 0,
+      subagents: [],
+      turn_series: [],
+      tools: [{ tool_name: "Read", calls: 1, result_chars: 400, median_s: 1, subagent_calls: 0 }],
+      compactions_at: [],
+      artifacts: [],
+      biggest_jumps: [],
+      attribution: {
+        turns: 427, attributed_turns: 17, cost_usd: 1.5, unattributed_cost_usd: 8.5,
+        plugins: [{ name: "superpowers", turns: 17, context_tokens: 1000,
+                    output_tokens: 50, cost_usd: 1.5, skills: 1 }],
+        skills: [{ name: "superpowers:brainstorming", turns: 17, context_tokens: 1000,
+                   output_tokens: 50, cost_usd: 1.5, plugin: "superpowers" }],
+        agents: [], mcp: [],
+      },
+      delegation: {
+        turns: 427, subagent_turns: 233, output_tokens: 183_669,
+        subagent_output_tokens: 29_263, tool_calls: 446, subagent_tool_calls: 245,
+      },
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    const dialog = within(screen.getByRole("dialog"));
+
+    expect(dialog.getByText("+720 / -179")).toBeInTheDocument();
+    expect(dialog.getByText("Files touched")).toBeInTheDocument();
+
+    // Attribution reaches the drawer now, so the Plugins tab answers "what
+    // did this session's tokens go to" rather than counting invocations.
+    fireEvent.click(dialog.getByRole("button", { name: /^Skills/ }));
+    expect(dialog.getByText("superpowers:brainstorming")).toBeInTheDocument();
+
+    // 233 of 427 turns ran inside a subagent — worth stating per session,
+    // not only for the whole window.
+    expect(dialog.getByText("Delegation")).toBeInTheDocument();
+    expect(dialog.getByLabelText(/^Turns: 55% delegated/)).toBeInTheDocument();
+  });
+
+  it("omits the delegation panel for a session that spawned nothing", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cold_turns: 0, subagents: [], turn_series: [], tools: [],
+      compactions_at: [], artifacts: [], biggest_jumps: [],
+      delegation: {
+        turns: 10, subagent_turns: 0, output_tokens: 100,
+        subagent_output_tokens: 0, tool_calls: 5, subagent_tool_calls: 0,
+      },
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    // Three bars all reading 0% say nothing; the panel stays away.
+    expect(within(screen.getByRole("dialog")).queryByText("Delegation")).not.toBeInTheDocument();
+  });
+
+  it("badges the plan a session ran on, and shows nothing when it is unknown", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "On Max", plan_organization_type: "claude_max" }),
+        session({ session_id: "bbbb2222-x", title: "No plan", plan_organization_type: null }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("On Max")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    const rows = table().getAllByRole("row").slice(1);
+    expect(within(rows[0]).getByText("Max")).toBeInTheDocument();
+    // The unknown case renders NO badge — never the word "unknown".
+    expect(within(rows[1]).queryByText(/unknown/i)).not.toBeInTheDocument();
+    expect(within(rows[1]).queryByText("Max")).not.toBeInTheDocument();
+  });
+
+  it("offers a plan filter only across all repos, and only when plans actually differ", async () => {
+    const mixed = {
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "On Max", plan_organization_type: "claude_max" }),
+        session({ session_id: "bbbb2222-x", title: "On Ent", plan_organization_type: "claude_enterprise" }),
+      ],
+    };
+    mocked.getChronicleSessions.mockResolvedValue(mixed);
+
+    // Within one repo the sessions are near-always one plan, so the control
+    // would be a permanent no-op: absent by design, not merely empty.
+    const one = render(<ChroniclePage {...pageProps(mixed.sessions)} scope="repo" />);
+    expect(screen.queryByRole("group", { name: "Plan" })).not.toBeInTheDocument();
+    one.unmount();
+
+    render(<ChroniclePage {...pageProps(mixed.sessions)} scope="all" />);
+    const plan = within(screen.getByRole("group", { name: "Plan" }));
+    fireEvent.click(plan.getByRole("button", { name: "Enterprise (1)" }));
+    const rows = within(screen.getByRole("table", { name: "Sessions" })).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("On Ent");
+  });
+
+  it("hides the plan filter when every session shares one plan", () => {
+    // One plan is a label, not a choice.
+    const same = [
+      session({ session_id: "aaaa1111-x", plan_organization_type: "claude_max" }),
+      session({ session_id: "bbbb2222-x", plan_organization_type: "claude_max" }),
+    ];
+    render(<ChroniclePage {...pageProps(same)} scope="all" />);
+    expect(screen.queryByRole("group", { name: "Plan" })).not.toBeInTheDocument();
+  });
+
+  it("opens a subagent over the session drawer, and unwinds one layer at a time", async () => {
+    mocked.getChronicleSession.mockResolvedValue({
+      ...session({ session_id: "aaaa1111-x", title: "Fix the widget" }),
+      cold_turns: 0, turn_series: [], tools: [], compactions_at: [],
+      artifacts: [], biggest_jumps: [],
+      subagents: [
+        { agent_id: "a11111111aaaa", turns: 10, context_tokens: 1000, output_tokens: 500,
+          tool_calls: 4, first_ts: 1, last_ts: 2, task: "Find the auth flow",
+          agent_type: "Explore" },
+        { agent_id: "a22222222bbbb", turns: 4, context_tokens: 100, output_tokens: 50,
+          tool_calls: 1, first_ts: 1, last_ts: 2, task: "Audit the ORM",
+          agent_type: "general-purpose" },
+      ],
+    });
+    mocked.getChronicleAgent.mockResolvedValue({
+      session_id: "aaaa1111-x", agent_id: "a11111111aaaa", task: "Find the auth flow",
+      agent_type: "Explore", turns: 10, context_tokens: 1000, input_tokens: 10,
+      cache_read_tokens: 900, cache_creation_tokens: 90, output_tokens: 500,
+      thinking_tokens: 20, tool_calls: 4, peak_context_tokens: 900,
+      first_ts: 1, last_ts: 2, duration_s: 1, cache_hit_rate: 0.9,
+      cost_usd: 0.42, unpriced_turns: 0, turn_series: [], tools: [], artifacts: [],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Fix the widget" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+    // The whole ROW opens it, as on the sessions table. `.chr-table__row`
+    // paints a pointer and a hover, so a row that only responded on its
+    // name button was advertising a click it would not honour.
+    fireEvent.click(screen.getByRole("row", { name: /Audit the ORM/ }));
+    await waitFor(() =>
+      expect(screen.getByTestId("subagent-drawer-overlay")).toBeInTheDocument());
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-drawer-overlay")).not.toBeInTheDocument());
+
+    // The name button still works, and must not fire the row handler twice.
+    fireEvent.click(screen.getByRole("button", { name: "Find the auth flow" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("subagent-drawer-overlay")).toBeInTheDocument());
+    // Layered, not replacing: the session drawer is still mounted beneath.
+    expect(screen.getByTestId("chronicle-drawer-overlay")).toBeInTheDocument();
+
+    // Escape unwinds ONE layer — the subagent closes, the session stays.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("subagent-drawer-overlay")).not.toBeInTheDocument());
+    expect(screen.getByTestId("chronicle-drawer-overlay")).toBeInTheDocument();
+
+    // A second Escape closes the session drawer.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("chronicle-drawer-overlay")).not.toBeInTheDocument());
   });
 
   it("opens the session drawer from a row", async () => {
@@ -401,7 +624,7 @@ describe("<ChroniclePage/>", () => {
         { ts: 1, model: "claude-opus-5", context_tokens: 100, input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 99, cache_5m_tokens: 99, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 1, stop_reason: "end_turn", cold: true, gap_s: null, cost_usd: 0.0007 },
         { ts: 700, model: "claude-opus-5", context_tokens: 120, input_tokens: 1, cache_read_tokens: 99, cache_creation_tokens: 20, cache_5m_tokens: 20, cache_1h_tokens: 0, output_tokens: 5, thinking_tokens: 0, tool_calls: 0, stop_reason: "end_turn", cold: false, gap_s: 699, cost_usd: 0.0003 },
       ],
-      tools: [{ tool_name: "Read", calls: 1 }],
+      tools: [{ tool_name: "Read", calls: 1, result_chars: 400, median_s: 1, subagent_calls: 0 }],
       compactions_at: [],
       artifacts: [
         { session_id: "aaaa1111-x", ts: 5, first_ts: 5, url: null, title: "lost-page", description: null, favicon: null, publishes: 1 },

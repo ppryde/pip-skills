@@ -6,6 +6,7 @@ returns plain dicts/lists (JSON-ready); filtering is by main repo root and a
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Iterable
@@ -65,6 +66,43 @@ def _plugin_of_server(server: str) -> str | None:
     return plugin if plugin and suffix else rest or None
 
 
+def _slug(name: str) -> str:
+    """A server name as Claude Code writes it into a tool name: every
+    character outside ``[A-Za-z0-9-]`` becomes an underscore. So
+    ``claude.ai Snowflake`` -> ``claude_ai_Snowflake`` and
+    ``plugin:linear:linear`` -> ``plugin_linear_linear``."""
+    return re.sub(r"[^A-Za-z0-9-]", "_", name)
+
+
+def mcp_server_names(conn: sqlite3.Connection) -> dict[str, str]:
+    """Slug -> the server's real name, from the attribution on turns.
+
+    The MCP breakdown is derived from tool names, which carry only the slug
+    (`mcp__claude_ai_Snowflake__sql_exec_tool`), so it could show nothing
+    better than `claude_ai_Snowflake`. Claude Code also stamps the server's
+    actual name on the TURN — `claude.ai Snowflake` — and `_slug` is exactly
+    the transform between them, so this is a join rather than a guess.
+
+    Built from the WHOLE store, not the filtered window: a name is a label,
+    not a measure, so a wider lookup skews no denominator, and a window whose
+    own turns happen to carry no attribution still gets the good label.
+
+    Two different names slugging to one key would make the label ambiguous;
+    that key is dropped and the slug stands, since a coarse name is honest
+    and a wrong one is not.
+    """
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    if "mcp_server" not in have:
+        return {}
+    names: dict[str, set[str]] = {}
+    for (name,) in conn.execute(
+        "SELECT DISTINCT mcp_server FROM turns WHERE mcp_server IS NOT NULL"
+    ):
+        if name:
+            names.setdefault(_slug(name), set()).add(name)
+    return {slug: next(iter(v)) for slug, v in names.items() if len(v) == 1}
+
+
 def classify(tool_name: str, qualifier: str | None) -> Classified:
     """Attribute one tool call to the MCP and/or plugin boxes."""
     if tool_name.startswith(MCP_PREFIX):
@@ -112,87 +150,480 @@ def _qualifier_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
     return f"{prefix}qualifier" if "qualifier" in columns else "NULL"
 
 
-def _usage_blocks(rows: Iterable[sqlite3.Row], *,
-                  with_sessions: bool) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Fold classified tool-call rows into the `mcp` and `plugins` blocks.
+def _result_chars_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
+    """The SQL expression for a call's `result_chars`, or NULL where the
+    column is not there yet — the same read-only migration trap
+    `_qualifier_sql` documents, on the column right beside it.
 
-    Rows need `tool_name`, `qualifier`, `result_chars` and (when
-    `with_sessions`) `session_id`. A plugin-provided MCP server lands in BOTH
-    blocks: the two answer different questions — what MCP costs, and which
-    plugins get used — so the overlap is the point, not a bug.
+    `result_chars` was in every usage query unguarded, so an upgraded-but-
+    never-synced store raised `OperationalError` on the whole summary, not
+    just on the sizes. NULL folds to 0 in `_usage_blocks` and to an empty
+    block in `_context_growth`, which is what such a store honestly holds.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(tool_calls)")}
+    return f"{prefix}result_chars" if "result_chars" in columns else "NULL"
+
+
+def _median(values: list[float]) -> float | None:
+    """Median, because the mean of a tool's wall time is a fiction: an
+    `AskUserQuestion` that waited 60 hours for a human, or a `Bash` left
+    running for half a day, drags it somewhere no call ever was. The middle
+    call is the one that describes the tool."""
+    if not values:
+        return None
+    values.sort()
+    mid = len(values) // 2
+    if len(values) % 2:
+        return values[mid]
+    return (values[mid - 1] + values[mid]) / 2
+
+
+_ATTRIBUTION_COLUMNS = ("skill", "plugin", "agent_type", "mcp_server", "mcp_tool")
+
+_EMPTY_ATTRIBUTION: dict[str, Any] = {
+    "turns": 0, "attributed_turns": 0, "cost_usd": 0.0, "unattributed_cost_usd": 0.0,
+    "plugins": [], "skills": [], "agents": [], "mcp": [],
+}
+
+
+def _attribution(conn: sqlite3.Connection, where: str, params: list[Any], *,
+                 limit: int = 50) -> dict[str, Any]:
+    """Turns, tokens and cost grouped by what was in scope.
+
+    Claude Code stamps `attributionSkill` / `attributionPlugin` /
+    `attributionAgent` / `attributionMcpServer` onto ASSISTANT records, so
+    these land on turns — which carry usage. That is the difference between
+    "superpowers was invoked 80 times" and "superpowers cost 427M context
+    tokens across 2,987 turns", and it is why this is grouped here rather
+    than folded into the tool-call breakdowns.
+
+    `plugin` is NULL for a built-in skill: the transcript states that, so a
+    built-in is counted among skills and attributed to no plugin, rather than
+    being guessed at from whether its name contains a colon.
+
+    A turn with nothing in scope is in no bucket — most turns, correctly.
+    """
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    if not any(c in have for c in _ATTRIBUTION_COLUMNS):
+        return {**_EMPTY_ATTRIBUTION, "turns": _attributed_totals(conn, where, params)[0]}
+
+    def _group(column: str, extra: str = "") -> list[dict[str, Any]]:
+        # Per-column, not just "any column present". The five attribution
+        # columns arrived as five separate ALTERs and the report verbs open
+        # the store READ-ONLY (see `_qualifier_sql`), so a store can genuinely
+        # hold some and not others — an interrupted `_migrate`, or one touched
+        # by an intermediate build. Naming an absent column raised
+        # `OperationalError` out of the whole summary; an absent column simply
+        # has nothing attributed to it, which is what the store honestly says.
+        if column not in have:
+            return []
+        rows = conn.execute(
+            f"""SELECT t.{column} AS name, COUNT(*) AS turns,
+                       SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                           AS context_tokens,
+                       SUM(t.output_tokens) AS output_tokens,
+                       COUNT(DISTINCT t.session_id) AS sessions{extra}
+                FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}
+                {'AND' if where else 'WHERE'} t.{column} IS NOT NULL
+                GROUP BY t.{column}
+                ORDER BY context_tokens DESC, name
+                LIMIT {int(limit)}""",
+            params,
+        ).fetchall()
+        costs = _costs_by(conn, f"t.{column}", where, params, extra=f"t.{column} IS NOT NULL")
+        out = []
+        for r in rows:
+            item = dict(r)
+            _attach_cost(item, costs, r["name"])
+            out.append(item)
+        return out
+
+    # Cost of turns with ANYTHING in scope, counted once. Summing the plugin
+    # and agent lists would bill a plugin skill running inside a subagent
+    # twice, since it sets both.
+    any_set = " OR ".join(f"t.{c} IS NOT NULL" for c in _ATTRIBUTION_COLUMNS if c in have)
+    attributed_costs = _costs_by(conn, "1", where, params, extra=any_set)
+    attributed_cost = sum(c["cost_usd"] for c in attributed_costs.values())
+    all_costs = _costs_by(conn, "1", where, params)
+    total_cost = sum(c["cost_usd"] for c in all_costs.values())
+
+    # The `extra` sub-selects name a column OTHER than the one being grouped,
+    # so each is guarded on its own: a store with `plugin` but no `skill` can
+    # still report plugins, just without the distinct-skill count.
+    plugins = _group("plugin",
+                     extra=", COUNT(DISTINCT t.skill) AS skills" if "skill" in have else "")
+    skills = _group("skill",
+                    extra=", MAX(t.plugin) AS plugin" if "plugin" in have else "")
+    total_turns, attributed = _attributed_totals(conn, where, params)
+    return {
+        "turns": total_turns,
+        "attributed_turns": attributed,
+        "cost_usd": round(attributed_cost, 6),
+        "unattributed_cost_usd": round(total_cost - attributed_cost, 6),
+        "plugins": plugins,
+        "skills": skills,
+        "agents": _group("agent_type"),
+        "mcp": _group("mcp_server"),
+    }
+
+
+def _attributed_totals(conn: sqlite3.Connection, where: str,
+                       params: list[Any]) -> tuple[int, int]:
+    """(all turns, turns with anything in scope) — the denominator that keeps
+    a plugin's share honest."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    cols = [c for c in _ATTRIBUTION_COLUMNS if c in have]
+    any_set = " OR ".join(f"t.{c} IS NOT NULL" for c in cols) if cols else "0"
+    row = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN {any_set} THEN 1 ELSE 0 END), 0)
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}""",
+        params,
+    ).fetchone()
+    return int(row[0]), int(row[1])
+
+
+def _delegation(conn: sqlite3.Connection, where: str, params: list[Any]) -> dict[str, Any]:
+    """What subagents DO against what they PRODUCE.
+
+    Kept as raw pairs rather than percentages so the caller can render either,
+    and so a zero denominator is the caller's problem to display rather than
+    a None to unpick. Counted from `agent_id`, which every turn and tool call
+    carries — unlike attribution, this covers the whole store.
+    """
+    turns = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN t.agent_id <> '' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(t.output_tokens), 0),
+                   COALESCE(SUM(CASE WHEN t.agent_id <> '' THEN t.output_tokens ELSE 0 END), 0)
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}""",
+        params,
+    ).fetchone()
+    calls = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(CASE WHEN c.agent_id <> '' THEN 1 ELSE 0 END), 0)
+            FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
+        params,
+    ).fetchone()
+    return {
+        "turns": int(turns[0]), "subagent_turns": int(turns[1]),
+        "output_tokens": int(turns[2]), "subagent_output_tokens": int(turns[3]),
+        "tool_calls": int(calls[0]), "subagent_tool_calls": int(calls[1]),
+    }
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Whether the store has `name` yet. The report verbs open the store
+    READ-ONLY, a path that returns before `_migrate` runs, so a store upgraded
+    but not yet synced can be missing a table this code names — see
+    `_qualifier_sql` for the same trap on a column."""
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone() is not None
+
+
+def _agent_type_sql(conn: sqlite3.Connection, prefix: str = "") -> str:
+    """`MAX(<prefix>agent_type)`, or NULL when the column is not there yet.
+    Same read-only migration trap as `_qualifier_sql`: the report verbs open
+    the store on a path that returns before `_migrate` runs."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+    return f"MAX({prefix}agent_type)" if "agent_type" in have else "NULL"
+
+
+def _agents_join(conn: sqlite3.Connection, prefix: str = "t.") -> str:
+    """LEFT JOIN onto `agents` when the table exists, else nothing — the task
+    is a label, and a store that predates it must still list its agents."""
+    if not _has_table(conn, "agents"):
+        return ""
+    return (f" LEFT JOIN agents ag ON ag.session_id = {prefix}session_id"
+            f" AND ag.agent_id = {prefix}agent_id")
+
+
+def _task_sql(conn: sqlite3.Connection) -> str:
+    return "MAX(ag.task)" if _has_table(conn, "agents") else "NULL"
+
+
+def _agent_description_sql(conn: sqlite3.Connection) -> str:
+    """The agent's short label. NULL where the column predates the store, so a
+    store not yet resynced degrades to the task prompt rather than erroring —
+    the same guard `qualifier` needed, for the same reason: report verbs open
+    the store READ-ONLY, a path that returns before `_migrate` can add it."""
+    if not _has_table(conn, "agents"):
+        return "NULL"
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+    return "MAX(ag.description)" if "description" in columns else "NULL"
+
+
+_EMPTY_CHURN: dict[str, Any] = {
+    "lines_added": 0, "lines_removed": 0, "files": 0, "edits": 0, "files_by_churn": [],
+    "sessions": 0, "output_tokens": 0, "by_day": [],
+}
+
+
+def _churn(conn: sqlite3.Connection, where: str, params: list[Any], *,
+           limit: int = 50, agent: str | None = None) -> dict[str, Any]:
+    """Lines added/removed and the files that moved most, from `file_edits`.
+
+    A measure of editing DONE, not of lines surviving in the repo: ten edits
+    to one line are ten edits, and a later revert still counts. For "what
+    shipped" git is the truthful source; this answers "how much editing
+    happened", which is a different question.
+
+    ``where`` is a SESSIONS-side filter (``s.``-prefixed) in every caller, so
+    every query here can share it — each joins `sessions s`.
+
+    ``agent`` narrows to one subagent's edits. It is applied to the FILE-side
+    queries only: the per-session denominator below counts sessions, which an
+    agent-side clause cannot filter and would not mean anything for.
+    """
+    if not _has_table(conn, "file_edits"):
+        return dict(_EMPTY_CHURN)
+    scope = f"{where}{' AND' if where else ' WHERE'} f.agent_id = ?" if agent else where
+    scoped = [*params, agent] if agent else params
+    join = f"FROM file_edits f JOIN sessions s ON s.session_id = f.session_id{scope}"
+    total = conn.execute(
+        f"""SELECT COALESCE(SUM(f.lines_added), 0), COALESCE(SUM(f.lines_removed), 0),
+                   COUNT(DISTINCT f.file_path), COUNT(*) {join}""",
+        scoped,
+    ).fetchone()
+    files = [
+        {
+            "file_path": r["file_path"],
+            "edits": r["edits"],
+            "lines_added": r["lines_added"],
+            "lines_removed": r["lines_removed"],
+            "operations": sorted(set((r["operations"] or "").split(","))),
+            "sessions": r["sessions"],
+        }
+        for r in conn.execute(
+            f"""SELECT f.file_path AS file_path, COUNT(*) AS edits,
+                       SUM(f.lines_added) AS lines_added,
+                       SUM(f.lines_removed) AS lines_removed,
+                       GROUP_CONCAT(DISTINCT f.operation) AS operations,
+                       COUNT(DISTINCT f.session_id) AS sessions
+                {join}
+                GROUP BY f.file_path
+                ORDER BY SUM(f.lines_added + f.lines_removed) DESC, f.file_path
+                LIMIT {int(limit)}""",
+            scoped,
+        )
+    ]
+    # Sessions that actually changed a file, and the output they produced —
+    # the ONLY honest denominators for a per-session or per-line average.
+    # Sessions with no file edits would otherwise halve every such figure.
+    per_session = conn.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(s.output_tokens), 0)
+            FROM sessions s{where}{' AND' if where else ' WHERE'} s.files_touched > 0""",
+        params,
+    ).fetchone()
+    by_day = [
+        {"day": r["day"], "lines_added": int(r["lines_added"]),
+         "lines_removed": int(r["lines_removed"]), "edits": int(r["edits"])}
+        for r in conn.execute(
+            f"""SELECT date(f.ts, 'unixepoch', 'localtime') AS day,
+                       SUM(f.lines_added) AS lines_added,
+                       SUM(f.lines_removed) AS lines_removed,
+                       COUNT(*) AS edits
+                {join}{' AND' if scope else ' WHERE'} f.ts IS NOT NULL
+                GROUP BY day ORDER BY day""",
+            scoped,
+        )
+    ]
+    return {
+        "lines_added": int(total[0]), "lines_removed": int(total[1]),
+        "files": int(total[2]), "edits": int(total[3]), "files_by_churn": files,
+        "sessions": int(per_session[0]), "output_tokens": int(per_session[1]),
+        "by_day": by_day,
+    }
+
+
+def _usage_blocks(rows: Iterable[sqlite3.Row], *, with_sessions: bool,
+                  limit: int = 50, tool_limit: int = 400,
+                  server_names: dict[str, str] | None = None,
+                  ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Fold classified tool-call rows into the `tools`, `mcp` and `plugins`
+    breakdowns the Usage callout reads.
+
+    Rows need `tool_name`, `qualifier`, `result_chars`, `ts`, `result_ts`,
+    `agent_id` and (when `with_sessions`) `session_id`. Every bucket carries
+    the same four measures, so the three tabs are directly comparable:
+
+    - `calls`         how often it ran
+    - `result_chars`  how much it poured back into the context — the reason a
+                      cheap-looking tool can be the expensive one
+    - `median_s`      wall time of the middle call (see `_median`)
+    - `subagent_calls` how much of it was delegated rather than run inline
+
+    A plugin-provided MCP server lands in BOTH the mcp and plugins blocks: the
+    two answer different questions — what MCP costs, and which plugins get
+    used — so the overlap is the point, not a bug.
 
     `with_sessions` is False for a single-session read, where every count
     would be 1 and the key is noise.
+
+    `server_names` (see `mcp_server_names`) supplies each MCP server's real
+    name for display. `server` stays the slug — it is the key everything
+    joins on — and `name` falls back to it for a server attribution never
+    named.
     """
-    servers: dict[str, dict[str, Any]] = {}
-    tools: dict[tuple[str, str], dict[str, Any]] = {}
-    plugins: dict[tuple[str, str], dict[str, Any]] = {}
+    names = server_names or {}
+    buckets: dict[tuple[str, str], dict[str, Any]] = {}
+    durations: dict[tuple[str, str], list[float]] = {}
+    seen: dict[tuple[str, str], set[str]] = {}
     server_tools: dict[str, set[str]] = {}
-    seen: dict[str, set[str]] = {}  # bucket key -> session ids, for `sessions`
     provenance: dict[str, int] = {}
     mcp_calls = mcp_chars = plugin_calls = 0
+    mcp_sessions: set[str] = set()
+    plugin_sessions: set[str] = set()
 
-    def _touch(bucket: dict[str, Any], key: str, session_id: str | None) -> None:
+    def _add(kind: str, key: str, fields: dict[str, Any], row: sqlite3.Row,
+             session_id: str | None) -> dict[str, Any]:
+        bucket = buckets.setdefault((kind, key), {**fields, "calls": 0, "result_chars": 0,
+                                                  "subagent_calls": 0})
+        bucket["calls"] += 1
+        bucket["result_chars"] += int(row["result_chars"] or 0)
+        if row["agent_id"]:
+            bucket["subagent_calls"] += 1
+        ts, result_ts = row["ts"], row["result_ts"]
+        if ts is not None and result_ts is not None and result_ts >= ts:
+            durations.setdefault((kind, key), []).append(float(result_ts) - float(ts))
         if with_sessions and session_id is not None:
-            ids = seen.setdefault(key, set())
+            ids = seen.setdefault((kind, key), set())
             ids.add(session_id)
             bucket["sessions"] = len(ids)
+        return bucket
 
     for row in rows:
         c = classify(row["tool_name"], row["qualifier"])
-        chars = int(row["result_chars"] or 0)
         session_id = row["session_id"] if with_sessions else None
+        _add("tool", row["tool_name"], {"tool_name": row["tool_name"]}, row, session_id)
         if c.mcp is not None:
             mcp_calls += 1
-            mcp_chars += chars
+            mcp_chars += int(row["result_chars"] or 0)
             provenance[c.mcp.provenance] = provenance.get(c.mcp.provenance, 0) + 1
             server_tools.setdefault(c.mcp.server, set()).add(c.mcp.tool)
-            s = servers.setdefault(c.mcp.server, {
-                "server": c.mcp.server, "provenance": c.mcp.provenance,
-                "tools": 0, "calls": 0, "result_chars": 0,
-            })
-            s["calls"] += 1
-            s["result_chars"] += chars
-            s["tools"] = len(server_tools[c.mcp.server])
-            _touch(s, f"server:{c.mcp.server}", session_id)
-
-            t = tools.setdefault((c.mcp.server, c.mcp.tool), {
-                "server": c.mcp.server, "tool": c.mcp.tool,
-                "calls": 0, "result_chars": 0,
-            })
-            t["calls"] += 1
-            t["result_chars"] += chars
-            _touch(t, f"tool:{c.mcp.server}/{c.mcp.tool}", session_id)
+            bucket = _add("mcp", c.mcp.server,
+                          {"server": c.mcp.server,
+                           "name": names.get(c.mcp.server, c.mcp.server),
+                           "provenance": c.mcp.provenance, "tools": 0},
+                          row, session_id)
+            bucket["tools"] = len(server_tools[c.mcp.server])
+            # Per-TOOL granularity too: the callout ranks servers, but "which
+            # of playwright's 17 tools" is a different and useful question.
+            _add("mcptool", f"{c.mcp.server}/{c.mcp.tool}",
+                 {"server": c.mcp.server, "name": names.get(c.mcp.server, c.mcp.server),
+                  "tool": c.mcp.tool}, row, session_id)
+            if session_id is not None:
+                mcp_sessions.add(session_id)
         if c.plugin is not None:
             plugin_calls += 1
             kind = "mcp" if c.mcp is not None else "skill"
-            p = plugins.setdefault((c.plugin, kind), {
-                "plugin": c.plugin, "kind": kind, "calls": 0,
-            })
-            p["calls"] += 1
-            _touch(p, f"plugin:{c.plugin}/{kind}", session_id)
+            _add("plugin", f"{c.plugin}/{kind}", {"plugin": c.plugin, "kind": kind},
+                 row, session_id)
+            if session_id is not None:
+                plugin_sessions.add(session_id)
 
-    def _ranked(values: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    for key, bucket in buckets.items():
+        median = _median(durations.get(key, []))
+        bucket["median_s"] = None if median is None else round(median, 2)
+
+    def _ranked(kind: str, cap: int | None = None) -> list[dict[str, Any]]:
         # Calls descending, then name ascending so equal counts are stable.
-        return sorted(values, key=lambda d: (-d["calls"],
-                                             d.get("server") or d.get("plugin") or ""))
+        values = [b for (k, _), b in buckets.items() if k == kind]
+        values.sort(key=lambda d: (-d["calls"],
+                                   d.get("tool_name") or d.get("plugin")
+                                   or f"{d.get('server')}/{d.get('tool', '')}"))
+        return values[:limit if cap is None else cap]
 
     mcp_block: dict[str, Any] = {
         "calls": mcp_calls,
         "result_chars": mcp_chars,
         "by_provenance": provenance,
-        "servers": _ranked(servers.values()),
-        "tools": _ranked(tools.values()),
+        "servers": _ranked("mcp"),
+        # A per-SERVER cap in disguise: `limit` ranks the whole flat list, so
+        # at 50 a store with a dozen servers loses the quiet ones entirely and
+        # the UI's server picker offers a name with no rows behind it. This
+        # list is read one server at a time, not as a top-N, so it gets a cap
+        # that clears the sum of every server's tool count instead.
+        "tools": _ranked("mcptool", tool_limit),
     }
-    plugins_block: dict[str, Any] = {"calls": plugin_calls, "items": _ranked(plugins.values())}
+    plugins_block: dict[str, Any] = {"calls": plugin_calls, "items": _ranked("plugin")}
     if with_sessions:
-        mcp_block["sessions"] = len(
-            {sid for key, ids in seen.items() if key.startswith("server:") for sid in ids}
-        )
-        plugins_block["sessions"] = len(
-            {sid for key, ids in seen.items() if key.startswith("plugin:") for sid in ids}
-        )
-    return mcp_block, plugins_block
+        mcp_block["sessions"] = len(mcp_sessions)
+        plugins_block["sessions"] = len(plugin_sessions)
+    return _ranked("tool"), mcp_block, plugins_block
+
+
+_EMPTY_CONTEXT_GROWTH: dict[str, Any] = {
+    "result_chars": 0, "calls": 0, "measured_calls": 0, "tools_total": 0, "tools": [],
+}
+
+
+def _context_growth(conn: sqlite3.Connection, where: str, params: list[Any], *,
+                    limit: int = 50, agent: str | None = None) -> dict[str, Any]:
+    """What actually grew the context, per tool, from `tool_calls.result_chars`.
+
+    Deliberately NOT "cost by tool". A turn's cost is the prompt it carried,
+    and that was paid before any of its tools ran — a turn that calls five
+    tools did not pay five times, so splitting its dollars across them would
+    be invention. The other direction IS sound: a tool RESULT is text that
+    enters the context, and every turn after it carries that text again. So
+    this ranks tools by how much they poured in, which is the part a reader
+    can actually act on.
+
+    Shares are of characters returned, never of dollars, for the same reason:
+    a result re-sent at cache-read rates costs a fraction of one at creation
+    rates, and a compaction drops some of it entirely. A per-tool $ figure
+    would overclaim by a factor nobody could see.
+
+    `calls` counts every call in the window; `measured_calls` only those that
+    recorded a result size. `avg_chars` divides by the latter — dividing by
+    the former would understate a tool whose results went unrecorded, and it
+    is the average that carries the finding: a tool called rarely and
+    returning enormously beats a chatty one that returns almost nothing.
+
+    `tools_total` is how many distinct tools the window holds, so a truncated
+    list can say what it is a truncation of. `where` is the same
+    sessions-side filter every other block takes; `agent` narrows to one
+    subagent's calls.
+    """
+    # `result_chars` was added to `tool_calls` after the table shipped, and
+    # the report verbs open the store READ-ONLY — a path that returns before
+    # `_migrate` runs. See `_qualifier_sql` for the full trap: naming a
+    # missing column here would report an EMPTY account to someone with a
+    # thousand transcripts.
+    if _result_chars_sql(conn) == "NULL":
+        return dict(_EMPTY_CONTEXT_GROWTH)
+
+    scope = f"{where}{' AND' if where else ' WHERE'} c.agent_id = ?" if agent else where
+    scoped = [*params, agent] if agent else params
+    rows = conn.execute(
+        f"""SELECT c.tool_name AS tool_name, COUNT(*) AS calls,
+                   COUNT(c.result_chars) AS measured_calls,
+                   COALESCE(SUM(c.result_chars), 0) AS result_chars
+            FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{scope}
+            GROUP BY c.tool_name
+            ORDER BY COALESCE(SUM(c.result_chars), 0) DESC, c.tool_name""",
+        scoped,
+    ).fetchall()
+    total_chars = sum(int(r["result_chars"]) for r in rows)
+    return {
+        "result_chars": total_chars,
+        "calls": sum(int(r["calls"]) for r in rows),
+        "measured_calls": sum(int(r["measured_calls"]) for r in rows),
+        "tools_total": len(rows),
+        "tools": [
+            {
+                "tool_name": r["tool_name"],
+                "calls": int(r["calls"]),
+                "measured_calls": int(r["measured_calls"]),
+                "result_chars": int(r["result_chars"]),
+                "share": round(int(r["result_chars"]) / total_chars, 6) if total_chars else 0.0,
+                # None, not 0, where nothing was measured: "we don't know" and
+                # "it returned nothing" are different claims.
+                "avg_chars": (round(int(r["result_chars"]) / int(r["measured_calls"]))
+                              if r["measured_calls"] else None),
+            }
+            for r in rows[:limit]
+        ],
+    }
 
 
 def context_window_for(peak_tokens: int) -> int:
@@ -272,7 +703,14 @@ def _costs_by(conn: sqlite3.Connection, key_sql: str, where: str, params: list[A
     ``unpriced_turns`` rather than priced as something else. Subagent turns
     are included — they cost the same money as the main agent's.
     """
-    clause = f"{where}{' AND' if where else ' WHERE'} {extra}" if extra else where
+    # Parenthesised, always. `extra` is caller-supplied SQL and `_attribution`
+    # passes a multi-clause `a OR b OR c` — spliced bare after the window's own
+    # `s.repo_root = ?` that degrades to `(repo_root = ? AND a) OR b OR c`,
+    # because SQL binds AND tighter than OR, and every attributed turn in the
+    # WHOLE store gets priced into one repo's figure (18x on a real store).
+    # The parens cost nothing for the single-clause callers and make the
+    # multi-clause ones correct by construction.
+    clause = f"{where}{' AND' if where else ' WHERE'} ({extra})" if extra else where
     out: dict[Any, dict[str, Any]] = {}
     for r in conn.execute(
         f"""SELECT {key_sql} AS key, t.model AS model, {_COST_COLUMNS}
@@ -410,32 +848,55 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
         if ts is not None:
             previous_ts = ts
     detail["turn_series"] = series
-    detail["subagents"] = [
+    # The rail's rows. `task` is the only legible name an agent has — its id
+    # is a hash — and `agent_type` says what KIND it was; both are LEFT-joined
+    # so an agent predating either still lists, unnamed.
+    subagent_rows = [
         dict(r) for r in conn.execute(
-            """SELECT agent_id, COUNT(*) AS turns,
-                      SUM(input_tokens + cache_read_tokens + cache_creation_tokens) AS context_tokens,
-                      SUM(output_tokens) AS output_tokens, SUM(tool_calls) AS tool_calls,
-                      MIN(ts) AS first_ts, MAX(ts) AS last_ts
-               FROM turns WHERE session_id = ? AND agent_id <> ''
-               GROUP BY agent_id ORDER BY first_ts""",
+            f"""SELECT t.agent_id AS agent_id, COUNT(*) AS turns,
+                      SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                          AS context_tokens,
+                      SUM(t.output_tokens) AS output_tokens, SUM(t.tool_calls) AS tool_calls,
+                      MIN(t.ts) AS first_ts, MAX(t.ts) AS last_ts,
+                      {_agent_type_sql(conn, 't.')} AS agent_type, {_task_sql(conn)} AS task,
+                      {_agent_description_sql(conn)} AS description
+               FROM turns t{_agents_join(conn)}
+               WHERE t.session_id = ? AND t.agent_id <> ''
+               GROUP BY t.agent_id ORDER BY first_ts""",
             (session_id,),
         )
     ]
-    detail["tools"] = [
-        dict(r) for r in conn.execute(
-            """SELECT tool_name, COUNT(*) AS calls FROM tool_calls
-               WHERE session_id = ? GROUP BY tool_name ORDER BY calls DESC, tool_name""",
-            (session_id,),
-        )
-    ]
-    detail["mcp"], detail["plugins"] = _usage_blocks(
+    # Cost per agent, from the same per-model rate table every other cost on
+    # the page uses. The rail listed turns, context, output and tools but not
+    # money — so the one question the list is actually scanned for ("which of
+    # these was expensive?") could only be answered by opening all of them in
+    # turn. `unpriced_turns` rides along so a row on a model the pricing table
+    # does not know reads as unknown rather than as free.
+    agent_costs = _costs_by(conn, "t.agent_id", " WHERE s.session_id = ?",
+                            [session_id], extra="t.agent_id <> ''")
+    for row in subagent_rows:
+        _attach_cost(row, agent_costs, row["agent_id"])
+    detail["subagents"] = subagent_rows
+
+    detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id])
+    detail["context_growth"] = _context_growth(
+        conn, " WHERE s.session_id = ?", [session_id])
+    # The same two blocks the page computes for a whole window, narrowed to
+    # this session: which plugins, skills, agent types and MCP servers its
+    # tokens went to, and how much of it ran inside a subagent. Both take a
+    # sessions-side filter, so nothing here is a special case.
+    detail["attribution"] = _attribution(conn, " WHERE s.session_id = ?", [session_id])
+    detail["delegation"] = _delegation(conn, " WHERE s.session_id = ?", [session_id])
+    detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
         conn.execute(
             f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
-                       result_chars FROM tool_calls
+                       {_result_chars_sql(conn)} AS result_chars,
+                       ts, result_ts, agent_id FROM tool_calls
                 WHERE session_id = ?""",
             (session_id,),
         ).fetchall(),
         with_sessions=False,
+        server_names=mcp_server_names(conn),
     )
     detail["compactions_at"] = [
         r[0] for r in conn.execute(
@@ -445,7 +906,8 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     ]
     detail["artifacts"] = artifacts_for(conn, session_id)
     tool_rows = conn.execute(
-        """SELECT tool_name, message_id, result_chars, result_ts FROM tool_calls
+        f"""SELECT tool_name, message_id, {_result_chars_sql(conn)} AS result_chars,
+                   result_ts FROM tool_calls
            WHERE session_id = ? AND agent_id = ''""",
         (session_id,),
     ).fetchall()
@@ -476,6 +938,105 @@ _ARTIFACT_PAGE_SQL = """
         WHERE q.url = a.url AND q.session_id = a.session_id
         ORDER BY q.ts DESC, q.rowid DESC LIMIT 1))
 """
+
+
+def agent_detail(conn: sqlite3.Connection, session_id: str,
+                 agent_id: str) -> dict[str, Any] | None:
+    """One subagent in detail, or None when the session never ran it.
+
+    The same questions `session_detail` answers, narrowed to an agent: its own
+    turns, its own tool calls, its own edits, its own cost. Every fact table
+    carries `agent_id`, so each is a WHERE clause on the query that already
+    existed rather than a new join.
+
+    Deliberately NOT folded into `session_detail`: a session with eight agents
+    at a hundred turns each would triple that payload for a drawer usually
+    left unopened, so the caller fetches this only when one is.
+    """
+    row = conn.execute(
+        f"""SELECT t.agent_id AS agent_id, COUNT(*) AS turns,
+                   SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
+                       AS context_tokens,
+                   SUM(t.input_tokens) AS input_tokens,
+                   SUM(t.cache_read_tokens) AS cache_read_tokens,
+                   SUM(t.cache_creation_tokens) AS cache_creation_tokens,
+                   SUM(t.output_tokens) AS output_tokens,
+                   SUM(t.thinking_tokens) AS thinking_tokens,
+                   SUM(t.tool_calls) AS tool_calls,
+                   MIN(t.ts) AS first_ts, MAX(t.ts) AS last_ts,
+                   {_agent_type_sql(conn, 't.')} AS agent_type, {_task_sql(conn)} AS task
+            FROM turns t{_agents_join(conn)}
+            WHERE t.session_id = ? AND t.agent_id = ?""",
+        (session_id, agent_id),
+    ).fetchone()
+    # An agent that ran no turn has no row to show. COUNT(*) makes the
+    # aggregate return one line regardless, so the emptiness is read off
+    # `turns` rather than off the row's existence.
+    if row is None or not row["turns"]:
+        return None
+
+    detail = dict(row)
+    detail["session_id"] = session_id
+    started, last = detail["first_ts"], detail["last_ts"]
+    detail["duration_s"] = (
+        round(last - started) if started and last and last >= started else None)
+    detail["cache_hit_rate"] = cache_hit_rate(
+        detail["input_tokens"], detail["cache_read_tokens"], detail["cache_creation_tokens"])
+    where, params = " WHERE t.session_id = ? AND t.agent_id = ?", [session_id, agent_id]
+    _attach_cost(detail, _costs_by(conn, "t.agent_id", where, params), agent_id)
+
+    series: list[dict[str, Any]] = []
+    previous_ts: float | None = None
+    for r in conn.execute(
+        "SELECT * FROM turns WHERE session_id = ? AND agent_id = ? ORDER BY ts, rowid",
+        (session_id, agent_id),
+    ):
+        ts = r["ts"]
+        series.append({
+            "ts": ts,
+            "message_id": r["message_id"],
+            "model": r["model"],
+            "context_tokens": r["input_tokens"] + r["cache_read_tokens"] + r["cache_creation_tokens"],
+            "input_tokens": r["input_tokens"],
+            "cache_read_tokens": r["cache_read_tokens"],
+            "cache_creation_tokens": r["cache_creation_tokens"],
+            "cache_5m_tokens": r["cache_5m_tokens"],
+            "cache_1h_tokens": r["cache_1h_tokens"],
+            "output_tokens": r["output_tokens"],
+            "thinking_tokens": r["thinking_tokens"],
+            "tool_calls": r["tool_calls"],
+            "stop_reason": r["stop_reason"],
+            "cold": r["cache_creation_tokens"] > r["cache_read_tokens"],
+            "gap_s": round(ts - previous_ts) if ts is not None and previous_ts is not None else None,
+            "cost_usd": _cost_of(r),
+        })
+        if ts is not None:
+            previous_ts = ts
+    detail["turn_series"] = series
+    detail["peak_context_tokens"] = max((t["context_tokens"] for t in series), default=0)
+
+    detail["tools"], detail["mcp"], detail["plugins"] = _usage_blocks(
+        conn.execute(
+            f"""SELECT session_id, tool_name, {_qualifier_sql(conn)} AS qualifier,
+                       {_result_chars_sql(conn)} AS result_chars,
+                       ts, result_ts, agent_id FROM tool_calls
+                WHERE session_id = ? AND agent_id = ?""",
+            (session_id, agent_id),
+        ).fetchall(),
+        with_sessions=False,
+        server_names=mcp_server_names(conn),
+    )
+    detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id], agent=agent_id)
+    detail["context_growth"] = _context_growth(
+        conn, " WHERE s.session_id = ?", [session_id], agent=agent_id)
+    detail["artifacts"] = [
+        _page_row(r) for r in conn.execute(
+            _ARTIFACT_PAGE_SQL + " AND a.session_id = ? AND a.agent_id = ?"
+            " ORDER BY COALESCE(first_ts, a.ts)",
+            (session_id, agent_id),
+        )
+    ]
+    return detail
 
 
 def _page_row(r: sqlite3.Row) -> dict[str, Any]:
@@ -669,24 +1230,17 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
     for m in by_model:
         cost = _cost_of(m)
         m["cost_usd"] = None if cost is None else round(cost, 6)
-    tools = [
-        dict(r) for r in conn.execute(
-            f"""SELECT c.tool_name AS tool_name, COUNT(*) AS calls,
-                       COUNT(DISTINCT c.session_id) AS sessions
-                FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id
-                {where}
-                GROUP BY c.tool_name ORDER BY calls DESC LIMIT 20""",
-            params,
-        )
-    ]
     usage_rows = conn.execute(
         f"""SELECT c.session_id AS session_id, c.tool_name AS tool_name,
                    {_qualifier_sql(conn, "c.")} AS qualifier,
-                   c.result_chars AS result_chars
+                   {_result_chars_sql(conn, "c.")} AS result_chars,
+                   c.ts AS ts, c.result_ts AS result_ts,
+                   c.agent_id AS agent_id
             FROM tool_calls c JOIN sessions s ON s.session_id = c.session_id{where}""",
         params,
     ).fetchall()
-    mcp_block, plugins_block = _usage_blocks(usage_rows, with_sessions=True)
+    tools, mcp_block, plugins_block = _usage_blocks(
+        usage_rows, with_sessions=True, server_names=mcp_server_names(conn))
     shape_rows = conn.execute(
         f"""SELECT session_id, turns, prompts, transcript_bytes, peak_context_tokens, started_at,
                    last_activity_at
@@ -726,6 +1280,10 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "by_day": by_day,
         "by_model": by_model,
         "tools": tools,
+        "context_growth": _context_growth(conn, where, params),
+        "churn": _churn(conn, where, params),
+        "attribution": _attribution(conn, where, params),
+        "delegation": _delegation(conn, where, params),
         "mcp": mcp_block,
         "plugins": plugins_block,
         "shape": shape,

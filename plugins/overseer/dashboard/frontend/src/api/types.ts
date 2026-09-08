@@ -401,9 +401,184 @@ export interface ChronicleModel {
   cost_usd: number | null;
 }
 
-export interface ChronicleTool {
-  tool_name: string;
+/** Measures every usage bucket carries, so the callout's three tabs are
+ * directly comparable. `median_s` is null when no call in the bucket had both
+ * a start and a result timestamp. */
+export interface ChronicleUsage {
   calls: number;
+  /** Characters the tool's results poured back into the context. */
+  result_chars: number;
+  /** Wall time of the MIDDLE call — never the mean, which one overnight
+   * `AskUserQuestion` would drag somewhere no call ever was. */
+  median_s: number | null;
+  /** How many of these calls came from a subagent rather than the main loop. */
+  subagent_calls: number;
+  /** Absent on a single-session read, where it would always be 1. */
+  sessions?: number;
+}
+
+export interface ChronicleTool extends ChronicleUsage {
+  tool_name: string;
+}
+
+export interface ChronicleMcpServer extends ChronicleUsage {
+  /** The slug the tool name carries (`claude_ai_Snowflake`). The key
+   * everything joins on, and the label of last resort. */
+  server: string;
+  /** The server's real name as attribution records it — `claude.ai
+   * Snowflake` for that slug. Falls back to the slug server-side, and is
+   * absent altogether from a backend that predates the join. */
+  name?: string;
+  /** "plugin" | "connector" | "local" — where the server comes from. */
+  provenance: string;
+  /** How many distinct tools of that server were called. */
+  tools: number;
+}
+
+export interface ChronicleMcpTool extends ChronicleUsage {
+  server: string;
+  name?: string;
+  tool: string;
+}
+
+export interface ChronicleMcp {
+  calls: number;
+  result_chars: number;
+  by_provenance: Record<string, number>;
+  servers: ChronicleMcpServer[];
+  tools: ChronicleMcpTool[];
+  sessions?: number;
+}
+
+export interface ChroniclePluginItem extends ChronicleUsage {
+  plugin: string;
+  /** "mcp" | "skill" — how this plugin was used. */
+  kind: string;
+}
+
+/** One tool's contribution to context growth. `share` is of CHARACTERS
+ * RETURNED, never of dollars — see `ChronicleContextGrowth`. */
+export interface ChronicleContextTool {
+  tool_name: string;
+  /** Every call in the window. */
+  calls: number;
+  /** Only those that recorded a result size — the denominator for
+   * `avg_chars`, since a call still in flight has none. */
+  measured_calls: number;
+  result_chars: number;
+  /** Fraction of everything returned in the window, 0..1. */
+  share: number;
+  /** Typical result size. Null where nothing was measured: "we don't know"
+   * and "it returned nothing" are different claims. */
+  avg_chars: number | null;
+}
+
+/** What GREW the context, per tool.
+ *
+ * Deliberately NOT cost by tool. A turn's cost is the prompt it carried, paid
+ * before any of its tools ran — a turn that called five tools did not pay
+ * five times, so splitting its dollars across them would be invention. The
+ * other direction holds: a tool RESULT is text that enters the context, and
+ * every turn after it carries that text again.
+ *
+ * Shares are of characters for the same reason a dollar figure is refused: a
+ * result re-sent at cache-read rates costs a fraction of one at creation
+ * rates, and a compaction drops some of it outright. */
+export interface ChronicleContextGrowth {
+  /** Everything returned in the window, across all tools — including any
+   * beyond the truncated `tools` list, so a share is honest. */
+  result_chars: number;
+  calls: number;
+  measured_calls: number;
+  /** Distinct tools in the window, so a truncated list can say what it is a
+   * truncation of. */
+  tools_total: number;
+  tools: ChronicleContextTool[];
+}
+
+export interface ChronicleFileChurn {
+  file_path: string;
+  edits: number;
+  lines_added: number;
+  lines_removed: number;
+  /** "edit" | "create" | "update", deduplicated. */
+  operations: string[];
+  sessions: number;
+}
+
+/** Editing DONE, not lines surviving in the repo: ten edits to one line are
+ * ten edits, and a later revert still counts. For "what shipped", git is the
+ * truthful source. */
+/** One thing that was in scope, with the turns and tokens spent under it.
+ * Attribution rides on TURNS, so these are token and cost figures — not
+ * invocation counts. `plugin` is null for a built-in skill. */
+export interface ChronicleAttributed {
+  name: string;
+  turns: number;
+  context_tokens: number;
+  output_tokens: number;
+  sessions: number;
+  cost_usd: number | null;
+  unpriced_turns?: number;
+  /** Skills tab only: the plugin supplying it, null for a built-in. */
+  plugin?: string | null;
+  /** Plugins tab only: how many distinct skills of that plugin ran. */
+  skills?: number;
+}
+
+export interface ChronicleAttribution {
+  turns: number;
+  /** Cost of turns with anything in scope, counted ONCE — a plugin skill
+   * inside a subagent sets both fields, so summing the lists double-bills. */
+  cost_usd: number;
+  unattributed_cost_usd: number;
+  /** Turns with anything in scope — the honest denominator. Most turns have
+   * nothing, correctly. */
+  attributed_turns: number;
+  plugins: ChronicleAttributed[];
+  skills: ChronicleAttributed[];
+  agents: ChronicleAttributed[];
+  mcp: ChronicleAttributed[];
+}
+
+export interface ChronicleChurnDay {
+  day: string;
+  lines_added: number;
+  lines_removed: number;
+  edits: number;
+}
+
+export interface ChronicleChurn {
+  lines_added: number;
+  lines_removed: number;
+  files: number;
+  edits: number;
+  files_by_churn: ChronicleFileChurn[];
+  /** Sessions that actually changed a file — the only honest denominator for
+   * a per-session average, since a session that edited nothing would
+   * otherwise drag every such figure down. */
+  sessions: number;
+  /** Output tokens over those same sessions, so output-per-line compares
+   * two numbers drawn from the same set. */
+  output_tokens: number;
+  by_day: ChronicleChurnDay[];
+}
+
+/** What subagents DO against what they PRODUCE. Counted from `agent_id`,
+ * which every turn and tool call carries — so unlike attribution this covers
+ * the whole store. Raw pairs, not percentages: the caller renders them. */
+export interface ChronicleDelegation {
+  turns: number;
+  subagent_turns: number;
+  output_tokens: number;
+  subagent_output_tokens: number;
+  tool_calls: number;
+  subagent_tool_calls: number;
+}
+
+export interface ChroniclePlugins {
+  calls: number;
+  items: ChroniclePluginItem[];
   sessions?: number;
 }
 
@@ -505,6 +680,11 @@ export interface ChronicleSummary {
   tools?: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
+  /** Optional: a store that predates `result_chars` returns none. */
+  context_growth?: ChronicleContextGrowth;
+  attribution?: ChronicleAttribution;
+  delegation?: ChronicleDelegation;
   shape?: ChronicleShape;
   artifacts?: ChronicleArtifact[];
 }
@@ -541,6 +721,11 @@ export interface ChronicleSession {
   cold_turns: number;
   artifacts: number;
   subagents: number;
+  /** The plan this session RAN ON, snapshotted at ingest — `claude_max`,
+   * `claude_enterprise`, … Absent/null when unknown (no account file, or an
+   * API-key config, which has no oauthAccount at all). Consumers render
+   * nothing rather than guessing: null means "not stated", not "no plan". */
+  plan_organization_type?: string | null;
   active_ms: number;
   models: string[];
   cache_hit_rate: number | null;
@@ -555,6 +740,13 @@ export interface ChronicleSession {
   /** API-equivalent cost at list prices, every agent's turns included. */
   cost_usd: number;
   unpriced_turns: number;
+  /** Editing done in this session, from the diffs in its transcript. Zero
+   * on a session whose transcript was pruned before ingest as well as on one
+   * that genuinely edited nothing — the two are indistinguishable here, so
+   * the table renders zero as "—" rather than as a claim of no work. */
+  lines_added: number;
+  lines_removed: number;
+  files_touched: number;
 }
 
 export interface ChronicleSessionsResponse {
@@ -590,6 +782,60 @@ export interface ChronicleSubagent {
   tool_calls: number;
   first_ts: number | null;
   last_ts: number | null;
+  /** What the agent was handed, lifted verbatim from the first prompt of its
+   * own transcript and truncated. The only legible name an agent has — its
+   * id is a hash. Null for an agent whose opening prompt was pruned, or in a
+   * store not yet resynced with `chronicle sync --full`.
+   *
+   * UNTRUSTED transcript text: render as a text node, never as markup. */
+  task: string | null;
+  /** "Explore", "general-purpose", … as attribution records it. */
+  agent_type: string | null;
+  /** The agent's SHORT label, from `agent-<id>.meta.json` — a purpose-built
+   * three-to-five word summary. Prefer this over `task`, which is the opening
+   * prompt and runs to thousands of characters. Null on the handful of agents
+   * with no meta file, and in a store not yet resynced with `--full`. */
+  description?: string | null;
+  /** API-equivalent cost of this agent's turns at list prices. Absent from a
+   * backend that predates the join; null is never sent — an agent whose model
+   * the pricing table does not know reports 0 here and says so through
+   * `unpriced_turns` instead, so "free" and "unknown" stay distinguishable. */
+  cost_usd?: number;
+  /** Turns on a model with no published price. Nonzero means `cost_usd` is a
+   * floor, not a total. */
+  unpriced_turns?: number;
+}
+
+/** `GET /api/chronicle/session/{sid}/agent/{aid}` — one subagent in detail.
+ * The same shape the session drawer reads, narrowed to one agent: its own
+ * turns, tool calls, edits and cost. */
+export interface ChronicleAgentDetail {
+  session_id: string;
+  agent_id: string;
+  task: string | null;
+  agent_type: string | null;
+  turns: number;
+  context_tokens: number;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  tool_calls: number;
+  peak_context_tokens: number;
+  first_ts: number | null;
+  last_ts: number | null;
+  duration_s: number | null;
+  cache_hit_rate: number | null;
+  cost_usd: number;
+  unpriced_turns: number;
+  turn_series: ChronicleTurn[];
+  tools: ChronicleTool[];
+  mcp?: ChronicleMcp;
+  plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
+  context_growth?: ChronicleContextGrowth;
+  artifacts: ChronicleArtifact[];
 }
 
 /** `GET /api/chronicle/session/{id}` — the session row plus its per-turn
@@ -603,6 +849,12 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
   tools: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
+  churn?: ChronicleChurn;
+  context_growth?: ChronicleContextGrowth;
+  /** The window-level blocks, narrowed to this session. Optional: a store
+   * that predates the attribution columns returns neither. */
+  attribution?: ChronicleAttribution;
+  delegation?: ChronicleDelegation;
   compactions_at: number[];
   artifacts: ChronicleArtifact[];
   biggest_jumps: ChronicleJump[];

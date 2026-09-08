@@ -195,11 +195,12 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     conn.executemany(
         """INSERT INTO turns(session_id, agent_id, message_id, request_id, ts, model,
                input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
-               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort)
+               thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort,
+               skill, plugin, agent_type, mcp_server, mcp_tool)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,
                (SELECT COUNT(*) FROM tool_calls
                 WHERE session_id = ? AND agent_id = ? AND message_id = ?),
-               ?,?)
+               ?,?,?,?,?,?,?)
            ON CONFLICT(session_id, agent_id, message_id) DO UPDATE SET
                request_id = excluded.request_id, ts = excluded.ts, model = excluded.model,
                input_tokens = excluded.input_tokens, cache_read_tokens = excluded.cache_read_tokens,
@@ -207,13 +208,22 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                output_tokens = excluded.output_tokens, thinking_tokens = excluded.thinking_tokens,
                cache_5m_tokens = excluded.cache_5m_tokens, cache_1h_tokens = excluded.cache_1h_tokens,
                tool_calls = excluded.tool_calls, stop_reason = excluded.stop_reason,
-               effort = excluded.effort""",
+               effort = excluded.effort,
+               -- COALESCE, like tool_calls.qualifier: a store ingested before
+               -- these columns existed has the row already, and overwriting
+               -- with a fresh NULL would undo a backfill rather than do one.
+               skill = COALESCE(excluded.skill, turns.skill),
+               plugin = COALESCE(excluded.plugin, turns.plugin),
+               agent_type = COALESCE(excluded.agent_type, turns.agent_type),
+               mcp_server = COALESCE(excluded.mcp_server, turns.mcp_server),
+               mcp_tool = COALESCE(excluded.mcp_tool, turns.mcp_tool)""",
         [
             (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
              t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
              t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens,
              session_id, t.agent_id, t.message_id,
-             t.stop_reason, t.effort)
+             t.stop_reason, t.effort,
+             t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool)
             for t in facts.turns.values()
         ],
     )
@@ -228,6 +238,17 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         "UPDATE tool_calls SET result_chars = ?, result_ts = ? "
         "WHERE session_id = ? AND tool_use_id = ?",
         [(r.chars, r.ts, session_id, r.tool_use_id) for r in facts.results.values()],
+    )
+    # Keyed by tool_use_id like every other fact table, so a re-read of the
+    # same transcript converges rather than double-counting the churn.
+    conn.executemany(
+        """INSERT OR REPLACE INTO file_edits(session_id, tool_use_id, agent_id, ts, file_path,
+               operation, lines_added, lines_removed) VALUES (?,?,?,?,?,?,?,?)""",
+        [
+            (session_id, e.tool_use_id, e.agent_id, e.ts, e.file_path, e.operation,
+             e.lines_added, e.lines_removed)
+            for e in facts.file_edits.values()
+        ],
     )
     conn.executemany(
         """INSERT OR REPLACE INTO artifacts(session_id, tool_use_id, agent_id, ts, url, title,
@@ -249,6 +270,46 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     )
 
 
+def _plan_snapshot(conn: sqlite3.Connection, config_dir: str | None,
+                   now: float) -> dict[str, Any]:
+    """The plan columns to stamp on a session, and the `accounts` upsert that
+    goes with them. `{}` when the config dir holds no readable account.
+
+    Read at INGEST time and stamped per session, because a plan changes: an
+    account that moves from Max to Enterprise would otherwise have every
+    session it ever ran relabelled by the move. `plan_observed_at` records
+    when the claim was true, so a row is legible as a snapshot rather than a
+    standing fact.
+
+    Only the identity half goes in `accounts` — the half that does not change.
+    Everything read here is whitelisted by name in `store.account_profile`;
+    nothing personal reaches the database.
+    """
+    if not config_dir:
+        return {}
+    profile = store.account_profile(Path(config_dir))
+    if not profile:      # None (no/unreadable file) or {} (API key: no oauthAccount)
+        return {}
+    account_uuid = profile.get("accountUuid")
+    if account_uuid:
+        conn.execute(
+            """INSERT INTO accounts(account_uuid, organization_uuid, first_seen, last_seen)
+                    VALUES (?,?,?,?)
+               ON CONFLICT(account_uuid) DO UPDATE SET
+                    organization_uuid = COALESCE(excluded.organization_uuid, organization_uuid),
+                    last_seen = MAX(COALESCE(last_seen, 0), excluded.last_seen)""",
+            (account_uuid, profile.get("organizationUuid"), now, now),
+        )
+    snapshot: dict[str, Any] = {
+        column: profile[key]
+        for key, column in store.ACCOUNT_PLAN_FIELDS.items()
+        if profile.get(key)
+    }
+    if snapshot:
+        snapshot["plan_observed_at"] = now
+    return snapshot
+
+
 def config_dir_of(transcript_path: Path) -> str | None:
     """The Claude config dir a main transcript belongs to, from its layout
     ``<config>/projects/<slug>/<session>.jsonl`` — None for any other shape
@@ -268,16 +329,18 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         (session_id, now),
     )
     cwd = facts.cwd
+    config = config_dir_of(transcript_path)
     updates: dict[str, Any] = {
         "project_slug": project_slug_of(transcript_path),
         "transcript_path": str(transcript_path),
-        "config_dir": config_dir_of(transcript_path),
+        "config_dir": config,
         "cwd": cwd,
         "repo_root": repo_root_of(cwd) if cwd else None,
         "git_branch": facts.git_branch,
         "version": facts.version,
         "entrypoint": facts.entrypoint,
         "title": facts.title,
+        "owner_account_uuid": facts.owner_account_uuid,
     }
     for column, value in updates.items():
         if value is None:
@@ -285,6 +348,19 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         conn.execute(
             f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
         )
+    # Write-once, unlike every column above. The plan columns record what was
+    # true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on a later ingest
+    # would let `sync --full` quietly relabel the whole back catalogue with
+    # today's plan — destroying the very history the snapshot exists to keep.
+    # Guarded on plan_observed_at, which is set if and only if a snapshot was.
+    already = conn.execute(
+        "SELECT plan_observed_at FROM sessions WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    if already is None or already[0] is None:
+        for column, value in _plan_snapshot(conn, config, now).items():
+            conn.execute(
+                f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
+            )
     if facts.first_ts is not None:
         conn.execute(
             "UPDATE sessions SET started_at = MIN(COALESCE(started_at, ?), ?) WHERE session_id = ?",
@@ -340,6 +416,19 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
             "INSERT OR IGNORE INTO sessions(session_id, updated_at) VALUES (?, ?)",
             (session_id, now),
         )
+        # The agent row exists whether or not this batch saw its task: an
+        # agent whose opening prompt was pruned must still be listable.
+        # COALESCE, not a plain SET — an incremental sync reads only the TAIL,
+        # where the opening prompt is not, so overwriting with the NULL it
+        # just saw would erase the label on every subsequent sync. Same trap
+        # that once shipped 3 qualifiers out of 1,265.
+        conn.execute(
+            """INSERT INTO agents(session_id, agent_id, task, description) VALUES (?,?,?,?)
+               ON CONFLICT(session_id, agent_id) DO UPDATE SET
+                   task = COALESCE(excluded.task, agents.task),
+                   description = COALESCE(excluded.description, agents.description)""",
+            (session_id, agent_id, facts.task, agent_description(path)),
+        )
     _write_facts(conn, session_id, facts)
     conn.execute(
         "INSERT OR REPLACE INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, "
@@ -352,6 +441,31 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
             (stat[0], session_id),
         )
     return len(lines)
+
+
+def agent_description(transcript_path: Path) -> str | None:
+    """The agent's short label, from `agent-<id>.meta.json` beside its transcript.
+
+    Claude Code writes that file for all but a handful of agents (979 of 980 on
+    the machine this was built for), and its `description` is a purpose-built
+    three-to-five word summary — "Review balance package correctness". The
+    `task` column, by contrast, holds the agent's opening PROMPT: 1,200 to 3,500
+    characters, which as a name blows a table column apart and truncates into a
+    mangled paragraph.
+
+    None on any failure, and None for a main transcript, which has no meta file.
+    Only `description` is read: the file also names the team, the colour and the
+    permission mode, none of which is a label.
+    """
+    meta = transcript_path.with_suffix(".meta.json")
+    if not meta.is_file():
+        return None
+    try:
+        data = json.loads(meta.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = data.get("description") if isinstance(data, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def subagent_files(transcript_path: Path, session_id: str) -> list[tuple[Path, str]]:
@@ -406,6 +520,12 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         "SELECT COUNT(DISTINCT COALESCE(url, tool_use_id)) FROM artifacts WHERE session_id = ?",
         (session_id,),
     ).fetchone()[0]
+    churn = conn.execute(
+        """SELECT COALESCE(SUM(lines_added), 0), COALESCE(SUM(lines_removed), 0),
+                  COUNT(DISTINCT file_path)
+           FROM file_edits WHERE session_id = ?""",
+        (session_id,),
+    ).fetchone()
     prompts = conn.execute(
         "SELECT COUNT(*) FROM events WHERE session_id = ? AND kind = 'prompt' AND agent_id = ''",
         (session_id,),
@@ -438,9 +558,11 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         """UPDATE sessions SET turns=?, input_tokens=?, cache_read_tokens=?, cache_creation_tokens=?,
                output_tokens=?, thinking_tokens=?, tool_calls=?, subagents=?, peak_context_tokens=?,
                cold_turns=?, artifacts=?, prompts=?, compactions=?, active_ms=?, models=?,
+               lines_added=?, lines_removed=?, files_touched=?,
                transcript_bytes=?, updated_at=?
            WHERE session_id = ?""",
         (*totals, peak, cold, artifacts, prompts, compactions, active_ms, json.dumps(models),
+         int(churn[0]), int(churn[1]), int(churn[2]),
          size, now, session_id),
     )
 

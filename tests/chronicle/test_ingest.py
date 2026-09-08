@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -325,6 +326,259 @@ class TestPathMapConfig:
         assert store.path_map() == [("/w/b", "/host/b")]
 
 
+class TestAgentDescription:
+    """`task` is the agent's opening PROMPT — 1,200 to 3,500 characters. Claude
+    Code writes a purpose-built short label beside the transcript; that is the
+    name, and the prompt is not."""
+
+    def test_reads_the_short_description_from_the_meta_file(self, projects):
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        agent = b.subagent("abc123", ["m2"], ts=T0)
+        agent.with_suffix(".meta.json").write_text(json.dumps({
+            "description": "Review balance package correctness",
+            "agentType": "general-purpose", "model": "sonnet",
+            # Present in the real file, and none of it is a label.
+            "teamName": "session-1", "color": "blue", "permissionMode": "auto",
+        }))
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        row = conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'abc123'").fetchone()
+        assert row[0] == "Review balance package correctness"
+
+    def test_no_meta_file_leaves_it_null_rather_than_failing(self, projects):
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent2")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        b.subagent("nometa", ["m2"], ts=T0)     # no .meta.json written
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'nometa'").fetchone()[0] is None
+
+    def test_a_malformed_meta_file_is_ignored(self, projects, tmp_path):
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent3")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        agent = b.subagent("bad", ["m2"], ts=T0)
+        agent.with_suffix(".meta.json").write_text("{not json")
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'bad'").fetchone()[0] is None
+
+    def test_a_tail_read_does_not_erase_it(self, projects):
+        # The meta file is read every ingest, but an incremental read that
+        # somehow loses it must not blank the label — same COALESCE trap that
+        # once shipped 3 qualifiers out of 1,265.
+        from .conftest import TranscriptBuilder
+        b = TranscriptBuilder(projects, session_id="s-agent4")
+        b.turn("m1", ts=T0)
+        path = b.write()
+        agent = b.subagent("keep", ["m2"], ts=T0)
+        meta = agent.with_suffix(".meta.json")
+        meta.write_text(json.dumps({"description": "Map the auth flow"}))
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        meta.unlink()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT description FROM agents WHERE agent_id = 'keep'").fetchone()[0] == "Map the auth flow"
+
+
+class TestStoreResolution:
+    """One machine, one store. `<primary>/chronicle/sessions.db` resolves per
+    ACCOUNT, so a second account running `sync` quietly raised a rival store —
+    342 sessions in one and a stale 238-session subset in another, and which
+    you saw depended on who launched the dashboard."""
+
+    def _store(self, directory: Path, sessions: int) -> Path:
+        path = directory / "chronicle" / "sessions.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE sessions (session_id TEXT PRIMARY KEY)")
+        conn.executemany("INSERT INTO sessions VALUES (?)", [(f"s{i}",) for i in range(sessions)])
+        conn.commit()
+        conn.close()
+        return path
+
+    def test_the_fullest_store_wins_from_either_account(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        self._store(a, 3)
+        big = self._store(b, 9)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", os.pathsep.join([str(a), str(b)]))
+        # Both accounts compute the same answer from the same files, so they
+        # converge instead of each preferring its own.
+        for primary in (a, b):
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(primary))
+            assert store.db_path() == big
+
+    def test_a_tie_prefers_the_primary(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        mine = self._store(a, 4)
+        self._store(b, 4)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(a))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", str(b))
+        assert store.db_path() == mine
+
+    def test_a_file_that_is_not_a_store_never_wins(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        real = self._store(a, 1)
+        junk = b / "chronicle" / "sessions.db"
+        junk.parent.mkdir(parents=True)
+        junk.write_text("not a database")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(a))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIRS", str(b))
+        assert store.db_path() == real
+
+    def test_none_yet_creates_under_the_primary(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CHRONICLE_DB", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+        monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
+        assert store.db_path() == tmp_path / "chronicle" / "sessions.db"
+
+    def test_the_env_override_still_wins(self, tmp_path, monkeypatch):
+        # Tests pin it, and a caller who names a file is not second-guessed.
+        self._store(tmp_path, 99)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setenv("CHRONICLE_DB", "/x/y.db")
+        assert store.db_path() == Path("/x/y.db")
+
+
+class TestAccountProfile:
+    """`.claude.json` also holds emailAddress, fullName, displayName and
+    organizationName, and this store is read by the dashboard — so the reader
+    whitelists by name rather than filtering out what it happens to know is
+    personal today."""
+
+    def _write(self, tmp_path, payload):
+        d = tmp_path / "cfg"
+        d.mkdir(exist_ok=True)
+        (d / ".claude.json").write_text(payload)
+        return d
+
+    def test_reads_only_whitelisted_fields(self, tmp_path):
+        d = self._write(tmp_path, json.dumps({"oauthAccount": {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_max", "seatTier": "seat",
+            "billingType": "stripe_subscription",
+            "organizationRateLimitTier": "default_claude_max_5x",
+            # None of the following may ever reach the database.
+            "emailAddress": "someone@example.com", "fullName": "A Person",
+            "displayName": "A", "organizationName": "Some Org",
+        }}))
+        got = store.account_profile(d)
+        assert got == {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_max", "seatTier": "seat",
+            "billingType": "stripe_subscription",
+            "organizationRateLimitTier": "default_claude_max_5x",
+        }
+        blob = json.dumps(got)
+        for personal in ("example.com", "A Person", "Some Org"):
+            assert personal not in blob
+
+    def test_no_oauth_account_is_empty_not_none(self, tmp_path):
+        # An API-key session has no oauthAccount at all — the one positive
+        # signal separating key auth from a subscription. Distinct from None,
+        # which means "could not read".
+        assert store.account_profile(self._write(tmp_path, json.dumps({"userID": "x"}))) == {}
+
+    def test_unreadable_or_malformed_is_none(self, tmp_path):
+        assert store.account_profile(tmp_path / "nope") is None
+        assert store.account_profile(self._write(tmp_path, "{not json")) is None
+
+
+class TestAccountAndPlan:
+    def _session(self, projects, plan, session_id="s-plan"):
+        from .conftest import TranscriptBuilder
+        Path(os.environ["CLAUDE_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
+        Path(os.environ["CLAUDE_CONFIG_DIR"], ".claude.json").write_text(
+            json.dumps({"oauthAccount": plan}) if plan is not None else "{}")
+        path = TranscriptBuilder(projects, session_id=session_id).turn("m1", ts=T0).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        return conn
+
+    def test_plan_is_stamped_on_the_session_and_identity_on_the_account(self, projects):
+        conn = self._session(projects, {
+            "accountUuid": "acc-1", "organizationUuid": "org-1",
+            "organizationType": "claude_max",
+            "organizationRateLimitTier": "default_claude_max_5x",
+        })
+        row = conn.execute(
+            "SELECT plan_organization_type, plan_rate_limit_tier, plan_observed_at "
+            "FROM sessions WHERE session_id = 's-plan'").fetchone()
+        assert row[0] == "claude_max"
+        assert row[1] == "default_claude_max_5x"
+        assert row[2] is not None
+        # The account row carries identity ONLY — no plan, because a plan changes.
+        acct = conn.execute("SELECT * FROM accounts").fetchone()
+        assert acct["account_uuid"] == "acc-1"
+        assert acct["organization_uuid"] == "org-1"
+        # Asserted against the table's columns, not the row: `in` on a
+        # sqlite3.Row tests VALUES, so the obvious spelling would quietly
+        # check the wrong thing (and ruff's SIM118 fix would introduce it).
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}
+        assert "plan_organization_type" not in columns
+
+    def test_the_plan_is_write_once(self, projects):
+        conn = self._session(projects,
+                             {"accountUuid": "acc-1", "organizationType": "claude_max"})
+        # The account moves to a different plan, then the transcript is re-read
+        # (`sync --full`). The session must keep the plan it actually ran under.
+        Path(os.environ["CLAUDE_CONFIG_DIR"], ".claude.json").write_text(json.dumps(
+            {"oauthAccount": {"accountUuid": "acc-1", "organizationType": "claude_enterprise"}}))
+        path = Path(conn.execute(
+            "SELECT transcript_path FROM sessions WHERE session_id = 's-plan'").fetchone()[0])
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT plan_organization_type FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] == "claude_max"
+
+    def test_an_api_key_config_stamps_no_plan(self, projects):
+        conn = self._session(projects, None)
+        row = conn.execute("SELECT plan_organization_type, plan_observed_at "
+                           "FROM sessions WHERE session_id = 's-plan'").fetchone()
+        assert row[0] is None and row[1] is None
+        assert conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0
+
+    def test_owner_uuid_comes_from_the_bridge_session_record(self, projects):
+        path = projects / "-repo" / "s-bridge.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join([
+            json.dumps({"type": "bridge-session", "sessionId": "s-bridge",
+                        "ownerAccountUuid": "acc-9", "ownerOrganizationUuid": "org-9"}),
+            json.dumps(_assistant("m1", ts=T0, session_id="s-bridge")),
+        ]) + "\n")
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-bridge'"
+        ).fetchone()[0] == "acc-9"
+
+    def test_a_session_without_that_record_has_no_owner(self, projects):
+        from .conftest import TranscriptBuilder
+        path = TranscriptBuilder(projects, session_id="s-plain").turn("m1", ts=T0).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        # NULL means "not stated", never "no account" — the badge shows nothing.
+        assert conn.execute(
+            "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-plain'"
+        ).fetchone()[0] is None
+
+
 class TestSync:
     def test_first_sync_ingests_every_slug(self, projects):
         from .conftest import TranscriptBuilder
@@ -579,3 +833,135 @@ class TestQualifierColumn:
 
         assert conn.execute(
             "SELECT result_chars FROM tool_calls WHERE session_id = 's1'").fetchone()[0] == 40
+
+
+class TestFileEdits:
+    def _patch_result(self, uuid, ts, tool_use_id, path, added, removed, kind=None):
+        tur = {"filePath": path, "structuredPatch": [
+            {"lines": ["+x"] * added + ["-y"] * removed}]}
+        if kind:
+            tur["type"] = kind
+        return {
+            "type": "user", "uuid": uuid, "sessionId": "s1", "timestamp": ts,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}]},
+            "toolUseResult": tur,
+        }
+
+    def test_churn_is_stored_and_rolled_up(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit", "Edit", "Write"])
+        b.raw(self._patch_result("r1", T1, "m1-tool0", "/repo/a.py", 10, 2))
+        b.raw(self._patch_result("r2", T1, "m1-tool1", "/repo/a.py", 5, 1))
+        b.raw(self._patch_result("r3", T1, "m1-tool2", "/repo/new.py", 40, 0, kind="create"))
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+
+        rows = conn.execute(
+            "SELECT file_path, operation, lines_added, lines_removed FROM file_edits "
+            "WHERE session_id = 's1' ORDER BY file_path, lines_added DESC"
+        ).fetchall()
+        assert [tuple(r) for r in rows] == [
+            ("/repo/a.py", "edit", 10, 2),
+            ("/repo/a.py", "edit", 5, 1),
+            ("/repo/new.py", "create", 40, 0),
+        ]
+        session = _session(conn)
+        assert session["lines_added"] == 55
+        assert session["lines_removed"] == 3
+        assert session["files_touched"] == 2   # a.py counted once, not twice
+
+    def test_a_reingest_does_not_double_count(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, tools=["Edit"])
+        b.raw(self._patch_result("r1", T1, "m1-tool0", "/repo/a.py", 7, 3))
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        ingest.sync(conn, projects, full=True)
+        assert conn.execute("SELECT COUNT(*) FROM file_edits").fetchone()[0] == 1
+        assert _session(conn)["lines_added"] == 7
+
+
+class TestAttributionColumns:
+    def test_attribution_is_stored_and_backfills_on_a_full_resync(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0)
+        b.turn("m1", T0, attributionSkill="overseer:ledger", attributionPlugin="overseer")
+        b.turn("m2", T0, attributionAgent="Explore")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # A store ingested before the columns existed carries NULLs.
+        conn.execute("UPDATE turns SET skill = NULL, plugin = NULL, agent_type = NULL")
+        conn.commit()
+
+        ingest.sync(conn, projects, full=True)
+
+        rows = dict(conn.execute(
+            "SELECT message_id, COALESCE(plugin, '') FROM turns WHERE session_id = 's1'"
+        ).fetchall())
+        assert rows == {"m1": "overseer", "m2": ""}
+        assert conn.execute(
+            "SELECT agent_type FROM turns WHERE message_id = 'm2'").fetchone()[0] == "Explore"
+        assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 2
+
+
+class TestSubagentTasks:
+    """A subagent's id is a hash, so the store keeps the one legible name it
+    has: the task its own transcript opens with."""
+
+    def _agents(self, conn):
+        return {r["agent_id"]: r["task"] for r in conn.execute(
+            "SELECT agent_id, task FROM agents ORDER BY agent_id")}
+
+    def test_each_subagent_records_the_task_it_was_handed(self, builder, projects):
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        builder.subagent("aexplore-1", ["a1"], T1, task="Find the auth flow")
+        builder.subagent("aexplore-2", ["b1"], T1, task="Audit the ORM")
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {
+            "aexplore-1": "Find the auth flow",
+            "aexplore-2": "Audit the ORM",
+        }
+
+    def test_the_main_transcript_is_not_an_agent(self, builder, projects):
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {}
+
+    def test_a_subagent_with_no_prompt_still_gets_a_row(self, builder, projects):
+        # A transcript whose opening prompt was pruned: the agent exists and
+        # must remain clickable, it simply has no label to show.
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        builder.subagent("aexplore-1", ["a1"], T1)
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {"aexplore-1": None}
+
+    def test_a_later_tail_read_does_not_erase_the_task(self, builder, projects):
+        """The trap that shipped 3 qualifiers out of 1,265: an incremental
+        sync re-reads only the TAIL, where the opening prompt is not, so the
+        write must COALESCE rather than overwrite with the NULL it just saw."""
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        path = builder.subagent("aexplore-1", ["a1"], T1, task="Find the auth flow")
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        with open(path, "a") as handle:
+            handle.write(json.dumps(_assistant("a2", ts=T1, session_id="s1",
+                                               agent_id="aexplore-1")) + "\n")
+        ingest.sync(conn, projects)
+        assert self._agents(conn) == {"aexplore-1": "Find the auth flow"}
+
+    def test_a_full_resync_backfills_a_task_the_store_lacks(self, builder, projects):
+        builder.prompt("u1", T0).turn("m1", T0).write()
+        builder.subagent("aexplore-1", ["a1"], T1, task="Find the auth flow")
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE agents SET task = NULL")
+        conn.commit()
+        ingest.sync(conn, projects, full=True)
+        assert self._agents(conn) == {"aexplore-1": "Find the auth flow"}

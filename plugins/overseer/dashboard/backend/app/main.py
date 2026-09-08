@@ -65,6 +65,12 @@ class OrderBody(BaseModel):
     order: int
 
 
+class ReorderBody(BaseModel):
+    """A lane's card ids in the order they should render, top first."""
+
+    ids: list[str]
+
+
 class PriorityBody(BaseModel):
     priority: str | None = None
 
@@ -730,6 +736,28 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
         return _mutate(do, effective)
 
+    @app.post("/api/lane/order", dependencies=[Depends(require_token)])
+    def reorder_lane(body: ReorderBody, root: str | None = None) -> dict[str, Any]:
+        """Renumber a whole lane in one call.
+
+        The per-card `/order` endpoint above cannot express a first reorder:
+        every card starts at `order: 0`, so there is no midpoint between two
+        neighbours to give the moved card. `overseer reorder` restamps the
+        lane 0, 10, 20, ... instead — and, unlike every other mutator,
+        leaves `updated` alone, since ordering records a preference rather
+        than work (see `cmd_reorder`).
+        """
+        effective = _resolve_root(launch_root, _derived_launch_root, root)
+
+        def do() -> None:
+            if not body.ids:
+                raise HTTPException(status_code=400, detail="ids cannot be empty")
+            for card_id in body.ids:
+                check_id(card_id)
+            run_overseer(effective, "reorder", "--ids", ",".join(body.ids))
+
+        return _mutate(do, effective)
+
     @app.post("/api/card/{card_id}/priority", dependencies=[Depends(require_token)])
     def set_priority(card_id: str, body: PriorityBody, root: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
@@ -1053,6 +1081,23 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         data = run_chronicle("session", session_id)
         if data is None:
             raise HTTPException(status_code=404, detail=f"no chronicle session {session_id!r}")
+        return data
+
+    @app.get("/api/chronicle/session/{session_id}/agent/{agent_id}")
+    def chronicle_agent(session_id: str, agent_id: str) -> dict[str, Any]:
+        """One subagent of a session. Fetched only when its drawer opens —
+        folding every agent into the session payload would triple it for a
+        panel usually left closed."""
+        try:
+            check_id(session_id)
+            check_id(agent_id)
+        except CliError as exc:
+            raise HTTPException(status_code=400, detail="invalid id") from exc
+        data = run_chronicle("agent", session_id, agent_id)
+        if data is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no chronicle agent {agent_id!r} in session {session_id!r}")
         return data
 
     if mount_frontend:

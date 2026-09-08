@@ -19,6 +19,9 @@ Tables (see ``_SCHEMA``):
 - ``tool_calls`` one row per ``tool_use`` block, with the size and time of its
                  ``tool_result`` once that lands (the result is what grows the
                  next turn's context — see ``report.biggest_turns``).
+- ``file_edits`` one row per file change, with the added/removed line counts
+                 taken from the diff the transcript carries (counts only —
+                 never the diff content).
 - ``artifacts``  one row per Artifact publish (title, description, favicon,
                  published URL parsed from the tool result).
 - ``events``     prompts, compactions and turn durations, keyed by record uuid
@@ -88,6 +91,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     cold_turns            INTEGER NOT NULL DEFAULT 0,
     artifacts             INTEGER NOT NULL DEFAULT 0,
     subagents             INTEGER NOT NULL DEFAULT 0,
+    lines_added           INTEGER NOT NULL DEFAULT 0,
+    lines_removed         INTEGER NOT NULL DEFAULT 0,
+    files_touched         INTEGER NOT NULL DEFAULT 0,
     active_ms             INTEGER NOT NULL DEFAULT 0,
     models                TEXT NOT NULL DEFAULT '[]'
 );
@@ -111,6 +117,11 @@ CREATE TABLE IF NOT EXISTS turns (
     tool_calls            INTEGER NOT NULL DEFAULT 0,
     stop_reason           TEXT,
     effort                TEXT,
+    skill                 TEXT,
+    plugin                TEXT,
+    agent_type            TEXT,
+    mcp_server            TEXT,
+    mcp_tool              TEXT,
     PRIMARY KEY (session_id, agent_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts);
@@ -145,6 +156,38 @@ CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_name ON tool_calls(tool_name);
 
+-- One row per file change, from the unified diff Claude Code writes with
+-- every Edit/Write result. Counts only: the diff CONTENT is deliberately not
+-- kept, so the store stays a facts table rather than a second copy of the
+-- source. Note this measures editing DONE, not lines surviving in the repo —
+-- ten edits to one line are ten rows, and a later revert still counts. For
+-- "what shipped", git is the truthful source.
+CREATE TABLE IF NOT EXISTS file_edits (
+    session_id    TEXT NOT NULL,
+    tool_use_id   TEXT NOT NULL,
+    agent_id      TEXT NOT NULL DEFAULT '',
+    ts            REAL,
+    file_path     TEXT NOT NULL,
+    operation     TEXT NOT NULL DEFAULT 'edit',
+    lines_added   INTEGER NOT NULL DEFAULT 0,
+    lines_removed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, tool_use_id)
+);
+CREATE INDEX IF NOT EXISTS file_edits_session ON file_edits(session_id);
+CREATE INDEX IF NOT EXISTS file_edits_path ON file_edits(file_path);
+
+-- One row per SUBAGENT, holding the only human-legible name it has: the task
+-- its own transcript opens with. Nothing derived lives here — an agent's
+-- turns, tokens, tools and churn are already keyed by `agent_id` on the fact
+-- tables and stay computed from them. A row with a NULL task is still a row:
+-- an agent whose opening prompt was pruned must remain listable.
+CREATE TABLE IF NOT EXISTS agents (
+    session_id TEXT NOT NULL,
+    agent_id   TEXT NOT NULL,
+    task       TEXT,
+    PRIMARY KEY (session_id, agent_id)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     session_id TEXT NOT NULL,
     uuid       TEXT NOT NULL,
@@ -155,6 +198,22 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX IF NOT EXISTS events_session_kind ON events(session_id, kind);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    -- Identity only, and deliberately only the parts that do not change and
+    -- do not identify a person. The mutable half of an account — which plan
+    -- it is on — is NOT here: a plan changes, and a row here would silently
+    -- rewrite history for every session already recorded against it. That
+    -- lives on `sessions` as a snapshot of what was true when it ran.
+    --
+    -- NOTHING personal is ever written: `.claude.json` also holds
+    -- emailAddress, fullName, displayName and organizationName, and this
+    -- store is read by the dashboard. The reader whitelists fields by name.
+    account_uuid      TEXT PRIMARY KEY,
+    organization_uuid TEXT,
+    first_seen        REAL,
+    last_seen         REAL
+);
 
 CREATE TABLE IF NOT EXISTS cursors (
     path        TEXT PRIMARY KEY,
@@ -186,6 +245,37 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # plugin-qualified name, an Agent's subagent type. Backfilled by
     # `chronicle sync --full`, which re-reads every transcript from byte 0.
     ("tool_calls", "qualifier", "TEXT"),
+    # The account that owns this session's bridge, from its `bridge-session`
+    # record. Sparse: only sessions bridged from claude.ai carry one, so NULL
+    # is the common case and means "not stated", never "no account".
+    ("sessions", "owner_account_uuid", "TEXT"),
+    # The plan AS IT WAS when this session was ingested, read from the config
+    # dir the transcript came from. Pinned per session rather than per account
+    # on purpose: an account moves between plans, and attributing today's plan
+    # to a session that ran under a previous one would be a confident lie.
+    # `plan_observed_at` is what makes the snapshot legible as a snapshot.
+    ("sessions", "plan_organization_type", "TEXT"),
+    ("sessions", "plan_seat_tier", "TEXT"),
+    ("sessions", "plan_billing_type", "TEXT"),
+    ("sessions", "plan_rate_limit_tier", "TEXT"),
+    ("sessions", "plan_observed_at", "REAL"),
+    # The agent's own short label, from `agent-<id>.meta.json` beside its
+    # transcript. Claude Code writes a purpose-built 3-5 word `description`
+    # there; the `task` column holds its opening PROMPT, which runs to
+    # thousands of characters and makes a poor name. Backfilled by
+    # `chronicle sync --full`.
+    ("agents", "description", "TEXT"),
+    # Churn rollup, recomputed from `file_edits` by ingest.rollup.
+    ("sessions", "lines_added", "INTEGER NOT NULL DEFAULT 0"),
+    ("sessions", "lines_removed", "INTEGER NOT NULL DEFAULT 0"),
+    ("sessions", "files_touched", "INTEGER NOT NULL DEFAULT 0"),
+    # What was in scope for a call, as the transcript stamps it. On the TURN,
+    # so these account for tokens rather than counting invocations.
+    ("turns", "skill", "TEXT"),
+    ("turns", "plugin", "TEXT"),
+    ("turns", "agent_type", "TEXT"),
+    ("turns", "mcp_server", "TEXT"),
+    ("turns", "mcp_tool", "TEXT"),
 )
 
 
@@ -241,6 +331,51 @@ def claude_dirs() -> list[Path]:
     return out
 
 
+# The ONLY fields ever read out of `.claude.json`. A whitelist, not a
+# blacklist: that file also holds emailAddress, fullName, displayName,
+# organizationName and more, and this store is read by the dashboard and can
+# be copied around. Anything not named here never enters the database, so a
+# new personal field appearing upstream cannot leak by default.
+ACCOUNT_IDENTITY_FIELDS = ("accountUuid", "organizationUuid")
+ACCOUNT_PLAN_FIELDS = {
+    "organizationType": "plan_organization_type",
+    "seatTier": "plan_seat_tier",
+    "billingType": "plan_billing_type",
+    "organizationRateLimitTier": "plan_rate_limit_tier",
+}
+
+
+def account_profile(config_dir: Path) -> dict[str, str] | None:
+    """The non-personal account facts a config dir currently holds, or None.
+
+    Source is `<config_dir>/.claude.json`'s `oauthAccount`, which describes the
+    account LOGGED IN THERE NOW — it carries no history, so what it says is
+    only ever true of the present. Callers stamp it onto sessions as they are
+    ingested, with the time of observation, rather than treating it as a
+    property of the account for all time.
+
+    An API-key session has no `oauthAccount` at all, which is the one positive
+    signal that distinguishes key auth from a subscription; that case returns
+    an empty dict, distinct from None (no file / unreadable / malformed).
+    """
+    path = config_dir / ".claude.json"
+    try:
+        data = json.loads(path.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    oauth = data.get("oauthAccount")
+    if not isinstance(oauth, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in (*ACCOUNT_IDENTITY_FIELDS, *ACCOUNT_PLAN_FIELDS):
+        value = oauth.get(key)
+        if isinstance(value, str) and value:
+            out[key] = value
+    return out
+
+
 def path_map() -> list[tuple[str, str]]:
     """Prefix rewrites from a recorded ``cwd`` to a path on THIS filesystem,
     longest prefix first.
@@ -288,10 +423,54 @@ def projects_dirs() -> list[Path]:
 
 
 def db_path() -> Path:
+    """The one store this machine should be writing to.
+
+    NOT simply `<primary>/chronicle/sessions.db`. That resolves per account, so
+    a second account running `sync` quietly raised a RIVAL store: this machine
+    had 342 sessions in one and a stale 238-session subset in another, and
+    which you saw depended on who launched the dashboard. Reading was always
+    multi-account (`claude_dirs`); only writing was not, and that asymmetry is
+    what split the history.
+
+    So: among the stores that already exist across the watched dirs, take the
+    FULLEST — the one with the most sessions. Every account computes the same
+    answer from the same files, so they converge on one store instead of each
+    preferring its own; and a second account joins the existing history rather
+    than starting a rival to it. Ties go to the primary. When none exists yet,
+    the primary is where a new one is created.
+
+    `CHRONICLE_DB` still overrides everything — tests pin it, and a caller who
+    means a specific file is not to be second-guessed.
+    """
     override = os.environ.get(DB_ENV)
     if override:
         return Path(override)
+    found = [(_session_count(d.joinpath(*DB_RELPATH)), -index, d.joinpath(*DB_RELPATH))
+             for index, d in enumerate(claude_dirs())]
+    # Negative index as the tiebreak, so an equal count prefers the earlier
+    # dir — the primary, which `claude_dirs` lists first.
+    usable = [entry for entry in found if entry[0] is not None]
+    if usable:
+        return max(usable)[2]
     return config_dir().joinpath(*DB_RELPATH)
+
+
+def _session_count(path: Path) -> int | None:
+    """Sessions in a chronicle store, or None if it is not one we can read —
+    absent, locked, corrupt, or some other file entirely. None never wins the
+    comparison in `db_path` and never raises out of it."""
+    if not path.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except (sqlite3.Error, ValueError, OSError):
+        return None
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0])
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 
 
 def connect(path: Path | None = None, *, readonly: bool = False) -> sqlite3.Connection:

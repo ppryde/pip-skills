@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  getChronicleAgent,
   getChronicleSession,
   getChronicleSessions,
   getChronicleStatus,
@@ -24,6 +25,7 @@ import {
   syncChronicle,
 } from "../../api/client";
 import type {
+  ChronicleAgentDetail,
   ChronicleQuery,
   ChronicleSession,
   ChronicleSessionDetail,
@@ -214,6 +216,57 @@ export interface UseChronicleSessionResult {
   detail: ChronicleSessionDetail | null;
   loading: boolean;
   error: string | null;
+}
+
+export interface UseChronicleAgentResult {
+  detail: ChronicleAgentDetail | null;
+  loading: boolean;
+  error: string | null;
+}
+
+/** One subagent's detail, fetched only while its drawer is open. Same shape
+ * and same conventions as `useChronicleSession`; a null `agentId` clears it,
+ * so closing the drawer drops the payload rather than holding it. */
+export function useChronicleAgent(
+  sessionId: string | null,
+  agentId: string | null,
+): UseChronicleAgentResult {
+  const [detail, setDetail] = useState<ChronicleAgentDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sessionId === null || agentId === null) {
+      setDetail(null);
+      setError(null);
+      return;
+    }
+    let mounted = true;
+    setLoading(true);
+    // Cleared before the fetch, unlike the session hook: switching agents in
+    // the rail must not show the previous agent's figures under the new
+    // agent's name for as long as the request takes.
+    setDetail(null);
+    Promise.resolve()
+      .then(() => getChronicleAgent(sessionId, agentId))
+      .then((res) => {
+        if (!mounted) return;
+        setDetail(res);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [sessionId, agentId]);
+
+  return { detail, loading, error };
 }
 
 export function useChronicleSession(id: string | null): UseChronicleSessionResult {
