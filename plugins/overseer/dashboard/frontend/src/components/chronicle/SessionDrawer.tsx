@@ -26,6 +26,7 @@ import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
 import SubagentDrawer, { agentLabel } from "./SubagentDrawer";
+import McpExplorer from "./McpExplorer";
 import UsageCallout from "./UsageCallout";
 
 export interface SessionDrawerProps {
@@ -268,9 +269,12 @@ export default function SessionDrawer({
               mcp={detail.mcp}
               plugins={detail.plugins}
               churn={detail.churn}
+              contextGrowth={detail.context_growth}
               attribution={detail.attribution}
               perSession
             />
+
+            <McpExplorer mcp={detail.mcp} perSession />
 
             {/* Only where something was actually delegated: on a session that
                 ran no subagent all three bars are zero, which says nothing. */}

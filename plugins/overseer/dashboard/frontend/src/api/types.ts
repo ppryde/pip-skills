@@ -456,6 +456,46 @@ export interface ChroniclePluginItem extends ChronicleUsage {
   kind: string;
 }
 
+/** One tool's contribution to context growth. `share` is of CHARACTERS
+ * RETURNED, never of dollars — see `ChronicleContextGrowth`. */
+export interface ChronicleContextTool {
+  tool_name: string;
+  /** Every call in the window. */
+  calls: number;
+  /** Only those that recorded a result size — the denominator for
+   * `avg_chars`, since a call still in flight has none. */
+  measured_calls: number;
+  result_chars: number;
+  /** Fraction of everything returned in the window, 0..1. */
+  share: number;
+  /** Typical result size. Null where nothing was measured: "we don't know"
+   * and "it returned nothing" are different claims. */
+  avg_chars: number | null;
+}
+
+/** What GREW the context, per tool.
+ *
+ * Deliberately NOT cost by tool. A turn's cost is the prompt it carried, paid
+ * before any of its tools ran — a turn that called five tools did not pay
+ * five times, so splitting its dollars across them would be invention. The
+ * other direction holds: a tool RESULT is text that enters the context, and
+ * every turn after it carries that text again.
+ *
+ * Shares are of characters for the same reason a dollar figure is refused: a
+ * result re-sent at cache-read rates costs a fraction of one at creation
+ * rates, and a compaction drops some of it outright. */
+export interface ChronicleContextGrowth {
+  /** Everything returned in the window, across all tools — including any
+   * beyond the truncated `tools` list, so a share is honest. */
+  result_chars: number;
+  calls: number;
+  measured_calls: number;
+  /** Distinct tools in the window, so a truncated list can say what it is a
+   * truncation of. */
+  tools_total: number;
+  tools: ChronicleContextTool[];
+}
+
 export interface ChronicleFileChurn {
   file_path: string;
   edits: number;
@@ -641,6 +681,8 @@ export interface ChronicleSummary {
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  /** Optional: a store that predates `result_chars` returns none. */
+  context_growth?: ChronicleContextGrowth;
   attribution?: ChronicleAttribution;
   delegation?: ChronicleDelegation;
   shape?: ChronicleShape;
@@ -784,6 +826,7 @@ export interface ChronicleAgentDetail {
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  context_growth?: ChronicleContextGrowth;
   artifacts: ChronicleArtifact[];
 }
 
@@ -799,6 +842,7 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  context_growth?: ChronicleContextGrowth;
   /** The window-level blocks, narrowed to this session. Optional: a store
    * that predates the attribution columns returns neither. */
   attribution?: ChronicleAttribution;

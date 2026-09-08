@@ -29,6 +29,7 @@ import { LineChart } from "./ChronicleCharts";
 import type { ChartEvent } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import StatTile from "./StatTile";
+import McpExplorer from "./McpExplorer";
 import UsageCallout from "./UsageCallout";
 
 export interface SubagentDrawerProps {
@@ -210,8 +211,11 @@ export default function SubagentDrawer({
                 mcp={detail.mcp}
                 plugins={detail.plugins}
                 churn={detail.churn}
+                contextGrowth={detail.context_growth}
                 perSession
               />
+
+              <McpExplorer mcp={detail.mcp} perSession />
             </>
           )}
         </div>

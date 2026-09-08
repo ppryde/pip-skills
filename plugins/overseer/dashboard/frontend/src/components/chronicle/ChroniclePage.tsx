@@ -41,6 +41,7 @@ import SessionDrawer from "./SessionDrawer";
 import CostAttributionPanel from "./CostAttributionPanel";
 import DelegationPanel from "./DelegationPanel";
 import StatTile from "./StatTile";
+import McpExplorer from "./McpExplorer";
 import UsageCallout from "./UsageCallout";
 
 /** The `useChronicle` result, as App.tsx fetched it for the current window
@@ -444,8 +445,15 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               mcp={summary?.mcp}
               plugins={summary?.plugins}
               churn={summary?.churn}
+              contextGrowth={summary?.context_growth}
               attribution={summary?.attribution}
             />
+          </div>
+
+          {/* One grain below the callout's MCP tab, in its own box: which of
+              a server's tools were called, and what each cost. */}
+          <div className="chronicle__grid chronicle__grid--wide">
+            <McpExplorer mcp={summary?.mcp} />
           </div>
 
           <div className="chronicle__grid chronicle__grid--wide">

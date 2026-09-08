@@ -1,10 +1,12 @@
 import { useState } from "react";
 
 import { formatBytes, formatDuration, formatTokens, formatUsd } from "../../board/chronicle/format";
+import { mcpServerNames, mcpToolLabel, parseMcpToolName } from "../../board/chronicle/mcp";
 import type {
   ChronicleAttributed,
   ChronicleAttribution,
   ChronicleChurn,
+  ChronicleContextGrowth,
   ChronicleMcp,
   ChroniclePlugins,
   ChronicleTool,
@@ -12,13 +14,14 @@ import type {
 import { Button } from "../../ui";
 import { BarList, type BarRow } from "./ChronicleCharts";
 
-type View = "tools" | "mcp" | "plugins" | "skills" | "agents" | "files";
+type View = "tools" | "context" | "mcp" | "plugins" | "skills" | "agents" | "files";
 
 interface UsageCalloutProps {
   tools?: ChronicleTool[];
   mcp?: ChronicleMcp;
   plugins?: ChroniclePlugins;
   churn?: ChronicleChurn;
+  contextGrowth?: ChronicleContextGrowth;
   attribution?: ChronicleAttribution;
   /** Per-session copy drops the "across N sessions" clauses, which would all
    * read "across 1 sessions" in the drawer. */
@@ -43,7 +46,7 @@ type Row = BarRow;
  * against each other, never scanned together.
  */
 export default function UsageCallout({
-  tools, mcp, plugins, churn, attribution, perSession,
+  tools, mcp, plugins, churn, contextGrowth, attribution, perSession,
 }: UsageCalloutProps) {
   const [view, setView] = useState<View>("tools");
 
@@ -68,11 +71,24 @@ export default function UsageCallout({
       .filter(Boolean)
       .join(" · ");
 
+  // The same join the MCP tab does, applied one grain lower: this list ranks
+  // EVERY call, so an MCP one was still showing its raw
+  // `mcp__claude_ai_Notion__fetch` slug beside a plain `Bash` long after the
+  // server tab had learnt to say "claude.ai Notion". A non-MCP name is its
+  // own label and passes through untouched.
+  const names = mcpServerNames(mcp);
+
   // No slicing: the list scrolls instead, so a long tail stays reachable
   // rather than being silently cut at an arbitrary twelve.
   const toolRows: Row[] = (tools ?? []).map((t) => ({
-    label: t.tool_name,
-    detail: measures(t),
+    // The raw name is the key — two servers can own a `search`, and the
+    // relabelled string is no longer guaranteed unique.
+    id: t.tool_name,
+    label: mcpToolLabel(t.tool_name, names),
+    // The slug stays in the detail, as it does on the MCP tab: it is what
+    // anyone grepping a transcript will actually be looking for.
+    detail: [measures(t), parseMcpToolName(t.tool_name) ? t.tool_name : null]
+      .filter(Boolean).join(" · "),
     value: t.calls,
   }));
 
@@ -96,6 +112,31 @@ export default function UsageCallout({
     label: `${p.plugin} · ${p.kind}`,
     detail: measures(p),
     value: p.calls,
+  }));
+
+  /** A share as a percentage, never rounded to a bare "0%": a tool at
+   * 0.4% of a 300 MB window still poured in more than a megabyte, and "0%"
+   * would say it poured in nothing. */
+  const share = (s: number) =>
+    s >= 0.1 ? `${Math.round(s * 100)}%`
+      : s >= 0.001 ? `${(s * 100).toFixed(1)}%`
+        : "<0.1%";
+
+  // Ranked by what each tool RETURNED, which the backend already ordered —
+  // re-sorting the `tools` block client-side would not do: that one truncates
+  // at 50 BY CALLS, and the tools worth seeing here are exactly the ones
+  // called rarely and returning enormously.
+  const contextRows: Row[] = (contextGrowth?.tools ?? []).map((t) => ({
+    label: t.tool_name,
+    detail: [
+      `${share(t.share)} of everything returned`,
+      `${t.calls.toLocaleString()} calls`,
+      t.avg_chars === null ? "no result sizes recorded" : `${formatBytes(t.avg_chars)} per call`,
+      t.measured_calls < t.calls
+        ? `${(t.calls - t.measured_calls).toLocaleString()} unmeasured`
+        : null,
+    ].filter(Boolean).join(" · "),
+    value: t.result_chars,
   }));
 
   // Ranked by total churn, so the file that moved most is first — the value
@@ -135,8 +176,11 @@ export default function UsageCallout({
     .map((k) => `${provenance[k]} ${k}`)
     .join(" · ");
 
+  // `format` and `countLabel` default to the token formatter every other tab
+  // wants; the Context tab overrides both because its measure is characters.
   const views: { key: View; label: string; count: number; rows: Row[]; hue: string;
-                 sub: string; empty: string }[] = [
+                 sub: string; empty: string; format?: (n: number) => string;
+                 countLabel?: string }[] = [
     {
       key: "tools",
       label: "Tools",
@@ -147,14 +191,43 @@ export default function UsageCallout({
       empty: "No tool calls in this window.",
     },
     {
+      // The companion to Tools, and the reason both exist: on this store Bash
+      // tops the call count three to one over Read, and Read tops this by a
+      // factor of two — because a Read averages ~11.7k characters against
+      // Bash's ~1.4k. Neither list says that alone.
+      key: "context",
+      label: "Context",
+      count: contextGrowth?.tools_total ?? 0,
+      // Bytes, not tokens: this counts characters that entered the context,
+      // and re-labelling them as tokens would be a 4x guess dressed as a
+      // measurement.
+      countLabel: contextGrowth ? formatBytes(contextGrowth.result_chars) : undefined,
+      rows: contextRows,
+      format: formatBytes,
+      // The one hue not already spoken for. It is named for cost, but this
+      // block measures VOLUME — see the sub-line: dollars are refused here on
+      // purpose.
+      hue: "--chr-cost",
+      sub: contextGrowth
+        ? `${formatBytes(contextGrowth.result_chars)} of tool results entered the context across `
+          + `${contextGrowth.tools_total} tools. What a tool RETURNS is what every later turn `
+          + `carries — so this ranks by volume returned, not by dollars: a turn's cost was paid `
+          + `on the prompt it carried, before any of its tools ran.`
+        : "Tools ranked by how much their results poured into the context.",
+      empty: "No result sizes recorded. Historical sessions need a `chronicle sync --full` to backfill.",
+    },
+    {
       key: "mcp",
       label: "MCP",
       count: mcp?.calls ?? 0,
       rows: mcpRows,
       hue: "--chr-context",
-      sub: provenanceNote
+      // Says where the next grain down lives: this tab stops at the server,
+      // and someone reading it is one question away from wanting the tools.
+      sub: (provenanceNote
         ? `By server — ${provenanceNote}.`
-        : "By server, split into plugin, connector and local.",
+        : "By server, split into plugin, connector and local.")
+        + (mcp?.tools?.length ? " Per-tool detail is in the MCP tools panel below." : ""),
       empty: "No MCP calls in this window.",
     },
     {
@@ -235,7 +308,10 @@ export default function UsageCallout({
               className="chr-usage__tab"
               style={{ ["--chr-hue" as string]: `var(${v.hue})` }}
             >
-              {v.label} <span className="chr-usage__count">{formatTokens(v.count)}</span>
+              {v.label}{" "}
+              <span className="chr-usage__count">
+                {v.countLabel ?? formatTokens(v.count)}
+              </span>
             </Button>
           ))}
         </div>
@@ -247,7 +323,7 @@ export default function UsageCallout({
         <div className="chr-usage__scroll">
           <BarList
             rows={active.rows}
-            format={formatTokens}
+            format={active.format ?? formatTokens}
             title={`${active.label} breakdown`}
             hue={active.hue}
           />

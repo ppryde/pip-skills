@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import UsageCallout from "./UsageCallout";
 
-const TOOLS = [{ tool_name: "Bash", calls: 60, sessions: 2, result_chars: 1200, median_s: 2.5, subagent_calls: 30 }];
+const TOOLS = [
+  { tool_name: "Bash", calls: 60, sessions: 2, result_chars: 1200, median_s: 2.5, subagent_calls: 30 },
+  { tool_name: "mcp__claude_ai_Notion__fetch", calls: 3, sessions: 1, result_chars: 500, median_s: 1.5, subagent_calls: 0 },
+  { tool_name: "mcp__claude-in-chrome__navigate", calls: 1, sessions: 1, result_chars: 400, median_s: null, subagent_calls: 0 },
+];
 const MCP = {
   calls: 4,
   result_chars: 900,
@@ -39,6 +43,23 @@ const CHURN = {
   ],
 };
 
+const CONTEXT_GROWTH = {
+  // Mirrors the real store's shape: the second tool is called twenty times
+  // more often and still returns less than a third as much.
+  result_chars: 3_200_000,
+  calls: 1205,
+  measured_calls: 1200,
+  tools_total: 27,
+  tools: [
+    { tool_name: "Read", calls: 200, measured_calls: 200,
+      result_chars: 2_200_000, share: 0.6875, avg_chars: 11_000 },
+    { tool_name: "Bash", calls: 1000, measured_calls: 995,
+      result_chars: 995_000, share: 0.3109, avg_chars: 1000 },
+    { tool_name: "Edit", calls: 5, measured_calls: 5,
+      result_chars: 5000, share: 0.0016, avg_chars: 1000 },
+  ],
+};
+
 const ATTRIBUTION = {
   turns: 100, attributed_turns: 12, cost_usd: 683.0, unattributed_cost_usd: 14095.0,
   plugins: [
@@ -55,6 +76,36 @@ const ATTRIBUTION = {
   ],
   mcp: [],
 };
+
+describe("<UsageCallout/> Tools tab", () => {
+  // The Tools tab ranks EVERY call, so it was the one list still showing an
+  // MCP call by its raw slug after the MCP tab had learnt the real name.
+  it("names an MCP call by its server's attributed name, not its slug", () => {
+    render(<UsageCallout tools={TOOLS} mcp={MCP} />);
+    expect(screen.getByText("claude.ai Notion · fetch")).toBeInTheDocument();
+    expect(screen.queryByText("mcp__claude_ai_Notion__fetch")).not.toBeInTheDocument();
+  });
+
+  it("keeps the raw name in the row's detail, where it can still be found", () => {
+    const { container } = render(<UsageCallout tools={TOOLS} mcp={MCP} />);
+    const row = Array.from(container.querySelectorAll(".chr-barlist__row"))
+      .find((r) => r.textContent?.includes("claude.ai Notion · fetch")) as HTMLElement;
+    expect(row.title).toContain("mcp__claude_ai_Notion__fetch");
+  });
+
+  it("leaves a built-in tool's name alone, detail and all", () => {
+    const { container } = render(<UsageCallout tools={TOOLS} mcp={MCP} />);
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+    const row = Array.from(container.querySelectorAll(".chr-barlist__row"))
+      .find((r) => r.textContent?.includes("Bash")) as HTMLElement;
+    expect(row.title).not.toContain("mcp__");
+  });
+
+  it("falls back to the slug for a server attribution never named", () => {
+    render(<UsageCallout tools={TOOLS} mcp={{ ...MCP, servers: [] }} />);
+    expect(screen.getByText("claude_ai_Notion · fetch")).toBeInTheDocument();
+  });
+});
 
 describe("<UsageCallout/>", () => {
   it("prefers attribution on the Plugins tab — cost, not invocation count", () => {
@@ -170,7 +221,7 @@ describe("<UsageCallout/>", () => {
 
   it("counts each breakdown on its own tab", () => {
     render(<UsageCallout tools={TOOLS} mcp={MCP} plugins={PLUGINS} />);
-    expect(screen.getByRole("button", { name: "Tools 60" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tools 64" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "MCP 4" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Plugins 3" })).toBeInTheDocument();
   });
@@ -225,7 +276,7 @@ describe("<UsageCallout/>", () => {
     expect(container.querySelectorAll(".chr-barlist__row")).toHaveLength(3);
 
     fireEvent.click(screen.getByRole("button", { name: /^Tools/ }));
-    expect(container.querySelectorAll(".chr-barlist__row")).toHaveLength(1);
+    expect(container.querySelectorAll(".chr-barlist__row")).toHaveLength(TOOLS.length);
     expect(screen.queryByText("src/styles.css")).not.toBeInTheDocument();
     expect(screen.queryByText("src/New.tsx")).not.toBeInTheDocument();
     expect(screen.getByText("Bash")).toBeInTheDocument();
@@ -252,5 +303,88 @@ describe("<UsageCallout/>", () => {
     render(<UsageCallout tools={TOOLS} />);
     fireEvent.click(screen.getByRole("button", { name: /^MCP/ }));
     expect(screen.getByText(/No MCP calls/)).toBeInTheDocument();
+  });
+});
+
+describe("<UsageCallout/> Context tab", () => {
+  it("ranks by what a tool returned, not by how often it ran", () => {
+    // The finding the tab exists for: Bash out-calls Read five to one and is
+    // still second, because the average Read is eleven times the size.
+    const { container } = render(
+      <UsageCallout tools={TOOLS} contextGrowth={CONTEXT_GROWTH} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    const labels = [...container.querySelectorAll(".chr-barlist__label")]
+      .map((n) => n.textContent);
+    expect(labels).toEqual(["Read", "Bash", "Edit"]);
+  });
+
+  it("states a share of what was returned, and the typical size behind it", () => {
+    const { container } = render(
+      <UsageCallout tools={TOOLS} contextGrowth={CONTEXT_GROWTH} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    const read = container.querySelector(".chr-barlist__row") as HTMLElement;
+    expect(read.title).toContain("69% of everything returned");
+    expect(read.title).toContain("200 calls");
+    expect(read.title).toContain("10.7 KB per call");
+  });
+
+  it("never rounds a small share down to nothing", () => {
+    // Edit is 0.16% of the window — 5 KB, not zero. "0%" would be a lie the
+    // reader could not catch.
+    const { container } = render(
+      <UsageCallout tools={TOOLS} contextGrowth={CONTEXT_GROWTH} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    const edit = [...container.querySelectorAll(".chr-barlist__row")]
+      .find((r) => r.textContent?.includes("Edit")) as HTMLElement;
+    expect(edit.title).toContain("0.2% of everything returned");
+    expect(edit.title).not.toContain("0% of");
+  });
+
+  it("says how many calls went unmeasured rather than averaging over them", () => {
+    const { container } = render(
+      <UsageCallout tools={TOOLS} contextGrowth={CONTEXT_GROWTH} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    const bash = [...container.querySelectorAll(".chr-barlist__row")]
+      .find((r) => r.textContent?.includes("Bash")) as HTMLElement;
+    // 1000 calls, 995 sizes recorded — the average divides by 995.
+    expect(bash.title).toContain("5 unmeasured");
+    expect(bash.title).toContain("1000 B per call");
+  });
+
+  it("counts the tab in bytes, since the measure is characters not tokens", () => {
+    render(<UsageCallout tools={TOOLS} contextGrowth={CONTEXT_GROWTH} />);
+    const group = screen.getByRole("group", { name: "Usage breakdown" });
+    expect(within(group).getByRole("button", { name: /^Context/ }).textContent)
+      .toContain("3.1 MB");
+  });
+
+  it("refuses to put a dollar figure on it, and says why", () => {
+    render(<UsageCallout tools={TOOLS} contextGrowth={CONTEXT_GROWTH} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    expect(screen.getByText(/not by dollars/)).toBeInTheDocument();
+    expect(screen.getByText(/before any of its tools ran/)).toBeInTheDocument();
+  });
+
+  it("tells an un-backfilled store what to run rather than showing nothing", () => {
+    render(<UsageCallout tools={TOOLS} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    expect(screen.getByText(/No result sizes recorded/)).toBeInTheDocument();
+    expect(screen.getByText(/chronicle sync --full/)).toBeInTheDocument();
+  });
+
+  it("has no average for a tool whose results were never sized", () => {
+    render(<UsageCallout tools={TOOLS} contextGrowth={{
+      result_chars: 0, calls: 3, measured_calls: 0, tools_total: 1,
+      tools: [{ tool_name: "Bash", calls: 3, measured_calls: 0,
+                result_chars: 0, share: 0, avg_chars: null }],
+    }} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Context/ }));
+    // Not "0 B per call" — that would claim it returned nothing, which is a
+    // different statement from having no measurement.
+    expect(screen.getByTitle(/no result sizes recorded/)).toBeInTheDocument();
   });
 });
