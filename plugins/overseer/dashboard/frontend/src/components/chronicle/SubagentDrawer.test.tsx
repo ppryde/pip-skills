@@ -13,6 +13,7 @@ function agent(overrides: Partial<ChronicleSubagent> & { agent_id: string }): Ch
     turns: 10, context_tokens: 1000, output_tokens: 500, tool_calls: 4,
     first_ts: 1_788_256_800, last_ts: 1_788_260_400,
     task: null, agent_type: "general-purpose",
+    cost_usd: 0.42, unpriced_turns: 0,
     ...overrides,
   };
 }
@@ -166,5 +167,31 @@ describe("<SubagentDrawer/>", () => {
     await waitFor(() => expect(screen.getByText("gone")).toBeInTheDocument());
     // The rail still works, so the reader can pick another agent or go back.
     expect(screen.getByText("Audit the ORM")).toBeInTheDocument();
+  });
+});
+
+describe("<SubagentDrawer/> cost on the rail", () => {
+  it("puts each agent's cost beside its turns, so the comparison is one glance", () => {
+    // The rail exists to answer "which of these eight spent the money" without
+    // opening each in turn — which it could not do without the figure on it.
+    renderDrawer({
+      agents: [
+        agent({ agent_id: "a11111111aaaa", cost_usd: 4.3 }),
+        agent({ agent_id: "a22222222bbbb", cost_usd: 0.08 }),
+      ],
+    });
+    const rail = within(screen.getByRole("navigation", { name: "Subagents" }));
+    expect(rail.getByText(/10 turns · 500 out · \$4\.30/)).toBeInTheDocument();
+    expect(rail.getByText(/\$0\.08/)).toBeInTheDocument();
+  });
+
+  it("omits the figure entirely for a backend that does not send one", () => {
+    // Never "$0.00" for an absent field: free and unknown are different claims.
+    renderDrawer({
+      agents: [agent({ agent_id: "a11111111aaaa", cost_usd: undefined })],
+    });
+    const rail = within(screen.getByRole("navigation", { name: "Subagents" }));
+    expect(rail.getByText("10 turns · 500 out")).toBeInTheDocument();
+    expect(rail.queryByText(/\$/)).not.toBeInTheDocument();
   });
 });

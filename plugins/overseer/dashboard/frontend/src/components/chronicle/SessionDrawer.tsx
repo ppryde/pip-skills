@@ -286,7 +286,7 @@ export default function SessionDrawer({
               <section className="chr-panel">
                 <h3 className="chr-panel__title">Subagents</h3>
                 <p className="chr-panel__sub">
-                  Open one for its own turns, tools and cost. The name is the task it was
+                  Open one for its own turns, tools and edits. The name is the task it was
                   handed; an agent whose opening prompt was pruned shows its id instead.
                 </p>
                 <table className="chr-table chr-table--compact">
@@ -297,6 +297,10 @@ export default function SessionDrawer({
                       <th scope="col" className="chr-num">Context</th>
                       <th scope="col" className="chr-num">Output</th>
                       <th scope="col" className="chr-num">Tools</th>
+                      {/* Last, and the reason the list is scanned at all:
+                          "which of these was expensive?" was previously only
+                          answerable by opening every agent in turn. */}
+                      <th scope="col" className="chr-num">Cost</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -327,6 +331,11 @@ export default function SessionDrawer({
                         <td className="chr-num">{formatTokens(a.context_tokens)}</td>
                         <td className="chr-num">{formatTokens(a.output_tokens)}</td>
                         <td className="chr-num">{a.tool_calls}</td>
+                        <td className="chr-num">
+                          {a.cost_usd === undefined
+                            ? "—"
+                            : formatCostWithUnpriced(a.cost_usd, a.unpriced_turns ?? 0)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -113,8 +113,17 @@ export default function SubagentDrawer({
                 >
                   <span className="chr-rail__type">{a.agent_type ?? "subagent"}</span>
                   <span className="chr-rail__task">{agentLabel(a)}</span>
+                  {/* Cost rides the rail too: the rail exists to make "which
+                      of these eight spent the money" one click wide, and it
+                      could not answer that without the figure on it. */}
                   <span className="chr-rail__meta">
-                    {a.turns} turns · {formatTokens(a.output_tokens)} out
+                    {[
+                      `${a.turns} turns`,
+                      `${formatTokens(a.output_tokens)} out`,
+                      a.cost_usd === undefined
+                        ? null
+                        : formatCostWithUnpriced(a.cost_usd, a.unpriced_turns ?? 0),
+                    ].filter(Boolean).join(" · ")}
                   </span>
                 </button>
               </li>

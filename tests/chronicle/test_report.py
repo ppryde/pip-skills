@@ -290,6 +290,24 @@ class TestSessionDetail:
         assert round(detail["cost_usd"], 6) == round(3 * TURN_USD, 6)
         assert [round(t["cost_usd"], 6) for t in detail["turn_series"]] == [round(TURN_USD, 6)] * 2
 
+    def test_each_subagent_carries_its_own_cost(self, projects):
+        # The rail and the session drawer's Subagents table are scanned for
+        # exactly one thing — which agent spent the money — and neither could
+        # answer it without the figure on the row.
+        conn = _seed(projects)
+        builder = TranscriptBuilder(projects, "-a", "s2")
+        builder.path.touch()
+        builder.subagent("agent-1", ["a1"], T1)
+        ingest.ingest_session(conn, builder.path)
+        agents = report.session_detail(conn, "s2")["subagents"]
+
+        assert round(agents[0]["cost_usd"], 6) == round(TURN_USD, 6)
+        # Zero, not absent: a priced agent must not read as "unknown".
+        assert agents[0]["unpriced_turns"] == 0
+        # And the parts still sum to the whole the session reports.
+        detail = report.session_detail(conn, "s2")
+        assert sum(a["cost_usd"] for a in detail["subagents"]) <= detail["cost_usd"]
+
     def test_missing(self):
         conn = store.connect()
         assert report.session_detail(conn, "nope") is None

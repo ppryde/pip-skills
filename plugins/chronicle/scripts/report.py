@@ -830,7 +830,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     # The rail's rows. `task` is the only legible name an agent has — its id
     # is a hash — and `agent_type` says what KIND it was; both are LEFT-joined
     # so an agent predating either still lists, unnamed.
-    detail["subagents"] = [
+    subagent_rows = [
         dict(r) for r in conn.execute(
             f"""SELECT t.agent_id AS agent_id, COUNT(*) AS turns,
                       SUM(t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens)
@@ -845,6 +845,17 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             (session_id,),
         )
     ]
+    # Cost per agent, from the same per-model rate table every other cost on
+    # the page uses. The rail listed turns, context, output and tools but not
+    # money — so the one question the list is actually scanned for ("which of
+    # these was expensive?") could only be answered by opening all of them in
+    # turn. `unpriced_turns` rides along so a row on a model the pricing table
+    # does not know reads as unknown rather than as free.
+    agent_costs = _costs_by(conn, "t.agent_id", " WHERE s.session_id = ?",
+                            [session_id], extra="t.agent_id <> ''")
+    for row in subagent_rows:
+        _attach_cost(row, agent_costs, row["agent_id"])
+    detail["subagents"] = subagent_rows
 
     detail["churn"] = _churn(conn, " WHERE s.session_id = ?", [session_id])
     detail["context_growth"] = _context_growth(

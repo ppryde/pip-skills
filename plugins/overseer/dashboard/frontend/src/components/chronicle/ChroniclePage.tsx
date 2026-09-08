@@ -56,8 +56,6 @@ export type ChroniclePageProps = Omit<UseChronicleResult, "refresh"> & {
   scope?: "repo" | "all";
 };
 
-/** useChronicle's poll cadence, for the fetch-failure banner's countdown. */
-const CHRONICLE_RETRY_SECONDS = 30;
 
 /** Columns that sort on a field of the row, by that field's name. */
 type RowSortKey =
@@ -216,7 +214,7 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
 
   return (
     <div className={`chronicle${loading && summary ? " chronicle--refreshing" : ""}`}>
-      {error && <Waylaid error={error} retryEverySeconds={CHRONICLE_RETRY_SECONDS} onRetry={onRetry} />}
+      {error && <Waylaid error={error} onRetry={onRetry} />}
 
       {summary && totals === null && (
         <div className="chronicle__empty">
@@ -246,7 +244,15 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             />
           </div>
 
+          {/* Twenty tiles in a five-column grid: four full rows, and each row
+              is a loose category read left to right — scale, reach, code,
+              tokens. They were ordered by nothing in particular and flowed
+              through an auto-fit grid, which on a wide page opened about
+              thirteen tracks and left the second row stopping halfway across
+              with bare parchment beside it. Grouping them costs nothing and
+              gives each row a reason to be a row. */}
           <div className="chr-tiles">
+            {/* Row 1 — scale: how much happened, and over how long. */}
             <StatTile
               label="Sessions"
               value={String(totals.sessions)}
@@ -261,34 +267,21 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <StatTile label="Subagents" value={String(totals.subagents)} hue="--chr-peak" />
             <StatTile label="Turns" value={formatTokens(totals.turns)} hue="--chr-turns" />
             <StatTile label="Tool calls" value={formatTokens(totals.tool_calls)} hue="--chr-tools" />
+            <StatTile label="Active time" value={formatActive(totals.active_ms)} hue="--chr-turns" />
+
+            {/* Row 2 — reach: what the work touched, and what it left behind. */}
             <StatTile label="MCP calls" value={formatTokens(summary?.mcp?.calls ?? 0)} hue="--chr-tools" />
             <StatTile label="Plugin calls" value={formatTokens(summary?.plugins?.calls ?? 0)} hue="--chr-peak" />
+            <StatTile label="Artifacts" value={String(totals.artifacts)} hue="--chr-output" />
+            <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
             <StatTile
-              label="Rework"
-              value={churnRatio(summary?.churn?.lines_removed, summary?.churn?.lines_added)}
-              note={`${formatTokens(summary?.churn?.lines_removed ?? 0)} undone`}
-              hue="--chr-peak"
-            />
-            <StatTile
-              label="Edits / file"
-              value={perUnit(summary?.churn?.edits, summary?.churn?.files, 1)}
-              note={`${formatTokens(summary?.churn?.edits ?? 0)} edits`}
+              label="Transcripts"
+              value={formatBytes(totals.transcript_bytes)}
               hue="--chr-tools"
             />
-            <StatTile
-              label="Output / line"
-              value={perUnit(summary?.churn?.output_tokens,
-                (summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0), 0)}
-              note="tokens written"
-              hue="--chr-output"
-            />
-            <StatTile
-              label="Lines / session"
-              value={perUnit((summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0),
-                summary?.churn?.sessions, 0)}
-              note={`over ${formatTokens(summary?.churn?.sessions ?? 0)} sessions`}
-              hue="--chr-cache"
-            />
+
+            {/* Row 3 — code: what actually moved on disk. Editing DONE, not
+                lines surviving — a reverted change still counts here. */}
             <StatTile
               label="Lines added"
               value={formatTokens(summary?.churn?.lines_added ?? 0)}
@@ -302,6 +295,28 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               hue="--chr-peak"
             />
             <StatTile
+              label="Rework"
+              value={churnRatio(summary?.churn?.lines_removed, summary?.churn?.lines_added)}
+              note={`${formatTokens(summary?.churn?.lines_removed ?? 0)} undone`}
+              hue="--chr-peak"
+            />
+            <StatTile
+              label="Edits / file"
+              value={perUnit(summary?.churn?.edits, summary?.churn?.files, 1)}
+              note={`${formatTokens(summary?.churn?.edits ?? 0)} edits`}
+              hue="--chr-tools"
+            />
+            <StatTile
+              label="Lines / session"
+              value={perUnit((summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0),
+                summary?.churn?.sessions, 0)}
+              note={`over ${formatTokens(summary?.churn?.sessions ?? 0)} sessions`}
+              hue="--chr-cache"
+            />
+
+            {/* Row 4 — tokens and what they cost, with the one ratio that
+                ties the two halves of the page together (tokens per line). */}
+            <StatTile
               label="Ctx processed"
               value={formatTokens(totals.input_tokens + totals.cache_read_tokens + totals.cache_creation_tokens)}
             />
@@ -309,19 +324,18 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                 below instead of a footnote here: a long note wrapped to two
                 lines and threw every tile in its row out of height. */}
             <StatTile label="Output tokens" value={formatTokens(totals.output_tokens)} hue="--chr-output" />
-            <StatTile label="Active time" value={formatActive(totals.active_ms)} hue="--chr-turns" />
-            <StatTile
-              label="Transcripts"
-              value={formatBytes(totals.transcript_bytes)}
-              hue="--chr-tools"
-            />
-            <StatTile label="Compactions" value={String(totals.compactions)} hue="--chr-peak" />
             <StatTile
               label="Cache written"
               value={formatTokens(totals.cache_creation_tokens)}
               hue="--chr-cache"
             />
-            <StatTile label="Artifacts" value={String(totals.artifacts)} hue="--chr-output" />
+            <StatTile
+              label="Output / line"
+              value={perUnit(summary?.churn?.output_tokens,
+                (summary?.churn?.lines_added ?? 0) + (summary?.churn?.lines_removed ?? 0), 0)}
+              note="tokens written"
+              hue="--chr-output"
+            />
             <StatTile
               label="API costs"
               value={formatCostWithUnpriced(totals.cost_usd, totals.unpriced_turns)}
@@ -340,7 +354,14 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
             <CounselPanel insights={insights} />
           </div>
 
-          <div className="chronicle__grid chronicle__grid--4">
+          {/* Nine chart panels in ONE three-up grid. They were three separate
+              four-up rows grouped by the question they answer, which left the
+              middle row a single panel stranded in a four-wide track and the
+              last row 4 + 1 — the grouping was invisible and the ragged
+              remainders were not. Nine divides exactly by three, so a single
+              container fills every slot; DOM order is unchanged, so the
+              grouping still reads down the rows. */}
+          <div className="chronicle__grid chronicle__grid--3">
             <section className="chr-panel" style={{ ["--chr-hue" as string]: "var(--chr-output)" }}>
               <h3 className="chr-panel__title">Where output went</h3>
               <p className="chr-panel__sub">Tokens the model wrote: thinking versus replies and tool calls.</p>
@@ -377,9 +398,6 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
               <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
             </section>
-          </div>
-
-          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
               {/* The prompt count lives here, not on the Turns tile: the
@@ -400,9 +418,6 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
                 hue="--chr-turns"
               />
             </section>
-          </div>
-
-          <div className="chronicle__grid chronicle__grid--4">
             <section className="chr-panel">
               <h3 className="chr-panel__title">Context processed per day</h3>
               <p className="chr-panel__sub">Input + cache read + cache creation, every API call.</p>

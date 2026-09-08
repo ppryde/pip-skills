@@ -29,9 +29,6 @@ import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilt
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
 
-/** useBoard's poll cadence, for the fetch-failure banner's countdown. */
-const BOARD_RETRY_SECONDS = 5;
-
 type ChronicleScope = NonNullable<ChronicleQuery["scope"]>;
 
 function readStoredRoot(): string | null {
@@ -124,9 +121,11 @@ function App() {
     limits,
     loading,
     error,
+    failure,
     inFlight,
     mutate,
     refresh,
+    cancel,
     setDragActive,
     lastRefreshedAt,
   } = useBoard(activeRoot, !isUnbegun);
@@ -487,7 +486,12 @@ function App() {
               <p className="board-placeholder">Loading board…</p>
             )}
             {error && (
-              <Waylaid error={error} retryEverySeconds={BOARD_RETRY_SECONDS} onRetry={() => void refresh()} />
+              <Waylaid
+                error={error}
+                failure={failure}
+                onRetry={() => void refresh()}
+                onCancel={cancel}
+              />
             )}
             {/* WF-095: an empty board under a filter is not an empty repo —
                 say so, with the one-click way out, rather than leaving a

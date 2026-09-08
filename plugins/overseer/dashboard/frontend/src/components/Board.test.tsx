@@ -595,6 +595,26 @@ describe("mobile board scroll-container (WF-085 review — CSS regression guard)
     expect(bodies.some((body) => /min-width:\s*0\b/.test(body))).toBe(true);
   });
 
+  // The desktop `.board` centres its lane row, which is only safe because
+  // the base `min-width: max-content` leaves zero free space the moment the
+  // lanes overflow — centring then degrades to flex-start on its own. The
+  // rule above drops that floor to 0 for the swipe track, so the same mobile
+  // block MUST hand `justify-content` back to flex-start: a centred track
+  // whose content overflows pushes the first lane past scrollLeft: 0, where
+  // no swipe can reach it. The two declarations are load-bearing together,
+  // so removing either one silently strands Backlog off the left edge.
+  it("the mobile .board rule overrides justify-content back to flex-start, since it also drops the min-width floor the desktop centring depends on", () => {
+    const bodies = ruleBodies(mobileBlock(), ".board");
+    const relevant = bodies.filter((body) => /min-width:\s*0\b/.test(body));
+    expect(
+      relevant.length,
+      "expected the mobile `.board` rule that zeroes min-width"
+    ).toBeGreaterThan(0);
+    for (const body of relevant) {
+      expect(body).toMatch(/justify-content:\s*flex-start\b/);
+    }
+  });
+
   // mobile-v2 refinement: empty lanes briefly became full 88vw snap panes
   // (so an empty lane's icon-nav entry had somewhere to jump to), then got
   // reverted — an empty lane's nav icon is disabled/faded instead, and the

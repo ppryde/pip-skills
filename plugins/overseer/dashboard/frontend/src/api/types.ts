@@ -796,6 +796,14 @@ export interface ChronicleSubagent {
    * prompt and runs to thousands of characters. Null on the handful of agents
    * with no meta file, and in a store not yet resynced with `--full`. */
   description?: string | null;
+  /** API-equivalent cost of this agent's turns at list prices. Absent from a
+   * backend that predates the join; null is never sent — an agent whose model
+   * the pricing table does not know reports 0 here and says so through
+   * `unpriced_turns` instead, so "free" and "unknown" stay distinguishable. */
+  cost_usd?: number;
+  /** Turns on a model with no published price. Nonzero means `cost_usd` is a
+   * floor, not a total. */
+  unpriced_turns?: number;
 }
 
 /** `GET /api/chronicle/session/{sid}/agent/{aid}` — one subagent in detail.

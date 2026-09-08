@@ -564,3 +564,142 @@ describe("useBoard(root, enabled) — WF-032 unbegun-repo fetch gate", () => {
     expect(mockedGetBoard).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * The retry budget (WF: "keeps retrying for ages"). The board used to poll a
+ * dead server every 5s forever and show one undifferentiated red strip; a
+ * refused dashboard token got exactly the same treatment even though no
+ * number of identical retries could ever be accepted.
+ */
+describe("useBoard fetch-failure retry budget", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  /** An ApiError-shaped rejection: `classifyFailure` reads `status`. */
+  function httpError(status: number, message: string) {
+    return Object.assign(new Error(message), { status });
+  }
+
+  it("schedules a retry with the backoff wait after a retryable failure", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { result } = renderHook(() => useBoard());
+    await vi.waitFor(() => expect(result.current.failure).not.toBeNull());
+
+    expect(result.current.failure).toMatchObject({
+      kind: "retryable",
+      retries: 1,
+      retryInSeconds: 2,
+    });
+    expect(result.current.error).toBe("Failed to fetch");
+  });
+
+  it("stops after the budget, leaving no further attempt scheduled", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { result } = renderHook(() => useBoard());
+    await vi.waitFor(() => expect(result.current.failure).not.toBeNull());
+
+    // Run out the whole 2+4+8+16+30 schedule.
+    for (const wait of [2, 4, 8, 16, 30]) {
+      await act(async () => {
+        vi.advanceTimersByTime(wait * 1000);
+        await Promise.resolve();
+      });
+    }
+
+    await vi.waitFor(() =>
+      expect(result.current.failure?.retryInSeconds).toBeNull()
+    );
+    expect(result.current.failure?.retries).toBe(5);
+    // One initial attempt plus five retries, and then it stops for good.
+    expect(mockedGetBoard).toHaveBeenCalledTimes(6);
+
+    await act(async () => {
+      vi.advanceTimersByTime(120_000);
+      await Promise.resolve();
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(6);
+  });
+
+  it("never retries a refused dashboard token", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockRejectedValue(httpError(401, "missing or invalid dashboard token"));
+
+    const { result } = renderHook(() => useBoard());
+    await vi.waitFor(() => expect(result.current.failure).not.toBeNull());
+
+    expect(result.current.failure).toMatchObject({
+      kind: "auth",
+      retries: 0,
+      retryInSeconds: null,
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(120_000);
+      await Promise.resolve();
+    });
+    // The single original attempt, and nothing after it — not even the 5s
+    // background poll, which must not creep past a terminal failure.
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("never retries a request the server rejected outright", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockRejectedValue(httpError(400, "unknown root"));
+
+    const { result } = renderHook(() => useBoard());
+    await vi.waitFor(() =>
+      expect(result.current.failure).toMatchObject({ kind: "rejected", retryInSeconds: null })
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      await Promise.resolve();
+    });
+    expect(mockedGetBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancel() clears the banner and stops everything, poll included", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { result } = renderHook(() => useBoard());
+    await vi.waitFor(() => expect(result.current.failure).not.toBeNull());
+    const callsAtCancel = mockedGetBoard.mock.calls.length;
+
+    act(() => result.current.cancel());
+    expect(result.current.failure).toBeNull();
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      await Promise.resolve();
+    });
+    // Neither the scheduled retry nor the background poll may take over the
+    // hammering the person just asked to stop.
+    expect(mockedGetBoard).toHaveBeenCalledTimes(callsAtCancel);
+  });
+
+  it("a success clears the failure and restores the budget", async () => {
+    const mockedGetBoard = vi.mocked(getBoard);
+    mockedGetBoard.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    mockedGetBoard.mockResolvedValue(boardResponse(10));
+
+    const { result } = renderHook(() => useBoard());
+    await vi.waitFor(() => expect(result.current.failure).not.toBeNull());
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(result.current.failure).toBeNull());
+    expect(result.current.error).toBeNull();
+  });
+});
