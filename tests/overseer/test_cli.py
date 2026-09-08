@@ -1614,3 +1614,68 @@ class TestLabelColorCommand:
     def test_list_text_empty(self, repo, capsys):
         assert run(repo, "label-color", "list") == 0
         assert "No label colours registered." in capsys.readouterr().out
+
+
+class TestReorder:
+    """`overseer reorder` — the bulk lane renumber behind same-lane drag.
+
+    A per-card ``set-field --order`` cannot express a FIRST reorder: every
+    card ships on the ``order: int = 0`` default, so there is no midpoint
+    between two neighbours to give the card being moved. This verb lays down
+    the distinct values that make later single-card arithmetic possible.
+    """
+
+    def _three(self, repo):
+        for title in ("A", "B", "C"):
+            run(repo, "new-card", "--title", title)
+        return ["WF-001", "WF-002", "WF-003"]
+
+    def test_numbers_the_lane_from_ten(self, repo):
+        ids = self._three(repo)
+        assert run(repo, "reorder", "--ids", ",".join(ids)) == 0
+        assert [_card(repo, i).order for i in ids] == [10, 20, 30]
+
+    def test_order_follows_the_ids_given_not_the_card_ids(self, repo):
+        ids = self._three(repo)
+        assert run(repo, "reorder", "--ids", "WF-003,WF-001,WF-002") == 0
+        assert _card(repo, "WF-003").order == 10
+        assert _card(repo, "WF-001").order == 20
+        assert _card(repo, "WF-002").order == 30
+
+    def test_starts_above_the_default_so_a_new_card_sorts_to_the_top(self, repo):
+        # `order: 0` has to keep meaning "unplaced": a card created after the
+        # lane was arranged must land at the top, not in an arbitrary middle.
+        ids = self._three(repo)
+        run(repo, "reorder", "--ids", ",".join(ids))
+        run(repo, "new-card", "--title", "D")
+        assert _card(repo, "WF-004").order == 0
+        assert min(_card(repo, i).order for i in ids) > 0
+
+    def test_does_not_stamp_updated(self, repo):
+        # Every other mutator stamps `updated` (design spec §3) because every
+        # other mutator records WORK. This one records a preference about
+        # presentation — and `updated` is the tiebreak beneath `order` in the
+        # board's sort, so stamping here would reshuffle the very cards the
+        # reorder was asked to leave alone.
+        ids = self._three(repo)
+        before = {i: _card(repo, i).updated for i in ids}
+        time.sleep(1.1)
+        assert run(repo, "reorder", "--ids", ",".join(ids)) == 0
+        assert {i: _card(repo, i).updated for i in ids} == before
+
+    def test_unknown_id_refuses_the_whole_batch(self, repo, capsys):
+        ids = self._three(repo)
+        assert run(repo, "reorder", "--ids", "WF-001,WF-999,WF-002") == 1
+        assert "no card WF-999" in capsys.readouterr().err
+        # Nothing partially applied — a half-numbered lane renders in an
+        # order nobody asked for.
+        assert [_card(repo, i).order for i in ids] == [0, 0, 0]
+
+    def test_duplicate_id_refused(self, repo, capsys):
+        self._three(repo)
+        assert run(repo, "reorder", "--ids", "WF-001,WF-001") == 1
+        assert "duplicate" in capsys.readouterr().err
+
+    def test_empty_ids_refused(self, repo, capsys):
+        assert run(repo, "reorder", "--ids", "  ,  ") == 1
+        assert "at least one card id" in capsys.readouterr().err

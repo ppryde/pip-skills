@@ -10,9 +10,12 @@
  * Mirrors wf005-context.md "Drag semantics" / the C4 brief, updated for
  * WF-044 (display order is recency-driven, not `order`-driven — see
  * layout.ts's `compareRecency`):
- * - within a lane -> NO_OP. A pure reorder has nothing to persist; a
- *   setOrder call here would just bump `updated` and top-jump the card in
- *   the recency sort it was meant to locally reshuffle.
+ * - within a lane -> reorderLane, restamping that lane's manual `order`.
+ *   (This WAS a NO_OP under WF-044, when display order was recency-only and
+ *   a setOrder call would have bumped `updated` and top-jumped the very card
+ *   being reshuffled. `order` now leads the sort with recency as its
+ *   tiebreak, and `overseer reorder` deliberately leaves `updated` alone, so
+ *   the write is both meaningful and harmless.)
  * - into a stage lane -> move({stage}) THEN setOrder (order matters: mutate
  *   applies whichever response `runDropPlan` returns LAST).
  * - into Parked/Done -> move({status}) only.
@@ -25,10 +28,16 @@
  */
 import type { BoardCard, Stage, Status } from "../api/types";
 import type { Lane } from "./layout";
+import { reorderLaneIds } from "./laneOrder";
 import { orderForDrop } from "./order";
 
 export type DragCall =
   | { kind: "setOrder"; id: string; order: number }
+  /** Restamps a whole lane's manual order in one call. Bulk because every
+   * card starts on the same `order: 0` default, so there is no midpoint
+   * between two neighbours for a single-card write to claim — see
+   * `cmd_reorder` in the overseer CLI. */
+  | { kind: "reorderLane"; ids: string[] }
   | { kind: "move"; id: string; body: { stage: Stage } | { status: Status } };
 
 export interface DropPlan {
@@ -93,14 +102,17 @@ export function resolveDrop(
   const destCards = targetLane.cards.filter((c) => c.id !== dragged.id);
 
   if (sourceLane && sourceLane.key === targetLane.key) {
-    // Pure reorder within the lane the card already lives in -> NO_OP.
-    // Display order is driven entirely by recency (`updated`, see
-    // layout.ts's `compareRecency`), NOT by `order` — so a same-lane
-    // reorder has nothing to persist. Emitting a setOrder call here would
-    // be a vestigial write: it bumps the card's `updated` timestamp
-    // server-side, which top-jumps the card in the very recency sort this
-    // drag was only meant to locally reshuffle.
-    return NO_OP;
+    // A reorder within the lane the card already lives in. `order` leads
+    // the lane sort now (layout.ts's `compareOrder`), so this persists as a
+    // renumber of the WHOLE lane rather than a midpoint for one card:
+    // every card ships on the same `order: 0` default, leaving no midpoint
+    // to compute until something has laid down distinct values.
+    //
+    // `reorderLaneIds` returns null for a drop that changes nothing, which
+    // stays a NO_OP — a drag that ends where it started must not write.
+    const ids = reorderLaneIds(targetLane.cards, dragged.id, toIndex);
+    if (!ids) return NO_OP;
+    return { calls: [{ kind: "reorderLane", ids }] };
   }
 
   // Parked cards NEVER leave Parked via drag (binding rule: they reorder

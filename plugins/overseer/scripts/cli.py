@@ -544,6 +544,61 @@ def cmd_set_field(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reorder(args: argparse.Namespace) -> int:
+    """Assign a lane's cards their manual display order, in one pass.
+
+    Takes the lane's ids in the order they should render and stamps
+    ``order`` as 10, 20, 30, ... — sparse on purpose, so a later single-card
+    move can still be expressed as a midpoint if one is ever wanted, and
+    starting ABOVE the ``order: int = 0`` default so that a card created
+    after a lane was arranged sorts to the top of it rather than into an
+    arbitrary middle.
+
+    Bulk rather than one ``set-field --order`` per card because the board's
+    cards all start at the dataclass default of ``order: int = 0``: with
+    every neighbour on the same value there is no midpoint to compute
+    (``floor((0 + 0) / 2)`` is 0 again), so a per-card write cannot express
+    "third of five" at all until something has laid down distinct values.
+    Renumbering the whole lane lays them down and is the only operation that
+    is correct on the FIRST reorder as well as the hundredth.
+
+    Deliberately does NOT stamp ``updated``. Every other mutator does
+    (design spec §3) because every other mutator records work; this one
+    records a preference about presentation. Stamping here would also be
+    self-defeating: ``updated`` is the tiebreak beneath ``order`` in the
+    board's sort, so a reorder that bumped it would reshuffle the very cards
+    it was asked to leave alone.
+
+    Unknown ids are refused as a whole rather than partially applied — a
+    half-numbered lane renders in an order nobody asked for.
+    """
+    ids = [c.strip() for c in args.ids.split(",") if c.strip()]
+    if not ids:
+        print("error: --ids requires at least one card id", file=sys.stderr)
+        return 1
+    if len(set(ids)) != len(ids):
+        print("error: --ids contains a duplicate card id", file=sys.stderr)
+        return 1
+
+    cards = []
+    for card_id in ids:
+        try:
+            cards.append(_load(args.root, card_id))
+        except FileNotFoundError:
+            print(f"error: no card {card_id}", file=sys.stderr)
+            return 1
+
+    conn = _conn(args.root)
+    for position, card in enumerate(cards):
+        card.order = (position + 1) * 10
+        db.save_card(conn, card)
+    # One index rebuild for the whole lane, not one per card — `_sync` is
+    # per-card by design and would re-walk the tree len(ids) times here.
+    _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
+    print(f"reordered {len(cards)} cards")
+    return 0
+
+
 CHECKLIST_STATUSES = ("pending", "in_progress", "completed", "deleted")
 
 
@@ -1735,6 +1790,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sprint", help="sprint id; empty string clears")
     p.add_argument("--estimate", help="token estimate, e.g. 400k or 1.2M; empty string clears")
     p.set_defaults(func=cmd_set_field)
+
+    p = sub.add_parser("reorder")
+    p.add_argument("--ids", required=True,
+                   help="comma-separated card ids, in the order they should render")
+    p.set_defaults(func=cmd_reorder)
 
     p = sub.add_parser("depends")
     p.add_argument("card_id")

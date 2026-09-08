@@ -71,11 +71,28 @@ function mostRecent(a: BoardCard, b: BoardCard): BoardCard {
   return compareRecency(a, b) <= 0 ? a : b;
 }
 
+/** Manual order first, recency as the tiebreak.
+ *
+ * A card that has never been placed carries `order: 0` (the dataclass
+ * default), so an untouched lane has every card on the same value and this
+ * degrades EXACTLY to `compareRecency` — the pre-existing behaviour, until
+ * someone actually drags something. `overseer reorder` numbers a lane from
+ * 10 upward, which leaves 0 meaning "unplaced, sorts above": a card created
+ * after a lane was arranged lands at the top rather than in an arbitrary
+ * middle. */
+export function compareOrder(a: BoardCard, b: BoardCard): number {
+  if (a.order !== b.order) return a.order - b.order;
+  return compareRecency(a, b);
+}
+
 interface CardGroup {
   /** Flattened render order: the group's root card first, then its
    * same-lane descendants (each preceded by its own parent), depth-first. */
   cards: BoardCard[];
-  /** Group's sort key card — see `sortLane` doc comment for the policy. */
+  /** The group's own card — the one a drag actually moves, so the one whose
+   * `order` positions the whole group. */
+  root: BoardCard;
+  /** Group's RECENCY key card — see `sortLane` doc comment for the policy. */
   key: BoardCard;
 }
 
@@ -88,7 +105,7 @@ function flattenGroup(
   root: BoardCard,
   childrenByParent: Map<string, BoardCard[]>
 ): CardGroup {
-  const children = [...(childrenByParent.get(root.id) ?? [])].sort(compareRecency);
+  const children = [...(childrenByParent.get(root.id) ?? [])].sort(compareOrder);
   const cards = [root];
   let key = root;
   for (const child of children) {
@@ -96,7 +113,7 @@ function flattenGroup(
     cards.push(...sub.cards);
     key = mostRecent(key, sub.key);
   }
-  return { cards, key };
+  return { cards, root, key };
 }
 
 /**
@@ -116,9 +133,18 @@ function flattenGroup(
  * the root's own `updated`) — so an epic with a freshly-updated child bubbles
  * up with that activity, even if the epic card itself hasn't been touched.
  *
- * `order` (the drag-reorder field) intentionally no longer drives this sort —
- * see its doc comment in api/types.ts — but remains untouched for the drag
- * machinery (order.ts / dragPlan.ts).
+ * `order` (the drag-reorder field) ranks the groups, with recency as its
+ * tiebreak (`compareOrder`). Since every card defaults to `order: 0`, a lane
+ * nobody has arranged sorts by pure recency exactly as it always did; once a
+ * lane IS dragged, `overseer reorder` renumbers all of it at once and the
+ * manual arrangement holds against the poll.
+ *
+ * Note the asymmetry between the two halves of the group comparator below,
+ * which is deliberate: ORDER comes from the group's ROOT (that is the card a
+ * drag grabs, so its position is the one that was chosen), while RECENCY
+ * still comes from the most-recently-touched card anywhere in the group — so
+ * an epic with a freshly-updated child keeps bubbling up in an unarranged
+ * lane, exactly as before.
  */
 function sortLane(cards: BoardCard[]): BoardCard[] {
   const idsInLane = new Set(cards.map((c) => c.id));
@@ -136,7 +162,11 @@ function sortLane(cards: BoardCard[]): BoardCard[] {
   }
 
   const groups = roots.map((root) => flattenGroup(root, childrenByParent));
-  groups.sort((a, b) => compareRecency(a.key, b.key));
+  groups.sort((a, b) =>
+    a.root.order !== b.root.order
+      ? a.root.order - b.root.order
+      : compareRecency(a.key, b.key)
+  );
   return groups.flatMap((g) => g.cards);
 }
 

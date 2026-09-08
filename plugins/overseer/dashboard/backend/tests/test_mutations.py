@@ -32,6 +32,41 @@ def test_order(client: TestClient, root: Path) -> None:
     assert _show(root, card_id)["order"] == 7
 
 
+def test_lane_order_renumbers_the_whole_lane_in_one_call(client: TestClient, root: Path) -> None:
+    # The per-card `/order` endpoint above cannot express a first reorder:
+    # every card starts on `order: 0`, leaving no midpoint between two
+    # neighbours for the moved card to claim.
+    a, b, c = (_new_card(root, t) for t in ("A", "B", "C"))
+
+    resp = client.post("/api/lane/order", json={"ids": [c, a, b]})
+
+    assert resp.status_code == 200
+    assert (_show(root, c)["order"], _show(root, a)["order"], _show(root, b)["order"]) == (10, 20, 30)
+
+
+def test_lane_order_leaves_updated_alone(client: TestClient, root: Path) -> None:
+    # `updated` is the tiebreak beneath `order` in the board's sort, so a
+    # reorder that bumped it would reshuffle the cards it was asked to leave
+    # in place — the exact failure that made same-lane drag a no-op before.
+    a, b = (_new_card(root, t) for t in ("A", "B"))
+    before = (_show(root, a)["updated"], _show(root, b)["updated"])
+
+    assert client.post("/api/lane/order", json={"ids": [b, a]}).status_code == 200
+
+    assert (_show(root, a)["updated"], _show(root, b)["updated"]) == before
+
+
+def test_lane_order_rejects_an_empty_list(client: TestClient, root: Path) -> None:
+    assert client.post("/api/lane/order", json={"ids": []}).status_code == 400
+
+
+def test_lane_order_rejects_a_malformed_id(client: TestClient, root: Path) -> None:
+    # Same `check_id` guard every card-scoped endpoint uses — the ids go
+    # straight into an argv, so they are validated before they get there.
+    resp = client.post("/api/lane/order", json={"ids": ["WF-001", "../../etc/passwd"]})
+    assert resp.status_code == 400
+
+
 def test_attributes_set_only_what_is_sent_and_clear_with_null(client: TestClient, root: Path) -> None:
     # WF-070: complexity / sprint / estimate from the drawer.
     card_id = _new_card(root)  # created with complexity S

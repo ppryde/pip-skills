@@ -17,7 +17,7 @@
  * rule: the response is only ever applied to board state by `mutate` itself;
  * the caller just gets to read the value `fn` already computed.
  */
-import { move, setOrder } from "../api/client";
+import { move, reorderLane, setOrder } from "../api/client";
 import type { BoardResponse } from "../api/types";
 import type { DropPlan } from "./dragPlan";
 
@@ -30,10 +30,9 @@ export async function runDropPlan(
   let response: BoardResponse | undefined;
   await mutate(async () => {
     for (const call of plan.calls) {
-      response =
-        call.kind === "setOrder"
-          ? await setOrder(call.id, call.order)
-          : await move(call.id, call.body);
+      if (call.kind === "setOrder") response = await setOrder(call.id, call.order);
+      else if (call.kind === "reorderLane") response = await reorderLane(call.ids);
+      else response = await move(call.id, call.body);
     }
     // Non-null: plan.calls.length > 0 is guaranteed by the guard above, so
     // the loop runs at least once and `response` is always assigned.

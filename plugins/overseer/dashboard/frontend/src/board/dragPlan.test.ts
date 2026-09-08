@@ -56,7 +56,12 @@ describe("isDragSource", () => {
 });
 
 describe("resolveDrop", () => {
-  it("WF-044: same-lane reorder is a NO_OP — display order is driven by recency (`updated`), not `order`, so a pure reorder has nothing to persist; emitting setOrder would bump `updated` server-side and top-jump the card", () => {
+  // WF-044 made a same-lane reorder a NO_OP: display order was recency-only,
+  // so persisting one would have bumped `updated` and top-jumped the very
+  // card being reshuffled. `order` now leads the lane sort with recency as
+  // its tiebreak, and `overseer reorder` deliberately leaves `updated`
+  // alone — so these drags persist, as a renumber of the whole lane.
+  it("same-lane FORWARD drag (A onto C in [A,B,C]) restamps the lane", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
@@ -65,25 +70,12 @@ describe("resolveDrop", () => {
     const { lane, index } = locateDropTarget("WF-C", lanes);
     const plan = resolveDrop(a, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([]);
+    expect(plan.calls).toEqual([
+      { kind: "reorderLane", ids: ["WF-B", "WF-C", "WF-A"] },
+    ]);
   });
 
-  it("(a) same-lane FORWARD drag (A onto C in [A,B,C]) is a NO_OP — index derived via locateDropTarget", () => {
-    const a = card({ id: "WF-A", status: "planned", order: 10 });
-    const b = card({ id: "WF-B", status: "planned", order: 20 });
-    const c = card({ id: "WF-C", status: "planned", order: 30 });
-    const lanes = groupIntoLanes([a, b, c]);
-
-    // Post-WF-044: same-lane reorders never persist an `order` — see the
-    // WF-044 test above. This covers a FORWARD drag specifically (dragged
-    // card originally sits BEFORE the drop target) staying a NO_OP too.
-    const { lane, index } = locateDropTarget("WF-C", lanes);
-    const plan = resolveDrop(a, lane!, index, lanes);
-
-    expect(plan.calls).toEqual([]);
-  });
-
-  it("(a) same-lane BACKWARD drag (C onto A in [A,B,C]) is a NO_OP — index derived via locateDropTarget", () => {
+  it("same-lane BACKWARD drag (C onto A in [A,B,C]) restamps the lane", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
@@ -92,10 +84,12 @@ describe("resolveDrop", () => {
     const { lane, index } = locateDropTarget("WF-A", lanes);
     const plan = resolveDrop(c, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([]);
+    expect(plan.calls).toEqual([
+      { kind: "reorderLane", ids: ["WF-C", "WF-A", "WF-B"] },
+    ]);
   });
 
-  it("(a) same-lane interior reorder (drag C onto B) is a NO_OP", () => {
+  it("same-lane interior reorder (drag C onto B) restamps the lane", () => {
     const a = card({ id: "WF-A", status: "planned", order: 10 });
     const b = card({ id: "WF-B", status: "planned", order: 20 });
     const c = card({ id: "WF-C", status: "planned", order: 30 });
@@ -103,6 +97,19 @@ describe("resolveDrop", () => {
 
     const { lane, index } = locateDropTarget("WF-B", lanes);
     const plan = resolveDrop(c, lane!, index, lanes);
+
+    expect(plan.calls).toEqual([
+      { kind: "reorderLane", ids: ["WF-A", "WF-C", "WF-B"] },
+    ]);
+  });
+
+  it("a drag that ends where it started is still a NO_OP — a no-move must not write", () => {
+    const a = card({ id: "WF-A", status: "planned", order: 10 });
+    const b = card({ id: "WF-B", status: "planned", order: 20 });
+    const lanes = groupIntoLanes([a, b]);
+
+    const { lane, index } = locateDropTarget("WF-A", lanes);
+    const plan = resolveDrop(a, lane!, index, lanes);
 
     expect(plan.calls).toEqual([]);
   });
@@ -211,17 +218,21 @@ describe("resolveDrop", () => {
     expect(plan.calls).toEqual([]);
   });
 
-  it("parked cards reordering WITHIN Parked is a NO_OP too (same-lane rule applies uniformly, no move call either)", () => {
+  it("parked cards reorder WITHIN Parked like any other lane — the same-lane rule applies uniformly, and still no move call", () => {
     const p1 = card({ id: "WF-P1", status: "parked", order: 10 });
     const p2 = card({ id: "WF-P2", status: "parked", order: 20 });
     const p3 = card({ id: "WF-P3", status: "parked", order: 30 });
     const lanes = groupIntoLanes([p1, p2, p3]);
 
-    // Backward drag P3 onto P1 within Parked — same-lane, so NO_OP.
+    // Backward drag P3 onto P1 within Parked. Reordering is allowed; what a
+    // parked card may never do by drag is LEAVE Parked (covered above).
     const { lane, index } = locateDropTarget("WF-P1", lanes);
     const plan = resolveDrop(p3, lane!, index, lanes);
 
-    expect(plan.calls).toEqual([]);
+    expect(plan.calls).toEqual([
+      { kind: "reorderLane", ids: ["WF-P3", "WF-P1", "WF-P2"] },
+    ]);
+    expect(plan.calls.some((c) => c.kind === "move")).toBe(false);
   });
 });
 

@@ -79,10 +79,14 @@ describe("groupIntoLanes", () => {
     }
   });
 
-  it("sorts by updated recency descending (newest first), ignoring order", () => {
-    const oldest = card({ id: "WF-OLDEST", order: 5, updated: "2026-07-01T09:00" });
-    const newest = card({ id: "WF-NEWEST", order: 999, updated: "2026-07-20T09:00" });
-    const middle = card({ id: "WF-MIDDLE", order: 10, updated: "2026-07-10T09:00" });
+  it("sorts by updated recency descending (newest first) in a lane nobody has arranged", () => {
+    // Every card ships on the same `order: 0` default, so an untouched lane
+    // is ranked entirely by recency — the behaviour this board has always
+    // had, and the reason making `order` lead the sort changes nothing until
+    // something is actually dragged.
+    const oldest = card({ id: "WF-OLDEST", order: 0, updated: "2026-07-01T09:00" });
+    const newest = card({ id: "WF-NEWEST", order: 0, updated: "2026-07-20T09:00" });
+    const middle = card({ id: "WF-MIDDLE", order: 0, updated: "2026-07-10T09:00" });
 
     const lanes = groupIntoLanes([oldest, newest, middle]);
     const backlog = laneByKey(lanes, "backlog");
@@ -91,6 +95,40 @@ describe("groupIntoLanes", () => {
       "WF-NEWEST",
       "WF-MIDDLE",
       "WF-OLDEST",
+    ]);
+  });
+
+  it("lets a manual order beat recency once a lane HAS been arranged", () => {
+    // `overseer reorder` numbers a lane 10, 20, 30 — the arrangement must
+    // then hold against the 5s poll, which is the whole point of persisting
+    // it. The newest card sits last here because that is where it was put.
+    const oldest = card({ id: "WF-OLDEST", order: 10, updated: "2026-07-01T09:00" });
+    const newest = card({ id: "WF-NEWEST", order: 30, updated: "2026-07-20T09:00" });
+    const middle = card({ id: "WF-MIDDLE", order: 20, updated: "2026-07-10T09:00" });
+
+    const lanes = groupIntoLanes([oldest, newest, middle]);
+
+    expect(laneByKey(lanes, "backlog").cards.map((x) => x.id)).toEqual([
+      "WF-OLDEST",
+      "WF-MIDDLE",
+      "WF-NEWEST",
+    ]);
+  });
+
+  it("floats a card created after the arrangement to the top, on its unset order", () => {
+    // `reorder` numbers from 10 upward precisely so that the `order: 0`
+    // default keeps meaning "unplaced" — new work arrives at the top rather
+    // than in an arbitrary middle.
+    const placedFirst = card({ id: "WF-A", order: 10, updated: "2026-07-01T09:00" });
+    const placedSecond = card({ id: "WF-B", order: 20, updated: "2026-07-02T09:00" });
+    const brandNew = card({ id: "WF-NEW", order: 0, updated: "2026-07-20T09:00" });
+
+    const lanes = groupIntoLanes([placedFirst, placedSecond, brandNew]);
+
+    expect(laneByKey(lanes, "backlog").cards.map((x) => x.id)).toEqual([
+      "WF-NEW",
+      "WF-A",
+      "WF-B",
     ]);
   });
 
