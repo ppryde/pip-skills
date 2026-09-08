@@ -256,3 +256,47 @@ class TestChronicleOnlyRoots:
         assert entry["has_board"] is False       # no board.db — the holding page still applies
         assert entry["chronicled"] is True       # but the Chronicle may be scoped to it
         assert entry["live_sessions"] == 0       # census knows nothing of it
+
+
+class TestSiblingPluginContract:
+    """The seam between overseer and chronicle is a FILESYSTEM layout plus a
+    subprocess, and neither half was defended by a test.
+
+    `cli_client` resolves its optional siblings by walking up four parents to
+    `plugins/` and naming a directory. That is a real contract with the
+    marketplace checkout: rearrange the tree and the Chronicle page silently
+    reports "not installed" rather than failing loudly, because every failure
+    mode of `run_chronicle` is deliberately soft.
+    """
+
+    def test_the_sibling_plugin_layout_still_holds(self) -> None:
+        assert cli_client._CHRONICLE_CLI.is_file(), (
+            f"chronicle CLI not at {cli_client._CHRONICLE_CLI} — the parents[4]/'chronicle' "
+            "resolution in cli_client.py no longer matches the repo layout, and the "
+            "Chronicle page will degrade to 'not installed' with nothing to say why"
+        )
+        assert cli_client.chronicle_installed() is True
+
+    def test_every_optional_sibling_resolves_the_same_way(self) -> None:
+        # vigil and census are reached by the identical parents[4] walk, so
+        # they stand or fall together — pin all three rather than the one
+        # this suite happens to be about.
+        for cli in (cli_client._CHRONICLE_CLI, cli_client._VIGIL_CLI, cli_client._CENSUS_CLI):
+            assert cli.is_file(), f"optional sibling plugin CLI missing: {cli}"
+            assert cli.parent.parent.parent.name == "plugins"
+
+    def test_overseer_never_imports_chronicle(self) -> None:
+        """The decoupling is a PROCESS boundary. An import would make the
+        optional plugin a hard dependency of the dashboard's startup, which
+        is exactly what `run_chronicle`'s soft-degrading contract exists to
+        avoid — and it would fail at import time, not at call time."""
+        backend = Path(cli_client.__file__).resolve().parent
+        offenders = []
+        for path in backend.rglob("*.py"):
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith(("import ", "from ")) and "chronicle" in stripped:
+                    offenders.append(f"{path.name}:{lineno}: {stripped}")
+        assert offenders == [], (
+            "the dashboard backend must reach chronicle by subprocess only: " + "; ".join(offenders)
+        )

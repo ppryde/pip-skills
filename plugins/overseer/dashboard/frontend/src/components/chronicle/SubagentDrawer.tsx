@@ -12,7 +12,7 @@
  * list reads `a8905de978ab95a89` eight times. That text is UNTRUSTED
  * transcript content and renders as a text node only, never as markup.
  */
-import { useEffect } from "react";
+
 
 import { useChronicleAgent } from "../../board/chronicle/useChronicle";
 import {
@@ -31,6 +31,7 @@ import Gauge from "./Gauge";
 import StatTile from "./StatTile";
 import McpExplorer from "./McpExplorer";
 import UsageCallout from "./UsageCallout";
+import { useDismiss } from "../../board/useDismiss";
 
 export interface SubagentDrawerProps {
   sessionId: string;
@@ -69,18 +70,11 @@ export default function SubagentDrawer({
   const { detail, loading, error } = useChronicleAgent(sessionId, agentId);
   const current = agents.find((a) => a.agent_id === agentId);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      // Only the top layer closes, and the session drawer beneath must not
-      // also act on the same press — hence stopPropagation on the container
-      // below plus this capture-phase handler taking the event first.
-      e.stopPropagation();
-      onBack();
-    }
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onBack]);
+  // The innermost layer, so the shared stack hands it the key. This used to
+  // be a capture-phase listener calling `stopPropagation` to take the event
+  // before the session drawer beneath could also act on it — a negotiation
+  // that only existed because every overlay listened independently.
+  useDismiss(onBack);
 
   const events: ChartEvent[] = detail
     ? detail.turn_series.flatMap((t, i): ChartEvent[] => (t.cold ? [{ index: i, kind: "cold" }] : []))

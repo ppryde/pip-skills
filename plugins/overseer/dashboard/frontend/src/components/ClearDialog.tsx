@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { clearRepo } from "../api/client";
 import type { ClearResponse } from "../api/types";
 // WF-097 follow-up: the confirm buttons now route through `<Button>` and the
@@ -10,6 +10,7 @@ import type { ClearResponse } from "../api/types";
 // and `.party-sheet__close` stays the icon-only "×" affordance.
 import { Button, Input } from "../ui";
 import CopyablePath from "./CopyablePath";
+import { useDismiss } from "../board/useDismiss";
 
 export interface ClearDialogProps {
   repoLabel: string;
@@ -48,13 +49,7 @@ function ClearDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  useDismiss(onClose);
 
   async function slay() {
     setBusy(true);
