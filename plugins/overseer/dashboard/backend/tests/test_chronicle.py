@@ -17,7 +17,10 @@ from fastapi.testclient import TestClient
 
 from app import cli_client
 
-_CHRONICLE_CLI = Path(__file__).resolve().parents[4] / "chronicle" / "scripts" / "cli.py"
+# Through `find_plugin`, not a fixed `parents[4]` walk: that walk is the very
+# shape `find_plugin` was written to replace, and a test that hard-codes the
+# checkout layout cannot fail when the app's discovery does.
+_CHRONICLE_CLI = cli_client.find_plugin("chronicle")
 
 
 def _record(kind: str, uuid: str, ts: str, **extra: object) -> dict[str, object]:
