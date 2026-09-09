@@ -1,13 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import TopBar from "./components/TopBar";
 import CopyablePath from "./components/CopyablePath";
 import type { View } from "./components/TopBar";
-import ChroniclePage from "./components/chronicle/ChroniclePage";
 import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
 import type { ChronicleQuery } from "./api/types";
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
+
+/**
+ * The Chronicle page is code-split, because the chronicle plugin is OPTIONAL.
+ *
+ * The backend already treats it that way — `chronicle_installed()` probes for
+ * a sibling CLI and `run_chronicle` degrades to None — and `chronicleAvailable`
+ * below hides the tab when it is absent. The BUNDLE did not: the page and its
+ * fourteen components compiled into the one chunk every board user downloads,
+ * so a dashboard with no chronicle installed still shipped its entire UI. A
+ * lazy import makes the optionality true of the artefact, not just the API.
+ */
+const ChroniclePage = lazy(() => import("./components/chronicle/ChroniclePage"));
 import { chronicleScopeFor } from "./board/chronicle/scope";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
@@ -467,14 +478,18 @@ function App() {
             reachable for an unbegun repo too — the page just locks its
             scope to "All repos" since a boardless root can't be named. */}
         {view === "chronicle" ? (
-          <ChroniclePage
-            scope={chronicleScope}
-            summary={chronicle.summary}
-            sessions={chronicle.sessions}
-            loading={chronicle.loading}
-            error={chronicle.error}
-            onRetry={() => void chronicle.refresh()}
-          />
+          // The same line the board shows while it loads — the chunk arrives
+          // in a blink over localhost, so anything heavier would be a flash.
+          <Suspense fallback={<p className="board-placeholder">Loading the Chronicle…</p>}>
+            <ChroniclePage
+              scope={chronicleScope}
+              summary={chronicle.summary}
+              sessions={chronicle.sessions}
+              loading={chronicle.loading}
+              error={chronicle.error}
+              onRetry={() => void chronicle.refresh()}
+            />
+          </Suspense>
         ) : isUnbegun && selectedRepo ? (
           <UnbegunHolding
             repo={selectedRepo}

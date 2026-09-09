@@ -27,10 +27,56 @@ if str(_OVERSEER_ROOT) not in sys.path:
     sys.path.insert(0, str(_OVERSEER_ROOT))
 from scripts import config as overseer_config  # must follow the sys.path setup above
 
-# parents[4]=plugins
-_VIGIL_CLI = Path(__file__).resolve().parents[4] / "vigil" / "scripts" / "cli.py"
-_CENSUS_CLI = Path(__file__).resolve().parents[4] / "census" / "scripts" / "cli.py"
-_CHRONICLE_CLI = Path(__file__).resolve().parents[4] / "chronicle" / "scripts" / "cli.py"
+def _version_key(name: str) -> tuple[int, ...]:
+    """A directory name as a comparable version. Non-numeric parts sort as 0,
+    so an odd entry never wins over a real version and never raises."""
+    return tuple(int(part) if part.isdigit() else 0 for part in name.split("."))
+
+
+def find_plugin(name: str, _from: Path | None = None) -> Path | None:
+    """The `scripts/cli.py` of a sibling plugin, in EITHER layout, or None.
+
+    This used to be `parents[4] / name / "scripts" / "cli.py"` — a fixed walk
+    up to a directory assumed to be `plugins/`. That holds for a repo
+    checkout and is wrong for every marketplace install, because the cache
+    inserts a version directory between the plugin name and its contents:
+
+        repo       plugins/overseer/dashboard/backend/app/  -> parents[4] = plugins/
+        installed  cache/<mkt>/overseer/0.15.0/.../app/     -> parents[4] = .../overseer/
+
+    So an installed dashboard looked for `overseer/chronicle/scripts/cli.py`,
+    never found it, and reported the plugin absent — which every caller here
+    treats as "not installed" rather than as an error. The Chronicle page has
+    therefore never appeared for anyone who installed rather than cloned, and
+    vigil and census were dead the same way.
+
+    Walking up and testing BOTH shapes at each level is layout-independent
+    and needs no registry, no hook and no prior run of the plugin being
+    looked for. Among cached versions the highest wins: old ones linger (they
+    stay marked `.in_use`), and a lexical "first found" would pin 0.10.0
+    below 0.9.0.
+    """
+    start = (_from or Path(__file__)).resolve()
+    for parent in start.parents:
+        candidate = parent / name
+        if not candidate.is_dir():
+            continue
+        direct = candidate / "scripts" / "cli.py"
+        if direct.is_file():
+            return direct
+        versioned = [
+            child / "scripts" / "cli.py"
+            for child in candidate.iterdir()
+            if child.is_dir() and (child / "scripts" / "cli.py").is_file()
+        ]
+        if versioned:
+            return max(versioned, key=lambda cli: _version_key(cli.parents[1].name))
+    return None
+
+
+_VIGIL_CLI = find_plugin("vigil")
+_CENSUS_CLI = find_plugin("census")
+_CHRONICLE_CLI = find_plugin("chronicle")
 
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
@@ -75,6 +121,11 @@ def run_overseer(root: Path, *args: str, json_out: bool = False, timeout: int = 
 
 
 def run_vigil(root: Path, *args: str, json_out: bool = False, timeout: int = 15) -> Any:
+    # Unlike census/chronicle, vigil's callers surface a CliError rather than
+    # degrading, so an absent plugin is reported as one instead of blowing up
+    # on `str(None)` inside `_run`.
+    if _VIGIL_CLI is None:
+        raise CliError(500, "vigil plugin not installed")
     return _run(_VIGIL_CLI, "vigil", root, args, json_out, timeout)
 
 
@@ -92,6 +143,8 @@ def _census_env(config_dir: Path | None) -> dict[str, str]:
 def _census_read(args: list[str], config_dir: Path | None, timeout: int) -> dict[str, Any] | None:
     """One `census read …` subprocess; None on any failure, like every census
     read here."""
+    if _CENSUS_CLI is None:
+        return None
     try:
         result = subprocess.run(
             [sys.executable, str(_CENSUS_CLI), "read", *args],
@@ -187,12 +240,17 @@ def run_census_all(timeout: int = 10) -> dict[str, Any] | None:
 
 
 def chronicle_installed() -> bool:
-    """Whether the chronicle plugin's CLI is present beside this checkout.
+    """Whether the chronicle plugin is present beside this install.
 
     The Chronicle page is OPTIONAL: the dashboard grows it only when the
-    plugin exists (same sibling-plugin resolution as census/vigil above).
+    plugin exists (same `find_plugin` resolution as census/vigil above).
+
+    Both halves earn their place. `is not None` covers "not installed when
+    this server started", which is what discovery answers. `is_file()` covers
+    "removed since" — the dashboard is launched by hand and left running for
+    days, so the plugin it found at import can be uninstalled underneath it.
     """
-    return _CHRONICLE_CLI.is_file()
+    return _CHRONICLE_CLI is not None and _CHRONICLE_CLI.is_file()
 
 
 def run_chronicle(*args: str, timeout: int = 20) -> Any:

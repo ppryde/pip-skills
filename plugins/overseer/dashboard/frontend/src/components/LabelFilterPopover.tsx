@@ -1,5 +1,5 @@
-import { useEffect } from "react";
 import { labelColor } from "../board/labelColor";
+import { useDismiss } from "../board/useDismiss";
 
 export interface LabelFilterPopoverProps {
   /** All distinct labels across the board (`cardFilter.distinctLabels`) —
@@ -75,13 +75,7 @@ function LabelFilterPopover({
   onClose,
   colorRegistry,
 }: LabelFilterPopoverProps) {
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  useDismiss(onClose);
 
   return (
     <div

@@ -28,6 +28,7 @@ import StatTile from "./StatTile";
 import SubagentDrawer, { agentLabel } from "./SubagentDrawer";
 import McpExplorer from "./McpExplorer";
 import UsageCallout from "./UsageCallout";
+import { useDismiss } from "../../board/useDismiss";
 
 export interface SessionDrawerProps {
   sessionId: string | null;
@@ -58,17 +59,12 @@ export default function SessionDrawer({
   // session's agent.
   useEffect(() => setOpenAgent(null), [sessionId]);
 
-  useEffect(() => {
-    if (sessionId === null) return;
-    function onKey(e: KeyboardEvent) {
-      // Escape unwinds ONE layer. While a subagent is open it owns the key,
-      // and this drawer stays put — asked as a state question rather than
-      // fought over as an event, since this component knows both answers.
-      if (e.key === "Escape" && openAgent === null) onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [sessionId, onClose, openAgent]);
+  // Escape unwinds ONE layer. While a subagent is open it owns the key and
+  // this drawer stays put — still asked as a state question rather than
+  // fought over as an event, since this component knows both answers. The
+  // shared stack in `useDismiss` would pick the subagent anyway; saying it
+  // here too keeps the reason legible where the state lives.
+  useDismiss(onClose, sessionId !== null && openAgent === null);
 
   if (sessionId === null) return null;
 

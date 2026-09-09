@@ -1,7 +1,7 @@
-import { useEffect } from "react";
 import type { PartyMember } from "../board/party";
 import { prLabel } from "../board/prLabel";
 import PartyAvatar from "./PartyAvatar";
+import { useDismiss } from "../board/useDismiss";
 
 /** WF-084: short display form of a census session id — first 8 chars plus
  * an ellipsis when the id runs longer, verbatim otherwise. The full id
@@ -53,13 +53,7 @@ function PartyOverlay({
   activeBranch = null,
   threshold = null,
 }: PartyOverlayProps) {
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  useDismiss(onClose);
 
   const liveCount = party.filter((m) => !m.session.stale).length;
   const totalCount = party.length;
