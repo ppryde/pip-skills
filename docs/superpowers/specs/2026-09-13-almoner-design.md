@@ -433,11 +433,52 @@ against an issue takes that issue key **as its id**. Match on both the
 Two derived checks, computed by joining, neither a notification:
 
 - **Inflow gap** — a Linear issue assigned to you, in an active state, with no
-  overseer card carrying its key.
+  overseer card carrying its key. **Settled 2026-09-13 — see "Active" below.**
 - **Upstream drift** — an overseer card whose Linear issue has since been
   closed, reassigned, or dropped in priority.
 
 Both render as `asks: "reconcile"`, in their own group.
+
+### "Active" is a state TYPE, with one named exception
+
+**Decision (2026-09-13, owner): active means `type: "started"`, minus
+`Blocked`.** In practice: *In Progress* and *In Review*.
+
+Key the rule on the state **type, never the name.** Linear names are defined
+per team and differ between them, so a list of names is a rule that breaks the
+first time a second team appears; `type` is workspace-wide and stable. It also
+keeps the spec free of any real team's vocabulary, which matters because this
+repo is public.
+
+The reasoning, stated so it can be argued with later:
+
+| Type | Active? | Why |
+|---|---|---|
+| `started` | **yes** | You have begun it. Beginning work with no breakdown behind it is exactly the gap worth seeing. |
+| `unstarted` | no | Ready-to-pick-up is not a gap. Having no card is *correct* until you start. |
+| `backlog` | no | Flagging a backlog deliberately not started is the noise that would make the check worthless. |
+| `triage` | no | Not yours yet. |
+| `completed` / `canceled` / `duplicate` | no | Nothing to decompose. |
+
+**The `Blocked` exception is deliberate and is the one place a name is used.**
+Linear classes a blocked issue as `started`, which is true — it was begun —
+but a blocked issue is one you have *stopped on purpose*, and a check nagging
+for a breakdown of work you cannot do is the check crying wolf. So it is
+excluded by name.
+
+That makes the exception the portable part's weak point, and the config must
+own it rather than the code:
+
+```jsonc
+{ "type": "linear",
+  "active": { "types": ["started"], "exclude": ["Blocked"] } }
+```
+
+`types` is the backbone and travels anywhere; `exclude` is a per-workspace
+escape hatch that is empty by default. A name in `exclude` that matches no
+state is **not an error** — teams rename things — but `almoner status` should
+say so, because a silently-inert exclusion is how this check would start
+crying wolf again without anyone noticing.
 
 ## Surface
 
@@ -518,9 +559,8 @@ dismiss/ack, and the history read the table is already shaped to display.
 
 1. ~~**Retention policy for the store.**~~ **Settled 2026-09-13 — see
    Retention: the window is a view, not a delete.**
-2. **Which Linear states count as "active"** for the inflow gap? Wrong here
-   makes the check either noisy (flagging a backlog deliberately not started)
-   or useless. Needs the real workflow states, not a guess.
+2. ~~**Which Linear states count as "active"**~~ **Settled 2026-09-13 against
+   the real workflow states — see "Active" is a state TYPE.**
 3. **Is the source list per-machine or per-repo?** `claude_dirs` is
    machine-level and sources probably are too — but the board is per-repo, so
    the same digest appearing on every board needs confirming as intended.
