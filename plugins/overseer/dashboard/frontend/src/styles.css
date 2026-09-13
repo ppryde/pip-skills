@@ -72,18 +72,13 @@
   --legacy-color-8b95a1: #8b95a1;
   --legacy-color-2a313b: #2a313b;
   --legacy-color-3a4453: #3a4453;
-  --legacy-color-7a2e2e: #7a2e2e;
-  --legacy-color-ffd9d9: #ffd9d9;
   --legacy-color-20262d: #20262d;
   --legacy-color-16a34a: #16a34a;
   --legacy-color-6b7280: #6b7280;
-  --legacy-color-b3261e: #b3261e;
   --legacy-color-e2e5e9: #e2e5e9;
   --legacy-color-f0f1f4: #f0f1f4;
   --legacy-color-374151: #374151;
   --legacy-color-9ca3af: #9ca3af;
-  --legacy-color-d33d3d: #d33d3d;
-  --legacy-color-fff5f5: #fff5f5;
   --legacy-color-2563eb: #2563eb;
   --legacy-color-4b5563: #4b5563;
   --legacy-color-15803d: #15803d;
@@ -118,6 +113,28 @@
   --qb-bg-page-highlight-tl: #f7eed8;
   --qb-bg-page-highlight-br: #eadcbd;
   --qb-panel: #fbf4e1;
+
+  /* ---- Alarm: blocked, quarantined, failed, destructive -------------------
+     Pantone 485 C — the red a British pillar box is actually painted. It
+     replaces five unrelated reds that were each named after their own hex
+     (`--legacy-color-7a2e2e` and friends), which is what a set nobody designed
+     looks like from the inside: four saturations across five degrees of hue.
+
+     TWO values, and they have different JOBS rather than being two shades of
+     one job — which is what stopped the previous pairing working. 485 is a
+     colour you put BEHIND things; it cannot be a colour you write in. As small
+     text on parchment it measures 3.83:1, under the 4.5:1 floor, so every red
+     word on the board takes `--qb-alarm-deep` instead. That one commits warm
+     (+8°) rather than merely dimming: two reds a couple of degrees apart read
+     as one colour printed badly, while a step that clearly goes somewhere
+     reads as a pair.
+
+     Filled alarm surfaces carry `--qb-alarm-ink`, which is WHITE. The soft
+     pink this board used, #ffd9d9, sits at 3.75:1 on 485 and cannot come. */
+  --qb-alarm: #da291c;
+  --qb-alarm-deep: #8f2f16;
+  --qb-alarm-ink: #ffffff;
+  --qb-alarm-tint: #fdeeec;
   /* The guild bar's field, and the two inks that read on it.
      Chosen as VALUE rather than hue: the bar needed to stop being the same
      cream as the page without picking a fight with it, and a dark warm brown
@@ -1077,13 +1094,13 @@ body {
    `.clear-dialog .danger`), so this button still needs its own paint
    rather than relying on that scoped rule. */
 .topbar-clear.danger {
-  border: 1.5px solid var(--legacy-color-b3261e);
-  background: var(--legacy-color-fff5f5);
-  color: var(--legacy-color-b3261e);
+  border: 1.5px solid var(--qb-alarm);
+  background: var(--qb-alarm-tint);
+  color: var(--qb-alarm-deep);
 }
 
 .topbar-clear.danger:hover {
-  background: var(--legacy-color-b3261e);
+  background: var(--qb-alarm);
   color: var(--legacy-color-fff);
   box-shadow: none;
 }
@@ -1338,8 +1355,8 @@ body {
      shadow, tried alongside the other topbar badges); keeps its alert-red
      fill. */
   border-radius: var(--qb-radius-pennant);
-  background: var(--legacy-color-7a2e2e);
-  color: var(--legacy-color-ffd9d9);
+  background: var(--qb-alarm);
+  color: var(--qb-alarm-ink);
 }
 
 /* Guild pills (HANDOFF: Gold total / vanquished / fleet-health). Gold and
@@ -1737,7 +1754,7 @@ body {
 /* Same danger-red exception as .topbar__quarantine-banner above — no
    HANDOFF-sourced alert colour to convert to. */
 .board-error {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
 }
 
 /* --- "The messenger has been waylaid" (Waylaid.tsx) ------------------------
@@ -1750,8 +1767,8 @@ body {
   gap: 0.75rem;
   align-items: center;
   padding: 0.55rem 0.8rem;
-  background: color-mix(in srgb, var(--legacy-color-b3261e) 7%, var(--qb-panel));
-  border: 1.5px solid color-mix(in srgb, var(--legacy-color-b3261e) 45%, var(--qb-card-border));
+  background: color-mix(in srgb, var(--qb-alarm) 7%, var(--qb-panel));
+  border: 1.5px solid color-mix(in srgb, var(--qb-alarm) 45%, var(--qb-card-border));
   /* A strip, not a card: the button-scale wobble keeps it slim. */
   border-radius: var(--qb-btn-wobble-2);
   /* An alert is read once, in the middle, and then acted on — stretched the
@@ -1933,8 +1950,8 @@ body {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: var(--legacy-radius-4px);
-  background: var(--legacy-color-7a2e2e);
-  color: var(--legacy-color-ffd9d9);
+  background: var(--qb-alarm);
+  color: var(--qb-alarm-ink);
   font-size: 0.8rem;
 }
 
@@ -2295,8 +2312,8 @@ body {
 }
 
 .card-tile--blocked {
-  border-color: var(--legacy-color-d33d3d);
-  background: var(--legacy-color-fff5f5);
+  border-color: var(--qb-alarm);
+  background: var(--qb-alarm-tint);
 }
 
 .card-tile--highlighted {
@@ -2333,7 +2350,7 @@ body {
    see the quarantine-banner comment above) rather than inventing a new
    warning colour. Can stack with `.is-spotlight` on the same card/row. */
 .is-near-threshold {
-  outline: 2px solid var(--legacy-color-d33d3d);
+  outline: 2px solid var(--qb-alarm);
   outline-offset: 1px;
 }
 
@@ -3237,7 +3254,7 @@ body {
   font-weight: 700;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-d33d3d);
+  background: var(--qb-alarm);
   color: var(--legacy-color-fff);
 }
 
@@ -3277,7 +3294,7 @@ body {
 
 /* Tripwire (actual >= 2x estimate) is visually distinct. */
 .budget-meter--tripwire .budget-meter__value {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm);
   font-weight: 700;
 }
 
@@ -3286,7 +3303,7 @@ body {
   font-weight: 700;
   padding: 0.05rem 0.3rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-b3261e);
+  background: var(--qb-alarm);
   color: var(--legacy-color-fff);
 }
 
@@ -3451,7 +3468,7 @@ body {
 /* Same danger-red exception as .board-error/.topbar__quarantine-banner
    elsewhere in the epic — no HANDOFF-sourced alert colour to convert to. */
 .card-drawer__status--error {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
 }
 
 .card-drawer__header {
@@ -3595,7 +3612,7 @@ body {
    saveEdit() keeps edit mode open and surfaces inline here (fix-up, PR3
    dual review) rather than silently discarding the draft. */
 .card-drawer__edit-error {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
   font-size: 0.85rem;
   margin: 0;
 }
@@ -4330,7 +4347,7 @@ a.card-drawer__pr-chip:hover {
 .attributes-editor__error {
   flex-basis: 100%;
   margin: 0;
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
   font-size: 0.85rem;
 }
 

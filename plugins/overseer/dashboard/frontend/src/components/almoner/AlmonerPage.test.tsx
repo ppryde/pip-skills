@@ -156,6 +156,23 @@ describe("AlmonerPage", () => {
     expect(screen.getByText(/arrivals between/i)).toBeInTheDocument();
   });
 
+  it("still draws a band when the newest day holds only a derived row", () => {
+    // Found by the clock rolling past midnight mid-session. `groupByDay` parks
+    // undated reconcile items on today, so in the small hours the newest day
+    // is a synthetic one with a single derived row and no arrival times — and
+    // the band, reading only `days[0]`, drew nothing. The page looked broken
+    // for the first hours of every day, and no test noticed because they all
+    // happened to run in the afternoon.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(Date.now() + 26 * 3600_000));
+      render(<AlmonerPage status={null} demo />);
+      expect(screen.getByText(/arrivals between/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("names a source it could not reach", () => {
     // A silently short digest reads as "nothing needs you" — the one wrong
     // answer this page can give.

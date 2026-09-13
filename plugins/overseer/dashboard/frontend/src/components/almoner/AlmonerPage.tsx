@@ -52,9 +52,23 @@ export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) 
   const items = useMemo(() => digest?.items ?? [], [digest]);
   const days = useMemo(() => groupByDay(items), [items]);
   const people = useMemo(() => whosWaiting(items), [items]);
-  // The band covers the newest day only — a scatter across a fortnight is a
-  // different chart, and this one answers "what shape did today have".
-  const band = useMemo(() => (days[0] ? dayBand(days[0].items) : null), [days]);
+  // The band covers ONE day — a scatter across a fortnight is a different
+  // chart, and this one answers "what shape did that day have".
+  //
+  // The newest day that actually has arrivals, though, not simply `days[0]`.
+  // A day can exist with nothing to plot: `groupByDay` parks undated reconcile
+  // items on today, so at 00:12 the newest day is a synthetic one holding a
+  // single derived row and no arrival times at all. Reading `days[0]` there
+  // gave `null` and the band silently vanished — the page looked broken for
+  // the first hours of every day. The same guard covers a real day of nothing
+  // but machine-mail rollups, which `dayBand` excludes by design.
+  const band = useMemo(() => {
+    for (const day of days) {
+      const drawn = dayBand(day.items);
+      if (drawn) return drawn;
+    }
+    return null;
+  }, [days]);
   const failed = failedSources(digest?.sources);
 
   // "Installed but no sources" is a normal published state — the plugin ships
