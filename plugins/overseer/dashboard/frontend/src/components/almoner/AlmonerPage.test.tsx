@@ -62,8 +62,9 @@ describe("AlmonerPage", () => {
   });
 
   it("leaves the page's name to the guild bar, not a second heading", () => {
-    // TopBar's per-view title owns it now; a page-level "The Almoner" under
-    // the bar's "The Almoner" is a layout that has lost track of who names it.
+    // TopBar's per-view title owns it now; the page name repeated directly
+    // under the bar's copy of it is a layout that has lost track of who names
+    // the page.
     const { container } = render(<AlmonerPage status={null} demo />);
     expect(container.querySelector(".almoner__heading")).toBeNull();
   });

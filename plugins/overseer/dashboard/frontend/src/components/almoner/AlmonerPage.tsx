@@ -65,8 +65,8 @@ export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) 
     <div className={`almoner${live.loading ? " almoner--refreshing" : ""}`}>
       <div className="almoner__bar">
         {/* No heading here: the guild bar above names the page (TopBar's
-            per-view title). Two "The Almoner"s, one under the other, is a
-            layout that has lost track of who owns the page's name. */}
+            per-view title). The page name twice, one under the other, is a
+            layout that has lost track of who owns it. */}
         <Button
           variant="primary"
           onClick={live.refresh}

@@ -49,8 +49,8 @@ export type View = "board" | "atlas" | "chronicle" | "almoner";
 const VIEW_TITLES: Record<View, string> = {
   board: "Adventurers\u2019 Guild Board",
   atlas: "Epic Atlas",
-  chronicle: "The Chronicle",
-  almoner: "The Almoner",
+  chronicle: "Chronicle",
+  almoner: "Almoner",
 };
 
 export interface TopBarProps {

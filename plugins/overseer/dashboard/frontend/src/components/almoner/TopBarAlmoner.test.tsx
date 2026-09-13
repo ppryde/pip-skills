@@ -115,8 +115,8 @@ describe("TopBar Almoner coin", () => {
     for (const [view, title] of [
       ["board", "Adventurers\u2019 Guild Board"],
       ["atlas", "Epic Atlas"],
-      ["chronicle", "The Chronicle"],
-      ["almoner", "The Almoner"],
+      ["chronicle", "Chronicle"],
+      ["almoner", "Almoner"],
     ] as [TopBarProps["view"], string][]) {
       const { container } = render(
         <TopBar {...props({ chronicleAvailable: true, almonerAvailable: true, view })} />
