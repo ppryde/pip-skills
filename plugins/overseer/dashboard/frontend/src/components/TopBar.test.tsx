@@ -917,16 +917,48 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
     expect(body).toMatch(/min-width:\s*0/);
   });
 
-  it("still renders the repo <select> with its own transparent-background override", () => {
-    expect(ruleBodyFor(".topbar__repo-select select")).toMatch(
-      /background:\s*transparent/
+  it("lets both dropdowns wear the button's own face, with no transparent override", () => {
+    // They used to override `.qb-select` to `background: transparent` so the
+    // control melted into a cream top bar. The bar is ink now, and that
+    // override left a dark box on a dark field. Deleting it is the whole fix:
+    // `.qb-select` already carries the button's face and ink, so a dropdown
+    // and the Refresh button beside it match by sharing one recipe rather
+    // than by two rules being kept in step by hand.
+    // Declarations only — a rule's own comment may well discuss the override
+    // it no longer has, and prose must not read as a declaration.
+    const decls = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(decls).not.toMatch(/\.topbar__repo-select select\s*\{[^}]*background:\s*transparent/);
+    expect(decls).not.toMatch(/\.topbar__branch-select select\s*\{[^}]*background:\s*transparent/);
+
+    const primitive = ruleBodyFor(".qb-select");
+    expect(primitive).toMatch(/background:\s*var\(--qb-btn-face\)/);
+    expect(primitive).toMatch(/border:\s*[^;]*var\(--qb-btn-ink\)/);
+  });
+
+  it("keeps the branch select's own wobble, so neighbouring controls differ in shape", () => {
+    // WF-046 item 1: no two neighbouring controls read as the same stamped
+    // shape. That override is genuine and survives the face change.
+    expect(ruleBodyFor(".topbar__branch-select select")).toMatch(
+      /border-radius:\s*var\(--qb-btn-wobble-2\)/
     );
   });
 
-  it("still renders the branch <select> with its own transparent-background override", () => {
-    expect(ruleBodyFor(".topbar__branch-select select")).toMatch(
-      /background:\s*transparent/
-    );
+  it("declares the ink-bar colour flip AFTER every rule it has to beat", () => {
+    // The flip is a list of single-class selectors overriding other
+    // single-class selectors, so it wins on source order alone. Declared too
+    // early it is silently inert and the bar's labels render dark-on-dark —
+    // which is exactly what shipped for one commit. Nothing about the page
+    // errors when this regresses, so it is asserted here instead.
+    const flip = css.indexOf("GUILD INK: the controls that sit directly");
+    expect(flip).toBeGreaterThan(-1);
+    for (const selector of [
+      ".topbar__branch-select-label {",
+      ".topbar__threshold {",
+      ".topbar__archive-toggle {",
+    ]) {
+      expect(css.indexOf(selector), selector).toBeGreaterThan(-1);
+      expect(css.indexOf(selector), selector).toBeLessThan(flip);
+    }
   });
 
   it("lets the repo/branch chip wrappers shrink below their content width so the ellipsis can engage", () => {

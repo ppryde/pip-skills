@@ -789,21 +789,6 @@ body {
   min-width: 0;
 }
 
-/* Everything below sits directly on the dark field and so flips to the cream
-   scale. Deliberately an explicit LIST rather than re-defining `--qb-ink-*`
-   inside `.topbar`: the bar also carries parchment-faced boxes — `.qb-btn`,
-   `.qb-chip`, the three guild pills, the coins — whose text is dark precisely
-   because their own face is light. A blanket override would turn every one of
-   those cream-on-cream. Boxes keep their colours; only bare text changes. */
-.topbar__repo-select,
-.topbar__repo-select-label,
-.topbar__branch-select,
-.topbar__branch-select-label,
-.topbar__threshold,
-.topbar__archive-toggle {
-  color: var(--qb-bar-ink-2);
-}
-
 .topbar h1 {
   margin: 0;
   /* Coins hard left, page name hard right. Right-aligned rather than left so
@@ -866,13 +851,6 @@ body {
    this select sits inside a chip whose own box IS the visible border, so it
    stays see-through. The `:hover`/`:focus-visible` states below were also
    full duplicates of `.qb-select`'s own and are gone entirely. */
-.topbar__repo-select select {
-  background: transparent;
-  /* A `<select>` does not reliably inherit colour across browsers, so the
-     cream is set outright rather than left to the wrapper. */
-  color: var(--qb-bar-ink);
-}
-
 /* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
    but-un-init'd root (has_board:false). Native <option> styling is limited
    to a small CSS subset (colour/background/font-style, no border/shape),
@@ -932,11 +910,13 @@ body {
    not `.qb-select`'s neutral ink-400) — everything else duplicated
    `.qb-select` and is gone. */
 .topbar__branch-select select {
-  background: transparent;
+  /* Only the wobble is bespoke now. The parchment-era `background:
+     transparent` override is gone: it existed so the select would melt
+     into a cream bar, and on the ink bar that left a dark box on a dark
+     field. `.qb-select` already carries `--qb-btn-face` and
+     `--qb-btn-ink`, so deleting the override is what makes these read as
+     the buttons beside them — the fix is a removal, not an addition. */
   border-radius: var(--qb-btn-wobble-2);
-  /* A `<select>` does not reliably inherit colour across browsers, so the
-     cream is set outright rather than left to the wrapper. */
-  color: var(--qb-bar-ink);
 }
 
 .topbar__branch-select select:focus-visible {
@@ -1102,6 +1082,31 @@ body {
   font-size: 0.8rem;
   color: var(--qb-ink-500);
   cursor: pointer;
+}
+
+/* GUILD INK: the controls that sit directly on the dark field, flipped to the
+   cream scale.
+   
+   POSITION IS LOAD-BEARING. Every selector here is a single class, the same
+   specificity as the rules it overrides, so it only wins by coming after them
+   — `.topbar__branch-select-label`, `.topbar__threshold` and
+   `.topbar__archive-toggle` all declare their own parchment-era colour above.
+   Declared higher up this file (where it first was) the whole block is inert
+   and these read dark-on-dark. `TopBar.test.tsx` guards the ordering.
+
+   Deliberately an explicit LIST rather than re-defining `--qb-ink-*` inside
+   `.topbar`: the bar also carries parchment-faced boxes — `.qb-btn`,
+   `.qb-select`, `.qb-chip`, the three guild pills, the coins — whose text is
+   dark precisely because their own face is light. A blanket override would
+   turn every one of those cream-on-cream. Boxes keep their own colours; only
+   what touches the field changes. */
+.topbar__repo-select,
+.topbar__repo-select-label,
+.topbar__branch-select,
+.topbar__branch-select-label,
+.topbar__threshold,
+.topbar__archive-toggle {
+  color: var(--qb-bar-ink-2);
 }
 
 .topbar__archive-toggle input {
