@@ -125,14 +125,20 @@
      colour you put BEHIND things; it cannot be a colour you write in. As small
      text on parchment it measures 3.83:1, under the 4.5:1 floor, so every red
      word on the board takes `--qb-alarm-deep` instead. That one commits warm
-     (+8°) rather than merely dimming: two reds a couple of degrees apart read
-     as one colour printed badly, while a step that clearly goes somewhere
-     reads as a pair.
+     — a deepened VERMILION, +10° — rather than merely dimming: two reds a
+     couple of degrees apart read as one colour printed badly, while a step
+     that clearly goes somewhere reads as a pair.
+
+     It is deepened for a measured reason, not for taste. Vermilion proper
+     (#e34234) is 3.24:1 on parchment and a mid vermilion (#c2381a) is 4.27:1
+     — both under the floor for the small bold text these rules set. #b23a17
+     is the most vermilion that clears it, at 4.71:1. Anything brighter here
+     is unreadable, however well it looks in a swatch.
 
      Filled alarm surfaces carry `--qb-alarm-ink`, which is WHITE. The soft
      pink this board used, #ffd9d9, sits at 3.75:1 on 485 and cannot come. */
   --qb-alarm: #da291c;
-  --qb-alarm-deep: #8f2f16;
+  --qb-alarm-deep: #b23a17;
   --qb-alarm-ink: #ffffff;
   --qb-alarm-tint: #fdeeec;
   /* The guild bar's field, and the two inks that read on it.
