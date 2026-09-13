@@ -118,6 +118,13 @@
   --qb-bg-page-highlight-tl: #f7eed8;
   --qb-bg-page-highlight-br: #eadcbd;
   --qb-panel: #fbf4e1;
+  /* The guild bar's own field. Lifted from the rpg-icons pack the coin art
+     comes from — it is the blue those icons were drawn against, so the coins
+     sit on their own ground rather than on parchment. Deliberately a
+     separate token from --qb-panel: the bar is the only surface wearing it,
+     and it must be revertible in one line. */
+  --qb-topbar-field: #ACCEF0;
+  --qb-topbar-field-edge: #8fb4d8;
   --qb-parchment-muted: #f3ead6;
   --qb-parchment-muted-2: #f1e9da;
   --qb-line-dashed: #d8c39a;
@@ -756,7 +763,8 @@ body {
   align-items: center;
   gap: 0.75rem;
   padding: 18px 26px;
-  background: var(--qb-panel);
+  background: var(--qb-topbar-field);
+  border-bottom: 2px solid var(--qb-topbar-field-edge);
   color: var(--qb-ink-700);
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
@@ -769,10 +777,23 @@ body {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  /* Grows so the title has somewhere to be pushed TO. Without this the block
+     is content-sized and `margin-left:auto` on the heading has no slack to
+     take. `min-width:0` lets a long page name shrink rather than shoving the
+     repo selector off the bar. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .topbar h1 {
   margin: 0;
+  /* Coins hard left, page name hard right. Right-aligned rather than left so
+     the name keeps a STABLE right edge as it changes between pages — the
+     titles differ a lot in length ("Epic Atlas" against "Adventurers' Guild
+     Board") and a left edge that moves every time you switch page reads as
+     the layout shifting under you. */
+  margin-left: auto;
+  text-align: right;
   font-family: var(--qb-font-display);
   font-weight: 800;
   /* Fluid: 26px on desktop, easing down to 20px on a phone — no breakpoint
@@ -5204,9 +5225,13 @@ a.card-drawer__pr-chip:hover {
    overlaps its neighbour by half. The active view's coin is the FRONT coin
    (gold-chip fill, full size); the others sit behind, shrunk and dimmed.
    Tapping a back coin brings it forward and swaps the view — transform +
-   z-index driven purely by `aria-pressed`. Positions come from source order
-   (`:nth-child`), the row's width from `data-count`, so a coin added or
-   removed never needs the CSS touched beyond those two lists.
+   z-index driven purely by `aria-pressed`. Each coin's slot and the row's
+   width come from two custom properties TopBar.tsx sets (`--coin-i` per
+   coin, `--coin-n` on the row), so adding or removing a page needs NO rule
+   here. That claim used to be made of a `:nth-child` list and a `data-count`
+   list which both stopped at three — so the Almoner's fourth coin was given
+   no slot, sat at left:0 outside a too-narrow row, and covered the wordmark.
+   A list that must be extended by hand is not a rule; this is.
 
    Each coin's box is 44px (border included) — meeting the ≥44px touch-target
    floor directly. Active = the same gold-chip fill/border/text trio the
@@ -5214,37 +5239,20 @@ a.card-drawer__pr-chip:hover {
 .topbar__view-toggle {
   position: relative;
   flex: 0 0 auto;
-  /* 44px coin + 30px per further coin (each overlapping the last by about
-     a third) */
-  width: 74px;
+  /* 44px for the front coin, +30px for every further one (each overlapping
+     its neighbour by about a third). The fallback of 2 is the minimum the
+     dashboard ever shows — Board and Atlas are not optional. */
+  width: calc(44px + (var(--coin-n, 2) - 1) * 30px);
   height: 44px;
-}
-
-.topbar__view-toggle[data-count="3"] {
-  width: 104px;
-}
-
-/* Stacking reads left to right: each coin lies over the one to its right,
-   like a fanned hand of cards, so on load the row is Board over Atlas over
-   Chronicle. The pressed coin's own z-index (below) still tops them all. */
-.topbar__view-toggle-btn:nth-child(1) {
-  z-index: 3;
-}
-
-.topbar__view-toggle-btn:nth-child(2) {
-  left: 30px;
-  z-index: 2;
-}
-
-.topbar__view-toggle-btn:nth-child(3) {
-  left: 60px;
-  z-index: 1;
 }
 
 .topbar__view-toggle-btn {
   position: absolute;
   top: 0;
-  left: 0;
+  /* Stacking reads left to right: each coin lies over the one to its right,
+     like a fanned hand of cards. The pressed coin tops them all (below). */
+  left: calc(var(--coin-i, 0) * 30px);
+  z-index: calc(20 - var(--coin-i, 0));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5274,7 +5282,9 @@ a.card-drawer__pr-chip:hover {
 /* Front coin — the active view: full size, fully opaque, above its siblings. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
   transform: scale(1);
-  z-index: 4;
+  /* Above every back coin whatever the count — the old `4` was only ever
+     above three siblings. */
+  z-index: 30;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
@@ -8955,16 +8965,10 @@ button.trail-tag:focus-visible {
   flex-wrap: wrap;
 }
 
-.almoner__heading {
-  margin: 0;
-  margin-right: auto;
-  font-family: var(--qb-font-display);
-  font-weight: 800;
-  font-size: 1.4rem;
-  color: var(--qb-ink-900);
-}
-
 .almoner__stamp {
+  /* Takes the space the page heading used to hold open — the guild bar names
+     the page now, so this row starts with its one action. */
+  margin-right: auto;
   font-family: var(--qb-font-prose);
   font-size: 0.85rem;
   color: var(--qb-ink-500);
@@ -9231,6 +9235,11 @@ button.trail-tag:focus-visible {
   width: 54px;
   text-align: center;
   border-left: 4px solid var(--alm-urg, var(--qb-accent-taupe-border));
+  /* Two channels meeting on one cell without colliding: the left edge is the
+     row's STATE, the wash behind it is the row's SOURCE. See the source-colour
+     block below. This is the cell that already holds the source's mark, so the
+     colour lands where the eye is sent to look for it. */
+  background: color-mix(in srgb, var(--alm-src, transparent) 16%, transparent);
 }
 
 .alm-row__time {
@@ -9255,6 +9264,35 @@ button.trail-tag:focus-visible {
 .alm-lab--bundled { border-style: dashed; }
 .alm-table__item.alm-row--open td {
   background: color-mix(in srgb, var(--qb-accent-orange-fill) 7%, transparent);
+}
+
+/* ---- Source colour: the row's OTHER question ------------------------------
+   The spine and wash answer "does this still want me". These answer "who is
+   this from", which is a different question and therefore a different
+   channel — never the same element, or one would silently overwrite the
+   other on any row where both had something to say.
+
+   Hues are the house accents, chosen for the nearest honest association
+   rather than for brand fidelity: a 14px chip cannot carry a brand colour and
+   the page is parchment, not a vendor's site. `almoner` is deliberately the
+   neutral ash — a derived row is not FROM a service at all, and giving it a
+   service's colour would be a small lie. An unknown source simply gets no
+   colour, which is the truthful rendering of "we have no idea what this is". */
+.alm-table__item[data-source="mail"],
+.alm-lab--src[data-source="mail"] { --alm-src: var(--qb-accent-amber-fill); }
+.alm-table__item[data-source="slack"],
+.alm-lab--src[data-source="slack"] { --alm-src: var(--qb-accent-rose-fill); }
+.alm-table__item[data-source="linear"],
+.alm-lab--src[data-source="linear"] { --alm-src: var(--qb-accent-sky-fill); }
+.alm-table__item[data-source="almoner"],
+.alm-lab--src[data-source="almoner"] { --alm-src: var(--qb-accent-ash-fill); }
+
+/* The chip says it in WORDS as well — the colour is reinforcement, the same
+   bargain the state chip strikes. A source with no hue keeps the plain chip
+   rather than rendering a transparent border. */
+.alm-lab--src[data-source] {
+  border-color: color-mix(in srgb, var(--alm-src, var(--qb-card-border)) 70%, var(--qb-card-border));
+  background: color-mix(in srgb, var(--alm-src, transparent) 20%, var(--qb-panel));
 }
 
 .alm-row__labels {

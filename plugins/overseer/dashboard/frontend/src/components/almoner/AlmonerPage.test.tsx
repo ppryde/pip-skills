@@ -34,6 +34,40 @@ describe("AlmonerPage", () => {
     expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
   });
 
+  it("stamps each row and its chip with the source, so colour can key off it", () => {
+    // The colour lives in CSS; what the component owes it is the hook. Both
+    // the row and the chip carry it because they are coloured differently —
+    // the row's lead cell takes a wash, the chip takes a border and fill.
+    const { container } = render(<AlmonerPage status={null} demo />);
+    const rows = [...container.querySelectorAll(".alm-table__item")];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const source = row.getAttribute("data-source");
+      expect(source).toBeTruthy();
+      // The chip in this row must agree with the row, or the two channels
+      // would colour the same item two different ways.
+      expect(row.querySelector(".alm-lab--src")).toHaveAttribute("data-source", source!);
+    }
+  });
+
+  it("colours by source WITHOUT disturbing the state spine", () => {
+    // Source and state are different questions. If a row ever carried its
+    // source in place of its state class, "does this still want me" would
+    // have quietly stopped being answerable.
+    const { container } = render(<AlmonerPage status={null} demo />);
+    const states = ["open", "reconcile", "settled", "bundled"];
+    for (const row of container.querySelectorAll(".alm-table__item")) {
+      expect(states.some((s) => row.classList.contains(`alm-row--${s}`))).toBe(true);
+    }
+  });
+
+  it("leaves the page's name to the guild bar, not a second heading", () => {
+    // TopBar's per-view title owns it now; a page-level "The Almoner" under
+    // the bar's "The Almoner" is a layout that has lost track of who names it.
+    const { container } = render(<AlmonerPage status={null} demo />);
+    expect(container.querySelector(".almoner__heading")).toBeNull();
+  });
+
   it("lays the digest out by day, newest first", () => {
     render(<AlmonerPage status={null} demo />);
     const days = screen.getAllByRole("columnheader", { name: /Today|Yesterday|September|October/i });

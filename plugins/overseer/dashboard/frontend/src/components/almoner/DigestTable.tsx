@@ -44,8 +44,13 @@ function Labels({ item }: { item: AlmonerItem }) {
   const alsoIn = (item.seen_in ?? []).filter((source) => source !== item.source);
   return (
     <span className="alm-row__labels">
-      <Chip className="alm-lab">{item.source}</Chip>
+      <Chip className="alm-lab alm-lab--src" data-source={item.source}>{item.source}</Chip>
       <Chip className="alm-lab">{item.context}</Chip>
+      {/* The source chip carries the source's own colour (styles.css keys off
+          `data-source`), so "where did this come from" is answerable without
+          reading. It is a SECOND channel to the spine's, which stays the
+          row's state — the two ask different questions and must not share
+          an element. */}
       {item.count !== undefined && item.count > 1 && (
         <Chip className="alm-lab alm-lab--count">{item.count} messages</Chip>
       )}
@@ -128,7 +133,11 @@ export default function DigestTable({ days }: DigestTableProps) {
               // something: a single message is shown in full by the excerpt.
               const expandable = threadOf(item).length > 1;
               return [
-                <tr key={item.id} className={`alm-table__item alm-row--${state.key}`}>
+                <tr
+                  key={item.id}
+                  className={`alm-table__item alm-row--${state.key}`}
+                  data-source={item.source}
+                >
                   <td className="alm-row__lead">
                     <SourceIcon source={item.source} size={18} />
                     <span className="alm-row__time">{clockTime(item.arrived)}</span>

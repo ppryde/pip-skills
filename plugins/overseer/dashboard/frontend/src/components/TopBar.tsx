@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -37,6 +38,20 @@ import settingsIcon from "../assets/ui-icons/settings.png";
  * page) each get a coin only when their plugin is installed beside this
  * dashboard. */
 export type View = "board" | "atlas" | "chronicle" | "almoner";
+
+/** What the guild bar calls the page you are on.
+ *
+ * The wordmark used to be the literal string "Adventurers' Guild Board" on
+ * every page, which left the Chronicle and the Almoner unnamed anywhere on
+ * screen — the Chronicle has no heading of its own at all, so it was a page
+ * you could only identify by what it happened to be showing. The board keeps
+ * the guild wordmark because on the board that IS the name. */
+const VIEW_TITLES: Record<View, string> = {
+  board: "Adventurers\u2019 Guild Board",
+  atlas: "Epic Atlas",
+  chronicle: "The Chronicle",
+  almoner: "The Almoner",
+};
 
 export interface TopBarProps {
   context: Context | null;
@@ -288,12 +303,24 @@ function TopBar({
             `aria-label`/`title`. The last-refreshed time is no longer here: it
             moved to a small label beside Refresh below. */}
         <div className="topbar__identity">
-          <div className="topbar__view-toggle" role="group" aria-label="View" data-count={coins.length}>
-            {coins.map((c) => (
+          {/* `--coin-n`/`--coin-i` place the coins and size the row (styles.css).
+              They are here rather than in CSS because the count is only known
+              at render: the Chronicle and Almoner coins come and go with their
+              plugins, and the hand-written rules this replaced stopped at
+              three, which left the Almoner's coin sitting on the wordmark. */}
+          <div
+            className="topbar__view-toggle"
+            role="group"
+            aria-label="View"
+            data-count={coins.length}
+            style={{ "--coin-n": coins.length } as CSSProperties}
+          >
+            {coins.map((c, i) => (
               <button
                 key={c.view}
                 type="button"
                 className="topbar__view-toggle-btn"
+                style={{ "--coin-i": i } as CSSProperties}
                 aria-pressed={view === c.view}
                 aria-label={c.label}
                 title={c.title}
@@ -303,7 +330,7 @@ function TopBar({
               </button>
             ))}
           </div>
-          <h1>Adventurers&rsquo; Guild Board</h1>
+          <h1>{VIEW_TITLES[view]}</h1>
         </div>
 
         {/* Mobile row layout: the topbar is one wrapping flex row and every
