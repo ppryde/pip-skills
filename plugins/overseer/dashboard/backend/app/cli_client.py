@@ -77,6 +77,7 @@ def find_plugin(name: str, _from: Path | None = None) -> Path | None:
 _VIGIL_CLI = find_plugin("vigil")
 _CENSUS_CLI = find_plugin("census")
 _CHRONICLE_CLI = find_plugin("chronicle")
+_ALMONER_CLI = find_plugin("almoner")
 
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
@@ -267,6 +268,52 @@ def run_chronicle(*args: str, timeout: int = 20) -> Any:
     try:
         result = subprocess.run(
             [sys.executable, str(_CHRONICLE_CLI), *args],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def almoner_installed() -> bool:
+    """Whether the almoner plugin is present beside this install.
+
+    The Almoner page is OPTIONAL on the same terms as the Chronicle — see
+    `chronicle_installed` for why both halves of the check earn their place.
+    """
+    return _ALMONER_CLI is not None and _ALMONER_CLI.is_file()
+
+
+# A digest is several remote round trips fanned out in parallel, and on the
+# connector-backed transports a headless agent run behind each one. Chronicle's
+# 20s ceiling would guarantee a timeout here; a minute is the honest budget.
+# The CLI is expected to degrade a slow SOURCE internally rather than let one
+# hold the whole digest — this ceiling only catches a wedged process.
+_ALMONER_TIMEOUT = 60
+
+
+def run_almoner(*args: str, timeout: int = _ALMONER_TIMEOUT) -> Any:
+    """Run an almoner READ verb and return its parsed JSON; None if unavailable.
+
+    almoner is a SOFT dependency like census and chronicle: a missing plugin,
+    a timeout, a non-zero exit, or bad JSON yields None rather than raising,
+    so the board never depends on it and the Almoner page degrades to "not
+    installed" / an empty digest.
+
+    Only READ verbs come through here. `dismiss` is a mutation and goes
+    through the token-gated path with the board's other writes — not this one.
+    """
+    if not almoner_installed():
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_ALMONER_CLI), *args],
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except (subprocess.TimeoutExpired, OSError):

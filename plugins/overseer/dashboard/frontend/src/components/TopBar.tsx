@@ -29,12 +29,14 @@ import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 import skullIcon from "../assets/ui-icons/skull.png";
 import scrollIcon from "../assets/ui-icons/scroll.png";
+import scryIcon from "../assets/ui-icons/scry.png";
 import settingsIcon from "../assets/ui-icons/settings.png";
 
 /** The dashboard's pages, each a coin in the view switcher. Chronicle (the
- * optional session-telemetry page) gets a coin only when the chronicle
- * plugin is installed beside this dashboard. */
-export type View = "board" | "atlas" | "chronicle";
+ * optional session-telemetry page) and Almoner (the optional inflow-triage
+ * page) each get a coin only when their plugin is installed beside this
+ * dashboard. */
+export type View = "board" | "atlas" | "chronicle" | "almoner";
 
 export interface TopBarProps {
   context: Context | null;
@@ -123,6 +125,9 @@ export interface TopBarProps {
   /** On the Chronicle page the repo selector gains an "All repos" choice,
    * since that page's data is account-wide. App-owned; see RepoSelector. */
   chronicleAllRepos?: { selected: boolean; onSelect: (all: boolean) => void };
+  /** Whether `/api/almoner/status` reported the plugin installed — gates
+   * the Almoner coin entirely (absent plugin, absent coin). */
+  almonerAvailable?: boolean;
   /** WF-091: the Epic Atlas toolbar folded into the Controls group — single
    * toggle buttons rendered ONLY when `view === "atlas"` (retired
    * standalone `<AtlasToolbar>`, which sat between the topbar and the
@@ -211,6 +216,7 @@ function TopBar({
   onChronicleSync,
   chronicleSyncing = false,
   chronicleAllRepos,
+  almonerAvailable = false,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -256,12 +262,21 @@ function TopBar({
     ...(chronicleAvailable
       ? [{ view: "chronicle" as View, label: "Chronicle", title: "The Chronicle — session token usage and shape", icon: scrollIcon }]
       : []),
+    ...(almonerAvailable
+      ? [{ view: "almoner" as View, label: "Almoner", title: "The Almoner — what is asking for your attention, gathered and triaged", icon: scryIcon }]
+      : []),
   ];
   // The Chronicle has no cards or board provisions: on that page the
   // Controls group and ＋ New card give way and Sync takes the ＋ slot. The
   // repo and branch selectors stay and drive the Chronicle's scope directly
   // (App feeds them that page's branch list and an "All repos" choice).
   const onChronicle = view === "chronicle";
+  // The Almoner likewise has no cards: it suppresses the board-only
+  // controls, but unlike the Chronicle it owns its own Gather action on the
+  // page itself and needs no slot in this cluster.
+  const onAlmoner = view === "almoner";
+  /** Pages with no cards of their own — the board-only controls give way. */
+  const boardless = onChronicle || onAlmoner;
 
   return (
     <>
@@ -360,7 +375,7 @@ function TopBar({
           >
             Filters {filtersOpen ? "▴" : "▾"}
           </Button>
-          {!onChronicle && (
+          {!boardless && (
             <Button
               className="topbar__controls-toggle"
               aria-expanded={controlsOpen}
@@ -388,7 +403,7 @@ function TopBar({
             >
               {chronicleSyncing ? "Syncing…" : "Sync"}
             </Button>
-          ) : (
+          ) : onAlmoner ? null : (
             /* "＋ New card" is icon-only — `aria-label`/`title` keep it
                accessible/resolvable by name exactly as the old "＋ New card"
                text button was; opens the same NewCardDialog unchanged.
@@ -419,7 +434,7 @@ function TopBar({
         <div
           id="topbar-controls-group"
           className="topbar__controls-group"
-          hidden={!controlsOpen || onChronicle}
+          hidden={!controlsOpen || boardless}
         >
           {/* Task 4: a small dotted-line header opening the group — same
               "quiet caption above a dashed rule" idea as FilterBar's own

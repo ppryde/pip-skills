@@ -7,6 +7,7 @@ import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
 import type { ChronicleQuery } from "./api/types";
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
+import { useAlmonerStatus } from "./board/almoner/useAlmoner";
 
 /**
  * The Chronicle page is code-split, because the chronicle plugin is OPTIONAL.
@@ -19,6 +20,9 @@ import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chro
  * lazy import makes the optionality true of the artefact, not just the API.
  */
 const ChroniclePage = lazy(() => import("./components/chronicle/ChroniclePage"));
+/** Code-split for the same reason as the Chronicle: the almoner plugin is
+ * OPTIONAL, so a dashboard without it must not ship the page's bundle. */
+const AlmonerPage = lazy(() => import("./components/almoner/AlmonerPage"));
 import { chronicleScopeFor } from "./board/chronicle/scope";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
@@ -61,7 +65,9 @@ function readStoredRoot(): string | null {
  * back to the board once status says the page isn't offered. */
 function viewFromHash(hash: string): View | null {
   const name = hash.replace(/^#/, "");
-  return name === "board" || name === "atlas" || name === "chronicle" ? name : null;
+  return name === "board" || name === "atlas" || name === "chronicle" || name === "almoner"
+    ? name
+    : null;
 }
 
 function sameLabelSet(a: string[], b: string[]): boolean {
@@ -220,13 +226,22 @@ function App() {
   // whether the page is offered at all. `null` = not yet known.
   const chronicleStatus = useChronicleStatus();
   const chronicleAvailable = chronicleStatus?.installed === true;
+  // Almoner (optional sibling plugin), gated exactly as the Chronicle is.
+  const almonerStatus = useAlmonerStatus();
+  const almonerAvailable = almonerStatus?.installed === true;
+  // `?demo=1` renders the sample digest so the page can be seen before the
+  // almoner CLI exists. Opt-in only, and the page says so in a banner.
+  const almonerDemo = new URLSearchParams(window.location.search).get("demo") === "1";
   useEffect(() => {
     // Defensive: a stale `#chronicle`-ish selection can't outlive the
     // plugin's absence — fall back to the board once status is known.
     if (view === "chronicle" && chronicleStatus !== null && !chronicleAvailable) {
       setView("board");
     }
-  }, [view, chronicleStatus, chronicleAvailable]);
+    if (view === "almoner" && almonerStatus !== null && !almonerAvailable && !almonerDemo) {
+      setView("board");
+    }
+  }, [view, chronicleStatus, chronicleAvailable, almonerStatus, almonerAvailable, almonerDemo]);
   // The Chronicle's filters and its Sync action are App-owned for the same
   // reason the Atlas toggles are (WF-091): the controls render in the top
   // bar / filter region while the data renders in the page, so both need
@@ -429,6 +444,7 @@ function App() {
         hideVanquished={hideVanquished}
         onToggleVanquished={setHideVanquished}
         chronicleAvailable={chronicleAvailable}
+          almonerAvailable={almonerAvailable || almonerDemo}
         onChronicleSync={() => void chronicleSync.sync()}
         chronicleSyncing={chronicleSync.syncing}
         chronicleAllRepos={{ selected: chronicleScope === "all", onSelect: setChronicleAllRepos }}
@@ -477,7 +493,11 @@ function App() {
         {/* The Chronicle is account-wide data, so unlike Board/Atlas it is
             reachable for an unbegun repo too — the page just locks its
             scope to "All repos" since a boardless root can't be named. */}
-        {view === "chronicle" ? (
+        {view === "almoner" ? (
+          <Suspense fallback={<p className="board-placeholder">Loading the Almoner…</p>}>
+            <AlmonerPage status={almonerStatus} demo={almonerDemo} />
+          </Suspense>
+        ) : view === "chronicle" ? (
           // The same line the board shows while it loads — the chunk arrives
           // in a blink over localhost, so anything heavier would be a flash.
           <Suspense fallback={<p className="board-placeholder">Loading the Chronicle…</p>}>

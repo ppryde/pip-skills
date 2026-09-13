@@ -4,6 +4,8 @@
  * import the wrappers below instead.
  */
 import type {
+  AlmonerDigest,
+  AlmonerStatus,
   BoardResponse,
   CardDetail,
   ChronicleQuery,
@@ -368,4 +370,35 @@ export function getChronicleAgent(
  * the call rather than prompting for a token. */
 export function syncChronicle(opts: { quiet?: boolean } = {}): Promise<ChronicleSyncResponse> {
   return request<ChronicleSyncResponse>("POST", "/api/chronicle/sync", undefined, opts);
+}
+
+/** Whether the almoner plugin is installed beside this dashboard, and whether
+ * any sources are configured — gates the Almoner page's nav entry exactly as
+ * `getChronicleStatus` gates the Chronicle's. */
+export function getAlmonerStatus(): Promise<AlmonerStatus> {
+  return request<AlmonerStatus>("GET", "/api/almoner/status");
+}
+
+/** The merged, deduplicated digest across every configured source.
+ *
+ * Read-only against every remote system — nothing is sent, replied to or
+ * marked read. It is NOT cache-free, though: the CLI persists what it gathers
+ * so the page renders instantly and yesterday keeps the ranking it was
+ * actually given. A stored row is therefore a snapshot of when it was
+ * gathered, never a live view of the source.
+ *
+ * Slow by nature (several network round trips, and a headless agent on the
+ * connector-backed transports), so callers show a pending state rather than
+ * assuming this returns promptly.
+ */
+export function getAlmonerDigest(
+  query: { hours?: number; context?: string; onlyNew?: boolean } = {},
+  opts: { signal?: AbortSignal } = {}
+): Promise<AlmonerDigest> {
+  const params: string[] = [];
+  if (query.hours !== undefined) params.push(`hours=${encodeURIComponent(String(query.hours))}`);
+  if (query.context) params.push(`context=${encodeURIComponent(query.context)}`);
+  if (query.onlyNew) params.push("new=1");
+  const url = "/api/almoner/digest" + (params.length ? `?${params.join("&")}` : "");
+  return request<AlmonerDigest>("GET", url, undefined, opts);
 }
