@@ -118,13 +118,15 @@
   --qb-bg-page-highlight-tl: #f7eed8;
   --qb-bg-page-highlight-br: #eadcbd;
   --qb-panel: #fbf4e1;
-  /* The guild bar's own field. Lifted from the rpg-icons pack the coin art
-     comes from — it is the blue those icons were drawn against, so the coins
-     sit on their own ground rather than on parchment. Deliberately a
-     separate token from --qb-panel: the bar is the only surface wearing it,
-     and it must be revertible in one line. */
-  --qb-topbar-field: #ACCEF0;
-  --qb-topbar-field-edge: #8fb4d8;
+  /* The guild bar's field, and the two inks that read on it.
+     Chosen as VALUE rather than hue: the bar needed to stop being the same
+     cream as the page without picking a fight with it, and a dark warm brown
+     has no temperature to argue about — it is the parchment's own ink. The
+     bar's parchment-faced furniture (coins, buttons, chips, pills) becomes
+     the brightest thing on screen as a result, which is the point. */
+  --qb-bar-field: #413020;
+  --qb-bar-ink: #f3e1b8;
+  --qb-bar-ink-2: #cbb489;
   --qb-parchment-muted: #f3ead6;
   --qb-parchment-muted-2: #f1e9da;
   --qb-line-dashed: #d8c39a;
@@ -763,9 +765,11 @@ body {
   align-items: center;
   gap: 0.75rem;
   padding: 18px 26px;
-  background: var(--qb-topbar-field);
-  border-bottom: 2px solid var(--qb-topbar-field-edge);
-  color: var(--qb-ink-700);
+  /* No border-bottom, deliberately — see the seam note above: a divider on
+     this block lands mid-header whenever the filter bar is open. A dark field
+     against parchment needs none; the value change IS the edge. */
+  background: var(--qb-bar-field);
+  color: var(--qb-bar-ink);
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
   position: sticky;
@@ -785,6 +789,21 @@ body {
   min-width: 0;
 }
 
+/* Everything below sits directly on the dark field and so flips to the cream
+   scale. Deliberately an explicit LIST rather than re-defining `--qb-ink-*`
+   inside `.topbar`: the bar also carries parchment-faced boxes — `.qb-btn`,
+   `.qb-chip`, the three guild pills, the coins — whose text is dark precisely
+   because their own face is light. A blanket override would turn every one of
+   those cream-on-cream. Boxes keep their colours; only bare text changes. */
+.topbar__repo-select,
+.topbar__repo-select-label,
+.topbar__branch-select,
+.topbar__branch-select-label,
+.topbar__threshold,
+.topbar__archive-toggle {
+  color: var(--qb-bar-ink-2);
+}
+
 .topbar h1 {
   margin: 0;
   /* Coins hard left, page name hard right. Right-aligned rather than left so
@@ -799,7 +818,7 @@ body {
   /* Fluid: 26px on desktop, easing down to 20px on a phone — no breakpoint
      jump in the guild wordmark. */
   font-size: clamp(20px, 4.5vw, 26px);
-  color: var(--qb-ink-900);
+  color: var(--qb-bar-ink);
 }
 
 /* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
@@ -849,6 +868,9 @@ body {
    full duplicates of `.qb-select`'s own and are gone entirely. */
 .topbar__repo-select select {
   background: transparent;
+  /* A `<select>` does not reliably inherit colour across browsers, so the
+     cream is set outright rather than left to the wrapper. */
+  color: var(--qb-bar-ink);
 }
 
 /* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
@@ -912,6 +934,9 @@ body {
 .topbar__branch-select select {
   background: transparent;
   border-radius: var(--qb-btn-wobble-2);
+  /* A `<select>` does not reliably inherit colour across browsers, so the
+     cream is set outright rather than left to the wrapper. */
+  color: var(--qb-bar-ink);
 }
 
 .topbar__branch-select select:focus-visible {
