@@ -917,7 +917,7 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
     expect(body).toMatch(/min-width:\s*0/);
   });
 
-  it("lets both dropdowns wear the button's own face, with no transparent override", () => {
+  it("lets every top-bar dropdown wear the button's own face, with no transparent override", () => {
     // They used to override `.qb-select` to `background: transparent` so the
     // control melted into a cream top bar. The bar is ink now, and that
     // override left a dark box on a dark field. Deleting it is the whole fix:
@@ -927,8 +927,19 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
     // Declarations only — a rule's own comment may well discuss the override
     // it no longer has, and prose must not read as a declaration.
     const decls = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(decls).not.toMatch(/\.topbar__repo-select select\s*\{[^}]*background:\s*transparent/);
-    expect(decls).not.toMatch(/\.topbar__branch-select select\s*\{[^}]*background:\s*transparent/);
+    // All THREE of them. The same override was written once per dropdown and
+    // found once per dropdown, the last of them only after someone noticed
+    // Last Orders was still unreadable — so this asserts the whole set.
+    for (const rule of [
+      ".topbar__repo-select select",
+      ".topbar__branch-select select",
+      ".threshold-control__select",
+    ]) {
+      const escaped = rule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(decls, rule).not.toMatch(
+        new RegExp(`${escaped}\\s*\\{[^}]*background:\\s*transparent`)
+      );
+    }
 
     const primitive = ruleBodyFor(".qb-select");
     expect(primitive).toMatch(/background:\s*var\(--qb-btn-face\)/);

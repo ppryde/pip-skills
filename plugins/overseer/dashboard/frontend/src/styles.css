@@ -125,6 +125,11 @@
      bar's parchment-faced furniture (coins, buttons, chips, pills) becomes
      the brightest thing on screen as a result, which is the point. */
   --qb-bar-field: #413020;
+  /* Where the field lands once the bar is opened out. Lifted enough to read
+     as a fade, held dark enough that `--qb-bar-ink` keeps well clear of the
+     contrast floor on it — the cream has to stay legible at the BOTTOM of an
+     expanded bar, which is the case a flat colour never had to survive. */
+  --qb-bar-field-2: #5d462f;
   --qb-bar-ink: #f3e1b8;
   --qb-bar-ink-2: #cbb489;
   --qb-parchment-muted: #f3ead6;
@@ -768,7 +773,19 @@ body {
   /* No border-bottom, deliberately — see the seam note above: a divider on
      this block lands mid-header whenever the filter bar is open. A dark field
      against parchment needs none; the value change IS the edge. */
-  background: var(--qb-bar-field);
+  /* A gradient rather than a flat fill, because this element CHANGES HEIGHT:
+     the Controls group is `display: contents`, so its children become flex
+     items of this bar and opening it makes the bar tall. A flat ink fill then
+     reads as a slab. Sized to the element, the fade is barely present on the
+     single identity row and opens up as the section does — the masthead stays
+     dark where the wordmark is, and the provisions below it lift towards the
+     parchment they sit above. */
+  background: linear-gradient(
+    to bottom,
+    var(--qb-bar-field) 0%,
+    var(--qb-bar-field) 34%,
+    var(--qb-bar-field-2) 100%
+  );
   color: var(--qb-bar-ink);
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
@@ -1107,6 +1124,22 @@ body {
 .topbar__threshold,
 .topbar__archive-toggle {
   color: var(--qb-bar-ink-2);
+}
+
+/* Last Orders' own caption and its ⓘ. Both are painted by shared primitives
+   (`.qb-label`, `.info-tooltip__trigger`) that set an ink colour on the
+   element itself, so inheriting from `.topbar__threshold` above never reaches
+   them. Scoped to the bar rather than flipped globally: the tooltip BUBBLE
+   keeps its parchment face wherever it opens, and only the trigger sitting on
+   the dark field changes. */
+.topbar__threshold .threshold-control__title,
+.topbar .info-tooltip__trigger {
+  color: var(--qb-bar-ink-2);
+}
+
+.topbar .info-tooltip__trigger:hover,
+.topbar .info-tooltip__trigger:focus-visible {
+  color: var(--qb-bar-ink);
 }
 
 .topbar__archive-toggle input {
@@ -4257,7 +4290,10 @@ a.card-drawer__pr-chip:hover {
 .threshold-control__select {
   width: 3.75rem;
   font-size: 0.75rem;
-  background: transparent;
+  /* No `background: transparent` — the third of the parchment-era overrides
+     (see `.topbar__branch-select select`). It melted the control into a cream
+     bar; on the ink bar it left a dark box on a dark field. `.qb-select`'s own
+     face is what makes this match the buttons beside it. */
   padding: 0.12rem 0.4rem;
 }
 
