@@ -8906,6 +8906,17 @@ button.trail-tag:focus-visible {
   }
 }
 
+/* Every source mark sits on one baseline whatever it is made of — the brand
+   marks are inline SVG, mail is a drawn PNG (see SourceIcon.tsx), and without
+   this the raster one rides a pixel low against its neighbours in the badge. */
+.almoner__source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+
 /* =========================================================================
    The Almoner — inflow triage page (optional almoner plugin)
 

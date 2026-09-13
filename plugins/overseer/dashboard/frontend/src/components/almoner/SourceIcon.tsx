@@ -1,14 +1,23 @@
 /**
  * The mark of the service a row came from.
  *
- * Inline SVG, not image assets: these are a dozen paths, they must take the
- * parchment theme's sizing, and the page is already code-split — pulling in
- * four PNGs to draw four glyphs would cost more than it saves.
+ * Brand marks are inline SVG: Slack's pinwheel and Linear's angled square are
+ * a dozen paths each, they must take the parchment theme's sizing, and the
+ * page is already code-split — shipping PNGs to draw them would cost more
+ * than it saves.
+ *
+ * MAIL is the exception, and deliberately so. It has no vendor to be faithful
+ * to — the adapter may be IMAP against any provider — so it is the one mark
+ * free to wear the house style instead of a logo, and it does: the same
+ * sealed letter the rest of the dashboard's icons are drawn in. A sealed
+ * letter also says the thing the page is about, which an envelope outline
+ * does not: something arrived and has not been opened.
  *
  * Decorative by default (`aria-hidden`): every icon sits beside the source
  * name in the same badge, so announcing it twice would only pad the row for
  * a screen-reader user. Pass `label` where the icon stands alone.
  */
+import sealedLetter from "../../assets/ui-icons/sealed-letter.png";
 export interface SourceIconProps {
   source: string;
   size?: number;
@@ -44,17 +53,11 @@ function LinearMark({ size }: { size: number }) {
   );
 }
 
-/** A plain envelope. Mail has no one vendor here — the adapter may be IMAP
- * against any provider — so a generic mark is the honest one. */
+/** The house sealed letter — see the note at the top on why mail, alone of
+ * the sources, is drawn rather than branded. `alt=""` because the wrapper
+ * below owns whatever this icon announces. */
 function MailMark({ size }: { size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" focusable="false">
-      <rect x="2" y="4.5" width="20" height="15" rx="2.5"
-            stroke="currentColor" strokeWidth="1.8" />
-      <path d="M3 6.5 12 13l9-6.5" stroke="currentColor" strokeWidth="1.8"
-            strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <img src={sealedLetter} width={size} height={size} alt="" draggable={false} />;
 }
 
 /** Derived items are not FROM a service — the almoner computed them by
