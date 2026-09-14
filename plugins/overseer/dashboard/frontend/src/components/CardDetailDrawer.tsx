@@ -46,6 +46,7 @@ import { StarIcon } from "./icons";
 // element, they ARE the content, so `.qb-label`'s uppercase-eyebrow
 // treatment doesn't apply.
 import { Button, Input, Label, Textarea } from "../ui";
+import { useDismiss } from "../board/useDismiss";
 
 export interface CardDetailDrawerProps {
   /** Card id to show, or null when the drawer is closed. */
@@ -274,14 +275,9 @@ function CardDetailDrawer({
     refetchDetail();
   };
 
-  useEffect(() => {
-    if (cardId === null) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [cardId, onClose]);
+  // Only while a card is actually open — a closed drawer must not answer
+  // for a layer above it.
+  useDismiss(onClose, cardId !== null);
 
   if (cardId === null) return null;
 
@@ -647,22 +643,24 @@ function CardDetailDrawer({
                   role="group"
                   aria-label="Body view"
                 >
-                  <button
-                    type="button"
-                    className="qb-btn card-drawer__viewtoggle-btn"
+                  {/* Through the design-library Button, not a raw element
+                      hand-carrying `qb-btn`: two ways to build one control
+                      is one way for the recipe to drift. `className`
+                      composes with the primitive's own classes. */}
+                  <Button
+                    className="card-drawer__viewtoggle-btn"
                     aria-pressed={view === "rendered"}
                     onClick={() => setView("rendered")}
                   >
                     Quest
-                  </button>
-                  <button
-                    type="button"
-                    className="qb-btn card-drawer__viewtoggle-btn"
+                  </Button>
+                  <Button
+                    className="card-drawer__viewtoggle-btn"
                     aria-pressed={view === "source"}
                     onClick={() => setView("source")}
                   >
                     Scroll <span className="card-drawer__md-badge">MD</span>
-                  </button>
+                  </Button>
                 </div>
                 <div className="card-drawer__body">
               {view === "source" ? (

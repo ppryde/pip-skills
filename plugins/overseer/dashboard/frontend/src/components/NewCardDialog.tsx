@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createCard } from "../api/client";
 import type { CreateCardBody } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
@@ -11,6 +11,7 @@ import type { UseBoardResult } from "../board/useBoard";
 // `.qb-select`/`.qb-btn`. The `.party-sheet__close` "×" stays a bespoke
 // icon-only affordance (same as every other sheet's close).
 import { Button, Input, Select, Textarea } from "../ui";
+import { useDismiss } from "../board/useDismiss";
 
 export interface NewCardDialogProps {
   open: boolean;
@@ -46,14 +47,7 @@ function NewCardDialog({ open, onClose, mutate }: NewCardDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  useDismiss(onClose, open);
 
   if (!open) return null;
 

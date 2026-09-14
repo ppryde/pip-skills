@@ -4,9 +4,22 @@
 Personal collection of Claude Code skills for serious engineering work.
 Built for real workflows, shared because they might help yours.
 
-## Skills
-- **puritan** — architectural doctrine suite (covenant, inquisition, scriptorium)
-- **tribunal** — PR comment review, categorisation and resolution
+## Plugins
+Each entry names the plugin and, in brackets, the skills it provides.
+`census` provides none — it is a status-line writer, which is why this
+section is "Plugins" and not "Skills".
+
+- **census** — records the status-line payload (context %, model, PR state, 5h/7d rate limits) into one worktree-indexed store; one writer, many readers
+- **chronicle** — per-session token, cost, tool, subagent and per-file churn accounting, read from the transcripts on disk; pull only, no hooks (chronicle)
+- **django-inquisition** — Django ORM performance audit against ~70 heuristics, ranked by impact (optimise-orm)
+- **email-absolution** — righteous HTML email construction (elder, scribe, visitation)
+- **overseer** — per-repo ledger of cards, sprints and token budgets, plus an orchestrator that drives a card end-to-end with delegated agents and adversarial review (ledger, orchestrate)
+- **puritan** — architectural doctrine suite (covenant, doctrines, inquisition, scriptorium)
+- **review-clone** — clone a reviewer's voice and rules from their public GitHub review history, every finding citing a real comment (clone-reviewer, review-as)
+- **review-panel** — composable code review: reviewer lenses × orchestration strategies, composed into named profiles (convene, reviewers, strategies)
+- **test-crucible** — make a test suite faster or drier by measuring the whole suite first, not the part you pointed at (test-suite-health)
+- **tribunal** — PR comment review, categorisation, prioritisation and resolution (reckoning)
+- **vigil** — portable context handover: measure ctx %, hand over in-process via /clear, resume from a re-injected handover (vigil)
 
 ## Tool Discipline
 
@@ -27,7 +40,7 @@ invokes the overseer/vigil/census CLIs, or reads a config/state dir, has to
 pin its environment into the test's `tmp_path` **before** running:
 
 - `CLAUDE_CONFIG_DIR`, `OVERSEER_CENTRAL`, `OVERSEER_DB` → point at `tmp_path`
-  (see the autouse fixtures in `plugins/overseer/tests/conftest.py` and
+  (see the autouse fixtures in `tests/overseer/conftest.py` and
   `plugins/overseer/dashboard/backend/tests/conftest.py` — each does exactly
   this and explains why).
 - Prefer `tmp_path`/`monkeypatch` over writing anywhere under `~`.

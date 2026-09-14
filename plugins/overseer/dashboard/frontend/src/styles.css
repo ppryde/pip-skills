@@ -1631,6 +1631,30 @@ body {
   color: var(--qb-ink-400);
 }
 
+/* ChunkLoadBoundary's fallback — a rejected `React.lazy` chunk (the
+   Chronicle page 404ing in a tab left open across a `dist/` rebuild),
+   contained to the page area rather than the app-unmounting throw it
+   replaces. Same danger-red wash as `.waylaid`, but a plain stacked box:
+   this is a dead end with one action, not a retry schedule to narrate. */
+.chunk-load-error {
+  max-width: 32rem;
+  margin: 1.5rem auto;
+  padding: 0.9rem 1rem;
+  background: color-mix(in srgb, var(--legacy-color-b3261e) 7%, var(--qb-panel));
+  border: 1.5px solid color-mix(in srgb, var(--legacy-color-b3261e) 45%, var(--qb-card-border));
+  border-radius: var(--qb-btn-wobble-2);
+}
+
+.chunk-load-error__title {
+  margin: 0 0 0.3rem;
+  font-weight: 600;
+}
+
+.chunk-load-error__body {
+  margin: 0 0 0.7rem;
+  color: var(--qb-ink-400);
+}
+
 /* WF-095: "your filters hide every card" — sits above the lanes in the
    board's own ink, with the clear action as an inline text button so it
    reads as a sentence, not a second toolbar. */

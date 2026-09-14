@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { setLabelColor } from "../api/client";
 import { labelColor, PALETTE_KEYS } from "../board/labelColor";
 import type { UseBoardResult } from "../board/useBoard";
@@ -16,6 +15,7 @@ import type { UseBoardResult } from "../board/useBoard";
 // use — `.label-chip label-chip--<key>` on the rendered element, unchanged
 // from the bare `<span>` this used to be.
 import { Button, Chip } from "../ui";
+import { useDismiss } from "../board/useDismiss";
 
 export interface LabelSettingsDialogProps {
   open: boolean;
@@ -58,14 +58,7 @@ function LabelSettingsDialog({
   colors,
   mutate,
 }: LabelSettingsDialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  useDismiss(onClose, open);
 
   if (!open) return null;
 

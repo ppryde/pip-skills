@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { InfoIcon } from "./icons";
+import { useDismiss } from "../board/useDismiss";
 
 /** Which way the bubble hangs off its trigger. The default is below and
  * flush left; each axis flips independently when that side would leave the
@@ -64,24 +65,22 @@ function InfoTooltip({ label, children, trigger, triggerClassName }: InfoTooltip
     // already-flipped bubble and undo it.
   }, [open]);
 
+  // An open tooltip is the innermost layer, so it takes Escape ahead of any
+  // drawer it sits inside — one press closes the tooltip, the next closes
+  // the drawer. Independent listeners closed both at once.
+  useDismiss(() => setOpen(false), open);
+
+  // Click-away stays here: it is about this element's own bounds, not about
+  // layering, and nothing else on the page wants it.
   useEffect(() => {
     if (!open) return;
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
     function handlePointerDown(e: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
-
-    document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("mousedown", handlePointerDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("mousedown", handlePointerDown);
-    };
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [open]);
 
   return (

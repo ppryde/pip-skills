@@ -17,7 +17,10 @@ from fastapi.testclient import TestClient
 
 from app import cli_client
 
-_CHRONICLE_CLI = Path(__file__).resolve().parents[4] / "chronicle" / "scripts" / "cli.py"
+# Through `find_plugin`, not a fixed `parents[4]` walk: that walk is the very
+# shape `find_plugin` was written to replace, and a test that hard-codes the
+# checkout layout cannot fail when the app's discovery does.
+_CHRONICLE_CLI = cli_client.find_plugin("chronicle")
 
 
 def _record(kind: str, uuid: str, ts: str, **extra: object) -> dict[str, object]:
@@ -256,3 +259,50 @@ class TestChronicleOnlyRoots:
         assert entry["has_board"] is False       # no board.db — the holding page still applies
         assert entry["chronicled"] is True       # but the Chronicle may be scoped to it
         assert entry["live_sessions"] == 0       # census knows nothing of it
+
+
+class TestSiblingPluginContract:
+    """The seam between overseer and chronicle is a FILESYSTEM layout plus a
+    subprocess, and neither half was defended by a test.
+
+    `cli_client` resolves its optional siblings by walking up four parents to
+    `plugins/` and naming a directory. That is a real contract with the
+    marketplace checkout: rearrange the tree and the Chronicle page silently
+    reports "not installed" rather than failing loudly, because every failure
+    mode of `run_chronicle` is deliberately soft.
+    """
+
+    def test_chronicle_resolves_from_wherever_this_is_running(self) -> None:
+        assert cli_client._CHRONICLE_CLI is not None, (
+            "chronicle CLI not found by find_plugin — the Chronicle page will "
+            "degrade to 'not installed' with nothing to say why"
+        )
+        assert cli_client.chronicle_installed() is True
+
+    def test_every_optional_sibling_resolves_the_same_way(self) -> None:
+        # All three go through `find_plugin`, so they stand or fall together.
+        # Deliberately NOT asserting the shape of the path: this test used to
+        # require `.../plugins/<name>/scripts/cli.py`, which is only one of
+        # the two real layouts and is exactly the assumption that hid the bug
+        # (see tests/test_plugin_discovery.py). What matters is that a CLI was
+        # found, not where.
+        for name, cli in (("chronicle", cli_client._CHRONICLE_CLI),
+                          ("vigil", cli_client._VIGIL_CLI),
+                          ("census", cli_client._CENSUS_CLI)):
+            assert cli is not None and cli.is_file(), f"sibling plugin not found: {name}"
+
+    def test_overseer_never_imports_chronicle(self) -> None:
+        """The decoupling is a PROCESS boundary. An import would make the
+        optional plugin a hard dependency of the dashboard's startup, which
+        is exactly what `run_chronicle`'s soft-degrading contract exists to
+        avoid — and it would fail at import time, not at call time."""
+        backend = Path(cli_client.__file__).resolve().parent
+        offenders = []
+        for path in backend.rglob("*.py"):
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith(("import ", "from ")) and "chronicle" in stripped:
+                    offenders.append(f"{path.name}:{lineno}: {stripped}")
+        assert offenders == [], (
+            "the dashboard backend must reach chronicle by subprocess only: " + "; ".join(offenders)
+        )
