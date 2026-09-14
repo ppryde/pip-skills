@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -29,12 +30,28 @@ import journalIcon from "../assets/ui-icons/journal.png";
 import treasureMapIcon from "../assets/ui-icons/treasure-map.png";
 import skullIcon from "../assets/ui-icons/skull.png";
 import scrollIcon from "../assets/ui-icons/scroll.png";
+import scryIcon from "../assets/ui-icons/scry.png";
 import settingsIcon from "../assets/ui-icons/settings.png";
 
 /** The dashboard's pages, each a coin in the view switcher. Chronicle (the
- * optional session-telemetry page) gets a coin only when the chronicle
- * plugin is installed beside this dashboard. */
-export type View = "board" | "atlas" | "chronicle";
+ * optional session-telemetry page) and Almoner (the optional inflow-triage
+ * page) each get a coin only when their plugin is installed beside this
+ * dashboard. */
+export type View = "board" | "atlas" | "chronicle" | "almoner";
+
+/** What the guild bar calls the page you are on.
+ *
+ * The wordmark used to be the literal string "Adventurers' Guild Board" on
+ * every page, which left the Chronicle and the Almoner unnamed anywhere on
+ * screen — the Chronicle has no heading of its own at all, so it was a page
+ * you could only identify by what it happened to be showing. The board keeps
+ * the guild wordmark because on the board that IS the name. */
+const VIEW_TITLES: Record<View, string> = {
+  board: "Adventurers\u2019 Guild Board",
+  atlas: "Epic Atlas",
+  chronicle: "Chronicle",
+  almoner: "Almoner",
+};
 
 export interface TopBarProps {
   context: Context | null;
@@ -123,6 +140,9 @@ export interface TopBarProps {
   /** On the Chronicle page the repo selector gains an "All repos" choice,
    * since that page's data is account-wide. App-owned; see RepoSelector. */
   chronicleAllRepos?: { selected: boolean; onSelect: (all: boolean) => void };
+  /** Whether `/api/almoner/status` reported the plugin installed — gates
+   * the Almoner coin entirely (absent plugin, absent coin). */
+  almonerAvailable?: boolean;
   /** WF-091: the Epic Atlas toolbar folded into the Controls group — single
    * toggle buttons rendered ONLY when `view === "atlas"` (retired
    * standalone `<AtlasToolbar>`, which sat between the topbar and the
@@ -211,6 +231,7 @@ function TopBar({
   onChronicleSync,
   chronicleSyncing = false,
   chronicleAllRepos,
+  almonerAvailable = false,
 }: TopBarProps) {
   // Task 10: "＋ New card" — TopBar owns this dialog's open state directly
   // (unlike the Clear control, which is App-owned since App also needs to
@@ -256,12 +277,21 @@ function TopBar({
     ...(chronicleAvailable
       ? [{ view: "chronicle" as View, label: "Chronicle", title: "The Chronicle — session token usage and shape", icon: scrollIcon }]
       : []),
+    ...(almonerAvailable
+      ? [{ view: "almoner" as View, label: "Almoner", title: "The Almoner — what is asking for your attention, gathered and triaged", icon: scryIcon }]
+      : []),
   ];
   // The Chronicle has no cards or board provisions: on that page the
   // Controls group and ＋ New card give way and Sync takes the ＋ slot. The
   // repo and branch selectors stay and drive the Chronicle's scope directly
   // (App feeds them that page's branch list and an "All repos" choice).
   const onChronicle = view === "chronicle";
+  // The Almoner likewise has no cards: it suppresses the board-only
+  // controls, but unlike the Chronicle it owns its own Gather action on the
+  // page itself and needs no slot in this cluster.
+  const onAlmoner = view === "almoner";
+  /** Pages with no cards of their own — the board-only controls give way. */
+  const boardless = onChronicle || onAlmoner;
 
   return (
     <>
@@ -273,12 +303,24 @@ function TopBar({
             `aria-label`/`title`. The last-refreshed time is no longer here: it
             moved to a small label beside Refresh below. */}
         <div className="topbar__identity">
-          <div className="topbar__view-toggle" role="group" aria-label="View" data-count={coins.length}>
-            {coins.map((c) => (
+          {/* `--coin-n`/`--coin-i` place the coins and size the row (styles.css).
+              They are here rather than in CSS because the count is only known
+              at render: the Chronicle and Almoner coins come and go with their
+              plugins, and the hand-written rules this replaced stopped at
+              three, which left the Almoner's coin sitting on the wordmark. */}
+          <div
+            className="topbar__view-toggle"
+            role="group"
+            aria-label="View"
+            data-count={coins.length}
+            style={{ "--coin-n": coins.length } as CSSProperties}
+          >
+            {coins.map((c, i) => (
               <button
                 key={c.view}
                 type="button"
                 className="topbar__view-toggle-btn"
+                style={{ "--coin-i": i } as CSSProperties}
                 aria-pressed={view === c.view}
                 aria-label={c.label}
                 title={c.title}
@@ -288,7 +330,7 @@ function TopBar({
               </button>
             ))}
           </div>
-          <h1>Adventurers&rsquo; Guild Board</h1>
+          <h1>{VIEW_TITLES[view]}</h1>
         </div>
 
         {/* Mobile row layout: the topbar is one wrapping flex row and every
@@ -352,15 +394,24 @@ function TopBar({
             open so the board looks unchanged on load, but either can be
             collapsed on any screen size. */}
         <div className="topbar__toggle-cluster">
-          <Button
-            className="topbar__controls-toggle"
-            aria-expanded={filtersOpen}
-            aria-controls="filter-bar"
-            onClick={onToggleFilters}
-          >
-            Filters {filtersOpen ? "▴" : "▾"}
-          </Button>
-          {!onChronicle && (
+          {!onAlmoner && (
+            // The Chronicle still gets this: <ChronicleFilterBar/> reuses
+            // the very same `#filter-bar` id App.tsx renders FilterBar at on
+            // the board, so `boardless` alone is the wrong guard here — it
+            // would hide this on the Chronicle too, where the control it
+            // names still exists. The Almoner is the one page with no filter
+            // bar of any kind, so `aria-controls="filter-bar"` would point at
+            // an element that is never in the DOM.
+            <Button
+              className="topbar__controls-toggle"
+              aria-expanded={filtersOpen}
+              aria-controls="filter-bar"
+              onClick={onToggleFilters}
+            >
+              Filters {filtersOpen ? "▴" : "▾"}
+            </Button>
+          )}
+          {!boardless && (
             <Button
               className="topbar__controls-toggle"
               aria-expanded={controlsOpen}
@@ -388,7 +439,7 @@ function TopBar({
             >
               {chronicleSyncing ? "Syncing…" : "Sync"}
             </Button>
-          ) : (
+          ) : onAlmoner ? null : (
             /* "＋ New card" is icon-only — `aria-label`/`title` keep it
                accessible/resolvable by name exactly as the old "＋ New card"
                text button was; opens the same NewCardDialog unchanged.
@@ -419,7 +470,7 @@ function TopBar({
         <div
           id="topbar-controls-group"
           className="topbar__controls-group"
-          hidden={!controlsOpen || onChronicle}
+          hidden={!controlsOpen || boardless}
         >
           {/* Task 4: a small dotted-line header opening the group — same
               "quiet caption above a dashed rule" idea as FilterBar's own

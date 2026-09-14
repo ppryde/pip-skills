@@ -72,18 +72,13 @@
   --legacy-color-8b95a1: #8b95a1;
   --legacy-color-2a313b: #2a313b;
   --legacy-color-3a4453: #3a4453;
-  --legacy-color-7a2e2e: #7a2e2e;
-  --legacy-color-ffd9d9: #ffd9d9;
   --legacy-color-20262d: #20262d;
   --legacy-color-16a34a: #16a34a;
   --legacy-color-6b7280: #6b7280;
-  --legacy-color-b3261e: #b3261e;
   --legacy-color-e2e5e9: #e2e5e9;
   --legacy-color-f0f1f4: #f0f1f4;
   --legacy-color-374151: #374151;
   --legacy-color-9ca3af: #9ca3af;
-  --legacy-color-d33d3d: #d33d3d;
-  --legacy-color-fff5f5: #fff5f5;
   --legacy-color-2563eb: #2563eb;
   --legacy-color-4b5563: #4b5563;
   --legacy-color-15803d: #15803d;
@@ -118,6 +113,48 @@
   --qb-bg-page-highlight-tl: #f7eed8;
   --qb-bg-page-highlight-br: #eadcbd;
   --qb-panel: #fbf4e1;
+
+  /* ---- Alarm: blocked, quarantined, failed, destructive -------------------
+     Pantone 485 C — the red a British pillar box is actually painted. It
+     replaces five unrelated reds that were each named after their own hex
+     (`--legacy-color-7a2e2e` and friends), which is what a set nobody designed
+     looks like from the inside: four saturations across five degrees of hue.
+
+     TWO values, and they have different JOBS rather than being two shades of
+     one job — which is what stopped the previous pairing working. 485 is a
+     colour you put BEHIND things; it cannot be a colour you write in. As small
+     text on parchment it measures 3.83:1, under the 4.5:1 floor, so every red
+     word on the board takes `--qb-alarm-deep` instead. That one commits warm
+     — a deepened VERMILION, +10° — rather than merely dimming: two reds a
+     couple of degrees apart read as one colour printed badly, while a step
+     that clearly goes somewhere reads as a pair.
+
+     It is deepened for a measured reason, not for taste. Vermilion proper
+     (#e34234) is 3.24:1 on parchment and a mid vermilion (#c2381a) is 4.27:1
+     — both under the floor for the small bold text these rules set. #b23a17
+     is the most vermilion that clears it, at 4.71:1. Anything brighter here
+     is unreadable, however well it looks in a swatch.
+
+     Filled alarm surfaces carry `--qb-alarm-ink`, which is WHITE. The soft
+     pink this board used, #ffd9d9, sits at 3.75:1 on 485 and cannot come. */
+  --qb-alarm: #da291c;
+  --qb-alarm-deep: #b23a17;
+  --qb-alarm-ink: #ffffff;
+  --qb-alarm-tint: #fdeeec;
+  /* The guild bar's field, and the two inks that read on it.
+     Chosen as VALUE rather than hue: the bar needed to stop being the same
+     cream as the page without picking a fight with it, and a dark warm brown
+     has no temperature to argue about — it is the parchment's own ink. The
+     bar's parchment-faced furniture (coins, buttons, chips, pills) becomes
+     the brightest thing on screen as a result, which is the point. */
+  --qb-bar-field: #413020;
+  /* Where the field lands once the bar is opened out. Lifted enough to read
+     as a fade, held dark enough that `--qb-bar-ink` keeps well clear of the
+     contrast floor on it — the cream has to stay legible at the BOTTOM of an
+     expanded bar, which is the case a flat colour never had to survive. */
+  --qb-bar-field-2: #5d462f;
+  --qb-bar-ink: #f3e1b8;
+  --qb-bar-ink-2: #cbb489;
   --qb-parchment-muted: #f3ead6;
   --qb-parchment-muted-2: #f1e9da;
   --qb-line-dashed: #d8c39a;
@@ -306,12 +343,31 @@
      border card 1's vocabulary sweep missed (HANDOFF line 53). */
   --qb-success-chip-border: #a9be7e;
 
+  /* ---- Fleet health — the third guild pill -------------------------------
+     Its own set, because it never had one. The pill wore
+     `--qb-locked-chip-*` for its fill and text and a lone
+     `--qb-questing-chip-border` for its edge — the last survivor of a pink
+     vocabulary otherwise deleted, used in exactly one place. So it was three
+     borrowed colours from two dead ideas, which is why it matched nothing.
+
+     Worse, `locked` MEANS something here: dependency badges and locked atlas
+     cards use it to say "waiting on something else". The fleet pill says the
+     opposite — agents are working, this is how full their context is.
+
+     Sky, because the pill is information rather than alarm or reward, and
+     because gold and green already have the row. Built to the same bg /
+     border / text shape as its neighbours, and at 6.45:1 where the pink it
+     replaces was 4.16:1 — under the floor, the only one of the three that
+     was. */
+  --qb-fleet-chip-bg: #dfeaf5;
+  --qb-fleet-chip-border: #8fb7d8;
+  --qb-fleet-chip-text: #33556f;
+
   --qb-locked-chip-bg: #f3e1e7;
   --qb-locked-chip-text: #a8506b;
   /* WF-029 chunk 5: the "N questing" pill shares locked-chip's fill/text
      (HANDOFF line 53 gives both the identical #F3E1E7/#A8506B) but has its
      own border, missing from card 1's vocabulary. */
-  --qb-questing-chip-border: #d9a0b4;
 
   /* Exhaustion bar fill — fills UP with context used, so "low" (little
      spent, safe) keeps the old mana-high calm blue and "high" (lots spent,
@@ -756,8 +812,23 @@ body {
   align-items: center;
   gap: 0.75rem;
   padding: 18px 26px;
-  background: var(--qb-panel);
-  color: var(--qb-ink-700);
+  /* No border-bottom, deliberately — see the seam note above: a divider on
+     this block lands mid-header whenever the filter bar is open. A dark field
+     against parchment needs none; the value change IS the edge. */
+  /* A gradient rather than a flat fill, because this element CHANGES HEIGHT:
+     the Controls group is `display: contents`, so its children become flex
+     items of this bar and opening it makes the bar tall. A flat ink fill then
+     reads as a slab. Sized to the element, the fade is barely present on the
+     single identity row and opens up as the section does — the masthead stays
+     dark where the wordmark is, and the provisions below it lift towards the
+     parchment they sit above. */
+  background: linear-gradient(
+    to bottom,
+    var(--qb-bar-field) 0%,
+    var(--qb-bar-field) 34%,
+    var(--qb-bar-field-2) 100%
+  );
+  color: var(--qb-bar-ink);
   box-shadow: var(--qb-topbar-shadow);
   flex-wrap: wrap;
   position: sticky;
@@ -769,16 +840,29 @@ body {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  /* Grows so the title has somewhere to be pushed TO. Without this the block
+     is content-sized and `margin-left:auto` on the heading has no slack to
+     take. `min-width:0` lets a long page name shrink rather than shoving the
+     repo selector off the bar. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .topbar h1 {
   margin: 0;
+  /* Coins hard left, page name hard right. Right-aligned rather than left so
+     the name keeps a STABLE right edge as it changes between pages — the
+     titles differ a lot in length ("Epic Atlas" against "Adventurers' Guild
+     Board") and a left edge that moves every time you switch page reads as
+     the layout shifting under you. */
+  margin-left: auto;
+  text-align: right;
   font-family: var(--qb-font-display);
   font-weight: 800;
   /* Fluid: 26px on desktop, easing down to 20px on a phone — no breakpoint
      jump in the guild wordmark. */
   font-size: clamp(20px, 4.5vw, 26px);
-  color: var(--qb-ink-900);
+  color: var(--qb-bar-ink);
 }
 
 /* WF-030 repo selector — a topbar chip like `.topbar__pill`, sitting right
@@ -826,10 +910,6 @@ body {
    this select sits inside a chip whose own box IS the visible border, so it
    stays see-through. The `:hover`/`:focus-visible` states below were also
    full duplicates of `.qb-select`'s own and are gone entirely. */
-.topbar__repo-select select {
-  background: transparent;
-}
-
 /* WF-032 "unbegun repo" — the repo selector's <option> for a discoverable-
    but-un-init'd root (has_board:false). Native <option> styling is limited
    to a small CSS subset (colour/background/font-style, no border/shape),
@@ -889,7 +969,12 @@ body {
    not `.qb-select`'s neutral ink-400) — everything else duplicated
    `.qb-select` and is gone. */
 .topbar__branch-select select {
-  background: transparent;
+  /* Only the wobble is bespoke now. The parchment-era `background:
+     transparent` override is gone: it existed so the select would melt
+     into a cream bar, and on the ink bar that left a dark box on a dark
+     field. `.qb-select` already carries `--qb-btn-face` and
+     `--qb-btn-ink`, so deleting the override is what makes these read as
+     the buttons beside them — the fix is a removal, not an addition. */
   border-radius: var(--qb-btn-wobble-2);
 }
 
@@ -1034,13 +1119,13 @@ body {
    `.clear-dialog .danger`), so this button still needs its own paint
    rather than relying on that scoped rule. */
 .topbar-clear.danger {
-  border: 1.5px solid var(--legacy-color-b3261e);
-  background: var(--legacy-color-fff5f5);
-  color: var(--legacy-color-b3261e);
+  border: 1.5px solid var(--qb-alarm);
+  background: var(--qb-alarm-tint);
+  color: var(--qb-alarm-deep);
 }
 
 .topbar-clear.danger:hover {
-  background: var(--legacy-color-b3261e);
+  background: var(--qb-alarm);
   color: var(--legacy-color-fff);
   box-shadow: none;
 }
@@ -1056,6 +1141,47 @@ body {
   font-size: 0.8rem;
   color: var(--qb-ink-500);
   cursor: pointer;
+}
+
+/* GUILD INK: the controls that sit directly on the dark field, flipped to the
+   cream scale.
+   
+   POSITION IS LOAD-BEARING. Every selector here is a single class, the same
+   specificity as the rules it overrides, so it only wins by coming after them
+   — `.topbar__branch-select-label`, `.topbar__threshold` and
+   `.topbar__archive-toggle` all declare their own parchment-era colour above.
+   Declared higher up this file (where it first was) the whole block is inert
+   and these read dark-on-dark. `TopBar.test.tsx` guards the ordering.
+
+   Deliberately an explicit LIST rather than re-defining `--qb-ink-*` inside
+   `.topbar`: the bar also carries parchment-faced boxes — `.qb-btn`,
+   `.qb-select`, `.qb-chip`, the three guild pills, the coins — whose text is
+   dark precisely because their own face is light. A blanket override would
+   turn every one of those cream-on-cream. Boxes keep their own colours; only
+   what touches the field changes. */
+.topbar__repo-select,
+.topbar__repo-select-label,
+.topbar__branch-select,
+.topbar__branch-select-label,
+.topbar__threshold,
+.topbar__archive-toggle {
+  color: var(--qb-bar-ink-2);
+}
+
+/* Last Orders' own caption and its ⓘ. Both are painted by shared primitives
+   (`.qb-label`, `.info-tooltip__trigger`) that set an ink colour on the
+   element itself, so inheriting from `.topbar__threshold` above never reaches
+   them. Scoped to the bar rather than flipped globally: the tooltip BUBBLE
+   keeps its parchment face wherever it opens, and only the trigger sitting on
+   the dark field changes. */
+.topbar__threshold .threshold-control__title,
+.topbar .info-tooltip__trigger {
+  color: var(--qb-bar-ink-2);
+}
+
+.topbar .info-tooltip__trigger:hover,
+.topbar .info-tooltip__trigger:focus-visible {
+  color: var(--qb-bar-ink);
 }
 
 .topbar__archive-toggle input {
@@ -1254,8 +1380,8 @@ body {
      shadow, tried alongside the other topbar badges); keeps its alert-red
      fill. */
   border-radius: var(--qb-radius-pennant);
-  background: var(--legacy-color-7a2e2e);
-  color: var(--legacy-color-ffd9d9);
+  background: var(--qb-alarm);
+  color: var(--qb-alarm-ink);
 }
 
 /* Guild pills (HANDOFF: Gold total / vanquished / fleet-health). Gold and
@@ -1291,9 +1417,9 @@ body {
 }
 
 .topbar__fleet-pill {
-  background: var(--qb-locked-chip-bg);
-  border: 1px solid var(--qb-questing-chip-border);
-  color: var(--qb-locked-chip-text);
+  background: var(--qb-fleet-chip-bg);
+  border: 1px solid var(--qb-fleet-chip-border);
+  color: var(--qb-fleet-chip-text);
   cursor: pointer;
 }
 
@@ -1677,7 +1803,7 @@ body {
 /* Same danger-red exception as .topbar__quarantine-banner above — no
    HANDOFF-sourced alert colour to convert to. */
 .board-error {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
 }
 
 /* --- "The messenger has been waylaid" (Waylaid.tsx) ------------------------
@@ -1690,8 +1816,8 @@ body {
   gap: 0.75rem;
   align-items: center;
   padding: 0.55rem 0.8rem;
-  background: color-mix(in srgb, var(--legacy-color-b3261e) 7%, var(--qb-panel));
-  border: 1.5px solid color-mix(in srgb, var(--legacy-color-b3261e) 45%, var(--qb-card-border));
+  background: color-mix(in srgb, var(--qb-alarm) 7%, var(--qb-panel));
+  border: 1.5px solid color-mix(in srgb, var(--qb-alarm) 45%, var(--qb-card-border));
   /* A strip, not a card: the button-scale wobble keeps it slim. */
   border-radius: var(--qb-btn-wobble-2);
   /* An alert is read once, in the middle, and then acted on — stretched the
@@ -1873,8 +1999,8 @@ body {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: var(--legacy-radius-4px);
-  background: var(--legacy-color-7a2e2e);
-  color: var(--legacy-color-ffd9d9);
+  background: var(--qb-alarm);
+  color: var(--qb-alarm-ink);
   font-size: 0.8rem;
 }
 
@@ -2235,8 +2361,8 @@ body {
 }
 
 .card-tile--blocked {
-  border-color: var(--legacy-color-d33d3d);
-  background: var(--legacy-color-fff5f5);
+  border-color: var(--qb-alarm);
+  background: var(--qb-alarm-tint);
 }
 
 .card-tile--highlighted {
@@ -2273,7 +2399,7 @@ body {
    see the quarantine-banner comment above) rather than inventing a new
    warning colour. Can stack with `.is-spotlight` on the same card/row. */
 .is-near-threshold {
-  outline: 2px solid var(--legacy-color-d33d3d);
+  outline: 2px solid var(--qb-alarm);
   outline-offset: 1px;
 }
 
@@ -3177,7 +3303,7 @@ body {
   font-weight: 700;
   padding: 0.05rem 0.4rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-d33d3d);
+  background: var(--qb-alarm);
   color: var(--legacy-color-fff);
 }
 
@@ -3217,7 +3343,7 @@ body {
 
 /* Tripwire (actual >= 2x estimate) is visually distinct. */
 .budget-meter--tripwire .budget-meter__value {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm);
   font-weight: 700;
 }
 
@@ -3226,7 +3352,7 @@ body {
   font-weight: 700;
   padding: 0.05rem 0.3rem;
   border-radius: var(--legacy-radius-3px);
-  background: var(--legacy-color-b3261e);
+  background: var(--qb-alarm);
   color: var(--legacy-color-fff);
 }
 
@@ -3391,7 +3517,7 @@ body {
 /* Same danger-red exception as .board-error/.topbar__quarantine-banner
    elsewhere in the epic — no HANDOFF-sourced alert colour to convert to. */
 .card-drawer__status--error {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
 }
 
 .card-drawer__header {
@@ -3535,7 +3661,7 @@ body {
    saveEdit() keeps edit mode open and surfaces inline here (fix-up, PR3
    dual review) rather than silently discarding the draft. */
 .card-drawer__edit-error {
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
   font-size: 0.85rem;
   margin: 0;
 }
@@ -4230,7 +4356,10 @@ a.card-drawer__pr-chip:hover {
 .threshold-control__select {
   width: 3.75rem;
   font-size: 0.75rem;
-  background: transparent;
+  /* No `background: transparent` — the third of the parchment-era overrides
+     (see `.topbar__branch-select select`). It melted the control into a cream
+     bar; on the ink bar it left a dark box on a dark field. `.qb-select`'s own
+     face is what makes this match the buttons beside it. */
   padding: 0.12rem 0.4rem;
 }
 
@@ -4267,7 +4396,7 @@ a.card-drawer__pr-chip:hover {
 .attributes-editor__error {
   flex-basis: 100%;
   margin: 0;
-  color: var(--legacy-color-b3261e);
+  color: var(--qb-alarm-deep);
   font-size: 0.85rem;
 }
 
@@ -5228,9 +5357,13 @@ a.card-drawer__pr-chip:hover {
    overlaps its neighbour by half. The active view's coin is the FRONT coin
    (gold-chip fill, full size); the others sit behind, shrunk and dimmed.
    Tapping a back coin brings it forward and swaps the view — transform +
-   z-index driven purely by `aria-pressed`. Positions come from source order
-   (`:nth-child`), the row's width from `data-count`, so a coin added or
-   removed never needs the CSS touched beyond those two lists.
+   z-index driven purely by `aria-pressed`. Each coin's slot and the row's
+   width come from two custom properties TopBar.tsx sets (`--coin-i` per
+   coin, `--coin-n` on the row), so adding or removing a page needs NO rule
+   here. That claim used to be made of a `:nth-child` list and a `data-count`
+   list which both stopped at three — so the Almoner's fourth coin was given
+   no slot, sat at left:0 outside a too-narrow row, and covered the wordmark.
+   A list that must be extended by hand is not a rule; this is.
 
    Each coin's box is 44px (border included) — meeting the ≥44px touch-target
    floor directly. Active = the same gold-chip fill/border/text trio the
@@ -5238,37 +5371,20 @@ a.card-drawer__pr-chip:hover {
 .topbar__view-toggle {
   position: relative;
   flex: 0 0 auto;
-  /* 44px coin + 30px per further coin (each overlapping the last by about
-     a third) */
-  width: 74px;
+  /* 44px for the front coin, +30px for every further one (each overlapping
+     its neighbour by about a third). The fallback of 2 is the minimum the
+     dashboard ever shows — Board and Atlas are not optional. */
+  width: calc(44px + (var(--coin-n, 2) - 1) * 30px);
   height: 44px;
-}
-
-.topbar__view-toggle[data-count="3"] {
-  width: 104px;
-}
-
-/* Stacking reads left to right: each coin lies over the one to its right,
-   like a fanned hand of cards, so on load the row is Board over Atlas over
-   Chronicle. The pressed coin's own z-index (below) still tops them all. */
-.topbar__view-toggle-btn:nth-child(1) {
-  z-index: 3;
-}
-
-.topbar__view-toggle-btn:nth-child(2) {
-  left: 30px;
-  z-index: 2;
-}
-
-.topbar__view-toggle-btn:nth-child(3) {
-  left: 60px;
-  z-index: 1;
 }
 
 .topbar__view-toggle-btn {
   position: absolute;
   top: 0;
-  left: 0;
+  /* Stacking reads left to right: each coin lies over the one to its right,
+     like a fanned hand of cards. The pressed coin tops them all (below). */
+  left: calc(var(--coin-i, 0) * 30px);
+  z-index: calc(20 - var(--coin-i, 0));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5298,7 +5414,9 @@ a.card-drawer__pr-chip:hover {
 /* Front coin — the active view: full size, fully opaque, above its siblings. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
   transform: scale(1);
-  z-index: 4;
+  /* Above every back coin whatever the count — the old `4` was only ever
+     above three siblings. */
+  z-index: 30;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
@@ -7469,7 +7587,8 @@ button.trail-tag:focus-visible {
   color: var(--qb-gold-chip-text);
 }
 
-.chronicle__empty {
+.chronicle__empty,
+.almoner__empty {
   padding: 2rem;
   text-align: center;
   background: var(--qb-panel);
@@ -7479,7 +7598,8 @@ button.trail-tag:focus-visible {
   color: var(--qb-ink-700);
 }
 
-.chronicle__empty-title {
+.chronicle__empty-title,
+.almoner__empty-title {
   margin: 0 0 0.5rem;
   font-family: var(--qb-font-display);
   font-weight: 800;
@@ -7487,7 +7607,8 @@ button.trail-tag:focus-visible {
   color: var(--qb-ink-900);
 }
 
-.chronicle__empty p {
+.chronicle__empty p,
+.almoner__empty p {
   margin: 0;
 }
 
@@ -8925,4 +9046,525 @@ button.trail-tag:focus-visible {
     grid-column: 1 / -1;
     justify-content: center;
   }
+}
+
+/* Every source mark sits on one baseline whatever it is made of — the brand
+   marks are inline SVG, mail is a drawn PNG (see SourceIcon.tsx), and without
+   this the raster one rides a pixel low against its neighbours in the badge. */
+.almoner__source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+
+/* =========================================================================
+   The Almoner — inflow triage page (optional almoner plugin)
+
+   Wears the dashboard's STICKER look: these rows are cards you act on, like
+   `.card-tile` on the board, so they keep the `:root` defaults for
+   `--chr-box-ink` / `--chr-box-shadow` rather than overriding them. Per that
+   token block's own instruction, a container picks a look by overriding
+   those tokens, never by restyling the boxes.
+
+   Chips and eyebrows route through the design library (`.qb-chip`,
+   `.qb-label`); only colour modifiers live here.
+   ========================================================================= */
+.board-region:has(.almoner) {
+  overflow-y: auto;
+}
+
+.almoner {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 1040px;
+  margin: 0 auto;
+  transition: opacity 0.2s ease;
+}
+
+/* Dimmed, not blanked: a gather is several remote round trips, and swapping
+   the page for a skeleton each time would flash it for seconds. */
+.almoner--refreshing {
+  opacity: 0.55;
+}
+
+.almoner__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.almoner__stamp {
+  /* Takes the space the page heading used to hold open — the guild bar names
+     the page now, so this row starts with its one action. */
+  margin-right: auto;
+  font-family: var(--qb-font-prose);
+  font-size: 0.85rem;
+  color: var(--qb-ink-500);
+}
+
+.almoner__notice {
+  padding: 0.7rem 1rem;
+  background: var(--qb-parchment-muted);
+  border: var(--chr-box-ink) solid var(--qb-card-border);
+  border-radius: var(--qb-radius-card-b);
+  font-family: var(--qb-font-prose);
+  font-size: 0.9rem;
+  color: var(--qb-ink-700);
+}
+
+.almoner__notice--demo { border-style: dashed; }
+
+/* A source that fell over is NAMED. A silently short digest reads as
+   "nothing needs you", which is the one wrong answer this page can give. */
+.almoner__notice--failed {
+  border-color: var(--qb-status-blocked-base);
+  background: color-mix(in srgb, var(--qb-status-blocked-base) 10%, var(--qb-panel));
+}
+
+.almoner__empty {
+  padding: 2rem;
+  text-align: center;
+  background: var(--qb-panel);
+  border: 2px dashed var(--qb-line-dashed);
+  border-radius: var(--qb-radius-panel);
+  font-family: var(--qb-font-prose);
+  color: var(--qb-ink-700);
+}
+
+.almoner__empty-title {
+  margin: 0 0 0.5rem;
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: var(--qb-ink-900);
+}
+
+.almoner__empty p { margin: 0; }
+
+.almoner__suppressed {
+  margin: 0;
+  font-family: var(--qb-font-prose);
+  font-size: 0.82rem;
+  color: var(--qb-ink-500);
+}
+
+.almoner__suppressed strong { color: var(--qb-ink-900); }
+
+.almoner__unranked {
+  margin: 0;
+  font-family: var(--qb-font-prose);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--qb-ink-500);
+}
+
+/* --- the day band: the page's one bold move -------------------------------
+   The only element that leaves the parchment. An instrument wants a dark
+   face; everything around it stays quiet so this can be loud. */
+.alm-band {
+  background: #2b2119;
+  border-radius: var(--qb-radius-card-b);
+  padding: 0.85rem 1.1rem 0.65rem;
+  color: #efe3cc;
+}
+
+.alm-band__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.alm-band__day {
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.alm-band__span {
+  font-family: var(--qb-font-prose);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: #9c8a70;
+}
+
+.alm-band__axis {
+  position: relative;
+  height: 62px;
+  border-bottom: 1px solid #5c4a36;
+  margin-bottom: 1.35rem;
+}
+
+.alm-band__hour {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 6px;
+  background: #5c4a36;
+}
+
+.alm-band__hourlab {
+  position: absolute;
+  bottom: -19px;
+  transform: translateX(-50%);
+  font-family: var(--qb-font-prose);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  color: #9c8a70;
+}
+
+.alm-band__blip {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid #2b2119;
+  transform: translateX(-50%);
+  background: #6e6154;
+}
+
+/* Brand hues lifted towards the dark ground — Slack's aubergine and Linear's
+   indigo are both too dark to read against #2b2119 at 11px. */
+.alm-band__blip--slack { background: #a06aa8; }
+.alm-band__blip--linear { background: #8e97e4; }
+.alm-band__blip--almoner { background: var(--qb-accent-sky-fill); }
+.alm-band__blip.is-open { box-shadow: 0 0 0 3.5px rgba(224, 162, 76, 0.3); }
+
+.alm-band__key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  font-family: var(--qb-font-prose);
+  font-size: 0.72rem;
+  color: #b8a68c;
+}
+
+.alm-band__k { display: inline-flex; align-items: center; gap: 0.32rem; }
+.alm-band__k i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.alm-band__k--end { margin-left: auto; }
+
+/* --- waiting on you ------------------------------------------------------- */
+.alm-waiting__eyebrow { display: block; margin-bottom: 0.4rem; }
+
+/* Scrolls rather than wraps: this is a glance, and wrapping it to three rows
+   makes it look like work. */
+.alm-waiting__strip {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.2rem;
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+}
+
+.alm-person {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.65rem 0.3rem 0.35rem;
+  background: var(--qb-panel);
+  border: var(--chr-box-ink) solid var(--qb-accent-taupe-border);
+  border-radius: var(--qb-radius-card-b);
+  box-shadow: var(--qb-shadow-card) var(--qb-accent-taupe-border);
+}
+
+.alm-person--owed {
+  border-color: var(--qb-accent-orange-border);
+  box-shadow: var(--qb-shadow-card) var(--qb-accent-orange-border);
+}
+
+.alm-person--clear { opacity: 0.66; }
+
+.alm-person__disc {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px 8px 10px 9px / 9px 11px 8px 10px;
+  background: var(--qb-tab-track);
+  border: var(--chr-box-ink) solid var(--qb-card-border);
+  font-family: var(--qb-font-display);
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: var(--qb-ink-900);
+}
+
+.alm-person__name {
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--qb-ink-900);
+}
+
+.alm-person__wait {
+  font-family: var(--qb-font-prose);
+  font-size: 0.73rem;
+  color: var(--qb-ink-500);
+  white-space: nowrap;
+}
+
+/* --- the day table -------------------------------------------------------- */
+.alm-tablewrap {
+  overflow-x: auto;
+  background: var(--qb-panel);
+  border: var(--chr-box-ink) solid var(--qb-card-border);
+  border-radius: var(--qb-radius-card-a);
+  box-shadow: var(--qb-shadow-card) var(--qb-card-border);
+}
+
+.alm-table {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: collapse;
+  font-family: var(--qb-font-prose);
+  font-size: 0.88rem;
+}
+
+.alm-table th,
+.alm-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.55rem 0.6rem;
+}
+
+.alm-table thead th {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.09em;
+  color: var(--qb-ink-400);
+  border-bottom: 2px solid var(--qb-card-border);
+  white-space: nowrap;
+}
+
+.alm-table__dayrow th {
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--qb-ink-500);
+  background: var(--qb-parchment-muted);
+  border-top: 1px dashed var(--qb-line-dashed);
+  border-bottom: 1px dashed var(--qb-line-dashed);
+}
+
+.alm-table__item td { border-top: 1px solid var(--qb-line-dashed-2); }
+.alm-table__dayrow + .alm-table__item td { border-top: 0; }
+.alm-table__thread td { border-top: 0; padding-top: 0; }
+
+/* The lead column: mark over time, urgency down its edge. The one piece that
+   does NOT restack on mobile, which is what keeps the two views one screen. */
+.alm-row__lead {
+  width: 54px;
+  text-align: center;
+  border-left: 4px solid var(--alm-urg, var(--qb-accent-taupe-border));
+  /* Two channels meeting on one cell without colliding: the left edge is the
+     row's STATE, the wash behind it is the row's SOURCE. See the source-colour
+     block below. This is the cell that already holds the source's mark, so the
+     colour lands where the eye is sent to look for it. */
+  background: color-mix(in srgb, var(--alm-src, transparent) 16%, transparent);
+}
+
+.alm-row__time {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--qb-ink-500);
+}
+
+/* Urgency, set once per row and read by the spine and the state chip. It is
+   carried three ways — spine, chip, wash — because one channel is never
+   enough, and the chip says it in words so colour is only reinforcement. */
+.alm-row--open { --alm-urg: var(--qb-accent-orange-border); }
+.alm-row--reconcile { --alm-urg: var(--qb-accent-sky-border); }
+.alm-row--settled { --alm-urg: var(--qb-accent-taupe-border); opacity: 0.76; }
+/* A rollup of machine mail: quieter than settled, because settled is
+   something you dealt with and this is something nobody asked of you. It is
+   still a row — nothing has been hidden — just the faintest one on the page. */
+.alm-row--bundled { --alm-urg: var(--qb-line-dashed); opacity: 0.66; }
+.alm-row--bundled .alm-row__title { font-weight: 600; }
+.alm-lab--bundled { border-style: dashed; }
+.alm-table__item.alm-row--open td {
+  background: color-mix(in srgb, var(--qb-accent-orange-fill) 7%, transparent);
+}
+
+/* ---- Source colour: the row's OTHER question ------------------------------
+   The spine and wash answer "does this still want me". These answer "who is
+   this from", which is a different question and therefore a different
+   channel — never the same element, or one would silently overwrite the
+   other on any row where both had something to say.
+
+   Hues are the house accents, chosen for the nearest honest association
+   rather than for brand fidelity: a 14px chip cannot carry a brand colour and
+   the page is parchment, not a vendor's site. `almoner` is deliberately the
+   neutral ash — a derived row is not FROM a service at all, and giving it a
+   service's colour would be a small lie. An unknown source simply gets no
+   colour, which is the truthful rendering of "we have no idea what this is". */
+.alm-table__item[data-source="mail"],
+.alm-lab--src[data-source="mail"] { --alm-src: var(--qb-accent-amber-fill); }
+.alm-table__item[data-source="slack"],
+.alm-lab--src[data-source="slack"] { --alm-src: var(--qb-accent-rose-fill); }
+.alm-table__item[data-source="linear"],
+.alm-lab--src[data-source="linear"] { --alm-src: var(--qb-accent-sky-fill); }
+/* Notion is monochrome by brand, so it takes the palette's most neutral warm
+   rather than a hue it never wears. */
+.alm-table__item[data-source="notion"],
+.alm-lab--src[data-source="notion"] { --alm-src: var(--qb-accent-taupe-fill); }
+.alm-table__item[data-source="almoner"],
+.alm-lab--src[data-source="almoner"] { --alm-src: var(--qb-accent-ash-fill); }
+
+/* The chip says it in WORDS as well — the colour is reinforcement, the same
+   bargain the state chip strikes. A source with no hue keeps the plain chip
+   rather than rendering a transparent border. */
+.alm-lab--src[data-source] {
+  border-color: color-mix(in srgb, var(--alm-src, var(--qb-card-border)) 70%, var(--qb-card-border));
+  background: color-mix(in srgb, var(--alm-src, transparent) 20%, var(--qb-panel));
+}
+
+.alm-row__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  margin-bottom: 0.2rem;
+}
+
+/* `.qb-chip` owns shape and spacing; these add colour only. */
+.alm-lab {
+  font-size: 0.68rem;
+  padding: 0 0.4rem;
+}
+
+.alm-lab--count { background: var(--qb-tab-track); }
+.alm-lab--dupe { border-style: dashed; }
+
+.alm-lab--state {
+  font-weight: 700;
+  color: var(--qb-ink-900);
+  border-color: color-mix(in srgb, var(--alm-urg) 70%, var(--qb-ink-300));
+  background: color-mix(in srgb, var(--alm-urg) 30%, var(--qb-panel));
+}
+.alm-lab--reconcile { border-style: dashed; }
+
+.alm-row__title {
+  display: block;
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--qb-ink-900);
+}
+
+.alm-row__ex { display: block; color: var(--qb-ink-700); }
+
+.alm-row__go { width: 4rem; text-align: right; white-space: nowrap; }
+
+.alm-row__chev,
+.alm-row__open {
+  font-size: 0.8rem;
+  background: none;
+  border: 1px solid var(--qb-ink-300);
+  border-radius: 8px;
+  color: var(--qb-ink-700);
+  padding: 0 0.35rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.alm-row__chev[aria-expanded="true"] { background: var(--qb-tab-track); }
+.alm-row__chev:hover,
+.alm-row__open:hover { background: var(--qb-tab-track); }
+
+/* --- the conversation, opened in place ------------------------------------ */
+.alm-thread {
+  margin: 0.15rem 0 0.5rem;
+  padding: 0.5rem 0 0.1rem 0.8rem;
+  border-left: 2px dashed var(--qb-line-dashed);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.alm-msg__head { display: flex; align-items: baseline; gap: 0.4rem; }
+
+.alm-msg__who {
+  font-family: var(--qb-font-display);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--qb-ink-700);
+}
+
+.alm-msg__when {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--qb-ink-400);
+}
+
+.alm-msg__link { margin-left: auto; font-size: 0.76rem; text-decoration: none; }
+
+.alm-msg__text { margin: 0.05rem 0 0; font-size: 0.86rem; }
+
+/* Your own lines, quieted — the shape of the exchange should be visible
+   without reading it. */
+.alm-msg--mine .alm-msg__text { color: var(--qb-ink-500); font-style: italic; }
+
+.alm-thread__foot {
+  margin: 0;
+  padding-top: 0.1rem;
+  font-size: 0.76rem;
+  color: var(--qb-ink-500);
+}
+
+/* --- narrow widths: the SAME table, tightened -----------------------------
+   An earlier pass restacked into cards below the house breakpoint, and the
+   table simply vanishing on a narrow window was more confusing than useful.
+   The lead column and the actions are already fixed and small, so the only
+   thing standing between this table and a phone is padding and a min-width
+   that assumed a desktop. Both go. */
+@media (max-width: 720px) {
+  .alm-table {
+    /* Let the conversation column take whatever is left instead of forcing
+       a horizontal scroll the reader has to discover. */
+    min-width: 0;
+    font-size: 0.84rem;
+  }
+
+  .alm-table th,
+  .alm-table td {
+    padding: 0.5rem 0.35rem;
+  }
+
+  .alm-row__lead {
+    width: 42px;
+    border-left-width: 3px;
+  }
+
+  .alm-row__go {
+    width: 2.6rem;
+    padding-left: 0;
+  }
+
+  /* Stacked rather than side by side: two 1.5rem controls do not fit beside
+     each other in a 2.6rem column. */
+  .alm-row__go .alm-row__chev,
+  .alm-row__go .alm-row__open {
+    display: block;
+    margin-left: auto;
+  }
+  .alm-row__go .alm-row__open { margin-top: 0.25rem; }
+
+  /* The header adds nothing once the columns are this narrow — the day rows
+     already say what the table is. */
+  .alm-table thead { display: none; }
+
+  .alm-thread { padding-left: 0.5rem; }
 }

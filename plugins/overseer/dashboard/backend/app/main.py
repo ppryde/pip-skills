@@ -29,8 +29,10 @@ from pydantic import BaseModel, field_validator
 
 from app.cli_client import (
     CliError,
+    almoner_installed,
     check_id,
     chronicle_installed,
+    run_almoner,
     run_census,
     run_census_all,
     run_chronicle,
@@ -1025,6 +1027,64 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         if data is None:
             return {"installed": True, "exists": False}
         return {"installed": True, **data}
+
+    # --- Almoner (optional sibling plugin) -------------------------------
+    # Read-only throughout. Both routes degrade to a shape the page can render
+    # rather than erroring, so a dashboard with no almoner installed — or one
+    # whose sources are all unreachable — still draws.
+
+    @app.get("/api/almoner/status")
+    def almoner_status() -> dict[str, Any]:
+        if not almoner_installed():
+            return {"installed": False, "configured": False, "sources": []}
+        data = run_almoner("status")
+        if data is None:
+            return {"installed": True, "configured": False, "sources": []}
+        sources = data.get("sources") or []
+        # "Installed but no sources" is a normal, published state: the plugin
+        # ships an empty source list, so a fresh install renders "not
+        # configured" rather than an empty digest that looks like good news.
+        return {"installed": True, "configured": bool(sources), **data}
+
+    @app.get("/api/almoner/digest")
+    def almoner_digest(hours: int | None = None, context: str | None = None,
+                       new: int | None = None) -> dict[str, Any]:
+        if hours is not None and (hours < 1 or hours > 24 * 30):
+            raise HTTPException(status_code=400, detail="hours out of range")
+        args = ["digest", "--json"]
+        if hours is not None:
+            args += ["--hours", str(hours)]
+        if context:
+            # `context` reaches a subprocess argv, so it goes through the same
+            # metacharacter rule as every other client-supplied token here.
+            # `check_id` raises CliError, which this server translates per
+            # route rather than globally — and "invalid card id" would be the
+            # wrong thing to tell someone who mistyped a context.
+            try:
+                check_id(context)
+            except CliError:
+                raise HTTPException(status_code=400, detail="invalid context") from None
+            args += ["--context", context]
+        if new:
+            args.append("--new")
+        # Not installed is its own, quieter case, checked only AFTER request
+        # validation above (a malformed `context` must still 400 whether or
+        # not the plugin exists) — the page never offers the coin at all when
+        # this is true, so a direct hit on the route just answers the same
+        # empty shape it always has, with no CLI run to have failed.
+        if not almoner_installed():
+            return {"items": [], "sources": []}
+        data = run_almoner(*args)
+        if data is not None:
+            return data
+        # The plugin IS installed but this run failed — timeout, non-zero
+        # exit or bad JSON (see run_almoner). That must not be byte-identical
+        # to a genuinely empty digest: `{"items": [], "sources": []}` alone
+        # renders as "every source answered and none of it was asking
+        # anything", which here is simply false. `error` is what lets the
+        # frontend tell the two apart and render a failure state instead of
+        # the quiet "nothing needs you" empty state.
+        return {"items": [], "sources": [], "error": "almoner did not return a digest"}
 
     @app.get("/api/chronicle/summary")
     def chronicle_summary(root: str | None = None, scope: str | None = None,

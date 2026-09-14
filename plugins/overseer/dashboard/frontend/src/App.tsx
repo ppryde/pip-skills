@@ -8,6 +8,7 @@ import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
 import type { ChronicleQuery } from "./api/types";
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
+import { useAlmonerStatus } from "./board/almoner/useAlmoner";
 
 /**
  * The Chronicle page is code-split, because the chronicle plugin is OPTIONAL.
@@ -20,6 +21,9 @@ import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chro
  * lazy import makes the optionality true of the artefact, not just the API.
  */
 const ChroniclePage = lazy(() => import("./components/chronicle/ChroniclePage"));
+/** Code-split for the same reason as the Chronicle: the almoner plugin is
+ * OPTIONAL, so a dashboard without it must not ship the page's bundle. */
+const AlmonerPage = lazy(() => import("./components/almoner/AlmonerPage"));
 import { chronicleScopeFor } from "./board/chronicle/scope";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
@@ -59,10 +63,27 @@ function readStoredRoot(): string | null {
 /** The page a URL hash names, or null for anything that isn't one of ours
  * (the bare URL, `#design`, a stray anchor). Chronicle is accepted here
  * even before its plugin status is known — the guard effect in App falls
- * back to the board once status says the page isn't offered. */
+ * back to the board once status says the page isn't offered.
+ *
+ * A hash may carry its own query string — `#almoner?demo=1` is the
+ * documented almoner demo URL (AlmonerPage.tsx, fixture.ts) — so the page
+ * name is only the part before a `?`. Without this split, `#almoner?demo=1`
+ * fails every comparison below, `view` falls back to `"board"`, and the
+ * hash-mirroring effect further down then overwrites the URL's own hash with
+ * `""` because it trusts that (wrong) view. */
 function viewFromHash(hash: string): View | null {
-  const name = hash.replace(/^#/, "");
-  return name === "board" || name === "atlas" || name === "chronicle" ? name : null;
+  const name = hash.replace(/^#/, "").split("?")[0];
+  return name === "board" || name === "atlas" || name === "chronicle" || name === "almoner"
+    ? name
+    : null;
+}
+
+/** The query string riding on a `#page?query` hash, as URLSearchParams —
+ * empty when the hash carries none. Mirrors `viewFromHash`'s split so the
+ * two never disagree about where the page name ends and the query begins. */
+function hashQuery(hash: string): URLSearchParams {
+  const at = hash.indexOf("?");
+  return new URLSearchParams(at === -1 ? "" : hash.slice(at + 1));
 }
 
 function sameLabelSet(a: string[], b: string[]): boolean {
@@ -204,8 +225,15 @@ function App() {
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash) ?? "board");
   useEffect(() => {
     if (window.location.hash === "#design") return;
+    // Compared by PAGE NAME, not exact string: a hash may carry its own
+    // query (`#almoner?demo=1`) that this effect must leave alone once it
+    // already names the current view — an exact-string compare rewrote it to
+    // the bare `#almoner` on every render, silently dropping `?demo=1`. An
+    // unrecognised/bare hash counts as "board", same fallback `view`'s own
+    // initial state uses, so the board's default (no-op) case still skips.
+    const currentPage = viewFromHash(window.location.hash) ?? "board";
+    if (currentPage === view) return;
     const wanted = view === "board" ? "" : `#${view}`;
-    if (window.location.hash === wanted) return;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${wanted}`);
   }, [view]);
   useEffect(() => {
@@ -221,13 +249,27 @@ function App() {
   // whether the page is offered at all. `null` = not yet known.
   const chronicleStatus = useChronicleStatus();
   const chronicleAvailable = chronicleStatus?.installed === true;
+  // Almoner (optional sibling plugin), gated exactly as the Chronicle is.
+  const almonerStatus = useAlmonerStatus();
+  const almonerAvailable = almonerStatus?.installed === true;
+  // `demo=1` renders the sample digest so the page can be seen before the
+  // almoner CLI exists. Opt-in only, and the page says so in a banner. The
+  // documented URL is `#almoner?demo=1` — the flag rides inside the hash's
+  // own query, not the page's `?query` — but `?demo=1#almoner` is accepted
+  // too, so either order works.
+  const almonerDemo =
+    new URLSearchParams(window.location.search).get("demo") === "1" ||
+    hashQuery(window.location.hash).get("demo") === "1";
   useEffect(() => {
     // Defensive: a stale `#chronicle`-ish selection can't outlive the
     // plugin's absence — fall back to the board once status is known.
     if (view === "chronicle" && chronicleStatus !== null && !chronicleAvailable) {
       setView("board");
     }
-  }, [view, chronicleStatus, chronicleAvailable]);
+    if (view === "almoner" && almonerStatus !== null && !almonerAvailable && !almonerDemo) {
+      setView("board");
+    }
+  }, [view, chronicleStatus, chronicleAvailable, almonerStatus, almonerAvailable, almonerDemo]);
   // The Chronicle's filters and its Sync action are App-owned for the same
   // reason the Atlas toggles are (WF-091): the controls render in the top
   // bar / filter region while the data renders in the page, so both need
@@ -430,6 +472,7 @@ function App() {
         hideVanquished={hideVanquished}
         onToggleVanquished={setHideVanquished}
         chronicleAvailable={chronicleAvailable}
+          almonerAvailable={almonerAvailable || almonerDemo}
         onChronicleSync={() => void chronicleSync.sync()}
         chronicleSyncing={chronicleSync.syncing}
         chronicleAllRepos={{ selected: chronicleScope === "all", onSelect: setChronicleAllRepos }}
@@ -478,7 +521,15 @@ function App() {
         {/* The Chronicle is account-wide data, so unlike Board/Atlas it is
             reachable for an unbegun repo too — the page just locks its
             scope to "All repos" since a boardless root can't be named. */}
-        {view === "chronicle" ? (
+        {view === "almoner" ? (
+          // Wrapped like the Chronicle below: both pages are lazy chunks a
+          // stale tab can 404 on after a rebuild.
+          <ChunkLoadBoundary>
+            <Suspense fallback={<p className="board-placeholder">Loading the Almoner…</p>}>
+              <AlmonerPage status={almonerStatus} demo={almonerDemo} />
+            </Suspense>
+          </ChunkLoadBoundary>
+        ) : view === "chronicle" ? (
           // ChunkLoadBoundary outside Suspense: Suspense only covers the
           // PENDING state of the lazy import below, not a REJECTED one (a
           // stale tab's chunk 404ing after a rebuild) — see its own comment.
