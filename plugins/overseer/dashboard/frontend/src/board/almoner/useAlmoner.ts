@@ -74,6 +74,16 @@ export function useAlmonerDigest(
       .then(() => getAlmonerDigest({ hours, context }, { signal: controller.signal }))
       .then((res) => {
         if (controller.signal.aborted) return;
+        // The backend answers 200 even when the almoner CLI itself failed
+        // (timeout, non-zero exit, bad JSON) — soft-degrading is the whole
+        // point of the sibling-plugin pattern, so this is not a thrown
+        // rejection. `error` is how it still reaches the SAME failure path a
+        // network error would: rendering it as "nothing needs you" would be
+        // the silently-short digest the design forbids.
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
         setDigest(res);
         setRefreshedAt(Date.now());
       })

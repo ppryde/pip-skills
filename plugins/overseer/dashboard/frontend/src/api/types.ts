@@ -1018,4 +1018,13 @@ export interface AlmonerDigest {
    * worked. It is also the number that makes the `suppressed` audit table
    * worth opening: a triage filter you cannot see is one you cannot trust. */
   suppressed?: number;
+  /** Set only when the almoner CLI itself failed — timed out, exited
+   * non-zero, or answered bad JSON — while `items`/`sources` still come back
+   * as empty arrays so old clients degrade gracefully. Distinguishes that
+   * failure from a genuinely empty digest, which carries no `error` at all:
+   * without this, both shapes are byte-identical and a real failure renders
+   * as the silently-short "nothing needs you" empty state the design
+   * forbids. The page treats its presence as a fetch error, same as a
+   * network failure. */
+  error?: string;
 }

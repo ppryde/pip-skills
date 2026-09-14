@@ -1067,10 +1067,24 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             args += ["--context", context]
         if new:
             args.append("--new")
+        # Not installed is its own, quieter case, checked only AFTER request
+        # validation above (a malformed `context` must still 400 whether or
+        # not the plugin exists) — the page never offers the coin at all when
+        # this is true, so a direct hit on the route just answers the same
+        # empty shape it always has, with no CLI run to have failed.
+        if not almoner_installed():
+            return {"items": [], "sources": []}
         data = run_almoner(*args)
-        # An unavailable almoner and an almoner with nothing to say are the
-        # same shape on purpose; `sources` is what tells the page which it is.
-        return data if data is not None else {"items": [], "sources": []}
+        if data is not None:
+            return data
+        # The plugin IS installed but this run failed — timeout, non-zero
+        # exit or bad JSON (see run_almoner). That must not be byte-identical
+        # to a genuinely empty digest: `{"items": [], "sources": []}` alone
+        # renders as "every source answered and none of it was asking
+        # anything", which here is simply false. `error` is what lets the
+        # frontend tell the two apart and render a failure state instead of
+        # the quiet "nothing needs you" empty state.
+        return {"items": [], "sources": [], "error": "almoner did not return a digest"}
 
     @app.get("/api/chronicle/summary")
     def chronicle_summary(root: str | None = None, scope: str | None = None,

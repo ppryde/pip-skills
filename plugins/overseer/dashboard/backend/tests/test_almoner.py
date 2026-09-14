@@ -59,12 +59,37 @@ def test_a_wedged_cli_degrades_instead_of_failing_the_page(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`run_almoner` returns None for a timeout, a non-zero exit or bad JSON
-    alike. The route must turn that into an empty digest, not a 500."""
+    alike, while the plugin IS installed. The route must turn that into a
+    200, never a 500 — but it must NOT be byte-identical to a genuinely
+    empty digest: that would render as "every source answered and none of it
+    was asking anything", which is false. `error` is what lets the frontend
+    tell the two apart."""
     monkeypatch.setattr(main, "almoner_installed", lambda: True)
     monkeypatch.setattr(main, "run_almoner", lambda *a, **k: None)
     res = client.get("/api/almoner/digest")
     assert res.status_code == 200
-    assert res.json() == {"items": [], "sources": []}
+    body = res.json()
+    assert body["items"] == []
+    assert body["sources"] == []
+    assert body.get("error")
+
+
+def test_a_genuinely_empty_digest_carries_no_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mirror image of the test above: a real run that legitimately
+    found nothing must not be flagged as a failure."""
+    monkeypatch.setattr(main, "almoner_installed", lambda: True)
+    monkeypatch.setattr(
+        main,
+        "run_almoner",
+        lambda *a, **k: {"items": [], "sources": [{"label": "slack", "type": "slack", "ok": True}]},
+    )
+    res = client.get("/api/almoner/digest")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["items"] == []
+    assert "error" not in body
 
 
 def test_digest_passes_the_window_and_context_through(
