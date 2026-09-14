@@ -11,8 +11,23 @@ node_modules/
 # RPG icon source library (17MB) — only the used subset is committed into the overseer dashboard bundle
 /assets/rpg-icons/
 /assets/rpg-icons-transparent/
-.overseer/config.local.json
-.overseer/remote-token
+# Per-repo overseer state. Directory-level: `config.local.json` and
+# `remote-token` were listed individually, which left anything ELSE that landed
+# here — a stray db, a cache, a future state file — untracked but unignored,
+# and so eligible for `git add -A`. `config.json` is the only thing here
+# intended to be shared, and it is not currently committed either.
+.overseer/
+
+# Databases, wherever they appear. The overseer board lives outside the repo
+# (`~/.claude*/overseer/<repo>/board.db`) and the almoner's store is specified
+# to do the same — but both hold work content at rest, and one landing in the
+# tree is a matter of when rather than whether. A pattern costs nothing; the
+# alternative is noticing in a diff.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 
 # The Almoner's LOCAL demo digest — a developer's own inflow, gathered to see
 # the page against real content. Never committed: this repo is public, and the
