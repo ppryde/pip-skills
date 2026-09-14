@@ -661,3 +661,48 @@ describe("<App/> — page in the URL hash", () => {
     expect(container.querySelector(".board")).toBeInTheDocument();
   });
 });
+
+// The documented almoner demo URL puts `demo=1` INSIDE the hash's own query
+// (`#almoner?demo=1` — see AlmonerPage.tsx and fixture.ts), not in the page's
+// `location.search`. `viewFromHash` used to compare the whole hash tail
+// against "almoner" verbatim, so the trailing `?demo=1` made that comparison
+// fail, `view` fell back to "board", and the hash-mirroring effect then
+// overwrote the URL's real hash with "" because it trusted that wrong view.
+describe("<App/> — almoner demo URL (#almoner?demo=1)", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    window.history.replaceState(null, "", window.location.pathname);
+  });
+
+  it("opens the Almoner in demo mode from #almoner?demo=1", async () => {
+    window.location.hash = "#almoner?demo=1";
+    render(<App />);
+    await screen.findByText(/Sample data/i);
+    expect(screen.getByRole("button", { name: "Almoner" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("does not wipe the hash's own query once it already names the current page", async () => {
+    window.location.hash = "#almoner?demo=1";
+    render(<App />);
+    await screen.findByText(/Sample data/i);
+    expect(window.location.hash).toBe("#almoner?demo=1");
+  });
+
+  it("also accepts the query in front of the hash (?demo=1#almoner)", async () => {
+    window.history.replaceState(null, "", `${window.location.pathname}?demo=1#almoner`);
+    render(<App />);
+    await screen.findByText(/Sample data/i);
+  });
+});
