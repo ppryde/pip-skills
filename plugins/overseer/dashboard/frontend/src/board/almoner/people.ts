@@ -37,6 +37,10 @@ function arrivedMs(item: AlmonerItem): number | null {
  * colleagues an uncapped strip is mostly ghosts. It bites on the CLEARED
  * first — an owed person falling off the strip is the one outcome that would
  * make it a liar, so the sort runs before the slice and owed always sorts up.
+ * That makes `cap` a target for the CLEARED tail rather than a hard ceiling
+ * on the whole list: every owed person is kept even when there are more of
+ * them than `cap`, so the strip can, deliberately, run longer than `cap`
+ * entries on a bad day rather than silently drop someone it owes.
  */
 export function whosWaiting(
   items: AlmonerItem[],
@@ -75,7 +79,14 @@ export function whosWaiting(
     return (b.waitedMs ?? -1) - (a.waitedMs ?? -1);
   });
 
-  return people.slice(0, cap);
+  // `slice(0, cap)` on the sorted list bit into the OWED end too whenever
+  // there were more than `cap` owed people — exactly the outcome the doc
+  // comment above says must never happen. Every owed person survives, even
+  // past `cap`; only the cleared tail is where truncation is allowed to show,
+  // which is what "the cap bites on the cleared first" actually requires.
+  const owed = people.filter((person) => person.owed);
+  const cleared = people.filter((person) => !person.owed);
+  return [...owed, ...cleared.slice(0, Math.max(0, cap - owed.length))];
 }
 
 /** "2h", "3d", "just now" — how long someone has been kept waiting.

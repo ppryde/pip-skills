@@ -98,6 +98,31 @@ describe("whosWaiting", () => {
     expect(names).toHaveLength(3);
   });
 
+  it("never drops an owed person even when owed people alone outnumber the cap", () => {
+    // Sorting owed-first before slicing was not enough on its own: when
+    // there are MORE owed people than `cap`, a plain `slice(0, cap)` still
+    // cuts into the owed end, silently vanishing whichever owed people
+    // sorted past the cut — exactly what the doc comment forbids.
+    const items = Array.from({ length: 10 }, (_, i) =>
+      item({ id: `o${i}`, who: `Owed${i}`, awaiting: true, arrived: "2026-09-13T08:00:00Z" })
+    );
+    const people = whosWaiting(items, NOW, 8);
+    expect(people).toHaveLength(10);
+    expect(people.every((p) => p.owed)).toBe(true);
+  });
+
+  it("still caps the cleared tail when owed people alone already fill the cap", () => {
+    const items = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        item({ id: `o${i}`, who: `Owed${i}`, awaiting: true, arrived: "2026-09-13T08:00:00Z" })
+      ),
+      ...Array.from({ length: 5 }, (_, i) => item({ id: `c${i}`, who: `Clear${i}`, awaiting: false })),
+    ];
+    const people = whosWaiting(items, NOW, 8);
+    expect(people).toHaveLength(8);
+    expect(people.every((p) => p.owed)).toBe(true);
+  });
+
   it("gives an initial for the disc", () => {
     expect(whosWaiting([item({ who: "rhona baird", awaiting: true })], NOW)[0].initial).toBe("R");
   });
