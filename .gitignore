@@ -19,3 +19,9 @@ node_modules/
 # shipped `fixture.ts` beside it is invented precisely so that it can ship.
 # `demo.ts` prefers this file when it exists and falls back when it does not.
 plugins/overseer/dashboard/frontend/src/board/almoner/fixture.local.ts
+
+# Local-only working documents — incident notes, support tickets, anything
+# holding real names, SHAs or customer data. Never committed. This repo is
+# public (currently private pending a GitHub Support purge), and the lesson of
+# 936e42d is that "I will remember not to commit it" is not a control.
+/local/
