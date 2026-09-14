@@ -343,12 +343,31 @@
      border card 1's vocabulary sweep missed (HANDOFF line 53). */
   --qb-success-chip-border: #a9be7e;
 
+  /* ---- Fleet health — the third guild pill -------------------------------
+     Its own set, because it never had one. The pill wore
+     `--qb-locked-chip-*` for its fill and text and a lone
+     `--qb-questing-chip-border` for its edge — the last survivor of a pink
+     vocabulary otherwise deleted, used in exactly one place. So it was three
+     borrowed colours from two dead ideas, which is why it matched nothing.
+
+     Worse, `locked` MEANS something here: dependency badges and locked atlas
+     cards use it to say "waiting on something else". The fleet pill says the
+     opposite — agents are working, this is how full their context is.
+
+     Sky, because the pill is information rather than alarm or reward, and
+     because gold and green already have the row. Built to the same bg /
+     border / text shape as its neighbours, and at 6.45:1 where the pink it
+     replaces was 4.16:1 — under the floor, the only one of the three that
+     was. */
+  --qb-fleet-chip-bg: #dfeaf5;
+  --qb-fleet-chip-border: #8fb7d8;
+  --qb-fleet-chip-text: #33556f;
+
   --qb-locked-chip-bg: #f3e1e7;
   --qb-locked-chip-text: #a8506b;
   /* WF-029 chunk 5: the "N questing" pill shares locked-chip's fill/text
      (HANDOFF line 53 gives both the identical #F3E1E7/#A8506B) but has its
      own border, missing from card 1's vocabulary. */
-  --qb-questing-chip-border: #d9a0b4;
 
   /* Exhaustion bar fill — fills UP with context used, so "low" (little
      spent, safe) keeps the old mana-high calm blue and "high" (lots spent,
@@ -1398,9 +1417,9 @@ body {
 }
 
 .topbar__fleet-pill {
-  background: var(--qb-locked-chip-bg);
-  border: 1px solid var(--qb-questing-chip-border);
-  color: var(--qb-locked-chip-text);
+  background: var(--qb-fleet-chip-bg);
+  border: 1px solid var(--qb-fleet-chip-border);
+  color: var(--qb-fleet-chip-text);
   cursor: pointer;
 }
 
