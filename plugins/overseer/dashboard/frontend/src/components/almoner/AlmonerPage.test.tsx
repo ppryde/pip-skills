@@ -114,9 +114,17 @@ describe("AlmonerPage", () => {
 
   it("explains, in the open conversation, why the row is classified as it is", () => {
     // The last-speaker rule stops being invisible machinery.
+    //
+    // Scoped through `aria-controls` to the thread this button actually opens.
+    // Every thread is in the DOM at all times, hidden rather than unmounted,
+    // so a page-wide `getByText` matches every closed conversation's footer
+    // too and breaks the moment a second awaiting row joins the fixture —
+    // which is exactly what adding the Notion row did.
     render(<AlmonerPage status={null} demo />);
-    fireEvent.click(screen.getByRole("button", { name: /Show 5 messages/i }));
-    expect(screen.getByText(/Their word was last/i)).toBeVisible();
+    const button = screen.getByRole("button", { name: /Show 5 messages/i });
+    fireEvent.click(button);
+    const thread = document.getElementById(button.getAttribute("aria-controls")!)!;
+    expect(within(thread).getByText(/Their word was last/i)).toBeVisible();
   });
 
   it("gives each message in an opened conversation its own permalink", () => {
@@ -242,9 +250,10 @@ describe("AlmonerPage", () => {
   it("keeps rollups off the day band", () => {
     // The band is about when work reached you, not when mail did.
     render(<AlmonerPage status={null} demo />);
-    // Three real arrivals today — Slack, Linear, and the bank alert that
-    // escaped its bundle. Were the four rollups counted it would say seven.
-    expect(screen.getByText(/arrivals between/i)).toHaveTextContent(/^3 arrivals/);
+    // Four real arrivals — Slack, Linear, Notion, and the bank alert that
+    // escaped its bundle. Were the four rollups counted it would say eight,
+    // and the band would claim the day was twice as busy as it was.
+    expect(screen.getByText(/arrivals between/i)).toHaveTextContent(/^4 arrivals/);
   });
 
   it("says how much it filtered out before ranking", () => {

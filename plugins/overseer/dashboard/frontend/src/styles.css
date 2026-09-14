@@ -9392,6 +9392,10 @@ button.trail-tag:focus-visible {
 .alm-lab--src[data-source="slack"] { --alm-src: var(--qb-accent-rose-fill); }
 .alm-table__item[data-source="linear"],
 .alm-lab--src[data-source="linear"] { --alm-src: var(--qb-accent-sky-fill); }
+/* Notion is monochrome by brand, so it takes the palette's most neutral warm
+   rather than a hue it never wears. */
+.alm-table__item[data-source="notion"],
+.alm-lab--src[data-source="notion"] { --alm-src: var(--qb-accent-taupe-fill); }
 .alm-table__item[data-source="almoner"],
 .alm-lab--src[data-source="almoner"] { --alm-src: var(--qb-accent-ash-fill); }
 

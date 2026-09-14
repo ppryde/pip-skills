@@ -13,3 +13,9 @@ node_modules/
 /assets/rpg-icons-transparent/
 .overseer/config.local.json
 .overseer/remote-token
+
+# The Almoner's LOCAL demo digest — a developer's own inflow, gathered to see
+# the page against real content. Never committed: this repo is public, and the
+# shipped `fixture.ts` beside it is invented precisely so that it can ship.
+# `demo.ts` prefers this file when it exists and falls back when it does not.
+plugins/overseer/dashboard/frontend/src/board/almoner/fixture.local.ts

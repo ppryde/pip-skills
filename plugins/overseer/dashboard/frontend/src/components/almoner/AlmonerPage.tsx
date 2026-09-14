@@ -29,7 +29,7 @@ import type { AlmonerStatus } from "../../api/types";
 import { dayBand } from "../../board/almoner/band";
 import { groupByDay } from "../../board/almoner/days";
 import { failedSources, relativeArrived } from "../../board/almoner/digest";
-import { SAMPLE_DIGEST } from "../../board/almoner/fixture";
+import { DEMO_DIGEST, DEMO_IS_LOCAL } from "../../board/almoner/demo";
 import { whosWaiting } from "../../board/almoner/people";
 import { useAlmonerDigest } from "../../board/almoner/useAlmoner";
 import { Button } from "../../ui";
@@ -48,7 +48,7 @@ export interface AlmonerPageProps {
 export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) {
   const live = useAlmonerDigest();
 
-  const digest = demo ? SAMPLE_DIGEST : live.digest;
+  const digest = demo ? DEMO_DIGEST : live.digest;
   const items = useMemo(() => digest?.items ?? [], [digest]);
   const days = useMemo(() => groupByDay(items), [items]);
   const people = useMemo(() => whosWaiting(items), [items]);
@@ -97,10 +97,27 @@ export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) 
         )}
       </div>
 
+      {/* Which digest is on screen is never left ambiguous. An unlabelled
+          fixture that looks like real inflow would mislead; real inflow that
+          looks like a fixture would be worse, because it invites you to
+          dismiss things that actually arrived. */}
       {demo && (
         <div className="almoner__notice almoner__notice--demo">
-          <strong>Sample data.</strong> This is a fixture, not your inflow — the almoner
-          CLI does not exist yet. Drop the <code>?demo=1</code> to see the real thing.
+          {DEMO_IS_LOCAL ? (
+            <>
+              <strong>Your own inflow, gathered by hand.</strong> A local
+              digest from <code>fixture.local.ts</code>, which is gitignored and
+              never ships. The almoner CLI does not exist yet — these rows were
+              collapsed and judged manually, so treat the ranking as a sketch
+              of what it would do, not as its output.
+            </>
+          ) : (
+            <>
+              <strong>Sample data.</strong> This is a fixture, not your inflow —
+              the almoner CLI does not exist yet. Drop the <code>?demo=1</code>{" "}
+              to see the real thing.
+            </>
+          )}
         </div>
       )}
 

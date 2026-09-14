@@ -53,6 +53,7 @@ export const SAMPLE_DIGEST: AlmonerDigest = {
     { label: "linear", type: "linear", via: "api", ok: true },
     { label: "personal", type: "mail", via: "imap", ok: true },
     { label: "work", type: "mail", via: "imap", ok: false, error: "not configured" },
+    { label: "notion", type: "notion", via: "api", ok: true },
   ],
   items: [
     {
@@ -103,6 +104,29 @@ export const SAMPLE_DIGEST: AlmonerDigest = {
           url: "https://example.slack.com/archives/G01EXAMPLE/p000000000000500",
         },
       ],
+    },
+    {
+      // A page someone left a comment on. Notion's grain is the PAGE, not the
+      // comment — the same conversation collapse Slack forced, arrived at from
+      // a different direction.
+      id: "notion:design-review",
+      source: "notion",
+      context: "work",
+      title: "Comments on “Signal store — data model”",
+      excerpt: "Rhona: the event table needs a tenant column before we cut over",
+      count: 2,
+      messages: [
+        { who: "Rhona Baird", text: "The event table needs a tenant column before we cut over.", at: ago(6) },
+        { who: "Rhona Baird", text: "Happy to pair on it tomorrow if that is easier.", at: ago(6) },
+      ],
+      who: "Rhona Baird",
+      arrived: ago(6),
+      awaiting: true,
+      asks: "reply",
+      url: "https://www.notion.so/demo-signal-store-data-model",
+      seen_in: ["notion"],
+      rank: null,
+      because: null,
     },
     {
       id: "linear:ABC-412",

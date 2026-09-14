@@ -60,6 +60,23 @@ function MailMark({ size }: { size: number }) {
   return <img src={sealedLetter} width={size} height={size} alt="" draggable={false} />;
 }
 
+/** Notion's mark: the ruled page and the angled stroke of its N, at the one
+ * weight that survives 14px. Monochrome on purpose — it is the brand's own
+ * treatment, and it keeps the badge legible on parchment and on ink alike. */
+function NotionMark({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" focusable="false">
+      <rect x="2.6" y="2.6" width="18.8" height="18.8" rx="3.2"
+            stroke="currentColor" strokeWidth="1.8" />
+      <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8.4 16.4V8.1" />
+        <path d="M8.4 8.1 15.6 16.4" />
+        <path d="M15.6 16.4V8.1" />
+      </g>
+    </svg>
+  );
+}
+
 /** Derived items are not FROM a service — the almoner computed them by
  * joining two. A pair of linked rings says "this came from the join". */
 function DerivedMark({ size }: { size: number }) {
@@ -86,6 +103,7 @@ const MARKS: Record<string, (props: { size: number }) => JSX.Element> = {
   slack: SlackMark,
   linear: LinearMark,
   mail: MailMark,
+  notion: NotionMark,
   almoner: DerivedMark,
 };
 

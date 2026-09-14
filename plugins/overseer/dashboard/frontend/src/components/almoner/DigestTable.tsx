@@ -32,6 +32,7 @@ const APP_NAMES: Record<string, string> = {
   slack: "Slack",
   linear: "Linear",
   mail: "mail",
+  notion: "Notion",
   almoner: "upstream",
 };
 
