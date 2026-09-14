@@ -54,7 +54,10 @@ def find_plugin(name: str, _from: Path | None = None) -> Path | None:
     and needs no registry, no hook and no prior run of the plugin being
     looked for. Among cached versions the highest wins: old ones linger (they
     stay marked `.in_use`), and a lexical "first found" would pin 0.10.0
-    below 0.9.0.
+    below 0.9.0 — except a version directory Claude Code has marked
+    `.orphaned_at` (removed or superseded, kept around rather than deleted
+    outright), which is skipped entirely so a stale orphaned version never
+    outranks a live one.
     """
     start = (_from or Path(__file__)).resolve()
     for parent in start.parents:
@@ -67,7 +70,9 @@ def find_plugin(name: str, _from: Path | None = None) -> Path | None:
         versioned = [
             child / "scripts" / "cli.py"
             for child in candidate.iterdir()
-            if child.is_dir() and (child / "scripts" / "cli.py").is_file()
+            if child.is_dir()
+            and not (child / ".orphaned_at").exists()
+            and (child / "scripts" / "cli.py").is_file()
         ]
         if versioned:
             return max(versioned, key=lambda cli: _version_key(cli.parents[1].name))

@@ -71,6 +71,26 @@ class TestMarketplaceCacheLayout:
         caller = _caller(cache, "overseer", "0.23.0")
         assert find_plugin("chronicle", _from=caller) == want
 
+    def test_ignores_an_orphaned_version_even_when_it_is_the_highest(self, tmp_path: Path) -> None:
+        # Claude Code marks a removed or superseded plugin version's cache
+        # directory with `.orphaned_at` rather than deleting it outright.
+        # The highest-version rule must not resurrect one of these: a stale
+        # orphaned 0.11.0 must never outrank a live 0.10.0.
+        cache = tmp_path / "cache" / "pip-skills"
+        orphaned = _cli(cache, "chronicle", "0.11.0")
+        (orphaned.parents[1] / ".orphaned_at").write_text("2026-01-01T00:00:00Z\n")
+        want = _cli(cache, "chronicle", "0.10.0")
+        caller = _caller(cache, "overseer", "0.23.0")
+        assert find_plugin("chronicle", _from=caller) == want
+
+    def test_returns_none_when_every_version_is_orphaned(self, tmp_path: Path) -> None:
+        cache = tmp_path / "cache" / "pip-skills"
+        orphaned = _cli(cache, "chronicle", "0.11.0")
+        (orphaned.parents[1] / ".orphaned_at").write_text("2026-01-01T00:00:00Z\n")
+        _cli(cache, "overseer", "0.23.0")
+        caller = _caller(cache, "overseer", "0.23.0")
+        assert find_plugin("chronicle", _from=caller) is None
+
 
 class TestAbsent:
     def test_returns_none_when_the_plugin_is_not_installed(self, tmp_path: Path) -> None:
