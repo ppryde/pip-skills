@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import TopBar from "./components/TopBar";
 import CopyablePath from "./components/CopyablePath";
+import ChunkLoadBoundary from "./components/ChunkLoadBoundary";
 import type { View } from "./components/TopBar";
 import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
@@ -478,18 +479,24 @@ function App() {
             reachable for an unbegun repo too — the page just locks its
             scope to "All repos" since a boardless root can't be named. */}
         {view === "chronicle" ? (
-          // The same line the board shows while it loads — the chunk arrives
-          // in a blink over localhost, so anything heavier would be a flash.
-          <Suspense fallback={<p className="board-placeholder">Loading the Chronicle…</p>}>
-            <ChroniclePage
-              scope={chronicleScope}
-              summary={chronicle.summary}
-              sessions={chronicle.sessions}
-              loading={chronicle.loading}
-              error={chronicle.error}
-              onRetry={() => void chronicle.refresh()}
-            />
-          </Suspense>
+          // ChunkLoadBoundary outside Suspense: Suspense only covers the
+          // PENDING state of the lazy import below, not a REJECTED one (a
+          // stale tab's chunk 404ing after a rebuild) — see its own comment.
+          <ChunkLoadBoundary>
+            {/* The same line the board shows while it loads — the chunk
+                arrives in a blink over localhost, so anything heavier would
+                be a flash. */}
+            <Suspense fallback={<p className="board-placeholder">Loading the Chronicle…</p>}>
+              <ChroniclePage
+                scope={chronicleScope}
+                summary={chronicle.summary}
+                sessions={chronicle.sessions}
+                loading={chronicle.loading}
+                error={chronicle.error}
+                onRetry={() => void chronicle.refresh()}
+              />
+            </Suspense>
+          </ChunkLoadBoundary>
         ) : isUnbegun && selectedRepo ? (
           <UnbegunHolding
             repo={selectedRepo}
