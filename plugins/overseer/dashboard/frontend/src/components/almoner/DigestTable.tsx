@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import type { AlmonerItem } from "../../api/types";
 import type { DigestDay } from "../../board/almoner/days";
 import { clockTime } from "../../board/almoner/days";
-import { relativeArrived, rowState } from "../../board/almoner/digest";
+import { relativeArrivedPhrase, rowState } from "../../board/almoner/digest";
 import { Chip } from "../../ui";
 import SourceIcon from "./SourceIcon";
 
@@ -203,11 +203,25 @@ export default function DigestTable({ days }: DigestTableProps) {
         ))}
       </table>
       {/* The column shows wall-clock time, which is what a day table is for;
-          the relative age is given here for a reader who cannot scan it. */}
-      <p className="sr-only">
-        {days[0]?.items[0] &&
-          `Most recent arrival ${relativeArrived(days[0].items[0].arrived)} ago.`}
-      </p>
+          the relative age is given here for a reader who cannot scan it.
+          `days[0].items[0]` is not necessarily datable — undated derived
+          reconcile checks ride at the TOP of the newest day (groupByDay), so
+          reading that row's `arrived` unconditionally used to read either
+          "Most recent arrival now ago." (the "now" bucket needs a phrase, not
+          a bare duration) or "Most recent arrival  ago." (undated: the gap
+          where a duration should be) whenever that row won the slot. The
+          first item that actually HAS an arrival time is what this sentence
+          means; when the day holds none at all, the sentence is omitted
+          rather than printed with nothing to report. */}
+      {(() => {
+        const mostRecent = days[0]?.items.find((item) => item.arrived);
+        if (!mostRecent) return null;
+        return (
+          <p className="sr-only">
+            {`Most recent arrival ${relativeArrivedPhrase(mostRecent.arrived)}.`}
+          </p>
+        );
+      })()}
     </div>
   );
 }

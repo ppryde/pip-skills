@@ -1,6 +1,15 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AlmonerPage from "./AlmonerPage";
+
+// Only the "gathered … ago" stamp tests below need a LIVE (non-demo) digest,
+// which routes through the real API client — every other test in this file
+// stays on `demo` and never touches it.
+vi.mock("../../api/client", () => ({
+  getAlmonerDigest: vi.fn(),
+  getAlmonerStatus: vi.fn(),
+}));
+import * as client from "../../api/client";
 
 const INSTALLED = { installed: true, configured: true };
 
@@ -181,6 +190,54 @@ describe("AlmonerPage", () => {
     }
   });
 
+  it("labels the band with the day it actually plots, not always days[0]", () => {
+    // Same midnight-rollover scenario as the test above, but this checks the
+    // LABEL rather than just that a band exists: `days[0]` after the
+    // rollover is the synthetic "Today" holding only the undated reconcile
+    // row, while the band is drawn from the day below it, which holds the
+    // real, datable arrivals. Reading `days[0].label` for the band's caption
+    // would label yesterday's arrivals "Today".
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(Date.now() + 26 * 3600_000));
+      render(<AlmonerPage status={null} demo />);
+      const dayHeaders = screen.getAllByRole("columnheader", {
+        name: /Today|Yesterday|September|October/i,
+      });
+      expect(dayHeaders[0]).toHaveTextContent(/Today/i);
+      const bandLabel = document.querySelector(".alm-band__day");
+      expect(bandLabel).not.toBeNull();
+      expect(bandLabel).not.toHaveTextContent(/^Today/i);
+      expect(bandLabel?.textContent).toBe(dayHeaders[1]?.textContent);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports the most recent DATED arrival for screen readers, not the undated reconcile row parked at the top of the day", () => {
+    // `groupByDay` parks the undated reconcile check at index 0 of the
+    // newest day, ahead of anything with a real arrival time — which used to
+    // make this sentence read "Most recent arrival  ago." (blank gap, since
+    // `days[0].items[0].arrived` is undefined) even on an ordinary render,
+    // no midnight rollover required: the demo fixture ships a reconcile item.
+    render(<AlmonerPage status={null} demo />);
+    const srText = screen.getByText(/Most recent arrival/i);
+    expect(srText.textContent).toMatch(/^Most recent arrival (\d+[dhm] ago|just now)\.$/);
+  });
+
+  it("omits the 'most recent arrival' sentence rather than printing a blank duration when the newest day has no dated item at all", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(Date.now() + 26 * 3600_000));
+      render(<AlmonerPage status={null} demo />);
+      // Same rollover as the day-band test above: the newest day is now
+      // synthetic, holding only the undated reconcile row.
+      expect(screen.queryByText(/Most recent arrival/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("names a source it could not reach", () => {
     // A silently short digest reads as "nothing needs you" — the one wrong
     // answer this page can give.
@@ -308,5 +365,40 @@ describe("AlmonerPage", () => {
     render(<AlmonerPage status={null} demo />);
     fireEvent.click(screen.getByRole("button", { name: /Show 5 messages/i }));
     expect(screen.getByText(/helps us find the edges/i)).toBeVisible();
+  });
+});
+
+// The "gathered … ago" stamp — a LIVE digest only; `demo` never shows it at
+// all (see the guard in AlmonerPage.tsx).
+describe("AlmonerPage — the 'gathered' stamp", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("says 'gathered just now', never 'gathered now ago', right after a gather", async () => {
+    vi.mocked(client.getAlmonerDigest).mockResolvedValue({ items: [], sources: [] });
+    render(<AlmonerPage status={{ installed: true, configured: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Gather/i }));
+    await screen.findByText(/gathered just now/i);
+    expect(screen.queryByText(/gathered now ago/i)).not.toBeInTheDocument();
+  });
+
+  it("ticks the stamp forward as time passes, rather than freezing at first paint", async () => {
+    vi.useFakeTimers();
+    vi.mocked(client.getAlmonerDigest).mockResolvedValue({ items: [], sources: [] });
+    render(<AlmonerPage status={{ installed: true, configured: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Gather/i }));
+    // Flushes the mocked fetch's promise chain AND any pending timers —
+    // `advanceTimersByTimeAsync` (unlike `advanceTimersByTime`) yields
+    // between the two, which plain microtask `await`s can't guarantee for a
+    // chain this deep, and a bare fake `setTimeout` flush can't do at all.
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/gathered just now/i)).toBeInTheDocument();
+
+    await act(() => vi.advanceTimersByTimeAsync(21 * 60_000));
+    expect(screen.getByText(/gathered 21m ago/i)).toBeInTheDocument();
   });
 });

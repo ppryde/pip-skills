@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AlmonerItem, AlmonerSource } from "../../api/types";
-import { failedSources, groupDigest, relativeArrived, rowState } from "./digest";
+import { failedSources, groupDigest, relativeArrived, relativeArrivedPhrase, rowState } from "./digest";
 
 function item(over: Partial<AlmonerItem> = {}): AlmonerItem {
   return { id: "slack:C1", source: "slack", context: "work", title: "DM · Rhona", ...over };
@@ -127,6 +127,24 @@ describe("relativeArrived", () => {
     // Derived reconcile items have no arrival time at all.
     expect(relativeArrived(undefined, now)).toBe("");
     expect(relativeArrived("not a date", now)).toBe("");
+  });
+});
+
+describe("relativeArrivedPhrase", () => {
+  const now = Date.parse("2026-09-13T12:00:00Z");
+
+  it("appends 'ago' to a real duration", () => {
+    expect(relativeArrivedPhrase("2026-09-13T11:30:00Z", now)).toBe("30m ago");
+    expect(relativeArrivedPhrase("2026-09-11T12:00:00Z", now)).toBe("2d ago");
+  });
+
+  it("says 'just now' rather than 'now ago' for the last minute", () => {
+    expect(relativeArrivedPhrase("2026-09-13T11:59:30Z", now)).toBe("just now");
+  });
+
+  it("renders nothing for an absent or unparseable time, so a caller can omit the sentence", () => {
+    expect(relativeArrivedPhrase(undefined, now)).toBe("");
+    expect(relativeArrivedPhrase("not a date", now)).toBe("");
   });
 });
 

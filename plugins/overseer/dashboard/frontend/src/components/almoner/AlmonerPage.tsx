@@ -24,11 +24,11 @@
  * and tested but no longer rendered here — the table replaced it as the
  * primary view. It is one component away from returning as a toggle.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AlmonerStatus } from "../../api/types";
 import { dayBand } from "../../board/almoner/band";
 import { groupByDay } from "../../board/almoner/days";
-import { failedSources, relativeArrived } from "../../board/almoner/digest";
+import { failedSources, relativeArrivedPhrase } from "../../board/almoner/digest";
 import { DEMO_DIGEST, DEMO_IS_LOCAL } from "../../board/almoner/demo";
 import { whosWaiting } from "../../board/almoner/people";
 import { useAlmonerDigest } from "../../board/almoner/useAlmoner";
@@ -48,6 +48,18 @@ export interface AlmonerPageProps {
 export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) {
   const live = useAlmonerDigest();
 
+  // The "gathered Xh ago" stamp below is computed at render time from
+  // `Date.now()`, so without something to force a re-render it freezes at
+  // whatever age it happened to have when it last painted — right after a
+  // gather it reads "gathered just now" forever, not "gathered 20m ago" once
+  // twenty minutes have actually passed. A minute is coarse enough to cost
+  // nothing and fine enough that nobody notices the lag.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => forceTick((tick) => tick + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const digest = demo ? DEMO_DIGEST : live.digest;
   const items = useMemo(() => digest?.items ?? [], [digest]);
   const days = useMemo(() => groupByDay(items), [items]);
@@ -62,10 +74,15 @@ export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) 
   // gave `null` and the band silently vanished — the page looked broken for
   // the first hours of every day. The same guard covers a real day of nothing
   // but machine-mail rollups, which `dayBand` excludes by design.
+  // The label travels WITH the geometry, not with `days[0]`: after midnight,
+  // with only an undated reconcile row today, `days[0]` is the synthetic
+  // "Today" day above and the band is actually drawn from `days[1]`
+  // ("Yesterday"). Pairing them at the point of computation is what stops
+  // that day's real arrivals rendering under the wrong label.
   const band = useMemo(() => {
     for (const day of days) {
       const drawn = dayBand(day.items);
-      if (drawn) return drawn;
+      if (drawn) return { drawn, label: day.label };
     }
     return null;
   }, [days]);
@@ -91,7 +108,7 @@ export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) 
         </Button>
         {live.refreshedAt !== null && !demo && (
           <span className="almoner__stamp">
-            gathered {relativeArrived(new Date(live.refreshedAt).toISOString())} ago
+            gathered {relativeArrivedPhrase(new Date(live.refreshedAt).toISOString())}
             {digest?.sources ? ` · ${digest.sources.length} sources` : ""}
           </span>
         )}
@@ -160,7 +177,7 @@ export default function AlmonerPage({ status, demo = false }: AlmonerPageProps) 
 
       {days.length > 0 && (
         <>
-          <DayBand band={band} label={days[0].label} />
+          <DayBand band={band?.drawn ?? null} label={band?.label ?? days[0].label} />
           <WaitingStrip people={people} />
           <DigestTable days={days} />
         </>

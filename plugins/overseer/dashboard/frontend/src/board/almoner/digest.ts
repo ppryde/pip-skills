@@ -102,6 +102,21 @@ export function relativeArrived(arrived: string | undefined, now: number = Date.
   return `${Math.floor(hours / 24)}d`;
 }
 
+/**
+ * `relativeArrived` as a full phrase — "3h ago", "just now" — so a caller
+ * that appends " ago" itself doesn't have to special-case the "now" bucket
+ * to avoid rendering "gathered now ago". Empty input still yields "", so a
+ * caller composing a longer sentence around it can tell "nothing to report"
+ * apart from "just happened" and omit the sentence entirely rather than
+ * printing something like "Most recent arrival  ago." with the gap where a
+ * duration should be.
+ */
+export function relativeArrivedPhrase(arrived: string | undefined, now: number = Date.now()): string {
+  const rel = relativeArrived(arrived, now);
+  if (rel === "") return "";
+  return rel === "now" ? "just now" : `${rel} ago`;
+}
+
 export type RowStateKey = "open" | "reconcile" | "settled" | "bundled";
 
 export interface RowState {
