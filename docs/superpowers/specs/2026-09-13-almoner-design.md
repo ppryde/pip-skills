@@ -59,8 +59,16 @@ it is one implementation of the adapter interface.
 adapter.fetch(window) -> list[Item]     # the ONLY contract
       ├── slack:agent   claude -p, connector-backed   ← today
       ├── slack:api     user token, direct            ← when a token exists
-      └── mail:imap     app password                  ← when settled
+      ├── mail:imap     app password                  ← when settled
+      └── notion:api    integration token             ← when authorised
 ```
+
+**Notion** is a source, and its grain is the **page**, not the comment: a
+thread of comments on one document is one thing to deal with, which is the
+same collapse Slack forced, arrived at from a different direction. It is
+currently unreachable rather than unbuilt — the connector exposes only its
+authorisation call — and the page therefore names it among the sources it
+could not reach, which is what an unreachable source is supposed to look like.
 
 Swapping is a config edit, not a refactor:
 
@@ -155,6 +163,44 @@ work mailbox may not follow personal's answer.
 generated and stashed in the macOS Keychain. It opens the inbox `readonly`
 and fetches headers with `BODY.PEEK`, so it cannot even mark mail read.
 
+### Gathered for real, 2026-09-14
+
+The design above was built from samples and an invented fixture. It was then
+run against the actual accounts, by hand, in the shape the CLI will emit. Four
+things came back, and none of them softened the design.
+
+**Not one of thirty mail threads was written by a human.** Over four days:
+orders and deliveries, newsletters, promotions, two from a professional
+network, a calendar notification, two security notices. Zero conversations.
+The invented fixture guessed two humans in twenty and was too generous. On this
+mailbox, folding is not a feature of the product — it *is* the product, and a
+digest that merely listed what arrived would be indistinguishable from the
+inbox it was supposed to replace.
+
+**Slack was eighteen bots to two people.** Twenty results, and the two human
+messages were a broadcast about CI flakes and a question addressed to somebody
+else. This matters for the `awaiting` rule: computed mechanically, both humans
+score `awaiting: true` because the last message in each was not the reader's —
+yet neither actually wants anything from them. The rule is still right to be
+mechanical and cheap, but it is a *floor*, and this is the evidence that the
+judging skill has real work to do above it rather than merely ordering rows.
+
+**The safety rule fired unprompted, on its own merits.** Two security mails
+arrived in the window. One was attributable — a sign-in to a florist's site
+three minutes before that florist's own order confirmation — and folds away
+quietly. The other was an account-confirmation code with nothing near it to
+explain it, which is exactly the case the rule exists for, and it escaped as
+its own `awaiting` row. Neither outcome was arranged. That is the first
+evidence the rule discriminates rather than simply always-escaping.
+
+**The inflow gap fired six times out of six, and is useless.** Every active
+Linear issue was reported as having no overseer card — because the board holds
+111 cards and *not one* carries a Linear key. The check is correctly
+implemented and worthless, which is precisely the noise failure open question 2
+warned about. **It must not ship until cards actually carry the key**; until
+then it would train the reader to ignore the Reconcile group, which is the one
+group that cannot afford to be ignored.
+
 ### A durable mail link needs no extra scope — but it is a search
 
 Linking out to a mail row needs nothing but the RFC 822 `Message-ID` header,
@@ -214,13 +260,15 @@ actually be shown.
 
 ### Rollups: folding machine mail
 
-A scan of a real personal mailbox found **eighteen of twenty threads over four
-days were machine-written**, and of the two a person sent, one had already been
-answered. Suppression and folding are therefore the main event, not a
-refinement of it.
+A first scan of a real personal mailbox found **eighteen of twenty threads over
+four days were machine-written**, and of the two a person sent, one had already
+been answered. A second scan, a day later and over the same window, found
+**thirty threads of which not one was written by a human at all** (see Gathered
+for real). Suppression and folding are therefore the main event, not a
+refinement of it — and the first scan was the optimistic one.
 
 Dropping machine mail silently loses information — *did my parcel ship?*
-Listing it individually drowns the two threads a person wrote. So each category
+Listing it individually drowns whatever a person did write. So each category
 folds into **one row** carrying `bundled: true`, which expands with exactly the
 same control as a conversation: `messages` holds the individual items, and
 nothing has actually gone.
@@ -538,22 +586,61 @@ entirely invented names, links and numbers, and says so on the page. Do not
 repopulate it with real content: no colleague, customer, employer, account or
 workspace may be nameable from anything in this repo — this document included.
 
+### Two fixtures, and the one that is not allowed to ship
+
+`fixture.ts` ships and is invented. `fixture.local.ts` does not ship, is
+gitignored, and holds a developer's own gathered inflow — because judging this
+design needs real content. An invented fixture cannot tell you whether a
+rollup's excerpt is enough to dismiss on, since its excerpts were written by
+someone who already knew the answer. The local file wins at runtime when it
+exists; `import.meta.glob` is what makes it optional, because a bare import of
+a missing module fails the build while a glob that matches nothing is an empty
+object.
+
+Two rules hold it together, and both were learned rather than designed:
+
+**The shipped fixture is used under test even when an override exists.**
+Otherwise the suite asserts against whatever is in one person's inbox that
+morning — green locally, red in CI, red differently tomorrow. A private file
+must never decide whether the tests pass.
+
+**Gitignoring the override is not sufficient, and believing it was cost us a
+disclosure.** `dist/` is committed. `npm run build` compiles whatever is in
+`src/`. A build run with an override present therefore writes real names,
+customers and commercial terms into the repository — and on 2026-09-14 it did
+exactly that, to a public repo, and nothing failed. It was found by grepping
+the built asset afterwards. So the override now declares a marker that
+`demo.ts` re-exports, and a test greps `dist/` for it: a bundle carrying local
+content cannot be committed with the suite green. **Assume any local-only input
+will eventually be compiled into a committed artefact, and put the check
+there.**
+
 Credentials live one file per source label, `0600`, gitignored, following
 `scripts/remote_token.py`; a missing file means "this source is not
 configured" and never raises.
 
 ## State of play
 
-**Built** (WF-111), and **uncommitted**: the dashboard page — TopBar coin gated
-on `/api/almoner/status`, code-split page, soft-failing backend routes, the day
-band, the waiting strip, the day table with conversation *and* rollup
-disclosure and per-message permalinks, the grouping and ordering logic kept
-behind it, source-aware links out including the Gmail `rfc822msgid` form,
-service icons, and a labelled sample fixture at `?demo=1` so the page is visible
-before the CLI exists. **114 tests** — 106 frontend, 8 backend.
+**Built** (WF-111), on branch `feat/almoner-page` as PR #71, stacked on #70:
+the dashboard page — TopBar coin gated on `/api/almoner/status`, code-split
+page, soft-failing backend routes, the day band, the waiting strip, the day
+table with conversation *and* rollup disclosure and per-message permalinks, the
+grouping and ordering logic kept behind it, source-aware links out including
+the Gmail `rfc822msgid` form, service icons for four sources, the optional
+local-inflow override, and a labelled sample fixture at `?demo=1` so the page
+is visible before the CLI exists. The suite stands at **1218 frontend and 222
+backend**, of which the almoner's own are a subset.
+
+Also done along the way, because the almoner's fourth coin exposed them: the
+guild bar's view switcher now places any number of coins rather than exactly
+three; the bar names the page you are on; and the board's five unrelated reds
+became one alarm pair (Pantone 485 with a vermilion for text).
 
 **Unbuilt:** the `almoner` plugin itself — CLI, adapters, store, judging skill,
 dismiss/ack, and the history read the table is already shaped to display.
+
+**Built but must not ship yet:** the inflow-gap check — see Gathered for real.
+It needs overseer cards to carry Linear keys before it says anything true.
 
 ## Open questions
 
