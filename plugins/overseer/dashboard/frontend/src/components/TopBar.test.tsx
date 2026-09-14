@@ -700,6 +700,24 @@ describe("<TopBar/> Filters toggle (Task 2)", () => {
     expect(document.getElementById("topbar-controls-group")).not.toBeVisible();
   });
 
+  it("hides Filters ▾ on the Almoner, which renders no filter bar for it to control", () => {
+    // The Almoner page renders no element with id="filter-bar" at all, so
+    // leaving this button up left `aria-controls="filter-bar"` pointing at
+    // nothing — dead for both a mouse click (nothing visibly toggles) and a
+    // screen reader (the referenced control does not exist).
+    render(<StatefulTopBar {...baseProps()} view="almoner" />);
+    expect(screen.queryByRole("button", { name: /^filters/i })).not.toBeInTheDocument();
+  });
+
+  it("still shows Filters ▾ on the Chronicle, which reuses the same #filter-bar id", () => {
+    // <ChronicleFilterBar/> renders at id="filter-bar" exactly like the
+    // board's own <FilterBar/> — only the Almoner has nothing there, so the
+    // guard above must be Almoner-specific, not `boardless` (which also
+    // covers the Chronicle).
+    render(<StatefulTopBar {...baseProps()} view="chronicle" />);
+    expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
+  });
+
   it("puts the toggle cluster in [Filters ▾] [Controls ▾] [＋] order", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
     const cluster = container.querySelector(".topbar__toggle-cluster")!;

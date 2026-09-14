@@ -394,14 +394,23 @@ function TopBar({
             open so the board looks unchanged on load, but either can be
             collapsed on any screen size. */}
         <div className="topbar__toggle-cluster">
-          <Button
-            className="topbar__controls-toggle"
-            aria-expanded={filtersOpen}
-            aria-controls="filter-bar"
-            onClick={onToggleFilters}
-          >
-            Filters {filtersOpen ? "▴" : "▾"}
-          </Button>
+          {!onAlmoner && (
+            // The Chronicle still gets this: <ChronicleFilterBar/> reuses
+            // the very same `#filter-bar` id App.tsx renders FilterBar at on
+            // the board, so `boardless` alone is the wrong guard here — it
+            // would hide this on the Chronicle too, where the control it
+            // names still exists. The Almoner is the one page with no filter
+            // bar of any kind, so `aria-controls="filter-bar"` would point at
+            // an element that is never in the DOM.
+            <Button
+              className="topbar__controls-toggle"
+              aria-expanded={filtersOpen}
+              aria-controls="filter-bar"
+              onClick={onToggleFilters}
+            >
+              Filters {filtersOpen ? "▴" : "▾"}
+            </Button>
+          )}
           {!boardless && (
             <Button
               className="topbar__controls-toggle"
