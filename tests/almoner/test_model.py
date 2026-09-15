@@ -7,9 +7,9 @@ from scripts.model import InMessage, conversation, digest_hash
 T0 = datetime(2026, 9, 11, 18, 0, tzinfo=timezone.utc)
 
 
-def _msg(minutes: int, *, mine, who="Rhona Baird", text=None):
+def _msg(minutes: int, *, mine, who="Rhona Baird", text=None, thread=None):
     return InMessage(text=text or f"m{minutes}", at=T0 + timedelta(minutes=minutes),
-                     who=who, mine=mine)
+                     who=who, mine=mine, thread=thread)
 
 
 def _conv(messages):
@@ -32,6 +32,38 @@ class TestLastSpeaker:
         item = _conv([_msg(5, mine=True, who="Me"), _msg(0, mine=False)])
         assert item["awaiting"] is False
         assert [m["text"] for m in item["messages"]] == ["m0", "m5"]
+
+
+class TestPerThreadAwaiting:
+    def test_unanswered_thread_a_is_not_hidden_by_reply_in_thread_b(self):
+        # Rhona asks in thread A; the reader only answers thread B — A is
+        # still open, so the row as a whole must still be awaiting.
+        item = _conv([
+            _msg(0, mine=False, thread="a", text="ask in a"),
+            _msg(5, mine=False, thread="b", text="ask in b"),
+            _msg(10, mine=True, who="Me", thread="b", text="reply in b"),
+        ])
+        assert item["awaiting"] is True
+
+    def test_awaiting_is_false_only_when_every_thread_is_answered(self):
+        item = _conv([
+            _msg(0, mine=False, thread="a", text="ask in a"),
+            _msg(1, mine=True, who="Me", thread="a", text="reply in a"),
+            _msg(5, mine=False, thread="b", text="ask in b"),
+            _msg(10, mine=True, who="Me", thread="b", text="reply in b"),
+        ])
+        assert item["awaiting"] is False
+
+    def test_one_thread_unknown_and_none_false_leaves_awaiting_absent(self):
+        item = _conv([
+            _msg(0, mine=None, thread="a", text="unclear author in a"),
+            _msg(5, mine=True, who="Me", thread="b", text="reply in b"),
+        ])
+        assert "awaiting" not in item
+
+    def test_with_no_threads_behaviour_is_unchanged(self):
+        item = _conv([_msg(0, mine=False), _msg(5, mine=True, who="Me")])
+        assert item["awaiting"] is False
 
 
 class TestCollapse:
