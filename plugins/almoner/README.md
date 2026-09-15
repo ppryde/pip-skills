@@ -4,6 +4,14 @@ One triaged view of what is asking for your attention, on the overseer
 dashboard's Almoner page. Read-only against every source: nothing is sent,
 marked read, resolved or edited.
 
+## Invoke
+
+Stdlib only — no install step:
+
+    python3 <plugin>/scripts/cli.py <verb>
+
+The dashboard runs it the same way, as a subprocess.
+
 ## Verbs
 
     almoner status                     sources, credentials, last fetch (no network)
@@ -27,6 +35,10 @@ Everything lives in `$CLAUDE_CONFIG_DIR/almoner/` (default `~/.claude/almoner/`)
 
 The plugin ships no sources: until you add one the page says "not configured".
 
+Two overrides, mainly for tests and for running more than one instance:
+`ALMONER_HOME` moves the whole directory above (default derived from
+`$CLAUDE_CONFIG_DIR`); `ALMONER_DB` moves just `almoner.db` on its own.
+
 ## Notion (`type: notion`, `via: api`)
 
 1. Create an **internal integration** at https://www.notion.so/profile/integrations
@@ -40,8 +52,18 @@ The plugin ships no sources: until you add one the page says "not configured".
        {"sources": [{"type": "notion", "via": "api", "label": "notion",
                      "context": "work", "me": "you@example.com"}]}
 
-5. `almoner status` should show the source `ok: true`.
+5. `almoner status` should show the source `ok: true` — that only means the secret file
+   exists, not that it works. Run `almoner digest --json --hours 168` to actually prove
+   access: a real digest (or a legitimately empty one) confirms the token and the shared
+   pages are good; an `error` on the source means something is still wrong.
 
 What it reads: recently edited pages and their **open** comment threads — one row per
 page. Notion's API has no inbox or mentions feed, so a resolved thread is gone and an
 @-mention outside a comment is not seen.
+
+`status` and `digest` may carry `warnings` on a source alongside `ok: true` — a
+non-fatal problem worth knowing about without failing the fetch. Two so far: the
+50-page-per-run cap was hit (older in-window pages were not read, and the watermark
+does not advance past them until a run gets under the cap), and the configured `me`
+could not be resolved to a Notion user (so `awaiting` is unknown for every item this
+run).

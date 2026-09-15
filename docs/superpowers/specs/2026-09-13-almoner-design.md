@@ -365,11 +365,16 @@ watermark   source, cursor, fetched_at
 seen        id, source, first_seen, last_seen, shown_count,
             digest_hash, state, state_at        -- new|shown|dismissed|acted
 item        id, source, context, title, excerpt, messages, url,
-            who, arrived, awaiting, asks, rank, because, gathered_at
+            who, arrived, awaiting, gathered_at
 suppressed  id, source, rule, at                -- what was filtered, by which rule
 run         id, started, finished, sources_ok, sources_failed,
             items_in, items_out
 ```
+
+`asks`, `rank` and `because` are deliberately not columns here — they are
+judgements, and every gather replaces the `item` row wholesale, which would
+wipe them. They live in the planned `judgement` table (see Judging), keyed
+`(id, digest_hash)`, once that stage is built.
 
 Consequences that must be designed for, not discovered:
 
@@ -379,8 +384,10 @@ Consequences that must be designed for, not discovered:
 - **The store now grows with content**, not merely with observations. That
   was expected to force a retention policy; it did not — see Retention below,
   where the window turns out to be a view rather than a delete.
-- **The store now holds work content at rest** in the central overseer folder.
-  Local only, never committed, never sent anywhere.
+- **The store now holds work content at rest** in `$CLAUDE_CONFIG_DIR/almoner/`
+  (per Claude account), not the central overseer folder — the home directory
+  is created `0700` and the database file `0600`. Local only, never
+  committed, never sent anywhere.
 
 #### Retention: the window is a view, not a delete
 
@@ -588,7 +595,11 @@ almoner digest --cached            read the store without gathering         (unb
 
 ```
 GET  /api/almoner/status    { installed, configured, sources[] }
-GET  /api/almoner/digest    ?hours=&days=&context=&new=  — soft-fails to { items: [] }
+GET  /api/almoner/digest    ?hours=&days=&context=&new=  — soft-fails to
+                             { items: [], sources: [], error } when the CLI
+                             fails; a genuinely empty digest carries no
+                             `error`. `days=` (unbuilt) is not yet passed
+                             through — every read uses the CLI's default.
 POST /api/almoner/dismiss   { id } — token-gated, like the board's mutations
 GET  /api/almoner/log       ?runs= | ?suppressed=
 ```
@@ -689,10 +700,50 @@ suppressed as `notion:malformed-page`, a page whose comments are all malformed
 as `notion:malformed-comments`, alongside `notion:no-open-comments` and
 `notion:no-new-comments`. Two Notion API facts remain unverified until a live
 smoke test: whether inline block comments are returned when listing comments
-by page id, and the `?d=<discussion_id>` deep link.
+by page id, and the `?d=<discussion_id>` deep link. Two more, found during
+the 2026-09-15 final review, remain unverified the same way: whether posting
+a new comment bumps a page's `last_edited_time` at all — if it does not, a
+new comment on an otherwise-untouched page is never picked up by the recency
+scan — and whether `Notion-Version: 2026-03-11` is actually accepted by the
+API rather than silently downgraded.
+
+**Awaiting is computed per thread, not per page (F1).** A Notion page can
+carry several open discussions at once, and the reader answering one must
+not hide an unanswered question sitting in another. `InMessage` carries an
+internal `thread` id (the discussion id, on Notion); when any message on a
+row has one, `awaiting` is computed by grouping on it: `true` if any
+thread's newest message is not the reader's, `false` only if every thread's
+newest message is, and absent otherwise. A row with no threads keeps the
+original whole-row rule.
+
+**The 50-page cap is disclosed, and never moves the watermark past what it
+skipped (F2).** `_recent_pages` stops at `MAX_PAGES`; if pages in the window
+were still unread when it did, the fetch reports `complete: false` and a
+warning naming the cap, and `gather_and_store` holds the previous watermark
+rather than advancing it — a later run picks up where the cap left off
+instead of silently losing those pages. The same mechanism surfaces a second
+warning when the configured `me` cannot be resolved to a Notion user, since
+`awaiting` is then unknown for the whole run. Archived and trashed pages are
+now skipped outright (`notion:archived`), never read. Fully paging past the
+cap in one run is deferred — this is the honest v1.
+
+**A resolved conversation leaves the digest (F3).** Notion's comments
+endpoint only ever returns open threads, so a page whose last open thread
+gets resolved would otherwise sit in the digest, stale, for up to `--days`.
+The Notion adapter now reports such pages as `closed` (in addition to the
+existing `notion:no-open-comments` suppression) — `notion:no-new-comments`
+pages are not, since their threads are still open, just quiet.
+`store.read_digest` excludes an item with a `closed` suppression newer than its
+own `gathered_at`; nothing is deleted, and a later gather that re-emits the
+item (its threads reopened) clears the suppression's effect by moving
+`gathered_at` past it.
 
 **Unbuilt:** Slack, Linear and mail adapters; the judging skill;
 `POST /api/almoner/dismiss`; a `days` passthrough on `GET /api/almoner/digest`.
+`status` also still surfaces a CLI failure the same way as "no sources"
+(`configured: false`) rather than with its own `error`, unlike `digest` —
+and the page's empty state currently points at the overseer config rather
+than `$CLAUDE_CONFIG_DIR/almoner/config.json`. Both are next-plan items.
 
 **Built but must not ship yet:** the inflow-gap check — see Gathered for real.
 It needs overseer cards to carry Linear keys before it says anything true.
