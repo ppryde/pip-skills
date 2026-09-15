@@ -12,6 +12,7 @@ their own table keyed by (id, digest_hash) when the judging stage lands.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -77,11 +78,26 @@ CREATE TABLE IF NOT EXISTS run (
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
     target = path if path is not None else paths.db_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # Work content at rest: the home dir is 0700, the db file 0600 — see
+    # cmd_status, which must never create either just by asking for status.
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     conn = sqlite3.connect(str(target), timeout=BUSY_TIMEOUT_S)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
+    os.chmod(target, 0o600)
+    return conn
+
+
+def connect_readonly(path: Path | None = None) -> sqlite3.Connection:
+    """Open the store read-only, for callers (``status``) that must never
+    create work-content storage just by asking about it."""
+    target = path if path is not None else paths.db_path()
+    if not target.exists():
+        raise FileNotFoundError(target)
+    conn = sqlite3.connect(f"{target.resolve().as_uri()}?mode=ro", uri=True,
+                           timeout=BUSY_TIMEOUT_S)
+    conn.row_factory = sqlite3.Row
     return conn
 
 
@@ -127,9 +143,15 @@ def read_digest(conn: sqlite3.Connection, *, days: int, now: float, context: str
                 source: str | None = None, new_only: bool = False,
                 mark_shown: bool = True) -> list[dict[str, Any]]:
     # The window is a query bound, never a post-filter: see module docstring.
-    sql = ("SELECT item.id, item.payload FROM item JOIN seen ON seen.id = item.id"
+    sql = ("SELECT item.id, item.payload, item.gathered_at FROM item"
+           " JOIN seen ON seen.id = item.id"
            " WHERE COALESCE(item.arrived_ts, item.gathered_at) >= ?"
-           " AND seen.state NOT IN ('dismissed', 'acted')")
+           " AND seen.state NOT IN ('dismissed', 'acted')"
+           # A page whose conversation was positively closed (all threads
+           # resolved) leaves the digest even though its item row is still
+           # cached — until a later gather re-emits it past the suppression.
+           " AND NOT EXISTS (SELECT 1 FROM suppressed WHERE suppressed.id = item.id"
+           " AND suppressed.rule = 'closed' AND suppressed.at > item.gathered_at)")
     params: list[Any] = [now - days * 86400]
     if context is not None:
         sql += " AND item.context = ?"
@@ -138,7 +160,7 @@ def read_digest(conn: sqlite3.Connection, *, days: int, now: float, context: str
         sql += " AND item.source = ?"
         params.append(source)
     if new_only:
-        sql += " AND seen.shown_count = 0"
+        sql += " AND seen.state = 'new'"
     sql += " ORDER BY COALESCE(item.arrived_ts, item.gathered_at) DESC, item.id"
     rows = conn.execute(sql, params).fetchall()
     if mark_shown:
@@ -147,7 +169,7 @@ def read_digest(conn: sqlite3.Connection, *, days: int, now: float, context: str
                 "UPDATE seen SET shown_count = shown_count + 1,"
                 " state = CASE WHEN state = 'new' THEN 'shown' ELSE state END WHERE id = ?",
                 [(r["id"],) for r in rows])
-    return [json.loads(r["payload"]) for r in rows]
+    return [{**json.loads(r["payload"]), "gathered_at": r["gathered_at"]} for r in rows]
 
 
 def set_state(conn: sqlite3.Connection, item_id: str, state: str, now: float) -> bool:

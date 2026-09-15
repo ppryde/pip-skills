@@ -69,6 +69,44 @@ class TestSeen:
         conn = store.connect()
         assert store.set_state(conn, "notion:nope", "acted", NOW.timestamp()) is False
 
+    def test_dismissed_row_that_changes_is_returned_once_by_new_only(self):
+        conn = store.connect()
+        t = NOW.timestamp()
+        store.upsert_items(conn, [_item("a", days_ago=1)], t)
+        store.read_digest(conn, days=14, now=t, new_only=True)  # shown_count -> 1, state shown
+        assert store.set_state(conn, "notion:a", "dismissed", t) is True
+        # Changed while dismissed: state resets to 'new', shown_count is left alone.
+        store.upsert_items(conn, [_item("a", days_ago=0.5, text="a new reply")], t + 60)
+        assert _ids(store.read_digest(conn, days=14, now=t, new_only=True)) == ["notion:a"]
+        assert store.read_digest(conn, days=14, now=t, new_only=True) == []
+
+
+class TestClosed:
+    def test_a_closed_suppression_hides_the_item(self):
+        conn = store.connect()
+        t = NOW.timestamp()
+        store.upsert_items(conn, [_item("a", days_ago=1)], t)
+        store.record_suppressed(conn, [("notion:a", "notion", "closed")], t + 1)
+        assert store.read_digest(conn, days=14, now=t) == []
+
+    def test_a_regather_after_closure_shows_it_again(self):
+        conn = store.connect()
+        t = NOW.timestamp()
+        store.upsert_items(conn, [_item("a", days_ago=1)], t)
+        store.record_suppressed(conn, [("notion:a", "notion", "closed")], t + 1)
+        assert store.read_digest(conn, days=14, now=t) == []
+        store.upsert_items(conn, [_item("a", days_ago=0.1, text="reopened")], t + 60)
+        assert _ids(store.read_digest(conn, days=14, now=t + 60)) == ["notion:a"]
+
+
+class TestGatheredAt:
+    def test_rows_carry_when_they_were_gathered(self):
+        conn = store.connect()
+        t = NOW.timestamp()
+        store.upsert_items(conn, [_item("a", days_ago=1)], t)
+        [row] = store.read_digest(conn, days=14, now=t)
+        assert row["gathered_at"] == t
+
 
 class TestBookkeeping:
     def test_watermark_round_trip(self):
