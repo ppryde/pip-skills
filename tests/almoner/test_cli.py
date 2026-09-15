@@ -132,6 +132,15 @@ class TestStatus:
         code, out, err = _run(capsys, "status")
         assert code == 2 and out is None and "config" in err
 
+    def test_status_after_digest_shows_the_watermark(self, capsys, fake_notion):
+        # status is read-only, but must read back what an earlier digest
+        # already wrote — it just must not fetch anything itself.
+        _configure(NOTION)
+        _secret("notion")
+        _run(capsys, "digest", "--json")
+        _, out, _ = _run(capsys, "status")
+        assert out["sources"][0]["watermark"] == NOW
+
 
 class TestDigest:
     def test_gathers_stores_and_reads_back(self, capsys, fake_notion):

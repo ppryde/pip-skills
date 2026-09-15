@@ -385,8 +385,12 @@ Consequences that must be designed for, not discovered:
   was expected to force a retention policy; it did not — see Retention below,
   where the window turns out to be a view rather than a delete.
 - **The store now holds work content at rest** in `$CLAUDE_CONFIG_DIR/almoner/`
-  (per Claude account), not the central overseer folder — the home directory
-  is created `0700` and the database file `0600`. Local only, never
+  (per Claude account), not the central overseer folder — the store directory
+  is `0700` and the database file and its `-wal`/`-shm` sidecars are `0600`,
+  regardless of the process umask: `store.connect()` narrows the umask for
+  the create/connect/schema sequence and then tightens the directory, db and
+  any sidecars unconditionally, so a pre-existing loose directory or file is
+  brought private too, not just what gets created fresh. Local only, never
   committed, never sent anywhere.
 
 #### Retention: the window is a view, not a delete
@@ -720,12 +724,16 @@ original whole-row rule.
 skipped (F2).** `_recent_pages` stops at `MAX_PAGES`; if pages in the window
 were still unread when it did, the fetch reports `complete: false` and a
 warning naming the cap, and `gather_and_store` holds the previous watermark
-rather than advancing it — a later run picks up where the cap left off
-instead of silently losing those pages. The same mechanism surfaces a second
+rather than advancing it. The search is newest-first, so a page skipped by
+the cap is only ever older than everything already read this run — a later
+run does not "pick up" from the cap in any special sense, it just runs the
+same newest-first search again and re-hits the same cap at the same place
+until enough gets read (or the window narrows) to finish under it; the
+warning repeats every run until then. The same mechanism surfaces a second
 warning when the configured `me` cannot be resolved to a Notion user, since
 `awaiting` is then unknown for the whole run. Archived and trashed pages are
-now skipped outright (`notion:archived`), never read. Fully paging past the
-cap in one run is deferred — this is the honest v1.
+now skipped outright (`notion:archived`) and reported `closed`, never read.
+Fully paging past the cap in one run is deferred — this is the honest v1.
 
 **A resolved conversation leaves the digest (F3).** Notion's comments
 endpoint only ever returns open threads, so a page whose last open thread

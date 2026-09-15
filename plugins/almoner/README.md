@@ -61,9 +61,10 @@ What it reads: recently edited pages and their **open** comment threads — one 
 page. Notion's API has no inbox or mentions feed, so a resolved thread is gone and an
 @-mention outside a comment is not seen.
 
-`status` and `digest` may carry `warnings` on a source alongside `ok: true` — a
-non-fatal problem worth knowing about without failing the fetch. Two so far: the
+`digest` may carry `warnings` on a source alongside `ok: true` — a non-fatal
+problem worth knowing about without failing the fetch. Two so far: the
 50-page-per-run cap was hit (older in-window pages were not read, and the watermark
 does not advance past them until a run gets under the cap), and the configured `me`
 could not be resolved to a Notion user (so `awaiting` is unknown for every item this
-run).
+run). `status` never fetches, so neither warning can appear there — the only warning
+`status` can show is the secret file being readable by others.

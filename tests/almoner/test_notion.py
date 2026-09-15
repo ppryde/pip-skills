@@ -164,6 +164,21 @@ class TestCap:
         result = _adapter(fake, me=ME).fetch(WINDOW)
         assert result.complete is True and result.warnings == []
 
+    def test_cap_hit_with_only_an_out_of_window_page_left_in_batch_stays_complete(
+            self, monkeypatch):
+        # A cap-sized batch of in-window pages followed by an out-of-window
+        # page (still in the same batch, has_more false) is not evidence
+        # anything in-window was left unread — this used to warn anyway,
+        # because the old check only asked whether *any* result followed in
+        # the batch, valid or not.
+        monkeypatch.setattr("scripts.adapters.notion.MAX_PAGES", 1)
+        fake = FakeNotion([_page("p1", "2026-09-15T09:30:00.000Z"),
+                           _page("old", "2026-09-10T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.complete is True and result.warnings == []
+
 
 class TestReaderWarning:
     def test_unresolved_email_warns(self):
@@ -202,6 +217,15 @@ class TestArchived:
         }, USERS)
         result = _adapter(fake, me=ME).fetch(WINDOW)
         assert ("notion:gone", "notion:archived") in result.suppressed
+
+    def test_archived_page_also_leaves_the_digest_as_closed(self):
+        archived = _page("gone", "2026-09-15T09:30:00.000Z")
+        archived["archived"] = True
+        fake = FakeNotion([archived, _page("p1", "2026-09-15T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.closed == ["notion:gone"]
 
 
 class TestClosed:
