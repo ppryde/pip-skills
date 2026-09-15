@@ -14,6 +14,8 @@ from scripts.model import InMessage, conversation
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc).timestamp()
 NOTION = Source("notion", "api", "notion", "work")
+CAP_WARNING = ("notion: stopped after 50 recently edited pages; older pages in the window "
+              "were not read")
 
 
 def _secret(label: str) -> None:
@@ -176,6 +178,30 @@ class TestPersist:
         assert store.get_watermark(conn, "notion") == NOW
         assert [r["id"] for r in store.read_digest(conn, days=14, now=NOW)] == ["shared:p1"]
         assert store.log_runs(conn)["runs"][0]["items_out"] == 1
+
+    def test_incomplete_result_keeps_the_prior_watermark_and_surfaces_warnings(self):
+        conn = store.connect()
+        _secret("notion")
+        store.set_watermark(conn, "notion", NOW - 3600)
+        fake = Fake(result=FetchResult(items=[_item("p1")], complete=False,
+                                       warnings=[CAP_WARNING]))
+        out = gather.gather_and_store(conn, [NOTION], hours=48, now=NOW, registry=_registry(fake))
+        [report] = out.reports
+        assert report.ok is True
+        assert report.watermark == NOW - 3600
+        assert report.warnings == [CAP_WARNING]
+        assert store.get_watermark(conn, "notion") == NOW - 3600
+        report_json = report.to_json()
+        assert report_json["warnings"] == report.warnings
+
+    def test_closed_ids_are_recorded_as_suppressions(self):
+        conn = store.connect()
+        _secret("notion")
+        fake = Fake(result=FetchResult(items=[], closed=["notion:resolved"]))
+        out = gather.gather_and_store(conn, [NOTION], hours=48, now=NOW, registry=_registry(fake))
+        assert out.suppressed == 1
+        [row] = store.log_suppressed(conn)["suppressed"]
+        assert (row["id"], row["source"], row["rule"]) == ("notion:resolved", "notion", "closed")
 
     def test_the_same_event_from_two_sources_is_one_row_seen_in_both(self):
         conn = store.connect()

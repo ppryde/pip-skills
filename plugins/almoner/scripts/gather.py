@@ -38,6 +38,14 @@ class FetchResult:
     items: list[dict[str, Any]]
     suppressed: list[tuple[str, str]] = field(default_factory=list)
     cursor: str | None = None
+    # Human-readable, non-fatal problems worth showing next to the source.
+    warnings: list[str] = field(default_factory=list)
+    # False when the adapter stopped early (a page cap, a rate limit) and
+    # in-window content may remain unread — the watermark must not advance.
+    complete: bool = True
+    # Ids the adapter positively knows no longer have an open conversation —
+    # see store.read_digest's "closed" suppression.
+    closed: list[str] = field(default_factory=list)
 
 
 class Adapter(Protocol):
@@ -60,6 +68,7 @@ class SourceReport:
     ok: bool
     error: str | None = None
     watermark: float | None = None
+    warnings: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"label": self.label, "type": self.type, "via": self.via,
@@ -67,6 +76,8 @@ class SourceReport:
                                "watermark": self.watermark}
         if self.error is not None:
             out["error"] = self.error
+        if self.warnings:
+            out["warnings"] = self.warnings
         return out
 
 
@@ -87,10 +98,10 @@ def fetch_window(now: float, hours: int, watermark: float | None) -> Window:
                   datetime.fromtimestamp(now, timezone.utc))
 
 
-def _report(source: Source, ok: bool, error: str | None,
-           watermark: float | None) -> SourceReport:
+def _report(source: Source, ok: bool, error: str | None, watermark: float | None,
+           warnings: list[str] | None = None) -> SourceReport:
     return SourceReport(source.label, source.type, source.via, source.context, ok, error,
-                        watermark)
+                        watermark, warnings or [])
 
 
 def _fetch_worker(adapter: Adapter, window: Window, future: Future[FetchResult]) -> None:
@@ -167,6 +178,7 @@ def gather_and_store(conn: sqlite3.Connection, sources: list[Source], *, hours: 
         ok_results.append((source, result))
         items_in += len(result.items)
         suppressed.extend((item_id, source.type, rule) for item_id, rule in result.suppressed)
+        suppressed.extend((item_id, source.type, "closed") for item_id in result.closed)
         for item in result.items:
             existing = merged.get(item["id"])
             if existing is None:
@@ -179,8 +191,15 @@ def gather_and_store(conn: sqlite3.Connection, sources: list[Source], *, hours: 
     store.upsert_items(conn, list(merged.values()), now)
     store.record_suppressed(conn, suppressed, now)
     for source, result in ok_results:
-        store.set_watermark(conn, source.label, now, result.cursor)
-        reports[source.label] = _report(source, True, None, now)
+        watermark: float | None
+        if result.complete:
+            store.set_watermark(conn, source.label, now, result.cursor)
+            watermark = now
+        else:
+            # Stopped early: in-window content may remain unread, so the
+            # watermark must not advance past it — see FetchResult.complete.
+            watermark = previous[source.label]
+        reports[source.label] = _report(source, True, None, watermark, list(result.warnings))
     store.record_run(conn, started=now, finished=datetime.now(timezone.utc).timestamp(),
                      sources_ok=[s.label for s, _ in ok_results],
                      sources_failed=[r.label for r in reports.values() if not r.ok],
