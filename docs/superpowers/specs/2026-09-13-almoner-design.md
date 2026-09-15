@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-13
 **Plugins:** `almoner` (new), `overseer` (dashboard page, backend routes)
-**Status:** Draft (design) — page built but **uncommitted**; CLI, adapters and
-store unbuilt. Open questions at the end must be settled before building them.
+**Status:** CLI core + Notion source built (plan 2026-09-15-almoner-cli-core-notion);
+Slack, Linear and mail adapters, the judging skill and POST /dismiss unbuilt.
 
 **Revised 2026-09-13 (second pass).** The day table replaced the grouped view
 as the primary surface; rollups and their safety rule were added; the mail
@@ -70,6 +70,9 @@ currently unreachable rather than unbuilt — the connector exposes only its
 authorisation call — and the page therefore names it among the sources it
 could not reach, which is what an unreachable source is supposed to look like.
 
+Notion turns out not to need the connector at all: it is reachable directly by
+an internal integration token (`via: api`), needing no connector.
+
 Swapping is a config edit, not a refactor:
 
 ```json
@@ -94,6 +97,42 @@ sides of the swap**, so the two transports cannot drift apart in behaviour.
 
 The boundary test: **unplug the skill and the CLI must still return something
 usable** — an unranked, newest-first digest rather than nothing.
+
+### Judging (ratified 2026-09-15)
+
+Design not yet built (see Next plan).
+
+- **Two stages: gather, then judge.** The CLI's gather is deterministic; the
+  `almoner:judge` skill runs second, and processes only items whose
+  `digest_hash` differs from the hash they were last judged at.
+- **The agent never touches SQLite.** `almoner judge --pending [--limit N]` is
+  a pure read — it never marks rows shown — returning unjudged or changed
+  items plus a feedback block of the reader's recent dismissals and acks
+  (capped at 20; title, source, asks — no bodies). `almoner judge --apply
+  FILE|-` validates per item against a fixed schema; each judgement echoes
+  `digest_hash`, and a stale one is rejected.
+- **Store:** a `judgement` table keyed `(id, digest_hash)`, history kept,
+  latest `judged_at` wins; a `rollup(key, title, excerpt, judged_at)` table.
+  Judgements are not columns on `item`, because each gather replaces the item
+  row.
+- **Judgement fields:** `asks`, `rank`, `because`, `topic` (free-text label
+  for v1), `for_reader`, `fold_into`, `attributed`.
+- **`for_reader` demotes only.** Row state is `bundled` > (`awaiting === true`
+  && `for_reader !== false`) > reconcile > fyi. Mechanical `awaiting` is never
+  overwritten.
+- **The agent cannot hide rows.** Its only tools for noise are `fold_into` (a
+  disclosed rollup) and `for_reader: false`.
+- **Safety gate in code:** a keyword list (sign-in, password, login/verification
+  code, reset, bank, payment, invoice, card, credential, currency marks); a
+  keyword-hit item without an explicit `attributed: true` has its `fold_into`
+  rejected per item.
+- **Rollup validation:** every member is an accepted item in the same batch;
+  `excerpt` is non-empty and not equal to `title`; the read shows the rollup as
+  one `bundled: true` row, members not repeated at top level.
+- **v1 is interactive-only** (run the skill in a session). Connector lookups
+  during judging are allowed, read-only, only for rows otherwise ambiguous. A
+  dashboard Judge button (headless `claude -p`, inheriting `CLAUDE_CONFIG_DIR`)
+  is a later task.
 
 ## Findings that shaped this
 
@@ -542,6 +581,9 @@ almoner dismiss <id>               local only
 almoner ack <id>                   mark actioned — local only
 almoner log --runs                 refresh history
 almoner log --suppressed           what was filtered, and by which rule
+almoner judge --pending            unjudged/changed items, read-only         (unbuilt)
+almoner judge --apply FILE         apply validated judgements from FILE or - (unbuilt)
+almoner digest --cached            read the store without gathering         (unbuilt)
 ```
 
 ```
@@ -636,8 +678,21 @@ guild bar's view switcher now places any number of coins rather than exactly
 three; the bar names the page you are on; and the board's five unrelated reds
 became one alarm pair (Pantone 485 with a vermilion for text).
 
-**Unbuilt:** the `almoner` plugin itself — CLI, adapters, store, judging skill,
-dismiss/ack, and the history read the table is already shaped to display.
+**Built (2026-09-15)**, on branch `feat/almoner-ui`: the `almoner` CLI core —
+`status`, `digest`, `dismiss`, `ack`, `log --runs|--suppressed` — the SQLite
+store (`watermark`, `seen`, `item`, `suppressed`, `run`), the Notion source
+(`type: notion`, `via: api`), and the history read the table was already
+shaped to display. Fetches run on daemon threads so a wedged source can never
+hold the CLI process open; adapter construction failures degrade per source
+like fetch failures. The Notion adapter degrades per item: a malformed page is
+suppressed as `notion:malformed-page`, a page whose comments are all malformed
+as `notion:malformed-comments`, alongside `notion:no-open-comments` and
+`notion:no-new-comments`. Two Notion API facts remain unverified until a live
+smoke test: whether inline block comments are returned when listing comments
+by page id, and the `?d=<discussion_id>` deep link.
+
+**Unbuilt:** Slack, Linear and mail adapters; the judging skill;
+`POST /api/almoner/dismiss`; a `days` passthrough on `GET /api/almoner/digest`.
 
 **Built but must not ship yet:** the inflow-gap check — see Gathered for real.
 It needs overseer cards to carry Linear keys before it says anything true.
@@ -648,9 +703,8 @@ It needs overseer cards to carry Linear keys before it says anything true.
    Retention: the window is a view, not a delete.**
 2. ~~**Which Linear states count as "active"**~~ **Settled 2026-09-13 against
    the real workflow states — see "Active" is a state TYPE.**
-3. **Is the source list per-machine or per-repo?** `claude_dirs` is
-   machine-level and sources probably are too — but the board is per-repo, so
-   the same digest appearing on every board needs confirming as intended.
+3. ~~**Is the source list per-machine or per-repo?**~~ **Settled 2026-09-15: per
+   machine, rooted per Claude account at `$CLAUDE_CONFIG_DIR/almoner/`.**
 4. **Mail authentication**, once the probe runs: app password if it holds,
    otherwise provider OAuth with someone owning the client registration.
 5. **Slack `via: api` may never be available** — a corporate workspace may not
