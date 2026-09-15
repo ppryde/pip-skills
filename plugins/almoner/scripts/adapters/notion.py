@@ -48,11 +48,22 @@ def urllib_transport(token: str, *, timeout: float = 15.0) -> Transport:
             raise AdapterError(_HTTP_ERRORS.get(exc.code, f"notion: HTTP {exc.code}")) from None
         except (urllib.error.URLError, TimeoutError):
             raise AdapterError("notion: unreachable") from None
+        except ValueError:
+            raise AdapterError("notion: unreadable response") from None
     return call
 
 
 def _parse(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def _try_parse(ts: Any) -> datetime | None:
+    if not isinstance(ts, str):
+        return None
+    try:
+        return _parse(ts)
+    except ValueError:
+        return None
 
 
 def _title(page: dict[str, Any]) -> str:
@@ -77,11 +88,14 @@ class NotionAdapter:
     def fetch(self, window: Window) -> FetchResult:
         me = self._reader_id()
         items: list[dict[str, Any]] = []
-        suppressed: list[tuple[str, str]] = []
-        pages = self._recent_pages(window)
+        pages, suppressed = self._recent_pages(window)
         for page in pages:
             item_id = f"notion:{page['id']}"
-            comments = self._open_comments(page["id"])
+            raw_comments = self._open_comments(page["id"])
+            comments = [c for c in raw_comments if _try_parse(c.get("created_time")) is not None]
+            if raw_comments and not comments:
+                suppressed.append((item_id, "notion:malformed-comments"))
+                continue
             if not comments:
                 suppressed.append((item_id, "notion:no-open-comments"))
                 continue
@@ -94,8 +108,12 @@ class NotionAdapter:
         cursor = pages[0]["last_edited_time"] if pages else None
         return FetchResult(items=items, suppressed=suppressed, cursor=cursor)
 
-    def _recent_pages(self, window: Window) -> list[dict[str, Any]]:
+    def _recent_pages(self, window: Window) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+        # A page missing id/url/last_edited_time is unusable but not fatal: skip it,
+        # keep paging (it doesn't count toward MAX_PAGES or the window-edge stop),
+        # and name it in `suppressed` when it at least has an id to name it by.
         pages: list[dict[str, Any]] = []
+        suppressed: list[tuple[str, str]] = []
         cursor: str | None = None
         while True:
             body: dict[str, Any] = {
@@ -107,13 +125,20 @@ class NotionAdapter:
                 body["start_cursor"] = cursor
             response = self.call("POST", "/search", body)
             for page in response.get("results") or []:
-                if _parse(page["last_edited_time"]) < window.since:
-                    return pages
+                edited = _try_parse(page.get("last_edited_time"))
+                page_id = page.get("id")
+                if edited is None or not isinstance(page_id, str) or \
+                        not isinstance(page.get("url"), str):
+                    if isinstance(page_id, str):
+                        suppressed.append((f"notion:{page_id}", "notion:malformed-page"))
+                    continue
+                if edited < window.since:
+                    return pages, suppressed
                 pages.append(page)
                 if len(pages) >= MAX_PAGES:
-                    return pages
+                    return pages, suppressed
             if not response.get("has_more"):
-                return pages
+                return pages, suppressed
             cursor = response.get("next_cursor")
 
     def _open_comments(self, page_id: str) -> list[dict[str, Any]]:
@@ -163,10 +188,12 @@ class NotionAdapter:
     def _message(self, page: dict[str, Any], comment: dict[str, Any],
                  me: str | None) -> InMessage:
         author = (comment.get("created_by") or {}).get("id", "")
+        discussion_id = comment.get("discussion_id")
+        url = f"{page['url']}?d={discussion_id}" if discussion_id else page["url"]
         return InMessage(
             text="".join(part.get("plain_text", "") for part in comment.get("rich_text") or []),
             at=_parse(comment["created_time"]),
             who=self._name(author) if author else None,
-            url=f"{page['url']}?d={comment['discussion_id']}",
-            mine=None if me is None else author == me,
+            url=url,
+            mine=None if me is None or not author else author == me,
         )

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from scripts.adapters import registry
-from scripts.adapters.notion import NotionAdapter
+from scripts.adapters.notion import NotionAdapter, urllib_transport
 from scripts.config import Source
 from scripts.gather import AdapterError, Window
 
@@ -128,6 +128,68 @@ class TestErrors:
         fake = FakeNotion([], {}, fail=("/search", AdapterError("notion: token rejected (401)")))
         with pytest.raises(AdapterError, match="401"):
             _adapter(fake).fetch(WINDOW)
+
+
+class TestMalformed:
+    def test_malformed_page_is_suppressed_not_fatal(self):
+        bad = _page("bad", "2026-09-15T09:30:00.000Z")
+        del bad["url"]
+        fake = FakeNotion([bad, _page("p1", "2026-09-15T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert [item["id"] for item in result.items] == ["notion:p1"]
+        assert ("notion:bad", "notion:malformed-page") in result.suppressed
+
+    def test_comment_missing_discussion_id_links_to_the_page(self):
+        comment = _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")
+        del comment["discussion_id"]
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [comment]}, USERS)
+        item = _adapter(fake, me=ME).fetch(WINDOW).items[0]
+        assert item["messages"][0]["url"] == "https://www.notion.so/p1"
+
+    def test_comment_missing_created_time_is_dropped(self):
+        bad_comment = _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "no time")
+        del bad_comment["created_time"]
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [
+            bad_comment,
+            _comment("c2", RHONA, "2026-09-15T08:30:00.000Z", "ok"),
+        ]}, USERS)
+        item = _adapter(fake, me=ME).fetch(WINDOW).items[0]
+        assert item["count"] == 1
+
+    def test_page_with_only_malformed_comments_is_suppressed(self):
+        bad_comment = _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "no time")
+        del bad_comment["created_time"]
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [bad_comment]}, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.items == []
+        assert result.suppressed == [("notion:p1", "notion:malformed-comments")]
+
+    def test_comment_missing_author_gives_unknown_mine(self):
+        comment = _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")
+        del comment["created_by"]
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [comment]}, USERS)
+        item = _adapter(fake, me=ME).fetch(WINDOW).items[0]
+        assert "awaiting" not in item
+
+
+class TestTransport:
+    def test_unreadable_response_becomes_a_named_error(self, monkeypatch):
+        class FakeResponse:
+            def read(self):
+                return b"not json"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: FakeResponse())
+        call = urllib_transport("invented-token")
+        with pytest.raises(AdapterError, match="unreadable"):
+            call("GET", "/search", None)
 
 
 def test_registered_under_notion_via_api():
