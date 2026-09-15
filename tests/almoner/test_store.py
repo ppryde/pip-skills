@@ -1,6 +1,8 @@
+import os
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from scripts import store
+from scripts import paths, store
 from scripts.model import InMessage, conversation
 
 NOW = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
@@ -127,3 +129,95 @@ class TestBookkeeping:
         assert runs["store_bytes"] > 0
         [row] = store.log_suppressed(conn)["suppressed"]
         assert row["rule"] == "notion:no-open-comments" and row["at"] == t + 1
+
+
+def _sidecars(target):
+    return [target.with_name(target.name + suffix) for suffix in ("-wal", "-shm")
+            if target.with_name(target.name + suffix).exists()]
+
+
+class TestPrivacy:
+    """A db, home dir or WAL/SHM sidecar must never be born group/other
+    readable — even under a loose ambient umask, and even when SQLite (not
+    almoner) is the one creating the sidecar. Every test here forces the
+    umask loose first so it fails on code that relies on a private ambient
+    umask instead of enforcing one itself."""
+
+    def test_fresh_store_is_private_end_to_end(self):
+        # -wal/-shm exist only while the connection is open (WAL mode creates
+        # them at schema-creation time and SQLite removes them on close), so
+        # check before closing — that's the window the finding is about.
+        old = os.umask(0o022)
+        try:
+            conn = store.connect()
+            store.upsert_items(conn, [_item("a", days_ago=1)], NOW.timestamp())
+            target = paths.db_path()
+            assert target.parent.stat().st_mode & 0o077 == 0
+            assert target.stat().st_mode & 0o077 == 0
+            sidecars = _sidecars(target)
+            assert sidecars
+            for sidecar in sidecars:
+                assert sidecar.stat().st_mode & 0o077 == 0
+            conn.close()
+        finally:
+            os.umask(old)
+
+    def test_pre_existing_loose_home_and_db_are_tightened(self):
+        # Check the -wal's mode before closing: a clean close checkpoints and
+        # removes it, so by the time the connection is closed there is
+        # nothing left to have been tightened.
+        old = os.umask(0o022)
+        try:
+            target = paths.db_path()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(target.parent, 0o755)
+            target.write_text("")
+            os.chmod(target, 0o644)
+            wal = target.with_name(target.name + "-wal")
+            wal.write_text("")
+            os.chmod(wal, 0o644)
+            conn = store.connect()
+            assert target.parent.stat().st_mode & 0o077 == 0
+            assert target.stat().st_mode & 0o077 == 0
+            assert wal.stat().st_mode & 0o077 == 0
+            conn.close()
+        finally:
+            os.umask(old)
+
+    def test_process_umask_is_restored_after_connect(self):
+        old = os.umask(0o022)
+        try:
+            conn = store.connect()
+            conn.close()
+            current = os.umask(0o022)
+            os.umask(current)
+            assert current == 0o022
+        finally:
+            os.umask(old)
+
+    def test_connect_readonly_tightens_a_sidecar_beside_a_pre_fix_loose_db(self):
+        # Simulates a db that predates this fix and was never re-tightened —
+        # `status` only ever calls connect_readonly, never connect(), so
+        # nothing else would fix it. SQLite mirrors the *existing* db file's
+        # own mode onto any -wal/-shm it creates while reading, umask or no
+        # umask, so wrapping the read in a private umask alone cannot close
+        # this: the sidecar must be chmodded explicitly.
+        target = paths.db_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        raw = sqlite3.connect(str(target))
+        raw.execute("PRAGMA journal_mode=WAL")
+        raw.execute("CREATE TABLE t (x)")
+        raw.commit()
+        raw.close()
+        os.chmod(target, 0o644)  # the loose, pre-fix state being migrated from
+        old = os.umask(0o022)
+        try:
+            ro = store.connect_readonly()
+            ro.execute("SELECT * FROM t").fetchall()
+            sidecars = _sidecars(target)
+            assert sidecars
+            for sidecar in sidecars:
+                assert sidecar.stat().st_mode & 0o077 == 0
+            ro.close()
+        finally:
+            os.umask(old)

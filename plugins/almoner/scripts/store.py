@@ -11,9 +11,11 @@ their own table keyed by (id, digest_hash) when the judging stage lands.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -76,28 +78,71 @@ CREATE TABLE IF NOT EXISTS run (
 """
 
 
+@contextlib.contextmanager
+def _private_umask() -> Iterator[None]:
+    """Narrow the process umask to 0o077 for the smallest window that covers
+    file creation, so anything SQLite creates fresh (the db, and its -wal/-shm
+    sidecars once WAL is on) is born 0600/0700 regardless of the ambient
+    umask. The umask is process-global — always restore it, even on error."""
+    previous = os.umask(0o077)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def _tighten(target: Path) -> None:
+    """Chmod the db, its parent dir and any WAL/SHM sidecars to private,
+    unconditionally. The umask only protects what this connect() creates
+    fresh — a directory or db file that predates it (the README has callers
+    create config.json under home/ first, so home/ usually pre-exists) is
+    born with whatever mode its creator chose, and is never tightened by a
+    later ``mkdir(exist_ok=True)``. Only the db's own parent is touched, never
+    an arbitrary ancestor a caller chose via ALMONER_DB."""
+    os.chmod(target.parent, 0o700)
+    os.chmod(target, 0o600)
+    for suffix in ("-wal", "-shm"):
+        sidecar = target.with_name(target.name + suffix)
+        if sidecar.exists():
+            os.chmod(sidecar, 0o600)
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     target = path if path is not None else paths.db_path()
-    # Work content at rest: the home dir is 0700, the db file 0600 — see
-    # cmd_status, which must never create either just by asking for status.
-    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    conn = sqlite3.connect(str(target), timeout=BUSY_TIMEOUT_S)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(_SCHEMA)
-    os.chmod(target, 0o600)
+    # Work content at rest: the home dir is 0700, the db/WAL/SHM files 0600 —
+    # see cmd_status, which must never create either just by asking for status.
+    with _private_umask():
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        conn = sqlite3.connect(str(target), timeout=BUSY_TIMEOUT_S)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(_SCHEMA)
+    _tighten(target)
     return conn
 
 
 def connect_readonly(path: Path | None = None) -> sqlite3.Connection:
     """Open the store read-only, for callers (``status``) that must never
-    create work-content storage just by asking about it."""
+    create work-content storage just by asking about it. Creates and loosens
+    nothing: the db itself and its parent dir are left exactly as found. A
+    -wal/-shm sidecar is another matter — SQLite only materialises it lazily,
+    on first access, and mirrors the *main db file's own mode* onto it (so
+    the umask wrap alone does not help when that db predates this fix and is
+    still loose). A harmless read forces it into existence here, on our
+    terms, so it can be chmodded private before any caller sees the
+    connection."""
     target = path if path is not None else paths.db_path()
     if not target.exists():
         raise FileNotFoundError(target)
-    conn = sqlite3.connect(f"{target.resolve().as_uri()}?mode=ro", uri=True,
-                           timeout=BUSY_TIMEOUT_S)
-    conn.row_factory = sqlite3.Row
+    with _private_umask():
+        conn = sqlite3.connect(f"{target.resolve().as_uri()}?mode=ro", uri=True,
+                               timeout=BUSY_TIMEOUT_S)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA user_version")
+    for suffix in ("-wal", "-shm"):
+        sidecar = target.with_name(target.name + suffix)
+        if sidecar.exists():
+            os.chmod(sidecar, 0o600)
     return conn
 
 
