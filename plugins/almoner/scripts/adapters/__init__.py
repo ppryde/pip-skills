@@ -12,4 +12,6 @@ if TYPE_CHECKING:
 
 
 def registry() -> dict[tuple[str, str], AdapterFactory]:
-    return {}
+    from scripts.adapters.notion import NotionAdapter
+
+    return {("notion", "api"): NotionAdapter.from_source}
