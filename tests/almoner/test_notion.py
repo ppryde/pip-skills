@@ -92,6 +92,19 @@ class TestCollapse:
         ]}, USERS)
         assert "awaiting" not in _adapter(fake).fetch(WINDOW).items[0]
 
+    def test_reply_in_one_discussion_does_not_hide_another_left_open(self):
+        # Rhona's question in d1 is never answered; the reader only replies
+        # in d2, which is also the newest message overall. The whole-row
+        # last-speaker rule would call that answered — the per-thread rule
+        # must not, because d1 is still open.
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [
+            _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "ask in d1", discussion="d1"),
+            _comment("c2", RHONA, "2026-09-15T08:10:00.000Z", "ask in d2", discussion="d2"),
+            _comment("c3", ME, "2026-09-15T08:20:00.000Z", "reply in d2", discussion="d2"),
+        ]}, USERS)
+        item = _adapter(fake, me=ME).fetch(WINDOW).items[0]
+        assert item["awaiting"] is True
+
     def test_unknown_author_name_degrades_to_no_who(self):
         fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [
             _comment("c1", "user-gone", "2026-09-15T08:00:00.000Z", "hello"),
@@ -128,6 +141,81 @@ class TestErrors:
         fake = FakeNotion([], {}, fail=("/search", AdapterError("notion: token rejected (401)")))
         with pytest.raises(AdapterError, match="401"):
             _adapter(fake).fetch(WINDOW)
+
+
+class TestCap:
+    def test_cap_hit_with_more_pages_sets_incomplete_and_warns(self, monkeypatch):
+        monkeypatch.setattr("scripts.adapters.notion.MAX_PAGES", 1)
+        fake = FakeNotion([_page("p1", "2026-09-15T09:30:00.000Z"),
+                           _page("p2", "2026-09-15T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        cap_warning = ("notion: stopped after 1 recently edited pages; older pages in the "
+                      "window were not read")
+        assert result.complete is False
+        assert result.warnings == [cap_warning]
+
+    def test_cap_hit_with_nothing_left_stays_complete(self, monkeypatch):
+        monkeypatch.setattr("scripts.adapters.notion.MAX_PAGES", 1)
+        fake = FakeNotion([_page("p1", "2026-09-15T09:30:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.complete is True and result.warnings == []
+
+
+class TestReaderWarning:
+    def test_unresolved_email_warns(self):
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [
+            _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi"),
+        ]}, USERS)
+        result = _adapter(fake, me="nobody@example.com").fetch(WINDOW)
+        reader_warning = "notion: could not resolve the configured reader; awaiting is unknown"
+        assert "awaiting" not in result.items[0]
+        assert result.warnings == [reader_warning]
+
+    def test_no_reader_configured_warns_nothing(self):
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {"p1": [
+            _comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi"),
+        ]}, USERS)
+        assert _adapter(fake).fetch(WINDOW).warnings == []
+
+
+class TestArchived:
+    def test_archived_page_is_suppressed_not_read(self):
+        archived = _page("gone", "2026-09-15T09:30:00.000Z")
+        archived["archived"] = True
+        fake = FakeNotion([archived, _page("p1", "2026-09-15T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert [item["id"] for item in result.items] == ["notion:p1"]
+        assert ("notion:gone", "notion:archived") in result.suppressed
+        assert not any("block_id=gone" in path for _, path, _ in fake.calls)
+
+    def test_in_trash_page_is_suppressed_not_read(self):
+        trashed = _page("gone", "2026-09-15T09:30:00.000Z")
+        trashed["in_trash"] = True
+        fake = FakeNotion([trashed, _page("p1", "2026-09-15T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert ("notion:gone", "notion:archived") in result.suppressed
+
+
+class TestClosed:
+    def test_no_open_comments_page_is_reported_closed(self):
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {}, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.closed == ["notion:p1"]
+
+    def test_no_new_comments_page_is_not_closed(self):
+        fake = FakeNotion([_page("p1", "2026-09-15T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-01T08:00:00.000Z", "old")],
+        }, USERS)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.closed == []
 
 
 class TestMalformed:

@@ -23,6 +23,14 @@ from scripts.model import InMessage, conversation
 API = "https://api.notion.com/v1"
 NOTION_VERSION = "2026-03-11"
 MAX_PAGES = 50
+_READER_WARNING = "notion: could not resolve the configured reader; awaiting is unknown"
+
+
+def _cap_warning() -> str:
+    # A function, not a module-level constant, so it always reads the
+    # current MAX_PAGES — tests monkeypatch it to exercise this path cheaply.
+    return (f"notion: stopped after {MAX_PAGES} recently edited pages; older pages in the "
+            "window were not read")
 
 Transport = Callable[[str, str, dict[str, Any] | None], dict[str, Any]]
 
@@ -86,9 +94,12 @@ class NotionAdapter:
         return cls(source, urllib_transport(secret))
 
     def fetch(self, window: Window) -> FetchResult:
-        me = self._reader_id()
+        me, reader_warning = self._reader_id()
         items: list[dict[str, Any]] = []
-        pages, suppressed = self._recent_pages(window)
+        closed: list[str] = []
+        pages, suppressed, complete, warnings = self._recent_pages(window)
+        if reader_warning is not None:
+            warnings = [*warnings, reader_warning]
         for page in pages:
             item_id = f"notion:{page['id']}"
             raw_comments = self._open_comments(page["id"])
@@ -97,7 +108,10 @@ class NotionAdapter:
                 suppressed.append((item_id, "notion:malformed-comments"))
                 continue
             if not comments:
+                # Notion only returns OPEN threads: zero here means every
+                # thread on this page has been resolved, not merely quiet.
                 suppressed.append((item_id, "notion:no-open-comments"))
+                closed.append(item_id)
                 continue
             if all(_parse(c["created_time"]) < window.since for c in comments):
                 suppressed.append((item_id, "notion:no-new-comments"))
@@ -106,9 +120,12 @@ class NotionAdapter:
                 id=item_id, source="notion", context=self.source.context, title=_title(page),
                 url=page["url"], messages=[self._message(page, c, me) for c in comments]))
         cursor = pages[0]["last_edited_time"] if pages else None
-        return FetchResult(items=items, suppressed=suppressed, cursor=cursor)
+        return FetchResult(items=items, suppressed=suppressed, cursor=cursor, warnings=warnings,
+                           complete=complete, closed=closed)
 
-    def _recent_pages(self, window: Window) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+    def _recent_pages(
+        self, window: Window,
+    ) -> tuple[list[dict[str, Any]], list[tuple[str, str]], bool, list[str]]:
         # A page missing id/url/last_edited_time is unusable but not fatal: skip it,
         # keep paging (it doesn't count toward MAX_PAGES or the window-edge stop),
         # and name it in `suppressed` when it at least has an id to name it by.
@@ -124,21 +141,32 @@ class NotionAdapter:
             if cursor:
                 body["start_cursor"] = cursor
             response = self.call("POST", "/search", body)
-            for page in response.get("results") or []:
-                edited = _try_parse(page.get("last_edited_time"))
+            results = response.get("results") or []
+            for i, page in enumerate(results):
                 page_id = page.get("id")
+                if page.get("archived") or page.get("in_trash"):
+                    if isinstance(page_id, str):
+                        suppressed.append((f"notion:{page_id}", "notion:archived"))
+                    continue
+                edited = _try_parse(page.get("last_edited_time"))
                 if edited is None or not isinstance(page_id, str) or \
                         not isinstance(page.get("url"), str):
                     if isinstance(page_id, str):
                         suppressed.append((f"notion:{page_id}", "notion:malformed-page"))
                     continue
                 if edited < window.since:
-                    return pages, suppressed
+                    return pages, suppressed, True, []
                 pages.append(page)
                 if len(pages) >= MAX_PAGES:
-                    return pages, suppressed
+                    # Unread results remain in this batch, or another batch
+                    # is waiting: the cap bit before the window edge did,
+                    # so in-window pages may still be unread.
+                    more_remaining = i < len(results) - 1 or bool(response.get("has_more"))
+                    if more_remaining:
+                        return pages, suppressed, False, [_cap_warning()]
+                    return pages, suppressed, True, []
             if not response.get("has_more"):
-                return pages, suppressed
+                return pages, suppressed, True, []
             cursor = response.get("next_cursor")
 
     def _open_comments(self, page_id: str) -> list[dict[str, Any]]:
@@ -154,12 +182,15 @@ class NotionAdapter:
                 return comments
             cursor = response.get("next_cursor")
 
-    def _reader_id(self) -> str | None:
+    def _reader_id(self) -> tuple[str | None, str | None]:
+        # Returns (resolved id or None, warning or None). A warning is only
+        # raised once resolution was actually attempted and failed — an
+        # unconfigured reader is silent, not a warning.
         me = self.source.options.get("me")
         if not isinstance(me, str) or not me:
-            return None
+            return None, None
         if "@" not in me:
-            return me
+            return me, None
         cursor: str | None = None
         while True:
             query = {"page_size": "100"}
@@ -168,13 +199,13 @@ class NotionAdapter:
             try:
                 response = self.call("GET", f"/users?{urllib.parse.urlencode(query)}", None)
             except AdapterError:
-                return None
+                return None, _READER_WARNING
             for user in response.get("results") or []:
                 email = ((user.get("person") or {}).get("email") or "").lower()
                 if email == me.lower():
-                    return str(user["id"])
+                    return str(user["id"]), None
             if not response.get("has_more"):
-                return None
+                return None, _READER_WARNING
             cursor = response.get("next_cursor")
 
     def _name(self, user_id: str) -> str | None:
@@ -196,4 +227,5 @@ class NotionAdapter:
             who=self._name(author) if author else None,
             url=url,
             mine=None if me is None or not author else author == me,
+            thread=discussion_id if isinstance(discussion_id, str) else None,
         )
