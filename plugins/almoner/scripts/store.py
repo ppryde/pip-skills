@@ -93,18 +93,27 @@ def _private_umask() -> Iterator[None]:
 
 def _tighten(target: Path) -> None:
     """Chmod the db, its parent dir and any WAL/SHM sidecars to private,
-    unconditionally. The umask only protects what this connect() creates
-    fresh — a directory or db file that predates it (the README has callers
-    create config.json under home/ first, so home/ usually pre-exists) is
-    born with whatever mode its creator chose, and is never tightened by a
-    later ``mkdir(exist_ok=True)``. Only the db's own parent is touched, never
-    an arbitrary ancestor a caller chose via ALMONER_DB."""
-    os.chmod(target.parent, 0o700)
-    os.chmod(target, 0o600)
+    unconditionally. The umask only protects what a connect creates fresh —
+    a directory or db file that predates it (the README has callers create
+    config.json under home/ first, so home/ usually pre-exists; an older
+    almoner may also have left a loose db from before this fix) is born
+    with whatever mode its creator chose, and is never tightened by a later
+    ``mkdir(exist_ok=True)``. Only the db's own parent is ever touched, and
+    only when we own it — chmod on a directory owned by someone else (e.g.
+    ALMONER_DB pointed at a shared /tmp) would raise, and a permissions
+    problem in a directory we don't own is not almoner's to fix or fail
+    over. Every chmod tolerates the target having vanished underneath us
+    (another process cleaned up a sidecar between an existence check and
+    here) rather than treating that as an error."""
+    parent = target.parent
+    if parent.stat().st_uid == os.getuid():
+        with contextlib.suppress(FileNotFoundError):
+            os.chmod(parent, 0o700)
+    with contextlib.suppress(FileNotFoundError):
+        os.chmod(target, 0o600)
     for suffix in ("-wal", "-shm"):
-        sidecar = target.with_name(target.name + suffix)
-        if sidecar.exists():
-            os.chmod(sidecar, 0o600)
+        with contextlib.suppress(FileNotFoundError):
+            os.chmod(target.with_name(target.name + suffix), 0o600)
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
@@ -117,20 +126,24 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(_SCHEMA)
-    _tighten(target)
+    try:
+        _tighten(target)
+    except Exception:  # never leak the connection we just opened, whatever went wrong
+        conn.close()
+        raise
     return conn
 
 
 def connect_readonly(path: Path | None = None) -> sqlite3.Connection:
     """Open the store read-only, for callers (``status``) that must never
-    create work-content storage just by asking about it. Creates and loosens
-    nothing: the db itself and its parent dir are left exactly as found. A
-    -wal/-shm sidecar is another matter — SQLite only materialises it lazily,
-    on first access, and mirrors the *main db file's own mode* onto it (so
-    the umask wrap alone does not help when that db predates this fix and is
-    still loose). A harmless read forces it into existence here, on our
-    terms, so it can be chmodded private before any caller sees the
-    connection."""
+    create work-content storage just by asking about it. Creates nothing:
+    ``target`` must already exist. But it does tighten what it opens, same
+    as ``connect`` — a db from before this fix (or its -wal/-shm, which
+    SQLite only materialises lazily, on first access, and which mirrors the
+    *main db file's own mode* regardless of umask) may still be loose, and
+    `status` calling this is the only chance such a db ever gets fixed,
+    since it never goes through ``connect``. A harmless read forces any
+    sidecar into existence here, on our terms, before it gets tightened."""
     target = path if path is not None else paths.db_path()
     if not target.exists():
         raise FileNotFoundError(target)
@@ -139,10 +152,11 @@ def connect_readonly(path: Path | None = None) -> sqlite3.Connection:
                                timeout=BUSY_TIMEOUT_S)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA user_version")
-    for suffix in ("-wal", "-shm"):
-        sidecar = target.with_name(target.name + suffix)
-        if sidecar.exists():
-            os.chmod(sidecar, 0o600)
+    try:
+        _tighten(target)
+    except Exception:  # never leak the connection we just opened, whatever went wrong
+        conn.close()
+        raise
     return conn
 
 

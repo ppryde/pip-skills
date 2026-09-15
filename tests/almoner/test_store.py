@@ -195,15 +195,18 @@ class TestPrivacy:
         finally:
             os.umask(old)
 
-    def test_connect_readonly_tightens_a_sidecar_beside_a_pre_fix_loose_db(self):
-        # Simulates a db that predates this fix and was never re-tightened —
-        # `status` only ever calls connect_readonly, never connect(), so
-        # nothing else would fix it. SQLite mirrors the *existing* db file's
-        # own mode onto any -wal/-shm it creates while reading, umask or no
+    def test_connect_readonly_tightens_everything_beside_a_pre_fix_loose_db(self):
+        # Simulates a db and its parent dir that predate this fix and were
+        # never re-tightened — `status` only ever calls connect_readonly,
+        # never connect(), so nothing else would fix them. The -wal/-shm
+        # sidecar is the trickiest part: SQLite mirrors the *existing* db
+        # file's own mode onto any it creates while reading, umask or no
         # umask, so wrapping the read in a private umask alone cannot close
-        # this: the sidecar must be chmodded explicitly.
+        # that gap — the sidecar must be chmodded explicitly, same as the
+        # db and its parent dir.
         target = paths.db_path()
         target.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(target.parent, 0o755)
         raw = sqlite3.connect(str(target))
         raw.execute("PRAGMA journal_mode=WAL")
         raw.execute("CREATE TABLE t (x)")
@@ -214,6 +217,8 @@ class TestPrivacy:
         try:
             ro = store.connect_readonly()
             ro.execute("SELECT * FROM t").fetchall()
+            assert target.parent.stat().st_mode & 0o077 == 0
+            assert target.stat().st_mode & 0o077 == 0
             sidecars = _sidecars(target)
             assert sidecars
             for sidecar in sidecars:
@@ -221,3 +226,18 @@ class TestPrivacy:
             ro.close()
         finally:
             os.umask(old)
+
+    def test_parent_dir_owned_by_someone_else_is_left_alone_and_never_raises(self, monkeypatch):
+        # _tighten must never chmod a directory it doesn't own (ALMONER_DB
+        # could point into a shared dir like /tmp) and must never raise for
+        # that — connect() has to keep working, just without tightening a
+        # dir that was never its call to tighten. Simulated by patching
+        # os.getuid, since the test process genuinely owns tmp_path.
+        target = paths.db_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(target.parent, 0o755)
+        real_getuid = os.getuid
+        monkeypatch.setattr(os, "getuid", lambda: real_getuid() + 1)
+        conn = store.connect()
+        conn.close()
+        assert target.parent.stat().st_mode & 0o077 != 0

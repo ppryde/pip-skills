@@ -30,8 +30,9 @@ def _comment(cid, author, created, text, discussion="d1"):
 
 
 class FakeNotion:
-    def __init__(self, pages, comments, users=None, fail=None):
+    def __init__(self, pages, comments, users=None, fail=None, search_has_more=False):
         self.pages, self.comments, self.users, self.fail = pages, comments, users or {}, fail
+        self.search_has_more = search_has_more
         self.calls = []
 
     def __call__(self, method, path, body):
@@ -39,7 +40,7 @@ class FakeNotion:
         if self.fail and path.startswith(self.fail[0]):
             raise self.fail[1]
         if path == "/search":
-            return {"results": self.pages, "has_more": False, "next_cursor": None}
+            return {"results": self.pages, "has_more": self.search_has_more, "next_cursor": None}
         if path.startswith("/comments?"):
             pid = path.split("block_id=")[1].split("&")[0]
             return {"results": self.comments.get(pid, []), "has_more": False,
@@ -178,6 +179,34 @@ class TestCap:
         }, USERS)
         result = _adapter(fake, me=ME).fetch(WINDOW)
         assert result.complete is True and result.warnings == []
+
+    def test_cap_hit_with_out_of_window_leftover_and_more_batches_waiting_stays_complete(
+            self, monkeypatch):
+        # The out-of-window leftover is conclusive on its own — since search
+        # is newest-first, everything past it (in this batch or the next) is
+        # also out-of-window — so a `has_more: true` alongside it must not
+        # override that and warn anyway.
+        monkeypatch.setattr("scripts.adapters.notion.MAX_PAGES", 1)
+        fake = FakeNotion([_page("p1", "2026-09-15T09:30:00.000Z"),
+                           _page("old", "2026-09-10T09:00:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS, search_has_more=True)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        assert result.complete is True and result.warnings == []
+
+    def test_cap_hit_with_batch_exhausted_and_more_batches_waiting_sets_incomplete(
+            self, monkeypatch):
+        # Nothing usable is left in this batch to judge by, so has_more is
+        # the only evidence available — and here it says there is more.
+        monkeypatch.setattr("scripts.adapters.notion.MAX_PAGES", 1)
+        fake = FakeNotion([_page("p1", "2026-09-15T09:30:00.000Z")], {
+            "p1": [_comment("c1", RHONA, "2026-09-15T08:00:00.000Z", "hi")],
+        }, USERS, search_has_more=True)
+        result = _adapter(fake, me=ME).fetch(WINDOW)
+        cap_warning = ("notion: stopped after 1 recently edited pages; older pages in the "
+                      "window were not read")
+        assert result.complete is False
+        assert result.warnings == [cap_warning]
 
 
 class TestReaderWarning:

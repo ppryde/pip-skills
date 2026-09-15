@@ -163,17 +163,22 @@ class NotionAdapter:
                 pages.append(page)
                 if len(pages) >= MAX_PAGES:
                     # Warn only on real evidence an in-window page was left
-                    # unread: a later result in this batch that is itself
-                    # valid and still in-window, or (nothing usable left in
-                    # the batch to judge by) another batch waiting. A later
-                    # result that is merely present — out-of-window, archived,
-                    # malformed — is not such evidence.
-                    more_in_window = any(
-                        not (r.get("archived") or r.get("in_trash"))
-                        and (e := _try_parse(r.get("last_edited_time"))) is not None
-                        and e >= window.since
-                        for r in results[i + 1:])
-                    if more_in_window or bool(response.get("has_more")):
+                    # unread. Results are newest-first, so the first *usable*
+                    # (not archived/trashed, parseable last_edited_time)
+                    # result later in this batch settles it either way: still
+                    # in-window means truncated, out-of-window means every
+                    # result after it is too, so it's conclusive regardless
+                    # of has_more. Only when nothing usable remains in the
+                    # batch to judge by does has_more get consulted.
+                    first_usable_edited = next(
+                        (edited for r in results[i + 1:]
+                         if not (r.get("archived") or r.get("in_trash"))
+                         and (edited := _try_parse(r.get("last_edited_time"))) is not None),
+                        None)
+                    truncated = (first_usable_edited >= window.since
+                                 if first_usable_edited is not None
+                                 else bool(response.get("has_more")))
+                    if truncated:
                         return pages, suppressed, False, [_cap_warning()], closed
                     return pages, suppressed, True, [], closed
             if not response.get("has_more"):

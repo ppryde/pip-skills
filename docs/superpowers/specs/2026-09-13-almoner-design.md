@@ -726,10 +726,13 @@ were still unread when it did, the fetch reports `complete: false` and a
 warning naming the cap, and `gather_and_store` holds the previous watermark
 rather than advancing it. The search is newest-first, so a page skipped by
 the cap is only ever older than everything already read this run — a later
-run does not "pick up" from the cap in any special sense, it just runs the
-same newest-first search again and re-hits the same cap at the same place
-until enough gets read (or the window narrows) to finish under it; the
-warning repeats every run until then. The same mechanism surfaces a second
+run does not "pick up" from the cap in any special sense, it just re-runs
+the same newest-first search from scratch and re-hits the same cap at the
+same place, reading no more pages than it did last time. The warning keeps
+firing on every run until one of them finds fewer than `MAX_PAGES`
+recently-edited pages still in the window — which only happens as the
+oldest of them age out of it, not because any run reads further into them.
+The same mechanism surfaces a second
 warning when the configured `me` cannot be resolved to a Notion user, since
 `awaiting` is then unknown for the whole run. Archived and trashed pages are
 now skipped outright (`notion:archived`) and reported `closed`, never read.
