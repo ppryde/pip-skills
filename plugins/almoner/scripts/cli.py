@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -50,19 +51,27 @@ def cmd_status(_: argparse.Namespace) -> int:
     sources = _sources()
     if sources is None:
         return 2
-    conn = store.connect()
+    # Read-only, and only opened if the store already exists: `status` must
+    # never create work-content storage just by being asked. An absent store
+    # is not an error here — every watermark simply reads as None.
+    try:
+        conn: sqlite3.Connection | None = store.connect_readonly()
+    except FileNotFoundError:
+        conn = None
     try:
         rows = []
         for s in sources:
             has_secret = config.read_secret(s.label) is not None
+            watermark = store.get_watermark(conn, s.label) if conn is not None else None
             row = gather.SourceReport(s.label, s.type, s.via, s.context, has_secret,
                                       None if has_secret else "no credentials",
-                                      store.get_watermark(conn, s.label)).to_json()
+                                      watermark).to_json()
             if has_secret and not config.secret_is_private(s.label):
-                row["warnings"] = ["secret file is readable by others"]
+                row["warnings"] = [*row.get("warnings", []), "secret file is readable by others"]
             rows.append(row)
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
     _emit({"config": str(paths.config_path()), "db": str(paths.db_path()), "sources": rows})
     return 0
 
@@ -139,6 +148,13 @@ def _ident(value: str) -> str:
     return value
 
 
+def _limit(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError("limit must be >= 1")
+    return n
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="almoner")
     sub = parser.add_subparsers(dest="verb", required=True)
@@ -167,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     which = log.add_mutually_exclusive_group(required=True)
     which.add_argument("--runs", action="store_true")
     which.add_argument("--suppressed", action="store_true")
-    log.add_argument("--limit", type=int, default=50)
+    log.add_argument("--limit", type=_limit, default=50)
     log.set_defaults(fn=cmd_log)
     return parser
 

@@ -27,6 +27,11 @@ class TestPaths:
         assert paths.config_path() == home / "config.json"
         assert paths.secret_path("notion") == home / "secrets" / "notion"
 
+    @pytest.mark.parametrize("label", ["../etc", "a/b", "", "-lead", " space"])
+    def test_secret_path_rejects_a_label_that_is_not_a_plain_identifier(self, label):
+        with pytest.raises(ValueError):
+            paths.secret_path(label)
+
 
 class TestSurface:
     def test_ships_no_hooks_and_the_spec_verbs(self):
@@ -40,6 +45,17 @@ class TestStatusUnconfigured:
         assert main(["status"]) == 0
         out = json.loads(capsys.readouterr().out)
         assert out["sources"] == []
+
+    def test_status_on_a_fresh_home_leaves_no_db_file(self, capsys):
+        _configure(NOTION)
+        assert main(["status"]) == 0
+        assert not paths.db_path().exists()
+
+    def test_status_db_stays_none_when_no_digest_has_run(self, capsys):
+        _configure(NOTION)
+        _secret("notion")
+        _, out, _ = _run(capsys, "status")
+        assert out["sources"][0]["watermark"] is None
 
     def test_runs_as_a_script_the_way_the_dashboard_calls_it(self, tmp_path):
         # The dashboard runs `[sys.executable, cli.py, "status"]` from an
@@ -136,6 +152,13 @@ class TestDigest:
         _, second, _ = _run(capsys, "digest", "--json", "--new")
         assert len(first["items"]) == 1 and second["items"] == []
 
+    def test_gather_creates_the_db_file_private(self, capsys, fake_notion):
+        _configure(NOTION)
+        _secret("notion")
+        _run(capsys, "digest", "--json")
+        mode = paths.db_path().stat().st_mode
+        assert mode & 0o077 == 0
+
     def test_no_sources_is_an_empty_digest_not_an_error(self, capsys, fake_notion):
         code, out, _ = _run(capsys, "digest", "--json")
         assert code == 0 and out["items"] == [] and out["sources"] == []
@@ -169,3 +192,8 @@ class TestDismissAckLog:
         _, supp, _ = _run(capsys, "log", "--suppressed")
         assert runs["runs"][0]["sources_ok"] == ["notion"] and runs["store_bytes"] > 0
         assert supp["suppressed"][0]["rule"] == "notion:no-open-comments"
+
+    @pytest.mark.parametrize("argv", [["--runs", "--limit", "0"], ["--runs", "--limit", "-1"]])
+    def test_log_rejects_a_limit_below_one(self, argv):
+        with pytest.raises(SystemExit):
+            main(["log", *argv])
