@@ -1,6 +1,11 @@
+import json
 import os
+import subprocess
+import sys
+import textwrap
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from scripts import gather, paths, store
 from scripts.config import Source
@@ -89,6 +94,73 @@ class TestDegrade:
         finally:
             release.set()
         assert (report.ok, report.error) == (False, "timed out")
+
+    def test_adapter_construction_failure_is_reported_and_others_still_gather(self):
+        conn = store.connect()
+        _secret("notion")
+        _secret("notion2")
+        healthy = Fake(result=FetchResult(items=[]))
+        second = Source("notion", "api", "notion2", "home")
+
+        def factory(source, secret):
+            if source.label == "notion":
+                raise AdapterError("notion: bad config")
+            return healthy
+
+        out = gather.gather_and_store(conn, [NOTION, second], hours=48, now=NOW,
+                                      registry={("notion", "api"): factory})
+        reports = {r.label: r for r in out.reports}
+        assert reports["notion"].error == "notion: bad config"
+        assert reports["notion2"].ok
+
+    def test_adapter_construction_error_never_echoes_the_secret(self):
+        conn = store.connect()
+        _secret("notion")
+
+        def bad_factory(source, secret):
+            raise ValueError(f"bad token: {secret}")
+
+        [report] = gather.gather_and_store(
+            conn, [NOTION], hours=48, now=NOW,
+            registry={("notion", "api"): bad_factory}).reports
+        assert report.error == "failed: ValueError"
+        assert "invented-token" not in json.dumps(report.to_json())
+
+
+class TestProcessExit:
+    def test_a_wedged_source_does_not_block_the_process_at_exit(self, tmp_path):
+        home = tmp_path / "config" / "almoner"
+        secret = home / "secrets" / "notion"
+        secret.parent.mkdir(parents=True, exist_ok=True)
+        secret.write_text("invented-token")
+        os.chmod(secret, 0o600)
+
+        script = textwrap.dedent("""
+            import threading
+
+            from scripts import gather, store
+            from scripts.config import Source
+            from scripts.gather import FetchResult, Window
+
+            class Wedged:
+                def fetch(self, window: Window) -> FetchResult:
+                    threading.Event().wait()  # never set: this thread never returns
+                    return FetchResult(items=[])
+
+            conn = store.connect()
+            source = Source("notion", "api", "notion", "work")
+            registry = {("notion", "api"): lambda source, secret: Wedged()}
+            out = gather.gather_and_store(conn, [source], hours=48, now=1000.0,
+                                          registry=registry, timeout=0.2)
+            print(out.reports[0].error)
+        """)
+        almoner_dir = Path(__file__).resolve().parents[2] / "plugins" / "almoner"
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": str(tmp_path / "config"),
+              "ALMONER_HOME": str(home), "ALMONER_DB": str(home / "almoner.db")}
+        result = subprocess.run([sys.executable, "-c", script], cwd=almoner_dir, env=env,
+                                capture_output=True, text=True, timeout=10, check=False)
+        assert result.returncode == 0, result.stderr
+        assert "timed out" in result.stdout
 
 
 class TestPersist:

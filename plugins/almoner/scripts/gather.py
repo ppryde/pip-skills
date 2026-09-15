@@ -3,12 +3,19 @@
 A source that is unreachable, unauthorised or slow becomes ``ok: false`` with a
 named error; it never fails the digest. A silently short digest is worse than a
 visible error, because an empty list reads as "nothing needs you" either way.
+
+Each source runs on its own daemon thread rather than a ``ThreadPoolExecutor``:
+a pool's worker threads are joined by an atexit hook with no timeout, so one
+wedged ``fetch()`` would keep the whole CLI process alive past the dashboard's
+subprocess kill. A daemon thread carries no such promise — the process exits
+without waiting for it, whether or not it ever returns.
 """
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, wait
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -86,6 +93,20 @@ def _report(source: Source, ok: bool, error: str | None,
                         watermark)
 
 
+def _fetch_worker(adapter: Adapter, window: Window, future: Future[FetchResult]) -> None:
+    # Mirrors concurrent.futures' own worker: catch BaseException so a wedged
+    # or misbehaving adapter can never crash the thread without resolving the
+    # future the main thread is waiting on.
+    if not future.set_running_or_notify_cancel():
+        return
+    try:
+        result = adapter.fetch(window)
+    except BaseException as exc:  # noqa: BLE001 — a wedged/broken adapter must still resolve
+        future.set_exception(exc)
+    else:
+        future.set_result(result)
+
+
 def gather_and_store(conn: sqlite3.Connection, sources: list[Source], *, hours: int, now: float,
                      registry: dict[tuple[str, str], AdapterFactory] | None = None,
                      timeout: float = SOURCE_TIMEOUT_S) -> GatherOutcome:
@@ -97,27 +118,34 @@ def gather_and_store(conn: sqlite3.Connection, sources: list[Source], *, hours: 
     reports: dict[str, SourceReport] = {}
     pending: dict[Future[FetchResult], Source] = {}
     done: set[Future[FetchResult]] = set()
-    pool = ThreadPoolExecutor(max_workers=max(1, len(sources)))
-    try:
-        for source in sources:
-            factory = registry.get((source.type, source.via))
-            if factory is None:
-                reports[source.label] = _report(
-                    source, False, f"unsupported source: {source.type} via {source.via}",
-                    previous[source.label])
-                continue
-            secret = read_secret(source.label)
-            if secret is None:
-                reports[source.label] = _report(source, False, "no credentials",
-                                                previous[source.label])
-                continue
+    for source in sources:
+        factory = registry.get((source.type, source.via))
+        if factory is None:
+            reports[source.label] = _report(
+                source, False, f"unsupported source: {source.type} via {source.via}",
+                previous[source.label])
+            continue
+        secret = read_secret(source.label)
+        if secret is None:
+            reports[source.label] = _report(source, False, "no credentials",
+                                            previous[source.label])
+            continue
+        try:
             adapter = factory(source, secret)
-            window = fetch_window(now, hours, previous[source.label])
-            pending[pool.submit(adapter.fetch, window)] = source
-        if pending:
-            done, _ = wait(pending, timeout=timeout)
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        except AdapterError as exc:
+            reports[source.label] = _report(source, False, str(exc), previous[source.label])
+            continue
+        except Exception as exc:  # noqa: BLE001 — a broken factory degrades, never sinks the gather
+            reports[source.label] = _report(source, False, f"failed: {type(exc).__name__}",
+                                            previous[source.label])
+            continue
+        window = fetch_window(now, hours, previous[source.label])
+        future: Future[FetchResult] = Future()
+        pending[future] = source
+        threading.Thread(target=_fetch_worker, args=(adapter, window, future), daemon=True,
+                         name=f"almoner-fetch-{source.label}").start()
+    if pending:
+        done, _ = wait(pending, timeout=timeout)
 
     merged: dict[str, dict[str, Any]] = {}
     suppressed: list[tuple[str, str, str]] = []
@@ -127,12 +155,12 @@ def gather_and_store(conn: sqlite3.Connection, sources: list[Source], *, hours: 
         if future not in done:
             reports[source.label] = _report(source, False, "timed out", previous[source.label])
             continue
-        exc = future.exception()
-        if isinstance(exc, AdapterError):
-            reports[source.label] = _report(source, False, str(exc), previous[source.label])
+        raised = future.exception()
+        if isinstance(raised, AdapterError):
+            reports[source.label] = _report(source, False, str(raised), previous[source.label])
             continue
-        if exc is not None:
-            reports[source.label] = _report(source, False, f"failed: {type(exc).__name__}",
+        if raised is not None:
+            reports[source.label] = _report(source, False, f"failed: {type(raised).__name__}",
                                             previous[source.label])
             continue
         result = future.result()
