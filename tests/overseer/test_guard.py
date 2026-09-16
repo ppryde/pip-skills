@@ -34,6 +34,9 @@ class TestBashAllowed:
         "cd /repo && gh pr create --title t --body b",
         "OVERSEER_DB=/x python plugins/overseer/scripts/cli.py board",
         "echo 'unbalanced",  # unparseable: fails open
+        "python3 /plugins/overseer/scripts/cli.py --root . --help",
+        "python3 /plugins/overseer/scripts/cli.py set-field --help && python3 /plugins/overseer/scripts/cli.py log-progress --help",
+        'cd "/repo" && python plugins/overseer/scripts/cli.py --root . show WF-1',
     ])
     def test_allowed(self, command):
         assert bash_allowed(command)
@@ -51,11 +54,62 @@ class TestBashAllowed:
     def test_denied(self, command):
         assert not bash_allowed(command)
 
+    @pytest.mark.parametrize("command", [
+        "grep -n foo /plugins/overseer/scripts/cli.py",
+        "grep -rn 'def cmd_bootstrap' /plugins/overseer/scripts",
+        "cat /plugins/overseer/skills/orchestrate/SKILL.md",
+        "head -n 40 /plugins/overseer/scripts/cli.py",
+    ])
+    def test_read_only_inspection_of_allowed_roots_is_allowed_with_roots(self, command):
+        assert bash_allowed(command, cwd="/repo", roots=ROOTS)
+
+    def test_read_only_inspection_denied_without_roots(self):
+        # bare bash_allowed(command) call sites (existing unit-test shape)
+        # keep the old, strict default — no roots means no exception.
+        assert not bash_allowed("grep -n foo /plugins/overseer/scripts/cli.py")
+
+    def test_read_only_inspection_of_repo_source_stays_denied(self):
+        assert not bash_allowed("cat /repo/src/app.py", cwd="/repo", roots=ROOTS)
+
+    @pytest.mark.parametrize("command", [
+        "cat > /tmp/x.md << 'EOF'\n# Title\nbody\nEOF",
+        "cat > /state/x.md << 'EOF'\nbody\nEOF",
+        "echo 'hello' > /tmp/notes.txt",
+        "printf 'x' >> /tmp/appendme.txt",
+    ])
+    def test_scratch_writes_are_allowed(self, command):
+        assert bash_allowed(command, cwd="/repo", roots=ROOTS)
+
+    @pytest.mark.parametrize("command", [
+        "cat > /tmp/x.md << 'EOF'\nbody\nEOF",  # no roots: state root unavailable, but /tmp still is
+    ])
+    def test_scratch_write_to_tmp_allowed_even_without_roots(self, command):
+        assert bash_allowed(command)
+
+    @pytest.mark.parametrize("command", [
+        "cat > /repo/x.md << 'EOF'\nbody\nEOF",  # the worktree — never allowed
+        "echo hi > /repo/x.py",
+        "echo hi | tee /repo/x.py",
+        "cat /repo/secret.py > /tmp/x.md",  # reads repo source into the write
+    ])
+    def test_scratch_writes_to_the_worktree_or_reading_repo_source_are_denied(self, command):
+        assert not bash_allowed(command, cwd="/repo", roots=ROOTS)
+
+    @pytest.mark.parametrize("command", [
+        "grep -n foo $(cat /repo/secret.py)",
+        "echo $(cat /repo/secret.py) > /tmp/x.md",
+        "python plugins/overseer/scripts/cli.py `echo show WF-1`",
+        "cat /repo/secret.py | tee /tmp/x.md",  # pipe into a writer — the read segment alone denies it
+    ])
+    def test_command_substitution_and_pipe_into_writer_stay_denied(self, command):
+        assert not bash_allowed(command, cwd="/repo", roots=ROOTS)
+
 
 class TestDecideOrchestrator:
     @pytest.mark.parametrize("payload", [
         _p("Edit", {"file_path": "/repo/a.py"}),
-        _p("Write", {"file_path": "/state/x.md"}),
+        _p("Edit", {"file_path": "/tmp/x.md"}),  # no scratch exception for Edit
+        _p("Write", {"file_path": "/repo/x.md"}),  # the worktree — never scratch
         _p("NotebookEdit"),
         _p("mcp__snowflake__query"),
         _p("Read", {"file_path": "/repo/src/app.py"}),
@@ -72,6 +126,12 @@ class TestDecideOrchestrator:
         _p("Read", {"file_path": "/plugins/overseer/skills/orchestrate/SKILL.md"}),
         _p("Glob", {"pattern": "*.md", "path": "/cfg/skills"}),
         _p("Bash", {"command": "git status"}),
+        _p("Bash", {"command": "python3 /plugins/overseer/scripts/cli.py --root . --help"}),
+        _p("Bash", {"command": "grep -n foo /plugins/overseer/scripts/cli.py"}),
+        _p("Bash", {"command": "cat > /tmp/brief.md << 'EOF'\nbody\nEOF"}),
+        _p("Bash", {"command": "cat > /state/brief.md << 'EOF'\nbody\nEOF"}),
+        _p("Write", {"file_path": "/tmp/brief.md"}),
+        _p("Write", {"file_path": "/state/dispatch/WF-012/planning/plan.md"}),
         _p("Agent", {"subagent_type": "overseer:overseer-reviewer", "prompt": "/state/b.md"}),
         _p("TaskCreate", {"subject": "x"}),
         _p("AskUserQuestion"),

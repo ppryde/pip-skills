@@ -12,8 +12,10 @@ best-effort and every doubt fails open.
 """
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,7 +24,10 @@ from scripts.models import Card, format_tokens
 
 READ_LIMIT_DEFAULT = 400
 _UNLIMITED_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".ipynb")
-_WRITE_TOOLS = {"Edit", "Write", "NotebookEdit"}
+# Edit/NotebookEdit are denied outright — there is no scratch-path exception
+# for them (Edit needs an existing file; a scratch notebook isn't a real use
+# case). Write gets the scratch-path exception below; it is not in this set.
+_HARD_DENY_WRITE_TOOLS = {"Edit", "NotebookEdit"}
 _PATH_TOOLS = {"Read", "Grep", "Glob"}
 _OPERATORS = {"&&", "||", ";", "|", "&", ";;", "|&"}
 _ASSIGNMENT = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]*=")
@@ -34,6 +39,19 @@ _GIT_SUBCOMMANDS = {
     "remote", "rev-parse", "show", "stash", "status", "symbolic-ref", "worktree",
 }
 _ESCAPES = '`release <card>`, `"guard": false` in .overseer/config.json, or OVERSEER_GUARD=off'
+# Read-only inspection of the orchestrator's own allowed roots (state,
+# plugins, config) — e.g. `grep -n foo <plugin>/scripts/cli.py` to check a
+# verb's signature instead of guessing or re-reading SKILL.md.
+_READ_ONLY_INSPECT = {"grep", "rg", "cat", "head", "tail", "less", "wc"}
+# Scratch-space writers: a heredoc/echo/tee into /tmp, $TMPDIR or the
+# overseer state root (never the repo worktree) — the orchestrator's way to
+# stage a --file input without editing repo source.
+_SCRATCH_WRITE_HEADS = {"cat", "echo", "printf", "tee"}
+_REDIRECT_OPS = (">", ">>")
+# Command substitution can smuggle a repo-source read (or worse) through an
+# otherwise-allowed head (`echo $(cat secret) > /tmp/x`). Fail closed on any
+# sign of it rather than trying to parse what it resolves to.
+_SUBSTITUTION_RE = re.compile(r"\$\(|`")
 
 
 @dataclass(frozen=True)
@@ -58,9 +76,84 @@ def _segments(command: str) -> list[list[str]] | None:
     return [s for s in segments if s]
 
 
-def bash_allowed(command: str) -> bool:
+def tmp_roots() -> list[Path]:
+    """System scratch locations safe for a heredoc/Write during a live card
+    — never the repo worktree. Computed fresh (not module-level) since
+    ``$TMPDIR`` is per-process/session; macOS symlinks ``/tmp`` and the
+    default tempdir to the same resolved place, so this naturally dedups."""
+    seen: list[Path] = []
+    for raw in (tempfile.gettempdir(), os.environ.get("TMPDIR", ""), "/tmp"):
+        if not raw:
+            continue
+        try:
+            resolved = Path(raw).resolve()
+        except OSError:
+            continue
+        if resolved not in seen:
+            seen.append(resolved)
+    return seen
+
+
+def _within(path: Path, roots: list[Path]) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    return any(resolved.is_relative_to(root) for root in roots)
+
+
+def _word_within(word: str, cwd: object, roots: list[Path]) -> bool:
+    path = Path(word).expanduser()
+    if not path.is_absolute():
+        if not isinstance(cwd, str):
+            return False
+        path = Path(cwd) / path
+    return _within(path, roots)
+
+
+def _is_path_like(word: str) -> bool:
+    return not word.startswith("-") and ("/" in word or word.startswith("~"))
+
+
+def _redirect_targets(words: list[str]) -> list[str]:
+    return [words[i + 1] for i, w in enumerate(words) if w in _REDIRECT_OPS and i + 1 < len(words)]
+
+
+def _read_only_allowed(words: list[str], cwd: object, roots: list[Path] | None) -> bool:
+    """``grep``/``cat``/... of the orchestrator's own allowed roots (its
+    state dir, the installed plugins, the config dir) — never a write, never
+    a repo-source read."""
+    if roots is None or any(w in _REDIRECT_OPS for w in words):
+        return False
+    paths = [w for w in words[1:] if _is_path_like(w)]
+    return bool(paths) and all(_word_within(w, cwd, roots) for w in paths)
+
+
+def _scratch_write_allowed(words: list[str], cwd: object, roots: list[Path] | None) -> bool:
+    """A heredoc/echo/tee write, ONLY when every redirect target — and any
+    other path-like word in the segment (e.g. a file it also reads) —
+    resolves inside scratch space (``tmp_roots()`` + the state root) or,
+    for a word that isn't a redirect target, the orchestrator's other
+    allowed roots (reading an allowed file into a scratch copy)."""
+    targets = _redirect_targets(words)
+    if not targets:
+        return False
+    scratch = tmp_roots() + ([roots[0]] if roots else [])
+    if not all(_word_within(t, cwd, scratch) for t in targets):
+        return False
+    readable = scratch + (roots or [])
+    others = [w for w in words[1:] if _is_path_like(w) and w not in targets]
+    return all(_word_within(w, cwd, readable) for w in others)
+
+
+def bash_allowed(command: str, *, cwd: object = None, roots: list[Path] | None = None) -> bool:
     """Every segment of the command must be ledger/vigil CLI, git plumbing
-    the orchestrator needs for branches/PRs, ``gh pr``, or a bare ``cd``."""
+    the orchestrator needs for branches/PRs, ``gh pr``, a bare ``cd``,
+    read-only inspection of its own allowed roots, or a scratch-space write.
+    ``$(...)``/backtick command substitution denies the whole command: it can
+    smuggle a repo-source read through an otherwise-allowed head."""
+    if _SUBSTITUTION_RE.search(command):
+        return False
     segments = _segments(command)
     if segments is None:
         return True
@@ -83,6 +176,10 @@ def bash_allowed(command: str) -> bool:
             continue
         if head.startswith("python") and len(words) > 1 and _LEDGER_CLI.search(words[1]):
             continue
+        if head in _READ_ONLY_INSPECT and _read_only_allowed(words, cwd, roots):
+            continue
+        if head in _SCRATCH_WRITE_HEADS and _scratch_write_allowed(words, cwd, roots):
+            continue
         return False
     return True
 
@@ -92,14 +189,6 @@ def allowed_roots(state: Path, plugin_root: Path, config_dir: Path) -> list[Path
     files included), the installed plugins (skills, references, templates),
     and the Claude config dir (memory, other skills)."""
     return [state.resolve(), plugin_root.parent.resolve(), config_dir.resolve()]
-
-
-def _within(path: Path, roots: list[Path]) -> bool:
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return False
-    return any(resolved.is_relative_to(root) for root in roots)
 
 
 def _hub_denial(
@@ -122,8 +211,17 @@ def _hub_denial(
                 f"against an estimate of {format_tokens(breached.budget_estimate)} — stop the "
                 "card and escalate to the user."
             )
-    if tool in _WRITE_TOOLS or tool.startswith("mcp__"):
+    if tool in _HARD_DENY_WRITE_TOOLS or tool.startswith("mcp__"):
         return work
+    if tool == "Write":
+        raw = tool_input.get("file_path")
+        if not isinstance(raw, str) or not raw:
+            return work
+        path = Path(raw).expanduser()
+        if not path.is_absolute() and isinstance(cwd, str):
+            path = Path(cwd) / path
+        scratch = tmp_roots() + [roots[0]]  # the overseer state root, never the worktree
+        return None if _within(path, scratch) else work
     if tool in _PATH_TOOLS:
         raw = tool_input.get("file_path") or tool_input.get("path")
         if not isinstance(raw, str) or not raw:
@@ -134,7 +232,7 @@ def _hub_denial(
         return None if _within(path, roots) else work
     if tool == "Bash":
         command = tool_input.get("command")
-        return None if isinstance(command, str) and bash_allowed(command) else work
+        return None if isinstance(command, str) and bash_allowed(command, cwd=cwd, roots=roots) else work
     return None
 
 
