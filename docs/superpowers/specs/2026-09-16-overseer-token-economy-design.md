@@ -342,6 +342,43 @@ plugin agent definitions cut turn-1 context (2.6k vs 18.8k); plugin agent types
 carry the `overseer:` prefix; transcript usage repeats identically per content
 block, so de-duplication by message id is exact.
 
-Remaining, measured in the plan's final task: turn-1 context of an `overseer-*`
-agent inside a real repo (with CLAUDE.md), and whether the Read limit raises
-turns per agent.
+Measured live in Task 12 (headless `claude -p` sessions against this
+worktree's plugin, not unit tests):
+
+- **Guard denials.** With WF-001 in flight, the orchestrator's own attempt to
+  read/edit a tracked file was denied verbatim: `WF-001 in flight: the
+  orchestrator dispatches, it does not do the work — dispatch an overseer-*
+  agent with a dispatch-prep bundle instead. (Escape hatch: release <card>,
+  "guard": false in .overseer/config.json, or OVERSEER_GUARD=off.)`. A `fork`
+  Agent call was denied with `WF-001 in flight: forks inherit the full parent
+  context — dispatch a fresh overseer-* agent with a bundle path instead.`. A
+  dispatched `overseer:overseer-implementer` Agent call in the same session
+  was allowed through and edited the target file (confirmed on disk), then
+  reported `DONE tests 0/0 - → .../c1.md`.
+- **Report hook.** The same implementer's `SubagentStop` fired the report
+  hook, which wrote a `## Progress log` entry (`chunk 1 — DONE tests 0/0 -
+  → .../c1.md (~15.804k tokens)`) and a `usage.jsonl` line with `source:
+  "hook"`, non-zero `cache_read` (43,155) and `output` (715), total 58,959
+  raw tokens / 15,804 budget tokens. The detail file already existed when the
+  hook read it — the implementer's own charter has it write that file before
+  replying — so this run exercised the happy path rather than the
+  `error: detail file missing` branch; that branch is covered by
+  `test_report_hook.py` at the unit level, not live here.
+- **Read limit.** An `overseer:overseer-reviewer` agent asked to Read a
+  2000-line file with no limit/offset received exactly 400 lines back
+  (through line `400\tline 400`), and reported "400" as its last line seen —
+  confirming the Read limit hook caps at 400 regardless of the caller's
+  arguments.
+- **Turn-1 context, real repo with CLAUDE.md.** Spawning one
+  `overseer:overseer-reviewer` and one `general-purpose` agent in this
+  worktree (real CLAUDE.md in scope) and reading each transcript's first
+  usage snapshot gave turn-1 context of **12,325 tokens** for the overseer
+  agent vs **27,447 tokens** for general-purpose — a ~55% reduction,
+  consistent with the plugin-agent-definition saving noted above (2.6k vs
+  18.8k) plus this repo's own CLAUDE.md/system overhead common to both.
+
+Full gates after verification: `pytest -c pyproject.toml` 762 passed;
+`ruff check scripts ../../tests/overseer` and `mypy scripts` show only
+pre-existing debt (no files touched by Task 12); `tests/run.sh` green across
+all five plugin suites (overseer 762, census 114, vigil 154, review-clone 14,
+chronicle 223).
