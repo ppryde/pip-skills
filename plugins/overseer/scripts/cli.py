@@ -23,7 +23,7 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import config, db, liveness, report_hook
+from scripts import config, db, guard, liveness, report_hook
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
 from scripts.dispatch import REPLY_WORD_CAP
@@ -1221,6 +1221,42 @@ def cmd_report_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+GUARD_ENV = "OVERSEER_GUARD"
+
+
+def cmd_pretool_hook(args: argparse.Namespace) -> int:
+    """PreToolUse backend — scripts/guard.py. Fails open: any error means no
+    output, which Claude Code treats as "no opinion"."""
+    try:
+        payload = _read_hook_payload()
+        repo_root = _hook_root(payload, args)
+        state = state_root(repo_root)
+        if not state.is_dir():
+            return 0
+        cfg = config.load_config(repo_root)
+        cards: list[Card] = []
+        session_id = payload.get("session_id")
+        guard_on = (
+            os.environ.get(GUARD_ENV, "").lower() != "off" and cfg.get("guard", True) is not False
+        )
+        if guard_on and isinstance(session_id, str) and session_id:
+            cards = db.orchestrated_cards(_conn(repo_root), session_id)
+        roots = guard.allowed_roots(
+            state, Path(__file__).resolve().parent.parent, config._config_dir()
+        )
+        limit = cfg.get("read_limit", guard.READ_LIMIT_DEFAULT)
+        verdict = guard.decide(
+            payload, cards, roots,
+            read_limit=limit if isinstance(limit, int) else guard.READ_LIMIT_DEFAULT,
+        )
+        output = guard.hook_output(verdict)
+        if output:
+            print(json.dumps(output))
+    except Exception:  # noqa: BLE001 — a failing PreToolUse hook must never block a tool call
+        return 0
+    return 0
+
+
 def cmd_dashboard_refresh_hook(args: argparse.Namespace) -> int:
     """SessionStart hook verb (WF-053): if a dashboard is running from an
     OLDER overseer than the one now installed, restart it in place.
@@ -1966,6 +2002,10 @@ def build_parser() -> argparse.ArgumentParser:
         "report-hook",
         help="SubagentStop: record an overseer agent's reply and real usage (WF-113)",
     ).set_defaults(func=cmd_report_hook)
+    sub.add_parser(
+        "pretool-hook",
+        help="PreToolUse: orchestrator no-work/no-fork guard and agent Read limit (WF-113)",
+    ).set_defaults(func=cmd_pretool_hook)
     sub.add_parser(
         "dashboard-refresh-hook",
         help="SessionStart: restart a running dashboard that is older than the installed overseer (WF-053)",
