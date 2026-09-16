@@ -92,6 +92,25 @@ def test_planner_writes_plan_section(repo, tmp_path, monkeypatch):
     assert _card(repo).sections["## Plan"] == "### Chunks\n1. build it"
 
 
+def test_planner_section_excludes_learned_lines_but_pending_still_gets_them(
+    repo, tmp_path, monkeypatch
+):
+    path = _detail(
+        repo, "planning", "plan.md",
+        "## Chunks\n1. build it\nLearned: the calibration figure was stale [tags: planning]\n",
+    )
+    _hook(repo, monkeypatch, {
+        "agent_type": "overseer:overseer-planner", "agent_id": "a3",
+        "agent_transcript_path": str(_transcript(tmp_path)),
+        "last_assistant_message": f"DONE → {path}",
+    })
+    section = _card(repo).sections["## Plan"]
+    assert section == "### Chunks\n1. build it"
+    assert "Learned:" not in section
+    [fact] = load_pending(repo)
+    assert fact.statement == "the calibration figure was stale"
+
+
 def test_verifier_writes_verification_section(repo, tmp_path, monkeypatch):
     path = _detail(repo, "verification", "verification.md", "pytest: 619 passed")
     _hook(repo, monkeypatch, {
@@ -100,6 +119,23 @@ def test_verifier_writes_verification_section(repo, tmp_path, monkeypatch):
         "last_assistant_message": f"PASS → {path}",
     })
     assert _card(repo).sections["## Verification"] == "pytest: 619 passed"
+
+
+def test_verifier_section_excludes_result_header_and_learned_lines(repo, tmp_path, monkeypatch):
+    path = _detail(
+        repo, "verification", "verification.md",
+        "result: PASS\npytest: 619 passed\nLearned: ci needs a retry flag [tags: ci]\n",
+    )
+    _hook(repo, monkeypatch, {
+        "agent_type": "overseer:overseer-verifier", "agent_id": "a4",
+        "agent_transcript_path": str(_transcript(tmp_path)),
+        "last_assistant_message": f"PASS → {path}",
+    })
+    section = _card(repo).sections["## Verification"]
+    assert section == "pytest: 619 passed"
+    assert "result:" not in section and "Learned:" not in section
+    [fact] = load_pending(repo)
+    assert fact.statement == "ci needs a retry flag"
 
 
 def test_tripwire_is_recorded(repo, tmp_path, monkeypatch):

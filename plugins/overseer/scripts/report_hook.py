@@ -11,6 +11,7 @@ never bounced. The cap is stated in the dispatch instead.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from scripts import db
@@ -23,10 +24,23 @@ from scripts.dispatch import (
     role_of,
 )
 from scripts.models import Card
-from scripts.pending import add_pending, parse_learned
+from scripts.pending import _LEARNED_RE, add_pending, parse_learned
 from scripts.store import state_root
 from scripts.transcript_usage import budget_tokens, raw_total, sum_usage, zero_usage
 from scripts.usage import append_usage
+
+_RESULT_HEADER_RE = re.compile(r"\A\s*result:\s*(PASS|FAIL)\s*\Z", re.IGNORECASE)
+
+
+def _strip_housekeeping(detail: str, *, drop_result_header: bool = False) -> str:
+    """Detail files are persisted whole into ``## Plan``/``## Verification``;
+    drop agent housekeeping lines that don't belong in the card body:
+    ``Learned:`` lines (already queued separately by ``parse_learned``) and,
+    for the verifier, its leading ``result: PASS|FAIL`` line."""
+    lines = detail.splitlines()
+    if drop_result_header and lines and _RESULT_HEADER_RE.match(lines[0]):
+        lines = lines[1:]
+    return "\n".join(line for line in lines if _LEARNED_RE.match(line) is None)
 
 
 def _record(card: Card, reply: Reply, detail: str, spend: int, now: str) -> None:
@@ -41,9 +55,9 @@ def _record(card: Card, reply: Reply, detail: str, spend: int, now: str) -> None
         card.log_progress(f"chunk {reply.chunk} — {reply.line}", spend, now)
     elif reply.role == "planner":
         if reply.status == "DONE" and detail.strip():
-            card.set_section("## Plan", detail, now)
+            card.set_section("## Plan", _strip_housekeeping(detail), now)
     elif reply.role == "verifier" and detail.strip():
-        card.set_section("## Verification", detail, now)
+        card.set_section("## Verification", _strip_housekeeping(detail, drop_result_header=True), now)
 
 
 def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, object] | None:
