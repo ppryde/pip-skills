@@ -144,10 +144,19 @@ file, which makes F2's pasted walls impossible through this verb.
 ### 5.4 Report hook (`SubagentStop`)
 
 New `hooks/report.sh` → `cli.py report-hook`. Acts only for `agent_type`
-starting `overseer-`. Always exits 0, prints nothing.
+starting `overseer-`.
 
-1. Parse `last_assistant_message` against §4.2; derive card/stage/round/slot
-   from the path.
+Superseded from the original Phase 1 text: replies are no longer a fixed
+one-line grammar (former §4.2). Each role's reply is a single fenced
+` ```overseer-report ` JSON block, one frozen dataclass per role
+(`scripts/schemas.py`), parsed with every problem collected at once (unknown/
+missing field, wrong type, bad enum, `detail` path outside the card's
+dispatch directory) rather than failing on the first. A JSON Schema per role
+is committed under `schemas/` and checked for drift against the generator.
+
+1. Extract the LAST ` ```overseer-report ` block from `last_assistant_message`
+   and parse it against the role's schema; card/stage/round/slot/chunk are
+   typed fields on the parsed report, not derived from a path pattern.
 2. Total real usage from `agent_transcript_path`: sum `input`, `cache_read`,
    `cache_creation`, `output` per assistant message, **de-duplicated by message
    id** (a message's usage repeats across its content blocks).
@@ -162,13 +171,21 @@ starting `overseer-`. Always exits 0, prints nothing.
 | verifier | `set-section Verification` from `verification.md`, usage |
 | foreman | stage result, usage |
 
-4. Always record `reply_words`. A reply over the cap is logged as `overrun`;
-   one that doesn't parse is logged as `unparsed` with the raw line. **No
-   retry, no block.** The dashboard shows both.
+4. **Bounded retry, not silent record-only** (revised from the original
+   Phase 1 text — see §9's updated "Rejecting long replies in the stop hook"
+   entry). A missing block, invalid JSON, or a block that fails its role's
+   schema:
+   - `stop_hook_active` is not set → print exactly one
+     `{"decision": "block", "reason": "<every problem found>; expected
+     <shape>"}` on stdout and record nothing yet.
+   - `stop_hook_active` is set (this is the bounce's own retry) → record it
+     as `unparsed` with the full error list, print nothing. Never a second
+     block.
+   A report that parses never blocks, regardless of `stop_hook_active`.
 
 `usage.jsonl` entries gain `input`, `cache_read`, `cache_creation`, `output`,
-`budget_tokens`, `reply_words`, `overrun`, `agent_id`, `source: "hook"`. `tokens`
-stays = raw total so existing readers keep working.
+`budget_tokens`, `agent_id`, `source: "hook"`. `tokens` stays = raw total so
+existing readers keep working.
 
 **Budget semantics:** as today, only implementer and fixer spend feeds the card's
 `budget_actual` (and so the tripwire); planner, reviewer and verifier spend lands
@@ -278,12 +295,21 @@ independence rules are unchanged.
 
 ## 7. Error handling
 
-- Every hook wraps its CLI call in `trap 'exit 0' EXIT`; any exception → allow
-  (guard) or log `hook_error` (report). A broken hook must never stall a session.
+- Every hook wraps its CLI call in `trap 'exit 0' EXIT`; any exception inside
+  the CLI itself → allow (guard) or silent (report — nothing is printed, so
+  `report.sh`'s trap has nothing to pass through). A broken hook must never
+  stall a session.
 - The guard hook fails open, not closed: a false deny costs a session; a false
   allow costs tokens.
-- Unparsed replies, overruns, missing detail files, and paths outside the dispatch
-  directory are ledger records, visible on the dashboard, never retries.
+- The report hook is the one exception to "never retries": a missing or
+  invalid `overseer-report` block gets exactly ONE bounce (§5.4), bounded by
+  `stop_hook_active` so it can never loop. `report.sh` passes the CLI's
+  stdout through (unlike the fully-silent hooks) for exactly this reason —
+  stderr stays suppressed. Everything downstream of a report that still
+  doesn't parse on the retry — recorded as `unparsed` with its error list —
+  and missing detail files or paths outside the dispatch directory once a
+  report DOES parse, are ledger records, visible on the dashboard, never
+  retried again.
 - Concurrent report hooks (parallel reviewers) write through the existing SQLite
   single-writer path.
 
@@ -328,9 +354,21 @@ real cards (estimates, to be confirmed):
 - **Rewinding the orchestrator after admin.** `/rewind` is interactive only;
   admin output is ~0.9 kB/call, so removing it saves little. Stage-boundary
   handover (§5.8) is the reliable form.
-- **Rejecting long replies in the stop hook.** A bounce costs an extra agent
-  turn and risks a continuation loop. The cap is stated in the dispatch instead;
-  the hook only records overruns.
+- **Rejecting long replies in the stop hook — reversed.** Originally rejected
+  here: "a bounce costs an extra agent turn and risks a continuation loop; the
+  cap is stated in the dispatch instead, the hook only records overruns." That
+  held for a soft word-count cap, where a bounce would only ever be advisory.
+  It stopped holding once replies became a typed, machine-checked JSON block:
+  a malformed block is a real parse failure the orchestrator would otherwise
+  have to notice from a garbled downstream read, diagnose, and re-dispatch —
+  strictly more expensive than one bounded retry. `stop_hook_active` is
+  Claude Code's own guarantee that Stop/SubagentStop fires at most once more
+  after a block, which is exactly the bound a naive "block on invalid" lacks:
+  the risk this bullet originally warned about (an unbounded continuation
+  loop) doesn't apply to a retry that can only ever happen once. §5.4 and §7
+  now bounce a missing/invalid report exactly once, guarded by
+  `stop_hook_active`, and record — never re-bounce — anything still invalid
+  after that.
 - **Hard turn caps / round caps.** Turn caps create BLOCKED re-dispatches that
   cost more hub turns than they save; round caps trade review quality for ~0.2
   Mtok/card.
