@@ -4,9 +4,8 @@ almoner is a SOFT sibling-plugin dependency on the same terms as chronicle:
 every route must degrade to a shape the page can render (never a 500) when
 the plugin is missing, unreachable, or answering nonsense.
 
-The plugin does not exist in the tree yet, so "not installed" is the REAL
-state here rather than a simulated one — which is exactly the state a user
-who has not built it is in. The installed paths are monkeypatched.
+The plugin now lives in the tree, so the "not installed" paths are simulated
+by monkeypatching `almoner_installed`, the same way the installed paths are.
 """
 from __future__ import annotations
 
@@ -18,14 +17,20 @@ from fastapi.testclient import TestClient
 from app import main
 
 
-def test_status_reports_not_installed_when_the_plugin_is_absent(client: TestClient) -> None:
+def test_status_reports_not_installed_when_the_plugin_is_absent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(main, "almoner_installed", lambda: False)
     body = client.get("/api/almoner/status").json()
     assert body == {"installed": False, "configured": False, "sources": []}
 
 
-def test_digest_is_empty_rather_than_erroring_when_absent(client: TestClient) -> None:
+def test_digest_is_empty_rather_than_erroring_when_absent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An absent plugin must not fail the page — the Almoner coin is simply
     never offered, and a direct hit on the route still answers."""
+    monkeypatch.setattr(main, "almoner_installed", lambda: False)
     res = client.get("/api/almoner/digest")
     assert res.status_code == 200
     assert res.json() == {"items": [], "sources": []}

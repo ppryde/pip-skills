@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-13
 **Plugins:** `almoner` (new), `overseer` (dashboard page, backend routes)
-**Status:** Draft (design) — page built but **uncommitted**; CLI, adapters and
-store unbuilt. Open questions at the end must be settled before building them.
+**Status:** CLI core + Notion source built (plan 2026-09-15-almoner-cli-core-notion);
+Slack, Linear and mail adapters, the judging skill and POST /dismiss unbuilt.
 
 **Revised 2026-09-13 (second pass).** The day table replaced the grouped view
 as the primary surface; rollups and their safety rule were added; the mail
@@ -70,6 +70,9 @@ currently unreachable rather than unbuilt — the connector exposes only its
 authorisation call — and the page therefore names it among the sources it
 could not reach, which is what an unreachable source is supposed to look like.
 
+Notion turns out not to need the connector at all: it is reachable directly by
+an internal integration token (`via: api`), needing no connector.
+
 Swapping is a config edit, not a refactor:
 
 ```json
@@ -94,6 +97,42 @@ sides of the swap**, so the two transports cannot drift apart in behaviour.
 
 The boundary test: **unplug the skill and the CLI must still return something
 usable** — an unranked, newest-first digest rather than nothing.
+
+### Judging (ratified 2026-09-15)
+
+Design not yet built (see Next plan).
+
+- **Two stages: gather, then judge.** The CLI's gather is deterministic; the
+  `almoner:judge` skill runs second, and processes only items whose
+  `digest_hash` differs from the hash they were last judged at.
+- **The agent never touches SQLite.** `almoner judge --pending [--limit N]` is
+  a pure read — it never marks rows shown — returning unjudged or changed
+  items plus a feedback block of the reader's recent dismissals and acks
+  (capped at 20; title, source, asks — no bodies). `almoner judge --apply
+  FILE|-` validates per item against a fixed schema; each judgement echoes
+  `digest_hash`, and a stale one is rejected.
+- **Store:** a `judgement` table keyed `(id, digest_hash)`, history kept,
+  latest `judged_at` wins; a `rollup(key, title, excerpt, judged_at)` table.
+  Judgements are not columns on `item`, because each gather replaces the item
+  row.
+- **Judgement fields:** `asks`, `rank`, `because`, `topic` (free-text label
+  for v1), `for_reader`, `fold_into`, `attributed`.
+- **`for_reader` demotes only.** Row state is `bundled` > (`awaiting === true`
+  && `for_reader !== false`) > reconcile > fyi. Mechanical `awaiting` is never
+  overwritten.
+- **The agent cannot hide rows.** Its only tools for noise are `fold_into` (a
+  disclosed rollup) and `for_reader: false`.
+- **Safety gate in code:** a keyword list (sign-in, password, login/verification
+  code, reset, bank, payment, invoice, card, credential, currency marks); a
+  keyword-hit item without an explicit `attributed: true` has its `fold_into`
+  rejected per item.
+- **Rollup validation:** every member is an accepted item in the same batch;
+  `excerpt` is non-empty and not equal to `title`; the read shows the rollup as
+  one `bundled: true` row, members not repeated at top level.
+- **v1 is interactive-only** (run the skill in a session). Connector lookups
+  during judging are allowed, read-only, only for rows otherwise ambiguous. A
+  dashboard Judge button (headless `claude -p`, inheriting `CLAUDE_CONFIG_DIR`)
+  is a later task.
 
 ## Findings that shaped this
 
@@ -326,11 +365,16 @@ watermark   source, cursor, fetched_at
 seen        id, source, first_seen, last_seen, shown_count,
             digest_hash, state, state_at        -- new|shown|dismissed|acted
 item        id, source, context, title, excerpt, messages, url,
-            who, arrived, awaiting, asks, rank, because, gathered_at
+            who, arrived, awaiting, gathered_at
 suppressed  id, source, rule, at                -- what was filtered, by which rule
 run         id, started, finished, sources_ok, sources_failed,
             items_in, items_out
 ```
+
+`asks`, `rank` and `because` are deliberately not columns here — they are
+judgements, and every gather replaces the `item` row wholesale, which would
+wipe them. They live in the planned `judgement` table (see Judging), keyed
+`(id, digest_hash)`, once that stage is built.
 
 Consequences that must be designed for, not discovered:
 
@@ -340,8 +384,14 @@ Consequences that must be designed for, not discovered:
 - **The store now grows with content**, not merely with observations. That
   was expected to force a retention policy; it did not — see Retention below,
   where the window turns out to be a view rather than a delete.
-- **The store now holds work content at rest** in the central overseer folder.
-  Local only, never committed, never sent anywhere.
+- **The store now holds work content at rest** in `$CLAUDE_CONFIG_DIR/almoner/`
+  (per Claude account), not the central overseer folder — the store directory
+  is `0700` and the database file and its `-wal`/`-shm` sidecars are `0600`,
+  regardless of the process umask: `store.connect()` narrows the umask for
+  the create/connect/schema sequence and then tightens the directory, db and
+  any sidecars unconditionally, so a pre-existing loose directory or file is
+  brought private too, not just what gets created fresh. Local only, never
+  committed, never sent anywhere.
 
 #### Retention: the window is a view, not a delete
 
@@ -542,11 +592,18 @@ almoner dismiss <id>               local only
 almoner ack <id>                   mark actioned — local only
 almoner log --runs                 refresh history
 almoner log --suppressed           what was filtered, and by which rule
+almoner judge --pending            unjudged/changed items, read-only         (unbuilt)
+almoner judge --apply FILE         apply validated judgements from FILE or - (unbuilt)
+almoner digest --cached            read the store without gathering         (unbuilt)
 ```
 
 ```
 GET  /api/almoner/status    { installed, configured, sources[] }
-GET  /api/almoner/digest    ?hours=&days=&context=&new=  — soft-fails to { items: [] }
+GET  /api/almoner/digest    ?hours=&days=&context=&new=  — soft-fails to
+                             { items: [], sources: [], error } when the CLI
+                             fails; a genuinely empty digest carries no
+                             `error`. `days=` (unbuilt) is not yet passed
+                             through — every read uses the CLI's default.
 POST /api/almoner/dismiss   { id } — token-gated, like the board's mutations
 GET  /api/almoner/log       ?runs= | ?suppressed=
 ```
@@ -636,8 +693,68 @@ guild bar's view switcher now places any number of coins rather than exactly
 three; the bar names the page you are on; and the board's five unrelated reds
 became one alarm pair (Pantone 485 with a vermilion for text).
 
-**Unbuilt:** the `almoner` plugin itself — CLI, adapters, store, judging skill,
-dismiss/ack, and the history read the table is already shaped to display.
+**Built (2026-09-15)**, on branch `feat/almoner-ui`: the `almoner` CLI core —
+`status`, `digest`, `dismiss`, `ack`, `log --runs|--suppressed` — the SQLite
+store (`watermark`, `seen`, `item`, `suppressed`, `run`), the Notion source
+(`type: notion`, `via: api`), and the history read the table was already
+shaped to display. Fetches run on daemon threads so a wedged source can never
+hold the CLI process open; adapter construction failures degrade per source
+like fetch failures. The Notion adapter degrades per item: a malformed page is
+suppressed as `notion:malformed-page`, a page whose comments are all malformed
+as `notion:malformed-comments`, alongside `notion:no-open-comments` and
+`notion:no-new-comments`. Two Notion API facts remain unverified until a live
+smoke test: whether inline block comments are returned when listing comments
+by page id, and the `?d=<discussion_id>` deep link. Two more, found during
+the 2026-09-15 final review, remain unverified the same way: whether posting
+a new comment bumps a page's `last_edited_time` at all — if it does not, a
+new comment on an otherwise-untouched page is never picked up by the recency
+scan — and whether `Notion-Version: 2026-03-11` is actually accepted by the
+API rather than silently downgraded.
+
+**Awaiting is computed per thread, not per page (F1).** A Notion page can
+carry several open discussions at once, and the reader answering one must
+not hide an unanswered question sitting in another. `InMessage` carries an
+internal `thread` id (the discussion id, on Notion); when any message on a
+row has one, `awaiting` is computed by grouping on it: `true` if any
+thread's newest message is not the reader's, `false` only if every thread's
+newest message is, and absent otherwise. A row with no threads keeps the
+original whole-row rule.
+
+**The 50-page cap is disclosed, and never moves the watermark past what it
+skipped (F2).** `_recent_pages` stops at `MAX_PAGES`; if pages in the window
+were still unread when it did, the fetch reports `complete: false` and a
+warning naming the cap, and `gather_and_store` holds the previous watermark
+rather than advancing it. The search is newest-first, so a page skipped by
+the cap is only ever older than everything already read this run — a later
+run does not "pick up" from the cap in any special sense, it just re-runs
+the same newest-first search from scratch and re-hits the same cap at the
+same place, reading no more pages than it did last time. The warning keeps
+firing on every run until one of them finds fewer than `MAX_PAGES`
+recently-edited pages still in the window — which only happens as the
+oldest of them age out of it, not because any run reads further into them.
+The same mechanism surfaces a second
+warning when the configured `me` cannot be resolved to a Notion user, since
+`awaiting` is then unknown for the whole run. Archived and trashed pages are
+now skipped outright (`notion:archived`) and reported `closed`, never read.
+Fully paging past the cap in one run is deferred — this is the honest v1.
+
+**A resolved conversation leaves the digest (F3).** Notion's comments
+endpoint only ever returns open threads, so a page whose last open thread
+gets resolved would otherwise sit in the digest, stale, for up to `--days`.
+The Notion adapter now reports such pages as `closed` (in addition to the
+existing `notion:no-open-comments` suppression) — `notion:no-new-comments`
+pages are not, since their threads are still open, just quiet.
+`store.read_digest` excludes an item with a `closed` suppression newer than its
+own `gathered_at`; nothing is deleted, and a later gather that re-emits the
+item (its threads reopened) clears the suppression's effect by moving
+`gathered_at` past it.
+
+**Unbuilt:** Slack, Linear and mail adapters; the judging skill;
+`POST /api/almoner/dismiss`; a `days` passthrough on `GET /api/almoner/digest`.
+`status` also still surfaces a CLI failure the same way as "no sources"
+(`configured: false`) rather than with its own `error`, unlike `digest` —
+and the page's empty state currently points at the overseer config rather
+than `$CLAUDE_CONFIG_DIR/almoner/config.json`. Both are next-plan items.
 
 **Built but must not ship yet:** the inflow-gap check — see Gathered for real.
 It needs overseer cards to carry Linear keys before it says anything true.
@@ -648,9 +765,8 @@ It needs overseer cards to carry Linear keys before it says anything true.
    Retention: the window is a view, not a delete.**
 2. ~~**Which Linear states count as "active"**~~ **Settled 2026-09-13 against
    the real workflow states — see "Active" is a state TYPE.**
-3. **Is the source list per-machine or per-repo?** `claude_dirs` is
-   machine-level and sources probably are too — but the board is per-repo, so
-   the same digest appearing on every board needs confirming as intended.
+3. ~~**Is the source list per-machine or per-repo?**~~ **Settled 2026-09-15: per
+   machine, rooted per Claude account at `$CLAUDE_CONFIG_DIR/almoner/`.**
 4. **Mail authentication**, once the probe runs: app password if it holds,
    otherwise provider OAuth with someone owning the client registration.
 5. **Slack `via: api` may never be available** — a corporate workspace may not
