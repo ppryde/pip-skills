@@ -236,6 +236,23 @@ def _load(repo_root: Path, card_id: str) -> Card:
     return card
 
 
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+
+def _stamp_orchestrator(repo_root: Path, card_id: str) -> None:
+    """Record the calling Claude session as ``card_id``'s orchestrator (WF-113
+    §5.1) so the PreToolUse guard can tell the hub from its agents. Claude
+    Code sets CLAUDE_CODE_SESSION_ID in every Bash call; outside Claude Code
+    it is absent and this is a no-op."""
+    session_id = os.environ.get(SESSION_ENV)
+    if session_id:
+        db.stamp_orchestrator(_conn(repo_root), card_id, session_id, _now())
+
+
+def _release_orchestrator(repo_root: Path, card_id: str) -> None:
+    db.clear_orchestrator(_conn(repo_root), card_id)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """`overseer init [--central PATH] [--backup-dir PATH] [--yes]` —
     bootstraps the `.workflow/` state tree (as before) and, new
@@ -439,6 +456,7 @@ def cmd_set_stage(args: argparse.Namespace) -> int:
     card.set_stage(args.stage, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} → {args.stage}")
     return 0
 
@@ -464,6 +482,7 @@ def _close(args: argparse.Namespace, verb: str) -> int:
     card = _load(args.root, args.card_id)
     card.complete(_now()) if verb == "done" else card.abandon(_now())
     db.archive_card(_conn(args.root), card)
+    _release_orchestrator(args.root, card.id)
     rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"{card.id} {card.status}, archived")
     return 0
@@ -893,7 +912,17 @@ def cmd_park(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.park(_now())
     _sync(args.root, card)
+    _release_orchestrator(args.root, card.id)
     print(f"{card.id} parked")
+    return 0
+
+
+def cmd_release(args: argparse.Namespace) -> int:
+    """The guard's per-card escape hatch: forget this card's orchestrator
+    until its next work verb re-stamps it."""
+    card = _load(args.root, args.card_id)
+    _release_orchestrator(args.root, card.id)
+    print(f"{card.id} released — guard off until its next work verb")
     return 0
 
 
@@ -1045,6 +1074,7 @@ def cmd_unclaim(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.unclaim(_now())
     _sync(args.root, card)
+    _release_orchestrator(args.root, card.id)
     print(f"{card.id} unclaimed")
     return 0
 
@@ -1223,6 +1253,7 @@ def cmd_log_progress(args: argparse.Namespace) -> int:
     card.log_progress(args.note, tokens, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
     if card.tripwire_breached:
         actual = format_tokens(card.budget_actual)
         estimate = format_tokens(card.budget_estimate)
@@ -1240,6 +1271,7 @@ def cmd_log_review(args: argparse.Namespace) -> int:
     card.log_review(args.stage, args.reviewers, args.verdict, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {args.stage} round {card.review_rounds(args.stage)} logged")
     return 0
 
@@ -1919,6 +1951,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("unclaim")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_unclaim)
+
+    p = sub.add_parser("release")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_release)
 
     p = sub.add_parser("claim-nudged")
     p.add_argument("card_id")

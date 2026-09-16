@@ -44,6 +44,12 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)
+    # WF-113: work verbs stamp the calling Claude session as a card's
+    # orchestrator, and the PreToolUse guard reads OVERSEER_GUARD. A suite run
+    # from inside Claude Code inherits both — strip them so no test depends
+    # on (or records) the developer's live session.
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("OVERSEER_GUARD", raising=False)
     # Multi-account: `config.claude_dirs()` (and so `central_root`) also reads
     # this list of EXTRA config dirs. A developer building that very feature
     # plausibly has it set — left ambient, tests would search (and write)
