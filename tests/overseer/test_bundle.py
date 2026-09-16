@@ -114,7 +114,6 @@ def test_verbosity_normal_drops_charter(repo, capsys):
 @pytest.mark.parametrize("argv, message", [
     (("--stage", "impl-review", "--role", "reviewer"), "--slot is required"),
     (("--stage", "impl-review", "--role", "reviewer", "--slot", "fix"), "reserved"),
-    (("--stage", "implementation", "--role", "implementer"), "--chunk is required"),
     (("--stage", "implementation", "--role", "implementer", "--chunk", "1",
       "--var", "constraints=" + "x" * 301), "cap 300"),
     (("--stage", "implementation", "--role", "implementer", "--chunk", "1",
@@ -123,6 +122,25 @@ def test_verbosity_normal_drops_charter(repo, capsys):
 def test_errors(repo, capsys, argv, message):
     code, _, err = _prep(repo, capsys, *argv)
     assert code == 1 and message in err
+
+
+def test_implementer_chunk_defaults_to_one(repo, capsys):
+    # Round 2 of WF-113: an orchestrator dispatching the FIRST implementer
+    # chunk no longer has to spell out --chunk 1.
+    code, out, _ = _prep(repo, capsys, "--stage", "implementation", "--role", "implementer")
+    assert code == 0
+    d = dispatch_dir(repo, "WF-001", "implementation")
+    assert out == str(d / "bundle-implementer-c1-r1.md")
+    assert str(d / "c1.md") in Path(out).read_text()
+
+
+def test_dispatch_prep_advance_sets_stage_then_preps_and_prints_only_the_path(repo, capsys):
+    code, out, err = _prep(repo, capsys, "--stage", "implementation", "--role", "implementer",
+                           "--chunk", "2", "--advance")
+    assert (code, err) == (0, "")
+    assert out == str(dispatch_dir(repo, "WF-001", "implementation") / "bundle-implementer-c2-r1.md")
+    card = db.load_card(db.connect(repo, migrate=False), "WF-001")
+    assert card.stage == "implementation"
 
 
 def test_reply_names():

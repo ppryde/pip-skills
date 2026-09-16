@@ -469,7 +469,13 @@ def worktree_path(main_root: Path, card_id: str, cfg: dict) -> Path:
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
     """new-card + base-branch detection + worktree + branch + set-field +
-    set-stage planning, in one orchestrator turn instead of seven."""
+    set-stage planning, in one orchestrator turn instead of seven.
+
+    ``--brief`` is the S-card shortcut (policy.md "right-sizing the
+    ceremony"): it writes the given text as ``## Plan`` directly and lands
+    the card at `implementation`, skipping the planner dispatch, plan-review
+    loop and PLAN GATE conversation entirely — one call instead of the
+    set-field/set-section-with-a-temp-file dance."""
     if not args.card and not args.title:
         print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
         return 1
@@ -493,10 +499,14 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         return 1
     card.branch = branch
     card.worktree = str(path)
-    card.set_stage("planning", _now())
+    if args.brief:
+        card.set_section("## Plan", args.brief, _now())
+        card.set_stage("implementation", _now())
+    else:
+        card.set_stage("planning", _now())
     _sync(args.root, card)
     _stamp_orchestrator(args.root, card.id)
-    print(f"{card.id} planning · {branch} · {path} (base {base})")
+    print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
     return 0
 
 
@@ -1366,7 +1376,19 @@ def cmd_log_review(args: argparse.Namespace) -> int:
 
 
 def cmd_dispatch_prep(args: argparse.Namespace) -> int:
+    """``--advance`` folds a set-stage into the same call (same validation:
+    ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
+    ``choices=STAGES`` already rules that out here) so each stage playbook
+    entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
+    only the bundle path either way."""
     card = _load(args.root, args.card_id)
+    if args.advance:
+        card.set_stage(args.stage, _now())
+        card.ack_claim()
+        _sync(args.root, card)
+    chunk = args.chunk
+    if chunk is None and args.role == "implementer":
+        chunk = 1
     try:
         path = bundle.prepare(
             args.root,
@@ -1375,7 +1397,7 @@ def cmd_dispatch_prep(args: argparse.Namespace) -> int:
             role=args.role,
             round_no=args.round,
             slot=args.slot,
-            chunk=args.chunk,
+            chunk=chunk,
             lens=args.lens,
             variables=bundle.parse_vars(args.var or []),
             verbosity=str(config.load_config(args.root).get("verbosity", "terse")),
@@ -1862,9 +1884,11 @@ SECTION_NAMES = ("Plan", "Verification", "Decisions")
 
 
 def cmd_set_section(args: argparse.Namespace) -> int:
-    """Replace one prose section from a file — written by agents (via the
-    report hook) so plan and verification text never transit the orchestrator."""
-    content = Path(args.file).read_text()
+    """Replace one prose section from a file (agents, via the report hook —
+    plan and verification text never transits the orchestrator that way) or
+    from ``--text`` directly (the orchestrator's own S-card/--brief path,
+    short enough not to need a temp file)."""
+    content = args.text if args.text is not None else Path(args.file).read_text()
     card = _load(args.root, args.card_id)
     card.set_section(f"## {args.section}", content, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
@@ -1994,6 +2018,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--goal")
     p.add_argument("--type", default="feat")
     p.add_argument("--slug")
+    p.add_argument("--brief", help="S-card shortcut: writes ## Plan directly and "
+                                    "lands at implementation, skipping the planner dispatch")
     p.set_defaults(func=cmd_bootstrap)
 
     p = sub.add_parser("set-stage")
@@ -2117,9 +2143,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--role", required=True, choices=ROLES)
     p.add_argument("--round", type=int, default=1)
     p.add_argument("--slot")
-    p.add_argument("--chunk", type=int)
+    p.add_argument("--chunk", type=int, help="defaults to 1 for --role implementer")
     p.add_argument("--lens")
     p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
+    p.add_argument("--advance", action="store_true",
+                    help="set-stage to --stage first, then prep the bundle, in one call")
     p.set_defaults(func=cmd_dispatch_prep)
 
     p = sub.add_parser("new-sprint")
@@ -2229,7 +2257,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("set-section")
     p.add_argument("card_id")
     p.add_argument("--section", required=True, choices=SECTION_NAMES)
-    p.add_argument("--file", required=True)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--file")
+    src.add_argument("--text")
     p.set_defaults(func=cmd_set_section)
 
     p = sub.add_parser("accept-fact")

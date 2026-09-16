@@ -66,3 +66,15 @@ def test_worktree_failure_leaves_card_at_bootstrap(repo, capsys):
 
 def test_title_or_card_required(repo):
     assert main(["--root", str(repo), "bootstrap"]) == 1
+
+
+def test_brief_writes_plan_and_lands_at_implementation(repo, tmp_path, capsys):
+    capsys.readouterr()
+    assert main(["--root", str(repo), "bootstrap", "--title", "Fix the typo",
+                 "--complexity", "S", "--brief", "Fix the typo in README.md line 12."]) == 0
+    path = tmp_path / "wt" / "proj-wf-001"
+    assert capsys.readouterr().out.strip() == (
+        f"WF-001 implementation · feat/WF-001-fix-the-typo · {path} (base main)")
+    card = db.load_card(db.connect(repo, migrate=False), "WF-001")
+    assert card.stage == "implementation"
+    assert card.sections["## Plan"] == "Fix the typo in README.md line 12."

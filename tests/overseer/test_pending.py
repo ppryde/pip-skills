@@ -75,6 +75,24 @@ class TestCli:
         card = db.load_card(db.connect(repo, migrate=False), "WF-001")
         assert card.sections["## Plan"] == "### Chunks\n1. x"
 
+    def test_set_section_text_needs_no_temp_file(self, repo):
+        # Round 2 of WF-113: the orchestrator's one-call S-card brief no
+        # longer has to shell out to a scratch file just to set ## Plan.
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "set-section", "WF-001", "--section", "Plan", "--text", "Just do X.") == 0
+        card = db.load_card(db.connect(repo, migrate=False), "WF-001")
+        assert card.sections["## Plan"] == "Just do X."
+
     def test_set_section_rejects_unknown_section(self, repo, tmp_path):
         run(repo, "new-card", "--title", "T")
         assert run(repo, "set-section", "WF-001", "--section", "Goal", "--file", "x") == 1
+
+    def test_set_section_requires_exactly_one_of_file_or_text(self, repo, capsys):
+        run(repo, "new-card", "--title", "T")
+        capsys.readouterr()
+        assert run(repo, "set-section", "WF-001", "--section", "Plan") == 1
+        assert "one of the arguments --file --text is required" in capsys.readouterr().err
+        capsys.readouterr()
+        assert run(repo, "set-section", "WF-001", "--section", "Plan",
+                   "--file", "x", "--text", "y") == 1
+        assert "not allowed with argument" in capsys.readouterr().err
