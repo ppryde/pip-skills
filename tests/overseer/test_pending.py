@@ -3,7 +3,7 @@ import pytest
 from scripts import db
 from scripts.cli import main
 from scripts.knowledge import knowledge_root, load_facts
-from scripts.pending import add_pending, load_pending, parse_learned, set_status
+from scripts.pending import add_pending, load_pending, set_status
 
 
 @pytest.fixture
@@ -14,22 +14,6 @@ def repo(tmp_path):
 
 def run(repo, *argv):
     return main(["--root", str(repo), *argv])
-
-
-class TestParseLearned:
-    def test_forms(self):
-        text = (
-            "findings...\n"
-            "Learned: dbt builds need --target ci [tags: dbt, ci]\n"
-            "- Learned: the ledger CLI is single-writer\n"
-            "Learned: none\n"
-            "Learned:   \n"
-            "not Learned: inline mention\n"
-        )
-        assert parse_learned(text) == [
-            ("dbt builds need --target ci", ["dbt", "ci"]),
-            ("the ledger CLI is single-writer", []),
-        ]
 
 
 class TestQueue:

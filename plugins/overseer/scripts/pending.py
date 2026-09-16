@@ -1,17 +1,17 @@
 """Pending Learned facts (WF-113 §5.5).
 
-Agents write ``Learned: <sentence> [tags: a, b]`` lines into their detail
-files; the report hook queues them here; the orchestrator adjudicates at a
-stage boundary — accept (becomes a real KB fact) or reject (kept, with a
-reason, so the same claim is recognisable if re-proposed). The queue is one
-JSONL file beside the knowledge base: appends are the hot path (parallel
-hooks), status changes are rare and rewrite the file atomically.
+Agents report a ``learned`` array of ``{statement, tags}`` objects in their
+``overseer-report`` JSON block (``scripts/schemas.py``); the report hook
+queues each one here; the orchestrator adjudicates at a stage boundary —
+accept (becomes a real KB fact) or reject (kept, with a reason, so the same
+claim is recognisable if re-proposed). The queue is one JSONL file beside the
+knowledge base: appends are the hot path (parallel hooks), status changes are
+rare and rewrite the file atomically.
 """
 from __future__ import annotations
 
 import json
 import os
-import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -19,8 +19,6 @@ from pathlib import Path
 from scripts.knowledge import knowledge_root
 
 PENDING_FILENAME = "pending.jsonl"
-_LEARNED_RE = re.compile(r"\A\s*(?:[-*]\s+)?Learned:\s*(?P<text>.*?)\s*\Z")
-_TAGS_RE = re.compile(r"\s*\[tags:\s*(?P<tags>[^\]]*)\]\s*\Z")
 
 
 @dataclass
@@ -32,24 +30,6 @@ class PendingFact:
     source: str = ""
     status: str = "pending"
     reason: str = ""
-
-
-def parse_learned(text: str) -> list[tuple[str, list[str]]]:
-    found: list[tuple[str, list[str]]] = []
-    for line in text.splitlines():
-        match = _LEARNED_RE.match(line)
-        if match is None:
-            continue
-        statement = match["text"]
-        tags: list[str] = []
-        tag_match = _TAGS_RE.search(statement)
-        if tag_match:
-            tags = [t.strip() for t in tag_match["tags"].split(",") if t.strip()]
-            statement = statement[: tag_match.start()].strip()
-        if not statement or statement.lower().rstrip(".") == "none":
-            continue
-        found.append((statement, tags))
-    return found
 
 
 def _path(repo_root: Path) -> Path:

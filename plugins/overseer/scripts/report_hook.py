@@ -1,66 +1,113 @@
-"""SubagentStop report hook (WF-113 §5.4).
+"""SubagentStop report hook (WF-113 rework — typed JSON report contract).
 
-Turns an overseer agent's one-line reply into ledger records without spending
-an agent or orchestrator turn: parse the line, total real usage from the
-agent's transcript, write the card and usage.jsonl, queue Learned lines.
+Turns an overseer agent's ``overseer-report`` JSON block into ledger records
+without spending an agent or orchestrator turn: parse the block, total real
+usage from the agent's transcript, write the card and usage.jsonl, queue
+Learned facts.
 
-Record-only by design. A Stop/SubagentStop hook that blocks makes the agent
-continue, which costs a turn at the agent's full context and risks a loop —
-so a malformed or over-long reply is *recorded* (``unparsed``/``overrun``),
-never bounced. The cap is stated in the dispatch instead.
+Bounded retry, not silent record-only: a Stop/SubagentStop hook that blocks
+makes the agent continue, which costs a turn at the agent's full context and
+risks a loop if it can repeat forever — so a missing or malformed report
+gets exactly ONE bounce (``decision: block`` naming every problem found and
+the expected shape), guarded by ``stop_hook_active`` so Claude Code's own
+retry-once semantics bound it. A report that is still missing or invalid on
+the retry is recorded as ``unparsed`` (with the error list) and the hook
+falls silent — never a second block, never a loop.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from scripts import db
-from scripts.dispatch import (
-    REPLY_WORD_CAP,
-    Reply,
-    ReplyError,
-    parse_reply,
-    reply_words,
-    role_of,
-)
+from scripts.dispatch import role_of
 from scripts.models import Card
-from scripts.pending import _LEARNED_RE, add_pending, parse_learned
+from scripts.pending import add_pending
+from scripts.schemas import (
+    FixerReport,
+    ImplementerReport,
+    PlannerReport,
+    Report,
+    ReportError,
+    ReviewerReport,
+    VerifierReport,
+    parse_report_message,
+)
 from scripts.store import state_root
 from scripts.transcript_usage import budget_tokens, raw_total, sum_usage, zero_usage
 from scripts.usage import append_usage
 
-_RESULT_HEADER_RE = re.compile(r"\A\s*result:\s*(PASS|FAIL)\s*\Z", re.IGNORECASE)
+EXPECTED_SHAPE = {
+    "reviewer": (
+        '{"schema": "overseer.reviewer/1", "card": "...", "stage": "...", '
+        '"round": 1, "slot": "A", "status": "approved|found wanting", '
+        '"counts": {"critical": 0, "important": 0, "minor": 0}, '
+        '"detail": "/abs/path", "learned": [{"statement": "...", "tags": []}]}'
+    ),
+    "implementer": (
+        '{"schema": "overseer.implementer/1", "card": "...", "stage": "...", '
+        '"chunk": 1, "status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT", '
+        '"tests": {"passed": 0, "total": 0}, "commits": ["sha"], '
+        '"detail": "/abs/path", "learned": []}'
+    ),
+    "fixer": (
+        '{"schema": "overseer.fixer/1", "card": "...", "stage": "...", '
+        '"round": 1, "status": "DONE|DISPUTED|BLOCKED", '
+        '"counts": {"fixed": 0, "disputed": 0}, "commits": ["sha"], '
+        '"detail": "/abs/path", "learned": []}'
+    ),
+    "planner": (
+        '{"schema": "overseer.planner/1", "card": "...", "stage": "planning", '
+        '"status": "DONE|NEEDS_CONTEXT", "detail": "/abs/path", "learned": []}'
+    ),
+    "verifier": (
+        '{"schema": "overseer.verifier/1", "card": "...", "stage": "verification", '
+        '"status": "PASS|FAIL", "detail": "/abs/path", "learned": []}'
+    ),
+}
 
 
-def _strip_housekeeping(detail: str, *, drop_result_header: bool = False) -> str:
-    """Detail files are persisted whole into ``## Plan``/``## Verification``;
-    drop agent housekeeping lines that don't belong in the card body:
-    ``Learned:`` lines (already queued separately by ``parse_learned``) and,
-    for the verifier, its leading ``result: PASS|FAIL`` line."""
-    lines = detail.splitlines()
-    if drop_result_header and lines and _RESULT_HEADER_RE.match(lines[0]):
-        lines = lines[1:]
-    return "\n".join(line for line in lines if _LEARNED_RE.match(line) is None)
+def _reviewer_line(r: ReviewerReport) -> str:
+    return f"{r.status} {r.critical}C {r.important}I {r.minor}M → {r.detail}"
 
 
-def _record(card: Card, reply: Reply, detail: str, spend: int, now: str) -> None:
-    """Budget semantics are unchanged from telemetry.md: implementer and fixer
-    spend feeds ``budget_actual``; planner/reviewer/verifier spend is
+def _fixer_line(r: FixerReport) -> str:
+    sha = r.commits[-1] if r.commits else "-"
+    return f"{r.status} fixed {r.fixed} disputed {r.disputed} {sha} → {r.detail}"
+
+
+def _implementer_line(r: ImplementerReport) -> str:
+    sha = r.commits[-1] if r.commits else "-"
+    return f"{r.status} tests {r.tests_passed}/{r.tests_total} {sha} → {r.detail}"
+
+
+def _detail_text(report: Report) -> tuple[str, str | None]:
+    try:
+        return report.detail.read_text(), None
+    except OSError:
+        return "", "detail file missing"
+
+
+def _record(card: Card, role: str, report: Report, detail: str, spend: int, now: str) -> None:
+    """Budget semantics are unchanged from telemetry.md: implementer and
+    fixer spend feeds ``budget_actual``; planner/reviewer/verifier spend is
     measurement only (usage.jsonl)."""
-    if reply.role == "reviewer":
-        card.record_review(reply.stage, reply.round or 0, reply.slot or "?", reply.line, now)
-    elif reply.role == "fixer":
-        card.log_progress(f"{reply.stage} r{reply.round} fix — {reply.line}", spend, now)
-    elif reply.role == "implementer":
-        card.log_progress(f"chunk {reply.chunk} — {reply.line}", spend, now)
-    elif reply.role == "planner":
-        if reply.status == "DONE" and detail.strip():
-            card.set_section("## Plan", _strip_housekeeping(detail), now)
-    elif reply.role == "verifier" and detail.strip():
-        card.set_section("## Verification", _strip_housekeeping(detail, drop_result_header=True), now)
+    if isinstance(report, ReviewerReport):
+        card.record_review(report.stage, report.round, report.slot, _reviewer_line(report), now)
+    elif isinstance(report, FixerReport):
+        card.log_progress(f"{report.stage} r{report.round} fix — {_fixer_line(report)}", spend, now)
+    elif isinstance(report, ImplementerReport):
+        card.log_progress(f"chunk {report.chunk} — {_implementer_line(report)}", spend, now)
+    elif isinstance(report, PlannerReport):
+        if report.status == "DONE" and detail.strip():
+            card.set_section("## Plan", detail, now)
+    elif isinstance(report, VerifierReport) and detail.strip():
+        card.set_section("## Verification", detail, now)
 
 
 def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, object] | None:
+    """Returns a hook-output dict (``{"decision": "block", ...}``) when the
+    reply should be bounced once, else None — the caller (``cli.py``'s
+    ``report-hook`` verb) prints whatever this returns and nothing else."""
     role = role_of(payload.get("agent_type"))
     if role is None:
         return None
@@ -68,40 +115,42 @@ def handle(payload: dict[str, object], repo_root: Path, now: str) -> dict[str, o
     text = message if isinstance(message, str) else ""
     transcript = payload.get("agent_transcript_path")
     totals = sum_usage(Path(transcript)) if isinstance(transcript, str) and transcript else zero_usage()
-    words = reply_words(text)
     root = state_root(repo_root)
     entry: dict[str, object] = {
         "ts": now, "card": None, "role": role, "stage": None, "round": None,
         "tokens": raw_total(totals), **totals, "budget_tokens": budget_tokens(totals),
-        "reply_words": words, "overrun": words > REPLY_WORD_CAP,
         "agent_id": payload.get("agent_id"), "source": "hook",
     }
     try:
-        reply = parse_reply(role, text)
-        if not reply.path.resolve().is_relative_to((root / "dispatch").resolve()):
-            raise ReplyError("reply path is outside this repo's dispatch directory")
-    except ReplyError as exc:
-        entry.update(unparsed=text[:500], error=str(exc))
+        report = parse_report_message(role, text)
+    except ReportError as exc:
+        stop_hook_active = bool(payload.get("stop_hook_active"))
+        if not stop_hook_active:
+            reason = (
+                f"overseer {role} report invalid: " + "; ".join(exc.errors) +
+                f". Expected a final message containing exactly one "
+                f"```overseer-report block shaped like: {EXPECTED_SHAPE[role]}"
+            )
+            return {"decision": "block", "reason": reason}
+        entry.update(unparsed=text[:500], errors=exc.errors)
         append_usage(root, entry)
-        return entry
-    entry.update(card=reply.card, stage=reply.stage, round=reply.round)
-    try:
-        detail = reply.path.read_text()
-    except OSError:
-        detail = ""
-        entry["error"] = "detail file missing"
+        return None
+    entry.update(card=report.card, stage=report.stage, round=getattr(report, "round", None))
+    detail, detail_error = _detail_text(report)
+    if detail_error:
+        entry["error"] = detail_error
     spend = budget_tokens(totals)
     conn = db.connect(repo_root)
     try:
-        card = db.mutate_card(conn, reply.card, lambda c: _record(c, reply, detail, spend, now))
+        card = db.mutate_card(conn, report.card, lambda c: _record(c, role, report, detail, spend, now))
     finally:
         conn.close()
     if card is None:
-        entry["error"] = f"no card {reply.card}"
+        entry["error"] = f"no card {report.card}"
     else:
-        for statement, tags in parse_learned(detail):
-            add_pending(repo_root, reply.card, statement, tags, str(reply.path))
+        for fact in report.learned:
+            add_pending(repo_root, report.card, fact.statement, list(fact.tags), str(report.detail))
         if card.tripwire_breached:
             entry["tripwire"] = True
     append_usage(root, entry)
-    return entry
+    return None

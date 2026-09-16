@@ -26,7 +26,7 @@ if __package__ in (None, ""):  # direct script invocation: put plugin root on sy
 from scripts import bundle, config, db, gitops, guard, liveness, report_hook
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
-from scripts.dispatch import REPLY_WORD_CAP, ROLES
+from scripts.dispatch import ROLES
 from scripts.index import rebuild_index
 from scripts.knowledge import (
     Fact,
@@ -1258,13 +1258,17 @@ def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_report_hook(args: argparse.Namespace) -> int:
-    """SubagentStop backend — scripts/report_hook.py. Always exit 0, no
-    output: a failing telemetry hook must never stall or steer an agent."""
+    """SubagentStop backend — scripts/report_hook.py. Always exit 0. Prints
+    a ``decision: block`` bounce for a first-time missing/invalid report
+    (bounded by Claude Code's ``stop_hook_active``, never a second block);
+    otherwise silent — a failing telemetry hook must never stall an agent."""
     try:
         payload = _read_hook_payload()
         repo_root = _hook_root(payload, args)
         if state_root(repo_root).is_dir():
-            report_hook.handle(payload, repo_root, _now())
+            decision = report_hook.handle(payload, repo_root, _now())
+            if decision is not None:
+                print(json.dumps(decision))
     except Exception:
         return 0
     return 0
@@ -1709,14 +1713,10 @@ def cmd_usage(args: argparse.Namespace) -> int:
         print(f"warning: {skipped} corrupt usage line(s) skipped", file=sys.stderr)
     scoped = [e for e in entries if not args.card or e.get("card") == args.card]
     unparsed = sum(1 for e in scoped if e.get("unparsed") is not None)
-    overruns = sum(1 for e in scoped if e.get("overrun"))
-    if unparsed or overruns:
-        noun = "reply" if unparsed == 1 else "replies"
-        print(
-            f"warning: {unparsed} unparsed agent {noun}, "
-            f"{overruns} over the {REPLY_WORD_CAP}-word cap",
-            file=sys.stderr,
-        )
+    if unparsed:
+        noun = "report" if unparsed == 1 else "reports"
+        print(f"warning: {unparsed} unparsed agent {noun} (bounced once, still invalid)",
+              file=sys.stderr)
     summary = summarise(entries, args.card)
     if args.json:
         print(json.dumps(summary, indent=2))
