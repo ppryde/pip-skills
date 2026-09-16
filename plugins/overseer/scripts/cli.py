@@ -15,6 +15,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -48,6 +49,8 @@ from scripts.models import (
     format_tokens,
     parse_tokens,
 )
+from scripts.pending import load_pending
+from scripts.pending import set_status as set_pending_status
 from scripts.relations import would_cycle_depends, would_cycle_parent
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries
 from scripts.sprints import (
@@ -1644,6 +1647,20 @@ def cmd_retire_fact(args: argparse.Namespace) -> int:
 
 
 def cmd_facts(args: argparse.Namespace) -> int:
+    if args.pending:
+        pending_rows = [
+            p for p in load_pending(args.root)
+            if p.status == "pending" and (not args.card or p.card == args.card)
+        ]
+        if args.json:
+            print(json.dumps([asdict(p) for p in pending_rows], indent=2))
+            return 0
+        if not pending_rows:
+            print("No pending facts.")
+            return 0
+        for p in pending_rows:
+            print(f"{p.id} {p.card} ({', '.join(p.tags) or 'no tags'}): {p.statement}")
+        return 0
     kb = knowledge_root(args.root)
     facts, quarantined = load_facts(kb)
     _report_quarantined(quarantined)
@@ -1672,6 +1689,50 @@ def cmd_facts(args: argparse.Namespace) -> int:
         mark = " [STALE]" if r["status"] == "stale" else ""
         tags = ", ".join(r["tags"]) or "no tags"
         print(f"{r['id']} ({tags}){mark}: {r['statement']}")
+    return 0
+
+
+SECTION_NAMES = ("Plan", "Verification", "Decisions")
+
+
+def cmd_set_section(args: argparse.Namespace) -> int:
+    """Replace one prose section from a file — written by agents (via the
+    report hook) so plan and verification text never transit the orchestrator."""
+    content = Path(args.file).read_text()
+    card = _load(args.root, args.card_id)
+    card.set_section(f"## {args.section}", content, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
+    _sync(args.root, card)
+    print(f"{card.id} ## {args.section} set")
+    return 0
+
+
+def cmd_accept_fact(args: argparse.Namespace) -> int:
+    _conn(args.root)  # migration-ordering guard, as cmd_add_fact
+    pending = next((f for f in load_pending(args.root) if f.id == args.fact_id), None)
+    if pending is None:
+        raise FileNotFoundError(f"no pending fact with id {args.fact_id}")
+    kb = knowledge_root(args.root)
+    ensure_kb(kb)
+    fact = Fact(
+        id=mint_fact_id(kb),
+        statement=pending.statement,
+        tags=pending.tags,
+        source=f"{pending.card} {pending.source}".strip(),
+        created=_today(),
+        verified=_today(),
+        status="active",
+    )
+    save_fact(kb, fact)
+    set_pending_status(args.root, pending.id, "accepted")
+    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    print(fact.id)
+    return 0
+
+
+def cmd_reject_fact(args: argparse.Namespace) -> int:
+    set_pending_status(args.root, args.fact_id, "rejected", args.reason)
+    print(f"{args.fact_id} rejected")
     return 0
 
 
@@ -1957,7 +2018,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag")
     p.add_argument("--stale", action="store_true")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--pending", action="store_true")
+    p.add_argument("--card")
     p.set_defaults(func=cmd_facts)
+
+    p = sub.add_parser("set-section")
+    p.add_argument("card_id")
+    p.add_argument("--section", required=True, choices=SECTION_NAMES)
+    p.add_argument("--file", required=True)
+    p.set_defaults(func=cmd_set_section)
+
+    p = sub.add_parser("accept-fact")
+    p.add_argument("fact_id")
+    p.set_defaults(func=cmd_accept_fact)
+
+    p = sub.add_parser("reject-fact")
+    p.add_argument("fact_id")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=cmd_reject_fact)
 
     p = sub.add_parser("backup")
     p.add_argument("--dir", help="override the computed backup destination")
