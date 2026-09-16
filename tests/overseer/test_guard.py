@@ -93,6 +93,22 @@ class TestDecideOrchestrator:
         reason = decide(_p("Agent", {"subagent_type": "overseer:overseer-fixer"}), [hot], ROOTS).deny_reason
         assert reason.startswith("TRIPWIRE: WF-012")
 
+    def test_tripwire_checks_every_orchestrated_card_not_just_the_first(self):
+        calm = make_card("WF-012")
+        hot = make_card("WF-013", budget_estimate=100, budget_actual=250)
+        reason = decide(
+            _p("Agent", {"subagent_type": "overseer:overseer-fixer"}), [calm, hot], ROOTS
+        ).deny_reason
+        assert reason.startswith("TRIPWIRE: WF-013")
+
+    def test_tripwire_allows_dispatch_when_no_orchestrated_card_is_breached(self):
+        calm = make_card("WF-012")
+        calm2 = make_card("WF-013")
+        verdict = decide(
+            _p("Agent", {"subagent_type": "overseer:overseer-fixer"}), [calm, calm2], ROOTS
+        )
+        assert verdict == Verdict()
+
 
 class TestDecideAgents:
     def test_agents_may_work(self):

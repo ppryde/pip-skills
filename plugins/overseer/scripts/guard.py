@@ -103,19 +103,25 @@ def _within(path: Path, roots: list[Path]) -> bool:
 
 
 def _hub_denial(
-    card: Card, tool: str, tool_input: dict[str, object], cwd: object, roots: list[Path]
+    cards: list[Card], tool: str, tool_input: dict[str, object], cwd: object, roots: list[Path]
 ) -> str | None:
+    """``cards`` is every live card this session orchestrates. Work/fork deny
+    reasons name the first card (kept short); the tripwire check must look at
+    all of them — a stacking session can be spending against any one."""
+    card = cards[0]
     work = (
         f"{card.id} in flight: the orchestrator dispatches, it does not do the work — "
         f"dispatch an overseer-* agent with a dispatch-prep bundle instead. "
         f"(Escape hatch: {_ESCAPES}.)"
     )
-    if tool == "Agent" and card.tripwire_breached:
-        return (
-            f"TRIPWIRE: {card.id} has spent {format_tokens(card.budget_actual)} against an "
-            f"estimate of {format_tokens(card.budget_estimate)} — stop the card and "
-            "escalate to the user."
-        )
+    if tool == "Agent":
+        breached = next((c for c in cards if c.tripwire_breached), None)
+        if breached is not None:
+            return (
+                f"TRIPWIRE: {breached.id} has spent {format_tokens(breached.budget_actual)} "
+                f"against an estimate of {format_tokens(breached.budget_estimate)} — stop the "
+                "card and escalate to the user."
+            )
     if tool in _WRITE_TOOLS or tool.startswith("mcp__"):
         return work
     if tool in _PATH_TOOLS:
@@ -161,15 +167,14 @@ def decide(
     input_raw = payload.get("tool_input")
     tool_input: dict[str, object] = input_raw if isinstance(input_raw, dict) else {}
     if cards:
-        card = cards[0]
         if tool == "Agent" and tool_input.get("subagent_type") == "fork":
             return Verdict(
-                f"{card.id} in flight: forks inherit the full parent context — dispatch a "
+                f"{cards[0].id} in flight: forks inherit the full parent context — dispatch a "
                 "fresh overseer-* agent with a bundle path instead."
             )
         is_hub = not payload.get("agent_id") or is_hub_agent(payload.get("agent_type"))
         if is_hub:
-            reason = _hub_denial(card, tool, tool_input, payload.get("cwd"), roots)
+            reason = _hub_denial(cards, tool, tool_input, payload.get("cwd"), roots)
             if reason:
                 return Verdict(reason)
     return Verdict(updated_input=_limited_read(tool, tool_input, payload, read_limit))
