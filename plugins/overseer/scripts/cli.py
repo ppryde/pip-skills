@@ -304,21 +304,9 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     (base / "config.json").write_text(
         json.dumps({"backup_dir": backup_dir_value}, indent=2))
-    # Preserve any OTHER local keys already on disk (e.g. `worktree_dir`,
-    # hand-edited or seeded before `init` runs) — only `central_dir` is
-    # `init`'s to manage, per the WF-087 rule above.
-    local_path = base / "config.local.json"
-    local_config: dict = {}
-    if local_path.exists():
-        try:
-            local_config = json.loads(local_path.read_text() or "{}")
-        except json.JSONDecodeError:
-            local_config = {}
-    if central_explicit:
-        local_config["central_dir"] = central_explicit
-    else:
-        local_config.pop("central_dir", None)
-    local_path.write_text(json.dumps(local_config, indent=2))
+    local_config = {"central_dir": central_explicit} if central_explicit else {}
+    (base / "config.local.json").write_text(
+        json.dumps(local_config, indent=2))
 
     # `base.parent` is the same canonical root `base` itself was resolved
     # against — never a linked worktree's own root — so the gitignore line

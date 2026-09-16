@@ -2,8 +2,8 @@ import json
 import subprocess
 
 import pytest
-
 from factories import git_init
+
 from scripts import db
 from scripts.cli import main, worktree_path
 
@@ -17,10 +17,11 @@ def repo(tmp_path):
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
     subprocess.run(["git", "branch", "-M", "main"], cwd=root, check=True)
-    (root / ".overseer").mkdir()
-    (root / ".overseer" / "config.local.json").write_text(
-        json.dumps({"worktree_dir": str(tmp_path / "wt")}))
     assert main(["--root", str(root), "init"]) == 0
+    local_path = root / ".overseer" / "config.local.json"
+    local_config = json.loads(local_path.read_text() or "{}")
+    local_config["worktree_dir"] = str(tmp_path / "wt")
+    local_path.write_text(json.dumps(local_config))
     return root
 
 
@@ -42,7 +43,7 @@ def test_new_card_bootstrap(repo, tmp_path, capsys, monkeypatch):
     assert (card.stage, card.status, card.branch, card.worktree, card.complexity) == (
         "planning", "in-flight", "feat/WF-001-add-the-thing", str(path), "S")
     head = subprocess.run(["git", "branch", "--show-current"], cwd=path,
-                          capture_output=True, text=True).stdout.strip()
+                          capture_output=True, text=True, check=False).stdout.strip()
     assert head == "feat/WF-001-add-the-thing"
     assert [c.id for c in db.orchestrated_cards(conn, "sess-1")] == ["WF-001"]
 
