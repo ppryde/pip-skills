@@ -3,6 +3,7 @@ import type { AlmonerItem } from "../../api/types";
 import type { DigestDay } from "../../board/almoner/days";
 import { clockTime } from "../../board/almoner/days";
 import { relativeArrivedPhrase, rowState } from "../../board/almoner/digest";
+import { slackLink } from "../../board/almoner/slackLink";
 import { Chip } from "../../ui";
 import SourceIcon from "./SourceIcon";
 
@@ -38,6 +39,55 @@ const APP_NAMES: Record<string, string> = {
 
 function threadOf(item: AlmonerItem) {
   return item.messages ?? [];
+}
+
+/**
+ * The "go to source" affordance for one link. A Slack permalink gets TWO:
+ * the `slack://` deep link into the app, plus the ordinary https link it
+ * always had — a `slack://` click is silent when the app is not installed,
+ * so the https link stays reachable beside it, never replaced. Every other
+ * source (`slackLink` returns `""` for anything that isn't a Slack
+ * permalink) keeps exactly the single link it renders today.
+ *
+ * `ariaLabel` is only used on the single-link path; the two-link path names
+ * each one itself ("Open in Slack (app)" / "Open in Slack (browser)"),
+ * since "Open in Slack" alone would no longer say which one a link is.
+ */
+function OpenLink({
+  url,
+  className,
+  webClassName,
+  ariaLabel,
+}: {
+  url: string;
+  className: string;
+  webClassName: string;
+  ariaLabel?: string;
+}) {
+  const appUrl = slackLink(url);
+  if (!appUrl) {
+    return (
+      <a className={className} href={url} target="_blank" rel="noreferrer" aria-label={ariaLabel}>
+        ↗
+      </a>
+    );
+  }
+  return (
+    <>
+      <a className={className} href={appUrl} aria-label="Open in Slack (app)">
+        ↗
+      </a>
+      <a
+        className={`${className} ${webClassName}`}
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Open in Slack (browser)"
+      >
+        web
+      </a>
+    </>
+  );
 }
 
 function Labels({ item }: { item: AlmonerItem }) {
@@ -78,9 +128,11 @@ function Thread({ item }: { item: AlmonerItem }) {
             {/* Per-message permalink: a reply usually needs to start from one
                 particular line, not the top of the conversation. */}
             {message.url && (
-              <a className="alm-msg__link" href={message.url} target="_blank" rel="noreferrer">
-                ↗
-              </a>
+              <OpenLink
+                url={message.url}
+                className="alm-msg__link"
+                webClassName="alm-msg__link--web"
+              />
             )}
           </div>
           <p className="alm-msg__text">{message.text}</p>
@@ -170,15 +222,12 @@ export default function DigestTable({ days }: DigestTableProps) {
                       </button>
                     )}
                     {item.url && (
-                      <a
+                      <OpenLink
+                        url={item.url}
                         className="alm-row__open"
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`Open in ${APP_NAMES[item.source] ?? item.source}`}
-                      >
-                        ↗
-                      </a>
+                        webClassName="alm-row__open--web"
+                        ariaLabel={`Open in ${APP_NAMES[item.source] ?? item.source}`}
+                      />
                     )}
                   </td>
                 </tr>,
