@@ -1311,6 +1311,7 @@ def cmd_pretool_hook(args: argparse.Namespace) -> int:
         verdict = guard.decide(
             payload, cards, roots,
             read_limit=limit if isinstance(limit, int) else guard.READ_LIMIT_DEFAULT,
+            repo_root=repo_root,
         )
         output = guard.hook_output(verdict)
         if output:

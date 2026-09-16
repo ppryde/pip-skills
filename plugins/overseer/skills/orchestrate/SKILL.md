@@ -13,12 +13,29 @@ effort: medium
 
 # Overseer Orchestrate
 
+## Locate the CLI — READ THIS FIRST, never search the filesystem for it
+This file just loaded from `<base directory>/SKILL.md` — Claude Code names
+that path (e.g. `.../plugins/overseer/skills/orchestrate`) when it loads a
+skill. The CLI is two levels up from THAT directory. Every verb in this file,
+with no exceptions, is invoked as:
+
+```
+python3 "<base directory>/../../scripts/cli.py" --root . <verb> [flags]
+```
+
+(inside a dispatched agent, `${CLAUDE_PLUGIN_ROOT}/scripts/cli.py` is the same
+file). This is the ONLY lookup you need — never `find`, `locate`, `which`, or
+any other filesystem search for `cli.py`: that is a slow, denied guess at
+something this file already told you, and a real run has paid a 120-second
+`find /` timeout for it.
+
 You are the orchestrator: the main session, the single writer of the card in
 `board.db` (the per-repo SQLite store shared across worktrees) and of the
 *resolved state root* — always via the ledger CLI; the CLI resolves both for
 you, you never hard-code them — the dispatcher of every agent, and the user's
-single point of contact. Read `policy.md` (this directory) before the first
-dispatch.
+single point of contact. **Skip `policy.md` for S and M cards** — the
+right-sizing table and Riders below are all either needs; it earns a read only
+for an L card, a cross-plugin card, or a re-grade decision (Stage playbook).
 
 **You dispatch; you never do the work.** While a card is in flight you do not
 Read source, Edit, Write, run tests or queries, or call MCP tools — and you
@@ -30,20 +47,11 @@ re-reads your whole context, so every turn you *don't* take is the saving.
 
 This file is the lean driver. Detailed sub-playbooks live in `references/` and
 load **only when a stage or condition needs them** — do not read them all up
-front. An S or M card should need NONE of them: the CLI cheat-sheet and
-review-loop summary below are inlined for exactly that reason. The
-**References** table at the end says exactly when the rest earn a read; this
-keeps your context small, which is itself part of the job (see Context
+front. An S or M card should need NONE of them (`policy.md` included): the CLI
+cheat-sheet and review-loop summary below are inlined for exactly that reason.
+The **References** table at the end says exactly when the rest earn a read;
+this keeps your context small, which is itself part of the job (see Context
 stewardship).
-
-## Locate the CLI — never search for it
-This file loaded from `<...>/plugins/overseer/skills/orchestrate/SKILL.md`
-(Claude Code names that path when the skill loads). The CLI is two levels up:
-`<that directory>/../../scripts/cli.py` — i.e. `plugins/overseer/scripts/cli.py`
-from the plugin root, or `${CLAUDE_PLUGIN_ROOT}/scripts/cli.py` inside a
-dispatched agent. Every verb below is `python3 <that path> --root <repo-root>
-<verb> [flags]`. Never `find` / `locate` for it — that's a denied, slow guess
-at something this file already told you.
 
 ## CLI cheat-sheet
 Exact signatures for every verb an S/M card needs; the parser rejects
@@ -79,8 +87,10 @@ denial, unrelated). `<id>` is a card id (`WF-123`).
    otherwise subagent mode. That is your comms mode for this session.
 
 ## Stage playbook
-**Right-sizing, inlined (full table + Riders: `policy.md`).** The bullets
-below are the maximum weight per stage, not the mandatory weight:
+**Right-sizing, inlined — skip `policy.md` for S and M.** Its full table and
+Riders only earn a read for an L card, a novel/cross-plugin card, or a
+re-grade decision; the bullets below are the maximum weight per stage, not
+the mandatory weight, and are everything an S or M card needs:
 - **S, fully specified** (exact behaviour known, 1–2 files, an existing house
   pattern, or prose-only): `bootstrap ... --brief "<task brief>"` — skips
   planning, plan-review AND the PLAN GATE conversation entirely, landing
@@ -89,7 +99,17 @@ below are the maximum weight per stage, not the mandatory weight:
 - **M, or ambiguous:** run planning, but proportionate to what's actually
   undecided — not full L weight.
 - **L, novel architecture, or cross-plugin:** every stage below, at full
-  weight, no shortcuts.
+  weight, no shortcuts. Read `policy.md` now — its Riders (split-first, lens
+  set, re-grade valve) apply.
+
+Model tiers and panel sizes, inlined (S/M only — L reads `policy.md`'s table
+directly): tiers map to the smallest/middle/most-capable models the harness
+offers (haiku/sonnet/opus-or-better).
+
+| Complexity | Planner | Workers | Reviewers | Round cap |
+|---|---|---|---|---|
+| S | mid | 1 × cheap | 1 × mid | 2 |
+| M | mid | 1–2 × mid | 2 × mid, distinct lenses | 3 |
 - **Review gates (plan-review, impl-review) never shrink at any size** — a
   card found wanting because its ceremony was skipped is unreviewed, not
   efficient. Triage only ever scales what happens *before* implementation.

@@ -30,11 +30,29 @@ def test_cli_location_and_cheat_sheet_present():
     # overseer` (120s) because it didn't know where cli.py was, and guessed
     # its way through dispatch-prep/set-section signatures. Both must be
     # answered directly in this file.
-    assert "Locate the CLI" in SKILL and "never search for it" in SKILL
+    assert "Locate the CLI" in SKILL
+    assert "never search the filesystem for it" in SKILL
     assert "scripts/cli.py" in SKILL
     for verb in ("resume", "bootstrap", "dispatch-prep", "set-stage", "set-section",
                  "set-field", "block", "release", "show", "facts --pending"):
         assert f"`{verb}`" in SKILL, verb
+
+
+def test_locate_the_cli_is_the_first_heading():
+    # Round 3: still on turn 2, a benchmark run shelled `find / -maxdepth 2`
+    # instead of reading this file to the section that already answers it —
+    # this has to be unmissable, so it must be the FIRST ## heading, and must
+    # give the literal invocation form (not just prose pointing elsewhere).
+    first_heading = SKILL.split("\n## ", 1)[1]
+    assert first_heading.startswith("Locate the CLI")
+    assert '"<base directory>/../../scripts/cli.py" --root . <verb>' in SKILL
+
+
+def test_policy_md_not_needed_for_s_or_m():
+    # Round 3: still Read policy.md on turn 3 for an S card. It must say,
+    # unambiguously, that S/M never need it.
+    assert "Skip `policy.md` for S and M" in SKILL or "skip `policy.md` for S and M" in SKILL
+    assert "S or M card should need NONE of them" in SKILL
 
 
 def test_one_call_s_brief_and_advance_documented():

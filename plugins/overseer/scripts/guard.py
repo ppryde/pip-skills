@@ -111,6 +111,39 @@ def _word_within(word: str, cwd: object, roots: list[Path]) -> bool:
     return _within(path, roots)
 
 
+def protected_roots(repo_root: Path | None, cards: list[Card]) -> list[Path]:
+    """Real source, never scratch space regardless of where it happens to
+    live: the orchestrator's own repo root, and every live card's worktree.
+    Needed because scratch space (``tmp_roots()``) is a SYSTEM location, not
+    a project one — a repo or worktree checked out under ``/tmp``/``$TMPDIR``
+    (a benchmark fixture did exactly this) would otherwise fall inside it."""
+    protected: list[Path] = []
+    if repo_root is not None:
+        try:
+            protected.append(Path(repo_root).resolve())
+        except OSError:
+            pass
+    for card in cards:
+        if not card.worktree:
+            continue
+        try:
+            protected.append(Path(card.worktree).resolve())
+        except OSError:
+            continue
+    return protected
+
+
+def _word_is_scratch(word: str, cwd: object, scratch: list[Path], protected: list[Path]) -> bool:
+    """Inside scratch space AND not inside the repo root or a card worktree
+    — the repo-under-/tmp exclusion, applied per word."""
+    path = Path(word).expanduser()
+    if not path.is_absolute():
+        if not isinstance(cwd, str):
+            return False
+        path = Path(cwd) / path
+    return _within(path, scratch) and not _within(path, protected)
+
+
 def _is_path_like(word: str) -> bool:
     return not word.startswith("-") and ("/" in word or word.startswith("~"))
 
@@ -119,34 +152,53 @@ def _redirect_targets(words: list[str]) -> list[str]:
     return [words[i + 1] for i, w in enumerate(words) if w in _REDIRECT_OPS and i + 1 < len(words)]
 
 
-def _read_only_allowed(words: list[str], cwd: object, roots: list[Path] | None) -> bool:
+def _read_only_allowed(
+    words: list[str], cwd: object, roots: list[Path] | None, protected: list[Path]
+) -> bool:
     """``grep``/``cat``/... of the orchestrator's own allowed roots (its
     state dir, the installed plugins, the config dir) — never a write, never
-    a repo-source read."""
+    a repo-source read. ``protected`` excludes the repo/worktree in case one
+    of them happens to sit under an allowed root (shouldn't normally, but the
+    scratch-write exclusion below needs the same check, so it's shared)."""
     if roots is None or any(w in _REDIRECT_OPS for w in words):
         return False
     paths = [w for w in words[1:] if _is_path_like(w)]
-    return bool(paths) and all(_word_within(w, cwd, roots) for w in paths)
+    return bool(paths) and all(
+        _word_within(w, cwd, roots) and not _word_within(w, cwd, protected) for w in paths
+    )
 
 
-def _scratch_write_allowed(words: list[str], cwd: object, roots: list[Path] | None) -> bool:
+def _scratch_write_allowed(
+    words: list[str], cwd: object, roots: list[Path] | None, protected: list[Path]
+) -> bool:
     """A heredoc/echo/tee write, ONLY when every redirect target — and any
     other path-like word in the segment (e.g. a file it also reads) —
     resolves inside scratch space (``tmp_roots()`` + the state root) or,
     for a word that isn't a redirect target, the orchestrator's other
-    allowed roots (reading an allowed file into a scratch copy)."""
+    allowed roots (reading an allowed file into a scratch copy) — and NONE of
+    them fall inside the repo root or a live card's worktree, even if that
+    worktree happens to live under scratch space (e.g. checked out under
+    ``/tmp``)."""
     targets = _redirect_targets(words)
     if not targets:
         return False
     scratch = tmp_roots() + ([roots[0]] if roots else [])
-    if not all(_word_within(t, cwd, scratch) for t in targets):
+    if not all(_word_is_scratch(t, cwd, scratch, protected) for t in targets):
         return False
     readable = scratch + (roots or [])
     others = [w for w in words[1:] if _is_path_like(w) and w not in targets]
-    return all(_word_within(w, cwd, readable) for w in others)
+    return all(
+        _word_within(w, cwd, readable) and not _word_within(w, cwd, protected) for w in others
+    )
 
 
-def bash_allowed(command: str, *, cwd: object = None, roots: list[Path] | None = None) -> bool:
+def bash_allowed(
+    command: str,
+    *,
+    cwd: object = None,
+    roots: list[Path] | None = None,
+    protected: list[Path] | None = None,
+) -> bool:
     """Every segment of the command must be ledger/vigil CLI, git plumbing
     the orchestrator needs for branches/PRs, ``gh pr``, a bare ``cd``,
     read-only inspection of its own allowed roots, or a scratch-space write.
@@ -154,6 +206,7 @@ def bash_allowed(command: str, *, cwd: object = None, roots: list[Path] | None =
     smuggle a repo-source read through an otherwise-allowed head."""
     if _SUBSTITUTION_RE.search(command):
         return False
+    protected = protected or []
     segments = _segments(command)
     if segments is None:
         return True
@@ -176,9 +229,9 @@ def bash_allowed(command: str, *, cwd: object = None, roots: list[Path] | None =
             continue
         if head.startswith("python") and len(words) > 1 and _LEDGER_CLI.search(words[1]):
             continue
-        if head in _READ_ONLY_INSPECT and _read_only_allowed(words, cwd, roots):
+        if head in _READ_ONLY_INSPECT and _read_only_allowed(words, cwd, roots, protected):
             continue
-        if head in _SCRATCH_WRITE_HEADS and _scratch_write_allowed(words, cwd, roots):
+        if head in _SCRATCH_WRITE_HEADS and _scratch_write_allowed(words, cwd, roots, protected):
             continue
         return False
     return True
@@ -192,11 +245,19 @@ def allowed_roots(state: Path, plugin_root: Path, config_dir: Path) -> list[Path
 
 
 def _hub_denial(
-    cards: list[Card], tool: str, tool_input: dict[str, object], cwd: object, roots: list[Path]
+    cards: list[Card],
+    tool: str,
+    tool_input: dict[str, object],
+    cwd: object,
+    roots: list[Path],
+    protected: list[Path],
 ) -> str | None:
     """``cards`` is every live card this session orchestrates. Work/fork deny
     reasons name the first card (kept short); the tripwire check must look at
-    all of them — a stacking session can be spending against any one."""
+    all of them — a stacking session can be spending against any one.
+    ``protected`` (repo root + every live worktree) excludes real source from
+    the scratch-space exceptions below, even when a worktree happens to live
+    under ``/tmp``/``$TMPDIR``."""
     card = cards[0]
     work = (
         f"{card.id} in flight: the orchestrator dispatches, it does not do the work — "
@@ -217,11 +278,8 @@ def _hub_denial(
         raw = tool_input.get("file_path")
         if not isinstance(raw, str) or not raw:
             return work
-        path = Path(raw).expanduser()
-        if not path.is_absolute() and isinstance(cwd, str):
-            path = Path(cwd) / path
         scratch = tmp_roots() + [roots[0]]  # the overseer state root, never the worktree
-        return None if _within(path, scratch) else work
+        return None if _word_is_scratch(raw, cwd, scratch, protected) else work
     if tool in _PATH_TOOLS:
         raw = tool_input.get("file_path") or tool_input.get("path")
         if not isinstance(raw, str) or not raw:
@@ -232,7 +290,9 @@ def _hub_denial(
         return None if _within(path, roots) else work
     if tool == "Bash":
         command = tool_input.get("command")
-        return None if isinstance(command, str) and bash_allowed(command, cwd=cwd, roots=roots) else work
+        return None if isinstance(command, str) and bash_allowed(
+            command, cwd=cwd, roots=roots, protected=protected
+        ) else work
     return None
 
 
@@ -257,9 +317,12 @@ def decide(
     roots: list[Path],
     *,
     read_limit: int = READ_LIMIT_DEFAULT,
+    repo_root: Path | None = None,
 ) -> Verdict:
     """``cards`` = live cards whose orchestrator is this payload's session
-    (empty when the guard is off). Deny beats the Read limit."""
+    (empty when the guard is off). Deny beats the Read limit. ``repo_root``
+    (with every live card's worktree) is excluded from the scratch-space
+    write exceptions — see ``protected_roots``."""
     tool_raw = payload.get("tool_name")
     tool = tool_raw if isinstance(tool_raw, str) else ""
     input_raw = payload.get("tool_input")
@@ -272,7 +335,8 @@ def decide(
             )
         is_hub = not payload.get("agent_id") or is_hub_agent(payload.get("agent_type"))
         if is_hub:
-            reason = _hub_denial(cards, tool, tool_input, payload.get("cwd"), roots)
+            protected = protected_roots(repo_root, cards)
+            reason = _hub_denial(cards, tool, tool_input, payload.get("cwd"), roots, protected)
             if reason:
                 return Verdict(reason)
     return Verdict(updated_input=_limited_read(tool, tool_input, payload, read_limit))

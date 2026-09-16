@@ -105,6 +105,73 @@ class TestBashAllowed:
         assert not bash_allowed(command, cwd="/repo", roots=ROOTS)
 
 
+class TestScratchExcludesRepoAndWorktreeUnderTmp:
+    """A repo or card worktree checked out UNDER /tmp or $TMPDIR (a real
+    benchmark fixture did this) must not become writable just because its
+    path happens to fall inside scratch space."""
+
+    @pytest.fixture
+    def scratch(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMPDIR", str(tmp_path))
+        repo = tmp_path / "repo"
+        worktree = tmp_path / "worktree"
+        repo.mkdir()
+        worktree.mkdir()
+        protected = [repo.resolve(), worktree.resolve()]
+        return tmp_path, repo, worktree, protected
+
+    def test_heredoc_write_to_repo_under_tmp_is_denied(self, scratch):
+        tmp_path, repo, _worktree, protected = scratch
+        command = f"cat > {repo}/src.py << 'EOF'\nbody\nEOF"
+        assert not bash_allowed(command, cwd=str(tmp_path), roots=ROOTS, protected=protected)
+
+    def test_heredoc_write_to_worktree_under_tmp_is_denied(self, scratch):
+        tmp_path, _repo, worktree, protected = scratch
+        command = f"cat > {worktree}/src.py << 'EOF'\nbody\nEOF"
+        assert not bash_allowed(command, cwd=str(tmp_path), roots=ROOTS, protected=protected)
+
+    def test_heredoc_write_to_sibling_scratch_file_is_allowed(self, scratch):
+        tmp_path, _repo, _worktree, protected = scratch
+        command = f"cat > {tmp_path}/scratch.md << 'EOF'\nbody\nEOF"
+        assert bash_allowed(command, cwd=str(tmp_path), roots=ROOTS, protected=protected)
+
+    def test_write_tool_to_repo_under_tmp_is_denied(self, scratch):
+        tmp_path, repo, worktree, _protected = scratch
+        card = make_card("WF-012", worktree=str(worktree))
+        verdict = decide(
+            _p("Write", {"file_path": str(repo / "src.py")}, cwd=str(tmp_path)),
+            [card], ROOTS, repo_root=repo,
+        )
+        assert verdict.deny_reason and "WF-012 in flight" in verdict.deny_reason
+
+    def test_write_tool_to_worktree_under_tmp_is_denied(self, scratch):
+        tmp_path, repo, worktree, _protected = scratch
+        card = make_card("WF-012", worktree=str(worktree))
+        verdict = decide(
+            _p("Write", {"file_path": str(worktree / "src.py")}, cwd=str(tmp_path)),
+            [card], ROOTS, repo_root=repo,
+        )
+        assert verdict.deny_reason and "WF-012 in flight" in verdict.deny_reason
+
+    def test_write_tool_to_sibling_scratch_file_is_allowed(self, scratch):
+        tmp_path, repo, worktree, _protected = scratch
+        card = make_card("WF-012", worktree=str(worktree))
+        verdict = decide(
+            _p("Write", {"file_path": str(tmp_path / "scratch.md")}, cwd=str(tmp_path)),
+            [card], ROOTS, repo_root=repo,
+        )
+        assert verdict == Verdict()
+
+    def test_read_only_inspect_excludes_protected_even_if_under_an_allowed_root(self, scratch):
+        # Defence in depth: if an allowed root ever overlapped the repo, the
+        # same exclusion applies to grep/cat, not just the write path.
+        tmp_path, repo, _worktree, protected = scratch
+        (repo / "secret.py").write_text("x")
+        roots_incl_repo = [*ROOTS, tmp_path.resolve()]
+        command = f"grep -n x {repo}/secret.py"
+        assert not bash_allowed(command, cwd=str(tmp_path), roots=roots_incl_repo, protected=protected)
+
+
 class TestDecideOrchestrator:
     @pytest.mark.parametrize("payload", [
         _p("Edit", {"file_path": "/repo/a.py"}),
