@@ -214,5 +214,5 @@ dispatches. Full mapping + the cleanup/disposal procedure: `references/superpowe
 | `references/stacking.md` | Considering an S-card stack / batched PR |
 | `references/sprints.md` | Activating a sprint, or running `conflicts` at a plan gate |
 | `references/context-stewardship.md` | Setting up or performing a context handover |
-| `references/telemetry.md` | You want the full `log-usage` rationale |
+| `references/telemetry.md` | You want to know what the report hook records, or how the budget is counted |
 | `references/superpowers.md` | Start of orchestration (precedence), and at merge/abandon (cleanup) |

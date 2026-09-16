@@ -5,6 +5,7 @@ OVERSEER = Path(__file__).resolve().parents[2] / "plugins" / "overseer"
 SKILL = (OVERSEER / "skills" / "orchestrate" / "SKILL.md").read_text()
 LOOP = (OVERSEER / "skills" / "orchestrate" / "references" / "review-loop.md").read_text()
 IMPL = (OVERSEER / "templates" / "implementer.md").read_text()
+LEDGER_SKILL = (OVERSEER / "skills" / "ledger" / "SKILL.md").read_text()
 
 
 def test_orchestrator_rules_present():
@@ -22,3 +23,13 @@ def test_retired_instructions_gone():
 
 def test_version_bumped():
     assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.24.0"
+
+
+def test_ledger_skill_qualifies_manual_logging_verbs():
+    # The Reviews bullet must not tell the orchestrator to log-review after
+    # every dispatched review round — under orchestration the report hook
+    # does that automatically. The bullet must say so.
+    reviews_bullet = LEDGER_SKILL.split("**Reviews:**", 1)[1].split("- **", 1)[0]
+    assert "log-review" in reviews_bullet
+    assert "report hook" in reviews_bullet
+    assert "automatically" in reviews_bullet
