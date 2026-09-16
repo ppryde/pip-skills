@@ -11,4 +11,4 @@
 - Binding constraints: {{constraints}}
 
 ## Output
-Write your evidence to `{{reply_path}}` in the format your agent definition gives, then reply with the single line it specifies. The ledger copies the file into the card's Verification section.
+Write your evidence to `{{reply_path}}` in the format your agent definition gives, then reply with the `overseer-report` block it specifies. The ledger copies the file into the card's Verification section.

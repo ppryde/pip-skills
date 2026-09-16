@@ -16,4 +16,4 @@
 - Ledger CLI (read-only verbs, e.g. `show {{card_id}} --json`): {{cli}}
 
 ## Output
-Write your verdict to `{{reply_path}}` in the format your agent definition gives, then reply with the single line it specifies, pointing at that path.
+Write your verdict to `{{reply_path}}` in the format your agent definition gives, then reply with the `overseer-report` block it specifies, its `detail` field pointing at that path.

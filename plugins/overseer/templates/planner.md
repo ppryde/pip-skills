@@ -13,4 +13,4 @@
 - Worktree (read to plan; do not modify): {{worktree}}
 
 ## Output
-Write the plan to `{{reply_path}}` in the structure your agent definition gives, then reply with the single line it specifies. The ledger copies the file into the card's Plan section.
+Write the plan to `{{reply_path}}` in the structure your agent definition gives, then reply with the `overseer-report` block it specifies. The ledger copies the file into the card's Plan section.

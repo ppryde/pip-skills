@@ -9,7 +9,7 @@ read files, never pasted walls.
    `dispatch-prep <id> --stage <stage> --role reviewer --slot <X> --round <n>
    --lens <lens>`, then dispatch every `overseer:overseer-reviewer` **in one
    turn**. Reviewers are independent: none sees another's current-round verdict.
-2. **Read the lines.** All `approved` → stage passes. Any `found wanting` with
+2. **Read the reports.** All `approved` → stage passes. Any `found wanting` with
    C or I > 0 → step 3. Minors never force a round.
 3. **One fixer.** `dispatch-prep <id> --stage <stage> --role fixer --round <n>`
    (it lists this round's verdict files) → dispatch `overseer:overseer-fixer`,

@@ -70,9 +70,9 @@ undecided, per the policy.md table. Review gates never shrink at any size.
   (`references/sprints.md`). On approval: `set-stage <id> implementation`.
 - **implementation** — per chunk: `dispatch-prep <id> --stage implementation
   --role implementer --chunk <n> [--var gate_commands="…"]` → dispatch
-  `overseer:overseer-implementer` with the path. Its one-line reply is all you
-  read; the report hook logs progress, commits and real usage. A chunk that
-  needs MCP tools: dispatch `general-purpose` with the same bundle path.
+  `overseer:overseer-implementer` with the path. Its `overseer-report` block
+  is all you read; the report hook logs progress, commits and real usage. A
+  chunk that needs MCP tools: dispatch `general-purpose` with the same bundle path.
 - **impl-review** — adversarial review loop over the diff; `dispatch-prep`
   writes the diff file for you (`references/review-loop.md`).
 - **verification** — `dispatch-prep <id> --stage verification --role verifier
@@ -88,9 +88,10 @@ undecided, per the policy.md table. Review gates never shrink at any size.
   into a prompt — `--var` values are capped at 300 characters for that reason.
 - **Agent types:** `overseer:overseer-planner|implementer|reviewer|fixer|verifier`.
   Pass `model` per `policy.md` tier on the `Agent` call. Never fork.
-- **Replies are one line.** Each agent ends with a fixed one-line reply
-  (status, counts, path). Decide from the line; open the named file only when
-  the line says you must (a dispute, a BLOCKED, a FAIL).
+- **Replies are one typed JSON block.** Each agent ends its final message with
+  one `overseer-report` fenced block (status, counts, its `detail` path).
+  Decide from the block; open the named `detail` file only when the block
+  says you must (a dispute, a BLOCKED, a FAIL).
 - **You log nothing after a dispatch.** The `SubagentStop` report hook records
   review verdicts, progress, commits, real usage and Learned facts.
 - **Run in the background, don't poll.** Dispatch with `run_in_background: true`
@@ -130,8 +131,8 @@ named card via the normal pickup flow; its first work verb (`set-stage`/
 if you cannot take it right now, `unclaim <id>` and say why.
 
 ## Comms
-- Subagent mode: hub-and-spoke. Agents reply to you with one line; detail lives
-  in their dispatch files and the ledger.
+- Subagent mode: hub-and-spoke. Agents reply to you with one report block;
+  detail lives in their dispatch files and the ledger.
 - Team mode: peers may talk directly, but nothing they agree is real until it
   is on the card. Do **not** CC peer traffic to yourself — every message you
   receive is a full-context turn. If it isn't in the ledger, it didn't happen.
@@ -176,9 +177,10 @@ written ONLY by the `checklist-sync-hook` (overseer's `PostToolUse` hook on
 ## Telemetry
 Automatic. The `SubagentStop` report hook totals each overseer agent's real
 usage from its transcript and appends it to `usage.jsonl`; implementer and
-fixer spend also feeds the card's budget. `usage [--card <id>]` warns when
-agents ignored the reply format (unparsed) or the 25-word cap (overrun).
-Full rationale: `references/telemetry.md`.
+fixer spend also feeds the card's budget. A missing or invalid report block
+gets one bounce (the hook's own `decision: block`, bounded by
+`stop_hook_active`); still invalid on the retry, it's recorded and
+`usage [--card <id>]` warns about it. Full rationale: `references/telemetry.md`.
 
 ## Context stewardship
 Context handover is provided by the **`vigil`** plugin (a soft dependency). Begin

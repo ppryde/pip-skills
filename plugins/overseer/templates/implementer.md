@@ -13,4 +13,4 @@
 {{knowledge}}
 
 ## Output
-Write your report to `{{reply_path}}` in the format your agent definition gives, then reply with the single line it specifies.
+Write your report to `{{reply_path}}` in the format your agent definition gives, then reply with the `overseer-report` block it specifies.
