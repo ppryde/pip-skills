@@ -70,6 +70,9 @@ python .../cli.py --root . resume
 - **Progress:** `log-progress <id> --note "what happened" --tokens 120k`
   after each meaningful unit of work. Exit code 2 means the 2× budget
   tripwire fired: **stop the card, tell the user why it overran.**
+- **Orchestration verbs (orchestrate skill):** `bootstrap`, `dispatch-prep`,
+  `set-section`, `release`, `facts --pending`, `accept-fact`, `reject-fact`.
+  Hook backends (not for hand use): `report-hook`, `pretool-hook`.
 - **Reviews:** after each review round:
   `log-review <id> --stage plan-review --reviewers 2 --verdict "approved"`.
   Verdicts are short and factual ("found wanting — 2 findings, 1 mortal").
