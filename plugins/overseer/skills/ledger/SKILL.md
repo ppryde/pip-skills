@@ -9,6 +9,7 @@ description: >
   overseer (a `board.db` entry for cards, sprints, usage and knowledge, all
   under the central per-repo folder). The state layer beneath the orchestrate
   skill; drive it through the overseer CLI, never by editing files.
+effort: medium
 ---
 
 # Overseer Ledger

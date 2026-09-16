@@ -25,6 +25,35 @@ def test_version_bumped():
     assert json.loads((OVERSEER / ".claude-plugin" / "plugin.json").read_text())["version"] == "0.24.0"
 
 
+def test_cli_location_and_cheat_sheet_present():
+    # Round 2 of WF-113: a benchmark run shelled out to `find / -iname
+    # overseer` (120s) because it didn't know where cli.py was, and guessed
+    # its way through dispatch-prep/set-section signatures. Both must be
+    # answered directly in this file.
+    assert "Locate the CLI" in SKILL and "never search for it" in SKILL
+    assert "scripts/cli.py" in SKILL
+    for verb in ("resume", "bootstrap", "dispatch-prep", "set-stage", "set-section",
+                 "set-field", "block", "release", "show", "facts --pending"):
+        assert f"`{verb}`" in SKILL, verb
+
+
+def test_one_call_s_brief_and_advance_documented():
+    assert "--brief" in SKILL and "--advance" in SKILL
+    assert "--chunk` defaults to `1`" in SKILL or "defaults to 1" in SKILL
+
+
+def test_foreground_dispatch_documented():
+    assert "run_in_background: false" in SKILL
+    assert "Never poll" in SKILL or "never poll" in SKILL.lower()
+
+
+def test_orchestrate_and_ledger_skills_declare_effort():
+    import yaml
+    for name, text in (("orchestrate", SKILL), ("ledger", LEDGER_SKILL)):
+        _, front, _ = text.split("---", 2)
+        assert yaml.safe_load(front).get("effort") == "medium", name
+
+
 def test_ledger_skill_qualifies_manual_logging_verbs():
     # The Progress and Reviews bullets must not tell the orchestrator to
     # log-progress/log-review after every dispatched unit of work or review

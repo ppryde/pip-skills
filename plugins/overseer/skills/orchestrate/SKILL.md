@@ -8,6 +8,7 @@ description: >
   resumes in-flight orchestrated work, or asks to hand over / reset context
   mid-run. Requires the overseer ledger (invoke overseer:ledger first if the
   overseer state directory is missing).
+effort: medium
 ---
 
 # Overseer Orchestrate
@@ -29,9 +30,45 @@ re-reads your whole context, so every turn you *don't* take is the saving.
 
 This file is the lean driver. Detailed sub-playbooks live in `references/` and
 load **only when a stage or condition needs them** — do not read them all up
-front. The **References** table at the end says exactly when to read each; this
+front. An S or M card should need NONE of them: the CLI cheat-sheet and
+review-loop summary below are inlined for exactly that reason. The
+**References** table at the end says exactly when the rest earn a read; this
 keeps your context small, which is itself part of the job (see Context
 stewardship).
+
+## Locate the CLI — never search for it
+This file loaded from `<...>/plugins/overseer/skills/orchestrate/SKILL.md`
+(Claude Code names that path when the skill loads). The CLI is two levels up:
+`<that directory>/../../scripts/cli.py` — i.e. `plugins/overseer/scripts/cli.py`
+from the plugin root, or `${CLAUDE_PLUGIN_ROOT}/scripts/cli.py` inside a
+dispatched agent. Every verb below is `python3 <that path> --root <repo-root>
+<verb> [flags]`. Never `find` / `locate` for it — that's a denied, slow guess
+at something this file already told you.
+
+## CLI cheat-sheet
+Exact signatures for every verb an S/M card needs; the parser rejects
+anything else with `error: ...`, exit 1 (or exit 2 → your own `bash_allowed`
+denial, unrelated). `<id>` is a card id (`WF-123`).
+
+| Verb | Signature | Notes |
+|---|---|---|
+| `resume` | `resume [--json]` | In-flight cards for this repo. Run first, every session. |
+| `bootstrap` | `bootstrap (--title "<t>" \| --card <id>) [--complexity S\|M\|L\|XL] [--labels a,b] [--goal "<g>"] [--jira K\|--linear K] [--type feat\|fix\|...] [--slug s] [--brief "<text>"]` | New card + worktree + branch, in one call. Plain: lands at `planning`. With `--brief`: writes `## Plan` from the text and lands at `implementation` directly — the whole S-card shortcut. |
+| `dispatch-prep` | `dispatch-prep <id> --stage <s> --role planner\|implementer\|reviewer\|fixer\|verifier [--round n] [--slot A] [--chunk n] [--lens l] [--var k=v ...] [--advance]` | Prints ONLY the bundle path — that path is the agent's whole prompt. `--chunk` defaults to `1` for `--role implementer`. `--advance` runs `set-stage <id> <s>` first, in the same call — a stage transition and its first dispatch in one Bash call. |
+| `set-stage` | `set-stage <id> <stage>` | A bare stage transition with no dispatch (PLAN GATE approval, PR raised). Prefer `dispatch-prep --advance` when a dispatch follows immediately. |
+| `set-section` | `set-section <id> --section Plan\|Verification\|Decisions (--file <path> \| --text "<t>")` | `--text` for a short brief (no temp file); `--file` for anything longer. |
+| `set-field` | `set-field <id> [--branch b] [--worktree w] [--pr url] [--touches t] [--labels a,b] [--parent id] [--priority P0..P4] [--title t] [--body md] [--complexity S\|M\|L\|XL] [--estimate 400k]` | Any card metadata field; an empty string clears a clearable one. |
+| `block` / `unblock` | `block <id> --reason "..."` / `unblock <id>` | A real blocker, with a reason. |
+| `park` / `unpark` | `park <id>` / `unpark <id>` | Shelve without a blocker; resumable, preserves stage/branch/worktree. |
+| `done` / `abandon` | `done <id>` / `abandon <id>` | Terminal; archives the card. |
+| `release` | `release <id>` | Escape hatch: un-stamps you as this card's orchestrator (the guard stops enforcing on it). |
+| `depends` | `depends <id> [--on <other>] [--off <other>]` | Card→card ordering; never a `block` reason. |
+| `show` | `show <id> [--json]` | Read a card's sections/fields — only when you need one for a gate. |
+| `facts --pending` | `facts --pending [--card <id>]` | List pending Learned facts at a stage boundary. |
+| `accept-fact` / `reject-fact` | `accept-fact <P-id>` / `reject-fact <P-id> --reason "..."` | Adjudicate one pending fact — one call per decision. |
+| `conflicts` | `conflicts [--sprint s] [--json]` | Cross-card conflicts, run at the PLAN GATE. |
+| `handoff` | `handoff [--json]` | Ledger rollup; pipe into vigil's `handover` (Context stewardship). |
+| `usage` | `usage [--card <id>] [--json]` | Token spend; warns on unparsed reports. |
 
 ## On invocation
 1. Run `resume` (ledger CLI). In-flight cards → offer resume/park/abandon per
@@ -42,45 +79,82 @@ stewardship).
    otherwise subagent mode. That is your comms mode for this session.
 
 ## Stage playbook
-Before the first dispatch, size the ceremony (`policy.md` — Right-sizing the
-ceremony): the bullets below are the maximum weight per stage, not the
-mandatory weight. An S, fully-specified card collapses planning into a task
-brief and skips the plan-review loop and PLAN GATE entirely; M/ambiguous and
-L cards traverse every stage, but only L (or novel/cross-plugin) runs each at
-full weight — an M card's planning is proportionate to what's actually
-undecided, per the policy.md table. Review gates never shrink at any size.
+**Right-sizing, inlined (full table + Riders: `policy.md`).** The bullets
+below are the maximum weight per stage, not the mandatory weight:
+- **S, fully specified** (exact behaviour known, 1–2 files, an existing house
+  pattern, or prose-only): `bootstrap ... --brief "<task brief>"` — skips
+  planning, plan-review AND the PLAN GATE conversation entirely, landing
+  straight at `implementation`. This is the default skip; use it unless the
+  card is genuinely M/L.
+- **M, or ambiguous:** run planning, but proportionate to what's actually
+  undecided — not full L weight.
+- **L, novel architecture, or cross-plugin:** every stage below, at full
+  weight, no shortcuts.
+- **Review gates (plan-review, impl-review) never shrink at any size** — a
+  card found wanting because its ceremony was skipped is unreviewed, not
+  efficient. Triage only ever scales what happens *before* implementation.
+
+Stages:
 - **bootstrap** — one call: `bootstrap --title "<title>" --complexity <S|M|L>
-  [--labels a,b] [--goal "<goal>"] [--jira|--linear KEY] [--type feat|fix|…]`
-  (or `bootstrap --card <id>` for an existing card). It detects the real base
-  branch, creates worktree + branch, records them, moves the card to
-  `planning` and stamps you as orchestrator. Exit 1 leaves the card at
-  `bootstrap` with the git error.
-- **planning** — `dispatch-prep <id> --stage planning --role planner` →
-  dispatch `overseer:overseer-planner` with the printed path as the whole
-  prompt. The report hook copies the plan into the card's `## Plan`; you read
-  it with `show <id> --json` only when you need it for the gate. L cards:
-  attempt split first; if split, create the children **with `set-field <child>
-  --parent <this-card>`** and keep this card as the epic. L keeps a second
-  planning pass.
-- **plan-review** — run the adversarial review loop over the plan text
-  (`references/review-loop.md`).
-- **PLAN GATE** — present to the user: plan, estimate, trade-offs, and the PR
-  decomposition (they may re-cut PR boundaries). Batch the gate for a declared
-  stack (`references/stacking.md`). Run `conflicts` against everything in flight
-  (`references/sprints.md`). On approval: `set-stage <id> implementation`.
+  [--labels a,b] [--goal "<goal>"] [--jira|--linear KEY] [--type feat|fix|…]
+  [--brief "<text>" for the S shortcut above]` (or `bootstrap --card <id>` for
+  an existing card). Detects the real base branch, creates worktree + branch,
+  records them, stamps you as orchestrator, and lands at `planning` (or
+  `implementation` with `--brief`). Exit 1 leaves the card at `bootstrap` with
+  the git error.
+- **planning** (skipped for an S `--brief` card) — `dispatch-prep <id> --stage
+  planning --role planner --advance` → dispatch `overseer:overseer-planner`
+  with the printed path as the whole prompt. The report hook copies the plan
+  into the card's `## Plan`; you read it with `show <id> --json` only when you
+  need it for the gate. L cards: attempt split first; if split, create the
+  children **with `set-field <child> --parent <this-card>`** and keep this
+  card as the epic. L keeps a second planning pass.
+- **plan-review** (skipped for an S `--brief` card) — the review loop below,
+  over the plan text.
+- **PLAN GATE** (skipped for an S `--brief` card) — present to the user: plan,
+  estimate, trade-offs, and the PR decomposition (they may re-cut PR
+  boundaries). Batch the gate for a declared stack (`references/stacking.md`).
+  Run `conflicts` against everything in flight (`references/sprints.md`). On
+  approval: `set-stage <id> implementation` (or fold into the first
+  implementer dispatch — see `--advance` below).
 - **implementation** — per chunk: `dispatch-prep <id> --stage implementation
-  --role implementer --chunk <n> [--var gate_commands="…"]` → dispatch
+  --role implementer [--chunk <n>] [--var gate_commands="…"] --advance` (first
+  call also flips the stage; `--chunk` defaults to `1`) → dispatch
   `overseer:overseer-implementer` with the path. Its `overseer-report` block
   is all you read; the report hook logs progress, commits and real usage. A
   chunk that needs MCP tools: dispatch `general-purpose` with the same bundle path.
-- **impl-review** — adversarial review loop over the diff; `dispatch-prep`
-  writes the diff file for you (`references/review-loop.md`).
+- **impl-review** — the review loop below, over the diff; `dispatch-prep`
+  writes the diff file for you.
 - **verification** — `dispatch-prep <id> --stage verification --role verifier
-  --var gate_commands="…"` → dispatch `overseer:overseer-verifier`. The hook
-  writes the card's `## Verification`. Empty Verification = cannot advance.
+  --var gate_commands="…" --advance` → dispatch `overseer:overseer-verifier`.
+  The hook writes the card's `## Verification`. Empty Verification = cannot
+  advance.
 - **awaiting-merge** — raise the PR (or stack onto the batch PR),
   `set-field --pr <url>`. The merge is the user's. Post-merge cleanup and
   abandonment follow `references/superpowers.md`.
+
+## Review loop (plan-review and impl-review)
+Inlined — read `references/review-loop.md` only for the round-cap/dispute
+edge cases (a maintained dispute, a deadlock, an L panel's round-1 lens set).
+1. **Round n reviewers**, one panel, dispatched together (one message, several
+   `Agent` calls, all foreground — see Dispatch): `dispatch-prep <id> --stage
+   <s> --role reviewer --slot <A|B|...> --round <n> --lens <lens>` per slot,
+   then dispatch every `overseer:overseer-reviewer`. Reviewers are
+   independent: none sees another's current-round verdict.
+2. **Read the reports.** All `approved` → stage passes, move on. Any
+   `found wanting` with critical/important > 0 → step 3. Minors alone never
+   force a round.
+3. **One fixer.** `dispatch-prep <id> --stage <s> --role fixer --round <n>` →
+   dispatch `overseer:overseer-fixer`. You do not read the findings yourself.
+4. **Re-review.** Round n+1 reviewers see every earlier verdict and fix report
+   and must WITHDRAW or MAINTAIN (with new evidence) each disputed finding. A
+   dispute still maintained after that is yours: open only that verdict file
+   and fix report, decide, record the ruling in `## Decisions`
+   (`references/review-loop.md` for the full protocol).
+5. **Round cap reached** (`policy.md` table by complexity) → `block <id>
+   --reason "user: review deadlock — <summary>"`.
+6. The report hook logs every verdict under the round's header in
+   `## Review log` — never call `log-review` yourself in this loop.
 
 ## Dispatch
 - **Prompt = bundle path.** Always `dispatch-prep` first; the agent's whole
@@ -94,9 +168,18 @@ undecided, per the policy.md table. Review gates never shrink at any size.
   says you must (a dispute, a BLOCKED, a FAIL).
 - **You log nothing after a dispatch.** The `SubagentStop` report hook records
   review verdicts, progress, commits, real usage and Learned facts.
-- **Run in the background, don't poll.** Dispatch with `run_in_background: true`
-  when you have nothing else to do; the completion notice *is* the report. Never
-  sleep, poll or message a running agent to check on it.
+- **Dispatch in the foreground.** `run_in_background: false` whenever you have
+  nothing else to do while it runs — which is the normal case: you don't do
+  work, so there's nothing to interleave. A foreground `Agent` call simply
+  returns with the result when the agent finishes; a background one costs you
+  a `ScheduleWakeup` turn plus a turn to read the bare completion notice, for
+  nothing gained. Only background a dispatch when you have genuinely
+  independent ledger work to do in parallel with it (rare for one card).
+- **Parallel reviewers: one message, several foreground `Agent` calls.**
+  Independent tool calls in the same message already run concurrently — no
+  `run_in_background: true` needed to parallelise a review panel.
+- **Never poll.** No `ScheduleWakeup`, no sleep, no checking on a running
+  agent — foreground dispatch means you don't need to.
 - **Batch.** Issue independent tool calls (parallel reviewers, independent CLI
   reads) in one turn.
 - **Learned facts:** at each stage boundary, `facts --pending --card <id>`, then
@@ -214,7 +297,7 @@ dispatches. Full mapping + the cleanup/disposal procedure: `references/superpowe
 ## References — read each only when you reach its trigger
 | File | Read when |
 |---|---|
-| `references/review-loop.md` | Entering plan-review or impl-review |
+| `references/review-loop.md` | The inlined review loop above hits a dispute, deadlock, round-cap, or an L card's round-1 panel — not on every plan-review/impl-review entry |
 | `references/knowledge.md` | Injecting `{{knowledge}}`, or adjudicating a Learned line / verifying / retiring a fact |
 | `references/stacking.md` | Considering an S-card stack / batched PR |
 | `references/sprints.md` | Activating a sprint, or running `conflicts` at a plan gate |
