@@ -23,9 +23,10 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import config, db, liveness
+from scripts import config, db, liveness, report_hook
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
+from scripts.dispatch import REPLY_WORD_CAP
 from scripts.index import rebuild_index
 from scripts.knowledge import (
     Fact,
@@ -1177,6 +1178,19 @@ def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_report_hook(args: argparse.Namespace) -> int:
+    """SubagentStop backend — scripts/report_hook.py. Always exit 0, no
+    output: a failing telemetry hook must never stall or steer an agent."""
+    try:
+        payload = _read_hook_payload()
+        repo_root = _hook_root(payload, args)
+        if state_root(repo_root).is_dir():
+            report_hook.handle(payload, repo_root, _now())
+    except Exception:
+        return 0
+    return 0
+
+
 def cmd_dashboard_refresh_hook(args: argparse.Namespace) -> int:
     """SessionStart hook verb (WF-053): if a dashboard is running from an
     OLDER overseer than the one now installed, restart it in place.
@@ -1551,6 +1565,16 @@ def cmd_usage(args: argparse.Namespace) -> int:
     entries, skipped = load_usage(state_root(args.root))
     if skipped:
         print(f"warning: {skipped} corrupt usage line(s) skipped", file=sys.stderr)
+    scoped = [e for e in entries if not args.card or e.get("card") == args.card]
+    unparsed = sum(1 for e in scoped if e.get("unparsed") is not None)
+    overruns = sum(1 for e in scoped if e.get("overrun"))
+    if unparsed or overruns:
+        noun = "reply" if unparsed == 1 else "replies"
+        print(
+            f"warning: {unparsed} unparsed agent {noun}, "
+            f"{overruns} over the {REPLY_WORD_CAP}-word cap",
+            file=sys.stderr,
+        )
     summary = summarise(entries, args.card)
     if args.json:
         print(json.dumps(summary, indent=2))
@@ -1902,6 +1926,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("claim-stop-hook").set_defaults(func=cmd_claim_stop_hook)
     sub.add_parser("claim-prompt-hook").set_defaults(func=cmd_claim_prompt_hook)
+    sub.add_parser(
+        "report-hook",
+        help="SubagentStop: record an overseer agent's reply and real usage (WF-113)",
+    ).set_defaults(func=cmd_report_hook)
     sub.add_parser(
         "dashboard-refresh-hook",
         help="SessionStart: restart a running dashboard that is older than the installed overseer (WF-053)",
