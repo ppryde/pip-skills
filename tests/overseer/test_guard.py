@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from factories import make_card
+
 from scripts.cli import main
 from scripts.guard import Verdict, allowed_roots, bash_allowed, decide, hook_output
 
@@ -191,7 +191,7 @@ class TestCli:
 def test_shell_wrapper_exits_zero(tmp_path):
     result = subprocess.run(
         [BASH, str(PLUGIN_ROOT / "hooks" / "pretool.sh")], input="{}",
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
         env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
              "OVERSEER_PYTHON": sys.executable, "OVERSEER_CENTRAL": str(tmp_path / "s"),
              "OVERSEER_DB": str(tmp_path / "b.db"), "CLAUDE_CONFIG_DIR": str(tmp_path / "c")},
