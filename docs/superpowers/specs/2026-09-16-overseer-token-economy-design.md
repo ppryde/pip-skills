@@ -89,32 +89,46 @@ Each item stands alone and ships in this order within one rolling PR.
 
 ### 5.1 Orchestrator guard hook (`PreToolUse`)
 
-New `hooks/guard.sh` → `cli.py guard-hook`. Record-and-decide; never blocks on
-its own failure (errors → allow).
+New `hooks/pretool.sh` → `cli.py pretool-hook` (one process runs the guard and
+the Read limit, §5.7). Never blocks on its own failure (errors → allow).
 
-- **Orchestrator identity:** new `cards.orchestrator_session` column, stamped
-  from `CLAUDE_CODE_SESSION_ID` by the work verbs (`set-stage`, `log-progress`,
-  `dispatch-prep`, `bootstrap`); cleared on `done`/`park`/`abandon`/`unclaim`.
+- **Orchestrator identity:** new `orchestrators(card_id, session_id, stamped)`
+  table in `board.db` (a side table, so the `Card` model and dashboard are
+  untouched), stamped from `CLAUDE_CODE_SESSION_ID` by the work verbs
+  (`set-stage`, `log-progress`, `log-review`, `dispatch-prep`, `bootstrap`);
+  cleared on `done`/`park`/`abandon`/`unclaim` and by a new `release <card>` verb
+  (the per-card escape hatch).
 - **Applies when** a live card has `orchestrator_session == payload.session_id`.
 - **No fork (any session with a live card, orchestrator or agent):** deny `Agent`
   with `subagent_type == "fork"` → reason `"WF-12 in flight: forks inherit full
   context — dispatch a fresh overseer-* agent with a bundle path"`.
 - **No work (orchestrator only, `agent_id` absent):** deny `Edit`, `Write`,
-  `NotebookEdit`, `mcp__*`, `Read`/`Grep`/`Glob` outside the state root, and
+  `NotebookEdit`, `mcp__*`, `Read`/`Grep`/`Glob` outside the state root, the plugins directory and the Claude config dir, and
   `Bash` unless the command is the overseer or vigil CLI, `git`
   (status/log/diff --stat/worktree/branch/fetch/pull/push/commit on the card
   branch), or `gh pr`. Reason names the card and says "dispatch instead".
 - **Foreman (Phase 2):** a call with `agent_type == "overseer-foreman"` gets the
   same no-work rule as the orchestrator.
-- **Escape hatch:** config `guard: off` per repo, or `OVERSEER_GUARD=off` in env.
-  The deny reason mentions both.
+- **Tripwire:** an orchestrator `Agent` dispatch on a card whose spend is ≥ 2×
+  its estimate is denied with the overrun story (replaces the `log-progress`
+  exit-2 path, which the orchestrator no longer calls).
+- **Escape hatch:** `release <card>`, config `"guard": false` in
+  `.overseer/config.json`, or `OVERSEER_GUARD=off` in the session env. The deny
+  reason names them.
+- **Not a security boundary.** Command parsing is best-effort and fails open;
+  its job is to stop accidental token spend, not a determined user.
 
 ### 5.2 Agent definitions
 
 New `agents/overseer-{planner,implementer,reviewer,fixer,verifier}.md`: a
-`tools:` allowlist, `model:` per `policy.md` tier, and a body that is the role
-charter + the terse charter (§5.9) + the role's reply line. Reviewers and
-verifiers get no `Edit`. The orchestrator dispatches only these types.
+`tools:` allowlist, default `model: sonnet` (the orchestrator passes `model` per
+`policy.md` tier on the `Agent` call), and a body that is the static role charter
++ the role's reply line. Reviewers, planners and verifiers get no `Edit`. Plugin
+agents are addressed as `overseer:overseer-<role>` (probe: `agent_type` carries the
+plugin prefix). The orchestrator dispatches only these types; a chunk that needs
+MCP tools is dispatched as `general-purpose` with the same bundle path.
+Probe: a `tools: Read, Write` plugin agent opened at 2.6k context vs 18.8k for
+`general-purpose` (no CLAUDE.md in the probe dir).
 
 ### 5.3 `dispatch-prep` verb
 
@@ -122,8 +136,10 @@ verifiers get no `Edit`. The orchestrator dispatches only these types.
 does in one call what the orchestrator does in ~5 turns today: `calibration`,
 fact selection for the card, diff to `diff.patch` (review stages), prior
 findings from earlier rounds' verdict files, template fill. Writes `bundle.md`,
-prints its absolute path only. Templates collapse to `{{bundle_path}}` +
-`{{reply_path}}`; everything else they took inline moves into the bundle.
+prints its absolute path only. The orchestrator's dispatch prompt is
+the bundle path alone. Small free-text inputs (gate commands, a lens) pass as
+`--var key=value`, **each capped at 300 characters** — anything longer must be a
+file, which makes F2's pasted walls impossible through this verb.
 
 ### 5.4 Report hook (`SubagentStop`)
 
@@ -146,13 +162,24 @@ starting `overseer-`. Always exits 0, prints nothing.
 | verifier | `set-section Verification` from `verification.md`, usage |
 | foreman | stage result, usage |
 
-4. Always record `reply_tokens`. A reply over the cap is logged as `overrun`;
+4. Always record `reply_words`. A reply over the cap is logged as `overrun`;
    one that doesn't parse is logged as `unparsed` with the raw line. **No
    retry, no block.** The dashboard shows both.
 
 `usage.jsonl` entries gain `input`, `cache_read`, `cache_creation`, `output`,
-`reply_tokens`, `agent_id`, `source: "hook"`. `tokens` stays = raw total so
-existing readers keep working. Orchestrator `log-progress --tokens` /
+`budget_tokens`, `reply_words`, `overrun`, `agent_id`, `source: "hook"`. `tokens`
+stays = raw total so existing readers keep working.
+
+**Budget semantics:** as today, only implementer and fixer spend feeds the card's
+`budget_actual` (and so the tripwire); planner, reviewer and verifier spend lands
+in `usage.jsonl` only (`references/telemetry.md`). The amount added is
+`input + cache_creation + output` — tokens newly placed in context — not the raw
+total. Cache reads are the ~750× re-read amplification; counting them would trip
+every card against today's S/M/L bands. The raw figure lives in `usage.jsonl`.
+
+**Concurrency:** parallel reviewers finish together, so the hook mutates the card
+inside one `BEGIN IMMEDIATE` transaction (load → change → save), never the
+whole-row last-write-wins `_sync` path. Orchestrator `log-progress --tokens` /
 `log-usage` after dispatches are removed from SKILL.md.
 
 ### 5.5 `set-section` and pending facts
@@ -175,10 +202,12 @@ still never see each other's verdicts before submitting.
 
 ### 5.7 Read limit hook
 
-`PreToolUse` on `Read` where `agent_id` is present, `agent_type` starts
-`overseer-`, and no `limit` is given → `updatedInput` with `limit: 400`. Agents
-can still pass an explicit `offset`/`limit`. **Verify `updatedInput` on this
-build during planning.** Measure turns per agent before and after; revert if
+`PreToolUse` on `Read` where `agent_id` is present, `agent_type` is an
+`overseer-*` role, and no `limit`/`offset` is given → `updatedInput` with
+`limit: 400` (config `read_limit`, `0` disables; images/PDFs/notebooks exempt).
+Agents can still pass an explicit `offset`/`limit`. **Verified:** `updatedInput`
+works with no `permissionDecision`, so permission rules still apply. The guard
+and this rule share one `PreToolUse` hook process. Measure turns per agent before and after; revert if
 agents take more turns re-reading in pieces.
 
 ### 5.8 Fewer orchestrator turns elsewhere
@@ -197,8 +226,8 @@ agents take more turns re-reading in pieces.
 
 ### 5.9 Terse charter
 
-One shared text, included in every agent definition and the orchestrator's
-user-communication section: *terse and factual; state results, not process;
+One shared text, written into every bundle by `dispatch-prep` (so config can
+switch it) and into the orchestrator's user-communication section: *terse and factual; state results, not process;
 no preamble or recap; expand only when asked.* Config `verbosity: terse|normal`
 (default `terse`) switches the charter paragraph off per repo.
 
@@ -306,11 +335,13 @@ real cards (estimates, to be confirmed):
   cost more hub turns than they save; round caps trade review quality for ~0.2
   Mtok/card.
 
-## 10. Open items for planning
+## 10. Open items
 
-- Verify `updatedInput` on `PreToolUse` (§5.7).
-- Confirm a plugin `agents/` definition's `tools:` allowlist reduces turn-1
-  context on this build, and by how much (evidence so far: an `Explore` agent
-  opened at 17k vs 53k+).
-- Decide the exact git allowlist for the guard (§5.1) against the stacking and
-  merge flows in `references/stacking.md` and `references/superpowers.md`.
+Resolved during planning: `updatedInput` works without a permission decision;
+plugin agent definitions cut turn-1 context (2.6k vs 18.8k); plugin agent types
+carry the `overseer:` prefix; transcript usage repeats identically per content
+block, so de-duplication by message id is exact.
+
+Remaining, measured in the plan's final task: turn-1 context of an `overseer-*`
+agent inside a real repo (with CLAUDE.md), and whether the Read limit raises
+turns per agent.
