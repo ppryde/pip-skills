@@ -18,3 +18,9 @@ writer; agents propose, you adjudicate.
 - **Retire.** When a reviewer or worker refutes a fact, `retire-fact` it
   (`--superseded-by` when a newer fact replaces it). Never edit knowledge files
   by hand.
+
+## Pending facts
+Agents propose facts as `Learned:` lines in their dispatch files; the report
+hook queues them. At each stage boundary: `facts --pending --card <id>`, then
+`accept-fact <P-id>` (creates the KB fact, source = card + dispatch file) or
+`reject-fact <P-id> --reason "…"`. Adjudicate before handing over.

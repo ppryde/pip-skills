@@ -15,6 +15,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -22,9 +23,10 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import config, db, liveness
+from scripts import bundle, config, db, gitops, guard, liveness, report_hook
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
+from scripts.dispatch import ROLES
 from scripts.index import rebuild_index
 from scripts.knowledge import (
     Fact,
@@ -43,11 +45,14 @@ from scripts.models import (
     COMPLEXITIES,
     LABEL_PALETTE_KEYS,
     PRIORITIES,
+    STAGES,
     Card,
     CardParseError,
     format_tokens,
     parse_tokens,
 )
+from scripts.pending import load_pending
+from scripts.pending import set_status as set_pending_status
 from scripts.relations import would_cycle_depends, would_cycle_parent
 from scripts.resume import format_report, handoff_data, handoff_report, resume_entries
 from scripts.sprints import (
@@ -61,7 +66,9 @@ from scripts.sprints import (
 )
 from scripts.store import (
     derive_repo_label,
+    derive_repo_root,
     init_workflow,
+    slugify,
     state_root,
 )
 from scripts.usage import append_usage, load_usage, summarise
@@ -232,6 +239,23 @@ def _load(repo_root: Path, card_id: str) -> Card:
     return card
 
 
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+
+def _stamp_orchestrator(repo_root: Path, card_id: str) -> None:
+    """Record the calling Claude session as ``card_id``'s orchestrator (WF-113
+    §5.1) so the PreToolUse guard can tell the hub from its agents. Claude
+    Code sets CLAUDE_CODE_SESSION_ID in every Bash call; outside Claude Code
+    it is absent and this is a no-op."""
+    session_id = os.environ.get(SESSION_ENV)
+    if session_id:
+        db.stamp_orchestrator(_conn(repo_root), card_id, session_id, _now())
+
+
+def _release_orchestrator(repo_root: Path, card_id: str) -> None:
+    db.clear_orchestrator(_conn(repo_root), card_id)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """`overseer init [--central PATH] [--backup-dir PATH] [--yes]` —
     bootstraps the `.workflow/` state tree (as before) and, new
@@ -398,7 +422,9 @@ def cmd_clear(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_new_card(args: argparse.Namespace) -> int:
+def _create_card(args: argparse.Namespace) -> Card:
+    """Mint and insert a card from new-card-style args. Raises
+    ``sqlite3.IntegrityError`` on an id collision (insert-only, see below)."""
     conn = _conn(args.root)
     card_id = args.jira or args.linear or db.mint_id(conn)
     card = Card(
@@ -408,11 +434,11 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         jira=args.jira,
         linear=args.linear,
         complexity=args.complexity,
-        sprint=args.sprint,
-        budget_estimate=parse_tokens(args.estimate),
+        sprint=getattr(args, "sprint", None),
+        budget_estimate=parse_tokens(getattr(args, "estimate", None)),
         created=_today(),
         updated=_now(),
-        repo=args.repo if args.repo else derive_repo_label(args.root),
+        repo=args.repo if getattr(args, "repo", None) else derive_repo_label(args.root),
         labels=[lb.strip() for lb in args.labels.split(",") if lb.strip()] if args.labels else [],
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
@@ -420,13 +446,67 @@ def cmd_new_card(args: argparse.Namespace) -> int:
     # would leave a TOCTOU window where two concurrent `new-card` calls that
     # mint/target the same id both pass the check and one silently
     # overwrites the other. `create_card` raises on the PK collision instead.
-    try:
-        db.create_card(conn, card)
-    except sqlite3.IntegrityError:
-        print(f"error: card {card_id} already exists", file=sys.stderr)
-        return 1
+    db.create_card(conn, card)
     _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
+    return card
+
+
+def cmd_new_card(args: argparse.Namespace) -> int:
+    try:
+        card = _create_card(args)
+    except sqlite3.IntegrityError:
+        print(f"error: card {args.jira or args.linear or '(minted id)'} already exists",
+              file=sys.stderr)
+        return 1
     print(card.id)
+    return 0
+
+
+def worktree_path(main_root: Path, card_id: str, cfg: dict) -> Path:
+    parent = Path(cfg["worktree_dir"]) if cfg.get("worktree_dir") else main_root.parent
+    return parent / f"{main_root.name}-{card_id.lower()}"
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """new-card + base-branch detection + worktree + branch + set-field +
+    set-stage planning, in one orchestrator turn instead of seven.
+
+    ``--brief`` is the S-card shortcut (policy.md "right-sizing the
+    ceremony"): it writes the given text as ``## Plan`` directly and lands
+    the card at `implementation`, skipping the planner dispatch, plan-review
+    loop and PLAN GATE conversation entirely — one call instead of the
+    set-field/set-section-with-a-temp-file dance."""
+    if not args.card and not args.title:
+        print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
+        return 1
+    try:
+        card = _load(args.root, args.card) if args.card else _create_card(args)
+    except sqlite3.IntegrityError:
+        print("error: card already exists", file=sys.stderr)
+        return 1
+    main_root = derive_repo_root(args.root) or args.root
+    branch = f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
+    path = worktree_path(main_root, card.id, config.load_config(args.root))
+    base = gitops.base_ref(main_root)
+    card.set_stage("bootstrap", _now())
+    card.ack_claim()
+    try:
+        gitops.worktree_add(main_root, path, branch, base)
+    except gitops.GitError as exc:
+        _sync(args.root, card)
+        _stamp_orchestrator(args.root, card.id)
+        print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
+        return 1
+    card.branch = branch
+    card.worktree = str(path)
+    if args.brief:
+        card.set_section("## Plan", args.brief, _now())
+        card.set_stage("implementation", _now())
+    else:
+        card.set_stage("planning", _now())
+    _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
+    print(f"{card.id} {card.stage} · {branch} · {path} (base {base})")
     return 0
 
 
@@ -435,6 +515,7 @@ def cmd_set_stage(args: argparse.Namespace) -> int:
     card.set_stage(args.stage, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} → {args.stage}")
     return 0
 
@@ -460,6 +541,7 @@ def _close(args: argparse.Namespace, verb: str) -> int:
     card = _load(args.root, args.card_id)
     card.complete(_now()) if verb == "done" else card.abandon(_now())
     db.archive_card(_conn(args.root), card)
+    _release_orchestrator(args.root, card.id)
     rebuild_index(args.root, args.root.resolve().name, _now())
     print(f"{card.id} {card.status}, archived")
     return 0
@@ -889,7 +971,17 @@ def cmd_park(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.park(_now())
     _sync(args.root, card)
+    _release_orchestrator(args.root, card.id)
     print(f"{card.id} parked")
+    return 0
+
+
+def cmd_release(args: argparse.Namespace) -> int:
+    """The guard's per-card escape hatch: forget this card's orchestrator
+    until its next work verb re-stamps it."""
+    card = _load(args.root, args.card_id)
+    _release_orchestrator(args.root, card.id)
+    print(f"{card.id} released — guard off until its next work verb")
     return 0
 
 
@@ -1041,6 +1133,7 @@ def cmd_unclaim(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     card.unclaim(_now())
     _sync(args.root, card)
+    _release_orchestrator(args.root, card.id)
     print(f"{card.id} unclaimed")
     return 0
 
@@ -1174,6 +1267,60 @@ def cmd_claim_prompt_hook(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_report_hook(args: argparse.Namespace) -> int:
+    """SubagentStop backend — scripts/report_hook.py. Always exit 0. Prints
+    a ``decision: block`` bounce for a first-time missing/invalid report
+    (bounded by Claude Code's ``stop_hook_active``, never a second block);
+    otherwise silent — a failing telemetry hook must never stall an agent."""
+    try:
+        payload = _read_hook_payload()
+        repo_root = _hook_root(payload, args)
+        if state_root(repo_root).is_dir():
+            decision = report_hook.handle(payload, repo_root, _now())
+            if decision is not None:
+                print(json.dumps(decision))
+    except Exception:
+        return 0
+    return 0
+
+
+GUARD_ENV = "OVERSEER_GUARD"
+
+
+def cmd_pretool_hook(args: argparse.Namespace) -> int:
+    """PreToolUse backend — scripts/guard.py. Fails open: any error means no
+    output, which Claude Code treats as "no opinion"."""
+    try:
+        payload = _read_hook_payload()
+        repo_root = _hook_root(payload, args)
+        state = state_root(repo_root)
+        if not state.is_dir():
+            return 0
+        cfg = config.load_config(repo_root)
+        cards: list[Card] = []
+        session_id = payload.get("session_id")
+        guard_on = (
+            os.environ.get(GUARD_ENV, "").lower() != "off" and cfg.get("guard", True) is not False
+        )
+        if guard_on and isinstance(session_id, str) and session_id:
+            cards = db.orchestrated_cards(_conn(repo_root), session_id)
+        roots = guard.allowed_roots(
+            state, Path(__file__).resolve().parent.parent, config._config_dir()
+        )
+        limit = cfg.get("read_limit", guard.READ_LIMIT_DEFAULT)
+        verdict = guard.decide(
+            payload, cards, roots,
+            read_limit=limit if isinstance(limit, int) else guard.READ_LIMIT_DEFAULT,
+            repo_root=repo_root,
+        )
+        output = guard.hook_output(verdict)
+        if output:
+            print(json.dumps(output))
+    except Exception:  # noqa: BLE001 — a failing PreToolUse hook must never block a tool call
+        return 0
+    return 0
+
+
 def cmd_dashboard_refresh_hook(args: argparse.Namespace) -> int:
     """SessionStart hook verb (WF-053): if a dashboard is running from an
     OLDER overseer than the one now installed, restart it in place.
@@ -1206,6 +1353,7 @@ def cmd_log_progress(args: argparse.Namespace) -> int:
     card.log_progress(args.note, tokens, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
     if card.tripwire_breached:
         actual = format_tokens(card.budget_actual)
         estimate = format_tokens(card.budget_estimate)
@@ -1223,7 +1371,45 @@ def cmd_log_review(args: argparse.Namespace) -> int:
     card.log_review(args.stage, args.reviewers, args.verdict, _now())
     card.ack_claim()  # work verb — design spec §3 ack list
     _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
     print(f"{card.id} {args.stage} round {card.review_rounds(args.stage)} logged")
+    return 0
+
+
+def cmd_dispatch_prep(args: argparse.Namespace) -> int:
+    """``--advance`` folds a set-stage into the same call (same validation:
+    ``Card.set_stage`` raises on an unknown stage, though ``--stage``'s own
+    ``choices=STAGES`` already rules that out here) so each stage playbook
+    entry is one Bash call instead of set-stage-then-dispatch-prep. Prints
+    only the bundle path either way."""
+    card = _load(args.root, args.card_id)
+    if args.advance:
+        card.set_stage(args.stage, _now())
+        card.ack_claim()
+        _sync(args.root, card)
+    chunk = args.chunk
+    if chunk is None and args.role == "implementer":
+        chunk = 1
+    try:
+        path = bundle.prepare(
+            args.root,
+            card,
+            stage=args.stage,
+            role=args.role,
+            round_no=args.round,
+            slot=args.slot,
+            chunk=chunk,
+            lens=args.lens,
+            variables=bundle.parse_vars(args.var or []),
+            verbosity=str(config.load_config(args.root).get("verbosity", "terse")),
+            archived=db.load_archived_cards(_conn(args.root)),
+            today=_today(),
+        )
+    except bundle.BundleError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _stamp_orchestrator(args.root, card.id)
+    print(path)
     return 0
 
 
@@ -1548,6 +1734,12 @@ def cmd_usage(args: argparse.Namespace) -> int:
     entries, skipped = load_usage(state_root(args.root))
     if skipped:
         print(f"warning: {skipped} corrupt usage line(s) skipped", file=sys.stderr)
+    scoped = [e for e in entries if not args.card or e.get("card") == args.card]
+    unparsed = sum(1 for e in scoped if e.get("unparsed") is not None)
+    if unparsed:
+        noun = "report" if unparsed == 1 else "reports"
+        print(f"warning: {unparsed} unparsed agent {noun} (bounced once, still invalid)",
+              file=sys.stderr)
     summary = summarise(entries, args.card)
     if args.json:
         print(json.dumps(summary, indent=2))
@@ -1644,6 +1836,20 @@ def cmd_retire_fact(args: argparse.Namespace) -> int:
 
 
 def cmd_facts(args: argparse.Namespace) -> int:
+    if args.pending:
+        pending_rows = [
+            p for p in load_pending(args.root)
+            if p.status == "pending" and (not args.card or p.card == args.card)
+        ]
+        if args.json:
+            print(json.dumps([asdict(p) for p in pending_rows], indent=2))
+            return 0
+        if not pending_rows:
+            print("No pending facts.")
+            return 0
+        for p in pending_rows:
+            print(f"{p.id} {p.card} ({', '.join(p.tags) or 'no tags'}): {p.statement}")
+        return 0
     kb = knowledge_root(args.root)
     facts, quarantined = load_facts(kb)
     _report_quarantined(quarantined)
@@ -1672,6 +1878,54 @@ def cmd_facts(args: argparse.Namespace) -> int:
         mark = " [STALE]" if r["status"] == "stale" else ""
         tags = ", ".join(r["tags"]) or "no tags"
         print(f"{r['id']} ({tags}){mark}: {r['statement']}")
+    return 0
+
+
+SECTION_NAMES = ("Plan", "Verification", "Decisions")
+
+
+def cmd_set_section(args: argparse.Namespace) -> int:
+    """Replace one prose section from a file (agents, via the report hook —
+    plan and verification text never transits the orchestrator that way) or
+    from ``--text`` directly (the orchestrator's own S-card/--brief path,
+    short enough not to need a temp file)."""
+    content = args.text if args.text is not None else Path(args.file).read_text()
+    card = _load(args.root, args.card_id)
+    card.set_section(f"## {args.section}", content, _now())
+    card.ack_claim()  # work verb — design spec §3 ack list
+    _sync(args.root, card)
+    print(f"{card.id} ## {args.section} set")
+    return 0
+
+
+def cmd_accept_fact(args: argparse.Namespace) -> int:
+    _conn(args.root)  # migration-ordering guard, as cmd_add_fact
+    pending = next((f for f in load_pending(args.root) if f.id == args.fact_id), None)
+    if pending is None:
+        raise FileNotFoundError(f"no pending fact with id {args.fact_id}")
+    if pending.status != "pending":
+        raise ValueError(f"{pending.id} is already {pending.status}")
+    kb = knowledge_root(args.root)
+    ensure_kb(kb)
+    fact = Fact(
+        id=mint_fact_id(kb),
+        statement=pending.statement,
+        tags=pending.tags,
+        source=f"{pending.card} {pending.source}".strip(),
+        created=_today(),
+        verified=_today(),
+        status="active",
+    )
+    save_fact(kb, fact)
+    set_pending_status(args.root, pending.id, "accepted")
+    _report_quarantined(rebuild_knowledge_index(args.root, _today()))
+    print(fact.id)
+    return 0
+
+
+def cmd_reject_fact(args: argparse.Namespace) -> int:
+    set_pending_status(args.root, args.fact_id, "rejected", args.reason)
+    print(f"{args.fact_id} rejected")
     return 0
 
 
@@ -1754,6 +2008,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--labels", help="comma-separated tags, e.g. policy,architecture")
     p.set_defaults(func=cmd_new_card)
 
+    p = sub.add_parser("bootstrap")
+    p.add_argument("--card")
+    p.add_argument("--title")
+    ref = p.add_mutually_exclusive_group()
+    ref.add_argument("--jira")
+    ref.add_argument("--linear")
+    p.add_argument("--complexity", choices=["S", "M", "L", "XL"])
+    p.add_argument("--labels")
+    p.add_argument("--goal")
+    p.add_argument("--type", default="feat")
+    p.add_argument("--slug")
+    p.add_argument("--brief", help="S-card shortcut: writes ## Plan directly and "
+                                    "lands at implementation, skipping the planner dispatch")
+    p.set_defaults(func=cmd_bootstrap)
+
     p = sub.add_parser("set-stage")
     p.add_argument("card_id")
     p.add_argument("stage")
@@ -1833,12 +2102,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("card_id")
     p.set_defaults(func=cmd_unclaim)
 
+    p = sub.add_parser("release")
+    p.add_argument("card_id")
+    p.set_defaults(func=cmd_release)
+
     p = sub.add_parser("claim-nudged")
     p.add_argument("card_id")
     p.set_defaults(func=cmd_claim_nudged)
 
     sub.add_parser("claim-stop-hook").set_defaults(func=cmd_claim_stop_hook)
     sub.add_parser("claim-prompt-hook").set_defaults(func=cmd_claim_prompt_hook)
+    sub.add_parser(
+        "report-hook",
+        help="SubagentStop: record an overseer agent's reply and real usage (WF-113)",
+    ).set_defaults(func=cmd_report_hook)
+    sub.add_parser(
+        "pretool-hook",
+        help="PreToolUse: orchestrator no-work/no-fork guard and agent Read limit (WF-113)",
+    ).set_defaults(func=cmd_pretool_hook)
     sub.add_parser(
         "dashboard-refresh-hook",
         help="SessionStart: restart a running dashboard that is older than the installed overseer (WF-053)",
@@ -1856,6 +2137,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reviewers", type=int, required=True)
     p.add_argument("--verdict", required=True)
     p.set_defaults(func=cmd_log_review)
+
+    p = sub.add_parser("dispatch-prep")
+    p.add_argument("card_id")
+    p.add_argument("--stage", required=True, choices=STAGES)
+    p.add_argument("--role", required=True, choices=ROLES)
+    p.add_argument("--round", type=int, default=1)
+    p.add_argument("--slot")
+    p.add_argument("--chunk", type=int, help="defaults to 1 for --role implementer")
+    p.add_argument("--lens")
+    p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
+    p.add_argument("--advance", action="store_true",
+                    help="set-stage to --stage first, then prep the bundle, in one call")
+    p.set_defaults(func=cmd_dispatch_prep)
 
     p = sub.add_parser("new-sprint")
     p.add_argument("sprint_id")
@@ -1957,7 +2251,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag")
     p.add_argument("--stale", action="store_true")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--pending", action="store_true")
+    p.add_argument("--card")
     p.set_defaults(func=cmd_facts)
+
+    p = sub.add_parser("set-section")
+    p.add_argument("card_id")
+    p.add_argument("--section", required=True, choices=SECTION_NAMES)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--file")
+    src.add_argument("--text")
+    p.set_defaults(func=cmd_set_section)
+
+    p = sub.add_parser("accept-fact")
+    p.add_argument("fact_id")
+    p.set_defaults(func=cmd_accept_fact)
+
+    p = sub.add_parser("reject-fact")
+    p.add_argument("fact_id")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=cmd_reject_fact)
 
     p = sub.add_parser("backup")
     p.add_argument("--dir", help="override the computed backup destination")

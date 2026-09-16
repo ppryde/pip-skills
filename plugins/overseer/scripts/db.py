@@ -8,6 +8,7 @@ import os
 import re as _re
 import sqlite3
 import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -61,6 +62,11 @@ CREATE INDEX IF NOT EXISTS idx_cards_claim ON cards(claimed_by);
 CREATE TABLE IF NOT EXISTS label_colors (
     name      TEXT PRIMARY KEY,
     color_key TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS orchestrators (
+    card_id    TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    stamped    TEXT NOT NULL
 );
 """
 
@@ -469,6 +475,59 @@ def claim_card(conn: sqlite3.Connection, card_id: str, session_id: str, now: str
     cur = conn.execute(sql, args)
     conn.commit()
     return cur.rowcount == 1
+
+
+def stamp_orchestrator(conn: sqlite3.Connection, card_id: str, session_id: str, now: str) -> None:
+    """Record which Claude session orchestrates ``card_id`` (WF-113 §5.1). A
+    side table rather than a ``cards`` column: the guard hook is its only
+    reader, so the Card model, backups and dashboard stay untouched."""
+    conn.execute(
+        "INSERT INTO orchestrators(card_id, session_id, stamped) VALUES(?, ?, ?) "
+        "ON CONFLICT(card_id) DO UPDATE SET session_id = excluded.session_id, "
+        "stamped = excluded.stamped",
+        (card_id, session_id, now),
+    )
+    conn.commit()
+
+
+def clear_orchestrator(conn: sqlite3.Connection, card_id: str) -> None:
+    conn.execute("DELETE FROM orchestrators WHERE card_id = ?", (card_id,))
+    conn.commit()
+
+
+def orchestrated_cards(conn: sqlite3.Connection, session_id: str) -> list[Card]:
+    """Live cards this session orchestrates. Parked cards are shelved, so the
+    guard lets go of them; blocked cards keep it (still the session's card)."""
+    rows = conn.execute(
+        "SELECT c.* FROM cards c JOIN orchestrators o ON o.card_id = c.id "
+        "WHERE o.session_id = ? AND c.archived = 0 AND c.status != 'parked' "
+        "ORDER BY c.id",
+        (session_id,),
+    ).fetchall()
+    return [row_to_card(r) for r in rows]
+
+
+def mutate_card(
+    conn: sqlite3.Connection, card_id: str, mutate: Callable[[Card], None]
+) -> Card | None:
+    """Load → change → save one card inside a single ``BEGIN IMMEDIATE``
+    transaction. Parallel reviewers' report hooks finish together; the CLI's
+    ``_sync`` whole-row upsert is last-write-wins and would drop verdicts."""
+    conn.commit()  # close any implicit transaction before taking the write lock
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        card = row_to_card(row)
+        mutate(card)
+        _upsert(conn, card, archived=row["archived"], commit=False)
+        conn.commit()
+        return card
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def _parse_iso(value: "str | None") -> "datetime | None":
