@@ -26,9 +26,15 @@ def test_version_bumped():
 
 
 def test_ledger_skill_qualifies_manual_logging_verbs():
-    # The Reviews bullet must not tell the orchestrator to log-review after
-    # every dispatched review round — under orchestration the report hook
-    # does that automatically. The bullet must say so.
+    # The Progress and Reviews bullets must not tell the orchestrator to
+    # log-progress/log-review after every dispatched unit of work or review
+    # round — under orchestration the report hook does that automatically.
+    # Both bullets must say so.
+    progress_bullet = LEDGER_SKILL.split("**Progress:**", 1)[1].split("- **", 1)[0]
+    assert "log-progress" in progress_bullet
+    assert "report hook" in progress_bullet
+    assert "automatically" in progress_bullet
+
     reviews_bullet = LEDGER_SKILL.split("**Reviews:**", 1)[1].split("- **", 1)[0]
     assert "log-review" in reviews_bullet
     assert "report hook" in reviews_bullet
