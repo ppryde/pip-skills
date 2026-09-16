@@ -69,6 +69,20 @@ class TestCli:
         assert run(repo, "facts", "--pending") == 0
         assert capsys.readouterr().out.strip() == "No pending facts."
 
+    def test_accept_fact_does_not_duplicate_on_reaccept_or_reject(self, repo, capsys):
+        a = add_pending(repo, "WF-001", "keep me", ["t"], "/d/r1-A.md")
+        b = add_pending(repo, "WF-002", "drop me", [], "/d/r1-B.md")
+        assert run(repo, "accept-fact", a.id) == 0
+        capsys.readouterr()
+        assert run(repo, "accept-fact", a.id) == 1
+        facts, _ = load_facts(knowledge_root(repo))
+        assert len(facts) == 1
+
+        assert run(repo, "reject-fact", b.id, "--reason", "noise") == 0
+        assert run(repo, "accept-fact", b.id) == 1
+        facts, _ = load_facts(knowledge_root(repo))
+        assert len(facts) == 1
+
     def test_set_section(self, repo, tmp_path):
         run(repo, "new-card", "--title", "T")
         plan = tmp_path / "plan.md"

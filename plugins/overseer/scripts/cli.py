@@ -1712,6 +1712,8 @@ def cmd_accept_fact(args: argparse.Namespace) -> int:
     pending = next((f for f in load_pending(args.root) if f.id == args.fact_id), None)
     if pending is None:
         raise FileNotFoundError(f"no pending fact with id {args.fact_id}")
+    if pending.status != "pending":
+        raise ValueError(f"{pending.id} is already {pending.status}")
     kb = knowledge_root(args.root)
     ensure_kb(kb)
     fact = Fact(
