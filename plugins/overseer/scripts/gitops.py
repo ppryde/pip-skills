@@ -33,3 +33,12 @@ def diff_against_base(worktree: Path) -> str:
     if result.returncode != 0:
         raise GitError(result.stderr.strip() or "git diff failed")
     return result.stdout
+
+
+def worktree_add(repo: Path, path: Path, branch: str, start: str) -> None:
+    """Create ``branch`` at ``start`` checked out in a new worktree at
+    ``path``. Fetches first (best effort) so ``origin/<base>`` is current."""
+    _git(repo, "fetch", "--quiet", "origin")
+    result = _git(repo, "worktree", "add", "-b", branch, str(path), start)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "git worktree add failed")

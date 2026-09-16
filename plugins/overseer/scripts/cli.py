@@ -23,7 +23,7 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import bundle, config, db, guard, liveness, report_hook
+from scripts import bundle, config, db, gitops, guard, liveness, report_hook
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
 from scripts.dispatch import REPLY_WORD_CAP, ROLES
@@ -66,7 +66,9 @@ from scripts.sprints import (
 )
 from scripts.store import (
     derive_repo_label,
+    derive_repo_root,
     init_workflow,
+    slugify,
     state_root,
 )
 from scripts.usage import append_usage, load_usage, summarise
@@ -302,9 +304,21 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     (base / "config.json").write_text(
         json.dumps({"backup_dir": backup_dir_value}, indent=2))
-    local_config = {"central_dir": central_explicit} if central_explicit else {}
-    (base / "config.local.json").write_text(
-        json.dumps(local_config, indent=2))
+    # Preserve any OTHER local keys already on disk (e.g. `worktree_dir`,
+    # hand-edited or seeded before `init` runs) — only `central_dir` is
+    # `init`'s to manage, per the WF-087 rule above.
+    local_path = base / "config.local.json"
+    local_config: dict = {}
+    if local_path.exists():
+        try:
+            local_config = json.loads(local_path.read_text() or "{}")
+        except json.JSONDecodeError:
+            local_config = {}
+    if central_explicit:
+        local_config["central_dir"] = central_explicit
+    else:
+        local_config.pop("central_dir", None)
+    local_path.write_text(json.dumps(local_config, indent=2))
 
     # `base.parent` is the same canonical root `base` itself was resolved
     # against — never a linked worktree's own root — so the gitignore line
@@ -420,7 +434,9 @@ def cmd_clear(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_new_card(args: argparse.Namespace) -> int:
+def _create_card(args: argparse.Namespace) -> Card:
+    """Mint and insert a card from new-card-style args. Raises
+    ``sqlite3.IntegrityError`` on an id collision (insert-only, see below)."""
     conn = _conn(args.root)
     card_id = args.jira or args.linear or db.mint_id(conn)
     card = Card(
@@ -430,11 +446,11 @@ def cmd_new_card(args: argparse.Namespace) -> int:
         jira=args.jira,
         linear=args.linear,
         complexity=args.complexity,
-        sprint=args.sprint,
-        budget_estimate=parse_tokens(args.estimate),
+        sprint=getattr(args, "sprint", None),
+        budget_estimate=parse_tokens(getattr(args, "estimate", None)),
         created=_today(),
         updated=_now(),
-        repo=args.repo if args.repo else derive_repo_label(args.root),
+        repo=args.repo if getattr(args, "repo", None) else derive_repo_label(args.root),
         labels=[lb.strip() for lb in args.labels.split(",") if lb.strip()] if args.labels else [],
         body=CARD_BODY_TEMPLATE.format(goal=args.goal or "_(to be written)_"),
     )
@@ -442,13 +458,57 @@ def cmd_new_card(args: argparse.Namespace) -> int:
     # would leave a TOCTOU window where two concurrent `new-card` calls that
     # mint/target the same id both pass the check and one silently
     # overwrites the other. `create_card` raises on the PK collision instead.
-    try:
-        db.create_card(conn, card)
-    except sqlite3.IntegrityError:
-        print(f"error: card {card_id} already exists", file=sys.stderr)
-        return 1
+    db.create_card(conn, card)
     _report_quarantined(rebuild_index(args.root, args.root.resolve().name, _now()))
+    return card
+
+
+def cmd_new_card(args: argparse.Namespace) -> int:
+    try:
+        card = _create_card(args)
+    except sqlite3.IntegrityError:
+        print(f"error: card {args.jira or args.linear or '(minted id)'} already exists",
+              file=sys.stderr)
+        return 1
     print(card.id)
+    return 0
+
+
+def worktree_path(main_root: Path, card_id: str, cfg: dict) -> Path:
+    parent = Path(cfg["worktree_dir"]) if cfg.get("worktree_dir") else main_root.parent
+    return parent / f"{main_root.name}-{card_id.lower()}"
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """new-card + base-branch detection + worktree + branch + set-field +
+    set-stage planning, in one orchestrator turn instead of seven."""
+    if not args.card and not args.title:
+        print("error: bootstrap needs --title (new card) or --card (existing)", file=sys.stderr)
+        return 1
+    try:
+        card = _load(args.root, args.card) if args.card else _create_card(args)
+    except sqlite3.IntegrityError:
+        print("error: card already exists", file=sys.stderr)
+        return 1
+    main_root = derive_repo_root(args.root) or args.root
+    branch = f"{args.type}/{card.id}-{args.slug or slugify(card.title)}"
+    path = worktree_path(main_root, card.id, config.load_config(args.root))
+    base = gitops.base_ref(main_root)
+    card.set_stage("bootstrap", _now())
+    card.ack_claim()
+    try:
+        gitops.worktree_add(main_root, path, branch, base)
+    except gitops.GitError as exc:
+        _sync(args.root, card)
+        _stamp_orchestrator(args.root, card.id)
+        print(f"error: {card.id} left at bootstrap — {exc}", file=sys.stderr)
+        return 1
+    card.branch = branch
+    card.worktree = str(path)
+    card.set_stage("planning", _now())
+    _sync(args.root, card)
+    _stamp_orchestrator(args.root, card.id)
+    print(f"{card.id} planning · {branch} · {path} (base {base})")
     return 0
 
 
@@ -1934,6 +1994,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--labels", help="comma-separated tags, e.g. policy,architecture")
     p.set_defaults(func=cmd_new_card)
+
+    p = sub.add_parser("bootstrap")
+    p.add_argument("--card")
+    p.add_argument("--title")
+    ref = p.add_mutually_exclusive_group()
+    ref.add_argument("--jira")
+    ref.add_argument("--linear")
+    p.add_argument("--complexity", choices=["S", "M", "L", "XL"])
+    p.add_argument("--labels")
+    p.add_argument("--goal")
+    p.add_argument("--type", default="feat")
+    p.add_argument("--slug")
+    p.set_defaults(func=cmd_bootstrap)
 
     p = sub.add_parser("set-stage")
     p.add_argument("card_id")
