@@ -110,7 +110,10 @@ undecided, per the policy.md table. Review gates never shrink at any size.
   escalate to the user before further spend (scope-creep gate).
 - **Unresponsive:** an agent whose transcript has not changed for 2× the
   card's unresponsive window (policy table) → stop it and
-  `block <id> --reason "agent: unresponsive"`. Never ping it.
+  `block <id> --reason "agent: unresponsive"`. Never ping it. To check: `Read`
+  the agent's transcript (under the Claude config dir, which the guard
+  allows) and see whether it has changed — shell `stat`/`ls` are denied by
+  the guard while a card is in flight.
 - **Budget:** the guard denies a dispatch once the card's spend reaches 2× its
   estimate (`TRIPWIRE: …`). That is a hard stop: escalate with the overrun
   story, never `release` your way past it.
