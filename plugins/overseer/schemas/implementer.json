@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "card": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "chunk": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "commits": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "detail": {
+      "description": "absolute path inside the card's dispatch directory",
+      "minLength": 1,
+      "type": "string"
+    },
+    "learned": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "const": "overseer.implementer/1"
+    },
+    "stage": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "DONE",
+        "DONE_WITH_CONCERNS",
+        "BLOCKED",
+        "NEEDS_CONTEXT"
+      ]
+    },
+    "tests": {
+      "additionalProperties": false,
+      "properties": {
+        "passed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "passed",
+        "total"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "card",
+    "stage",
+    "chunk",
+    "status",
+    "tests",
+    "commits",
+    "detail",
+    "learned"
+  ],
+  "title": "overseer.implementer/1",
+  "type": "object"
+}
