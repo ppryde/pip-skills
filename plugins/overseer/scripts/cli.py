@@ -23,10 +23,10 @@ from typing import cast
 if __package__ in (None, ""):  # direct script invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import config, db, guard, liveness, report_hook
+from scripts import bundle, config, db, guard, liveness, report_hook
 from scripts.calibration import BANDS, calibrate
 from scripts.conflicts import find_conflicts
-from scripts.dispatch import REPLY_WORD_CAP
+from scripts.dispatch import REPLY_WORD_CAP, ROLES
 from scripts.index import rebuild_index
 from scripts.knowledge import (
     Fact,
@@ -45,6 +45,7 @@ from scripts.models import (
     COMPLEXITIES,
     LABEL_PALETTE_KEYS,
     PRIORITIES,
+    STAGES,
     Card,
     CardParseError,
     format_tokens,
@@ -1312,6 +1313,31 @@ def cmd_log_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dispatch_prep(args: argparse.Namespace) -> int:
+    card = _load(args.root, args.card_id)
+    try:
+        path = bundle.prepare(
+            args.root,
+            card,
+            stage=args.stage,
+            role=args.role,
+            round_no=args.round,
+            slot=args.slot,
+            chunk=args.chunk,
+            lens=args.lens,
+            variables=bundle.parse_vars(args.var or []),
+            verbosity=str(config.load_config(args.root).get("verbosity", "terse")),
+            archived=db.load_archived_cards(_conn(args.root)),
+            today=_today(),
+        )
+    except bundle.BundleError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _stamp_orchestrator(args.root, card.id)
+    print(path)
+    return 0
+
+
 def cmd_new_sprint(args: argparse.Namespace) -> int:
     # Ensure the one-time `.workflow/` -> central migration guard has run
     # before this verb creates/touches central state directly (bypassing
@@ -2023,6 +2049,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reviewers", type=int, required=True)
     p.add_argument("--verdict", required=True)
     p.set_defaults(func=cmd_log_review)
+
+    p = sub.add_parser("dispatch-prep")
+    p.add_argument("card_id")
+    p.add_argument("--stage", required=True, choices=STAGES)
+    p.add_argument("--role", required=True, choices=ROLES)
+    p.add_argument("--round", type=int, default=1)
+    p.add_argument("--slot")
+    p.add_argument("--chunk", type=int)
+    p.add_argument("--lens")
+    p.add_argument("--var", action="append", help=f"key=value, value ≤ {bundle.VAR_CAP} chars")
+    p.set_defaults(func=cmd_dispatch_prep)
 
     p = sub.add_parser("new-sprint")
     p.add_argument("sprint_id")
