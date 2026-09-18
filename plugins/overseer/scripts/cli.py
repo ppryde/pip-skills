@@ -1200,6 +1200,29 @@ def cmd_dashboard_refresh_hook(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_append_body(args: argparse.Namespace) -> int:
+    """Append text to a card body section server-side (WF-115). The caller never holds the whole body: unlike
+    ``set-field --body``, there is no read-whole-body/write-whole-body round
+    trip for the caller to silently lose content in — the load, append and
+    save all happen inside this one process/one `_sync` call.
+
+    Text comes from ``--text``, or from stdin when ``--text`` is ``-``
+    (multi-line content). ``--text`` is required so a forgotten flag fails
+    fast instead of blocking on a stdin nobody is writing to. A trailing newline off stdin/a
+    shell-quoted ``--text`` is stripped so it doesn't open an extra blank
+    line before the next section.
+    """
+    card = _load(args.root, args.card_id)
+    text = args.text
+    if text == "-":
+        text = sys.stdin.read()
+    text = text.rstrip("\n")
+    card.append_section(args.section, text, _now())
+    _sync(args.root, card)
+    print(f"{card.id} {args.section} appended")
+    return 0
+
+
 def cmd_log_progress(args: argparse.Namespace) -> int:
     card = _load(args.root, args.card_id)
     tokens = parse_tokens(args.tokens) or 0
@@ -1790,6 +1813,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sprint", help="sprint id; empty string clears")
     p.add_argument("--estimate", help="token estimate, e.g. 400k or 1.2M; empty string clears")
     p.set_defaults(func=cmd_set_field)
+
+    p = sub.add_parser("append-body")
+    p.add_argument("card_id")
+    p.add_argument("section", help="heading text, e.g. Decisions or '## Decisions'")
+    p.add_argument("--text", required=True, help="text to append; '-' reads it from stdin")
+    p.set_defaults(func=cmd_append_body)
 
     p = sub.add_parser("reorder")
     p.add_argument("--ids", required=True,

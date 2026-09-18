@@ -5,6 +5,7 @@ from scripts.models import (
     CardParseError,
     append_to_section,
     format_tokens,
+    normalize_section_header,
     parse_tokens,
     split_frontmatter,
 )
@@ -206,6 +207,17 @@ class TestAppendToSection:
         assert "## Progress log\n- new" in out
 
 
+class TestNormalizeSectionHeader:
+    def test_bare_name(self):
+        assert normalize_section_header("Decisions") == "## Decisions"
+
+    def test_already_prefixed(self):
+        assert normalize_section_header("## Decisions") == "## Decisions"
+
+    def test_strips_padding(self):
+        assert normalize_section_header("  Decisions  ") == "## Decisions"
+
+
 class TestMutations:
     def test_set_stage(self):
         card = make_card()
@@ -264,6 +276,23 @@ class TestMutations:
         card.log_review("impl-review", 2, "approved", NOW)
         assert card.review_rounds("impl-review") == 2
         assert "### impl-review — round 2 (2 reviewers)\nVerdict: approved" in card.body
+
+    def test_append_section_appends_to_existing_section(self):
+        card = make_card()
+        card.append_section("Decisions", "- chose X over Y", NOW)
+        assert "## Decisions\n- chose X over Y" in card.body
+        assert card.updated == NOW
+
+    def test_append_section_creates_missing_section(self):
+        card = make_card()
+        card.append_section("Risks", "- flaky CI", NOW)
+        assert card.body.endswith("## Risks\n- flaky CI")
+
+    def test_append_section_tolerates_hash_prefixed_name(self):
+        card = make_card()
+        card.append_section("## Decisions", "- chose X over Y", NOW)
+        assert card.body.count("## Decisions") == 1
+        assert "- chose X over Y" in card.body
 
     def test_tripwire(self):
         card = make_card()
