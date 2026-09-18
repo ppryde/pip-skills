@@ -167,7 +167,45 @@ def file_changed(conn: sqlite3.Connection, path: Path) -> bool:
     return (float(row[0]), int(row[1])) != current
 
 
+def _owned_elsewhere(conn: sqlite3.Connection, table: str, column: str,
+                     ids: set[str], session_id: str) -> set[str]:
+    """Ids from ``table`` already stored under a DIFFERENT session — the
+    signal that a record is a copy, not new work (see ``_write_facts``).
+    Batched to stay clear of SQLite's variable-count limit on a fat resume."""
+    found: set[str] = set()
+    ordered = sorted(ids)
+    for start in range(0, len(ordered), 500):
+        chunk = ordered[start:start + 500]
+        marks = ",".join("?" * len(chunk))
+        found.update(
+            row[0] for row in conn.execute(
+                f"SELECT {column} FROM {table} WHERE session_id <> ? AND {column} IN ({marks})",
+                (session_id, *chunk),
+            )
+        )
+    return found
+
+
 def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> None:
+    # A resumed or forked transcript repeats records from the session it was
+    # resumed/forked FROM, verbatim, under this new session id. Every id here
+    # is otherwise globally unique, so a record already stored under another
+    # session is a copy, not new work — counting it again would inflate every
+    # total that aggregates across sessions by however much was repeated.
+    # Whichever session's ingest reaches a record first keeps it: this is a
+    # first-seen rule, not "parent always wins" — a copy synced before its
+    # source claims the record, and the source then finds it already owned.
+    copied_messages = _owned_elsewhere(
+        conn, "turns", "message_id", {t.message_id for t in facts.turns.values()}, session_id
+    )
+    turns = [t for t in facts.turns.values() if t.message_id not in copied_messages]
+    tool_ids = (
+        {tool_id for t in turns for tool_id, _, _ in t.tool_uses}
+        | set(facts.results) | set(facts.file_edits)
+    )
+    copied_tools = _owned_elsewhere(conn, "tool_calls", "tool_use_id", tool_ids, session_id)
+    copied_events = _owned_elsewhere(conn, "events", "uuid", {e.uuid for e in facts.events}, session_id)
+    results = [r for r in facts.results.values() if r.tool_use_id not in copied_tools]
     # tool_calls rows first: a message split across two ingests (a Stop hook
     # or a dashboard Sync landing mid-write) folds into two DISJOINT Turn
     # objects, one per call, each seeing only the tool_use blocks that were
@@ -188,8 +226,9 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                qualifier = COALESCE(tool_calls.qualifier, excluded.qualifier)""",
         [
             (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts)
-            for t in facts.turns.values()
+            for t in turns
             for tool_id, name, qualifier in t.tool_uses
+            if tool_id not in copied_tools
         ],
     )
     conn.executemany(
@@ -224,20 +263,21 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
              session_id, t.agent_id, t.message_id,
              t.stop_reason, t.effort,
              t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool)
-            for t in facts.turns.values()
+            for t in turns
         ],
     )
     conn.executemany(
         "INSERT OR IGNORE INTO events(session_id, uuid, agent_id, kind, ts, value) "
         "VALUES (?,?,?,?,?,?)",
-        [(session_id, e.uuid, e.agent_id, e.kind, e.ts, e.value) for e in facts.events],
+        [(session_id, e.uuid, e.agent_id, e.kind, e.ts, e.value)
+         for e in facts.events if e.uuid not in copied_events],
     )
     # Results may land in a later ingest than their call (a Stop hook fires
     # between the two), so this is an UPDATE against whatever row exists.
     conn.executemany(
         "UPDATE tool_calls SET result_chars = ?, result_ts = ? "
         "WHERE session_id = ? AND tool_use_id = ?",
-        [(r.chars, r.ts, session_id, r.tool_use_id) for r in facts.results.values()],
+        [(r.chars, r.ts, session_id, r.tool_use_id) for r in results],
     )
     # Keyed by tool_use_id like every other fact table, so a re-read of the
     # same transcript converges rather than double-counting the churn.
@@ -248,6 +288,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
             (session_id, e.tool_use_id, e.agent_id, e.ts, e.file_path, e.operation,
              e.lines_added, e.lines_removed)
             for e in facts.file_edits.values()
+            if e.tool_use_id not in copied_tools
         ],
     )
     conn.executemany(
@@ -256,8 +297,9 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         [
             (session_id, a.tool_use_id, t.agent_id, t.ts, a.url, a.title, a.description,
              a.favicon, int(a.redeploy))
-            for t in facts.turns.values()
+            for t in turns
             for a in t.artifacts.values()
+            if a.tool_use_id not in copied_tools
         ],
     )
     # An artifact whose result landed in THIS ingest but whose call was
@@ -266,7 +308,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     conn.executemany(
         "UPDATE artifacts SET url = ? WHERE session_id = ? AND tool_use_id = ? AND url IS NULL",
         [(r.artifact_url, session_id, r.tool_use_id)
-         for r in facts.results.values() if r.artifact_url],
+         for r in results if r.artifact_url],
     )
 
 
@@ -480,6 +522,34 @@ def subagent_files(transcript_path: Path, session_id: str) -> list[tuple[Path, s
     return out
 
 
+def _active_ms(conn: sqlite3.Connection, session_id: str) -> int:
+    """Summed turn durations, each capped at the time elapsed since the turn
+    began (the latest prompt from the same agent, or that agent's previous
+    turn end).
+
+    Claude Code occasionally writes a ``durationMs`` far longer than the
+    session itself — observed after a multi-day resume — and an uncapped sum
+    then exceeds the session's own span. A duration with no earlier prompt
+    from its agent is not counted: there is nothing to measure it against.
+    """
+    total = 0
+    prompted: dict[str, float] = {}
+    for kind, agent_id, ts, value in conn.execute(
+        """SELECT kind, agent_id, ts, value FROM events
+           WHERE session_id = ? AND kind IN ('prompt', 'turn_duration') AND ts IS NOT NULL
+           ORDER BY ts, kind = 'turn_duration'""",
+        (session_id,),
+    ):
+        if kind == "prompt":
+            prompted[agent_id] = ts
+        elif agent_id in prompted:
+            total += min(value or 0, round((ts - prompted[agent_id]) * 1000))
+            # A later duration with no NEW prompt is capped from the end of
+            # this turn, not re-measured from the same stale prompt.
+            prompted[agent_id] = ts
+    return total
+
+
 def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = None) -> None:
     """Recompute the denormalised session totals from the fact tables."""
     if now is None:
@@ -534,10 +604,7 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         "SELECT COUNT(*) FROM events WHERE session_id = ? AND kind = 'compaction'",
         (session_id,),
     ).fetchone()[0]
-    active_ms = conn.execute(
-        "SELECT COALESCE(SUM(value), 0) FROM events WHERE session_id = ? AND kind = 'turn_duration'",
-        (session_id,),
-    ).fetchone()[0]
+    active_ms = _active_ms(conn, session_id)
     models = [
         row[0] for row in conn.execute(
             "SELECT DISTINCT model FROM turns WHERE session_id = ? AND model IS NOT NULL "
@@ -564,6 +631,20 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         (*totals, peak, cold, artifacts, prompts, compactions, active_ms, json.dumps(models),
          int(churn[0]), int(churn[1]), int(churn[2]),
          size, now, session_id),
+    )
+    # Copied records are skipped by `_write_facts`, but `_upsert_session_identity`
+    # already stamped `started_at` from the raw (unfiltered) transcript, so a
+    # resumed session would show as starting when its PARENT did. The main
+    # agent's own owned records are the truth when it has any; with none (a
+    # copy this session never actually owned) the earlier stamp stands.
+    conn.execute(
+        """UPDATE sessions SET started_at = COALESCE(
+               (SELECT MIN(ts) FROM (SELECT ts FROM turns WHERE session_id = ?1 AND agent_id = ''
+                                     UNION ALL
+                                     SELECT ts FROM events WHERE session_id = ?1 AND agent_id = '')),
+               started_at)
+           WHERE session_id = ?1""",
+        (session_id,),
     )
 
 

@@ -123,6 +123,7 @@ class ToolResult:
     # The published URL when this is an Artifact publish's result — kept here
     # so an ingest that sees the result but not the call can still fill it.
     artifact_url: str | None = None
+    is_error: bool = False
 
 
 @dataclass
@@ -394,17 +395,20 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
             continue
         payload = block.get("content")
         text = payload if isinstance(payload, str) else json.dumps(payload) if payload is not None else ""
-        url = artifact_url(text)
+        is_error = block.get("is_error") is True
+        # A refused or invalid publish can echo an artifact URL in its own
+        # error text; it published nothing, so that url is never recorded.
+        url = None if is_error else artifact_url(text)
         facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
-                                            artifact_url=url)
+                                            artifact_url=url, is_error=is_error)
         edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
         if edit is not None:
             facts.file_edits[tool_id] = edit
-        if url:
-            for turn in facts.turns.values():
-                artifact = turn.artifacts.get(tool_id)
-                if artifact is not None:
-                    artifact.url = url
+        for turn in facts.turns.values():
+            if is_error:
+                turn.artifacts.pop(tool_id, None)
+            elif url and tool_id in turn.artifacts:
+                turn.artifacts[tool_id].url = url
 
 
 # Git's marker for a missing trailing newline, which is not a change.

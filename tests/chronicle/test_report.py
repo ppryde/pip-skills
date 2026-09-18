@@ -14,10 +14,16 @@ TURN_USD = (3 * 5.0 + 1000 * 0.5 + 200 * 5.0 * 1.25 + 40 * 25.0) / 1_000_000
 
 def _seed(projects):
     """Two repos' worth of sessions, with repo_root stamped directly (the
-    builders' cwd isn't a git repo, so repo_root would otherwise be NULL)."""
+    builders' cwd isn't a git repo, so repo_root would otherwise be NULL).
+
+    Every session's prompt/turn ids are unique ACROSS sessions, not just
+    within one — a real transcript's ids are globally unique, and a store
+    that saw the same id twice under different sessions would (correctly)
+    treat the second as a copy from a resumed/forked session and skip it
+    (see TestCopiedRecords in test_ingest.py)."""
     TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=["Bash"]).write()
-    TranscriptBuilder(projects, "-a", "s2").prompt("u1", T1).turn("m1", T1).turn("m2", T1, tools=["Read", "Read"]).write()
-    TranscriptBuilder(projects, "-b", "s3").prompt("u1", T1).turn("m1", T1).write()
+    TranscriptBuilder(projects, "-a", "s2").prompt("u2", T1).turn("n1", T1).turn("n2", T1, tools=["Read", "Read"]).write()
+    TranscriptBuilder(projects, "-b", "s3").prompt("u3", T1).turn("o1", T1).write()
     conn = store.connect()
     ingest.sync(conn, projects)
     conn.execute("UPDATE sessions SET repo_root = '/repo/a' WHERE session_id IN ('s1', 's2')")
@@ -107,6 +113,32 @@ class TestSummary:
         out = report.summary(conn, since=cutoff)
         assert out["totals"]["sessions"] == 2
         assert [d["day"] for d in out["by_day"]] == ["2026-09-02"]
+
+    def test_trend_days_are_clipped_to_the_window_but_totals_keep_the_whole_session(self, projects):
+        """`since` is a SESSION-level filter (membership decided by the
+        session's last activity), so a session that touched a day before the
+        window still counts wholly in the totals once any of its activity is
+        inside it. A day TREND is a different read: a day outside the window
+        must not appear on the chart just because the session that touched it
+        also touched a later day that is inside."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=["Edit"])
+        b.raw({
+            "type": "user", "uuid": "r1", "sessionId": "s1", "timestamp": T0,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "m1-tool0", "content": "ok"}]},
+            "toolUseResult": {"filePath": "/repo/a.py",
+                              "structuredPatch": [{"lines": ["+x"] * 3}]},
+        })
+        b.turn("m2", T1).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        cutoff = parse_ts(T1)
+        out = report.summary(conn, since=cutoff)
+        assert out["totals"]["turns"] == 2  # the whole session, both days
+        assert out["churn"]["lines_added"] == 3
+        assert [d["day"] for d in out["by_day"]] == ["2026-09-02"]
+        assert [d["day"] for d in out["churn"]["by_day"]] == []
 
     def test_branch_filter_is_session_level(self, projects):
         conn = _seed(projects)
@@ -423,6 +455,35 @@ class TestArtifactsReport:
         detail = report.session_detail(conn, "s2")
         assert [a["title"] for a in detail["artifacts"]] == ["Board v3", "lost"]
         assert [t["turn"] for t in detail["biggest_jumps"]] == [1, 2]
+
+    def test_a_page_published_from_several_sessions_is_one_row(self, projects):
+        """A page resumed into another session is a SEPARATE row per session
+        as far as `_ARTIFACT_PAGE_SQL` is concerned — `artifacts()` must
+        merge those back into one, or a republish across sessions inflates
+        both the listing and its `publishes` count."""
+        conn = _seed(projects)
+        url = "https://claude.ai/code/artifact/resumed"
+        conn.executemany(
+            "INSERT INTO artifacts(session_id, tool_use_id, ts, url, title, favicon, description) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [
+                ("s1", "p1", 3, url, "Map v1", "🗺️", None),
+                ("s2", "p2", 15, url, "Map v2", None, "The map"),
+                ("s2", "p3", 16, None, "lost", None, None),
+                ("s3", "p4", 30, url, "Map v3", None, None),  # /repo/b: outside the repo filter below
+            ],
+        )
+        conn.commit()
+        merged = {
+            "session_id": "s2", "session_title": None, "ts": 15.0, "url": url,
+            "title": "Map v2", "description": "The map", "favicon": "🗺️",
+            "publishes": 2, "first_ts": 3.0,
+        }
+        lost = {**merged, "ts": 16.0, "url": None, "title": "lost", "description": None,
+                "favicon": None, "publishes": 1, "first_ts": 16.0}
+        assert report.artifacts(conn, repo_root="/repo/a") == [lost, merged]
+        # `limit` counts MERGED pages, not raw rows.
+        assert report.artifacts(conn, repo_root="/repo/a", limit=1) == [lost]
 
 
 class TestUnmigratedStore:
@@ -992,8 +1053,9 @@ class TestDerivedMetrics:
         b.subagent("agent-1", ["a1"], T0)
         b.write()
         # A second session with NO file edits: it must not dilute the
-        # churn-derived averages.
-        TranscriptBuilder(projects, "-a", "s2").prompt("u1", T1).turn("m1", T1).write()
+        # churn-derived averages. Its own message id — reusing "m1" would
+        # collide with s1's and be skipped as a copy (see TestCopiedRecords).
+        TranscriptBuilder(projects, "-a", "s2").prompt("u2", T1).turn("n1", T1).write()
         conn = store.connect()
         ingest.sync(conn, projects)
         conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
