@@ -818,6 +818,23 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(slots(container)).toEqual({ Almoner: "0", Board: "1", Atlas: "2", Chronicle: "3" });
   });
 
+  it("gives each page its own coin art", () => {
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+    const icons = Object.fromEntries(
+      Array.from(container.querySelectorAll(".topbar__view-toggle-btn")).map((b) => [
+        b.getAttribute("aria-label"),
+        b.querySelector("img")!.getAttribute("src")!.split("/").pop(),
+      ])
+    );
+    expect(icons).toEqual({
+      Board: "scry.png",
+      Atlas: "treasure-map.png",
+      Chronicle: "journal.png",
+      Almoner: "scroll.png",
+    });
+  });
+
   it("sits still on load: no coin carries data-spin until the first view change", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} view="board" />);
     container
