@@ -843,6 +843,27 @@ describe("<TopBar/> coin spin-in-place (WF-11x)", () => {
   const bySlot = (container: HTMLElement, slot: number) =>
     container.querySelector(`.topbar__view-toggle-btn[data-slot="${slot}"]`) as HTMLElement;
 
+  /** The declarations inside `@keyframes <name> { ... }` in the real
+   * stylesheet source — brace-counted rather than a regex match, since the
+   * block's own percentage selectors (`50% { ... }`) nest braces inside it.
+   * Same "read the real CSS, don't trust jsdom computed style" approach as
+   * the truncation-styling describe block further down this file. */
+  function keyframesBody(css: string, name: string): string {
+    const start = css.indexOf(`@keyframes ${name}`);
+    expect(start, `expected @keyframes ${name}`).toBeGreaterThanOrEqual(0);
+    const openBrace = css.indexOf("{", start);
+    let depth = 0;
+    let end = openBrace;
+    for (; end < css.length; end++) {
+      if (css[end] === "{") depth++;
+      else if (css[end] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return css.slice(openBrace + 1, end);
+  }
+
   it("never remounts or reorders a coin's DOM node across a view change", () => {
     const all = { chronicleAvailable: true, almonerAvailable: true };
     const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
@@ -894,26 +915,39 @@ describe("<TopBar/> coin spin-in-place (WF-11x)", () => {
   });
 
   it("restarts the spin, and the last click wins, when a second change lands before the first settles", () => {
-    const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    // Board -> Atlas -> Chronicle, the second click landing before the
+    // first spin's midpoint. A straight reversal (Board -> Atlas -> Board)
+    // would settle back to a NULL data-spin either way, making a
+    // `not.toBe(firstToken)` check vacuous — a third, distinct destination
+    // is what actually proves a fresh animation ran rather than the first
+    // one just continuing to a coincidentally-matching end state.
+    const withChronicle = { chronicleAvailable: true };
+    const { container, rerender } = render(
+      <StatefulTopBar {...baseProps()} {...withChronicle} view="board" />
+    );
     const front = bySlot(container, 0);
+    // Ground truth for "did the final face really land on Chronicle" below,
+    // read from Chronicle's own coin before anything has spun.
+    const chronicleIcon = bySlot(container, 2).querySelector("img")!.getAttribute("src");
 
-    rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+    rerender(<StatefulTopBar {...baseProps()} {...withChronicle} view="atlas" />);
     const firstToken = front.getAttribute("data-spin");
-    act(() => vi.advanceTimersByTime(COIN_SPIN_MS / 2 - 1));
+    expect(firstToken).not.toBeNull();
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS / 4));
 
-    // Second click, before the first spin's midpoint has fired.
-    rerender(<StatefulTopBar {...baseProps()} view="board" />);
-    expect(front).toHaveAttribute("aria-label", "Board");
+    // Second click, well before the first spin's midpoint has fired.
+    rerender(<StatefulTopBar {...baseProps()} {...withChronicle} view="chronicle" />);
+    expect(front).toHaveAttribute("aria-label", "Chronicle");
     // The keyframe name alternates, so a browser sees a fresh animation
-    // rather than the first one continuing.
+    // rather than the first (superseded) one continuing.
+    expect(front.getAttribute("data-spin")).not.toBeNull();
     expect(front.getAttribute("data-spin")).not.toBe(firstToken);
 
-    // Advancing the ORIGINAL midpoint delay must not swap in Atlas's icon —
-    // that click was superseded before it ever took visible effect.
-    const boardIcon = front.querySelector("img")!.getAttribute("src");
+    // Settle fully: the face must land on Chronicle — the superseded
+    // Atlas face from the cancelled first spin must never have appeared.
     act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
-    expect(front.querySelector("img")!.getAttribute("src")).toBe(boardIcon);
     expect(front).not.toHaveAttribute("data-spin");
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(chronicleIcon);
   });
 
   it("swaps instantly with no spin under prefers-reduced-motion", () => {
@@ -949,6 +983,29 @@ describe("<TopBar/> coin spin-in-place (WF-11x)", () => {
     expect(row.style.getPropertyValue("--coin-spin-ms")).toBe(`${COIN_SPIN_MS}ms`);
   });
 
+  it("never rotates past 90deg in either direction, so the icon is never mirrored", () => {
+    const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+    for (const name of ["topbar-coin-spin-a", "topbar-coin-spin-b"]) {
+      const body = keyframesBody(css, name);
+      const degrees = [...body.matchAll(/rotate:\s*y\s*(-?\d+(?:\.\d+)?)deg/g)].map((m) =>
+        Number(m[1])
+      );
+      expect(degrees.length).toBeGreaterThan(0);
+      degrees.forEach((deg) => expect(Math.abs(deg)).toBeLessThanOrEqual(90));
+    }
+  });
+
+  it("swaps sides exactly at the midpoint, where the coin is edge-on", () => {
+    const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+    for (const name of ["topbar-coin-spin-a", "topbar-coin-spin-b"]) {
+      const body = keyframesBody(css, name);
+      expect(body).toMatch(/50%\s*\{\s*rotate:\s*y\s*90deg;?\s*\}/);
+      expect(body).toMatch(/50\.001%\s*\{\s*rotate:\s*y\s*-90deg;?\s*\}/);
+    }
+  });
+});
+
+describe("<TopBar/> view toggle (WF-086) — identity placement", () => {
   it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
     const circles = container.querySelectorAll(".topbar__view-toggle-btn");

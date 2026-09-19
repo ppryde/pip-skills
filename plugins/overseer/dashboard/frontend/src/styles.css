@@ -5460,15 +5460,30 @@ a.card-drawer__pr-chip:hover {
 }
 
 /* Two identical spins: switching `animation-name` is what restarts the run
-   when a second view change lands before the first spin has finished. */
+   when a second view change lands before the first spin has finished.
+
+   Never rotates past 90deg (or -90deg) either way — a full 0deg->360deg
+   sweep spends its whole 90deg-270deg middle showing the icon MIRRORED
+   (default backface-visibility renders the flipped side as a horizontally
+   reversed image, not a blank/hidden one), and the old icon would be
+   mirrored right up to a swap that then landed on the new icon ALSO
+   mirrored. Swinging 0deg->90deg, jumping to -90deg (visually identical —
+   edge-on either way) and swinging -90deg->0deg instead keeps the coin
+   showing its true face for the entire turn, with the JS midpoint swap
+   (COIN_SPIN_MS/2, i.e. keyframe 50%) landing exactly on the edge-on jump,
+   where there is nothing to see swap. */
 @keyframes topbar-coin-spin-a {
-  from { rotate: y 0deg; }
-  to { rotate: y 360deg; }
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; }
+  50.001% { rotate: y -90deg; }
+  100% { rotate: y 0deg; }
 }
 
 @keyframes topbar-coin-spin-b {
-  from { rotate: y 0deg; }
-  to { rotate: y 360deg; }
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; }
+  50.001% { rotate: y -90deg; }
+  100% { rotate: y 0deg; }
 }
 
 /* Front coin — the active view: full size, above its siblings. */
