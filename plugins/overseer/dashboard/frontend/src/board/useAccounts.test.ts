@@ -31,6 +31,7 @@ describe("useAccounts", () => {
       expect(result.current.accounts).toHaveLength(1);
     });
     expect(result.current.accounts[0].account_uuid).toBe("11111111-aaaa");
+    expect(result.current.loaded).toBe(true);
   });
 
   it("swallows a mount-fetch failure and returns an empty list", async () => {
@@ -41,6 +42,33 @@ describe("useAccounts", () => {
 
     await waitFor(() => {
       expect(mockGetAccounts).toHaveBeenCalled();
+    });
+    expect(result.current.accounts).toEqual([]);
+  });
+
+  it("starts not loaded, and stays not loaded after a failed fetch — a caller must not treat a" +
+     " hiccup as 'we now know there are no accounts'", async () => {
+    const mockGetAccounts = vi.mocked(client.getAccounts);
+    mockGetAccounts.mockRejectedValueOnce(new Error("Network error"));
+
+    const { result } = renderHook(() => useAccounts());
+
+    expect(result.current.loaded).toBe(false);
+    await waitFor(() => {
+      expect(mockGetAccounts).toHaveBeenCalled();
+    });
+    expect(result.current.loaded).toBe(false);
+  });
+
+  it("becomes loaded after a successful fetch even when the list comes back genuinely empty", async () => {
+    const mockGetAccounts = vi.mocked(client.getAccounts);
+    mockGetAccounts.mockResolvedValueOnce({ accounts: [] });
+
+    const { result } = renderHook(() => useAccounts());
+
+    expect(result.current.loaded).toBe(false);
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
     });
     expect(result.current.accounts).toEqual([]);
   });

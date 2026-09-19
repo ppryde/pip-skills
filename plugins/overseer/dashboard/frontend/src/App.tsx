@@ -139,7 +139,7 @@ function App() {
   // WF-116 account selector — same persisted-choice shape as the repo
   // selector above, reconciled the same way once `/api/accounts` resolves
   // (below).
-  const { accounts } = useAccounts();
+  const { accounts, loaded: accountsLoaded } = useAccounts();
   const [activeAccount, setActiveAccountState] = useState<string | null>(
     readStoredAccount
   );
@@ -162,12 +162,28 @@ function App() {
   // filtering every scoped fetch to a uuid nothing matches. Unlike the repo
   // reconcile there is no "current" fallback to prefer — `null` (all
   // accounts) is itself always a valid, meaningful choice.
+  //
+  // Guarded on `accountsLoaded`, NOT `accounts.length === 0`: the latter
+  // can't tell "the fetch hasn't come back yet" from "it came back and
+  // there really are no accounts" (no chronicle history, no oauth logins
+  // anywhere) — collapsing the two left a stale persisted uuid filtering
+  // every session/chronicle read forever, with nothing in the UI able to
+  // clear it (`AccountSelector` hides itself below two accounts). A failed
+  // fetch never sets `accountsLoaded` (see `useAccounts`), so a hiccup
+  // leaves whatever was persisted untouched rather than being read as "no
+  // accounts exist" — same "don't clear on a failure" rule the repo
+  // reconcile gets for free by falling back to `current` instead of `null`.
+  // Clears the localStorage key too (not just the in-memory state) so the
+  // reconcile does not just re-happen on every reload — `writeStoredAccount`
+  // already treats `null` as "remove the key".
   useEffect(() => {
-    if (accounts.length === 0) return;
-    setActiveAccountState((current) =>
-      current && accounts.some((a) => a.account_uuid === current) ? current : null
-    );
-  }, [accounts]);
+    if (!accountsLoaded) return;
+    setActiveAccountState((current) => {
+      if (current && accounts.some((a) => a.account_uuid === current)) return current;
+      if (current !== null) writeStoredAccount(null);
+      return null;
+    });
+  }, [accounts, accountsLoaded]);
 
   function handleSelectAccount(account: string | null) {
     setActiveAccountState(account);
