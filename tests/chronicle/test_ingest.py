@@ -310,6 +310,19 @@ class TestCopiedRecords:
         # s0 (which sorts first) does NOT retroactively steal them back.
         assert empty["started_at"] == full["started_at"] == parse_ts(T0)
 
+    @pytest.mark.parametrize("table,column", [
+        ("turns", "message_id"), ("tool_calls", "tool_use_id"), ("events", "uuid"),
+    ])
+    def test_the_copy_check_seeks_an_index_rather_than_scanning_history(
+            self, tmp_path, table, column):
+        # Every sync runs this check, so a scan would make routine syncs cost
+        # the whole store rather than the lines that are new.
+        conn = store.connect(tmp_path / "sessions.db")
+        plan = " ".join(row[-1] for row in conn.execute(
+            f"EXPLAIN QUERY PLAN SELECT {column} FROM {table} "
+            f"WHERE session_id <> ? AND {column} IN (?, ?)", ("s", "a", "b")))
+        assert plan.startswith("SEARCH") and column in plan
+
 
 class TestActiveMs:
     @pytest.mark.parametrize(
