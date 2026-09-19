@@ -288,17 +288,17 @@ function TopBar({
   // One coin per page, spread in an overlapping row; each coin selects its
   // own view (the pressed coin is inert — it already is the page). This
   // replaces the old two-coin "click either to swap" toggle, which only
-  // ever encoded two views. rpg-icons pack art: journal (the guild's belted
-  // quest-ledger), treasure map (dashed trail and all), sealed letter (the
-  // session ledger).
+  // ever encoded two views. rpg-icons pack art: magnifying glass (the
+  // overseer's eye on the board), treasure map (the epic journey), journal
+  // (the session diary), sealed letter (the Almoner's post).
   const coins: { view: View; label: string; title: string; icon: string }[] = [
-    { view: "board", label: "Board", title: "Board", icon: journalIcon },
+    { view: "board", label: "Board", title: "Board", icon: scryIcon },
     { view: "atlas", label: "Atlas", title: "Atlas", icon: treasureMapIcon },
     ...(chronicleAvailable
-      ? [{ view: "chronicle" as View, label: "Chronicle", title: "The Chronicle — session token usage and shape", icon: scrollIcon }]
+      ? [{ view: "chronicle" as View, label: "Chronicle", title: "The Chronicle — session token usage and shape", icon: journalIcon }]
       : []),
     ...(almonerAvailable
-      ? [{ view: "almoner" as View, label: "Almoner", title: "The Almoner — what is asking for your attention, gathered and triaged", icon: scryIcon }]
+      ? [{ view: "almoner" as View, label: "Almoner", title: "The Almoner — what is asking for your attention, gathered and triaged", icon: scrollIcon }]
       : []),
   ];
   // The Chronicle has no cards or board provisions: on that page the
