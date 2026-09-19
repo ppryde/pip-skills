@@ -5404,12 +5404,16 @@ a.card-drawer__pr-chip:hover {
    row's `--coin-count`; position and stacking are derived from those, so a
    coin added or removed never needs this CSS touched.
 
-   On a view change the coins slide to their new slots (a `translate`
-   transition) while the whole row spins about its vertical axis — a
-   `rotate` keyframe run, restarted per change by TopBar flipping
-   `data-spin` between two identically-shaped keyframe names. Both are
-   individual transform properties, so the slide, the spin and the back
-   coins' `scale` compose without clobbering one another.
+   A coin's DOM node is keyed by its SLOT and never moves (WF-11x follow-up
+   to #76, which slid coins between slots on every view change — "all of the
+   coins switch places" was the very thing that needed fixing). On a view
+   change, only the slots whose assigned page actually changed spin about
+   their vertical axis in place (`rotate: y`, via the `data-spin="a"`/`"b"`
+   alternation below — same "swap the keyframe name to restart mid-spin"
+   trick #76 used, now scoped to just the coins actually changing). TopBar
+   swaps each spinning coin's icon at the midpoint of that turn — half of
+   `--coin-spin-ms`, set inline from the same `COIN_SPIN_MS` constant its JS
+   timer reads, so the two can never drift out of sync.
 
    Each coin's box is 44px (border included) — meeting the ≥44px touch-target
    floor directly. Active = the same gold-chip fill/border/text trio the
@@ -5428,7 +5432,9 @@ a.card-drawer__pr-chip:hover {
   top: 0;
   left: 0;
   /* Stacking reads left to right: each coin lies over the one to its right,
-     like a fanned hand of cards, so the pressed coin (slot 0) tops them all. */
+     like a fanned hand of cards, so the pressed coin (slot 0) tops them all.
+     Fixed for the coin's lifetime — the slot a button is born into is the
+     only slot it ever occupies, so this never transitions. */
   translate: calc(var(--slot, 0) * 30px) 0;
   z-index: calc(var(--coin-count, 2) - var(--slot, 0));
   display: inline-flex;
@@ -5450,39 +5456,53 @@ a.card-drawer__pr-chip:hover {
 @media (prefers-reduced-motion: no-preference) {
   .topbar__view-toggle-btn {
     transition:
-      translate 0.5s cubic-bezier(0.34, 1.4, 0.64, 1),
       scale 0.28s ease,
       background-color 0.2s ease,
       border-color 0.2s ease;
   }
 
-  /* A slight stagger by slot, so the spin ripples out from the new front
-     coin rather than the row turning as one rigid plate. */
-  .topbar__view-toggle[data-spin] .topbar__view-toggle-btn {
-    animation-duration: 0.6s;
+  /* Only the coins whose assigned page actually changed spin — a two-coin
+     swap (say Board <-> Atlas) turns those two in place and leaves any
+     Chronicle/Almoner coins beside them untouched. */
+  .topbar__view-toggle-btn[data-spin] {
+    animation-duration: var(--coin-spin-ms, 600ms);
     animation-timing-function: ease-in-out;
-    animation-delay: calc(var(--slot, 0) * 50ms);
   }
 
-  .topbar__view-toggle[data-spin="a"] .topbar__view-toggle-btn {
+  .topbar__view-toggle-btn[data-spin="a"] {
     animation-name: topbar-coin-spin-a;
   }
 
-  .topbar__view-toggle[data-spin="b"] .topbar__view-toggle-btn {
+  .topbar__view-toggle-btn[data-spin="b"] {
     animation-name: topbar-coin-spin-b;
   }
 }
 
 /* Two identical spins: switching `animation-name` is what restarts the run
-   when a second view change lands before the first spin has finished. */
+   when a second view change lands before the first spin has finished.
+
+   Never rotates past 90deg (or -90deg) either way — a full 0deg->360deg
+   sweep spends its whole 90deg-270deg middle showing the icon MIRRORED
+   (default backface-visibility renders the flipped side as a horizontally
+   reversed image, not a blank/hidden one), and the old icon would be
+   mirrored right up to a swap that then landed on the new icon ALSO
+   mirrored. Swinging 0deg->90deg, jumping to -90deg (visually identical —
+   edge-on either way) and swinging -90deg->0deg instead keeps the coin
+   showing its true face for the entire turn, with the JS midpoint swap
+   (COIN_SPIN_MS/2, i.e. keyframe 50%) landing exactly on the edge-on jump,
+   where there is nothing to see swap. */
 @keyframes topbar-coin-spin-a {
-  from { rotate: y 0deg; }
-  to { rotate: y 360deg; }
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; }
+  50.001% { rotate: y -90deg; }
+  100% { rotate: y 0deg; }
 }
 
 @keyframes topbar-coin-spin-b {
-  from { rotate: y 0deg; }
-  to { rotate: y 360deg; }
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; }
+  50.001% { rotate: y -90deg; }
+  100% { rotate: y 0deg; }
 }
 
 /* Front coin — the active view: full size, above its siblings. */
