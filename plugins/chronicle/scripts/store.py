@@ -219,6 +219,26 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_seen         REAL
 );
 
+-- One row per usage-limit banner RECORD (see transcript.LimitHit) — the same
+-- real-world hit is written into every session and subagent running at the
+-- time, so this is deliberately not deduplicated at write time: "how many
+-- sessions saw it" is itself part of what `report.limits` answers, on the
+-- read side, by grouping on (account, kind, resets_at/bucketed ts).
+CREATE TABLE IF NOT EXISTS limit_hits (
+    session_id  TEXT NOT NULL,
+    agent_id    TEXT NOT NULL DEFAULT '',
+    uuid        TEXT NOT NULL,
+    ts          REAL,
+    kind        TEXT NOT NULL DEFAULT 'other',
+    model       TEXT,
+    reset_raw   TEXT,
+    resets_at   REAL,
+    raw_text    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (session_id, uuid)
+);
+CREATE INDEX IF NOT EXISTS limit_hits_ts ON limit_hits(ts);
+CREATE INDEX IF NOT EXISTS limit_hits_kind ON limit_hits(kind);
+
 CREATE TABLE IF NOT EXISTS cursors (
     path        TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL,

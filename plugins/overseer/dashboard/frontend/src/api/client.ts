@@ -12,6 +12,7 @@ import type {
   ChronicleQuery,
   ChronicleSyncResponse,
   ChronicleAgentDetail,
+  ChronicleLimitsResponse,
   ChronicleSessionDetail,
   ChronicleSessionsResponse,
   ChronicleStatus,
@@ -373,6 +374,14 @@ export function getChronicleSessions(
     "GET",
     `${url}${url.includes("?") ? "&" : "?"}limit=${limit}`
   );
+}
+
+/** Deduplicated usage-limit hits (the same real hit is written into every
+ * session running at the time; the backend folds those into one event per
+ * account/kind/reset — see `chronicle limits`), scoped by the same
+ * root/scope/days/branch query every other Chronicle read takes. */
+export function getChronicleLimits(query?: ChronicleQuery): Promise<ChronicleLimitsResponse> {
+  return request<ChronicleLimitsResponse>("GET", chronicleQuery("/api/chronicle/limits", query));
 }
 
 export function getChronicleSession(id: string): Promise<ChronicleSessionDetail> {

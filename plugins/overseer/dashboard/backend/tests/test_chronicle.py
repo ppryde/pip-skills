@@ -60,6 +60,51 @@ def _seed(root: Path, tmp_path: Path, *, repo_root: str) -> None:
     conn.close()
 
 
+def _seed_limit_hit(root: Path, tmp_path: Path, *, repo_root: str,
+                    text: str = "You've hit your session limit · resets 11:50am (Europe/London)",
+                    session_id: str = "limsess1") -> None:
+    """A single usage-limit banner, ingested exactly like `_seed`'s turns."""
+    transcript = tmp_path / "projects" / "-repo" / f"{session_id}.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    record = _record("assistant", session_id, "2026-09-01T10:00:00Z", message={
+        "id": f"m-{session_id}", "model": "<synthetic>", "role": "assistant",
+        "content": [{"type": "text", "text": text}]},
+        isApiErrorMessage=True, error="rate_limit", apiErrorStatus=429, sessionId=session_id)
+    transcript.write_text(json.dumps(record) + "\n")
+    subprocess.run(
+        [sys.executable, str(_CHRONICLE_CLI), "ingest", "--transcript", str(transcript)],
+        check=True, capture_output=True, text=True, env=dict(os.environ),
+    )
+    import sqlite3
+    conn = sqlite3.connect(os.environ["CHRONICLE_DB"])
+    conn.execute("UPDATE sessions SET repo_root = ? WHERE session_id = ?", (repo_root, session_id))
+    conn.commit()
+    conn.close()
+
+
+def test_limits_scoped_to_launch_root(client: TestClient, root: Path, tmp_path: Path) -> None:
+    _seed_limit_hit(root, tmp_path, repo_root=str(root.resolve()))
+    body = client.get("/api/chronicle/limits").json()
+    assert body["by_kind"] == {"session": 1}
+    assert len(body["events"]) == 1
+    assert body["events"][0]["kind"] == "session"
+    assert body["events"][0]["sessions"] == 1
+
+
+def test_limits_hidden_outside_its_root_unless_scope_all(client: TestClient, root: Path,
+                                                          tmp_path: Path) -> None:
+    _seed_limit_hit(root, tmp_path, repo_root="/somewhere/else")
+    assert client.get("/api/chronicle/limits").json()["events"] == []
+    assert len(client.get("/api/chronicle/limits?scope=all").json()["events"]) == 1
+
+
+def test_limits_days_window(client: TestClient, root: Path, tmp_path: Path) -> None:
+    _seed_limit_hit(root, tmp_path, repo_root=str(root.resolve()))
+    assert client.get("/api/chronicle/limits?days=1").json()["events"] == []
+    assert len(client.get("/api/chronicle/limits?days=3650").json()["events"]) == 1
+    assert client.get("/api/chronicle/limits?days=0").status_code == 400
+
+
 def test_sync_pulls_new_transcripts(client: TestClient, root: Path, tmp_path: Path,
                                     monkeypatch: pytest.MonkeyPatch) -> None:
     """POST /api/chronicle/sync ingests what's on disk under the (pinned)
@@ -180,6 +225,7 @@ def test_plugin_absent_degrades(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert client.get("/api/chronicle/status").json() == {"installed": False, "exists": False}
     assert client.get("/api/chronicle/summary").json() == {"totals": None}
     assert client.get("/api/chronicle/sessions").json() == {"sessions": []}
+    assert client.get("/api/chronicle/limits").json() == {"events": [], "by_kind": {}}
     assert client.get("/api/chronicle/session/sess1").status_code == 404
     assert client.post("/api/chronicle/sync").status_code == 503
 
@@ -242,7 +288,7 @@ class TestChronicleOnlyRoots:
         _seed(root, tmp_path, repo_root=str(root.resolve()))
         stranger = tmp_path / "never-heard-of-it"
         stranger.mkdir()
-        for route in ("/api/chronicle/sessions", "/api/chronicle/summary"):
+        for route in ("/api/chronicle/sessions", "/api/chronicle/summary", "/api/chronicle/limits"):
             resp = client.get(route, params={"root": str(stranger)})
             assert resp.status_code == 400, route
             assert "unknown root" in resp.json()["detail"]

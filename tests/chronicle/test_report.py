@@ -1153,3 +1153,163 @@ class TestDerivedMetrics:
         conn.commit()
         attr = report.summary(conn)["attribution"]
         assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)   # once, not twice
+
+
+class TestLimits:
+    SESSION_TEXT = "You've hit your session limit · resets 3pm (Europe/London)"
+    WEEKLY_TEXT = "You've hit your weekly limit · resets 8pm (Europe/London)"
+    MONTHLY_TEXT = "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"
+    MODEL_TEXT = "You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."
+
+    def test_the_same_hit_across_two_sessions_is_one_event(self, projects):
+        # Claude Code writes the SAME real hit into every session running at
+        # the time; the resets_at they all state is identical.
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 1
+        assert out["events"][0]["sessions"] == 2
+        assert out["events"][0]["kind"] == "session"
+        assert out["by_kind"] == {"session": 1}
+
+    def test_different_reset_times_are_distinct_events(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T1, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-02T15:00:00.000Z")}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 2
+
+    def test_different_accounts_never_merge(self, projects):
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1' WHERE session_id = 's1'")
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-2' WHERE session_id = 's2'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 2
+        assert {e["sessions"] for e in out["events"]} == {1}
+
+    def test_model_kind_keeps_the_model_name_and_by_kind_count(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit("h1", T0, self.MODEL_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn)
+        assert out["events"][0]["kind"] == "model"
+        assert out["events"][0]["model"] == "Fable 5"
+        assert out["by_kind"] == {"model": 1}
+
+    def test_hits_with_no_reset_time_bucket_by_the_hit_moment(self, projects):
+        # monthly-spend carries no reset time at all, so two hits close
+        # together are the same event, and two far apart are not.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.limit_hit("h1", "2026-09-01T10:00:00.000Z", self.MONTHLY_TEXT)
+        b.limit_hit("h2", "2026-09-01T10:02:00.000Z", self.MONTHLY_TEXT)
+        b.limit_hit("h3", "2026-09-15T10:00:00.000Z", self.MONTHLY_TEXT)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn)
+        assert len(out["events"]) == 2
+        assert sorted(e["sessions"] for e in out["events"]) == [1, 1]  # 1 session, 2 rows folded
+
+    def test_since_filters_on_the_hit_time_not_session_activity(self, projects):
+        # A session active recently but whose HIT happened long before the
+        # window must not count as an in-window hit — same fix `_within`
+        # applies to a day trend elsewhere in this module.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.limit_hit("h1", T0, self.SESSION_TEXT,
+                   quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")})
+        b.turn("m1", T1)  # keeps the session's last_activity_at recent
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn, since=parse_ts(T1) - 3600)
+        assert out["events"] == []
+
+    def test_tokens_to_limit_sums_the_account_wide_window(self, projects):
+        window_start = "2026-09-01T10:00:00.000Z"          # resets_at - 5h
+        hit_ts = "2026-09-01T14:55:00.000Z"
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.turn("before", "2026-09-01T09:00:00.000Z")        # excluded: before window
+        b.turn("in-window-1", window_start)                 # included: default usage
+        b.turn("in-window-2", "2026-09-01T12:00:00.000Z",   # included: custom usage
+              usage={"input_tokens": 10, "cache_read_input_tokens": 0,
+                     "cache_creation_input_tokens": 0, "output_tokens": 20})
+        b.turn("after", "2026-09-01T16:00:00.000Z")         # excluded: after the hit
+        b.limit_hit("h1", hit_ts, self.SESSION_TEXT,
+                   quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")})
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        tokens = report.limits(conn)["events"][0]["tokens_to_limit"]
+        assert tokens["input_tokens"] == 13     # 3 (default) + 10
+        assert tokens["cache_read_tokens"] == 1000
+        assert tokens["cache_creation_tokens"] == 200
+        assert tokens["output_tokens"] == 60    # 40 (default) + 20
+        assert tokens["total_tokens"] == 1273
+        assert round(tokens["cost_usd"], 6) == round(TURN_USD + (10 * 5.0 + 20 * 25.0) / 1_000_000, 6)
+        assert tokens["window_start"] == parse_ts(window_start)
+
+    def test_tokens_to_limit_is_none_without_an_account(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)  # no account_uuid stamped
+        assert report.limits(conn)["events"][0]["tokens_to_limit"] is None
+
+    def test_tokens_to_limit_is_none_for_kinds_with_no_documented_window(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.limit_hit("h1", T0, self.MONTHLY_TEXT)
+        b.limit_hit("h2", T0, self.MODEL_TEXT)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        for event in report.limits(conn)["events"]:
+            assert event["tokens_to_limit"] is None
+
+    def test_repo_root_scopes_which_sessions_hits_are_read_from(self, projects):
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T0, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-02T15:00:00.000Z")}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a' WHERE session_id = 's1'")
+        conn.execute("UPDATE sessions SET repo_root = '/repo/b' WHERE session_id = 's2'")
+        conn.commit()
+        out = report.limits(conn, repo_root="/repo/a")
+        assert len(out["events"]) == 1
+
+    def test_missing_table_degrades_to_empty_rather_than_raising(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("DROP TABLE limit_hits")
+        conn.commit()
+        assert report.limits(conn) == {"events": [], "by_kind": {}}

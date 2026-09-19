@@ -613,6 +613,7 @@ function App() {
                 scope={chronicleScope}
                 summary={chronicle.summary}
                 sessions={chronicle.sessions}
+                limits={chronicle.limits}
                 loading={chronicle.loading}
                 error={chronicle.error}
                 onRetry={() => void chronicle.refresh()}

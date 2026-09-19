@@ -1,8 +1,15 @@
 import json
 
-from scripts.transcript import MAIN_AGENT, TASK_CHARS, fold, parse_ts
+from scripts.transcript import (
+    MAIN_AGENT,
+    SYNTHETIC_MODEL,
+    TASK_CHARS,
+    fold,
+    parse_reset_time,
+    parse_ts,
+)
 
-from .conftest import _assistant, _user
+from .conftest import _assistant, _limit_hit, _user
 
 T0 = "2026-09-01T10:00:00.000Z"
 T1 = "2026-09-01T10:00:30.000Z"
@@ -496,3 +503,121 @@ class TestStreamedUsage:
         facts = fold([self._line(40, "text", thinking=10)])
         turn = next(iter(facts.turns.values()))
         assert (turn.output_tokens, turn.thinking_tokens) == (40, 10)
+
+
+class TestLimitHits:
+    """A usage-limit banner is a SYNTHETIC assistant record — no API call
+    happened — so it must be captured independently of ``turns``, which skips
+    synthetic records outright (see ``_fold_assistant``)."""
+
+    def test_session_limit_with_bare_time_reset(self):
+        rec = _limit_hit("h1", ts=T0, text="You've hit your session limit · resets 11:50am (Europe/London)")
+        facts = fold([json.dumps(rec)])
+        assert len(facts.limit_hits) == 1
+        hit = facts.limit_hits[0]
+        assert hit.kind == "session"
+        assert hit.model is None
+        assert hit.reset_raw == "11:50am (Europe/London)"
+        assert hit.raw_text == "You've hit your session limit · resets 11:50am (Europe/London)"
+        # T0 is 10:00 UTC = 11:00 BST; "11:50am" that same day is still ahead
+        # of the hit, so no day rollover.
+        assert hit.resets_at == parse_ts("2026-09-01T11:50:00+01:00")
+
+    def test_session_limit_never_becomes_a_turn(self):
+        rec = _limit_hit("h1", ts=T0, text="You've hit your session limit · resets 11:50am (Europe/London)")
+        facts = fold([json.dumps(rec)])
+        assert facts.turns == {}
+
+    def test_weekly_limit_with_dated_reset(self):
+        rec = _limit_hit("h2", ts="2026-08-10T10:00:00.000Z",
+                         text="You've hit your weekly limit · resets Aug 16 at 8pm (Europe/London)")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.kind == "weekly"
+        assert hit.reset_raw == "Aug 16 at 8pm (Europe/London)"
+        assert hit.resets_at == parse_ts("2026-08-16T20:00:00+01:00")
+
+    def test_dated_reset_rolls_the_year_forward_when_the_date_has_passed(self):
+        # A weekly reset stated in early January for a hit made in late
+        # December names a date already behind the hit in the current year.
+        rec = _limit_hit("h2b", ts="2026-12-30T10:00:00.000Z",
+                         text="You've hit your weekly limit · resets Jan 2 at 8pm (Europe/London)")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.resets_at == parse_ts("2027-01-02T20:00:00+00:00")
+
+    def test_monthly_spend_limit_has_no_reset_time(self):
+        rec = _limit_hit("h3", ts=T0,
+                         text="You've hit your monthly spend limit · raise it at claude.ai/settings/usage")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.kind == "monthly_spend"
+        assert hit.reset_raw is None
+        assert hit.resets_at is None
+
+    def test_model_limit_captures_the_model_name(self):
+        rec = _limit_hit("h4", ts=T0,
+                         text="You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model.")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.kind == "model"
+        assert hit.model == "Fable 5"
+        assert hit.resets_at is None
+
+    def test_unrecognised_wording_is_kept_as_other_not_dropped(self):
+        rec = _limit_hit("h5", ts=T0, text="You've hit some new kind of limit we've never seen")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.kind == "other"
+        assert hit.model is None
+        assert hit.raw_text == "You've hit some new kind of limit we've never seen"
+
+    def test_other_api_errors_are_not_limit_hits(self):
+        connection_drop = _assistant("m1", ts=T0, model=SYNTHETIC_MODEL,
+                                     blocks=[{"type": "text",
+                                              "text": "API Error: Connection closed mid-response."}],
+                                     isApiErrorMessage=True, error="server_error", uuid="not-a-hit")
+        login_expired = _assistant("m2", ts=T0, model=SYNTHETIC_MODEL,
+                                   blocks=[{"type": "text", "text": "Login expired · Please run /login"}],
+                                   isApiErrorMessage=True, error="authentication_failed", uuid="also-not")
+        facts = fold([json.dumps(connection_drop), json.dumps(login_expired)])
+        assert facts.limit_hits == []
+
+    def test_ordinary_rate_limited_text_without_the_error_marker_is_ignored(self):
+        # The banner is only recognised via Claude Code's own error markers —
+        # a turn that merely MENTIONS a limit in its own text is not a hit.
+        rec = _assistant("m1", ts=T0, blocks=[{"type": "text", "text": "You've hit your session limit"}])
+        assert fold([json.dumps(rec)]).limit_hits == []
+
+    def test_quota_limits_resets_at_is_preferred_over_text_parsing(self):
+        rec = _limit_hit("h6", ts=T0, text="You've hit your session limit · resets 11:50am (Europe/London)",
+                         quotaLimits={"resetsAt": 1234567890, "rateLimitType": "five_hour"})
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.resets_at == 1234567890.0
+
+    def test_subagent_hit_carries_its_agent_id(self):
+        rec = _limit_hit("h7", ts=T0, text="You've hit your session limit · resets 11:50am (Europe/London)",
+                         agent_id="worker-1")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.agent_id == "worker-1"
+
+    def test_bare_hour_with_no_minutes(self):
+        rec = _limit_hit("h8", ts=T0, text="You've hit your session limit · resets 11pm (Europe/London)")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.resets_at == parse_ts("2026-09-01T23:00:00+01:00")
+
+    def test_bare_time_already_passed_today_rolls_to_tomorrow(self):
+        # Hit at 10:00 UTC (11:00 BST); "resets 9am" has already happened
+        # today, so the next occurrence is tomorrow morning.
+        rec = _limit_hit("h9", ts=T0, text="You've hit your session limit · resets 9am (Europe/London)")
+        hit = fold([json.dumps(rec)]).limit_hits[0]
+        assert hit.resets_at == parse_ts("2026-09-02T09:00:00+01:00")
+
+
+class TestParseResetTime:
+    def test_no_timezone_is_unparseable(self):
+        assert parse_reset_time("11:50am", parse_ts(T0)) is None
+
+    def test_unknown_timezone_is_unparseable(self):
+        assert parse_reset_time("11:50am (Nowhere/Fake)", parse_ts(T0)) is None
+
+    def test_garbage_body_is_unparseable(self):
+        assert parse_reset_time("sometime soon (Europe/London)", parse_ts(T0)) is None
+
+    def test_none_is_unparseable(self):
+        assert parse_reset_time(None, parse_ts(T0)) is None

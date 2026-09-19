@@ -1217,6 +1217,155 @@ def _within(days: list[dict[str, Any]], since: float | None) -> list[dict[str, A
     return [d for d in days if d["day"] >= first]
 
 
+# The window a limit's stated reset time covers, so tokens-to-limit can be
+# summed back from it. Only the two Claude Code states a clean period for —
+# a monthly-spend or per-model limit's window is not documented anywhere the
+# transcript states, so those are left without a tokens figure rather than
+# guessed at.
+_LIMIT_WINDOW_SECONDS = {"session": 5 * 3600, "weekly": 7 * 86400}
+# How close together two hits with no parseable reset time must be to count
+# as the SAME event (see `_limit_group_key`).
+_LIMIT_BUCKET_SECONDS = 600
+
+
+def _limit_bucket(ts: float | None) -> int | None:
+    return int(ts // _LIMIT_BUCKET_SECONDS) * _LIMIT_BUCKET_SECONDS if ts is not None else None
+
+
+def _limit_group_key(row: sqlite3.Row) -> tuple[Any, ...]:
+    """One real-world hit, however many sessions logged it. `resets_at` is
+    the STABLE identity when it parsed — every session hitting the same
+    limit at the same moment states the same reset — so it is preferred over
+    the hit's own timestamp, which drifts by whenever each session happened
+    to retry. Only a hit with no reset time at all falls back to bucketing
+    ITS OWN timestamp, which is coarser and can in principle split one real
+    event that happened to log with and without a parseable reset time; that
+    has not been observed in practice (see the ingest worker's report)."""
+    resets_at = row["resets_at"]
+    marker = ("resets_at", resets_at) if resets_at is not None else ("bucket", _limit_bucket(row["ts"]))
+    return (row["account_uuid"], row["kind"], row["model"], marker)
+
+
+def _tokens_to_limit(conn: sqlite3.Connection, account_uuid: str | None, kind: str,
+                     resets_at: float | None, hit_ts: float | None) -> dict[str, Any] | None:
+    """Token usage (and cost) an account burned reaching one deduped limit
+    event, summed across ALL its sessions and subagents from the window's
+    start to the moment it was hit.
+
+    An APPROXIMATION, and a documented one: the banner states only the RESET
+    time, never when the window opened, so the start is inferred as
+    `resets_at` minus the limit's fixed period (5h / 7d) — assuming the
+    window opened the instant it could have, rather than whenever usage
+    actually began inside it. None for a limit whose window this cannot
+    infer (see `_LIMIT_WINDOW_SECONDS`), or for an event missing the account,
+    the reset time, or the hit time needed to bound the sum.
+    """
+    window = _LIMIT_WINDOW_SECONDS.get(kind)
+    if not account_uuid or window is None or resets_at is None or hit_ts is None:
+        return None
+    window_start = resets_at - window
+    totals: dict[str, Any] = {"input_tokens": 0, "cache_read_tokens": 0,
+                              "cache_creation_tokens": 0, "output_tokens": 0}
+    cost = 0.0
+    unpriced_turns = 0
+    for r in conn.execute(
+        """SELECT t.model AS model, COUNT(*) AS turns,
+                  COALESCE(SUM(t.input_tokens), 0) AS input_tokens,
+                  COALESCE(SUM(t.cache_read_tokens), 0) AS cache_read_tokens,
+                  COALESCE(SUM(t.cache_creation_tokens), 0) AS cache_creation_tokens,
+                  COALESCE(SUM(t.cache_5m_tokens), 0) AS cache_5m_tokens,
+                  COALESCE(SUM(t.cache_1h_tokens), 0) AS cache_1h_tokens,
+                  COALESCE(SUM(t.output_tokens), 0) AS output_tokens
+           FROM turns t JOIN sessions s ON s.session_id = t.session_id
+           WHERE s.account_uuid = ? AND t.ts >= ? AND t.ts <= ?
+           GROUP BY t.model""",
+        (account_uuid, window_start, hit_ts),
+    ):
+        for key in ("input_tokens", "cache_read_tokens", "cache_creation_tokens", "output_tokens"):
+            totals[key] += int(r[key])
+        priced = _cost_of(r)
+        if priced is None:
+            unpriced_turns += int(r["turns"])
+        else:
+            cost += priced
+    totals["total_tokens"] = sum(totals.values())
+    totals["cost_usd"] = round(cost, 6)
+    totals["unpriced_turns"] = unpriced_turns
+    totals["window_start"] = window_start
+    return totals
+
+
+def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: float | None = None,
+           branch: str | None = None, account: str | None = None) -> dict[str, Any]:
+    """Deduplicated usage-limit hits, most recent first, plus a per-kind count.
+
+    Claude Code writes the SAME real-world hit into every session and
+    subagent running at the time (see `transcript.LimitHit`), so the rows in
+    `limit_hits` are grouped here into distinct EVENTS — one per
+    (account, kind, model, reset) — each carrying how many sessions saw it
+    and, when the window is known, the tokens burned reaching it (see
+    `_tokens_to_limit`).
+
+    The filters are session-scoped like every other read here (`repo_root`,
+    `branch`, `account` narrow WHICH SESSIONS' hits are considered; `since`
+    narrows to hits themselves, like a day trend elsewhere in this module,
+    since a hit long before a session's later, in-window activity must not
+    count as inside it).
+    """
+    if not _has_table(conn, "limit_hits"):
+        return {"events": [], "by_kind": {}}
+    where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
+    rows = conn.execute(
+        f"""SELECT h.session_id AS session_id, h.ts AS ts, h.kind AS kind, h.model AS model,
+                   h.reset_raw AS reset_raw, h.resets_at AS resets_at, h.raw_text AS raw_text,
+                   s.account_uuid AS account_uuid
+            FROM limit_hits h JOIN sessions s ON s.session_id = h.session_id
+            {where}""",
+        params,
+    ).fetchall()
+
+    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for r in rows:
+        g = groups.setdefault(_limit_group_key(r), {
+            "account_uuid": r["account_uuid"], "kind": r["kind"], "model": r["model"],
+            "resets_at": r["resets_at"], "reset_raw": r["reset_raw"], "raw_text": r["raw_text"],
+            "first_ts": None, "last_ts": None, "sessions": set(),
+        })
+        ts = r["ts"]
+        if ts is not None:
+            g["first_ts"] = ts if g["first_ts"] is None else min(g["first_ts"], ts)
+            g["last_ts"] = ts if g["last_ts"] is None else max(g["last_ts"], ts)
+        g["sessions"].add(r["session_id"])
+
+    events = [
+        {
+            "account_uuid": g["account_uuid"],
+            "kind": g["kind"],
+            "model": g["model"],
+            "hit_at": g["first_ts"],
+            "last_seen_at": g["last_ts"],
+            "resets_at": g["resets_at"],
+            "reset_raw": g["reset_raw"],
+            "raw_text": g["raw_text"],
+            "sessions": len(g["sessions"]),
+            "tokens_to_limit": _tokens_to_limit(
+                conn, g["account_uuid"], g["kind"], g["resets_at"], g["first_ts"]),
+        }
+        for g in groups.values()
+    ]
+    # `since` is session-scoped in `_session_filter` above (a session with
+    # ANY in-window activity keeps every hit it ever logged); this narrows to
+    # hits actually inside the window, the same fix `_within` applies to a
+    # day trend elsewhere in this module.
+    if since is not None:
+        events = [e for e in events if e["hit_at"] is not None and e["hit_at"] >= since]
+    events.sort(key=lambda e: e["hit_at"] if e["hit_at"] is not None else -1, reverse=True)
+    by_kind: dict[str, int] = {}
+    for e in events:
+        by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
+    return {"events": events, "by_kind": by_kind}
+
+
 def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             since: float | None = None, branch: str | None = None,
             account: str | None = None) -> dict[str, Any]:

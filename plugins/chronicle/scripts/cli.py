@@ -112,6 +112,20 @@ def cmd_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_limits(args: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"events": [], "by_kind": {}}))
+        return 0
+    try:
+        out = report.limits(conn, repo_root=args.root, since=_since(args.days), branch=args.branch,
+                            account=args.account)
+    finally:
+        conn.close()
+    print(json.dumps(out))
+    return 0
+
+
 def cmd_sessions(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
@@ -370,6 +384,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--account", default=None,
                    help="only sessions attributed to this account uuid (session-level)")
     p.set_defaults(fn=cmd_summary)
+
+    p = sub.add_parser("limits", help="deduplicated usage-limit hits, with tokens burned reaching each (JSON)")
+    p.add_argument("--root", default=None)
+    p.add_argument("--days", type=int, default=None)
+    p.add_argument("--branch", default=None)
+    p.add_argument("--account", default=None)
+    p.set_defaults(fn=cmd_limits)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)

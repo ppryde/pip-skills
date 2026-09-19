@@ -1219,3 +1219,71 @@ class TestSubagentTasks:
         conn.commit()
         ingest.sync(conn, projects, full=True)
         assert self._agents(conn) == {"aexplore-1": "Find the auth flow"}
+
+
+class TestLimitHitIngest:
+    SESSION_TEXT = "You've hit your session limit · resets 11:50am (Europe/London)"
+
+    def test_limit_hit_fields_are_recorded(self, builder):
+        path = builder.limit_hit("h1", T0, self.SESSION_TEXT).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        row = conn.execute("SELECT * FROM limit_hits").fetchone()
+        assert row["session_id"] == "s1"
+        assert row["agent_id"] == ""
+        assert row["kind"] == "session"
+        assert row["reset_raw"] == "11:50am (Europe/London)"
+        assert row["resets_at"] == parse_ts("2026-09-01T11:50:00+01:00")
+        assert row["raw_text"] == self.SESSION_TEXT
+
+    def test_a_limit_hit_never_becomes_a_turn(self, builder):
+        path = builder.limit_hit("h1", T0, self.SESSION_TEXT).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
+
+    def test_limit_hit_is_idempotent_on_a_full_resync(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit("h1", T0, self.SESSION_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects, full=True)
+        ingest.sync(conn, projects, full=True)
+        assert conn.execute("SELECT COUNT(*) FROM limit_hits").fetchone()[0] == 1
+
+    def test_full_sync_backfills_a_historical_hit_an_incremental_sync_misses(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit("h1", T0, self.SESSION_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # As an already-fully-ingested transcript looks from before this
+        # feature shipped: the cursor already covers every byte, so nothing
+        # is left for an ordinary sync to read.
+        conn.execute("DELETE FROM limit_hits")
+        conn.commit()
+        result = ingest.sync(conn, projects)
+        assert result["changed"] == 0
+        assert conn.execute("SELECT COUNT(*) FROM limit_hits").fetchone()[0] == 0
+        ingest.sync(conn, projects, full=True)
+        assert conn.execute("SELECT COUNT(*) FROM limit_hits").fetchone()[0] == 1
+
+    def test_the_same_hit_written_into_two_sessions_is_kept_as_two_rows(self, projects):
+        # One real hit is logged into every session running at the time —
+        # deliberately NOT deduplicated at ingest (see report.limits).
+        TranscriptBuilder(projects, "-a", "s1").limit_hit("h1", T0, self.SESSION_TEXT).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit("h1", T0, self.SESSION_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert conn.execute("SELECT COUNT(*) FROM limit_hits").fetchone()[0] == 2
+        assert {r[0] for r in conn.execute("SELECT session_id FROM limit_hits")} == {"s1", "s2"}
+
+    def test_limit_hit_from_a_subagent_transcript_keeps_its_agent_id(self, projects):
+        from .conftest import _limit_hit
+        main_path = TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        sub_dir = main_path.parent / "s1" / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-worker1.jsonl").write_text(
+            json.dumps(_limit_hit("h1", ts=T0, text=self.SESSION_TEXT,
+                                  session_id="s1", agent_id="worker1")) + "\n"
+        )
+        conn = store.connect()
+        ingest.ingest_session(conn, main_path)
+        row = conn.execute("SELECT agent_id FROM limit_hits WHERE uuid = 'h1'").fetchone()
+        assert row[0] == "worker1"

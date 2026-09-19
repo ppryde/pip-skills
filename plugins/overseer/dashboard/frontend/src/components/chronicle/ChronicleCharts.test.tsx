@@ -1,8 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { BarList, ColumnChart, Donut, LineChart } from "./ChronicleCharts";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { ChronicleLimitEvent } from "../../api/types";
+import { BarList, ColumnChart, Donut, LimitsTimeline, LineChart } from "./ChronicleCharts";
 
 const fmt = (n: number) => String(n);
+
+function limitEvent(overrides: Partial<ChronicleLimitEvent> = {}): ChronicleLimitEvent {
+  return {
+    account_uuid: "acc-1",
+    kind: "session",
+    model: null,
+    hit_at: 1_788_256_800, // 2026-09-01T10:00:00Z (a fixed local day for the test)
+    last_seen_at: 1_788_256_800,
+    resets_at: 1_788_275_400,
+    reset_raw: "11:50am (Europe/London)",
+    raw_text: "You've hit your session limit · resets 11:50am (Europe/London)",
+    sessions: 2,
+    tokens_to_limit: {
+      input_tokens: 10, cache_read_tokens: 100, cache_creation_tokens: 20, output_tokens: 40,
+      total_tokens: 170, cost_usd: 1.23, unpriced_turns: 0, window_start: 1_788_238_800,
+    },
+    ...overrides,
+  };
+}
 
 describe("<ColumnChart/>", () => {
   it("draws one bar per non-zero point and a table-view twin", () => {
@@ -174,5 +194,70 @@ describe("<LineChart/>", () => {
   it("omits the legend when there are no events", () => {
     render(<LineChart title="Context" format={fmt} values={[1, 2]} />);
     expect(screen.queryByRole("list", { name: "Marks" })).not.toBeInTheDocument();
+  });
+});
+
+describe("<LimitsTimeline/>", () => {
+  it("renders an empty note without hits", () => {
+    render(<LimitsTimeline events={[]} />);
+    expect(screen.getByText(/no limit hits/i)).toBeInTheDocument();
+  });
+
+  it("stacks one segment per kind on the day it happened, and legends only present kinds", () => {
+    render(
+      <LimitsTimeline
+        events={[
+          limitEvent({ kind: "session" }),
+          limitEvent({ kind: "weekly", hit_at: 1_788_256_900 }), // same local day as the session hit
+        ]}
+      />
+    );
+    const segs = screen.getAllByTestId("chr-limits-seg");
+    expect(segs.map((s) => s.getAttribute("data-kind")).sort()).toEqual(["session", "weekly"]);
+    const legend = screen.getByRole("list", { name: "Limit kinds" });
+    expect(within(legend).getByText("Session (5h)")).toBeInTheDocument();
+    expect(within(legend).getByText("Weekly")).toBeInTheDocument();
+    expect(within(legend).queryByText("Monthly spend")).not.toBeInTheDocument();
+  });
+
+  it("puts hits on different days in separate bars", () => {
+    render(
+      <LimitsTimeline
+        events={[
+          limitEvent({ hit_at: 1_788_256_800 }),        // 2026-09-01
+          limitEvent({ hit_at: 1_788_256_800 + 86_400 }), // 2026-09-02
+        ]}
+      />
+    );
+    // One session-kind segment per day, not one stacked segment for both.
+    expect(screen.getAllByTestId("chr-limits-seg")).toHaveLength(2);
+  });
+
+  it("lists every event in the table, with tokens/cost dashed when the window is unknown", () => {
+    render(
+      <LimitsTimeline
+        events={[
+          limitEvent({ kind: "model", model: "Fable 5", reset_raw: null, tokens_to_limit: null, sessions: 1 }),
+        ]}
+      />
+    );
+    const table = screen.getByText("Table view").closest("details")!;
+    const row = within(table).getByText(/Per-model \(Fable 5\)/).closest("tr")!;
+    const cells = within(row).getAllByRole("cell");
+    expect(cells.map((c) => c.textContent)).toEqual([
+      "Per-model (Fable 5)",
+      expect.stringMatching(/\d/), // formatWhen output
+      "—", // no reset text for a per-model limit
+      "1",
+      "—", // no tokens_to_limit
+      "—",
+    ]);
+  });
+
+  it("shows tokens and cost in the table when the window is known", () => {
+    render(<LimitsTimeline events={[limitEvent()]} />);
+    const table = screen.getByText("Table view").closest("details")!;
+    expect(within(table).getByText("170")).toBeInTheDocument();
+    expect(within(table).getByText("$1.23")).toBeInTheDocument();
   });
 });
