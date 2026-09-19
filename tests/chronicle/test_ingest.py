@@ -4,7 +4,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from scripts import ingest, store
 from scripts.transcript import parse_ts
 
