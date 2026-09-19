@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type {
@@ -12,7 +12,7 @@ import type {
   RepoEntry,
 } from "../api/types";
 import type { PartyMember } from "../board/party";
-import TopBar, { type TopBarProps } from "./TopBar";
+import TopBar, { COIN_SPIN_MS, type TopBarProps } from "./TopBar";
 
 // `controlsOpen`/`filtersOpen` are App-owned, so TopBar is a fully
 // controlled component — it renders the "Controls ▾"/"Filters ▾" buttons
@@ -814,24 +814,139 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(slots(container)).toEqual({ Almoner: "0", Board: "1", Atlas: "2", Chronicle: "3" });
   });
 
-  it("sits still on load and restarts the spin on every view change", () => {
+  it("sits still on load: no coin carries data-spin until the first view change", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    container
+      .querySelectorAll(".topbar__view-toggle-btn")
+      .forEach((btn) => expect(btn).not.toHaveAttribute("data-spin"));
+  });
+
+  it("a re-render with no view change leaves settled coins alone", () => {
     const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
-    const row = container.querySelector(".topbar__view-toggle")!;
-    expect(row).not.toHaveAttribute("data-spin");
+    rerender(<StatefulTopBar {...baseProps()} view="board" refreshing />);
+    container
+      .querySelectorAll(".topbar__view-toggle-btn")
+      .forEach((btn) => expect(btn).not.toHaveAttribute("data-spin"));
+  });
+});
+
+// Owner's ask (WF-11x, follow-up to #76): "all of the coins switch places —
+// I would love it if they didn't actually move, they just spin and turn into
+// a different menu item." #76 slid every coin to a new slot on each view
+// change; this replaces that with coins fixed to their slot for life, which
+// spin in place and swap face only when their own assignment actually
+// changes.
+describe("<TopBar/> coin spin-in-place (WF-11x)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const bySlot = (container: HTMLElement, slot: number) =>
+    container.querySelector(`.topbar__view-toggle-btn[data-slot="${slot}"]`) as HTMLElement;
+
+  it("never remounts or reorders a coin's DOM node across a view change", () => {
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+    const nodesBefore = [0, 1, 2, 3].map((slot) => bySlot(container, slot));
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="almoner" />);
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
+    const nodesAfter = [0, 1, 2, 3].map((slot) => bySlot(container, slot));
+
+    nodesBefore.forEach((node, i) => expect(nodesAfter[i]).toBe(node));
+  });
+
+  it("updates aria-pressed and the accessible name immediately, but the icon only at the spin's midpoint", () => {
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    const front = bySlot(container, 0);
+    const iconBefore = front.querySelector("img")!.getAttribute("src");
+    expect(front).toHaveAttribute("aria-label", "Board");
 
     rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
-    const first = row.getAttribute("data-spin");
-    expect(first).not.toBeNull();
+    // Immediate: correctness for screen readers and the next click never
+    // waits on the animation.
+    expect(front).toHaveAttribute("aria-label", "Atlas");
+    expect(front).toHaveAttribute("aria-pressed", "true");
+    // Lagged: the face is still the old icon right up to the midpoint.
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(iconBefore);
 
-    // A second change flips the keyframe name, so the animation restarts.
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS / 2 - 1));
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(iconBefore);
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(front.querySelector("img")!.getAttribute("src")).not.toBe(iconBefore);
+  });
+
+  it("spins only the slots whose assigned page actually changed", () => {
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="atlas" />);
+    // Board <-> Atlas swap slots 0 and 1; Chronicle/Almoner sit at 2 and 3
+    // throughout and never had a reason to move.
+    expect(bySlot(container, 0)).toHaveAttribute("data-spin");
+    expect(bySlot(container, 1)).toHaveAttribute("data-spin");
+    expect(bySlot(container, 2)).not.toHaveAttribute("data-spin");
+    expect(bySlot(container, 3)).not.toHaveAttribute("data-spin");
+
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
+    expect(bySlot(container, 0)).not.toHaveAttribute("data-spin");
+    expect(bySlot(container, 1)).not.toHaveAttribute("data-spin");
+  });
+
+  it("restarts the spin, and the last click wins, when a second change lands before the first settles", () => {
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    const front = bySlot(container, 0);
+
+    rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+    const firstToken = front.getAttribute("data-spin");
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS / 2 - 1));
+
+    // Second click, before the first spin's midpoint has fired.
     rerender(<StatefulTopBar {...baseProps()} view="board" />);
-    expect(row.getAttribute("data-spin")).not.toBeNull();
-    expect(row.getAttribute("data-spin")).not.toBe(first);
+    expect(front).toHaveAttribute("aria-label", "Board");
+    // The keyframe name alternates, so a browser sees a fresh animation
+    // rather than the first one continuing.
+    expect(front.getAttribute("data-spin")).not.toBe(firstToken);
 
-    // A re-render with no view change leaves the spin alone.
-    const settled = row.getAttribute("data-spin");
-    rerender(<StatefulTopBar {...baseProps()} view="board" refreshing />);
-    expect(row.getAttribute("data-spin")).toBe(settled);
+    // Advancing the ORIGINAL midpoint delay must not swap in Atlas's icon —
+    // that click was superseded before it ever took visible effect.
+    const boardIcon = front.querySelector("img")!.getAttribute("src");
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(boardIcon);
+    expect(front).not.toHaveAttribute("data-spin");
+  });
+
+  it("swaps instantly with no spin under prefers-reduced-motion", () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+      const front = bySlot(container, 0);
+      const iconBefore = front.querySelector("img")!.getAttribute("src");
+
+      rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+      expect(front).toHaveAttribute("aria-label", "Atlas");
+      expect(front).not.toHaveAttribute("data-spin");
+      expect(front.querySelector("img")!.getAttribute("src")).not.toBe(iconBefore);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
+  it("shares one duration between the row's CSS custom property and the JS midpoint timer", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    const row = container.querySelector(".topbar__view-toggle") as HTMLElement;
+    expect(row.style.getPropertyValue("--coin-spin-ms")).toBe(`${COIN_SPIN_MS}ms`);
   });
 
   it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {
