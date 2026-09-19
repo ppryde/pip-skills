@@ -549,6 +549,70 @@ describe("api/client", () => {
     expect(result).toEqual(clearResponse);
   });
 
+  describe("chronicle: since=\"month-to-date\"", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sends the 1st of the current month at local midnight, in this browser's own offset", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 15, 10, 30, 0)); // local: 15 Sep 2026
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+
+      await client.getChronicleSummary({ since: "month-to-date" });
+
+      // The offset is derived independently of the client, from the same
+      // Date the client itself would read — a duplicate of the runtime's own
+      // timezone data, not of the client's formatting code.
+      const offsetMin = -new Date(2026, 8, 1).getTimezoneOffset();
+      const sign = offsetMin >= 0 ? "+" : "-";
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const offset = `${sign}${pad(Math.floor(Math.abs(offsetMin) / 60))}:${pad(Math.abs(offsetMin) % 60)}`;
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).toBe(`/api/chronicle/summary?since=${encodeURIComponent(`2026-09-01T00:00:00${offset}`)}`);
+    });
+
+    it("on the 1st itself, still names that day's midnight rather than rolling back a month", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 1, 0, 5, 0)); // 5 minutes into the 1st
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+
+      await client.getChronicleSummary({ since: "month-to-date" });
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).toContain(encodeURIComponent("2026-09-01T00:00:00"));
+    });
+
+    it("is recomputed on every call, so a fetch made after a month boundary names the new month", async () => {
+      // Nothing caches the "since" value between calls (unlike a `days`
+      // window, which would silently drift): the page's poll ticks call
+      // getChronicleSummary fresh, so a tick that lands after midnight on
+      // the 1st sees the new month without the filter being re-selected.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 0)); // 30 Sep, just before midnight
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+      await client.getChronicleSummary({ since: "month-to-date" });
+      expect(fetchMock.mock.calls[0][0]).toContain(encodeURIComponent("2026-09-01T00:00:00"));
+
+      vi.setSystemTime(new Date(2026, 9, 1, 0, 2, 0)); // rolled over to 1 Oct
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+      await client.getChronicleSummary({ since: "month-to-date" });
+      expect(fetchMock.mock.calls[1][0]).toContain(encodeURIComponent("2026-10-01T00:00:00"));
+    });
+
+    it("never sends days alongside it, even if a caller passed both", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 15));
+      fetchMock.mockResolvedValueOnce(jsonResponse({ sessions: [] }));
+
+      await client.getChronicleSessions({ days: 30, since: "month-to-date" });
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).not.toContain("days=");
+      expect(url).toContain("since=");
+    });
+  });
+
   it("throws an Error with the backend detail message on a non-2xx response", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ detail: "nope" }, 400));
 

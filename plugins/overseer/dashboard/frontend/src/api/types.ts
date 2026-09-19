@@ -887,8 +887,16 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
 
 /** Query knobs shared by the summary and sessions reads. */
 export interface ChronicleQuery {
-  /** Only sessions active in the last N days; omit for all time. */
+  /** Only sessions active in the last N days; omit for all time. Mutually
+   * exclusive with `since` — `since` wins if both are somehow set (see
+   * `chronicleQuery` in api/client.ts). */
   days?: number;
+  /** The exact-instant sibling of `days` — today only `"month-to-date"`,
+   * resolved to an ISO datetime (local midnight on the 1st, carrying THIS
+   * browser's own UTC offset) at request time, so a poll tick that lands
+   * after a month boundary always names the new month rather than a value
+   * computed when the filter was first chosen. */
+  since?: "month-to-date";
   /** `"all"` drops the repo filter (account-wide); default scopes to the
    * active root exactly like `/api/board`. */
   scope?: "repo" | "all";

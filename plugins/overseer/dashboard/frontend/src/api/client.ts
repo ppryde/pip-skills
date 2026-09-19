@@ -342,12 +342,35 @@ export function clearRepo(
 
 // --- Chronicle (optional) ---------------------------------------------------
 
+/** The 1st of the current month at local midnight, as an ISO datetime
+ * carrying THIS browser's own UTC offset — so the backend (which may run in
+ * a different zone entirely) resolves "month to date" the way the browser
+ * sees it, not its own local midnight. Computed fresh on every call, never
+ * cached: `query.since` is a request-time instruction, not a stored value,
+ * which is what lets a poll tick after a month boundary see the new month. */
+function monthToDateSince(now: Date = new Date()): string {
+  const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offsetMin = -first.getTimezoneOffset(); // minutes EAST of UTC
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMin);
+  const date = `${first.getFullYear()}-${pad(first.getMonth() + 1)}-${pad(first.getDate())}`;
+  const offset = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return `${date}T00:00:00${offset}`;
+}
+
 /** Query-string tail for the chronicle reads. `scope=all` is appended AFTER
- * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`. */
+ * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`.
+ * `since` and `days` are mutually exclusive on the backend, so `since` wins
+ * here rather than sending both and letting the server 400. */
 function chronicleQuery(base: string, query: ChronicleQuery = {}): string {
   const url = withRoot(base);
   const params: string[] = [];
-  if (query.days !== undefined) params.push(`days=${encodeURIComponent(String(query.days))}`);
+  if (query.since === "month-to-date") {
+    params.push(`since=${encodeURIComponent(monthToDateSince())}`);
+  } else if (query.days !== undefined) {
+    params.push(`days=${encodeURIComponent(String(query.days))}`);
+  }
   if (query.scope === "all") params.push("scope=all");
   if (query.branch) params.push(`branch=${encodeURIComponent(query.branch)}`);
   if (params.length === 0) return url;
