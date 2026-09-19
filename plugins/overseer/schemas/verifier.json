@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "card": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "detail": {
+      "description": "absolute path inside the card's dispatch directory",
+      "minLength": 1,
+      "type": "string"
+    },
+    "learned": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "const": "overseer.verifier/1"
+    },
+    "stage": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "card",
+    "stage",
+    "status",
+    "detail",
+    "learned"
+  ],
+  "title": "overseer.verifier/1",
+  "type": "object"
+}

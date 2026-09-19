@@ -9,6 +9,7 @@ description: >
   overseer (a `board.db` entry for cards, sprints, usage and knowledge, all
   under the central per-repo folder). The state layer beneath the orchestrate
   skill; drive it through the overseer CLI, never by editing files.
+effort: medium
 ---
 
 # Overseer Ledger
@@ -67,12 +68,21 @@ python .../cli.py --root . resume
 
 ## During work
 
-- **Progress:** `log-progress <id> --note "what happened" --tokens 120k`
-  after each meaningful unit of work. Exit code 2 means the 2× budget
-  tripwire fired: **stop the card, tell the user why it overran.**
-- **Reviews:** after each review round:
-  `log-review <id> --stage plan-review --reviewers 2 --verdict "approved"`.
-  Verdicts are short and factual ("found wanting — 2 findings, 1 mortal").
+- **Progress:** `log-progress <id> --note "what happened" --tokens 120k` for
+  manual, off-dispatch progress only. Exit code 2 means the 2× budget
+  tripwire fired: **stop the card, tell the user why it overran.** Under
+  orchestration, the `SubagentStop` report hook logs each dispatched agent's
+  progress, commits and real usage automatically — you don't call this after
+  a dispatch (orchestrate `references/telemetry.md`).
+- **Orchestration verbs (orchestrate skill):** `bootstrap`, `dispatch-prep`,
+  `set-section`, `release`, `facts --pending`, `accept-fact`, `reject-fact`.
+  Hook backends (not for hand use): `report-hook`, `pretool-hook`.
+- **Reviews:** `log-review <id> --stage plan-review --reviewers 2 --verdict
+  "approved"` for a manually-run review round only. Under orchestration, the
+  report hook writes each dispatched reviewer's verdict to the card's
+  `## Review log` automatically — you never call this in the dispatch review
+  loop (orchestrate `references/review-loop.md`). Verdicts are short and
+  factual ("found wanting — 2 findings, 1 mortal").
 - **Blocked:** `block <id> --reason "user: <question>"` for a human/agent
   blocker; `unblock <id>` when cleared. For card→card ordering use `depends`
   (see Relationships), not a `block` reason.
