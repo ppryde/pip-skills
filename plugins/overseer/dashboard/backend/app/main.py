@@ -38,6 +38,7 @@ from app.cli_client import (
     run_chronicle,
     run_overseer,
     run_vigil,
+    watched_account_profiles,
 )
 
 # backend/app/main.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
@@ -441,6 +442,53 @@ def _chronicle_roots() -> set[Path]:
     return roots or _CHRONICLE_ROOTS_CACHE
 
 
+def _accounts() -> list[dict[str, Any]]:
+    """The account selector's data (WF-116): every account uuid chronicle has
+    ever recorded a session under, UNIONED with every watched config dir's
+    CURRENT login — so an account with history but no live login (an old
+    machine, a revoked key) is still listed, and a freshly logged-in account
+    with no chronicle history yet is selectable from the first session.
+
+    A uuid matched by one or more watched dirs is enriched with that dir's
+    plan and lists every matching dir's path (``config_dirs``) — used to
+    scope live census sessions to the account (see `get_sessions`'s
+    ``account`` filter). A uuid seen only in chronicle's history (no dir
+    currently logged into it) is listed bare: still selectable, but with
+    no plan and an empty ``config_dirs``.
+
+    No email or name ever appears — `watched_account_profiles` reads a
+    whitelist only (see its module comment in `cli_client`).
+    """
+    seen: dict[str, dict[str, Any]] = {}
+
+    def _entry(uuid: str) -> dict[str, Any]:
+        return seen.setdefault(uuid, {
+            "account_uuid": uuid,
+            "short_uuid": uuid[:8],
+            "plan": None,
+            "config_dirs": [],
+            "sessions": 0,
+            "last_activity_at": None,
+        })
+
+    history = run_chronicle("accounts") if chronicle_installed() else None
+    for row in (history or {}).get("accounts") or []:
+        uuid = row.get("account_uuid")
+        if not uuid:
+            continue
+        entry = _entry(uuid)
+        entry["sessions"] = row.get("sessions") or 0
+        entry["last_activity_at"] = row.get("last_activity_at")
+
+    for config_dir, profile in watched_account_profiles():
+        entry = _entry(profile["account_uuid"])
+        entry["config_dirs"].append(str(config_dir))
+        if profile.get("plan"):
+            entry["plan"] = profile["plan"]
+
+    return sorted(seen.values(), key=lambda a: (-a["sessions"], a["account_uuid"]))
+
+
 def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
                   also_allowed: set[Path] | None = None) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
@@ -677,9 +725,24 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         return {"repos": repos_list}
 
     @app.get("/api/sessions")
-    def get_sessions(root: str | None = None) -> dict[str, Any]:
+    def get_sessions(root: str | None = None, account: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
-        return {"sessions": _sessions_list(effective)}
+        sessions = _sessions_list(effective)
+        if account:
+            # Multi-account (WF-116): scope live sessions/claims to the
+            # config dir(s) currently logged into `account` — cards
+            # themselves are never hidden by this, only which live session
+            # a claim is shown alongside. A session with no `config_dir` tag
+            # (single-account setups — see `run_census_all`) never matches a
+            # named account, which is correct: there is nothing to pick
+            # between.
+            dirs = {str(d) for d, p in watched_account_profiles() if p["account_uuid"] == account}
+            sessions = [s for s in sessions if s.get("config_dir") in dirs]
+        return {"sessions": sessions}
+
+    @app.get("/api/accounts")
+    def get_accounts() -> dict[str, Any]:
+        return {"accounts": _accounts()}
 
     @app.post("/api/card", dependencies=[Depends(require_token)])
     def create_card(body: CreateBody, root: str | None = None) -> dict[str, Any]:
@@ -1019,6 +1082,17 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="branch name too long")
         return ["--branch", branch]
 
+    def _account_args(account: str | None) -> list[str]:
+        # Multi-account (WF-116): a session-level filter on the account
+        # chronicle stamped it with at first ingest. Same argv-element
+        # treatment as `_branch_args` — passed through as an exact match,
+        # never shell-interpolated.
+        if not account:
+            return []
+        if len(account) > 100:
+            raise HTTPException(status_code=400, detail="account too long")
+        return ["--account", account]
+
     @app.get("/api/chronicle/status")
     def chronicle_status() -> dict[str, Any]:
         if not chronicle_installed():
@@ -1088,19 +1162,21 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.get("/api/chronicle/summary")
     def chronicle_summary(root: str | None = None, scope: str | None = None,
-                          days: int | None = None, branch: str | None = None) -> dict[str, Any]:
-        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch)]
+                          days: int | None = None, branch: str | None = None,
+                          account: str | None = None) -> dict[str, Any]:
+        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
+                *_account_args(account)]
         data = run_chronicle(*args)
         return data if data is not None else {"totals": None}
 
     @app.get("/api/chronicle/sessions")
     def chronicle_sessions(root: str | None = None, scope: str | None = None,
                            days: int | None = None, branch: str | None = None,
-                           limit: int = 200) -> dict[str, Any]:
+                           account: str | None = None, limit: int = 200) -> dict[str, Any]:
         if limit < 1 or limit > 2000:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
         args = ["sessions", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
-                "--limit", str(limit)]
+                *_account_args(account), "--limit", str(limit)]
         data = run_chronicle(*args)
         return data if data is not None else {"sessions": []}
 
