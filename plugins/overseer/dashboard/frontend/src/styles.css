@@ -1969,9 +1969,9 @@ body {
   display: flex;
   align-items: flex-start;
   /* Centre the lane row in the region rather than pinning it left. Desktop
-     shows the COLLAPSED set — Backlog / In Progress / Parked / Done, plus
-     Abandoned when toggled on (Board.tsx applies `collapseStagesForMobile`
-     at every viewport) — so four or five columns sat hard against the left
+     shows the COLLAPSED set — Backlog / In Progress / In Review / Parked /
+     Done, plus Abandoned when toggled on (Board.tsx applies `collapseStages`
+     at every viewport) — so five or six columns sat hard against the left
      edge with a few hundred px of dead parchment to their right.
 
      Centring a flex row inside a scroller is normally the bug where the
@@ -2193,16 +2193,27 @@ body {
   border: 1.5px solid color-mix(in srgb, var(--qb-accent-ash-fill) 60%, white);
 }
 
-/* WF-085 in-progress lane (mobile-only — `collapseStagesForMobile`'s
-   synthetic lane never exists on desktop). Status-coloured (orange
-   in-progress): this is the umbrella over all 7 stages this lane replaces
-   on a phone, and the `in-flight` top-level status is orange (the same
-   hue as `--qb-status-in-progress-*`), so every stage reads consistently
-   orange here regardless of sub-stage — no longer the amber bootstrap
-   group. */
+/* WF-085 in-progress lane (`collapseStages`'s synthetic group lane — now on
+   every viewport, not just mobile). Status-coloured (orange in-progress):
+   this is the umbrella over the 5 agent-driven stages it replaces, and the
+   `in-flight` top-level status is orange (the same hue as
+   `--qb-status-in-progress-*`), so every stage reads consistently orange
+   here regardless of sub-stage — no longer the amber bootstrap group. */
 .lane__header--in-progress {
   background: color-mix(in srgb, var(--qb-accent-orange-fill) 38%, white);
   border: 1.5px solid color-mix(in srgb, var(--qb-accent-orange-fill) 60%, white);
+}
+
+/* In Review lane (`collapseStages`'s second group lane: verification +
+   awaiting-merge). Deliberately NOT the orange of in-progress — this lane
+   waits on the USER rather than on an agent, so it must read as a different
+   kind of waiting at a glance. Uses `--qb-accent-rose-*` (teal/aqua despite
+   the legacy token name — see its declaration), which is already
+   `awaiting-merge`'s own hue in `.lane--accent-awaiting-merge` below, so the
+   group keeps the colour of the stage it exists to surface. */
+.lane__header--in-review {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 60%, white);
 }
 
 /* WF-092: light lane fill — the same per-accent groups as the header banners
@@ -2223,6 +2234,10 @@ body {
    `.lane__header--in-progress` above. */
 .lane--accent-in-progress {
   background: color-mix(in srgb, var(--qb-accent-orange-fill) 20%, transparent);
+}
+/* In Review group lane — same accent as `.lane__header--in-review` above. */
+.lane--accent-in-review {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 20%, transparent);
 }
 /* Done lane gets a green wash like the other status lanes (overrides the
    parchment-muted `.lane--done` fill above — declared later so it wins) so
@@ -2338,6 +2353,16 @@ body {
   --card-accent-fill: var(--qb-accent-orange-fill);
   --card-accent-border: var(--qb-accent-orange-border);
   --card-accent-shadow: var(--qb-accent-orange-cardshadow);
+}
+
+/* In Review group lane's cards — Lane.tsx gives every card in a group lane
+   the LANE's accent key, not its own stage key, so this rule (not the
+   stage-key group above) is what colours a verification/awaiting-merge card.
+   Same accent as `.lane__header--in-review`. */
+.card-tile--accent-in-review {
+  --card-accent-fill: var(--qb-accent-rose-fill);
+  --card-accent-border: var(--qb-accent-rose-border);
+  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
 }
 
 .card-tile {
@@ -5352,18 +5377,20 @@ a.card-drawer__pr-chip:hover {
    ========================================================================== */
 
 /* --- TopBar: view switcher — a row of overlapping "guild coins" ------------
-   One circular icon coin per page (Board, Atlas, and Chronicle when its
-   plugin is present), fanned out to the LEFT of the wordmark so each
-   overlaps its neighbour by half. The active view's coin is the FRONT coin
-   (gold-chip fill, full size); the others sit behind, shrunk and dimmed.
-   Tapping a back coin brings it forward and swaps the view — transform +
-   z-index driven purely by `aria-pressed`. Each coin's slot and the row's
-   width come from two custom properties TopBar.tsx sets (`--coin-i` per
-   coin, `--coin-n` on the row), so adding or removing a page needs NO rule
-   here. That claim used to be made of a `:nth-child` list and a `data-count`
-   list which both stopped at three — so the Almoner's fourth coin was given
-   no slot, sat at left:0 outside a too-narrow row, and covered the wordmark.
-   A list that must be extended by hand is not a rule; this is.
+   One circular icon coin per page (Board, Atlas, and Chronicle/Almoner when
+   their plugins are present), fanned out to the LEFT of the wordmark so each
+   overlaps its neighbour. The active view's coin is always the LEFTMOST,
+   FRONT coin (gold-chip fill, full size); the others follow it in source
+   order, shrunk. TopBar sets each coin's `--slot` (0 = pressed) and the
+   row's `--coin-count`; position and stacking are derived from those, so a
+   coin added or removed never needs this CSS touched.
+
+   On a view change the coins slide to their new slots (a `translate`
+   transition) while the whole row spins about its vertical axis — a
+   `rotate` keyframe run, restarted per change by TopBar flipping
+   `data-spin` between two identically-shaped keyframe names. Both are
+   individual transform properties, so the slide, the spin and the back
+   coins' `scale` compose without clobbering one another.
 
    Each coin's box is 44px (border included) — meeting the ≥44px touch-target
    floor directly. Active = the same gold-chip fill/border/text trio the
@@ -5371,20 +5398,20 @@ a.card-drawer__pr-chip:hover {
 .topbar__view-toggle {
   position: relative;
   flex: 0 0 auto;
-  /* 44px for the front coin, +30px for every further one (each overlapping
-     its neighbour by about a third). The fallback of 2 is the minimum the
-     dashboard ever shows — Board and Atlas are not optional. */
-  width: calc(44px + (var(--coin-n, 2) - 1) * 30px);
+  /* 44px coin + 30px per further coin (each overlapping the last by about
+     a third) */
+  width: calc(44px + (var(--coin-count, 2) - 1) * 30px);
   height: 44px;
 }
 
 .topbar__view-toggle-btn {
   position: absolute;
   top: 0;
+  left: 0;
   /* Stacking reads left to right: each coin lies over the one to its right,
-     like a fanned hand of cards. The pressed coin tops them all (below). */
-  left: calc(var(--coin-i, 0) * 30px);
-  z-index: calc(20 - var(--coin-i, 0));
+     like a fanned hand of cards, so the pressed coin (slot 0) tops them all. */
+  translate: calc(var(--slot, 0) * 30px) 0;
+  z-index: calc(var(--coin-count, 2) - var(--slot, 0));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5404,31 +5431,55 @@ a.card-drawer__pr-chip:hover {
 @media (prefers-reduced-motion: no-preference) {
   .topbar__view-toggle-btn {
     transition:
-      transform 0.28s ease,
-      opacity 0.2s ease,
+      translate 0.5s cubic-bezier(0.34, 1.4, 0.64, 1),
+      scale 0.28s ease,
       background-color 0.2s ease,
       border-color 0.2s ease;
   }
+
+  /* A slight stagger by slot, so the spin ripples out from the new front
+     coin rather than the row turning as one rigid plate. */
+  .topbar__view-toggle[data-spin] .topbar__view-toggle-btn {
+    animation-duration: 0.6s;
+    animation-timing-function: ease-in-out;
+    animation-delay: calc(var(--slot, 0) * 50ms);
+  }
+
+  .topbar__view-toggle[data-spin="a"] .topbar__view-toggle-btn {
+    animation-name: topbar-coin-spin-a;
+  }
+
+  .topbar__view-toggle[data-spin="b"] .topbar__view-toggle-btn {
+    animation-name: topbar-coin-spin-b;
+  }
 }
 
-/* Front coin — the active view: full size, fully opaque, above its siblings. */
+/* Two identical spins: switching `animation-name` is what restarts the run
+   when a second view change lands before the first spin has finished. */
+@keyframes topbar-coin-spin-a {
+  from { rotate: y 0deg; }
+  to { rotate: y 360deg; }
+}
+
+@keyframes topbar-coin-spin-b {
+  from { rotate: y 0deg; }
+  to { rotate: y 360deg; }
+}
+
+/* Front coin — the active view: full size, above its siblings. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
-  transform: scale(1);
-  /* Above every back coin whatever the count — the old `4` was only ever
-     above three siblings. */
-  z-index: 30;
+  scale: 1;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
   color: var(--qb-gold-chip-text);
 }
 
-/* Back coins — the other views: in place and shrunk, behind the front coin,
-   keeping the left-over-right order set per coin above. Opaque: the gold
-   fill and the size step already single out the pressed coin, and a
+/* Back coins — the other views: shrunk, behind the front coin. Opaque: the
+   gold fill and the size step already single out the pressed coin, and a
    dimmed coin made the icon behind it hard to read. */
 .topbar__view-toggle-btn[aria-pressed="false"] {
-  transform: scale(0.9);
+  scale: 0.9;
 }
 
 .topbar__view-toggle-btn[aria-pressed="false"]:hover {

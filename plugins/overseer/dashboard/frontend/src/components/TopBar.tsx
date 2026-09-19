@@ -1,5 +1,4 @@
-import { useState } from "react";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
@@ -285,6 +284,24 @@ function TopBar({
   // Controls group and ＋ New card give way and Sync takes the ＋ slot. The
   // repo and branch selectors stay and drive the Chronicle's scope directly
   // (App feeds them that page's branch list and an "All repos" choice).
+  // The pressed coin always sits leftmost (slot 0); the rest keep their
+  // source order behind it. Slots drive position through a CSS custom
+  // property rather than DOM order, so each coin stays the same element and
+  // slides to its new place instead of being remounted there.
+  const activeIndex = Math.max(0, coins.findIndex((c) => c.view === view));
+  const slotOf = (i: number) => (i === activeIndex ? 0 : i < activeIndex ? i + 1 : i);
+  // Every view change sets the whole row spinning while it rearranges.
+  // Alternating between two identical keyframe names restarts the animation
+  // even when a second change lands mid-spin; `null` until the first change,
+  // so the coins sit still on load. Adjusted during render (React's "state
+  // from a changed prop" pattern), not in an effect, to skip a stale frame.
+  const [spunView, setSpunView] = useState(view);
+  const [spins, setSpins] = useState(0);
+  if (view !== spunView) {
+    setSpunView(view);
+    setSpins((n) => n + 1);
+  }
+  const spin = spins === 0 ? undefined : spins % 2 ? "a" : "b";
   const onChronicle = view === "chronicle";
   // The Almoner likewise has no cards: it suppresses the board-only
   // controls, but unlike the Chronicle it owns its own Gather action on the
@@ -303,24 +320,21 @@ function TopBar({
             `aria-label`/`title`. The last-refreshed time is no longer here: it
             moved to a small label beside Refresh below. */}
         <div className="topbar__identity">
-          {/* `--coin-n`/`--coin-i` place the coins and size the row (styles.css).
-              They are here rather than in CSS because the count is only known
-              at render: the Chronicle and Almoner coins come and go with their
-              plugins, and the hand-written rules this replaced stopped at
-              three, which left the Almoner's coin sitting on the wordmark. */}
           <div
             className="topbar__view-toggle"
             role="group"
             aria-label="View"
             data-count={coins.length}
-            style={{ "--coin-n": coins.length } as CSSProperties}
+            data-spin={spin}
+            style={{ "--coin-count": coins.length } as CSSProperties}
           >
             {coins.map((c, i) => (
               <button
                 key={c.view}
                 type="button"
                 className="topbar__view-toggle-btn"
-                style={{ "--coin-i": i } as CSSProperties}
+                data-slot={slotOf(i)}
+                style={{ "--slot": slotOf(i) } as CSSProperties}
                 aria-pressed={view === c.view}
                 aria-label={c.label}
                 title={c.title}

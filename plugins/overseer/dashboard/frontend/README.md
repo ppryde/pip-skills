@@ -90,12 +90,14 @@ without a stuck/incorrect card position.
 1. **Launch backend** — start the FastAPI backend (serves the committed
    `dist/` at `/`) against a root with some cards in a mix of statuses/stages.
 2. **Open board** — load `/` in a browser; confirm all lanes render
-   (Backlog, the seven stage columns, Parked, Done — Archive hidden by
+   (Backlog, In Progress, In Review, Parked, Done — Archive hidden by
    default behind the TopBar toggle) and the context %/threshold show in the
-   TopBar.
-3. **Drag a card across a stage lane** — drag an eligible card (planned or
-   non-blocked in-flight) from one stage column into another; confirm it
-   lands in the new column at the dropped position and the move persists
+   TopBar. The seven stages are collapsed into the two group lanes by
+   `collapseStages`; they no longer render as individual columns.
+3. **Drag a card into In Review** — drag an eligible card (planned or
+   non-blocked in-flight) onto the In Review lane; confirm it lands there
+   and the move persists (it is stamped `verification`, the group's entry
+   stage — `GROUP_LANDING_STAGE` in `board/dragPlan.ts`)
    after a manual Refresh.
 4. **Expand a card** — click a card tile (not the drag handle) to open the
    `CardDetailDrawer`; confirm it fetches and renders the full card (sections,

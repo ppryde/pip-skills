@@ -56,9 +56,30 @@ export function isDragSource(card: BoardCard): boolean {
 }
 
 /**
+ * Where a drop on a collapsed group lane's BACKGROUND lands. `Board.tsx`
+ * resolves drops against the real per-stage `lanes`, never the rendered
+ * `displayLanes`, so a group lane's own key matches nothing there and the
+ * drop would otherwise silently no-op — see `locateDropTarget`.
+ *
+ * Only `in-review` is mapped. A card dragged there means "this is ready for
+ * me to check and merge", and `verification` is the group's entry stage, so
+ * the drop lands there rather than skipping straight to `awaiting-merge`
+ * (which would assert a PR exists that nothing has raised).
+ *
+ * `in-progress` is deliberately ABSENT, preserving its long-standing no-op:
+ * that group spans bootstrap→impl-review with no defensible single landing
+ * stage, and guessing one would move work backwards or forwards at random.
+ */
+export const GROUP_LANDING_STAGE: Record<string, Stage> = {
+  "in-review": "verification",
+};
+
+/**
  * Maps a dnd-kit `over.id` to the lane + index it represents:
  * - if `overId` matches a lane's own droppable id (dropped on the lane's
  *   background, e.g. an empty lane) -> that lane, appended at the end.
+ * - if `overId` is a collapsed group lane with a `GROUP_LANDING_STAGE` ->
+ *   that stage's real lane, appended at the end.
  * - if `overId` matches a card id -> that card's lane, at that card's index.
  * - otherwise -> no lane (caller should no-op).
  */
@@ -68,6 +89,14 @@ export function locateDropTarget(
 ): { lane: Lane | undefined; index: number } {
   const directLane = lanes.find((l) => l.key === overId);
   if (directLane) return { lane: directLane, index: directLane.cards.length };
+
+  const landingStage = GROUP_LANDING_STAGE[overId];
+  if (landingStage) {
+    const stageLane = lanes.find(
+      (l) => l.kind === "stage" && l.stage === landingStage
+    );
+    if (stageLane) return { lane: stageLane, index: stageLane.cards.length };
+  }
 
   for (const lane of lanes) {
     const idx = lane.cards.findIndex((c) => c.id === overId);
