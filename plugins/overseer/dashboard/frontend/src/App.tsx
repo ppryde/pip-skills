@@ -36,6 +36,7 @@ import DesignLibrary from "./ui/DesignLibrary";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
+import { useAccounts } from "./board/useAccounts";
 import { useCardFilter } from "./board/useCardFilter";
 import { useIconKeyGlow } from "./board/useIconKeyGlow";
 import { buildParty } from "./board/party";
@@ -44,6 +45,10 @@ import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilt
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
+/** localStorage key for the account selector's persisted choice (WF-116) —
+ * same persist-across-reloads treatment as the repo selector (unlike the
+ * branch filter, which is session-local). */
+const ACTIVE_ACCOUNT_KEY = "overseer.activeAccount";
 
 type ChronicleScope = NonNullable<ChronicleQuery["scope"]>;
 
@@ -53,6 +58,15 @@ function readStoredRoot(): string | null {
   } catch {
     // Storage disabled/unavailable (private browsing, etc.) — no persisted
     // choice, fall back to the launch-root default.
+    return null;
+  }
+}
+
+function readStoredAccount(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_ACCOUNT_KEY);
+  } catch {
+    // Same fallback as readStoredRoot: no persisted choice, "All accounts".
     return null;
   }
 }
@@ -101,6 +115,18 @@ function writeStoredRoot(root: string): void {
   }
 }
 
+/** `null` clears the persisted choice ("All accounts" is not worth carrying
+ * across a reload as a stored empty string) — every other value persists
+ * exactly like `writeStoredRoot`. */
+function writeStoredAccount(account: string | null): void {
+  try {
+    if (account === null) localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    else localStorage.setItem(ACTIVE_ACCOUNT_KEY, account);
+  } catch {
+    // Best-effort only, same as writeStoredRoot.
+  }
+}
+
 function App() {
   const { repos, reload: reloadRepos } = useRepos();
   // Seeded synchronously from localStorage so the very first board fetch
@@ -109,6 +135,13 @@ function App() {
   // `/api/repos` resolves.
   const [activeRoot, setActiveRootState] = useState<string | null>(
     readStoredRoot
+  );
+  // WF-116 account selector — same persisted-choice shape as the repo
+  // selector above, reconciled the same way once `/api/accounts` resolves
+  // (below).
+  const { accounts } = useAccounts();
+  const [activeAccount, setActiveAccountState] = useState<string | null>(
+    readStoredAccount
   );
 
   // Reconcile the selection against what's actually discoverable once
@@ -122,6 +155,24 @@ function App() {
       return repos.find((r) => r.current)?.root ?? current;
     });
   }, [repos]);
+
+  // Same reconcile idea for the account selector: a persisted uuid that has
+  // since dropped out of `/api/accounts` (a machine's only login moved, or
+  // history aged out) falls back to "All accounts" rather than silently
+  // filtering every scoped fetch to a uuid nothing matches. Unlike the repo
+  // reconcile there is no "current" fallback to prefer — `null` (all
+  // accounts) is itself always a valid, meaningful choice.
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    setActiveAccountState((current) =>
+      current && accounts.some((a) => a.account_uuid === current) ? current : null
+    );
+  }, [accounts]);
+
+  function handleSelectAccount(account: string | null) {
+    setActiveAccountState(account);
+    writeStoredAccount(account);
+  }
 
   function handleSelectRepo(root: string) {
     // WF-095: the card filters belong to the board the person set them on.
@@ -168,7 +219,7 @@ function App() {
   // (task 10) mirrors `useBoard`'s own gate directly above: an unbegun root
   // 400s `/api/sessions` exactly like it 400s `/api/board`, so this fetch
   // (mount AND poll) must be hard-skipped for it too.
-  const { sessions } = useSessions(activeRoot, !isUnbegun);
+  const { sessions } = useSessions(activeRoot, !isUnbegun, activeAccount);
   // Task 6: 60s post-change glow (live, frontend-only) — observes
   // `board.cards` across polls/mutations and glows any card whose
   // `cardIconKey` changed within the last 60s. `board?.cards ?? []` mirrors
@@ -297,7 +348,8 @@ function App() {
   const chronicle = useChronicle(
     activeRoot,
     { days: chronicleDays, scope: chronicleScope, branch: chronicleBranch },
-    view === "chronicle"
+    view === "chronicle",
+    activeAccount
   );
   // Chronicle is pull only (no hooks, by design) — while the page shows, the
   // dashboard is what keeps its store current: a quiet sync on open and
@@ -446,6 +498,9 @@ function App() {
         branches={view === "chronicle" ? chronicleBranches : branches}
         activeBranch={view === "chronicle" ? chronicleBranch : activeBranch}
         onSelectBranch={view === "chronicle" ? setChronicleBranch : setActiveBranch}
+        accounts={accounts}
+        activeAccount={activeAccount}
+        onSelectAccount={handleSelectAccount}
         // Task 10: an unbegun repo never populates `party` (sessions are
         // hard-gated off above), so source the questing pill from the SAME
         // `live_sessions` count `<UnbegunHolding/>` already shows below —

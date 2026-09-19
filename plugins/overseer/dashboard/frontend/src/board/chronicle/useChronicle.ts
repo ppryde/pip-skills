@@ -3,16 +3,18 @@
  *
  * `useChronicleStatus` — one fetch on mount; tells App whether to offer the
  * page at all. `useChronicle` — the page's summary + session list, re-fetched
- * whenever the selected root / time window / scope / branch changes and
- * polled every 30s while enabled. `useChronicleSync` — the Sync action, plus
- * the quiet auto-sync the page runs while it shows: chronicle is pull only
- * (no hooks, by design), so the dashboard is what keeps the store current.
- * `useChronicleSession` — one session's detail for the drawer.
+ * whenever the selected root / account / time window / scope / branch
+ * changes and polled every 30s while enabled. `useChronicleSync` — the Sync
+ * action, plus the quiet auto-sync the page runs while it shows: chronicle
+ * is pull only (no hooks, by design), so the dashboard is what keeps the
+ * store current. `useChronicleSession` — one session's detail for the
+ * drawer.
  *
- * All three follow the dashboard's data-hook conventions: `setActiveRoot`
- * is called synchronously before the fetch (see `useSessions`), errors are
- * captured rather than thrown, and the previous data is held while a
- * refetch is in flight (no skeleton flash — `loading` lets the page dim).
+ * All three follow the dashboard's data-hook conventions: `setActiveRoot`/
+ * `setActiveAccount` (WF-116) are called synchronously before the fetch (see
+ * `useSessions`), errors are captured rather than thrown, and the previous
+ * data is held while a refetch is in flight (no skeleton flash — `loading`
+ * lets the page dim).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +23,7 @@ import {
   getChronicleSessions,
   getChronicleStatus,
   getChronicleSummary,
+  setActiveAccount,
   setActiveRoot,
   syncChronicle,
 } from "../../api/client";
@@ -80,7 +83,8 @@ export interface UseChronicleResult {
 export function useChronicle(
   root: string | null,
   query: ChronicleQuery,
-  enabled: boolean
+  enabled: boolean,
+  account: string | null = null
 ): UseChronicleResult {
   const [summary, setSummary] = useState<ChronicleSummary | null>(null);
   const [sessions, setSessions] = useState<ChronicleSession[]>([]);
@@ -96,6 +100,7 @@ export function useChronicle(
   const load = useCallback(async () => {
     const id = ++requestIdRef.current;
     setActiveRoot(root);
+    setActiveAccount(account);
     setLoading(true);
     try {
       const [sum, list] = await Promise.all([
@@ -112,7 +117,7 @@ export function useChronicle(
     } finally {
       if (id === requestIdRef.current) setLoading(false);
     }
-  }, [root, days, scope, branch]);
+  }, [root, days, scope, branch, account]);
 
   useEffect(() => {
     const ref = requestIdRef;

@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
+import type { AccountEntry, BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
 import { goldTotal } from "../board/goldTotal";
@@ -11,6 +11,7 @@ import { CoinIcon, CheckIcon } from "./icons";
 import ThresholdControl from "./ThresholdControl";
 import RepoSelector from "./RepoSelector";
 import BranchFilter from "./BranchFilter";
+import AccountSelector from "./AccountSelector";
 import NewCardDialog from "./NewCardDialog";
 import LabelSettingsDialog from "./LabelSettingsDialog";
 // WF-097 follow-up: routes this bar's Role-A buttons + the plain rest/
@@ -84,6 +85,15 @@ export interface TopBarProps {
   branches: string[];
   activeBranch: string | null;
   onSelectBranch: (branch: string | null) => void;
+  /** WF-116 account selector — every account this machine knows about
+   * (`useAccounts`), the persisted active selection (App.tsx state, `null`
+   * = "All accounts"), and the handler that commits a new one. Shown on the
+   * board and Chronicle only (hidden on Atlas/Almoner, which have no
+   * sessions of their own to scope) and only once there is more than one
+   * account to choose between (`AccountSelector` itself hides below two). */
+  accounts: AccountEntry[];
+  activeAccount: string | null;
+  onSelectAccount: (account: string | null) => void;
   /** Task 7: opens the destructive clear-data dialog (`ClearDialog`,
    * App-owned) for the currently selected repo. Optional and rendered only
    * when set — App.tsx passes `undefined` while no repo is selected (no
@@ -213,6 +223,9 @@ function TopBar({
   branches,
   activeBranch,
   onSelectBranch,
+  accounts,
+  activeAccount,
+  onSelectAccount,
   questingCountOverride,
   onClear,
   labelColors,
@@ -376,6 +389,15 @@ function TopBar({
           onSelect={onSelectBranch}
           keepWhenEmpty={onChronicle}
         />
+        {/* WF-116: board + Chronicle only — Atlas/Almoner have no sessions
+            of their own for an account to scope. */}
+        {view !== "atlas" && !onAlmoner && (
+          <AccountSelector
+            accounts={accounts}
+            activeAccount={activeAccount}
+            onSelect={onSelectAccount}
+          />
+        )}
 
         {limits?.five_hour?.used_percentage !== undefined && (
           <Chip className="topbar__pill" title="5h window">

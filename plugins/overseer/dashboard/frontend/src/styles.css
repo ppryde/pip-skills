@@ -982,6 +982,23 @@ body {
   outline-color: var(--qb-branch-chip-border);
 }
 
+/* WF-116 account selector — same topbar-chip shape as `.topbar__repo-select`
+   (no branch-style colour coding: an account has no analogous per-value
+   tint), sitting right after the branch select so all three wrap into the
+   mobile chip shelf together. */
+.topbar__account-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+  background: transparent;
+  color: var(--qb-ink-500);
+  /* WF-085: same shrink-to-allow-ellipsis rationale as `.topbar__repo-select`
+     above. */
+  min-width: 0;
+}
+
 /* WF-042: wraps ThresholdControl, whose own label now reads "default
    threshold" — the fleet's global default, not any one agent's fact (that
    moved to the Party's hero cards). Replaces the old `.topbar__ctx` block
@@ -1163,6 +1180,8 @@ body {
 .topbar__repo-select-label,
 .topbar__branch-select,
 .topbar__branch-select-label,
+.topbar__account-select,
+.topbar__account-select-label,
 .topbar__threshold,
 .topbar__archive-toggle {
   color: var(--qb-bar-ink-2);
@@ -6566,11 +6585,13 @@ button.trail-tag:focus-visible {
     flex-basis: 100%;
     height: 0;
   }
-  .topbar__row-break--r2 { order: 12; }
+  .topbar__row-break--r2 { order: 13; }
   .topbar__row-break--r3 { order: 22; }
   .topbar__row-break--r4 { order: 33; }
 
-  /* R2: repo + branch selects, side by side, sharing the row evenly.
+  /* R2: repo + branch + account selects, side by side, sharing the row
+     evenly (account WF-116: slotted into the gap the numbering below left
+     for exactly this — see the "gaps in the numbering" comment above).
      `flex: 1 1 0; min-width: 0` on each CHIP (not just the `<select>`
      inside) is what actually keeps both on one line at any width down to
      320px — same "flex-basis:0 never overflows the line-breaking pass"
@@ -6587,17 +6608,20 @@ button.trail-tag:focus-visible {
      text when the row is tight — the native dropdown's OPEN option list
      is never truncated, only the closed control's label. */
   .topbar__repo-select,
-  .topbar__branch-select {
+  .topbar__branch-select,
+  .topbar__account-select {
     flex: 1 1 0;
     min-width: 0;
   }
   .topbar__repo-select select,
-  .topbar__branch-select select {
+  .topbar__branch-select select,
+  .topbar__account-select select {
     max-width: none;
     width: 100%;
   }
   .topbar__repo-select { order: 10; }
   .topbar__branch-select { order: 11; }
+  .topbar__account-select { order: 12; }
 
   /* R3: Short Rest + Long Rest pills, alone on their own row (both share
      `.topbar__pill` — DOM order between them, Short before Long, already

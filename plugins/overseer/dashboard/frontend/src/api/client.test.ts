@@ -58,9 +58,11 @@ describe("api/client", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    // `activeRoot` is module-level state (the repo selector's single choke
-    // point) — reset it so a root set by one test never leaks into the next.
+    // `activeRoot`/`activeAccount` are module-level state (the repo/account
+    // selectors' single choke points) — reset both so a value set by one
+    // test never leaks into the next.
     client.setActiveRoot(null);
+    client.setActiveAccount(null);
     localStorage.clear();
   });
 
@@ -135,6 +137,50 @@ describe("api/client", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/card/WF-1/order?root=%2Frepo-b");
     expect(JSON.parse(init.body)).toEqual({ order: 3 });
+  });
+
+  it("getAccounts() GETs /api/accounts and returns the parsed response, never root/account-scoped", async () => {
+    client.setActiveRoot("/some/repo");
+    client.setActiveAccount("some-uuid");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ accounts: [] }));
+
+    const result = await client.getAccounts();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/accounts");
+    expect(result).toEqual({ accounts: [] });
+  });
+
+  it("setActiveAccount(account) threads ?account=... into getSessions()", async () => {
+    client.setActiveAccount("some-uuid");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ sessions: [] }));
+
+    await client.getSessions();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/sessions?account=some-uuid");
+  });
+
+  it("threads both root and account into getSessions() together", async () => {
+    client.setActiveRoot("/repo-b");
+    client.setActiveAccount("some-uuid");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ sessions: [] }));
+
+    await client.getSessions();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/sessions?root=%2Frepo-b&account=some-uuid");
+  });
+
+  it("setActiveAccount(null) omits the account query param entirely", async () => {
+    client.setActiveAccount("some-uuid");
+    client.setActiveAccount(null);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ sessions: [] }));
+
+    await client.getSessions();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/sessions");
   });
 
   it("getSessions() GETs /api/sessions and returns the parsed response", async () => {
