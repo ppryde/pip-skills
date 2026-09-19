@@ -464,123 +464,195 @@ function TopBar({
         <span className="topbar__row-break topbar__row-break--r3" aria-hidden="true" />
         <span className="topbar__row-break topbar__row-break--r4" aria-hidden="true" />
 
-        <RepoSelector
-          repos={repos}
-          activeRoot={activeRoot}
-          onSelect={onSelectRepo}
-          allOption={onChronicle ? chronicleAllRepos : undefined}
-        />
-        <BranchFilter
-          branches={branches}
-          activeBranch={activeBranch}
-          onSelect={onSelectBranch}
-          keepWhenEmpty={onChronicle}
-        />
-        {/* WF-116: board + Chronicle only — Atlas/Almoner have no sessions
-            of their own for an account to scope. */}
-        {view !== "atlas" && !onAlmoner && (
-          <AccountSelector
-            accounts={accounts}
-            activeAccount={activeAccount}
-            onSelect={onSelectAccount}
+        {/* Desktop row 2, left half (owner's ask: "account/repo/branch in
+            that order in left of second line") — `display: contents` by
+            default (mobile, and any width where the grid below doesn't
+            apply) so these three keep flowing as direct `.topbar` flex
+            items exactly as before, unaffected by this wrapper's own
+            existence (same technique `.topbar__controls-group`/
+            `.topbar__controls-actions` already use above/below). Only the
+            `@media (min-width: 721px)` block in styles.css turns this into
+            a real box pinned to the `row2-left` grid area, with its own
+            internal flex-wrap. DOM order here is Account → Repo → Branch
+            (was Repo → Branch → Account) to match that ask — mobile is
+            untouched because its own `order: 10/11/12` rules key off each
+            control's CLASS, not this wrapper's child order. */}
+        <div className="topbar__row2-left">
+          {/* WF-116: board + Chronicle only — Atlas/Almoner have no sessions
+              of their own for an account to scope. */}
+          {view !== "atlas" && !onAlmoner && (
+            <AccountSelector
+              accounts={accounts}
+              activeAccount={activeAccount}
+              onSelect={onSelectAccount}
+            />
+          )}
+          <RepoSelector
+            repos={repos}
+            activeRoot={activeRoot}
+            onSelect={onSelectRepo}
+            allOption={onChronicle ? chronicleAllRepos : undefined}
           />
-        )}
+          <BranchFilter
+            branches={branches}
+            activeBranch={activeBranch}
+            onSelect={onSelectBranch}
+            keepWhenEmpty={onChronicle}
+          />
+        </div>
 
-        {limits?.five_hour?.used_percentage !== undefined && (
-          <Chip className="topbar__pill" title="5h window">
-            ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
-          </Chip>
-        )}
-        {limits?.seven_day?.used_percentage !== undefined && (
-          <Chip className="topbar__pill" title="7d window">
-            ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
-          </Chip>
-        )}
-        {/* Task 5: last-refreshed moved out of the Controls group and
-            grouped here as its own note-badge pill, right beside the two
-            rest pills (same `.topbar__pill` treatment — now literally
-            `.qb-chip` under the hood, WF-097 follow-up). Omitted entirely
-            until the first successful load, same as before the move. */}
-        {lastRefreshedAt !== null && (
-          <Chip className="topbar__pill" title="last refreshed">
-            {formatUpdated(lastRefreshedAt)}
-          </Chip>
-        )}
+        {/* Desktop row 2, right half (owner's ask: "filters on the right" of
+            the second line) — same `display: contents` default / grid
+            override as `.topbar__row2-left` above. Holds the always-visible
+            status pills (rest windows, last-refreshed, gold/vanquished/
+            fleet — moved up here from the bar's old tail so they read
+            together with the account/repo/branch info on the same line)
+            followed by the Filters/Controls/＋ toggle cluster, which stays
+            the rightmost thing in this half. */}
+        <div className="topbar__row2-right">
+          {limits?.five_hour?.used_percentage !== undefined && (
+            <Chip className="topbar__pill" title="5h window">
+              ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
+            </Chip>
+          )}
+          {limits?.seven_day?.used_percentage !== undefined && (
+            <Chip className="topbar__pill" title="7d window">
+              ⛺ Long Rest {formatPct(limits.seven_day.used_percentage)}
+            </Chip>
+          )}
+          {/* Task 5: last-refreshed moved out of the Controls group and
+              grouped here as its own note-badge pill, right beside the two
+              rest pills (same `.topbar__pill` treatment — now literally
+              `.qb-chip` under the hood, WF-097 follow-up). Omitted entirely
+              until the first successful load, same as before the move. */}
+          {lastRefreshedAt !== null && (
+            <Chip className="topbar__pill" title="last refreshed">
+              {formatUpdated(lastRefreshedAt)}
+            </Chip>
+          )}
 
-        {/* Filters ▾ / Controls ▾ / ＋ — three independent controls grouped
-            as one cluster. Filters and Controls used to be ONE shared
-            "Controls ▾" toggle driving both TopBar's own group AND the
-            separate <FilterBar/>; they're now two independent toggles, each
-            wired to just its own region via `aria-controls`. `hidden={
-            !filtersOpen}`/`hidden={!controlsOpen}` take effect on every
-            viewport now, not just ≤720px (see styles.css) — both default
-            open so the board looks unchanged on load, but either can be
-            collapsed on any screen size. */}
-        <div className="topbar__toggle-cluster">
-          {!onAlmoner && (
-            // The Chronicle still gets this: <ChronicleFilterBar/> reuses
-            // the very same `#filter-bar` id App.tsx renders FilterBar at on
-            // the board, so `boardless` alone is the wrong guard here — it
-            // would hide this on the Chronicle too, where the control it
-            // names still exists. The Almoner is the one page with no filter
-            // bar of any kind, so `aria-controls="filter-bar"` would point at
-            // an element that is never in the DOM.
-            <Button
-              className="topbar__controls-toggle"
-              aria-expanded={filtersOpen}
-              aria-controls="filter-bar"
-              onClick={onToggleFilters}
-            >
-              Filters {filtersOpen ? "▴" : "▾"}
-            </Button>
-          )}
-          {!boardless && (
-            <Button
-              className="topbar__controls-toggle"
-              aria-expanded={controlsOpen}
-              aria-controls="topbar-controls-group"
-              onClick={onToggleControls}
-            >
-              {/* rpg-icons pack "settings" gear — decorative only (`alt=""`),
-                  so the button's accessible name stays plain "Controls" (task
-                  C: no equivalent funnel/filter asset exists for the
-                  "Filters ▾" button beside this one, so that stays text-only). */}
-              <img src={settingsIcon} alt="" className="topbar__toggle-icon" />
-              Controls {controlsOpen ? "▴" : "▾"}
-            </Button>
-          )}
-          {onChronicle ? (
-            /* The Chronicle's one action, in the slot ＋ New card holds on the
-               other pages. Gold primary: it is the page's call to action, and
-               the blank-chronicle prompt points at it by name. */
-            <Button
-              variant="primary"
-              className="topbar__sync"
-              onClick={onChronicleSync}
-              disabled={chronicleSyncing || !onChronicleSync}
-              title="Read every session transcript on this machine into the chronicle"
-            >
-              {chronicleSyncing ? "Syncing…" : "Sync"}
-            </Button>
-          ) : onAlmoner ? null : (
-            /* "＋ New card" is icon-only — `aria-label`/`title` keep it
-               accessible/resolvable by name exactly as the old "＋ New card"
-               text button was; opens the same NewCardDialog unchanged.
-               variant="neutral" (not "primary"): despite being a create
-               action, `.topbar__new-card`'s own chrome paints it with the
-               same PLAIN Role-A face as Refresh, not the gold `.qb-btn--
-               primary` fill — keeping it neutral here preserves that
-               existing look exactly (WF-097 follow-up). */
-            <Button
-              variant="neutral"
-              className="topbar__new-card topbar__new-card--icon"
-              onClick={() => setNewCardOpen(true)}
-              aria-label="New card"
-              title="New card"
-            >
-              ＋
-            </Button>
-          )}
+          {/* Guild pills (HANDOFF: Gold total / vanquished / fleet-health) —
+              moved up from the bar's tail (desktop row layout) so they sit
+              with the rest of this line's status info; DOM position doesn't
+              matter to mobile, which places each by its own `order` below
+              720px regardless of nesting. */}
+          <span className="topbar__gold-pill" title={`${gold} tokens total`}>
+            <CoinIcon aria-hidden="true" />
+            {formatTokens(gold)}
+          </span>
+
+          <span className="topbar__vanquished-pill">
+            <CheckIcon aria-hidden="true" />
+            {done} / {total} vanquished
+          </span>
+
+          {/* WF-042 fleet-health line — replaces the old dedicated questing
+              pill (Decisions: single live-count source, folded in rather than
+              duplicated). `topCtx`/`nearThreshold` segments are omitted
+              gracefully when there's no pct data to report — never a
+              "top ctx null%" or a noisy "0 near threshold". */}
+          <button
+            type="button"
+            className="topbar__fleet-pill"
+            onClick={onOpenParty}
+          >
+            <span className="topbar__fleet-icon" aria-hidden="true">
+              ⚔
+            </span>
+            {/* Mobile-only (styles.css): the full "N questing · top ctx N% ·
+                N near threshold" line can be wider than R4's remaining row
+                space next to the gold/vanquished pills — wrapping it in its
+                own span gives ellipsis-truncation a real box to clip (a bare
+                text run inside a flex container becomes an anonymous flex
+                item CSS can't target), so the pill's OWN height stays a
+                single line/matches its neighbours instead of growing to fit
+                a wrapped second line. Desktop is untouched (no width cap
+                there), so the full line still always shows in full. */}
+            <span className="topbar__fleet-label">
+              {questingCount} questing
+              {idleCount > 0 && <> ({idleCount} idle)</>}
+              {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
+              {fleet.nearThreshold > 0 && (
+                <> · {fleet.nearThreshold} near threshold</>
+              )}
+            </span>
+          </button>
+
+          {/* Filters ▾ / Controls ▾ / ＋ — three independent controls grouped
+              as one cluster. Filters and Controls used to be ONE shared
+              "Controls ▾" toggle driving both TopBar's own group AND the
+              separate <FilterBar/>; they're now two independent toggles, each
+              wired to just its own region via `aria-controls`. `hidden={
+              !filtersOpen}`/`hidden={!controlsOpen}` take effect on every
+              viewport now, not just ≤720px (see styles.css) — both default
+              open so the board looks unchanged on load, but either can be
+              collapsed on any screen size. */}
+          <div className="topbar__toggle-cluster">
+            {!onAlmoner && (
+              // The Chronicle still gets this: <ChronicleFilterBar/> reuses
+              // the very same `#filter-bar` id App.tsx renders FilterBar at on
+              // the board, so `boardless` alone is the wrong guard here — it
+              // would hide this on the Chronicle too, where the control it
+              // names still exists. The Almoner is the one page with no filter
+              // bar of any kind, so `aria-controls="filter-bar"` would point at
+              // an element that is never in the DOM.
+              <Button
+                className="topbar__controls-toggle"
+                aria-expanded={filtersOpen}
+                aria-controls="filter-bar"
+                onClick={onToggleFilters}
+              >
+                Filters {filtersOpen ? "▴" : "▾"}
+              </Button>
+            )}
+            {!boardless && (
+              <Button
+                className="topbar__controls-toggle"
+                aria-expanded={controlsOpen}
+                aria-controls="topbar-controls-group"
+                onClick={onToggleControls}
+              >
+                {/* rpg-icons pack "settings" gear — decorative only (`alt=""`),
+                    so the button's accessible name stays plain "Controls" (task
+                    C: no equivalent funnel/filter asset exists for the
+                    "Filters ▾" button beside this one, so that stays text-only). */}
+                <img src={settingsIcon} alt="" className="topbar__toggle-icon" />
+                Controls {controlsOpen ? "▴" : "▾"}
+              </Button>
+            )}
+            {onChronicle ? (
+              /* The Chronicle's one action, in the slot ＋ New card holds on the
+                 other pages. Gold primary: it is the page's call to action, and
+                 the blank-chronicle prompt points at it by name. */
+              <Button
+                variant="primary"
+                className="topbar__sync"
+                onClick={onChronicleSync}
+                disabled={chronicleSyncing || !onChronicleSync}
+                title="Read every session transcript on this machine into the chronicle"
+              >
+                {chronicleSyncing ? "Syncing…" : "Sync"}
+              </Button>
+            ) : onAlmoner ? null : (
+              /* "＋ New card" is icon-only — `aria-label`/`title` keep it
+                 accessible/resolvable by name exactly as the old "＋ New card"
+                 text button was; opens the same NewCardDialog unchanged.
+                 variant="neutral" (not "primary"): despite being a create
+                 action, `.topbar__new-card`'s own chrome paints it with the
+                 same PLAIN Role-A face as Refresh, not the gold `.qb-btn--
+                 primary` fill — keeping it neutral here preserves that
+                 existing look exactly (WF-097 follow-up). */
+              <Button
+                variant="neutral"
+                className="topbar__new-card topbar__new-card--icon"
+                onClick={() => setNewCardOpen(true)}
+                aria-label="New card"
+                title="New card"
+              >
+                ＋
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* WF-085 (Task 2/3): the secondary-controls group — Last Orders
@@ -721,48 +793,6 @@ function TopBar({
             {quarantinedCount} quarantined — see archive/corrupt
           </span>
         )}
-
-        <span className="topbar__gold-pill" title={`${gold} tokens total`}>
-          <CoinIcon aria-hidden="true" />
-          {formatTokens(gold)}
-        </span>
-
-        <span className="topbar__vanquished-pill">
-          <CheckIcon aria-hidden="true" />
-          {done} / {total} vanquished
-        </span>
-
-        {/* WF-042 fleet-health line — replaces the old dedicated questing
-            pill (Decisions: single live-count source, folded in rather than
-            duplicated). `topCtx`/`nearThreshold` segments are omitted
-            gracefully when there's no pct data to report — never a
-            "top ctx null%" or a noisy "0 near threshold". */}
-        <button
-          type="button"
-          className="topbar__fleet-pill"
-          onClick={onOpenParty}
-        >
-          <span className="topbar__fleet-icon" aria-hidden="true">
-            ⚔
-          </span>
-          {/* Mobile-only (styles.css): the full "N questing · top ctx N% ·
-              N near threshold" line can be wider than R4's remaining row
-              space next to the gold/vanquished pills — wrapping it in its
-              own span gives ellipsis-truncation a real box to clip (a bare
-              text run inside a flex container becomes an anonymous flex
-              item CSS can't target), so the pill's OWN height stays a
-              single line/matches its neighbours instead of growing to fit
-              a wrapped second line. Desktop is untouched (no width cap
-              there), so the full line still always shows in full. */}
-          <span className="topbar__fleet-label">
-            {questingCount} questing
-            {idleCount > 0 && <> ({idleCount} idle)</>}
-            {fleet.topCtx !== null && <> · top ctx {fleet.topCtx}%</>}
-            {fleet.nearThreshold > 0 && (
-              <> · {fleet.nearThreshold} near threshold</>
-            )}
-          </span>
-        </button>
       </header>
       {/* Task 10: NewCardDialog is a sibling of `<header>`, not nested
           inside it — same "modal is App/TopBar state, rendered outside the

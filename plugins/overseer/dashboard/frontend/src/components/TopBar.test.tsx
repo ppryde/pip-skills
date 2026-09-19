@@ -1051,13 +1051,15 @@ describe("<TopBar/> view toggle (WF-086) — identity placement", () => {
     const titleIndex = kids.findIndex((c) => c.tagName === "H1");
     expect(stackIndex).toBeGreaterThanOrEqual(0);
     expect(stackIndex).toBeLessThan(titleIndex);
-    // The identity cluster itself still precedes the repo selector in the bar.
-    const header = container.querySelector("header.topbar")!;
-    const barKids = Array.from(header.children);
-    const identityIndex = barKids.indexOf(identity);
-    const repoIndex = barKids.findIndex((c) => c.classList.contains("topbar__repo-select"));
-    expect(identityIndex).toBeGreaterThanOrEqual(0);
-    expect(identityIndex).toBeLessThan(repoIndex);
+    // The identity cluster itself still precedes the repo selector in the
+    // bar — the repo selector now lives inside the desktop-row `.topbar__
+    // row2-left` wrapper (see TopBar.tsx), so this compares DOM position via
+    // `compareDocumentPosition` rather than `header`'s DIRECT children.
+    const repo = container.querySelector(".topbar__repo-select")!;
+    expect(repo).not.toBeNull();
+    expect(
+      identity.compareDocumentPosition(repo) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 });
 
@@ -1149,6 +1151,80 @@ describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
 // than `.topbar__repo-select select`/`.topbar__branch-select select`
 // (which keep only their own genuine overrides — a transparent background,
 // plus the branch select's own wobble variant — nothing duplicated).
+// Owner's ask: "on desktop can we do menu left, title right for top line,
+// account/repo/branch in that order in left of second line and filters on
+// the right, then all labels on the third row". These two wrappers
+// (`.topbar__row2-left`/`.topbar__row2-right`) are the structural hooks a
+// `@media (min-width: 721px)` grid in styles.css pins to `row2-left`/
+// `row2-right`; both default to `display: contents` (see styles.css) so
+// mobile — asserted untouched by the whole existing suite above/below —
+// never sees them as real boxes. These tests pin the DOM membership/order a
+// screenshot can't regression-guard on its own.
+describe("<TopBar/> desktop row 2 grouping", () => {
+  it("puts Account, Repo, Branch in that order inside .topbar__row2-left", () => {
+    const { container } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        accounts={[
+          { account_uuid: "acc-a", short_uuid: "acc-a", plan: null, config_dirs: [], sessions: 0, last_activity_at: null },
+          { account_uuid: "acc-b", short_uuid: "acc-b", plan: null, config_dirs: [], sessions: 0, last_activity_at: null },
+        ]}
+        activeAccount={null}
+        repos={[{ label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 }]}
+        activeRoot="/a"
+        branches={["feat/a"]}
+        activeBranch="feat/a"
+      />
+    );
+
+    const left = container.querySelector(".topbar__row2-left")!;
+    expect(left).not.toBeNull();
+    const classesInOrder = Array.from(left.children).map((c) => c.className);
+    const accountIdx = classesInOrder.findIndex((c) => c.includes("topbar__account-select"));
+    const repoIdx = classesInOrder.findIndex((c) => c.includes("topbar__repo-select"));
+    const branchIdx = classesInOrder.findIndex((c) => c.includes("topbar__branch-select"));
+    expect(accountIdx).toBeGreaterThanOrEqual(0);
+    expect(repoIdx).toBeGreaterThan(accountIdx);
+    expect(branchIdx).toBeGreaterThan(repoIdx);
+  });
+
+  it("groups the rest/last-refreshed pills, the gold/vanquished/fleet pills, and the toggle cluster inside .topbar__row2-right, cluster last", () => {
+    const { container } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        limits={{
+          five_hour: { used_percentage: 28 } as RateWindow,
+          seven_day: { used_percentage: 63 } as RateWindow,
+        }}
+        lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
+      />
+    );
+
+    const right = container.querySelector(".topbar__row2-right")!;
+    expect(right).not.toBeNull();
+    expect(right.querySelector(".topbar__pill")).not.toBeNull();
+    expect(right.querySelector(".topbar__gold-pill")).not.toBeNull();
+    expect(right.querySelector(".topbar__vanquished-pill")).not.toBeNull();
+    expect(right.querySelector(".topbar__fleet-pill")).not.toBeNull();
+    const cluster = right.querySelector(".topbar__toggle-cluster");
+    expect(cluster).not.toBeNull();
+    // The toggle cluster is the rightmost (last) direct child.
+    expect(right.lastElementChild).toBe(cluster);
+  });
+
+  it("keeps every row2 control reachable outside row2-left/row2-right too (mobile flattens them via display:contents)", () => {
+    // A structural smoke test: nothing about wrapping these controls should
+    // make them any less queryable by their own existing class/role — the
+    // whole rest of this file's assertions (Repo/Branch/Account selects,
+    // gold/vanquished/fleet pills, Filters/Controls/＋) already prove this,
+    // this just documents the intent for future readers of this describe
+    // block.
+    render(<StatefulTopBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
+    expect(screen.getByText(/vanquished/)).toBeInTheDocument();
+  });
+});
+
 describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
 

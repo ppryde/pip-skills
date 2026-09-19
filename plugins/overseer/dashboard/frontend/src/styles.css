@@ -1321,6 +1321,22 @@ body {
   gap: 0.4rem;
 }
 
+/* Desktop row 2 wrappers (owner's ask, see TopBar.tsx's JSX comments at
+   these two elements' call sites): `.topbar__row2-left` groups Account/Repo/
+   Branch, `.topbar__row2-right` groups the status pills + the toggle
+   cluster. `display: contents` is the base/every-viewport default — same
+   "vanish and let the children become direct flex items of `.topbar`"
+   technique `.topbar__controls-group`/`.topbar__controls-actions` already
+   use above — so mobile (and any width below the grid media query further
+   down this file) is completely unaffected by these wrappers merely
+   existing: each child still flows/gets ordered exactly as if it were a
+   bare `.topbar` child. Only the `@media (min-width: 721px)` block turns
+   either into a real box pinned to its own named grid area. */
+.topbar__row2-left,
+.topbar__row2-right {
+  display: contents;
+}
+
 /* WF-091: the Epic Atlas toggles, moved into the Controls group from the
    retired standalone `<AtlasToolbar>` component (a static complexity-weight
    label plus three segmented two-button toggles, previously rendered
@@ -6547,6 +6563,92 @@ button.trail-tag:focus-visible {
 
 .atlas-trail__beast--slain {
   --qb-atlas-beast-slain: var(--atlas-trail-fill, var(--qb-ink-300));
+}
+
+/* ==========================================================================
+   Desktop top-bar rows (>720px) — CSS Grid per the owner's ask: menu left /
+   title right on row 1; account → repo → branch on the left and the
+   Filters/Controls/＋ cluster (plus the status pills, see `.topbar__row2-
+   right`'s own comment at its call site) on the right of row 2; the rare
+   quarantine banner on its own row when present; then the "Provisions"
+   group — Last Orders, the Atlas toggles when shown, Labels…/Refresh/
+   Abandoned/Clear… ("the labels row" — full width) — last. Grid-template-
+   areas place each piece by NAME, independent of DOM/source order, so
+   `.topbar__controls-group`/`.topbar__quarantine-banner` keep their
+   existing JSX position untouched — only the two new `.topbar__row2-*`
+   wrapper elements needed adding (see TopBar.tsx). Every row is `auto`-
+   sized, so an absent one (the banner, or Provisions while `controlsOpen`
+   is false) collapses to zero height instead of leaving a gap. This block
+   sits ahead of, and is fully independent from, the "Mobile layout layer"
+   below: `min-width: 721px` here and that layer's `max-width: 720px` can
+   never both match the same viewport, so mobile is untouched by any of
+   this. */
+@media (min-width: 721px) {
+  .topbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "row1      row1"
+      "row2-left row2-right"
+      "banner    banner"
+      "row3      row3";
+    row-gap: 0.75rem;
+  }
+
+  .topbar__identity {
+    grid-area: row1;
+  }
+
+  .topbar__row2-left {
+    grid-area: row2-left;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .topbar__row2-right {
+    grid-area: row2-right;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+  }
+
+  .topbar__quarantine-banner {
+    grid-area: banner;
+    /* A grid item stretches to fill its column by default (`align-self`/
+       `justify-self: stretch`) — this pill should stay its own intrinsic
+       size instead, same as every other chip in this bar. */
+    justify-self: start;
+  }
+
+  /* "The labels row": unwraps the Provisions group from `.topbar`'s own
+     flex flow (base rule, `display: contents`) into its OWN box pinned to
+     `row3` — a named grid area can only be filled by one real element, and
+     `display: contents` has none to give it. `:not([hidden])` beats the
+     bare `.topbar__controls-group { display: contents }` base rule on
+     specificity, same trick the existing mobile override two screens down
+     already uses. `.topbar__controls-header`'s own `flex-basis: 100%`
+     (base rule) still forces its "Provisions" caption onto its own line
+     first, now within this box rather than within `.topbar` itself — same
+     visual result. */
+  .topbar__controls-group:not([hidden]) {
+    grid-area: row3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* The mobile-only row-break spacers (force hard breaks between 320-
+     720px) are still present in the DOM at every width; keep them out of
+     the grid's auto-placement flow entirely rather than let one claim a
+     stray implicit cell. */
+  .topbar__row-break {
+    display: none;
+  }
 }
 
 /* ==========================================================================
