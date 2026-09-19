@@ -4,6 +4,7 @@
  * import the wrappers below instead.
  */
 import type {
+  AccountsResponse,
   AlmonerDigest,
   AlmonerStatus,
   BoardResponse,
@@ -89,12 +90,33 @@ export function setActiveRoot(root: string | null): void {
   activeRoot = root;
 }
 
-/** Appends `?root=...` (or `&root=...` if the url already has a query
- * string) when a root is active; otherwise returns `url` unchanged. */
+/** WF-116: the account selector's choice, same single-choke-point shape as
+ * `activeRoot` above — `null` means "no selection" / "every account",
+ * which every wrapper below treats as "omit the `account` query param
+ * entirely" (unchanged pre-selector behaviour). */
+let activeAccount: string | null = null;
+
+/**
+ * Sets the account every subsequent `withRoot`-routed call threads through
+ * as `?account=...`. Called by the same data hooks `setActiveRoot` is
+ * (`useSessions`, `useChronicle`), at the same point in their effect.
+ */
+export function setActiveAccount(account: string | null): void {
+  activeAccount = account;
+}
+
+/** Appends `?root=...`/`&account=...` (as `?`/`&` the url already needs)
+ * for whichever of `activeRoot`/`activeAccount` is set; returns `url`
+ * unchanged when neither is. */
 function withRoot(url: string): string {
-  if (activeRoot === null) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}root=${encodeURIComponent(activeRoot)}`;
+  let out = url;
+  if (activeRoot !== null) {
+    out += `${out.includes("?") ? "&" : "?"}root=${encodeURIComponent(activeRoot)}`;
+  }
+  if (activeAccount !== null) {
+    out += `${out.includes("?") ? "&" : "?"}account=${encodeURIComponent(activeAccount)}`;
+  }
+  return out;
 }
 
 /**
@@ -168,6 +190,13 @@ export function getBoard(opts?: { signal?: AbortSignal }): Promise<BoardResponse
  * marks whichever entry is its own launch root with `current: true`. */
 export function getRepos(): Promise<ReposResponse> {
   return request<ReposResponse>("GET", "/api/repos");
+}
+
+/** Account discovery (WF-116) — always global, like `getRepos`: the union
+ * of chronicle's account history and every watched config dir's current
+ * login, never scoped by the currently-selected account itself. */
+export function getAccounts(): Promise<AccountsResponse> {
+  return request<AccountsResponse>("GET", "/api/accounts");
 }
 
 /** Census sessions, scoped to the active root (WF-031) — same `withRoot`

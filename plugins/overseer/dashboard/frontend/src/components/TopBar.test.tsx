@@ -4,6 +4,7 @@ import { act, render, screen, fireEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type {
+  AccountEntry,
   BoardCard,
   BoardResponse,
   Context,
@@ -113,6 +114,9 @@ function baseProps() {
     branches: [] as string[],
     activeBranch: null as string | null,
     onSelectBranch: () => {},
+    accounts: [] as AccountEntry[],
+    activeAccount: null as string | null,
+    onSelectAccount: () => {},
     // WF-086: Board|Atlas view toggle — every existing test gets a stable
     // default (board view, no-op handler) via this shared fixture so only
     // the toggle's own describe block below needs to care about it.

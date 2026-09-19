@@ -388,6 +388,56 @@ class TestRepos:
         assert rows[1]["repo_root"] == "/repo/b"
 
 
+class TestAccounts:
+    def test_counts(self, projects):
+        conn = _seed(projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1' WHERE session_id IN ('s1', 's2')")
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-2' WHERE session_id = 's3'")
+        conn.commit()
+        rows = report.accounts(conn)
+        assert rows[0]["account_uuid"] == "acc-1"
+        assert rows[0]["sessions"] == 2
+        assert rows[1]["account_uuid"] == "acc-2"
+
+    def test_sessions_with_no_account_are_not_listed(self, projects):
+        conn = _seed(projects)
+        assert report.accounts(conn) == []
+
+    def test_missing_column_degrades_to_empty_rather_than_raising(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE sessions (session_id TEXT)")
+        assert report.accounts(conn) == []
+
+
+class TestAccountFilter:
+    def test_scopes_summary_and_sessions_to_one_account(self, projects):
+        conn = _seed(projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1' WHERE session_id IN ('s1', 's2')")
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-2' WHERE session_id = 's3'")
+        conn.commit()
+        out = report.summary(conn, account="acc-1")
+        assert out["totals"]["sessions"] == 2
+        rows = report.sessions(conn, account="acc-2")
+        assert [r["session_id"] for r in rows] == ["s3"]
+        # Composes with the repo filter.
+        out = report.summary(conn, repo_root="/repo/a", account="acc-1")
+        assert out["totals"]["sessions"] == 2
+        # An unknown account is an empty window, not an error.
+        assert report.summary(conn, account="nope")["totals"]["sessions"] == 0
+
+    def test_missing_column_degrades_to_unfiltered_rather_than_raising(self, projects):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE sessions (session_id TEXT, repo_root TEXT, git_branch TEXT, "
+                     "last_activity_at REAL, started_at REAL)")
+        conn.execute("INSERT INTO sessions VALUES ('s1', NULL, NULL, NULL, NULL)")
+        where, params = report._session_filter(None, None, account="acc-1", conn=conn)
+        assert where == "" and params == []
+
+
 class TestBiggestJumps:
     def _series(self, *contexts):
         return [{"ts": float(i * 10), "message_id": f"m{i}", "context_tokens": c, "output_tokens": 5,

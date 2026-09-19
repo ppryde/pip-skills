@@ -14,7 +14,12 @@ vi.mock("../api/client", () => ({
   getCard: vi.fn(),
   getSessions: vi.fn(),
   getRepos: vi.fn(),
+  // WF-116: App now mounts useAccounts()/threads setActiveAccount()
+  // unconditionally too, same "every read the mount path touches" rationale
+  // as getSessions/getRepos above.
+  getAccounts: vi.fn().mockResolvedValue({ accounts: [] }),
   setActiveRoot: vi.fn(),
+  setActiveAccount: vi.fn(),
 }));
 
 import { getBoard, getCard, getSessions, getRepos } from "../api/client";

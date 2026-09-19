@@ -287,6 +287,31 @@ export interface ReposResponse {
   repos: RepoEntry[];
 }
 
+/** One account the selector can scope to (WF-116) — the union of every
+ * account uuid chronicle has recorded a session under and every watched
+ * Claude config dir's CURRENT login. `plan`/`config_dirs` come only from a
+ * live login: a uuid chronicle knows but no dir is currently logged into
+ * has `plan: null` and `config_dirs: []`, and is still selectable. No
+ * email or name ever appears — the backend reads a whitelist only. */
+export interface AccountEntry {
+  account_uuid: string;
+  /** First 8 characters of `account_uuid`, for a compact selector label. */
+  short_uuid: string;
+  /** Raw plan value (e.g. "claude_max") — render through `planLabel`
+   * (board/chronicle/plan.ts), never shown raw. */
+  plan: string | null;
+  /** Every watched config dir currently logged into this account — used to
+   * scope live census sessions (`/api/sessions?account=`) to it. */
+  config_dirs: string[];
+  /** Sessions chronicle has recorded under this uuid. */
+  sessions: number;
+  last_activity_at: number | null;
+}
+
+export interface AccountsResponse {
+  accounts: AccountEntry[];
+}
+
 /** POST /api/repo/clear response — the dashboard's clear-data action
  * (per-repo cards-only or full-repo destructive clear, always preceded by
  * a git-trackable backup). `backup_path` is null on a `noop` clear (nothing

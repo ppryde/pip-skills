@@ -278,6 +278,15 @@ class TestCli:
         assert main(["repos"]) == 0
         assert json.loads(capsys.readouterr().out)["repos"] == []  # /repo isn't a git repo
 
+        assert main(["accounts"]) == 0
+        assert json.loads(capsys.readouterr().out)["accounts"] == []  # no oauthAccount in the fixture
+
+        # --account narrows summary/sessions the same way --branch does.
+        assert main(["summary", "--account", "nope"]) == 0
+        assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 0
+        assert main(["sessions", "--account", "nope"]) == 0
+        assert json.loads(capsys.readouterr().out)["sessions"] == []
+
     def test_reports_without_store_are_empty_not_errors(self, capsys):
         assert main(["summary"]) == 0
         assert json.loads(capsys.readouterr().out) == {"totals": None}
@@ -285,6 +294,8 @@ class TestCli:
         assert json.loads(capsys.readouterr().out) == {"sessions": []}
         assert main(["repos"]) == 0
         assert json.loads(capsys.readouterr().out) == {"repos": []}
+        assert main(["accounts"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"accounts": []}
         assert main(["session", "x"]) == 1
 
     def test_ingest_verb(self, builder, capsys):

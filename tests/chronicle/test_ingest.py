@@ -4,7 +4,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from scripts import ingest, store
 from scripts.transcript import parse_ts
 
@@ -765,6 +764,70 @@ class TestAccountAndPlan:
         assert conn.execute(
             "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-plain'"
         ).fetchone()[0] is None
+
+    def test_account_uuid_is_stamped_from_the_config_dir_at_first_ingest(self, projects):
+        conn = self._session(projects, {"accountUuid": "acc-1", "organizationType": "claude_max"})
+        assert conn.execute(
+            "SELECT account_uuid FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] == "acc-1"
+
+    def test_account_uuid_is_write_once(self, projects):
+        conn = self._session(projects, {"accountUuid": "acc-1", "organizationType": "claude_max"})
+        # A different account logs into the SAME config dir, then the
+        # transcript is re-read (`sync --full`). The session must keep the
+        # account that actually ran it, not whoever is logged in now.
+        Path(os.environ["CLAUDE_CONFIG_DIR"], ".claude.json").write_text(json.dumps(
+            {"oauthAccount": {"accountUuid": "acc-2", "organizationType": "claude_max"}}))
+        path = Path(conn.execute(
+            "SELECT transcript_path FROM sessions WHERE session_id = 's-plan'").fetchone()[0])
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT account_uuid FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] == "acc-1"
+
+    def test_a_preexisting_accountless_session_is_backfilled_on_next_sync(self, projects):
+        # A session ingested before `account_uuid` existed already has
+        # `plan_observed_at` set — the write-once guard for account_uuid must
+        # be independent of that, or this row would never be backfilled. A
+        # fully-ingested transcript has no new bytes for a plain re-ingest to
+        # see, so backfill happens via the sweep `sync` runs, like
+        # `config_dir`'s before it — not by re-reading the file.
+        conn = self._session(projects, {"accountUuid": "acc-1", "organizationType": "claude_max"})
+        conn.execute("UPDATE sessions SET account_uuid = NULL WHERE session_id = 's-plan'")
+        conn.commit()
+        assert conn.execute(
+            "SELECT plan_observed_at FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] is not None
+        ingest.sync(conn, projects)
+        assert conn.execute(
+            "SELECT account_uuid FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] == "acc-1"
+
+    def test_an_api_key_config_stamps_no_account_uuid(self, projects):
+        conn = self._session(projects, None)
+        assert conn.execute(
+            "SELECT account_uuid FROM sessions WHERE session_id = 's-plan'"
+        ).fetchone()[0] is None
+
+    def test_the_transcripts_own_account_uuid_field_is_ignored(self, projects):
+        # A record's top-level `accountUuid` names the claude.ai account an
+        # Artifact publish belongs to, not who ran the session — using it here
+        # would misattribute every bridged/artifact-touching session to the
+        # wrong account. Session attribution comes ONLY from the config dir's
+        # current login, read via `store.account_profile`.
+        Path(os.environ["CLAUDE_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
+        Path(os.environ["CLAUDE_CONFIG_DIR"], ".claude.json").write_text(json.dumps(
+            {"oauthAccount": {"accountUuid": "acc-config-dir"}}))
+        path = projects / "-repo" / "s-decoy.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(
+            _assistant("m1", ts=T0, session_id="s-decoy", accountUuid="acc-from-transcript")
+        ) + "\n")
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT account_uuid FROM sessions WHERE session_id = 's-decoy'"
+        ).fetchone()[0] == "acc-config-dir"
 
 
 class TestSync:

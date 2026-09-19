@@ -312,26 +312,31 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     )
 
 
-def _plan_snapshot(conn: sqlite3.Connection, config_dir: str | None,
-                   now: float) -> dict[str, Any]:
-    """The plan columns to stamp on a session, and the `accounts` upsert that
-    goes with them. `{}` when the config dir holds no readable account.
+def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None,
+                      now: float) -> tuple[dict[str, Any], str | None]:
+    """The plan columns to stamp on a session, and the account uuid found —
+    plus the `accounts` upsert that goes with it, as a side effect. `({}, None)`
+    when the config dir holds no readable account.
 
-    Read at INGEST time and stamped per session, because a plan changes: an
-    account that moves from Max to Enterprise would otherwise have every
+    Read at INGEST time. The PLAN is stamped per session because it changes:
+    an account that moves from Max to Enterprise would otherwise have every
     session it ever ran relabelled by the move. `plan_observed_at` records
     when the claim was true, so a row is legible as a snapshot rather than a
-    standing fact.
+    standing fact. The ACCOUNT UUID itself does not change this way — an
+    account keeps its uuid across plan moves — but the caller still treats it
+    as write-once (see `_upsert_session_identity`): a session belongs to
+    whichever account was logged in the FIRST time it was ingested, not to
+    whoever happens to be logged into that config dir on a later resync.
 
     Only the identity half goes in `accounts` — the half that does not change.
     Everything read here is whitelisted by name in `store.account_profile`;
     nothing personal reaches the database.
     """
     if not config_dir:
-        return {}
+        return {}, None
     profile = store.account_profile(Path(config_dir))
     if not profile:      # None (no/unreadable file) or {} (API key: no oauthAccount)
-        return {}
+        return {}, None
     account_uuid = profile.get("accountUuid")
     if account_uuid:
         conn.execute(
@@ -349,7 +354,7 @@ def _plan_snapshot(conn: sqlite3.Connection, config_dir: str | None,
     }
     if snapshot:
         snapshot["plan_observed_at"] = now
-    return snapshot
+    return snapshot, account_uuid
 
 
 def config_dir_of(transcript_path: Path) -> str | None:
@@ -390,18 +395,33 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         conn.execute(
             f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
         )
-    # Write-once, unlike every column above. The plan columns record what was
-    # true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on a later ingest
-    # would let `sync --full` quietly relabel the whole back catalogue with
-    # today's plan — destroying the very history the snapshot exists to keep.
-    # Guarded on plan_observed_at, which is set if and only if a snapshot was.
+    # Write-once, unlike every column above. The plan columns AND account_uuid
+    # record what was true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on
+    # a later ingest would let `sync --full` quietly relabel the whole back
+    # catalogue with today's login — destroying the very history the snapshot
+    # exists to keep. Each is guarded on ITS OWN column being unset, not a
+    # shared flag: a session ingested before `account_uuid` existed already has
+    # `plan_observed_at` set, and sharing one guard would leave it unbackfilled
+    # forever. So a session missing either gets a fresh read of the profile
+    # (cheap — one local file), and each column is then written only if IT is
+    # still unset — the plan and the account uuid each keep whichever value
+    # they saw first, independently.
     already = conn.execute(
-        "SELECT plan_observed_at FROM sessions WHERE session_id = ?", (session_id,)
+        "SELECT plan_observed_at, account_uuid FROM sessions WHERE session_id = ?", (session_id,)
     ).fetchone()
-    if already is None or already[0] is None:
-        for column, value in _plan_snapshot(conn, config, now).items():
+    plan_pending = already is None or already[0] is None
+    account_pending = already is None or already[1] is None
+    if plan_pending or account_pending:
+        snapshot, account_uuid = _account_snapshot(conn, config, now)
+        if plan_pending:
+            for column, value in snapshot.items():
+                conn.execute(
+                    f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
+                )
+        if account_pending and account_uuid:
             conn.execute(
-                f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
+                "UPDATE sessions SET account_uuid = ? WHERE session_id = ?",
+                (account_uuid, session_id),
             )
     if facts.first_ts is not None:
         conn.execute(
@@ -719,6 +739,8 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
     if conn.execute("SELECT 1 FROM meta WHERE key = 'config_dirs_backfilled'").fetchone() is None:
         backfill_config_dirs(conn)
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('config_dirs_backfilled', '1')")
+    # Not one-time-flagged, unlike the sweep above — see `backfill_account_uuids`.
+    backfill_account_uuids(conn, now=now)
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES ('synced_at', ?)", (str(now),)
     )
@@ -730,6 +752,46 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
         "sessions": changed,
         "synced_at": now,
     }
+
+
+def backfill_account_uuids(conn: sqlite3.Connection, *, now: float | None = None) -> int:
+    """Fill ``sessions.account_uuid`` for rows that have none yet, from the
+    CURRENT login of the config dir each was ingested from — the same shape
+    of sweep ``backfill_config_dirs`` runs for the column beside it, so a
+    session ingested before this feature shipped (or one whose config dir was
+    logged out the first time it ran) is not stuck NULL forever.
+
+    Unlike ``backfill_config_dirs`` this is NOT one-time-flagged: its source —
+    whether a config dir is currently logged in, and as whom — can become true
+    only later (someone logs in after weeks of API-key use), so every sync
+    re-checks whatever is still NULL. Cheap either way: the query only ever
+    touches rows with no account, and a config dir's profile is read at most
+    once per call regardless of how many of its sessions are pending.
+
+    Still write-once in effect: a row this fills never has NULL again, so a
+    later run of this same sweep leaves it untouched — the account a session
+    picks up here is the one it keeps.
+    """
+    if now is None:
+        now = time.time()
+    rows = conn.execute(
+        "SELECT session_id, config_dir FROM sessions "
+        "WHERE account_uuid IS NULL AND config_dir IS NOT NULL"
+    ).fetchall()
+    profiles: dict[str, str | None] = {}
+    filled = 0
+    for session_id, config_dir in rows:
+        if config_dir not in profiles:
+            _, profiles[config_dir] = _account_snapshot(conn, config_dir, now)
+        account_uuid = profiles[config_dir]
+        if account_uuid is None:
+            continue
+        conn.execute(
+            "UPDATE sessions SET account_uuid = ? WHERE session_id = ?",
+            (account_uuid, session_id),
+        )
+        filled += 1
+    return filled
 
 
 def backfill_config_dirs(conn: sqlite3.Connection) -> int:
