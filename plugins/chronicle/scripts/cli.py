@@ -109,11 +109,15 @@ def _parse_since(value: str) -> float:
     """
     try:
         parsed = datetime.fromisoformat(value)
-    except ValueError:
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()  # naive -> presumed local, per datetime's own contract
+        return parsed.timestamp()
+    except (ValueError, OverflowError):
+        # `fromisoformat` alone accepts a year like 9999 or 1 — the overflow
+        # only surfaces in `astimezone()`/`timestamp()`, converting a year at
+        # the edge of what `datetime` (or a POSIX timestamp) can hold into
+        # another timezone. Both stages fold into one invalid-input error.
         raise argparse.ArgumentTypeError(f"invalid --since value: {value!r}") from None
-    if parsed.tzinfo is None:
-        parsed = parsed.astimezone()  # naive -> presumed local, per datetime's own contract
-    return parsed.timestamp()
 
 
 def _resolve_since(args: argparse.Namespace) -> float | None:

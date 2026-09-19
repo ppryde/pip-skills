@@ -1082,8 +1082,18 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         if since is None:
             return []
         try:
-            datetime.fromisoformat(since)
-        except ValueError:
+            parsed = datetime.fromisoformat(since)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            parsed.timestamp()
+        except (ValueError, OverflowError):
+            # `fromisoformat` alone accepts an out-of-range year like 9999 or
+            # 1 — the overflow only surfaces converting it to an aware
+            # datetime or a POSIX timestamp, exactly what chronicle's own
+            # `--since` does. Checked here too, or such a value would reach
+            # chronicle, which exits 2 on it, and `run_chronicle` treats any
+            # non-zero exit as "no data" — a quiet 200 indistinguishable
+            # from a real empty window instead of a 400.
             raise HTTPException(status_code=400, detail="invalid since value") from None
         return ["--since", since]
 

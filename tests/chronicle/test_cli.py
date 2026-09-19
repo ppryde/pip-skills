@@ -338,6 +338,18 @@ class TestSince:
         with pytest.raises(argparse.ArgumentTypeError):
             _parse_since("not-a-date")
 
+    def test_an_out_of_range_since_raises_the_same_error_not_a_crash(self):
+        # `datetime.fromisoformat` happily parses "9999-12-31" and
+        # "0001-01-01" — the overflow only surfaces later, in `astimezone()`
+        # or `.timestamp()` (both raise plain ValueError, on some platforms
+        # OverflowError), converting a naive local year at the edge of what
+        # `datetime` can hold in another timezone or as a POSIX timestamp.
+        # Uncaught, that ValueError would crash the CLI instead of failing
+        # cleanly as invalid input.
+        for value in ("9999-12-31", "0001-01-01"):
+            with pytest.raises(argparse.ArgumentTypeError):
+                _parse_since(value)
+
     def test_since_scopes_summary_and_sessions(self, builder, capsys):
         builder.prompt("u1", T0).turn("m1", T0, tools=["Edit"]).write()
         assert main(["sync"]) == 0
@@ -367,6 +379,13 @@ class TestSince:
             main(["summary", "--since", "not-a-date"])
         assert exc.value.code == 2
         assert "invalid --since value" in capsys.readouterr().err
+
+    def test_an_out_of_range_since_is_invalid_input_not_a_crash(self, capsys):
+        for value in ("9999-12-31", "0001-01-01"):
+            with pytest.raises(SystemExit) as exc:
+                main(["summary", "--since", value])
+            assert exc.value.code == 2
+            assert "invalid --since value" in capsys.readouterr().err
 
 
 class TestErrorContract:
