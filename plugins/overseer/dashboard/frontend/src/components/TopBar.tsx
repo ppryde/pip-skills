@@ -1,7 +1,8 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { BoardCard, Context, Limits, RepoEntry } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
+import { useMediaQuery } from "../board/useMediaQuery";
 import { goldTotal } from "../board/goldTotal";
 import { vanquishedStats } from "../board/vanquished";
 import { formatTokens } from "../board/formatTokens";
@@ -37,6 +38,13 @@ import settingsIcon from "../assets/ui-icons/settings.png";
  * page) each get a coin only when their plugin is installed beside this
  * dashboard. */
 export type View = "board" | "atlas" | "chronicle" | "almoner";
+
+/** Shared with styles.css's `--coin-spin-ms` custom property (set inline
+ * from this same constant below): the view-toggle coins' full spin
+ * duration. The CSS `animation-duration` and the JS "swap the face at the
+ * midpoint" timer both read this ONE number, so the two can never drift out
+ * of sync. */
+export const COIN_SPIN_MS = 600;
 
 /** What the guild bar calls the page you are on.
  *
@@ -284,24 +292,89 @@ function TopBar({
   // Controls group and ＋ New card give way and Sync takes the ＋ slot. The
   // repo and branch selectors stay and drive the Chronicle's scope directly
   // (App feeds them that page's branch list and an "All repos" choice).
-  // The pressed coin always sits leftmost (slot 0); the rest keep their
-  // source order behind it. Slots drive position through a CSS custom
-  // property rather than DOM order, so each coin stays the same element and
-  // slides to its new place instead of being remounted there.
   const activeIndex = Math.max(0, coins.findIndex((c) => c.view === view));
-  const slotOf = (i: number) => (i === activeIndex ? 0 : i < activeIndex ? i + 1 : i);
-  // Every view change sets the whole row spinning while it rearranges.
-  // Alternating between two identical keyframe names restarts the animation
-  // even when a second change lands mid-spin; `null` until the first change,
-  // so the coins sit still on load. Adjusted during render (React's "state
-  // from a changed prop" pattern), not in an effect, to skip a stale frame.
-  const [spunView, setSpunView] = useState(view);
-  const [spins, setSpins] = useState(0);
-  if (view !== spunView) {
-    setSpunView(view);
-    setSpins((n) => n + 1);
-  }
-  const spin = spins === 0 ? undefined : spins % 2 ? "a" : "b";
+  const coinCount = coins.length;
+  // The pressed coin's slot is always 0 (leftmost, frontmost); the rest keep
+  // their source order behind it — same arrangement as before #76. What
+  // changed (owner's ask: "all of the coins switch places — I would love it
+  // if they didn't actually move, they just spin and turn into a different
+  // menu item"): a coin's DOM node is now keyed by its SLOT, not by which
+  // view it shows, and never moves. `indexAtSlot` is the inverse of the old
+  // `slotOf(i) = i === activeIndex ? 0 : i < activeIndex ? i + 1 : i` — it
+  // decides which face belongs in which fixed slot; nothing here translates
+  // a coin to a new position anymore (that's what used to make the row look
+  // like it was reshuffling).
+  const indexAtSlot = (slot: number) =>
+    slot === 0 ? activeIndex : slot <= activeIndex ? slot - 1 : slot;
+
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  // The face each slot currently SHOWS (an icon). Lags `indexAtSlot` — the
+  // correct, immediate assignment — until the midpoint of that slot's spin,
+  // so the icon swap lands while the coin is edge-on rather than popping
+  // outright. `aria-pressed`/the accessible name are NEVER read from this:
+  // they come straight from `indexAtSlot` at render time below, so screen
+  // readers and the click target are correct the instant the view changes.
+  const [facesAtSlot, setFacesAtSlot] = useState<number[]>(() =>
+    Array.from({ length: coinCount }, (_, slot) => indexAtSlot(slot))
+  );
+  // Slots currently mid-spin — drives the rotateY animation. A superset of
+  // the slots whose face hasn't caught up yet: a coin keeps turning for the
+  // second half of its spin even after its new face has already swapped in.
+  const [spinningSlots, setSpinningSlots] = useState<ReadonlySet<number>>(
+    () => new Set<number>()
+  );
+  // Alternates so a slot re-triggered mid-spin (a second click landing
+  // before the first spin finishes) restarts its CSS animation instead of
+  // silently continuing the stale run — the same "two identical keyframes,
+  // swap the name" trick #76's row-level spin used, now scoped to just the
+  // coins actually changing.
+  const [spinGen, setSpinGen] = useState(0);
+
+  useEffect(() => {
+    const targetFaces = Array.from({ length: coinCount }, (_, slot) => indexAtSlot(slot));
+    // A coin appearing/disappearing (chronicleAvailable/almonerAvailable
+    // flipping) reshuffles every slot at once — an instant relayout, not
+    // "the user picked a different page", so it never spins.
+    if (facesAtSlot.length !== coinCount) {
+      setFacesAtSlot(targetFaces);
+      setSpinningSlots(new Set());
+      return;
+    }
+    const changedSlots = targetFaces.reduce<number[]>((acc, face, slot) => {
+      if (face !== facesAtSlot[slot]) acc.push(slot);
+      return acc;
+    }, []);
+    // Nothing to reconcile (including the "clicked away and back before the
+    // midpoint" case, where `facesAtSlot` never moved off the original
+    // faces) or motion is disabled — settle straight to the target and drop
+    // any spin a just-cancelled batch left marked. Always REPLACING
+    // `spinningSlots` (never merging into whatever was there) is what keeps
+    // a superseded batch from leaving a slot stuck spinning forever: its own
+    // settle timeout got cancelled below, so nothing else would clear it.
+    if (changedSlots.length === 0 || prefersReducedMotion) {
+      setFacesAtSlot(targetFaces);
+      setSpinningSlots(new Set());
+      return;
+    }
+
+    setSpinGen((g) => g + 1);
+    setSpinningSlots(new Set(changedSlots));
+    const midpoint = setTimeout(() => setFacesAtSlot(targetFaces), COIN_SPIN_MS / 2);
+    const settle = setTimeout(() => setSpinningSlots(new Set()), COIN_SPIN_MS);
+    // A view change landing before either timer fires cancels both — this
+    // effect's own cleanup runs before the next invocation, so a rapid
+    // second click never leaves a stale midpoint swap pending (last click
+    // wins).
+    return () => {
+      clearTimeout(midpoint);
+      clearTimeout(settle);
+    };
+    // `facesAtSlot` is read here as "the last settled arrangement", not a
+    // trigger — including it would re-run this effect the instant it sets
+    // that same state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, coinCount, prefersReducedMotion]);
+
   const onChronicle = view === "chronicle";
   // The Almoner likewise has no cards: it suppresses the board-only
   // controls, but unlike the Chronicle it owns its own Gather action on the
@@ -324,25 +397,39 @@ function TopBar({
             className="topbar__view-toggle"
             role="group"
             aria-label="View"
-            data-count={coins.length}
-            data-spin={spin}
-            style={{ "--coin-count": coins.length } as CSSProperties}
+            data-count={coinCount}
+            style={
+              {
+                "--coin-count": coinCount,
+                "--coin-spin-ms": `${COIN_SPIN_MS}ms`,
+              } as CSSProperties
+            }
           >
-            {coins.map((c, i) => (
-              <button
-                key={c.view}
-                type="button"
-                className="topbar__view-toggle-btn"
-                data-slot={slotOf(i)}
-                style={{ "--slot": slotOf(i) } as CSSProperties}
-                aria-pressed={view === c.view}
-                aria-label={c.label}
-                title={c.title}
-                onClick={() => onSelectView(c.view)}
-              >
-                <img src={c.icon} alt="" className="topbar__view-toggle-icon" />
-              </button>
-            ))}
+            {Array.from({ length: coinCount }, (_, slot) => {
+              // Immediate: this slot's correct, current face — drives the
+              // click target and everything screen readers see.
+              const target = coins[indexAtSlot(slot)];
+              // Lagged: what the coin actually shows right now (see the
+              // `facesAtSlot` effect above) — only its icon reads this.
+              const shown = coins[facesAtSlot[slot] ?? indexAtSlot(slot)];
+              const spinning = spinningSlots.has(slot);
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  className="topbar__view-toggle-btn"
+                  data-slot={slot}
+                  data-spin={spinning ? (spinGen % 2 ? "a" : "b") : undefined}
+                  style={{ "--slot": slot } as CSSProperties}
+                  aria-pressed={view === target.view}
+                  aria-label={target.label}
+                  title={target.title}
+                  onClick={() => onSelectView(target.view)}
+                >
+                  <img src={shown.icon} alt="" className="topbar__view-toggle-icon" />
+                </button>
+              );
+            })}
           </div>
           <h1>{VIEW_TITLES[view]}</h1>
         </div>
