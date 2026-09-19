@@ -28,12 +28,23 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from scripts import ingest, report, store
 
+# One error contract for every verb: success prints a single JSON object to
+# stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
+# input (a malformed argument — nothing was attempted) or 1 for a runtime
+# failure or a thing not found (a store, a session, a transcript).
+INVALID_INPUT = 2
+NOT_FOUND = 1
+
+
+def _fail(message: str, *, code: int = NOT_FOUND) -> int:
+    print(json.dumps({"error": message}), file=sys.stderr)
+    return code
+
 
 def cmd_ingest(args: argparse.Namespace) -> int:
     path = Path(args.transcript)
     if not path.is_file():
-        print(f"chronicle: no transcript at {path}", file=sys.stderr)
-        return 1
+        return _fail(f"no transcript at {path}")
     conn = store.connect()
     try:
         result = ingest.ingest_session(conn, path, args.session_id)
@@ -117,15 +128,13 @@ def cmd_sessions(args: argparse.Namespace) -> int:
 def cmd_session(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
-        return 1
+        return _fail(f"no store at {store.db_path()}")
     try:
         detail = report.session_detail(conn, args.session_id)
     finally:
         conn.close()
     if detail is None:
-        print(f"chronicle: no session {args.session_id}", file=sys.stderr)
-        return 1
+        return _fail(f"no session {args.session_id}")
     print(json.dumps(detail))
     return 0
 
@@ -214,20 +223,15 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     Pull only, like every other verb here: nothing watches, nothing daemonises.
     """
     if not _VOLUME_RE.match(args.volume):
-        print(json.dumps({"error": f"invalid volume name: {args.volume!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid volume name: {args.volume!r}", code=INVALID_INPUT)
     source = args.source.strip("/")
     if not _SOURCE_RE.match(source) or ".." in Path(source).parts:
-        print(json.dumps({"error": f"invalid source path: {args.source!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid source path: {args.source!r}", code=INVALID_INPUT)
     if not _IMAGE_RE.match(args.image):
-        print(json.dumps({"error": f"invalid image: {args.image!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid image: {args.image!r}", code=INVALID_INPUT)
     dest = Path(args.dest).expanduser()
     if not dest.is_absolute():
-        print(json.dumps({"error": "dest must be an absolute path (docker requires one)"}),
-              file=sys.stderr)
-        return 2
+        return _fail("dest must be an absolute path (docker requires one)", code=INVALID_INPUT)
     # Created HERE, not by the container: the container needs no shell to
     # mkdir, so nothing is interpolated into one.
     #
@@ -244,8 +248,7 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     try:
         projects.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        print(json.dumps({"error": f"cannot create {projects}: {exc}"}), file=sys.stderr)
-        return 1
+        return _fail(f"cannot create {projects}: {exc}")
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{args.volume}:/v:ro",
@@ -257,15 +260,16 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=_PULL_TIMEOUT_SECONDS, check=False)
     except FileNotFoundError:
-        print(json.dumps({"error": "docker not found on PATH"}), file=sys.stderr)
-        return 1
+        return _fail("docker not found on PATH")
     except subprocess.SubprocessError as exc:
-        print(json.dumps({"error": f"docker run failed: {exc}"}), file=sys.stderr)
-        return 1
+        return _fail(f"docker run failed: {exc}")
     if result.returncode != 0:
+        # More than `_fail` carries (the process's own returncode alongside
+        # the message), so this one stays a direct print rather than going
+        # through the helper.
         print(json.dumps({"error": (result.stderr or result.stdout).strip()[:500],
                           "returncode": result.returncode}), file=sys.stderr)
-        return 1
+        return NOT_FOUND
     account_plan = _pull_account_profile(args, dest)
     pulled = list(projects.rglob("*.jsonl"))
     # A pulled transcript this user cannot read is the failure mode of the
@@ -297,16 +301,13 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
 def cmd_agent(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
-        return 1
+        return _fail(f"no store at {store.db_path()}")
     try:
         detail = report.agent_detail(conn, args.session_id, args.agent_id)
     finally:
         conn.close()
     if detail is None:
-        print(f"chronicle: no agent {args.agent_id} in session {args.session_id}",
-              file=sys.stderr)
-        return 1
+        return _fail(f"no agent {args.agent_id} in session {args.session_id}")
     print(json.dumps(detail))
     return 0
 

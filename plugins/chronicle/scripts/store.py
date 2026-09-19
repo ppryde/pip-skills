@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts);
 CREATE INDEX IF NOT EXISTS turns_ts ON turns(ts);
+-- Ingest's copied-record check looks each id up across every session.
+CREATE INDEX IF NOT EXISTS turns_message_id ON turns(message_id);
 
 CREATE TABLE IF NOT EXISTS tool_calls (
     session_id   TEXT NOT NULL,
@@ -155,6 +157,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_name ON tool_calls(tool_name);
+CREATE INDEX IF NOT EXISTS tool_calls_tool_use_id ON tool_calls(tool_use_id);
 
 -- One row per file change, from the unified diff Claude Code writes with
 -- every Edit/Write result. Counts only: the diff CONTENT is deliberately not
@@ -198,6 +201,7 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX IF NOT EXISTS events_session_kind ON events(session_id, kind);
+CREATE INDEX IF NOT EXISTS events_uuid ON events(uuid);
 
 CREATE TABLE IF NOT EXISTS accounts (
     -- Identity only, and deliberately only the parts that do not change and

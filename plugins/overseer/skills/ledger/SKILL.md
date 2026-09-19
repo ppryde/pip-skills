@@ -87,9 +87,12 @@ python .../cli.py --root . resume
   blocker; `unblock <id>` when cleared. For card→card ordering use `depends`
   (see Relationships), not a `block` reason.
 - **Decisions:** significant decisions and trade-offs belong in the card's
-  `## Decisions` section, part of its `board.db` body — there is no CLI verb
-  to append there after creation yet, so track new decisions via
-  `log-progress` notes in the meantime.
+  `## Decisions` section, part of its `board.db` body — append with
+  `append-body <id> Decisions --text "- chose X over Y"` (heading given
+  bare or as `## Decisions`, both work). Appends server-side, so you never
+  read-modify-write the whole body: pass `--text -` to
+  pipe multi-line content from stdin instead. A missing section is created
+  at the end of the body.
 - **Amending a goal:** never silently rewrite a card's goal — confirm the new
   wording with the user first. The goal is one of the by-hand fields under the
   prose exception, so it gets extra care.

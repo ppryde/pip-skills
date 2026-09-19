@@ -3,7 +3,10 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from scripts import ingest, store
+from scripts.transcript import parse_ts
 
 from .conftest import TranscriptBuilder, _assistant
 
@@ -203,6 +206,191 @@ class TestIngestSession:
         conn = store.connect()
         assert ingest.ingest_session(conn, path) == {"lines": 0, "files": 1}
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+
+
+class TestCopiedRecords:
+    """A resumed or forked session's transcript repeats records from the
+    session it came from, VERBATIM, under a new session id. Every id
+    involved here (message id, tool_use id, event uuid) is otherwise
+    globally unique, so a record already stored under another session is a
+    copy, not new work — see ``ingest._owned_elsewhere``. Whichever
+    session's ingest reaches a record first keeps it (a first-seen rule,
+    not "the parent always wins")."""
+
+    URL = "https://claude.ai/code/artifact/11111111-2222-3333-4444-555555555555"
+
+    def _result(self, uuid, ts, session_id, tool_use_id, content, tool_use_result=None):
+        return {
+            "type": "user", "uuid": uuid, "timestamp": ts, "sessionId": session_id,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]},
+            "toolUseResult": tool_use_result or {},
+        }
+
+    def _parent(self, projects, session_id):
+        b = TranscriptBuilder(projects, "-repo", session_id)
+        b.prompt("u1", T0).turn("m1", T0, tools=["Edit"])
+        b.raw(self._result("r1", T0, session_id, "m1-tool0", "ok",
+                           {"filePath": "/repo/a.py",
+                            "structuredPatch": [{"lines": ["+x", "+y", "-z"]}]}))
+        b.artifact("m2", T0, tool_id="a1")
+        b.raw(self._result("r2", T0, session_id, "a1", f"Published at {self.URL}"))
+        return b
+
+    @pytest.mark.parametrize(("parent_id", "child_id"), [("a-parent", "b-child"), ("b-parent", "a-child")])
+    def test_a_resumed_session_skips_its_parents_records_whichever_syncs_first(
+        self, projects, parent_id, child_id):
+        parent = self._parent(projects, parent_id)
+        parent.write()
+        child = TranscriptBuilder(projects, "-repo", child_id)
+        child.records = [*parent.records]  # the resumed transcript: parent's lines, verbatim
+        child.prompt("u2", T2).turn("m3", T2, tools=["Bash"]).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        # scan_transcripts sorts by filename, so whichever id sorts first is
+        # ingested first and keeps the shared records — regardless of which
+        # builder is conceptually the "parent".
+        first = min(parent_id, child_id)
+        assert dict(conn.execute("SELECT message_id, session_id FROM turns")) == {
+            "m1": first, "m2": first, "m3": child_id,
+        }
+        assert dict(conn.execute("SELECT tool_use_id, session_id FROM tool_calls")) == {
+            "m1-tool0": first, "a1": first, "m3-tool0": child_id,
+        }
+        assert [dict(r) for r in conn.execute(
+            "SELECT session_id, tool_use_id, lines_added FROM file_edits")] == [
+            {"session_id": first, "tool_use_id": "m1-tool0", "lines_added": 2}
+        ]
+        assert [dict(r) for r in conn.execute(
+            "SELECT session_id, tool_use_id, url FROM artifacts")] == [
+            {"session_id": first, "tool_use_id": "a1", "url": self.URL}
+        ]
+        assert {(r["session_id"], r["uuid"]) for r in conn.execute(
+            "SELECT session_id, uuid FROM events")} == {(first, "u1"), (child_id, "u2")}
+        rollup = dict(conn.execute(
+            """SELECT SUM(turns) AS turns, SUM(prompts) AS prompts, SUM(tool_calls) AS tool_calls,
+                      SUM(lines_added) AS lines_added, SUM(artifacts) AS artifacts
+               FROM sessions"""
+        ).fetchone())
+        assert rollup == {"turns": 3, "prompts": 2, "tool_calls": 3, "lines_added": 2, "artifacts": 1}
+
+    @pytest.mark.parametrize(
+        ("parent_id", "child_id", "child_start"), [("a-parent", "b-child", T1), ("b-parent", "a-child", T0)]
+    )
+    def test_a_resumed_session_starts_at_the_first_record_it_owns(
+        self, projects, parent_id, child_id, child_start):
+        parent = self._parent(projects, parent_id)
+        parent.write()
+        child = TranscriptBuilder(projects, "-repo", child_id)
+        child.records = [*parent.records]
+        child.prompt("u2", T1).turn("m3", T2).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        assert {r["session_id"]: r["started_at"] for r in conn.execute(
+            "SELECT session_id, started_at FROM sessions")} == {
+            parent_id: parse_ts(T0), child_id: parse_ts(child_start),
+        }
+
+    def test_a_copy_synced_later_does_not_move_records_already_stored(self, projects):
+        parent = self._parent(projects, "s1")
+        parent.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        child = TranscriptBuilder(projects, "-repo", "s0")  # alphabetically BEFORE s1
+        child.records = [*parent.records]
+        child.write()
+        ingest.sync(conn, projects)
+        empty, full = _session(conn, "s0"), _session(conn, "s1")
+        assert (empty["turns"], empty["prompts"], empty["tool_calls"],
+                empty["lines_added"], empty["artifacts"]) == (0, 0, 0, 0, 0)
+        assert (full["turns"], full["prompts"], full["tool_calls"],
+                full["lines_added"], full["artifacts"]) == (2, 1, 2, 2, 1)
+        # s1 already owned every record by the time s0's copy was synced, so
+        # s0 (which sorts first) does NOT retroactively steal them back.
+        assert empty["started_at"] == full["started_at"] == parse_ts(T0)
+
+    @pytest.mark.parametrize("table,column", [
+        ("turns", "message_id"), ("tool_calls", "tool_use_id"), ("events", "uuid"),
+    ])
+    def test_the_copy_check_seeks_an_index_rather_than_scanning_history(
+            self, tmp_path, table, column):
+        # Every sync runs this check, so a scan would make routine syncs cost
+        # the whole store rather than the lines that are new.
+        conn = store.connect(tmp_path / "sessions.db")
+        plan = " ".join(row[-1] for row in conn.execute(
+            f"EXPLAIN QUERY PLAN SELECT {column} FROM {table} "
+            f"WHERE session_id <> ? AND {column} IN (?, ?)", ("s", "a", "b")))
+        assert plan.startswith("SEARCH") and column in plan
+
+
+class TestActiveMs:
+    @pytest.mark.parametrize(
+        ("events", "expected"),
+        [
+            ([("prompt", "", 100.0, None), ("turn_duration", "", 105.0, 4000)], 4000),
+            ([("prompt", "", 100.0, None), ("turn_duration", "", 105.0, 3 * 86_400_000)], 5000),
+            ([("turn_duration", "", 105.0, 4000)], 0),
+            ([("turn_duration", "", 99.0, 4000), ("prompt", "", 100.0, None)], 0),
+            ([("prompt", "", 90.0, None), ("turn_duration", "", 100.0, 4000), ("prompt", "", 100.0, None)], 0),
+            ([("prompt", "a1", 100.0, None), ("turn_duration", "", 105.0, 4000)], 0),
+            (
+                [
+                    ("prompt", "", 100.0, None),
+                    ("prompt", "a1", 104.0, None),
+                    ("turn_duration", "a1", 106.0, 9000),
+                    ("turn_duration", "", 106.0, 9000),
+                ],
+                2000 + 6000,
+            ),
+            (
+                [
+                    ("prompt", "", 100.0, None),
+                    ("turn_duration", "", 101.0, 1000),
+                    ("prompt", "", 200.0, None),
+                    ("turn_duration", "", 230.0, 60_000),
+                ],
+                1000 + 30_000,
+            ),
+            (
+                [
+                    ("prompt", "", 100.0, None),
+                    ("turn_duration", "", 110.0, 10_000),
+                    ("turn_duration", "", 120.0, 20_000),
+                ],
+                10_000 + 10_000,
+            ),
+            ([("prompt", "", 100.0, None), ("turn_duration", "", None, 4000), ("turn_duration", "", 102.0, None)], 0),
+        ],
+        ids=[
+            "within-cap",
+            "capped-at-time-since-prompt",
+            "no-prompt",
+            "prompt-only-after",
+            "shared-timestamp-orders-prompt-first",
+            "other-agents-prompt",
+            "per-agent-prompts",
+            "latest-prompt",
+            "consecutive-durations-cap-from-the-previous-turn",
+            "missing-ts-or-value",
+        ],
+    )
+    def test_durations_are_capped_by_the_latest_prompt_from_the_same_agent(
+        self, events, expected):
+        conn = store.connect()
+        conn.executemany(
+            "INSERT INTO events(session_id, uuid, agent_id, kind, ts, value) VALUES ('s1', ?, ?, ?, ?, ?)",
+            [(f"e{i}", agent, kind, ts, value) for i, (kind, agent, ts, value) in enumerate(events)],
+        )
+        assert ingest._active_ms(conn, "s1") == expected
+
+    def test_rollup_reports_the_capped_active_time(self, builder):
+        duration = {"type": "system", "subtype": "turn_duration", "uuid": "d1", "timestamp": T1,
+                    "durationMs": 2 * 86_400_000, "sessionId": "s1"}
+        path = builder.prompt("u1", T0).turn("m1", T0).raw(duration).write()
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        assert _session(conn)["active_ms"] == round((parse_ts(T1) - parse_ts(T0)) * 1000)
 
 
 class TestRepoRoot:
@@ -583,7 +771,10 @@ class TestSync:
     def test_first_sync_ingests_every_slug(self, projects):
         from .conftest import TranscriptBuilder
         TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
-        TranscriptBuilder(projects, "-b", "s2").turn("m1", T0).turn("m2", T1).write()
+        # Distinct message ids from s1's: two UNRELATED sessions reusing "m1"
+        # would look like a resumed session sharing a record (see
+        # TestCopiedRecords) and s2's copy of it would be skipped, not counted.
+        TranscriptBuilder(projects, "-b", "s2").turn("n1", T0).turn("n2", T1).write()
         conn = store.connect()
         result = ingest.sync(conn, projects, now=500.0)
         assert result["scanned"] == 2

@@ -1061,14 +1061,31 @@ def artifacts_for(conn: sqlite3.Connection, session_id: str) -> list[dict[str, A
 def artifacts(conn: sqlite3.Connection, *, repo_root: str | None = None,
               since: float | None = None, limit: int = 50,
               branch: str | None = None) -> list[dict[str, Any]]:
-    """Most recently published pages across the filtered sessions."""
+    """Most recently published pages across the filtered sessions.
+
+    ``_ARTIFACT_PAGE_SQL`` already folds a url's republishes WITHIN one
+    session into its latest row; a page resumed into another session is a
+    SEPARATE row from that query, one per session it was published from, so
+    those are merged here by url — otherwise one artifact republished across
+    two sessions would count, and list, as two.
+    """
     where, params = _session_filter(repo_root, since, branch=branch)
     clause = where.replace(" WHERE ", " AND ", 1) if where else ""
-    return [
-        _page_row(r) for r in conn.execute(
-            _ARTIFACT_PAGE_SQL + clause + " ORDER BY a.ts DESC LIMIT ?", (*params, int(limit))
-        )
-    ]
+    pages: list[dict[str, Any]] = []
+    by_url: dict[str, dict[str, Any]] = {}
+    for r in conn.execute(_ARTIFACT_PAGE_SQL + clause + " ORDER BY a.ts DESC", params):
+        row = _page_row(r)
+        earlier = by_url.get(row["url"]) if row["url"] else None
+        if earlier is None:
+            pages.append(row)
+            if row["url"]:
+                by_url[row["url"]] = row
+            continue
+        earlier["publishes"] += row["publishes"]
+        earlier["first_ts"] = min(earlier["first_ts"], row["first_ts"])
+        earlier["favicon"] = earlier["favicon"] or row["favicon"]
+        earlier["description"] = earlier["description"] or row["description"]
+    return pages[:limit]
 
 
 def biggest_jumps(series: list[dict[str, Any]], tool_rows: list[sqlite3.Row],
@@ -1144,6 +1161,21 @@ def _quantiles(values: list[float]) -> dict[str, float | None]:
     }
 
 
+def _within(days: list[dict[str, Any]], since: float | None) -> list[dict[str, Any]]:
+    """Day buckets at or after ``since``.
+
+    ``since`` is a SESSION-level filter (see ``_session_filter``): a session
+    counts wholly once any of its activity falls inside the window, so its
+    totals keep turns from before it. A day TREND is a different read — a day
+    the window excludes must not appear on the chart just because the session
+    that touched it also touched a later day that is inside.
+    """
+    if since is None:
+        return days
+    first = time.strftime("%Y-%m-%d", time.localtime(since))
+    return [d for d in days if d["day"] >= first]
+
+
 def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             since: float | None = None, branch: str | None = None) -> dict[str, Any]:
     where, params = _session_filter(repo_root, since, branch=branch)
@@ -1203,6 +1235,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             params,
         )
     ]
+    by_day = _within(by_day, since)
     day_costs = _costs_by(conn, "date(t.ts, 'unixepoch', 'localtime')", where, params,
                           extra="t.ts IS NOT NULL")
     for day in by_day:
@@ -1275,13 +1308,15 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             if not (entry["cost_usd"] == 0.0 and entry["unpriced_turns"] > 0)
         ]),
     }
+    churn = _churn(conn, where, params)
+    churn["by_day"] = _within(churn["by_day"], since)
     return {
         "totals": totals,
         "by_day": by_day,
         "by_model": by_model,
         "tools": tools,
         "context_growth": _context_growth(conn, where, params),
-        "churn": _churn(conn, where, params),
+        "churn": churn,
         "attribution": _attribution(conn, where, params),
         "delegation": _delegation(conn, where, params),
         "mcp": mcp_block,

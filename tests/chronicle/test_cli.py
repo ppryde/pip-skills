@@ -293,6 +293,51 @@ class TestCli:
         assert json.loads(capsys.readouterr().out)["lines"] == 1
         assert main(["ingest", "--transcript", str(path.with_name("missing.jsonl"))]) == 1
 
+
+class TestErrorContract:
+    """One contract for every verb: success is a single JSON object on
+    stdout; failure is `{"error": ...}` on stderr — 2 for invalid input,
+    1 for a runtime failure or a thing not found."""
+
+    def test_a_missing_transcript_is_json_on_stderr_not_bare_text(self, tmp_path, capsys):
+        assert main(["ingest", "--transcript", str(tmp_path / "nope.jsonl")]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert json.loads(err) == {"error": f"no transcript at {tmp_path / 'nope.jsonl'}"}
+
+    def test_an_unknown_session_is_json_on_stderr(self, builder, capsys):
+        builder.turn("m1", T0).write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+        assert main(["session", "nope"]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert json.loads(err) == {"error": "no session nope"}
+
+    def test_a_missing_store_is_json_on_stderr(self, capsys):
+        assert main(["session", "s1"]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        payload = json.loads(err)
+        assert payload["error"].startswith("no store at ")
+
+    def test_an_unknown_agent_is_json_on_stderr(self, builder, capsys):
+        builder.turn("m1", T0).write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+        assert main(["agent", "s1", "nope"]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert json.loads(err) == {"error": "no agent nope in session s1"}
+
+    def test_pull_volume_invalid_input_is_2_and_runtime_failure_is_1(self, monkeypatch, capsys, tmp_path):
+        assert main(["pull-volume", "--volume", "bad name", "--dest", str(tmp_path)]) == 2
+
+        def missing(*a, **k):
+            raise FileNotFoundError()
+        monkeypatch.setattr("scripts.cli.subprocess.run", missing)
+        assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path)]) == 1
+
     def test_module_is_runnable_as_script(self, tmp_path):
         result = subprocess.run(
             [sys.executable, str(PLUGIN_ROOT / "scripts" / "cli.py"), "status"],

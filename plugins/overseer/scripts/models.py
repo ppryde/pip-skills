@@ -101,6 +101,12 @@ def append_to_section(body: str, header: str, content: str) -> str:
     return "\n".join(lines)
 
 
+def normalize_section_header(name: str) -> str:
+    """'Decisions' or '## Decisions' -> '## Decisions' — the canonical
+    `## ` heading form `append_to_section` matches on."""
+    return f"## {name.strip().lstrip('#').strip()}"
+
+
 @dataclass
 class Card:
     """One unit of work. The card file is the source of truth; the index is a view."""
@@ -430,6 +436,18 @@ class Card:
                 end += 1
             tail = lines[end:]
             self.body = "\n".join([*lines[: start + 1], new, *([""] if tail else []), *tail])
+        self.updated = now
+
+    def append_section(self, section: str, text: str, now: str) -> None:
+        """Append `text` at the end of the named body section, creating it
+        (as a new `## <section>` heading at the end of the body) if absent.
+
+        `section` may be given as bare heading text ('Decisions') or with its
+        `## ` prefix already on ('## Decisions') — both normalise to the same
+        heading. Unlike `log_progress`/`log_review`, the caller's text is
+        appended verbatim, with no formatting applied."""
+        header = normalize_section_header(section)
+        self.body = append_to_section(self.body, header, text)
         self.updated = now
 
     @property

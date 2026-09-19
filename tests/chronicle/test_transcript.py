@@ -159,6 +159,34 @@ class TestToolResultsAndArtifacts:
              "input": {"file_path": "/scratch/notifications-internals.html", "favicon": "🔔"}}]))
         assert fold(lines).turns[("", "m1")].artifacts["a1"].title == "notifications-internals"
 
+    def test_an_error_result_unpublishes_its_artifact_and_ignores_its_url(self):
+        """A refused or invalid publish published nothing, even when its
+        error text echoes an artifact url."""
+        url = "https://claude.ai/code/artifact/f7ec8e3d-b032-4432-94a1-c81758132da3"
+        other_url = "https://claude.ai/code/artifact/0000aaaa-b032-4432-94a1-c81758132da3"
+        publishes = [
+            {"type": "tool_use", "id": tid, "name": "Artifact", "input": {"file_path": f"/{tid}.html"}}
+            for tid in ("ok", "bad", "odd")
+        ]
+        error_text = f"Refused: {other_url} belongs to someone else"
+        lines = _lines(
+            _assistant("m1", ts=T0, blocks=publishes),
+            _user("r1", ts=T1, content=[
+                {"type": "tool_result", "tool_use_id": "ok", "content": f"Published at {url}"},
+                {"type": "tool_result", "tool_use_id": "bad", "content": error_text, "is_error": True},
+                # A truthy but non-boolean is_error is NOT an error — only `is True` counts.
+                {"type": "tool_result", "tool_use_id": "odd", "content": f"Published at {other_url}",
+                 "is_error": "yes"},
+            ], toolUseResult={}),
+        )
+        facts = fold(lines)
+        assert facts.turns[("", "m1")].artifacts.keys() == {"ok", "odd"}
+        assert facts.turns[("", "m1")].artifacts["ok"].url == url
+        assert facts.turns[("", "m1")].artifacts["odd"].url == other_url
+        assert (facts.results["ok"].is_error, facts.results["ok"].artifact_url) == (False, url)
+        assert (facts.results["bad"].is_error, facts.results["bad"].artifact_url) == (True, None)
+        assert (facts.results["odd"].is_error, facts.results["odd"].artifact_url) == (False, other_url)
+
     def test_redeploy_and_non_publish_actions(self):
         lines = _lines(_assistant("m1", ts=T0, blocks=[
             {"type": "tool_use", "id": "a1", "name": "Artifact",
