@@ -49,7 +49,7 @@ function props(overrides: Partial<TopBarProps> = {}): TopBarProps {
 /** The inline slot index a coin was given. `null` when it was given none —
  * which is the failure this file exists to catch. */
 function slotOf(el: Element): string | null {
-  return (el as HTMLElement).style.getPropertyValue("--coin-i") || null;
+  return (el as HTMLElement).style.getPropertyValue("--slot") || null;
 }
 
 describe("TopBar Almoner coin", () => {
@@ -103,7 +103,7 @@ describe("TopBar Almoner coin", () => {
       const { container } = render(<TopBar {...props(opts)} />);
       const row = container.querySelector(".topbar__view-toggle") as HTMLElement;
       expect(row).toHaveAttribute("data-count", count);
-      expect(row.style.getPropertyValue("--coin-n")).toBe(count);
+      expect(row.style.getPropertyValue("--coin-count")).toBe(count);
     }
   });
 

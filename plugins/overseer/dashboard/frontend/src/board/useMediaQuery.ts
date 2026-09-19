@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 
 /**
- * Mobile-collapse gate (WF-085 in-progress lane): tiny `matchMedia` wrapper
- * so `Board.tsx` can pick `collapseStagesForMobile(lanes)` vs `lanes` by
- * viewport width — `useMediaQuery("(max-width:720px)")` mirrors the exact
- * breakpoint the mobile CSS block in styles.css already gates on.
+ * Mobile gate (WF-085 in-progress lane): tiny `matchMedia` wrapper reporting
+ * whether the viewport is phone-width — `useMediaQuery("(max-width:720px)")`
+ * mirrors the exact breakpoint the mobile CSS block in styles.css already
+ * gates on.
+ *
+ * NOT the lane-collapse gate any more: `Board.tsx` applies `collapseStages`
+ * at every viewport since the "hide the additional columns on desktop"
+ * change, so this now only drives mobile-specific CHROME (the swipe track's
+ * active-lane height sync), never which lanes exist.
  *
  * SSR/jsdom-safe: `window.matchMedia` doesn't exist in every environment
  * (older jsdom, non-browser SSR) — both the initial read and the listener

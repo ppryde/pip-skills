@@ -16,7 +16,8 @@ export type LaneKind =
   | "parked"
   | "done"
   | "archive"
-  | "in-progress";
+  | "in-progress"
+  | "in-review";
 
 export interface Lane {
   key: string;
@@ -36,6 +37,42 @@ export const STAGES: Stage[] = [
   "verification",
   "awaiting-merge",
 ];
+
+/**
+ * Display-lane groups: which stages fold into which collapsed lane, in the
+ * order those lanes render. `collapseStages` is the only consumer.
+ *
+ * `kind` doubles as the lane key AND the accent/icon key (laneIcons.ts's
+ * `ICONS`, styles.css's `.lane__header--<key>` / `.lane--accent-<key>` /
+ * `.card-tile--accent-<key>`) — one string per group, everywhere, the same
+ * one-lane-one-accent contract `laneIconKey` documents.
+ *
+ * The groups MUST between them cover every entry in `STAGES` exactly once:
+ * a stage in no group would vanish from the board entirely, since the
+ * collapsed lanes are all that render. `layout.test.ts` pins that.
+ */
+export const STAGE_GROUPS = [
+  {
+    kind: "in-progress",
+    label: "In Progress",
+    stages: [
+      "bootstrap",
+      "planning",
+      "plan-review",
+      "implementation",
+      "impl-review",
+    ],
+  },
+  {
+    kind: "in-review",
+    label: "In Review",
+    stages: ["verification", "awaiting-merge"],
+  },
+] as const satisfies ReadonlyArray<{
+  kind: LaneKind;
+  label: string;
+  stages: readonly Stage[];
+}>;
 
 export const STAGE_LABELS: Record<Stage, string> = {
   bootstrap: "Bootstrap",
@@ -219,23 +256,27 @@ export function groupIntoLanes(cards: BoardCard[]): Lane[] {
 }
 
 /**
- * Mobile-only view helper (WF-085): collapses the 7 `kind:"stage"` lanes
- * `groupIntoLanes` always returns into ONE synthetic "in-progress" lane, in
- * place of the first stage lane — so the result stays `[backlog,
- * in-progress, parked, done, archive]`, same relative position the stage
- * lanes occupied. Every other lane (backlog/parked/done/archive) passes
- * through untouched, same order, same object.
+ * View helper (WF-085, extended): collapses the 7 `kind:"stage"` lanes
+ * `groupIntoLanes` always returns into the synthetic group lanes declared by
+ * `STAGE_GROUPS`, in place of the first stage lane — so the result is
+ * `[backlog, in-progress, in-review, parked, done, archive]`, the groups
+ * sitting exactly where the stage lanes did. Every other lane
+ * (backlog/parked/done/archive) passes through untouched, same order, same
+ * object.
  *
- * Pure and desktop-inert: nothing calls this unless `Board.tsx`'s
- * `useMediaQuery` reports mobile — desktop always renders `groupIntoLanes`'s
- * own 11-lane result directly.
+ * NOT mobile-only despite the WF-085 origin, and named accordingly since the
+ * "hide the additional columns on desktop" change: `Board.tsx` applies this on
+ * EVERY viewport, so these lanes are the whole board. Mobile differs only in
+ * rendering them as a snap-scrolling swipe track with the icon nav, rather
+ * than as side-by-side columns — same lanes either way.
  *
- * Card order within the merged lane is STAGES order (bootstrap first,
- * awaiting-merge last), each stage's own internal (recency) order preserved
- * — i.e. exactly the concatenation of each `stage:<S>` lane's `cards` in
- * `STAGES` order, regardless of the order stage lanes appear in `lanes`.
+ * Card order within a group lane is STAGES order (so a `verification` card
+ * sorts above an `awaiting-merge` one in In Review), each stage's own
+ * internal (recency) order preserved — i.e. exactly the concatenation of each
+ * `stage:<S>` lane's `cards` in group order, regardless of the order stage
+ * lanes appear in `lanes`.
  */
-export function collapseStagesForMobile(lanes: Lane[]): Lane[] {
+export function collapseStages(lanes: Lane[]): Lane[] {
   const stageLanesByStage = new Map<Stage, Lane>();
   for (const lane of lanes) {
     if (lane.kind === "stage" && lane.stage) {
@@ -243,19 +284,21 @@ export function collapseStagesForMobile(lanes: Lane[]): Lane[] {
     }
   }
 
-  const inProgressLane: Lane = {
-    key: "in-progress",
-    label: "In Progress",
-    kind: "in-progress",
-    cards: STAGES.flatMap((stage) => stageLanesByStage.get(stage)?.cards ?? []),
-  };
+  const groupLanes: Lane[] = STAGE_GROUPS.map((group) => ({
+    key: group.kind,
+    label: group.label,
+    kind: group.kind,
+    cards: group.stages.flatMap(
+      (stage) => stageLanesByStage.get(stage)?.cards ?? []
+    ),
+  }));
 
   const result: Lane[] = [];
   let inserted = false;
   for (const lane of lanes) {
     if (lane.kind === "stage") {
       if (!inserted) {
-        result.push(inProgressLane);
+        result.push(...groupLanes);
         inserted = true;
       }
       continue;

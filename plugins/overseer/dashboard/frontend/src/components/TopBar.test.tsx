@@ -795,6 +795,45 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(onSelectView).toHaveBeenNthCalledWith(2, "atlas");
   });
 
+  it("slots the pressed coin leftmost and keeps the others in source order behind it", () => {
+    const slots = (container: HTMLElement) =>
+      Object.fromEntries(
+        Array.from(container.querySelectorAll(".topbar__view-toggle-btn")).map((b) => [
+          b.getAttribute("aria-label"),
+          b.getAttribute("data-slot"),
+        ])
+      );
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+    expect(slots(container)).toEqual({ Board: "0", Atlas: "1", Chronicle: "2", Almoner: "3" });
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="chronicle" />);
+    expect(slots(container)).toEqual({ Chronicle: "0", Board: "1", Atlas: "2", Almoner: "3" });
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="almoner" />);
+    expect(slots(container)).toEqual({ Almoner: "0", Board: "1", Atlas: "2", Chronicle: "3" });
+  });
+
+  it("sits still on load and restarts the spin on every view change", () => {
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    const row = container.querySelector(".topbar__view-toggle")!;
+    expect(row).not.toHaveAttribute("data-spin");
+
+    rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+    const first = row.getAttribute("data-spin");
+    expect(first).not.toBeNull();
+
+    // A second change flips the keyframe name, so the animation restarts.
+    rerender(<StatefulTopBar {...baseProps()} view="board" />);
+    expect(row.getAttribute("data-spin")).not.toBeNull();
+    expect(row.getAttribute("data-spin")).not.toBe(first);
+
+    // A re-render with no view change leaves the spin alone.
+    const settled = row.getAttribute("data-spin");
+    rerender(<StatefulTopBar {...baseProps()} view="board" refreshing />);
+    expect(row.getAttribute("data-spin")).toBe(settled);
+  });
+
   it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
     const circles = container.querySelectorAll(".topbar__view-toggle-btn");
