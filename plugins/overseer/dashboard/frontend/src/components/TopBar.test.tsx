@@ -722,15 +722,27 @@ describe("<TopBar/> Filters toggle (Task 2)", () => {
     expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
   });
 
-  it("puts the toggle cluster in [Filters ▾] [Controls ▾] [＋] order", () => {
+  // Desktop revision: Filters ▾ now lives alone in `.topbar__filters-toggle`
+  // (row 2), separate from Controls ▾/＋ in `.topbar__actions-cluster` (row
+  // 3) — see TopBar.tsx's JSX comments on both. Mobile still renders all
+  // three as one visual line (styles.css gives both wrappers matching
+  // `order`s), but the DOM/CSS grouping the old single `.topbar__toggle-
+  // cluster` test pinned no longer exists, so this checks the two new
+  // groupings instead.
+  it("puts Filters ▾ alone in .topbar__filters-toggle, and Controls ▾/＋ together in .topbar__actions-cluster", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
-    const cluster = container.querySelector(".topbar__toggle-cluster")!;
-    expect(cluster).not.toBeNull();
-    const buttons = Array.from(cluster.querySelectorAll("button"));
-    expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
-    expect(buttons[1]).toHaveAccessibleName(/^controls/i);
-    expect(buttons[2]).toHaveAccessibleName(/new card/i);
+    const filtersGroup = container.querySelector(".topbar__filters-toggle")!;
+    expect(filtersGroup).not.toBeNull();
+    const filtersButtons = Array.from(filtersGroup.querySelectorAll("button"));
+    expect(filtersButtons).toHaveLength(1);
+    expect(filtersButtons[0]).toHaveAccessibleName(/^filters/i);
+
+    const actions = container.querySelector(".topbar__actions-cluster")!;
+    expect(actions).not.toBeNull();
+    const actionButtons = Array.from(actions.querySelectorAll("button"));
+    expect(actionButtons).toHaveLength(2);
+    expect(actionButtons[0]).toHaveAccessibleName(/^controls/i);
+    expect(actionButtons[1]).toHaveAccessibleName(/new card/i);
   });
 });
 
@@ -1151,16 +1163,17 @@ describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
 // than `.topbar__repo-select select`/`.topbar__branch-select select`
 // (which keep only their own genuine overrides — a transparent background,
 // plus the branch select's own wobble variant — nothing duplicated).
-// Owner's ask: "on desktop can we do menu left, title right for top line,
-// account/repo/branch in that order in left of second line and filters on
-// the right, then all labels on the third row". These two wrappers
-// (`.topbar__row2-left`/`.topbar__row2-right`) are the structural hooks a
-// `@media (min-width: 721px)` grid in styles.css pins to `row2-left`/
-// `row2-right`; both default to `display: contents` (see styles.css) so
-// mobile — asserted untouched by the whole existing suite above/below —
-// never sees them as real boxes. These tests pin the DOM membership/order a
-// screenshot can't regression-guard on its own.
-describe("<TopBar/> desktop row 2 grouping", () => {
+// Owner's ask (revised): "on desktop can we do menu left, title right for
+// top line, account/repo/branch in that order in left of second line and
+// filters on the right [alone — nothing else shares row 2], then all labels
+// [everything else] on the third row". `.topbar__row2-left`/`.topbar__
+// row2-right`/`.topbar__row3` are the structural hooks a `@media (min-width:
+// 721px)` grid in styles.css pins to `row2-left`/`row2-right`/`row3`; all
+// three default to `display: contents` (see styles.css) so mobile —
+// asserted untouched by the whole existing suite above/below — never sees
+// them as real boxes. These tests pin the DOM membership/order a screenshot
+// can't regression-guard on its own.
+describe("<TopBar/> desktop row grouping", () => {
   it("puts Account, Repo, Branch in that order inside .topbar__row2-left", () => {
     const { container } = render(
       <StatefulTopBar
@@ -1188,7 +1201,21 @@ describe("<TopBar/> desktop row 2 grouping", () => {
     expect(branchIdx).toBeGreaterThan(repoIdx);
   });
 
-  it("groups the rest/last-refreshed pills, the gold/vanquished/fleet pills, and the toggle cluster inside .topbar__row2-right, cluster last", () => {
+  it("puts ONLY the Filters ▾ toggle inside .topbar__row2-right", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+
+    const right = container.querySelector(".topbar__row2-right")!;
+    expect(right).not.toBeNull();
+    const buttons = Array.from(right.querySelectorAll("button"));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
+    // Nothing else — no pills, no gold/vanquished/fleet, no Controls ▾/＋.
+    expect(right.querySelector(".topbar__pill")).toBeNull();
+    expect(right.querySelector(".topbar__gold-pill")).toBeNull();
+    expect(right.querySelector(".topbar__actions-cluster")).toBeNull();
+  });
+
+  it("groups the rest/last-refreshed pills, the gold/vanquished/fleet pills, and the actions cluster inside .topbar__row3, actions last", () => {
     const { container } = render(
       <StatefulTopBar
         {...baseProps()}
@@ -1200,19 +1227,36 @@ describe("<TopBar/> desktop row 2 grouping", () => {
       />
     );
 
-    const right = container.querySelector(".topbar__row2-right")!;
-    expect(right).not.toBeNull();
-    expect(right.querySelector(".topbar__pill")).not.toBeNull();
-    expect(right.querySelector(".topbar__gold-pill")).not.toBeNull();
-    expect(right.querySelector(".topbar__vanquished-pill")).not.toBeNull();
-    expect(right.querySelector(".topbar__fleet-pill")).not.toBeNull();
-    const cluster = right.querySelector(".topbar__toggle-cluster");
-    expect(cluster).not.toBeNull();
-    // The toggle cluster is the rightmost (last) direct child.
-    expect(right.lastElementChild).toBe(cluster);
+    const row3 = container.querySelector(".topbar__row3")!;
+    expect(row3).not.toBeNull();
+    expect(row3.querySelector(".topbar__pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__gold-pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__vanquished-pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__fleet-pill")).not.toBeNull();
+    const actions = row3.querySelector(".topbar__actions-cluster");
+    expect(actions).not.toBeNull();
+    // The actions cluster is the rightmost (last) status/actions child —
+    // #topbar-controls-group (the Provisions group) may follow it in the
+    // DOM too (it wraps to its own line below via its own flex-basis), so
+    // this only pins ordering among the always-visible pieces, not against
+    // that collapsible group.
+    const alwaysVisible = Array.from(row3.children).filter(
+      (c) => c.id !== "topbar-controls-group"
+    );
+    expect(alwaysVisible[alwaysVisible.length - 1]).toBe(actions);
   });
 
-  it("keeps every row2 control reachable outside row2-left/row2-right too (mobile flattens them via display:contents)", () => {
+  it("nests the Provisions group inside .topbar__row3, still toggled by controlsOpen", () => {
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+    openControls();
+
+    const row3 = document.querySelector(".topbar__row3")!;
+    const group = document.getElementById("topbar-controls-group")!;
+    expect(row3.contains(group)).toBe(true);
+    expect(group).toBeVisible();
+  });
+
+  it("keeps every row control reachable outside row2-left/row2-right/row3 too (mobile flattens them via display:contents)", () => {
     // A structural smoke test: nothing about wrapping these controls should
     // make them any less queryable by their own existing class/role — the
     // whole rest of this file's assertions (Repo/Branch/Account selects,

@@ -502,14 +502,45 @@ function TopBar({
         </div>
 
         {/* Desktop row 2, right half (owner's ask: "filters on the right" of
-            the second line) — same `display: contents` default / grid
-            override as `.topbar__row2-left` above. Holds the always-visible
-            status pills (rest windows, last-refreshed, gold/vanquished/
-            fleet — moved up here from the bar's old tail so they read
-            together with the account/repo/branch info on the same line)
-            followed by the Filters/Controls/＋ toggle cluster, which stays
-            the rightmost thing in this half. */}
+            the second line — revised: row 2 is ONE line, ONLY the Filters ▾
+            toggle, nothing else). Same `display: contents` default / grid
+            override as `.topbar__row2-left` above. */}
         <div className="topbar__row2-right">
+          {/* `.topbar__filters-toggle` is its own flex box (not `contents`)
+              on every viewport: mobile gives IT the `order`/`margin-left:
+              auto` that used to live on the old combined toggle-cluster
+              (see `.topbar__actions-cluster`'s own comment below for how the
+              two split apart without changing a single mobile pixel);
+              desktop pins it to the `row2-right` grid area. */}
+          <div className="topbar__filters-toggle">
+            {!onAlmoner && (
+              // The Chronicle still gets this: <ChronicleFilterBar/> reuses
+              // the very same `#filter-bar` id App.tsx renders FilterBar at on
+              // the board, so `boardless` alone is the wrong guard here — it
+              // would hide this on the Chronicle too, where the control it
+              // names still exists. The Almoner is the one page with no filter
+              // bar of any kind, so `aria-controls="filter-bar"` would point at
+              // an element that is never in the DOM.
+              <Button
+                className="topbar__controls-toggle"
+                aria-expanded={filtersOpen}
+                aria-controls="filter-bar"
+                onClick={onToggleFilters}
+              >
+                Filters {filtersOpen ? "▴" : "▾"}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Desktop row 3 (owner's revised ask: "all labels on the third
+            row" = everything else) — status pills left, actions right, one
+            full-width wrapping line; the Provisions group below wraps onto
+            its OWN line within this same box when Controls is open (via its
+            existing `.topbar__controls-header` `flex-basis: 100%` trick,
+            styles.css). Same `display: contents` default / grid override
+            pattern as the two wrappers above. */}
+        <div className="topbar__row3">
           {limits?.five_hour?.used_percentage !== undefined && (
             <Chip className="topbar__pill" title="5h window">
               ⛺ Short Rest {formatPct(limits.five_hour.used_percentage)}
@@ -532,10 +563,10 @@ function TopBar({
           )}
 
           {/* Guild pills (HANDOFF: Gold total / vanquished / fleet-health) —
-              moved up from the bar's tail (desktop row layout) so they sit
-              with the rest of this line's status info; DOM position doesn't
-              matter to mobile, which places each by its own `order` below
-              720px regardless of nesting. */}
+              moved up from the bar's original tail (desktop row layout) so
+              they sit with the rest of this row's status info; DOM position
+              doesn't matter to mobile, which places each by its own `order`
+              below 720px regardless of nesting. */}
           <span className="topbar__gold-pill" title={`${gold} tokens total`}>
             <CoinIcon aria-hidden="true" />
             {formatTokens(gold)}
@@ -578,33 +609,24 @@ function TopBar({
             </span>
           </button>
 
-          {/* Filters ▾ / Controls ▾ / ＋ — three independent controls grouped
-              as one cluster. Filters and Controls used to be ONE shared
-              "Controls ▾" toggle driving both TopBar's own group AND the
-              separate <FilterBar/>; they're now two independent toggles, each
-              wired to just its own region via `aria-controls`. `hidden={
-              !filtersOpen}`/`hidden={!controlsOpen}` take effect on every
-              viewport now, not just ≤720px (see styles.css) — both default
-              open so the board looks unchanged on load, but either can be
-              collapsed on any screen size. */}
-          <div className="topbar__toggle-cluster">
-            {!onAlmoner && (
-              // The Chronicle still gets this: <ChronicleFilterBar/> reuses
-              // the very same `#filter-bar` id App.tsx renders FilterBar at on
-              // the board, so `boardless` alone is the wrong guard here — it
-              // would hide this on the Chronicle too, where the control it
-              // names still exists. The Almoner is the one page with no filter
-              // bar of any kind, so `aria-controls="filter-bar"` would point at
-              // an element that is never in the DOM.
-              <Button
-                className="topbar__controls-toggle"
-                aria-expanded={filtersOpen}
-                aria-controls="filter-bar"
-                onClick={onToggleFilters}
-              >
-                Filters {filtersOpen ? "▴" : "▾"}
-              </Button>
-            )}
+          {/* Controls ▾ / ＋ (or Sync) — the "actions" half of what used to
+              be one three-button `.topbar__toggle-cluster` alongside Filters
+              ▾ above. Splitting them into two independent boxes (this one,
+              and `.topbar__filters-toggle` up in row 2) is what lets desktop
+              put Filters ▾ alone on row 2 and Controls ▾/＋ down here on row
+              3 — but mobile needs the OLD single-line, single-gap "[Filters
+              ▾][Controls ▾][＋]" shelf back, since nothing here asked for
+              that to change. It still gets it: `.topbar__filters-toggle`
+              (row 2's `display: contents` wrapper unwraps it on mobile) and
+              `.topbar__actions-cluster` (this box, likewise unwrapped from
+              `.topbar__row3`) both land as ordinary DIRECT flex items of
+              `.topbar` below 720px, in that DOM order; giving them
+              `order: 40`/`order: 41` (styles.css) puts them on the same
+              wrapped line the old cluster used to occupy, and a small
+              negative margin on this one cancels `.topbar`'s own 0.75rem
+              inter-item gap back down to the cluster's original 0.4rem —
+              same rendered pixels, two boxes instead of one. */}
+          <div className="topbar__actions-cluster">
             {!boardless && (
               <Button
                 className="topbar__controls-toggle"
@@ -653,138 +675,140 @@ function TopBar({
               </Button>
             )}
           </div>
-        </div>
 
-        {/* WF-085 (Task 2/3): the secondary-controls group — Last Orders
-            (threshold), Labels…, Refresh, Abandoned toggle, Clear… (WF-090:
-            Labels… grouped with the action buttons, Clear… kept rightmost).
-            `hidden` is driven by `controlsOpen`, defaulting OPEN (the board
-            looks unchanged on load); the Controls ▾ button above collapses
-            it on every viewport now — desktop is no longer exempt (see
-            `.topbar__controls-group[hidden]` in styles.css). */}
-        <div
-          id="topbar-controls-group"
-          className="topbar__controls-group"
-          hidden={!controlsOpen || boardless}
-        >
-          {/* Task 4: a small dotted-line header opening the group — same
-              "quiet caption above a dashed rule" idea as FilterBar's own
-              "Scry" eyebrow, just recast as a divider+title here. Routes
-              through `<Label/>` (design-library eyebrow migration) same as
-              that "Scry" eyebrow already does — `.topbar__controls-eyebrow`
-              only carries its own 0.06em letter-spacing override now,
-              cancelling `.qb-label`'s 0.04em default (declared later in
-              styles.css, so it wins), same pattern RepoSelector/BranchFilter/
-              FilterBar's own eyebrows already follow. */}
-          <div className="topbar__controls-header">
-            <Label className="topbar__controls-eyebrow">Provisions</Label>
-          </div>
-          <div className="topbar__threshold">
-            <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
-          </div>
-
-          {/* WF-091: Epic Atlas's toggles, folded into the Controls
-              group and shown ONLY on the Atlas page — retired the standalone
-              `<AtlasToolbar>` that used to sit between the topbar and the
-              chart (three segmented two-button toggles + a static
-              "weighed by complexity" label). Each control here is now a
-              SINGLE toggle button whose own label carries the current
-              state, rather than a pair of always-both-visible tab buttons —
-              `aria-pressed` still marks which state is active for screen
-              readers. The static complexity-weight label is dropped
-              entirely (informational only; the ★ weight still appears in
-              every marker tooltip — EpicAtlas.tsx). */}
-          {view === "atlas" && (
-            <div className="topbar__atlas-controls">
-              <Button
-                className="topbar__atlas-control"
-                aria-pressed={showNames}
-                onClick={() => onToggleNames(!showNames)}
-                title="Toggle quest name-tags on the trail"
-              >
-                {/* rpg-icons pack "sealed letter" — a scroll of quest names */}
-                <img src={scrollIcon} alt="" className="topbar__atlas-control-icon" />
-                {showNames ? "Quest names: On" : "Quest names: Off"}
-              </Button>
-              <Button
-                className="topbar__atlas-control"
-                aria-pressed={!hideVanquished}
-                onClick={() => onToggleVanquished(!hideVanquished)}
-                title="Toggle vanquished (done) epics"
-              >
-                {/* rpg-icons pack "skull-crossbones" — the vanquished mark */}
-                <img src={skullIcon} alt="" className="topbar__atlas-control-icon" />
-                {hideVanquished ? "Vanquished: Hidden" : "Vanquished: Shown"}
-              </Button>
+          {/* WF-085 (Task 2/3): the secondary-controls group — Last Orders
+              (threshold), Labels…, Refresh, Abandoned toggle, Clear… (WF-090:
+              Labels… grouped with the action buttons, Clear… kept rightmost).
+              `hidden` is driven by `controlsOpen`, defaulting OPEN (the board
+              looks unchanged on load); the Controls ▾ button above collapses
+              it on every viewport now — desktop is no longer exempt (see
+              `.topbar__controls-group[hidden]` in styles.css). Nested inside
+              `.topbar__row3` now (was a direct `.topbar` child) so its
+              existing `flex-basis: 100%` header still forces it onto its own
+              line, just within row 3's own box instead of `.topbar`'s. */}
+          <div
+            id="topbar-controls-group"
+            className="topbar__controls-group"
+            hidden={!controlsOpen || boardless}
+          >
+            {/* Task 4: a small dotted-line header opening the group — same
+                "quiet caption above a dashed rule" idea as FilterBar's own
+                "Scry" eyebrow, just recast as a divider+title here. Routes
+                through `<Label/>` (design-library eyebrow migration) same as
+                that "Scry" eyebrow already does — `.topbar__controls-eyebrow`
+                only carries its own 0.06em letter-spacing override now,
+                cancelling `.qb-label`'s 0.04em default (declared later in
+                styles.css, so it wins), same pattern RepoSelector/BranchFilter/
+                FilterBar's own eyebrows already follow. */}
+            <div className="topbar__controls-header">
+              <Label className="topbar__controls-eyebrow">Provisions</Label>
             </div>
-          )}
+            <div className="topbar__threshold">
+              <ThresholdControl value={threshold} mutate={mutate} inFlight={inFlight} />
+            </div>
 
-          {/* WF-090 follow-up: Labels…/Refresh/Abandoned/Clear… wrapped in
-              their own atomic flex unit — desktop is natural-wrap (no
-              `order` above 720px), and `.topbar__refresh`'s pre-existing
-              `margin-left: auto` (hugs the right edge of WHATEVER line it
-              lands on) means the exact wrap point between these four and
-              everything before them (repo/branch/rest-pills/Last Orders)
-              shifts with viewport width and even live content width (gold
-              total digit count, timestamp, etc) — moving Labels… next to
-              Refresh in DOM order alone still let it get stranded on the
-              upper line at some widths (verified: reproducible at 1500px,
-              NOT at 1180px, same content). Wrapping all four in one
-              `.topbar__controls-actions` box makes them wrap TOGETHER as a
-              single flex item of `.topbar` — Labels… can never again land
-              on a different line than Refresh/Abandoned/Clear…, regardless
-              of width. `display: contents` on this wrapper inside the
-              ≤720px block (styles.css) fully un-wraps it back to individual
-              flex items of `.topbar__controls-group` on mobile, where the
-              existing per-child `order` resets (below) still apply
-              untouched. */}
-          <div className="topbar__controls-actions">
-            <Button
-              variant="neutral"
-              // Task 10: shares the "＋ New card" control's Role-A button paint
-              // (non-destructive positive action, same wobble shape) — see
-              // `.topbar__new-card` in styles.css, reused here rather than
-              // duplicated.
-              className="topbar__new-card topbar__labels-settings"
-              onClick={() => setLabelSettingsOpen(true)}
-              title="Edit label colors"
-            >
-              Labels…
-            </Button>
-
-            <Button
-              className="topbar__refresh"
-              onClick={onRefresh}
-              disabled={refreshing}
-            >
-              {refreshing ? "Refreshing…" : "Refresh"}
-            </Button>
-
-            <label className="topbar__archive-toggle">
-              <input
-                type="checkbox"
-                checked={showArchive}
-                onChange={onToggleArchive}
-              />
-              Abandoned
-            </label>
-
-            {/* WF-090: moved to the END of this group (was first) — Clear is
-                the one destructive action here, so it now sits rightmost,
-                separated from the constructive controls (Labels…/Refresh/
-                Abandoned) rather than leading them. `.topbar-clear` gets an
-                explicit `order: 1` reset scoped to `.topbar__controls-group`
-                on mobile (see styles.css) rather than relying on DOM order
-                alone. */}
-            {onClear && (
-              <Button
-                className="topbar-clear danger"
-                onClick={onClear}
-                title="Clear this repo's data"
-              >
-                Clear…
-              </Button>
+            {/* WF-091: Epic Atlas's toggles, folded into the Controls
+                group and shown ONLY on the Atlas page — retired the standalone
+                `<AtlasToolbar>` that used to sit between the topbar and the
+                chart (three segmented two-button toggles + a static
+                "weighed by complexity" label). Each control here is now a
+                SINGLE toggle button whose own label carries the current
+                state, rather than a pair of always-both-visible tab buttons —
+                `aria-pressed` still marks which state is active for screen
+                readers. The static complexity-weight label is dropped
+                entirely (informational only; the ★ weight still appears in
+                every marker tooltip — EpicAtlas.tsx). */}
+            {view === "atlas" && (
+              <div className="topbar__atlas-controls">
+                <Button
+                  className="topbar__atlas-control"
+                  aria-pressed={showNames}
+                  onClick={() => onToggleNames(!showNames)}
+                  title="Toggle quest name-tags on the trail"
+                >
+                  {/* rpg-icons pack "sealed letter" — a scroll of quest names */}
+                  <img src={scrollIcon} alt="" className="topbar__atlas-control-icon" />
+                  {showNames ? "Quest names: On" : "Quest names: Off"}
+                </Button>
+                <Button
+                  className="topbar__atlas-control"
+                  aria-pressed={!hideVanquished}
+                  onClick={() => onToggleVanquished(!hideVanquished)}
+                  title="Toggle vanquished (done) epics"
+                >
+                  {/* rpg-icons pack "skull-crossbones" — the vanquished mark */}
+                  <img src={skullIcon} alt="" className="topbar__atlas-control-icon" />
+                  {hideVanquished ? "Vanquished: Hidden" : "Vanquished: Shown"}
+                </Button>
+              </div>
             )}
+
+            {/* WF-090 follow-up: Labels…/Refresh/Abandoned/Clear… wrapped in
+                their own atomic flex unit — desktop is natural-wrap (no
+                `order` above 720px), and `.topbar__refresh`'s pre-existing
+                `margin-left: auto` (hugs the right edge of WHATEVER line it
+                lands on) means the exact wrap point between these four and
+                everything before them shifts with viewport width and even
+                live content width (gold total digit count, timestamp, etc) —
+                moving Labels… next to Refresh in DOM order alone still let it
+                get stranded on the upper line at some widths (verified:
+                reproducible at 1500px, NOT at 1180px, same content).
+                Wrapping all four in one `.topbar__controls-actions` box
+                makes them wrap TOGETHER as a single flex item of this group
+                — Labels… can never again land on a different line than
+                Refresh/Abandoned/Clear…, regardless of width. `display:
+                contents` on this wrapper inside the ≤720px block
+                (styles.css) fully un-wraps it back to individual flex items
+                of `.topbar__controls-group` on mobile, where the existing
+                per-child `order` resets (below) still apply untouched. */}
+            <div className="topbar__controls-actions">
+              <Button
+                variant="neutral"
+                // Task 10: shares the "＋ New card" control's Role-A button paint
+                // (non-destructive positive action, same wobble shape) — see
+                // `.topbar__new-card` in styles.css, reused here rather than
+                // duplicated.
+                className="topbar__new-card topbar__labels-settings"
+                onClick={() => setLabelSettingsOpen(true)}
+                title="Edit label colors"
+              >
+                Labels…
+              </Button>
+
+              <Button
+                className="topbar__refresh"
+                onClick={onRefresh}
+                disabled={refreshing}
+              >
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </Button>
+
+              <label className="topbar__archive-toggle">
+                <input
+                  type="checkbox"
+                  checked={showArchive}
+                  onChange={onToggleArchive}
+                />
+                Abandoned
+              </label>
+
+              {/* WF-090: moved to the END of this group (was first) — Clear is
+                  the one destructive action here, so it now sits rightmost,
+                  separated from the constructive controls (Labels…/Refresh/
+                  Abandoned) rather than leading them. `.topbar-clear` gets an
+                  explicit `order: 1` reset scoped to `.topbar__controls-group`
+                  on mobile (see styles.css) rather than relying on DOM order
+                  alone. */}
+              {onClear && (
+                <Button
+                  className="topbar-clear danger"
+                  onClick={onClear}
+                  title="Clear this repo's data"
+                >
+                  Clear…
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
