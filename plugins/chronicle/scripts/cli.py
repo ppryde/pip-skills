@@ -104,7 +104,8 @@ def cmd_summary(args: argparse.Namespace) -> int:
         print(json.dumps({"totals": None}))
         return 0
     try:
-        out = report.summary(conn, repo_root=args.root, since=_since(args.days), branch=args.branch)
+        out = report.summary(conn, repo_root=args.root, since=_since(args.days), branch=args.branch,
+                             account=args.account)
     finally:
         conn.close()
     print(json.dumps(out))
@@ -118,7 +119,7 @@ def cmd_sessions(args: argparse.Namespace) -> int:
         return 0
     try:
         rows = report.sessions(conn, repo_root=args.root, since=_since(args.days), limit=args.limit,
-                               branch=args.branch)
+                               branch=args.branch, account=args.account)
     finally:
         conn.close()
     print(json.dumps({"sessions": rows}))
@@ -325,6 +326,19 @@ def cmd_repos(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_accounts(_: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"accounts": []}))
+        return 0
+    try:
+        rows = report.accounts(conn)
+    finally:
+        conn.close()
+    print(json.dumps({"accounts": rows}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chronicle", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -353,12 +367,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
     p.add_argument("--branch", default=None,
                    help="only sessions whose last-seen git branch matches (session-level)")
+    p.add_argument("--account", default=None,
+                   help="only sessions attributed to this account uuid (session-level)")
     p.set_defaults(fn=cmd_summary)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)
     p.add_argument("--days", type=int, default=None)
     p.add_argument("--branch", default=None)
+    p.add_argument("--account", default=None)
     p.add_argument("--limit", type=int, default=200)
     p.set_defaults(fn=cmd_sessions)
 
@@ -372,6 +389,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_agent)
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
+
+    sub.add_parser("accounts", help="account uuids seen, with session counts (JSON)").set_defaults(
+        fn=cmd_accounts)
 
     p = sub.add_parser("pull-volume",
                        help="copy transcripts out of a docker named volume onto this filesystem")

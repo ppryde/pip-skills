@@ -280,6 +280,15 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("turns", "agent_type", "TEXT"),
     ("turns", "mcp_server", "TEXT"),
     ("turns", "mcp_tool", "TEXT"),
+    # Which account this session belongs to: the `accountUuid` of the config
+    # dir its transcript was ingested from, at first ingest. Write-once like
+    # the plan snapshot (see `ingest._upsert_session_identity`) and for the
+    # same reason — an account logging into a different config dir later must
+    # not relabel history. Deliberately NOT the transcript's own top-level
+    # `accountUuid` field: that names the Artifact/claude.ai account a record
+    # was made from (only `artifact-autoreact-ledger` rows carry it), not
+    # who ran the session.
+    ("sessions", "account_uuid", "TEXT"),
 )
 
 

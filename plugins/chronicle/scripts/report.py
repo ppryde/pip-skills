@@ -642,11 +642,25 @@ def peak_context_pct(peak_tokens: int) -> float | None:
 
 
 def _session_filter(repo_root: str | None, since: float | None,
-                    alias: str = "s", branch: str | None = None) -> tuple[str, list[Any]]:
+                    alias: str = "s", branch: str | None = None,
+                    account: str | None = None,
+                    conn: sqlite3.Connection | None = None) -> tuple[str, list[Any]]:
     """The WHERE clause every session-scoped read shares. ``branch`` is a
     session-level filter: a session records the LAST branch it was seen on
     (a session can check out several), so a branch-scoped read attributes
-    each session wholly to where it ended up. Turns carry no branch."""
+    each session wholly to where it ended up. Turns carry no branch.
+
+    ``account`` is likewise session-level — a session belongs to whichever
+    account was logged in when it was first ingested (see
+    ``ingest._upsert_session_identity``). ``conn`` is needed only to guard
+    it: `account_uuid` is a migrated column, and the report verbs open the
+    store READ-ONLY — a path that returns before `_migrate` can add it (the
+    same trap `_qualifier_sql` documents). Without the guard, an
+    account-filtered read against a store not yet resynced since this shipped
+    would raise `OperationalError` for a store with a thousand sessions in
+    it; with it, the filter is silently dropped (a store with no such column
+    has recorded no account for anything, so there is nothing to match).
+    """
     clauses: list[str] = []
     params: list[Any] = []
     if repo_root:
@@ -655,6 +669,11 @@ def _session_filter(repo_root: str | None, since: float | None,
     if branch:
         clauses.append(f"{alias}.git_branch = ?")
         params.append(branch)
+    if account and (conn is None
+                    or "account_uuid" in {row[1] for row in conn.execute(
+                        "PRAGMA table_info(sessions)")}):
+        clauses.append(f"{alias}.account_uuid = ?")
+        params.append(account)
     if since is not None:
         clauses.append(f"COALESCE({alias}.last_activity_at, {alias}.started_at, 0) >= ?")
         params.append(since)
@@ -776,8 +795,8 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
 
 def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
              since: float | None = None, limit: int = 200,
-             branch: str | None = None) -> list[dict[str, Any]]:
-    where, params = _session_filter(repo_root, since, branch=branch)
+             branch: str | None = None, account: str | None = None) -> list[dict[str, Any]]:
+    where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
     rows = conn.execute(
         f"SELECT * FROM sessions s{where} "
         "ORDER BY COALESCE(s.last_activity_at, s.started_at, 0) DESC LIMIT ?",
@@ -806,6 +825,28 @@ def repos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                   MAX(COALESCE(last_activity_at, started_at)) AS last_activity_at
            FROM sessions WHERE repo_root IS NOT NULL
            GROUP BY repo_root ORDER BY sessions DESC"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """One row per account uuid seen on a session: session count, and when it
+    was last active. Read straight off ``sessions.account_uuid`` — what a
+    session was actually attributed to at ingest — rather than the
+    ``accounts`` table, which only records identity for a config dir that was
+    readable AT INGEST TIME and carries no session count of its own.
+
+    Same read-only migration trap as `repos`' column-guarded siblings: naming
+    `account_uuid` unconditionally would raise on a store not yet resynced
+    since the column shipped."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "account_uuid" not in have:
+        return []
+    rows = conn.execute(
+        """SELECT account_uuid, COUNT(*) AS sessions,
+                  MAX(COALESCE(last_activity_at, started_at)) AS last_activity_at
+           FROM sessions WHERE account_uuid IS NOT NULL
+           GROUP BY account_uuid ORDER BY sessions DESC"""
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1060,7 +1101,7 @@ def artifacts_for(conn: sqlite3.Connection, session_id: str) -> list[dict[str, A
 
 def artifacts(conn: sqlite3.Connection, *, repo_root: str | None = None,
               since: float | None = None, limit: int = 50,
-              branch: str | None = None) -> list[dict[str, Any]]:
+              branch: str | None = None, account: str | None = None) -> list[dict[str, Any]]:
     """Most recently published pages across the filtered sessions.
 
     ``_ARTIFACT_PAGE_SQL`` already folds a url's republishes WITHIN one
@@ -1069,7 +1110,7 @@ def artifacts(conn: sqlite3.Connection, *, repo_root: str | None = None,
     those are merged here by url — otherwise one artifact republished across
     two sessions would count, and list, as two.
     """
-    where, params = _session_filter(repo_root, since, branch=branch)
+    where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
     clause = where.replace(" WHERE ", " AND ", 1) if where else ""
     pages: list[dict[str, Any]] = []
     by_url: dict[str, dict[str, Any]] = {}
@@ -1177,8 +1218,9 @@ def _within(days: list[dict[str, Any]], since: float | None) -> list[dict[str, A
 
 
 def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
-            since: float | None = None, branch: str | None = None) -> dict[str, Any]:
-    where, params = _session_filter(repo_root, since, branch=branch)
+            since: float | None = None, branch: str | None = None,
+            account: str | None = None) -> dict[str, Any]:
+    where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
     totals_row = conn.execute(
         f"""SELECT COUNT(*) AS sessions,
                    COALESCE(SUM(turns), 0) AS turns,
@@ -1322,5 +1364,6 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "mcp": mcp_block,
         "plugins": plugins_block,
         "shape": shape,
-        "artifacts": artifacts(conn, repo_root=repo_root, since=since, branch=branch),
+        "artifacts": artifacts(conn, repo_root=repo_root, since=since, branch=branch,
+                              account=account),
     }
