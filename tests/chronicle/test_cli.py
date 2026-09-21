@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import chrome_profile
 from scripts.cli import build_parser, main
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "chronicle"
@@ -300,3 +301,96 @@ class TestCli:
         )
         assert result.returncode == 0
         assert json.loads(result.stdout)["exists"] is False
+
+
+class TestOpen:
+    """`chronicle open` — a Chrome window is never actually launched in these
+    tests: `subprocess.run` is replaced before every one, either recording
+    the call (the success path) or raising (every guard path, so a bug that
+    reached the launch anyway fails loudly instead of popping a real
+    window)."""
+
+    def _account(self, config_dir: Path, email: str | None) -> None:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        oauth = {"emailAddress": email} if email else None
+        (config_dir / ".claude.json").write_text(json.dumps({"oauthAccount": oauth}))
+
+    def _chrome(self, tmp_path: Path, profiles: dict[str, str]) -> None:
+        local_state = tmp_path / "Local State"
+        info_cache = {name: {"user_name": email} for name, email in profiles.items()}
+        local_state.write_text(json.dumps({"profile": {"info_cache": info_cache}}))
+        return local_state
+
+    def _no_launch(self, monkeypatch):
+        def boom(*a, **k):
+            raise AssertionError(f"Chrome must not be launched, got: {a!r}")
+        monkeypatch.setattr("scripts.cli.subprocess.run", boom)
+
+    def test_opens_the_active_account_s_profile(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        config_dir = tmp_path / "config"
+        self._account(config_dir, "client-a@example.com")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+        local_state = self._chrome(tmp_path, {"Profile 1": "client-a@example.com"})
+        monkeypatch.setattr(chrome_profile, "DEFAULT_LOCAL_STATE", local_state)
+
+        calls = []
+        monkeypatch.setattr("scripts.cli.subprocess.run",
+                            lambda argv, **k: calls.append(argv))
+
+        assert main(["open", "https://claude.ai/artifact/x"]) == 0
+        assert calls == [[
+            "open", "-na", "Google Chrome", "--args",
+            "--profile-directory=Profile 1", "https://claude.ai/artifact/x",
+        ]]
+        assert json.loads(capsys.readouterr().out) == {
+            "url": "https://claude.ai/artifact/x",
+            "email": "client-a@example.com",
+            "profile_dir": "Profile 1",
+        }
+
+    def test_a_config_dir_flag_overrides_the_active_account(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        active = tmp_path / "active"
+        self._account(active, "personal@example.com")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(active))
+        other = tmp_path / "client-b"
+        self._account(other, "client-b@example.com")
+        local_state = self._chrome(tmp_path, {
+            "Default": "personal@example.com", "Profile 2": "client-b@example.com",
+        })
+        monkeypatch.setattr(chrome_profile, "DEFAULT_LOCAL_STATE", local_state)
+        calls = []
+        monkeypatch.setattr("scripts.cli.subprocess.run", lambda argv, **k: calls.append(argv))
+
+        assert main(["open", "https://claude.ai/x", "--config-dir", str(other)]) == 0
+        assert calls[0][-2] == "--profile-directory=Profile 2"
+
+    def test_refuses_off_macos(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(sys, "platform", "linux")
+        self._no_launch(monkeypatch)
+        assert main(["open", "https://claude.ai/x"]) == 1
+        assert "macOS only" in capsys.readouterr().err
+
+    def test_no_signed_in_account_at_the_config_dir(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        config_dir = tmp_path / "config"
+        self._account(config_dir, None)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+        self._no_launch(monkeypatch)
+        assert main(["open", "https://claude.ai/x"]) == 1
+        assert "no signed-in account" in capsys.readouterr().err
+
+    def test_no_chrome_profile_signed_in_as_that_email(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        config_dir = tmp_path / "config"
+        self._account(config_dir, "client-a@example.com")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+        local_state = self._chrome(tmp_path, {"Default": "someone-else@example.com"})
+        monkeypatch.setattr(chrome_profile, "DEFAULT_LOCAL_STATE", local_state)
+        self._no_launch(monkeypatch)
+
+        assert main(["open", "https://claude.ai/x"]) == 1
+        err = capsys.readouterr().err
+        assert "no Chrome profile signed in as client-a@example.com" in err
+        assert "someone-else@example.com" in err

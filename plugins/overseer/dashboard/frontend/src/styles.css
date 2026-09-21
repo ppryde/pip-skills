@@ -7990,6 +7990,34 @@ button.trail-tag:focus-visible {
   flex: 0 0 auto;
 }
 
+.chr-chart__legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.chr-chart__tooltip-breakdown {
+  margin: 0.3rem 0 0;
+  padding: 0.3rem 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--qb-party-text) 25%, transparent);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+}
+
+.chr-chart__tooltip-breakdown li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chr-chart__tooltip-breakdown li > span:nth-child(2) {
+  flex: 1 1 auto;
+}
+
 .chr-chart__tooltip {
   position: absolute;
   transform: translate(-50%, -4px);
@@ -8040,6 +8068,7 @@ button.trail-tag:focus-visible {
   margin-top: 0.3rem;
   max-height: 200px;
   overflow-y: auto;
+  overflow-x: auto;
   display: block;
   border-collapse: collapse;
 }

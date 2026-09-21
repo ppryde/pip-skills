@@ -55,6 +55,7 @@ chronicle sessions [--root R] [--days N] [--limit N]
 chronicle session <id>         # one session with its per-turn context series
 chronicle repos                # repo roots seen, with session counts
 chronicle ingest --transcript PATH [--session-id ID]   # one transcript, now
+chronicle open <url> [--config-dir DIR]   # macOS: open url in the right account's Chrome profile
 ```
 
 `sync` is the on-demand path and the one the dashboard's **Sync** button drives: it stats
@@ -78,6 +79,24 @@ CLAUDE_CONFIG_DIRS=~/.claude-personal chronicle sync   # env alternative, os.pat
 
 The file is `{"claude_dirs": ["~/.claude-personal"]}`; chronicle reads it with its own small
 loader so it stays standalone. `--projects PATH` (repeatable) replaces the set for one run.
+
+### Opening a link in the right account's browser
+
+An artifact link only works in the browser identity that created it — useless if you're
+looking at it from the wrong Chrome window. For a contracting setup with one config dir per
+client, `chronicle open` picks the right one for you (macOS only):
+
+```bash
+chronicle open https://claude.ai/artifact/...              # the active account's profile
+chronicle open https://claude.ai/artifact/... --config-dir ~/.claude-client-b
+```
+
+It reads the signed-in email straight out of `<config dir>/.claude.json`'s `oauthAccount`
+(never written to the chronicle store — see "Accounts and plans" below on why `emailAddress`
+never crosses into it), matches it against Chrome's own `Local State` (which profile is
+signed in as which email), and launches a **new** Chrome window (`open -na`, never reusing
+whatever has focus) on that profile. No match names the profiles it did find, so you can see
+what's actually signed in rather than guess.
 
 ### Sessions from a container
 

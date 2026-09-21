@@ -30,12 +30,13 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
+import { costByRepo } from "../../board/chronicle/costByRepo";
 import { Button } from "../../ui";
 import { planLabel, plansPresent } from "../../board/chronicle/plan";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
-import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
+import { BarList, ColumnChart, Donut, StackedColumnChart } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import CostAttributionPanel from "./CostAttributionPanel";
@@ -204,6 +205,12 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
     value: d.cache_hit_rate ?? 0,
   }));
   const costPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.cost_usd }));
+  // Server-side `by_day` sums every repo in scope into one line — a
+  // per-repo split only exists client-side, from `sessions`. Only worth
+  // computing (and only shown) under "all repos": within one repo it would
+  // always be a single, uninteresting segment.
+  const repoStack = useMemo(() => (scope === "all" ? costByRepo(sessions) : null), [scope, sessions]);
+  const showRepoStack = !!repoStack && repoStack.series.length > 1;
   const churnPerDay = (summary?.churn?.by_day ?? []).map((d) => ({
     label: formatDay(d.day),
     detail: `${d.day} · +${d.lines_added} / -${d.lines_removed} · ${d.edits} edits`,
@@ -394,9 +401,22 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               />
             </section>
             <section className="chr-panel">
-              <h3 className="chr-panel__title">Cost per day</h3>
-              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
-              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+              <h3 className="chr-panel__title">Cost per day{showRepoStack ? ", by repo" : ""}</h3>
+              <p className="chr-panel__sub">
+                {showRepoStack
+                  ? "What each day's calls would cost at API list prices, split by repo."
+                  : "What each day's calls would cost at API list prices."}
+              </p>
+              {showRepoStack && repoStack ? (
+                <StackedColumnChart
+                  points={repoStack.points}
+                  series={repoStack.series}
+                  format={formatUsd}
+                  title="API-equivalent cost per day, by repo"
+                />
+              ) : (
+                <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+              )}
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>

@@ -6,7 +6,9 @@ description: >
   compactions and duration, folded into an account-scoped SQLite store and shown on the
   overseer dashboard's Chronicle page. Use when the user asks how many tokens a session or
   repo used, "how big are my sessions", "which tools do I call most", "sync the chronicle",
-  "backfill session history", or wants session cost/size/length analysed.
+  "backfill session history", wants session cost/size/length analysed, or (multi-account)
+  asks to open an artifact/claude.ai link in the right Chrome profile / the right account's
+  browser window.
 ---
 
 # Chronicle
@@ -37,6 +39,14 @@ cheap to run every time. `backfill` is the same verb for a first run.
 Report numbers as the CLI gives them; say which window and scope you used. "Context
 processed" is input + cache read + cache creation summed over turns (what the API
 billed); "peak context" is the largest single window the main agent reached.
+
+## Opening a link in the right account (multi-account / contracting)
+`open <url> [--config-dir DIR]` (macOS only) launches a NEW Chrome window on whichever
+profile is signed in as the account at `--config-dir` (default: the active one — the
+account this session is already running under). Use when the user asks to open an
+artifact/claude.ai link "in the right profile" or "for client X" and juggles more than one
+Claude account: it reads the email straight from that config dir's `.claude.json`, matches
+it against Chrome's own signed-in profiles, and never stores the email anywhere.
 
 ## The dashboard
 When the user wants to *see* it, the overseer dashboard (`/overseer:dashboard`) offers a

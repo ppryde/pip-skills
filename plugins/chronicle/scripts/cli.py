@@ -26,7 +26,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
-from scripts import ingest, report, store
+from scripts import chrome_profile, ingest, report, store
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -324,6 +324,34 @@ def cmd_repos(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_open(args: argparse.Namespace) -> int:
+    """Open `url` in the Chrome profile signed in as the account at
+    `--config-dir` (default: the active one — same account the terminal
+    running this command is already in, which is the account that would have
+    printed the link). Multi-account contracting setups: one config dir per
+    client, so this is how a client's artifact link lands in THAT client's
+    browser identity instead of whichever Chrome window has focus."""
+    if sys.platform != "darwin":
+        print("chronicle open: macOS only (uses `open --args --profile-directory`)",
+              file=sys.stderr)
+        return 1
+    config_dir = Path(args.config_dir) if args.config_dir else store.config_dir()
+    email = chrome_profile.account_email(config_dir)
+    if not email:
+        print(f"chronicle open: no signed-in account at {config_dir}/.claude.json", file=sys.stderr)
+        return 1
+    profiles = chrome_profile.read_profiles(chrome_profile.DEFAULT_LOCAL_STATE)
+    profile_dir = chrome_profile.profile_for_email(email, profiles)
+    if not profile_dir:
+        known = ", ".join(sorted(profiles)) or "(none)"
+        print(f"chronicle open: no Chrome profile signed in as {email}; known: {known}",
+              file=sys.stderr)
+        return 1
+    subprocess.run(chrome_profile.open_command(args.url, profile_dir), check=False)
+    print(json.dumps({"url": args.url, "email": email, "profile_dir": profile_dir}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chronicle", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -371,6 +399,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_agent)
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
+
+    p = sub.add_parser("open",
+                       help="open a URL in the Chrome profile signed in as the active account (macOS)")
+    p.add_argument("url")
+    p.add_argument("--config-dir", default=None,
+                   help="account whose signed-in email to match (default: the active account)")
+    p.set_defaults(fn=cmd_open)
 
     p = sub.add_parser("pull-volume",
                        help="copy transcripts out of a docker named volume onto this filesystem")
