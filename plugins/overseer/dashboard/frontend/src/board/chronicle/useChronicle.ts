@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getChronicleAgent,
+  getChronicleLimits,
   getChronicleSession,
   getChronicleSessions,
   getChronicleStatus,
@@ -29,6 +30,7 @@ import {
 } from "../../api/client";
 import type {
   ChronicleAgentDetail,
+  ChronicleLimitsResponse,
   ChronicleQuery,
   ChronicleSession,
   ChronicleSessionDetail,
@@ -75,6 +77,7 @@ export function useChronicleStatus(): ChronicleStatus | null {
 export interface UseChronicleResult {
   summary: ChronicleSummary | null;
   sessions: ChronicleSession[];
+  limits: ChronicleLimitsResponse | null;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -88,6 +91,7 @@ export function useChronicle(
 ): UseChronicleResult {
   const [summary, setSummary] = useState<ChronicleSummary | null>(null);
   const [sessions, setSessions] = useState<ChronicleSession[]>([]);
+  const [limits, setLimits] = useState<ChronicleLimitsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Every load takes a ticket; only the newest ticket's response lands. A
@@ -104,16 +108,18 @@ export function useChronicle(
     setLoading(true);
     try {
       // `since` (e.g. "month-to-date") is resolved to an actual instant
-      // inside getChronicleSummary/Sessions at THIS call, not before — so a
-      // poll tick that lands after a month boundary asks for the new month,
-      // never a value computed when the filter was first chosen.
-      const [sum, list] = await Promise.all([
+      // inside getChronicleSummary/Sessions/Limits at THIS call, not before —
+      // so a poll tick that lands after a month boundary asks for the new
+      // month, never a value computed when the filter was first chosen.
+      const [sum, list, lims] = await Promise.all([
         getChronicleSummary({ days, since, scope, branch }),
         getChronicleSessions({ days, since, scope, branch }),
+        getChronicleLimits({ days, since, scope, branch }),
       ]);
       if (id !== requestIdRef.current) return;
       setSummary(sum);
       setSessions(list.sessions);
+      setLimits(lims);
       setError(null);
     } catch (err) {
       if (id !== requestIdRef.current) return;
@@ -138,7 +144,7 @@ export function useChronicle(
   // catch-up load when a hidden tab comes back; a hidden tab polls nothing.
   useVisibleInterval(() => void load(), POLL_INTERVAL_MS, enabled, { immediate: "on-return" });
 
-  return { summary, sessions, loading, error, refresh: load };
+  return { summary, sessions, limits, loading, error, refresh: load };
 }
 
 export function formatSyncSummary(res: ChronicleSyncResponse): string {

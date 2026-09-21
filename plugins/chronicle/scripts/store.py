@@ -219,6 +219,34 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_seen         REAL
 );
 
+-- One row per usage-limit banner RECORD (see transcript.LimitHit) — the same
+-- real-world hit is written into every session and subagent running at the
+-- time, so this is deliberately not deduplicated at write time: "how many
+-- sessions saw it" is itself part of what `report.limits` answers, on the
+-- read side, by clustering rows close together in time within one
+-- (account, kind, model) family (see `report._cluster_limit_rows`).
+--
+-- `raw_text` extends the "nothing personal is ever written" policy above:
+-- today's banners carry no PII, but `kind='other'` exists precisely to keep
+-- an unrecognised future wording verbatim rather than dropping it, and this
+-- store is read by the dashboard. So `raw_text` is kept here for a person
+-- reading the store directly to debug an `other` classification, but
+-- `report.limits` never selects it and no API route or UI ever surfaces it.
+CREATE TABLE IF NOT EXISTS limit_hits (
+    session_id  TEXT NOT NULL,
+    agent_id    TEXT NOT NULL DEFAULT '',
+    uuid        TEXT NOT NULL,
+    ts          REAL,
+    kind        TEXT NOT NULL DEFAULT 'other',
+    model       TEXT,
+    reset_raw   TEXT,
+    resets_at   REAL,
+    raw_text    TEXT NOT NULL DEFAULT '',  -- debugging only; never leaves this table (see above)
+    PRIMARY KEY (session_id, uuid)
+);
+CREATE INDEX IF NOT EXISTS limit_hits_ts ON limit_hits(ts);
+CREATE INDEX IF NOT EXISTS limit_hits_kind ON limit_hits(kind);
+
 CREATE TABLE IF NOT EXISTS cursors (
     path        TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL,
@@ -297,6 +325,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in present:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # `account_uuid` is a MIGRATED column (added above, not in `_SCHEMA`'s own
+    # `CREATE TABLE sessions`), so its index has to be created here, after the
+    # ALTER that guarantees the column exists — naming it in `_SCHEMA` would
+    # fail outright on a brand-new store, whose table is created without it.
+    # `report._session_windows` scans a single account's turns via this same
+    # join (`turns JOIN sessions ON ... WHERE sessions.account_uuid = ?`), so
+    # this is what keeps that scan from also being a full scan of `sessions`.
+    conn.execute("CREATE INDEX IF NOT EXISTS sessions_account_uuid ON sessions(account_uuid)")
 
 
 def config_dir() -> Path:

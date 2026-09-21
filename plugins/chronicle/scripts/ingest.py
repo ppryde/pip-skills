@@ -310,6 +310,20 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         [(r.artifact_url, session_id, r.tool_use_id)
          for r in results if r.artifact_url],
     )
+    # Deliberately not filtered through `_owned_elsewhere` like every table
+    # above: the SAME real-world hit is written into every session and
+    # subagent running at the time BY DESIGN, and "how many sessions saw it"
+    # is part of what `report.limits` reads back out. Keyed on the record's
+    # own uuid, like `events`, so re-reading a file from byte 0 converges.
+    conn.executemany(
+        """INSERT OR IGNORE INTO limit_hits(session_id, agent_id, uuid, ts, kind, model,
+               reset_raw, resets_at, raw_text) VALUES (?,?,?,?,?,?,?,?,?)""",
+        [
+            (session_id, h.agent_id, h.uuid, h.ts, h.kind, h.model,
+             h.reset_raw, h.resets_at, h.raw_text)
+            for h in facts.limit_hits
+        ],
+    )
 
 
 def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None,

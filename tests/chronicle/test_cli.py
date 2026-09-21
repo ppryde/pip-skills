@@ -291,6 +291,20 @@ class TestCli:
         assert main(["sessions", "--account", "nope"]) == 0
         assert json.loads(capsys.readouterr().out)["sessions"] == []
 
+        assert main(["limits"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"events": [], "by_kind": {}}
+
+    def test_limits_verb(self, builder, capsys):
+        builder.limit_hit("h1", T0, "You've hit your session limit · resets 11:50am (Europe/London)")
+        builder.write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+        assert main(["limits", "--days", "36500"]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["by_kind"] == {"session": 1}
+        assert out["events"][0]["kind"] == "session"
+        assert out["events"][0]["sessions"] == 1
+
     def test_reports_without_store_are_empty_not_errors(self, capsys):
         assert main(["summary"]) == 0
         assert json.loads(capsys.readouterr().out) == {"totals": None}
@@ -300,6 +314,8 @@ class TestCli:
         assert json.loads(capsys.readouterr().out) == {"repos": []}
         assert main(["accounts"]) == 0
         assert json.loads(capsys.readouterr().out) == {"accounts": []}
+        assert main(["limits"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"events": [], "by_kind": {}}
         assert main(["session", "x"]) == 1
 
     def test_ingest_verb(self, builder, capsys):

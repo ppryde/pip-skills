@@ -1211,6 +1211,19 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         data = run_chronicle(*args)
         return data if data is not None else {"sessions": []}
 
+    @app.get("/api/chronicle/limits")
+    def chronicle_limits(root: str | None = None, scope: str | None = None,
+                         days: int | None = None, since: str | None = None,
+                         branch: str | None = None, account: str | None = None) -> dict[str, Any]:
+        """Deduplicated usage-limit hits (see `chronicle limits`): the same
+        real-world hit written into every session running at the time,
+        folded into one event per (account, kind, reset), with the tokens
+        burned reaching it when the window is known."""
+        args = ["limits", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account)]
+        data = run_chronicle(*args)
+        return data if data is not None else {"events": [], "by_kind": {}}
+
     @app.post("/api/chronicle/sync")
     def chronicle_sync() -> dict[str, Any]:
         """Pull-on-demand reconciliation: chronicle stats every transcript on

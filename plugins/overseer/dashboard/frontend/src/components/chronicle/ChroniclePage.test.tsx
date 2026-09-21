@@ -8,6 +8,7 @@ vi.mock("../../api/client", async (importOriginal) => {
     ...actual,
     getChronicleSummary: vi.fn(),
     getChronicleSessions: vi.fn(),
+    getChronicleLimits: vi.fn(),
     getChronicleSession: vi.fn(),
     getChronicleAgent: vi.fn(),
     syncChronicle: vi.fn(),
@@ -50,6 +51,7 @@ function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repo
       <ChroniclePage
         summary={data.summary}
         sessions={data.sessions}
+        limits={data.limits}
         loading={data.loading}
         error={data.error}
         onRetry={() => void data.refresh()}
@@ -153,6 +155,7 @@ function summary(): ChronicleSummary {
 const mocked = client as unknown as {
   getChronicleSummary: ReturnType<typeof vi.fn>;
   getChronicleSessions: ReturnType<typeof vi.fn>;
+  getChronicleLimits: ReturnType<typeof vi.fn>;
   getChronicleSession: ReturnType<typeof vi.fn>;
   getChronicleAgent: ReturnType<typeof vi.fn>;
   syncChronicle: ReturnType<typeof vi.fn>;
@@ -167,6 +170,7 @@ beforeEach(() => {
       session({ session_id: "bbbb2222-x", turns: 5, live: true }),
     ],
   });
+  mocked.getChronicleLimits.mockResolvedValue({ events: [], by_kind: {} });
   mocked.syncChronicle.mockResolvedValue({ scanned: 3, changed: 1, lines: 12, sessions: ["aaaa1111-x"], synced_at: 1 });
 });
 
@@ -182,7 +186,10 @@ const COLUMN_INDEX_SUBAGENTS = 2 + 5;
 /** The page renders from props alone; these tests drive it directly rather
  * than through the fetch harness, since only the scope prop is under test. */
 function pageProps(sessions: ChronicleSession[]) {
-  return { summary: summary(), sessions, loading: false, error: null, onRetry: () => {} };
+  return {
+    summary: summary(), sessions, limits: { events: [], by_kind: {} }, loading: false, error: null,
+    onRetry: () => {},
+  };
 }
 
 describe("<ChroniclePage/>", () => {
@@ -200,6 +207,27 @@ describe("<ChroniclePage/>", () => {
     // A plugin's MCP calls are counted on BOTH tabs — the deliberate overlap.
     expect(screen.getByText("playwright · mcp")).toBeInTheDocument();
     expect(screen.getByText("tribunal · skill")).toBeInTheDocument();
+  });
+
+  it("shows the limits panel's empty state with none, and the hit count when there are some", async () => {
+    render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    expect(screen.getByText(/When Claude Code writes a usage-limit banner/)).toBeInTheDocument();
+
+    mocked.getChronicleLimits.mockResolvedValue({
+      events: [
+        {
+          account_uuid: "acc-1", kind: "session", model: null,
+          hit_at: 1_788_256_800, last_seen_at: 1_788_256_800,
+          resets_at: 1_788_275_400, resets_at_inferred: false, reset_raw: "11:50am (Europe/London)",
+          sessions: 2, tokens_to_limit: null,
+        },
+      ],
+      by_kind: { session: 1 },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Branch feat/x" })); // any filter change re-fetches
+    await waitFor(() => expect(screen.getByText(/1 deduplicated hit in this window/)).toBeInTheDocument());
+    expect(screen.getByRole("img", { name: "Usage-limit hits per day, by kind" })).toBeInTheDocument();
   });
 
   it("renders tiles, charts and the session table from the summary", async () => {

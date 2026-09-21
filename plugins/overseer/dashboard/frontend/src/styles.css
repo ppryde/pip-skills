@@ -8482,6 +8482,66 @@ button.trail-tag:focus-visible {
   text-align: left;
 }
 
+/* --- usage-limit timeline ---------------------------------------------------
+   Kind is an IDENTITY here, not a magnitude — the one chart on the page that
+   breaks the single-hue rule, so each kind gets its own step of the existing
+   measure ramp rather than a fresh palette. */
+.chr-limits__seg {
+  transition: opacity 0.12s ease;
+}
+
+.chr-limits__seg--hover {
+  opacity: 0.72;
+}
+
+.chr-limits__seg--session {
+  fill: var(--chr-turns);
+}
+
+.chr-limits__seg--weekly {
+  fill: var(--chr-peak);
+}
+
+.chr-limits__seg--monthly_spend {
+  fill: var(--chr-cost);
+}
+
+.chr-limits__seg--model {
+  fill: var(--chr-tools);
+}
+
+.chr-limits__seg--other {
+  fill: var(--qb-ink-400);
+}
+
+.chr-limits__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.chr-limits__swatch--session {
+  background: var(--chr-turns);
+}
+
+.chr-limits__swatch--weekly {
+  background: var(--chr-peak);
+}
+
+.chr-limits__swatch--monthly_spend {
+  background: var(--chr-cost);
+}
+
+.chr-limits__swatch--model {
+  background: var(--chr-tools);
+}
+
+.chr-limits__swatch--other {
+  background: var(--qb-ink-400);
+}
+
 /* --- ranked bar list ------------------------------------------------------- */
 .chr-barlist {
   display: flex;

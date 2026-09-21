@@ -697,6 +697,66 @@ export interface ChronicleJump {
   landed_chars: number;
 }
 
+/** A usage-limit kind, as `chronicle limits` classifies the banner Claude
+ * Code writes into the transcript. `"other"` is an unrecognised wording —
+ * kept, never dropped, so a future banner change still shows up. */
+export type ChronicleLimitKind = "session" | "weekly" | "monthly_spend" | "model" | "other";
+
+/** Token usage (and cost) an account burned reaching one deduped limit event,
+ * summed across all its sessions and subagents from the window's inferred
+ * start to the moment it was hit. `null` on the event itself when the window
+ * can't be inferred (see `ChronicleLimitKind` — only "session" and "weekly"
+ * have a documented window) or there's no account to sum against. */
+export interface ChronicleLimitTokens {
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  unpriced_turns: number;
+  /** Epoch seconds: `resets_at` minus the limit's fixed period. */
+  window_start: number;
+}
+
+/** One deduplicated real-world limit hit — Claude Code writes the SAME hit
+ * into every session and subagent running at the time, folded here into one
+ * event per (account, kind, model), clustering rows that landed close
+ * together in time (so a hit logged with a reset in one session and without
+ * in another still merges). */
+export interface ChronicleLimitEvent {
+  account_uuid: string | null;
+  kind: ChronicleLimitKind;
+  /** The model named in a "reached your <model> limit" banner; null for
+   * every other kind. */
+  model: string | null;
+  /** Epoch seconds of the earliest session to log this event. */
+  hit_at: number | null;
+  /** Epoch seconds of the latest session to log this event (useful when a
+   * session kept retrying across a long-open window). */
+  last_seen_at: number | null;
+  /** Epoch seconds this resets — the banner's own stated time when it
+   * parsed, otherwise DERIVED (a session limit's window close, or a weekly
+   * limit's anchor) — see `resets_at_inferred`. */
+  resets_at: number | null;
+  /** True when `resets_at` was derived rather than read off the banner
+   * itself (its text carried no reset, or none parsed) — an honest label
+   * for a value this call computed, not one Claude Code stated. */
+  resets_at_inferred: boolean;
+  /** The reset clause verbatim ("11:50am (Europe/London)"), before parsing;
+   * null when the banner stated none (whether or not `resets_at` was later
+   * inferred). */
+  reset_raw: string | null;
+  /** How many distinct sessions logged this same event. */
+  sessions: number;
+  tokens_to_limit: ChronicleLimitTokens | null;
+}
+
+export interface ChronicleLimitsResponse {
+  events: ChronicleLimitEvent[];
+  by_kind: Partial<Record<ChronicleLimitKind, number>>;
+}
+
 export interface ChronicleSummary {
   /** `null` when chronicle has no store yet (or the plugin is absent). */
   totals: ChronicleTotals | null;

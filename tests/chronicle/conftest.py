@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from scripts.transcript import SYNTHETIC_MODEL
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +71,20 @@ def _user(uuid: str, *, ts: str, content="hello", session_id: str = "s1", **extr
     return record
 
 
+def _limit_hit(uuid: str, *, ts: str, text: str, session_id: str = "s1",
+               agent_id: str | None = None, **extra):
+    """A usage-limit banner: a SYNTHETIC assistant record (no API call
+    happened) marked as a rejected rate-limited request, carrying the banner
+    text Claude Code writes when a request is refused for hitting a limit."""
+    return _assistant(
+        f"m-{uuid}", ts=ts, model=SYNTHETIC_MODEL,
+        blocks=[{"type": "text", "text": text}],
+        session_id=session_id, agent_id=agent_id,
+        isApiErrorMessage=True, error="rate_limit", apiErrorStatus=429,
+        uuid=uuid, **extra,
+    )
+
+
 class TranscriptBuilder:
     """Assemble a transcript JSONL (and optional subagent files) under a
     projects dir shaped exactly like ``~/.claude/projects/<slug>/``."""
@@ -124,6 +139,10 @@ class TranscriptBuilder:
         else:
             self.records.append(_assistant(message_id, ts=ts, blocks=blocks,
                                            session_id=self.session_id, **kw))
+        return self
+
+    def limit_hit(self, uuid: str, ts: str, text: str, **kw):
+        self.records.append(_limit_hit(uuid, ts=ts, text=text, session_id=self.session_id, **kw))
         return self
 
     def raw(self, record):
