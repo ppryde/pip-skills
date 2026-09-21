@@ -1,12 +1,12 @@
-"""Vigil runtime state under `.vigil/`, keyed by the repo root (cwd).
+"""Vigil runtime state under `.claude/vigil/`, keyed by the repo root (cwd).
 
 The vigil root is the per-session key: one root, one watch. Every function is
 quarantine-safe — it only touches its own marker files and never raises on a
 missing path.
 
 Single-writer assumption: these markers (`active`, `paused`, `cooldown`,
-`clear-requested`, `handover-gate`, `handoff.md`) live under one `.vigil/` per
-root and carry no session identity. If two live sessions share a single root
+`clear-requested`, `handover-gate`, `handoff.md`) live under one
+`.claude/vigil/` per root and carry no session identity. If two live sessions share a single root
 they share — and race on — the same markers: one session's nudge gates the
 other, one session's `/clear` cooldown silences the other. Vigil therefore
 assumes exactly one session per root, which the intended per-worktree session
