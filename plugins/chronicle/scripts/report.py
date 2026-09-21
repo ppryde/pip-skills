@@ -1219,32 +1219,47 @@ def _within(days: list[dict[str, Any]], since: float | None) -> list[dict[str, A
     return [d for d in days if d["day"] >= first]
 
 
-# How close together two hits with no parseable reset time must be to count
-# as the SAME event (see `_limit_group_key`).
-_LIMIT_BUCKET_SECONDS = 600
+# How close together two rows of the same (account, kind, model) family must
+# land to count as the SAME real-world hit (see `_cluster_limit_rows`).
+# Concurrent sessions retrying a request that just got rejected land within
+# seconds to minutes of each other; a genuinely SEPARATE hit of the same kind
+# on the same account is necessarily at least a whole reset PERIOD later (5h
+# for a session limit, 7d for a weekly one) — the account is locked out until
+# then. This is wide enough to also absorb the ~10-minute reset-time
+# quantisation census has observed on real boundaries, which used to split
+# two copies of one hit that happened to bucket their own raw timestamps on
+# opposite sides of a 10-minute line.
+_LIMIT_MERGE_WINDOW_SECONDS = 30 * 60
 
 
-def _limit_bucket(ts: float | None) -> int | None:
-    return int(ts // _LIMIT_BUCKET_SECONDS) * _LIMIT_BUCKET_SECONDS if ts is not None else None
+def _cluster_limit_rows(rows: list[sqlite3.Row]) -> list[list[sqlite3.Row]]:
+    """Rows already known to share one (account, kind, model) family,
+    clustered into the distinct real-world hits they represent.
 
-
-def _limit_group_key(row: sqlite3.Row) -> tuple[Any, ...]:
-    """One real-world hit, however many sessions logged it. `resets_at` is
-    the STABLE identity when it parsed — every session hitting the same
-    limit at the same moment states the same reset — so it is preferred over
-    the hit's own timestamp, which drifts by whenever each session happened
-    to retry. Only a hit with no reset time at all falls back to bucketing
-    ITS OWN timestamp, which is coarser and can in principle split one real
-    event that happened to log with and without a parseable reset time; that
-    has not been observed in practice (see the ingest worker's report).
-
-    Deliberately the RAW stored `resets_at`, never a window-inferred one
-    (see `_session_windows`/`_weekly_anchor` below) — inference depends on
-    the account's OTHER activity, which is a report-time computation and
-    must not change what counts as "the same event"."""
-    resets_at = row["resets_at"]
-    marker = ("resets_at", resets_at) if resets_at is not None else ("bucket", _limit_bucket(row["ts"]))
-    return (row["account_uuid"], row["kind"], row["model"], marker)
+    Sorted by `ts` and walked once: a row starts a new cluster only when it
+    is more than `_LIMIT_MERGE_WINDOW_SECONDS` after the previous row in the
+    current cluster. This is deliberately NOT keyed on `resets_at` — that
+    used to be the identity, which split one real hit in two whenever only
+    SOME of the sessions that logged it carried a parseable reset (or
+    `quotaLimits`) and others didn't: two disjoint key shapes for what is
+    the same event. Rows with no `ts` at all can't be placed relative to
+    anything, so each starts (and is) its own cluster.
+    """
+    # `or 0.0` only breaks a tie between two `ts IS NULL` rows for the sort
+    # itself (None has no "<"); the loop below still isolates every such row
+    # into its own cluster regardless of where the sort places it.
+    ordered = sorted(rows, key=lambda r: (r["ts"] is None, r["ts"] or 0.0))
+    clusters: list[list[sqlite3.Row]] = []
+    last_ts: float | None = None
+    for r in ordered:
+        ts = r["ts"]
+        if (clusters and ts is not None and last_ts is not None
+                and ts - last_ts <= _LIMIT_MERGE_WINDOW_SECONDS):
+            clusters[-1].append(r)
+        else:
+            clusters.append([r])
+        last_ts = ts
+    return clusters
 
 
 # --- usage-limit windows -----------------------------------------------------
@@ -1465,9 +1480,16 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
     Claude Code writes the SAME real-world hit into every session and
     subagent running at the time (see `transcript.LimitHit`), so the rows in
     `limit_hits` are grouped here into distinct EVENTS — one per
-    (account, kind, model, reset) — each carrying how many sessions saw it
-    and, when the window is known, the tokens burned reaching it (see
+    (account, kind, model) family, clustered by how close together they
+    landed (see `_cluster_limit_rows`) — each carrying how many sessions saw
+    it and, when the window is known, the tokens burned reaching it (see
     `_limit_window_and_tokens`).
+
+    `raw_text` (the banner's full text, verbatim) is deliberately never
+    read here or returned in an event: it exists in `limit_hits` only so an
+    unrecognised ("other") banner's wording is preserved for a person
+    reading the store directly, not for the dashboard to render (see the
+    table's own comment in `store.py`).
 
     Entirely DB-reads: nothing here re-opens a transcript. Window derivation
     for a SESSION event walks the account's own `turns` (indexed on `ts`;
@@ -1486,25 +1508,35 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
     where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
     rows = conn.execute(
         f"""SELECT h.session_id AS session_id, h.ts AS ts, h.kind AS kind, h.model AS model,
-                   h.reset_raw AS reset_raw, h.resets_at AS resets_at, h.raw_text AS raw_text,
+                   h.reset_raw AS reset_raw, h.resets_at AS resets_at,
                    s.account_uuid AS account_uuid
             FROM limit_hits h JOIN sessions s ON s.session_id = h.session_id
             {where}""",
         params,
     ).fetchall()
 
-    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+    families: dict[tuple[Any, ...], list[sqlite3.Row]] = {}
     for r in rows:
-        g = groups.setdefault(_limit_group_key(r), {
-            "account_uuid": r["account_uuid"], "kind": r["kind"], "model": r["model"],
-            "resets_at": r["resets_at"], "reset_raw": r["reset_raw"], "raw_text": r["raw_text"],
-            "first_ts": None, "last_ts": None, "sessions": set(),
-        })
-        ts = r["ts"]
-        if ts is not None:
-            g["first_ts"] = ts if g["first_ts"] is None else min(g["first_ts"], ts)
-            g["last_ts"] = ts if g["last_ts"] is None else max(g["last_ts"], ts)
-        g["sessions"].add(r["session_id"])
+        families.setdefault((r["account_uuid"], r["kind"], r["model"]), []).append(r)
+
+    groups: list[dict[str, Any]] = []
+    for family_rows in families.values():
+        for cluster in _cluster_limit_rows(family_rows):
+            # Prefer a row that actually STATED a reset (parsed text or
+            # `quotaLimits`) over one that didn't — the same real hit can
+            # land with a reset in one session's copy and without in
+            # another's, and a stated value is worth more than a bare
+            # timestamp. Falls back to the first row in ts order when none
+            # of them stated one at all.
+            representative = next((r for r in cluster if r["resets_at"] is not None), cluster[0])
+            tss = [r["ts"] for r in cluster if r["ts"] is not None]
+            groups.append({
+                "account_uuid": representative["account_uuid"], "kind": representative["kind"],
+                "model": representative["model"], "resets_at": representative["resets_at"],
+                "reset_raw": representative["reset_raw"],
+                "first_ts": min(tss) if tss else None, "last_ts": max(tss) if tss else None,
+                "sessions": {r["session_id"] for r in cluster},
+            })
 
     # Per-account caches so a window/anchor derivation — one ordered scan of
     # that account's whole turn history — is paid at most once per account
@@ -1513,7 +1545,7 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
     weekly_anchors: dict[str, WeeklyAnchor | None] = {}
 
     events = []
-    for g in groups.values():
+    for g in groups:
         resets_at, inferred, tokens = _limit_window_and_tokens(
             conn, kind=g["kind"], account_uuid=g["account_uuid"], hit_at=g["first_ts"],
             resets_at=g["resets_at"], session_windows=session_windows, weekly_anchors=weekly_anchors,
@@ -1531,7 +1563,6 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
             # this call computed rather than one Claude Code stated.
             "resets_at_inferred": inferred,
             "reset_raw": g["reset_raw"],
-            "raw_text": g["raw_text"],
             "sessions": len(g["sessions"]),
             "tokens_to_limit": tokens,
         })

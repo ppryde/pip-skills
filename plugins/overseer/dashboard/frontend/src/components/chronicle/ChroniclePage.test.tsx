@@ -219,8 +219,7 @@ describe("<ChroniclePage/>", () => {
         {
           account_uuid: "acc-1", kind: "session", model: null,
           hit_at: 1_788_256_800, last_seen_at: 1_788_256_800,
-          resets_at: 1_788_275_400, reset_raw: "11:50am (Europe/London)",
-          raw_text: "You've hit your session limit · resets 11:50am (Europe/London)",
+          resets_at: 1_788_275_400, resets_at_inferred: false, reset_raw: "11:50am (Europe/London)",
           sessions: 2, tokens_to_limit: null,
         },
       ],

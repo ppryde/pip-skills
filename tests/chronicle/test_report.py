@@ -1278,6 +1278,43 @@ class TestLimits:
         assert out["events"][0]["kind"] == "session"
         assert out["by_kind"] == {"session": 1}
 
+    def test_a_hit_parsed_in_one_session_but_not_another_is_still_one_event(self, projects):
+        # The same real-world hit: one session's copy states a reset
+        # (`quotaLimits`), the other's is bare. These used to be two
+        # disjoint group-key SHAPES -- ("resets_at", X) vs ("bucket", Y) --
+        # which split one event in two whenever only some of the sessions
+        # that logged a hit happened to carry a parseable reset.
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", "2026-09-01T10:01:00.000Z", "You've hit your session limit").write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 1
+        event = out["events"][0]
+        assert event["sessions"] == 2
+        # The row that stated a reset wins over the one that didn't.
+        assert event["resets_at"] == resets_at
+        assert event["resets_at_inferred"] is False
+
+    def test_two_copies_either_side_of_a_bucket_boundary_are_one_event(self, projects):
+        # Both bare (no reset at all), 11 minutes apart -- the old 10-minute
+        # bucketing put these in two different buckets despite being the
+        # same real-world hit; close-in-time clustering doesn't.
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", "2026-09-01T10:00:00.000Z", self.MONTHLY_TEXT).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h2", "2026-09-01T10:11:00.000Z", self.MONTHLY_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn)
+        assert len(out["events"]) == 1
+        assert out["events"][0]["sessions"] == 2
+
     def test_different_reset_times_are_distinct_events(self, projects):
         TranscriptBuilder(projects, "-a", "s1").limit_hit(
             "h1", T0, self.SESSION_TEXT,

@@ -223,7 +223,15 @@ CREATE TABLE IF NOT EXISTS accounts (
 -- real-world hit is written into every session and subagent running at the
 -- time, so this is deliberately not deduplicated at write time: "how many
 -- sessions saw it" is itself part of what `report.limits` answers, on the
--- read side, by grouping on (account, kind, resets_at/bucketed ts).
+-- read side, by clustering rows close together in time within one
+-- (account, kind, model) family (see `report._cluster_limit_rows`).
+--
+-- `raw_text` extends the "nothing personal is ever written" policy above:
+-- today's banners carry no PII, but `kind='other'` exists precisely to keep
+-- an unrecognised future wording verbatim rather than dropping it, and this
+-- store is read by the dashboard. So `raw_text` is kept here for a person
+-- reading the store directly to debug an `other` classification, but
+-- `report.limits` never selects it and no API route or UI ever surfaces it.
 CREATE TABLE IF NOT EXISTS limit_hits (
     session_id  TEXT NOT NULL,
     agent_id    TEXT NOT NULL DEFAULT '',
@@ -233,7 +241,7 @@ CREATE TABLE IF NOT EXISTS limit_hits (
     model       TEXT,
     reset_raw   TEXT,
     resets_at   REAL,
-    raw_text    TEXT NOT NULL DEFAULT '',
+    raw_text    TEXT NOT NULL DEFAULT '',  -- debugging only; never leaves this table (see above)
     PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX IF NOT EXISTS limit_hits_ts ON limit_hits(ts);

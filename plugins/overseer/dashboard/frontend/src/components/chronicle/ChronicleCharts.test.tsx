@@ -15,7 +15,6 @@ function limitEvent(overrides: Partial<ChronicleLimitEvent> = {}): ChronicleLimi
     resets_at: 1_788_275_400,
     resets_at_inferred: false,
     reset_raw: "11:50am (Europe/London)",
-    raw_text: "You've hit your session limit · resets 11:50am (Europe/London)",
     sessions: 2,
     tokens_to_limit: {
       input_tokens: 10, cache_read_tokens: 100, cache_creation_tokens: 20, output_tokens: 40,

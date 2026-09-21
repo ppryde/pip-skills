@@ -721,7 +721,9 @@ export interface ChronicleLimitTokens {
 
 /** One deduplicated real-world limit hit — Claude Code writes the SAME hit
  * into every session and subagent running at the time, folded here into one
- * event per (account, kind, model, reset). */
+ * event per (account, kind, model), clustering rows that landed close
+ * together in time (so a hit logged with a reset in one session and without
+ * in another still merges). */
 export interface ChronicleLimitEvent {
   account_uuid: string | null;
   kind: ChronicleLimitKind;
@@ -745,8 +747,6 @@ export interface ChronicleLimitEvent {
    * null when the banner stated none (whether or not `resets_at` was later
    * inferred). */
   reset_raw: string | null;
-  /** The full banner text, verbatim. */
-  raw_text: string;
   /** How many distinct sessions logged this same event. */
   sessions: number;
   tokens_to_limit: ChronicleLimitTokens | null;
