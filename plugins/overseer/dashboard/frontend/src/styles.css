@@ -1311,14 +1311,52 @@ body {
   box-shadow: none;
 }
 
-/* Task 2: the [Filters ▾] [Controls ▾] [＋] cluster — one atomic flex item
-   of `.topbar` (same wrapping-together technique as
-   `.topbar__controls-actions`) so the three buttons never split across a
-   line break. */
-.topbar__toggle-cluster {
+/* Task 2 (revised): Filters ▾ and the Controls ▾/＋(or Sync) actions used to
+   be ONE atomic `.topbar__toggle-cluster` flex item of `.topbar`. Desktop
+   now needs them on two different rows (row 2 vs. row 3 — see TopBar.tsx's
+   own JSX comments), so they're two independent boxes instead: `.topbar__
+   filters-toggle` (Filters ▾ alone) and `.topbar__actions-cluster`
+   (Controls ▾ + ＋/Sync). Both are real boxes on EVERY viewport (never
+   `display: contents`) — there's no third box left to merge them back into
+   below 720px, so the ≤720px override two screens down gives each an
+   `order` that lands them on the SAME wrapped line they used to share, plus
+   a small negative margin on the second to recreate the original cluster's
+   tighter 0.4rem gap against `.topbar`'s own wider 0.75rem inter-item
+   default. */
+.topbar__filters-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.topbar__actions-cluster {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+/* Desktop row wrappers (owner's ask, see TopBar.tsx's JSX comments at each
+   element's call site): `.topbar__row2-left` groups Account/Repo/Branch,
+   `.topbar__row2-right` groups (only) the Filters ▾ toggle, `.topbar__row3`
+   groups everything else (status pills, guild pills, the actions cluster,
+   and the Provisions group). `display: contents` is the base/every-
+   viewport default — same "vanish and let the children become direct flex
+   items of `.topbar`" technique `.topbar__controls-group`/`.topbar__
+   controls-actions` already use above — so mobile (and any width below the
+   grid media query further down this file) is completely unaffected by
+   these wrappers merely existing: each child still flows/gets ordered
+   exactly as if it were a bare `.topbar` child (`.topbar__filters-toggle`/
+   `.topbar__actions-cluster` are real boxes themselves already — see their
+   own rule above — so unwrapping THEIR parent still lands them, not their
+   grandchildren, as the direct `.topbar` flex item). The `@media (min-
+   width: 721px)` block turns `.topbar__row2-left`/`.topbar__row3` into real
+   boxes pinned to their own named grid area; `.topbar__row2-right` stays
+   `display: contents` even there — its one child, `.topbar__filters-
+   toggle`, is the actual grid item (it's a real box on every viewport
+   already). */
+.topbar__row2-left,
+.topbar__row2-right,
+.topbar__row3 {
+  display: contents;
 }
 
 /* WF-091: the Epic Atlas toggles, moved into the Controls group from the
@@ -6550,6 +6588,147 @@ button.trail-tag:focus-visible {
 }
 
 /* ==========================================================================
+   Desktop top-bar rows (>720px) — CSS Grid per the owner's ask (revised):
+   menu left / title right on row 1; account → repo → branch on the left and
+   ONLY the Filters ▾ toggle on the right of row 2 (one line, vertically
+   centred — nothing else shares it); the rare quarantine banner on its own
+   row when present; then "everything else" on row 3, full width — the
+   status pills (rest windows, last-refreshed, gold/vanquished/fleet) on the
+   left, the Controls ▾/＋(or Sync) actions on the right, and the
+   "Provisions" group (Last Orders, Atlas toggles, Labels…/Refresh/
+   Abandoned/Clear…) wrapping onto its own line beneath them when Controls
+   is open. Grid-template-areas place each piece by NAME, independent of
+   DOM/source order, so `.topbar__quarantine-banner` keeps its existing JSX
+   position untouched. `row-gap` applies between EVERY adjacent pair of row
+   tracks regardless of whether either side holds content — an `auto`-sized
+   empty banner track collapses to zero HEIGHT, but the gaps flanking it
+   don't collapse with it, so a naive fixed `row-gap` over a 4-row template
+   still doubles the visible row2→row3 distance whenever the banner is
+   absent (the default state of the app). The `:has()` pair below switches
+   the whole template — banner row included or dropped — so the no-banner
+   case only ever has 2 gaps (row1↔row2, row2↔row3) at exactly 0.75rem,
+   never the leftover 1.5rem a 3-gap/1-empty-track template would produce.
+   This block sits ahead of, and is fully independent from, the "Mobile
+   layout layer" below: `min-width: 721px` here and that layer's
+   `max-width: 720px` can never both match the same viewport, so mobile is
+   untouched by any of this. */
+@media (min-width: 721px) {
+  .topbar {
+    display: grid;
+    /* Row 2's left half is the flexible column (Account/Repo/Branch can
+       need real room); the right half shrinks to fit exactly the Filters ▾
+       button, sitting flush against the bar's right edge rather than
+       claiming a wasted half-width column. Row 1/banner/row 3 each span
+       both columns as one merged cell, so this split only ever matters for
+       row 2. */
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "row1      row1"
+      "row2-left row2-right"
+      "row3      row3";
+    row-gap: 0.75rem;
+    /* Row 2 in particular must read as ONE vertically-centred line even
+       though its two halves can differ in natural height (three selects
+       vs. a single button) — `align-items` on the grid container centres
+       every row's item(s) within that row's own track height. */
+    align-items: center;
+  }
+
+  /* `quarantinedCount > 0` is the one case with a fifth row: re-declare the
+     template with the banner's own track spliced back in between row2 and
+     row3, rather than letting the base rule's fixed `row-gap` leave a
+     doubled gap around an always-present-but-usually-empty track (see the
+     block comment above). `:has(.topbar__quarantine-banner)` tracks the
+     banner's actual conditional render (TopBar.tsx) exactly — no JS/class
+     toggle needed. */
+  .topbar:has(.topbar__quarantine-banner) {
+    grid-template-areas:
+      "row1      row1"
+      "row2-left row2-right"
+      "banner    banner"
+      "row3      row3";
+  }
+
+  .topbar__identity {
+    grid-area: row1;
+  }
+
+  .topbar__row2-left {
+    grid-area: row2-left;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* `.topbar__row2-right` itself stays `display: contents` even here (base
+     rule) — `.topbar__filters-toggle` is already a real box on every
+     viewport (see its own rule above), so IT is the grid item pinned to
+     `row2-right`, the ONLY thing on row 2's right half now. */
+  .topbar__filters-toggle {
+    grid-area: row2-right;
+  }
+
+  .topbar__quarantine-banner {
+    grid-area: banner;
+    /* A grid item stretches to fill its column by default (`align-self`/
+       `justify-self: stretch`) — this pill should stay its own intrinsic
+       size instead, same as every other chip in this bar. */
+    justify-self: start;
+  }
+
+  /* "Everything else" (owner's revised words) — status pills + guild pills
+     + the Controls ▾/＋(or Sync) actions, one full-width wrapping line; the
+     Provisions group (nested inside, see its own comment two rules down)
+     wraps onto its own line beneath via ITS `.topbar__controls-header`'s
+     existing `flex-basis: 100%` trick. */
+  .topbar__row3 {
+    grid-area: row3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* Status pills sit left (plain DOM order within `.topbar__row3`); this
+     pushes the Controls ▾/＋(or Sync) actions to the right end of the SAME
+     line — same `margin-left: auto` trick `.topbar__refresh` already uses
+     one level deeper. Desktop-only: mobile needs a small NEGATIVE margin
+     instead (see the ≤720px override two screens down) to recreate the old
+     combined toggle-cluster's tighter 0.4rem gap against `.topbar__filters-
+     toggle` beside it. */
+  .topbar__actions-cluster {
+    margin-left: auto;
+  }
+
+  /* "The labels row" — really "everything else" now that it's nested a
+     level deeper inside `.topbar__row3` rather than sitting directly in
+     `.topbar`'s own grid: `:not([hidden])` beats the bare
+     `.topbar__controls-group { display: contents }` base rule on
+     specificity, same trick the existing mobile override two screens down
+     already uses. `flex-basis: 100%` (not `grid-area` — this is a flex
+     child of `.topbar__row3` now, not a grid child of `.topbar`) forces it
+     onto its own line within row 3, same mechanism its OWN `.topbar__
+     controls-header` child already uses one level deeper for the
+     "Provisions" caption. */
+  .topbar__controls-group:not([hidden]) {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* The mobile-only row-break spacers (force hard breaks between 320-
+     720px) are still present in the DOM at every width; keep them out of
+     the grid's auto-placement flow entirely rather than let one claim a
+     stray implicit cell. */
+  .topbar__row-break {
+    display: none;
+  }
+}
+
+/* ==========================================================================
    Mobile layout layer (≤720px) — "the guild ledger, one page at a time".
    On a phone the corkboard becomes a ledger you leaf through: each lane is a
    near-full-width parchment page with scroll-snap, a sliver of the next
@@ -6654,13 +6833,26 @@ button.trail-tag:focus-visible {
   .topbar__vanquished-pill { order: 31; }
   .topbar__fleet-pill { order: 32; }
 
-  /* R5: the [Filters ▾][Controls ▾][＋] cluster, pinned right via its own
-     `margin-left: auto` — it's the only item between the r4 and
-     (self-forcing, flex-basis:100%) controls-group breaks, so that auto
-     margin has the whole row's slack to push into. The three buttons
-     inside keep natural DOM order (the cluster is `inline-flex`, not
-     `contents`), so no per-button `order` is needed here. */
-  .topbar__toggle-cluster { order: 40; margin-left: auto; }
+  /* R5: was one atomic [Filters ▾][Controls ▾][＋] `.topbar__toggle-cluster`
+     — now two independent boxes (desktop needs them on different rows, see
+     styles.css's own desktop grid block and TopBar.tsx's JSX comments), so
+     recreating this exact line takes two rules instead of one:
+     `.topbar__filters-toggle` gets the OLD cluster's `order`/`margin-left:
+     auto` (it's the only thing between the r4 and controls-group breaks, so
+     that auto margin still has the whole row's slack to push into — both
+     boxes ride along together, per the next rule), and `.topbar__actions-
+     cluster` gets the next `order` plus a small NEGATIVE margin that
+     cancels `.topbar`'s own mobile inter-item gap back down to the old
+     cluster's tighter internal 0.4rem. Mobile overrides `.topbar`'s `gap`
+     shorthand to `0.4rem 0.5rem` (row-gap column-gap) two screens up, so
+     the horizontal gap this margin is cancelling is the 0.5rem COLUMN-gap,
+     not the desktop rule's 0.75rem — the offset is -0.1rem (0.5rem -
+     0.4rem), not -0.35rem (which was computed against the wrong gap value
+     and rendered only 0.15rem apart, tighter than intended). Same two
+     rendered pixels apart as when Filters ▾ and Controls ▾ were DOM
+     siblings inside one shared box. */
+  .topbar__filters-toggle { order: 40; margin-left: auto; }
+  .topbar__actions-cluster { order: 41; margin-left: -0.1rem; }
 
   /* Rare/optional (`quarantinedCount > 0`) — own full-width row right
      after identity, ahead of R2, so it never crowds into the repo/branch
