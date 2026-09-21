@@ -722,15 +722,27 @@ describe("<TopBar/> Filters toggle (Task 2)", () => {
     expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
   });
 
-  it("puts the toggle cluster in [Filters ▾] [Controls ▾] [＋] order", () => {
+  // Desktop revision: Filters ▾ now lives alone in `.topbar__filters-toggle`
+  // (row 2), separate from Controls ▾/＋ in `.topbar__actions-cluster` (row
+  // 3) — see TopBar.tsx's JSX comments on both. Mobile still renders all
+  // three as one visual line (styles.css gives both wrappers matching
+  // `order`s), but the DOM/CSS grouping the old single `.topbar__toggle-
+  // cluster` test pinned no longer exists, so this checks the two new
+  // groupings instead.
+  it("puts Filters ▾ alone in .topbar__filters-toggle, and Controls ▾/＋ together in .topbar__actions-cluster", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
-    const cluster = container.querySelector(".topbar__toggle-cluster")!;
-    expect(cluster).not.toBeNull();
-    const buttons = Array.from(cluster.querySelectorAll("button"));
-    expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
-    expect(buttons[1]).toHaveAccessibleName(/^controls/i);
-    expect(buttons[2]).toHaveAccessibleName(/new card/i);
+    const filtersGroup = container.querySelector(".topbar__filters-toggle")!;
+    expect(filtersGroup).not.toBeNull();
+    const filtersButtons = Array.from(filtersGroup.querySelectorAll("button"));
+    expect(filtersButtons).toHaveLength(1);
+    expect(filtersButtons[0]).toHaveAccessibleName(/^filters/i);
+
+    const actions = container.querySelector(".topbar__actions-cluster")!;
+    expect(actions).not.toBeNull();
+    const actionButtons = Array.from(actions.querySelectorAll("button"));
+    expect(actionButtons).toHaveLength(2);
+    expect(actionButtons[0]).toHaveAccessibleName(/^controls/i);
+    expect(actionButtons[1]).toHaveAccessibleName(/new card/i);
   });
 });
 
@@ -1051,13 +1063,15 @@ describe("<TopBar/> view toggle (WF-086) — identity placement", () => {
     const titleIndex = kids.findIndex((c) => c.tagName === "H1");
     expect(stackIndex).toBeGreaterThanOrEqual(0);
     expect(stackIndex).toBeLessThan(titleIndex);
-    // The identity cluster itself still precedes the repo selector in the bar.
-    const header = container.querySelector("header.topbar")!;
-    const barKids = Array.from(header.children);
-    const identityIndex = barKids.indexOf(identity);
-    const repoIndex = barKids.findIndex((c) => c.classList.contains("topbar__repo-select"));
-    expect(identityIndex).toBeGreaterThanOrEqual(0);
-    expect(identityIndex).toBeLessThan(repoIndex);
+    // The identity cluster itself still precedes the repo selector in the
+    // bar — the repo selector now lives inside the desktop-row `.topbar__
+    // row2-left` wrapper (see TopBar.tsx), so this compares DOM position via
+    // `compareDocumentPosition` rather than `header`'s DIRECT children.
+    const repo = container.querySelector(".topbar__repo-select")!;
+    expect(repo).not.toBeNull();
+    expect(
+      identity.compareDocumentPosition(repo) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 });
 
@@ -1149,6 +1163,112 @@ describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
 // than `.topbar__repo-select select`/`.topbar__branch-select select`
 // (which keep only their own genuine overrides — a transparent background,
 // plus the branch select's own wobble variant — nothing duplicated).
+// Owner's ask (revised): "on desktop can we do menu left, title right for
+// top line, account/repo/branch in that order in left of second line and
+// filters on the right [alone — nothing else shares row 2], then all labels
+// [everything else] on the third row". `.topbar__row2-left`/`.topbar__
+// row2-right`/`.topbar__row3` are the structural hooks a `@media (min-width:
+// 721px)` grid in styles.css pins to `row2-left`/`row2-right`/`row3`; all
+// three default to `display: contents` (see styles.css) so mobile —
+// asserted untouched by the whole existing suite above/below — never sees
+// them as real boxes. These tests pin the DOM membership/order a screenshot
+// can't regression-guard on its own.
+describe("<TopBar/> desktop row grouping", () => {
+  it("puts Account, Repo, Branch in that order inside .topbar__row2-left", () => {
+    const { container } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        accounts={[
+          { account_uuid: "acc-a", short_uuid: "acc-a", plan: null, config_dirs: [], sessions: 0, last_activity_at: null },
+          { account_uuid: "acc-b", short_uuid: "acc-b", plan: null, config_dirs: [], sessions: 0, last_activity_at: null },
+        ]}
+        activeAccount={null}
+        repos={[{ label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 }]}
+        activeRoot="/a"
+        branches={["feat/a"]}
+        activeBranch="feat/a"
+      />
+    );
+
+    const left = container.querySelector(".topbar__row2-left")!;
+    expect(left).not.toBeNull();
+    const classesInOrder = Array.from(left.children).map((c) => c.className);
+    const accountIdx = classesInOrder.findIndex((c) => c.includes("topbar__account-select"));
+    const repoIdx = classesInOrder.findIndex((c) => c.includes("topbar__repo-select"));
+    const branchIdx = classesInOrder.findIndex((c) => c.includes("topbar__branch-select"));
+    expect(accountIdx).toBeGreaterThanOrEqual(0);
+    expect(repoIdx).toBeGreaterThan(accountIdx);
+    expect(branchIdx).toBeGreaterThan(repoIdx);
+  });
+
+  it("puts ONLY the Filters ▾ toggle inside .topbar__row2-right", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+
+    const right = container.querySelector(".topbar__row2-right")!;
+    expect(right).not.toBeNull();
+    const buttons = Array.from(right.querySelectorAll("button"));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
+    // Nothing else — no pills, no gold/vanquished/fleet, no Controls ▾/＋.
+    expect(right.querySelector(".topbar__pill")).toBeNull();
+    expect(right.querySelector(".topbar__gold-pill")).toBeNull();
+    expect(right.querySelector(".topbar__actions-cluster")).toBeNull();
+  });
+
+  it("groups the rest/last-refreshed pills, the gold/vanquished/fleet pills, and the actions cluster inside .topbar__row3, actions last", () => {
+    const { container } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        limits={{
+          five_hour: { used_percentage: 28 } as RateWindow,
+          seven_day: { used_percentage: 63 } as RateWindow,
+        }}
+        lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
+      />
+    );
+
+    const row3 = container.querySelector(".topbar__row3")!;
+    expect(row3).not.toBeNull();
+    expect(row3.querySelector(".topbar__pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__gold-pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__vanquished-pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__fleet-pill")).not.toBeNull();
+    const actions = row3.querySelector(".topbar__actions-cluster");
+    expect(actions).not.toBeNull();
+    // The actions cluster is the rightmost (last) status/actions child —
+    // #topbar-controls-group (the Provisions group) may follow it in the
+    // DOM too (it wraps to its own line below via its own flex-basis), so
+    // this only pins ordering among the always-visible pieces, not against
+    // that collapsible group.
+    const alwaysVisible = Array.from(row3.children).filter(
+      (c) => c.id !== "topbar-controls-group"
+    );
+    expect(alwaysVisible[alwaysVisible.length - 1]).toBe(actions);
+  });
+
+  it("nests the Provisions group inside .topbar__row3, still toggled by controlsOpen", () => {
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+    openControls();
+
+    const row3 = document.querySelector(".topbar__row3")!;
+    const group = document.getElementById("topbar-controls-group")!;
+    expect(row3.contains(group)).toBe(true);
+    expect(group).toBeVisible();
+  });
+
+  it("keeps every row control reachable outside row2-left/row2-right/row3 too (mobile flattens them via display:contents)", () => {
+    // A structural smoke test: nothing about wrapping these controls should
+    // make them any less queryable by their own existing class/role — the
+    // whole rest of this file's assertions (Repo/Branch/Account selects,
+    // gold/vanquished/fleet pills, Filters/Controls/＋) already prove this,
+    // this just documents the intent for future readers of this describe
+    // block.
+    render(<StatefulTopBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
+    expect(screen.getByText(/vanquished/)).toBeInTheDocument();
+  });
+});
+
 describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
 
@@ -1225,5 +1345,56 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   it("lets the repo/branch chip wrappers shrink below their content width so the ellipsis can engage", () => {
     expect(ruleBodyFor(".topbar__repo-select")).toMatch(/min-width:\s*0/);
     expect(ruleBodyFor(".topbar__branch-select")).toMatch(/min-width:\s*0/);
+  });
+});
+
+// PR #81 review round: two CSS-geometry regressions jsdom's layout-free DOM
+// can't render its way into failing — no viewport/box-model math ever
+// executes there, so these assert on the styles.css SOURCE the same way the
+// describe block above does. The actual geometry (row-gap distance, mobile
+// gap width) was verified separately with real headless-Chrome measurements
+// (see PR #81's review-round comment) — these tests exist so a future edit
+// to either value regresses loudly here instead of only in a screenshot.
+describe("topbar desktop-row geometry regressions (PR #81 review round)", () => {
+  const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+
+  it("gives the no-banner desktop grid its own template with no banner row, so row-gap never doubles up", () => {
+    // The FIRST `grid-template-areas` in the file is the base `.topbar` rule
+    // inside the `@media (min-width: 721px)` block (the non-media `.topbar`
+    // rule earlier in the file has no grid-template-areas at all) — this is
+    // the template used whenever `quarantinedCount` is 0, i.e. almost always.
+    // A blanket `row-gap` applies between every pair of row tracks whether or
+    // not either side holds content, so a 4-row template with an always-
+    // empty "banner" track (this test's old, wrong shape) renders TWO gaps
+    // between row2 and row3 instead of one — see the block comment directly
+    // above this rule in styles.css for the full "why".
+    const [, areas] = css.match(/grid-template-areas:\s*([\s\S]*?);/) ?? [];
+    expect(areas, "expected a grid-template-areas declaration").toBeTruthy();
+    expect(areas).not.toMatch(/banner/);
+    expect(areas).toMatch(/row2-left\s+row2-right/);
+    expect(areas).toMatch(/row3\s+row3/);
+  });
+
+  it("splices the banner row back in only via :has(), scoped to when the banner actually renders", () => {
+    const hasRule = css.match(
+      /\.topbar:has\(\.topbar__quarantine-banner\)\s*\{([\s\S]*?)\}/
+    );
+    expect(hasRule, "expected a .topbar:has(.topbar__quarantine-banner) rule").not.toBeNull();
+    expect(hasRule![1]).toMatch(/banner\s+banner/);
+  });
+
+  it("cancels the mobile actions-cluster gap against the actual column-gap (0.5rem), not the desktop gap (0.75rem)", () => {
+    // Regression: this used to be -0.35rem, computed against `.topbar`'s
+    // DESKTOP `gap: 0.75rem` — but mobile overrides `gap` to the shorthand
+    // `0.4rem 0.5rem` (row-gap column-gap), so the real column-gap here is
+    // 0.5rem and the correct cancelling offset is -0.1rem (0.5rem - 0.4rem).
+    // The wrong value rendered a ~0.15rem gap instead of the intended
+    // 0.4rem — see TopBar.tsx/styles.css review notes for the measured px.
+    // `.topbar__actions-cluster` also has an unrelated DESKTOP rule earlier
+    // in the file (the atomic-wrapper `display:inline-flex` one) — anchoring
+    // on the full `order: 41` mobile declaration avoids matching that one.
+    const mobileRule = css.match(/\.topbar__actions-cluster\s*\{\s*order:\s*41;\s*margin-left:\s*(-?[\d.]+rem);\s*\}/);
+    expect(mobileRule, "expected the mobile .topbar__actions-cluster { order: 41; ... } rule").not.toBeNull();
+    expect(mobileRule![1]).toBe("-0.1rem");
   });
 });
