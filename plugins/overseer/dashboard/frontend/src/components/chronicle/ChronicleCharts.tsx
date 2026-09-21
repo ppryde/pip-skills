@@ -802,7 +802,10 @@ export function LimitsTimeline({ events, height = 200 }: LimitsTimelineProps) {
                 <tr key={`${i}-${e.hit_at ?? "?"}-${e.kind}`}>
                   <td>{LIMIT_KIND_META[e.kind].label}{e.model ? ` (${e.model})` : ""}</td>
                   <td>{formatWhen(e.hit_at)}</td>
-                  <td>{e.reset_raw ?? "—"}</td>
+                  <td>
+                    {e.reset_raw ?? (e.resets_at_inferred ? formatWhen(e.resets_at) : "—")}
+                    {e.resets_at_inferred ? " (inferred)" : ""}
+                  </td>
                   <td className="chr-num">{e.sessions}</td>
                   <td className="chr-num">
                     {e.tokens_to_limit ? formatTokens(e.tokens_to_limit.total_tokens) : "—"}

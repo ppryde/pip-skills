@@ -13,6 +13,7 @@ function limitEvent(overrides: Partial<ChronicleLimitEvent> = {}): ChronicleLimi
     hit_at: 1_788_256_800, // 2026-09-01T10:00:00Z (a fixed local day for the test)
     last_seen_at: 1_788_256_800,
     resets_at: 1_788_275_400,
+    resets_at_inferred: false,
     reset_raw: "11:50am (Europe/London)",
     raw_text: "You've hit your session limit · resets 11:50am (Europe/London)",
     sessions: 2,
@@ -259,5 +260,28 @@ describe("<LimitsTimeline/>", () => {
     const table = screen.getByText("Table view").closest("details")!;
     expect(within(table).getByText("170")).toBeInTheDocument();
     expect(within(table).getByText("$1.23")).toBeInTheDocument();
+  });
+
+  it("marks a derived reset — no raw banner text, so the resolved time is shown — as inferred", () => {
+    render(
+      <LimitsTimeline
+        events={[
+          limitEvent({ kind: "weekly", reset_raw: null, resets_at: 1_788_275_400, resets_at_inferred: true }),
+        ]}
+      />
+    );
+    const table = screen.getByText("Table view").closest("details")!;
+    const row = within(table).getByText("Weekly").closest("tr")!;
+    const resetCell = within(row).getAllByRole("cell")[2];
+    expect(resetCell.textContent).toMatch(/\(inferred\)$/);
+    expect(resetCell.textContent).not.toBe("— (inferred)"); // a real resolved time, not the empty dash
+  });
+
+  it("never marks a reset read straight off the banner as inferred", () => {
+    render(<LimitsTimeline events={[limitEvent()]} />);
+    const table = screen.getByText("Table view").closest("details")!;
+    const row = within(table).getByText(/Session \(5h\)/).closest("tr")!;
+    const resetCell = within(row).getAllByRole("cell")[2];
+    expect(resetCell.textContent).toBe("11:50am (Europe/London)");
   });
 });
