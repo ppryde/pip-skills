@@ -6599,12 +6599,19 @@ button.trail-tag:focus-visible {
    Abandoned/Clear…) wrapping onto its own line beneath them when Controls
    is open. Grid-template-areas place each piece by NAME, independent of
    DOM/source order, so `.topbar__quarantine-banner` keeps its existing JSX
-   position untouched. Every row is `auto`-sized, so an absent one (the
-   banner) collapses to zero height instead of leaving a gap. This block
-   sits ahead of, and is fully independent from, the "Mobile layout layer"
-   below: `min-width: 721px` here and that layer's `max-width: 720px` can
-   never both match the same viewport, so mobile is untouched by any of
-   this. */
+   position untouched. `row-gap` applies between EVERY adjacent pair of row
+   tracks regardless of whether either side holds content — an `auto`-sized
+   empty banner track collapses to zero HEIGHT, but the gaps flanking it
+   don't collapse with it, so a naive fixed `row-gap` over a 4-row template
+   still doubles the visible row2→row3 distance whenever the banner is
+   absent (the default state of the app). The `:has()` pair below switches
+   the whole template — banner row included or dropped — so the no-banner
+   case only ever has 2 gaps (row1↔row2, row2↔row3) at exactly 0.75rem,
+   never the leftover 1.5rem a 3-gap/1-empty-track template would produce.
+   This block sits ahead of, and is fully independent from, the "Mobile
+   layout layer" below: `min-width: 721px` here and that layer's
+   `max-width: 720px` can never both match the same viewport, so mobile is
+   untouched by any of this. */
 @media (min-width: 721px) {
   .topbar {
     display: grid;
@@ -6618,7 +6625,6 @@ button.trail-tag:focus-visible {
     grid-template-areas:
       "row1      row1"
       "row2-left row2-right"
-      "banner    banner"
       "row3      row3";
     row-gap: 0.75rem;
     /* Row 2 in particular must read as ONE vertically-centred line even
@@ -6626,6 +6632,21 @@ button.trail-tag:focus-visible {
        vs. a single button) — `align-items` on the grid container centres
        every row's item(s) within that row's own track height. */
     align-items: center;
+  }
+
+  /* `quarantinedCount > 0` is the one case with a fifth row: re-declare the
+     template with the banner's own track spliced back in between row2 and
+     row3, rather than letting the base rule's fixed `row-gap` leave a
+     doubled gap around an always-present-but-usually-empty track (see the
+     block comment above). `:has(.topbar__quarantine-banner)` tracks the
+     banner's actual conditional render (TopBar.tsx) exactly — no JS/class
+     toggle needed. */
+  .topbar:has(.topbar__quarantine-banner) {
+    grid-template-areas:
+      "row1      row1"
+      "row2-left row2-right"
+      "banner    banner"
+      "row3      row3";
   }
 
   .topbar__identity {
@@ -6821,11 +6842,17 @@ button.trail-tag:focus-visible {
      that auto margin still has the whole row's slack to push into — both
      boxes ride along together, per the next rule), and `.topbar__actions-
      cluster` gets the next `order` plus a small NEGATIVE margin that
-     cancels `.topbar`'s own 0.75rem inter-item `gap` back down to the old
-     cluster's tighter internal 0.4rem — same two rendered pixels apart as
-     when Filters ▾ and Controls ▾ were DOM siblings inside one shared box. */
+     cancels `.topbar`'s own mobile inter-item gap back down to the old
+     cluster's tighter internal 0.4rem. Mobile overrides `.topbar`'s `gap`
+     shorthand to `0.4rem 0.5rem` (row-gap column-gap) two screens up, so
+     the horizontal gap this margin is cancelling is the 0.5rem COLUMN-gap,
+     not the desktop rule's 0.75rem — the offset is -0.1rem (0.5rem -
+     0.4rem), not -0.35rem (which was computed against the wrong gap value
+     and rendered only 0.15rem apart, tighter than intended). Same two
+     rendered pixels apart as when Filters ▾ and Controls ▾ were DOM
+     siblings inside one shared box. */
   .topbar__filters-toggle { order: 40; margin-left: auto; }
-  .topbar__actions-cluster { order: 41; margin-left: -0.35rem; }
+  .topbar__actions-cluster { order: 41; margin-left: -0.1rem; }
 
   /* Rare/optional (`quarantinedCount > 0`) — own full-width row right
      after identity, ahead of R2, so it never crowds into the repo/branch

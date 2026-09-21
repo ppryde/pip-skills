@@ -1347,3 +1347,54 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
     expect(ruleBodyFor(".topbar__branch-select")).toMatch(/min-width:\s*0/);
   });
 });
+
+// PR #81 review round: two CSS-geometry regressions jsdom's layout-free DOM
+// can't render its way into failing — no viewport/box-model math ever
+// executes there, so these assert on the styles.css SOURCE the same way the
+// describe block above does. The actual geometry (row-gap distance, mobile
+// gap width) was verified separately with real headless-Chrome measurements
+// (see PR #81's review-round comment) — these tests exist so a future edit
+// to either value regresses loudly here instead of only in a screenshot.
+describe("topbar desktop-row geometry regressions (PR #81 review round)", () => {
+  const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+
+  it("gives the no-banner desktop grid its own template with no banner row, so row-gap never doubles up", () => {
+    // The FIRST `grid-template-areas` in the file is the base `.topbar` rule
+    // inside the `@media (min-width: 721px)` block (the non-media `.topbar`
+    // rule earlier in the file has no grid-template-areas at all) — this is
+    // the template used whenever `quarantinedCount` is 0, i.e. almost always.
+    // A blanket `row-gap` applies between every pair of row tracks whether or
+    // not either side holds content, so a 4-row template with an always-
+    // empty "banner" track (this test's old, wrong shape) renders TWO gaps
+    // between row2 and row3 instead of one — see the block comment directly
+    // above this rule in styles.css for the full "why".
+    const [, areas] = css.match(/grid-template-areas:\s*([\s\S]*?);/) ?? [];
+    expect(areas, "expected a grid-template-areas declaration").toBeTruthy();
+    expect(areas).not.toMatch(/banner/);
+    expect(areas).toMatch(/row2-left\s+row2-right/);
+    expect(areas).toMatch(/row3\s+row3/);
+  });
+
+  it("splices the banner row back in only via :has(), scoped to when the banner actually renders", () => {
+    const hasRule = css.match(
+      /\.topbar:has\(\.topbar__quarantine-banner\)\s*\{([\s\S]*?)\}/
+    );
+    expect(hasRule, "expected a .topbar:has(.topbar__quarantine-banner) rule").not.toBeNull();
+    expect(hasRule![1]).toMatch(/banner\s+banner/);
+  });
+
+  it("cancels the mobile actions-cluster gap against the actual column-gap (0.5rem), not the desktop gap (0.75rem)", () => {
+    // Regression: this used to be -0.35rem, computed against `.topbar`'s
+    // DESKTOP `gap: 0.75rem` — but mobile overrides `gap` to the shorthand
+    // `0.4rem 0.5rem` (row-gap column-gap), so the real column-gap here is
+    // 0.5rem and the correct cancelling offset is -0.1rem (0.5rem - 0.4rem).
+    // The wrong value rendered a ~0.15rem gap instead of the intended
+    // 0.4rem — see TopBar.tsx/styles.css review notes for the measured px.
+    // `.topbar__actions-cluster` also has an unrelated DESKTOP rule earlier
+    // in the file (the atomic-wrapper `display:inline-flex` one) — anchoring
+    // on the full `order: 41` mobile declaration avoids matching that one.
+    const mobileRule = css.match(/\.topbar__actions-cluster\s*\{\s*order:\s*41;\s*margin-left:\s*(-?[\d.]+rem);\s*\}/);
+    expect(mobileRule, "expected the mobile .topbar__actions-cluster { order: 41; ... } rule").not.toBeNull();
+    expect(mobileRule![1]).toBe("-0.1rem");
+  });
+});
