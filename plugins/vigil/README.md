@@ -15,10 +15,11 @@ other plugin.
 
 ## What it does
 
-- `.vigil/` (git-ignored, per-repo) holds the watch state: an `active` marker,
-  the armed flag, a paused flag, a TTL cooldown, a TTL `handover-gate` (arms
-  the once-per-cycle trigger nudge), and the pending `handoff.md` (archived to
-  `.vigil/archive/` after it injects once).
+- `.claude/vigil/` (per-repo, self-ignored via its own `.gitignore` — never
+  touches the repo's own) holds the watch state: an `active` marker, the armed
+  flag, a paused flag, a TTL cooldown, a TTL `handover-gate` (arms the
+  once-per-cycle trigger nudge), and the pending `handoff.md` (archived to
+  `.claude/vigil/archive/` after it injects once).
 - `vigil begin` activates the watch (auto under tmux, else manual).
 - `vigil context` reports `ctx NN%` against a configured threshold.
 - A `UserPromptSubmit` hook (`vigil nudge-hook`) watches ctx% every turn

@@ -28,7 +28,7 @@ def test_overseer_rollup_feeds_vigil_handover(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    handoff = (tmp_path / ".vigil" / "handoff.md").read_text()
+    handoff = (tmp_path / ".claude" / "vigil" / "handoff.md").read_text()
     assert "WF-001" in handoff                    # the overseer rollup flowed through
     assert "preserve the auth spike" in handoff   # notes preserved
     assert "Session snapshot" not in handoff      # --no-snapshot honored
