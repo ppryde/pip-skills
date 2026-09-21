@@ -523,6 +523,20 @@ def parse_reset_time(reset_raw: str | None, hit_ts: float) -> float | None:
     return None
 
 
+def reset_zone_name(reset_raw: str | None) -> str | None:
+    """The IANA zone name a reset clause states — "Europe/London" from
+    "11:50am (Europe/London)" — or None when there is none to read.
+
+    Exposed for ``report.py``'s weekly-anchor inference, which needs the zone
+    a stored ``reset_raw`` was written in without re-deriving the whole
+    ``parse_reset_time`` computation.
+    """
+    if not reset_raw:
+        return None
+    match = _RESET_TZ_RE.match(reset_raw)
+    return match.group("tz") if match else None
+
+
 def _quota_resets_at(record: dict[str, Any]) -> float | None:
     """``quotaLimits.resetsAt`` — an exact epoch some client versions attach
     to the rejection, alongside (not instead of) the text banner. Preferred

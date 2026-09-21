@@ -207,6 +207,36 @@ def test_unknown_root_is_400(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
+def test_since_window(client: TestClient, root: Path, tmp_path: Path) -> None:
+    """`since` is the exact-instant sibling of `days` — an ISO date or
+    datetime, validated and passed through to chronicle's own `--since`
+    (which chronicle's own tests cover for correctness). The seeded session
+    is dated 2026-09-01; a `since` before it includes it, one after excludes
+    it, and a malformed value or one paired with `days` is refused."""
+    _seed(root, tmp_path, repo_root=str(root.resolve()))
+    assert client.get("/api/chronicle/summary?since=2020-01-01").json()["totals"]["sessions"] == 1
+    assert client.get("/api/chronicle/summary?since=2030-01-01").json()["totals"]["sessions"] == 0
+    assert len(client.get("/api/chronicle/sessions?since=2020-01-01").json()["sessions"]) == 1
+    assert client.get("/api/chronicle/sessions?since=2030-01-01").json()["sessions"] == []
+    assert client.get("/api/chronicle/summary?since=not-a-date").status_code == 400
+    assert client.get("/api/chronicle/summary?days=7&since=2020-01-01").status_code == 400
+    assert client.get("/api/chronicle/sessions?days=7&since=2020-01-01").status_code == 400
+
+
+def test_an_out_of_range_since_is_400_not_a_silent_empty_result(client: TestClient) -> None:
+    # `datetime.fromisoformat` alone accepts "9999-12-31" and "0001-01-01" —
+    # the overflow only surfaces converting a naive value to an aware one at
+    # the edge of what `datetime`/a POSIX timestamp can hold. Validating with
+    # `fromisoformat` alone let both through to chronicle's own `--since`,
+    # which chronicle exits 2 on; `run_chronicle` treats any non-zero exit as
+    # "no data", so the route quietly answered 200 with an empty result
+    # instead of 400 — indistinguishable from a real "nothing in this
+    # window" answer.
+    for value in ("9999-12-31", "0001-01-01"):
+        assert client.get(f"/api/chronicle/summary?since={value}").status_code == 400
+        assert client.get(f"/api/chronicle/sessions?since={value}").status_code == 400
+
+
 def test_session_detail(client: TestClient, root: Path, tmp_path: Path) -> None:
     _seed(root, tmp_path, repo_root=str(root.resolve()))
     detail = client.get("/api/chronicle/session/sess1").json()

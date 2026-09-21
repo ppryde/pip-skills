@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,13 +99,38 @@ def _since(days: int | None) -> float | None:
     return time.time() - days * 86400 if days else None
 
 
+def _parse_since(value: str) -> float:
+    """``--since`` into a Unix epoch: a bare date (``2026-09-01``) or a full
+    ISO 8601 datetime. A value with no UTC offset is assumed to already be in
+    the LOCAL zone — the same frame ``--days`` measures from via
+    ``time.time()`` — so a bare date means local midnight, not UTC midnight;
+    this is what lets the dashboard's "month to date" mean the 1st of the
+    month where the browser is, not where the server is.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()  # naive -> presumed local, per datetime's own contract
+        return parsed.timestamp()
+    except (ValueError, OverflowError):
+        # `fromisoformat` alone accepts a year like 9999 or 1 — the overflow
+        # only surfaces in `astimezone()`/`timestamp()`, converting a year at
+        # the edge of what `datetime` (or a POSIX timestamp) can hold into
+        # another timezone. Both stages fold into one invalid-input error.
+        raise argparse.ArgumentTypeError(f"invalid --since value: {value!r}") from None
+
+
+def _resolve_since(args: argparse.Namespace) -> float | None:
+    return args.since if args.since is not None else _since(args.days)
+
+
 def cmd_summary(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
         print(json.dumps({"totals": None}))
         return 0
     try:
-        out = report.summary(conn, repo_root=args.root, since=_since(args.days), branch=args.branch,
+        out = report.summary(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
                              account=args.account)
     finally:
         conn.close()
@@ -118,7 +144,7 @@ def cmd_limits(args: argparse.Namespace) -> int:
         print(json.dumps({"events": [], "by_kind": {}}))
         return 0
     try:
-        out = report.limits(conn, repo_root=args.root, since=_since(args.days), branch=args.branch,
+        out = report.limits(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
                             account=args.account)
     finally:
         conn.close()
@@ -132,7 +158,7 @@ def cmd_sessions(args: argparse.Namespace) -> int:
         print(json.dumps({"sessions": []}))
         return 0
     try:
-        rows = report.sessions(conn, repo_root=args.root, since=_since(args.days), limit=args.limit,
+        rows = report.sessions(conn, repo_root=args.root, since=_resolve_since(args), limit=args.limit,
                                branch=args.branch, account=args.account)
     finally:
         conn.close()
@@ -378,7 +404,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("summary", help="aggregate metrics (JSON)")
     p.add_argument("--root", default=None, help="scope to one main repo root")
-    p.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
+    window.add_argument("--since", type=_parse_since, default=None,
+                        help="only sessions active since this ISO date/datetime (a bare date is local "
+                             "midnight; a datetime with no UTC offset is assumed local)")
     p.add_argument("--branch", default=None,
                    help="only sessions whose last-seen git branch matches (session-level)")
     p.add_argument("--account", default=None,
@@ -387,14 +417,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("limits", help="deduplicated usage-limit hits, with tokens burned reaching each (JSON)")
     p.add_argument("--root", default=None)
-    p.add_argument("--days", type=int, default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
     p.add_argument("--branch", default=None)
     p.add_argument("--account", default=None)
     p.set_defaults(fn=cmd_limits)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)
-    p.add_argument("--days", type=int, default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
     p.add_argument("--branch", default=None)
     p.add_argument("--account", default=None)
     p.add_argument("--limit", type=int, default=200)

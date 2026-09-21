@@ -1,7 +1,9 @@
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from scripts import ingest, pricing, report, store
-from scripts.report import context_window_for, peak_context_pct
+from scripts.report import WeeklyAnchor, context_window_for, peak_context_pct
 from scripts.transcript import parse_ts
 
 from .conftest import TranscriptBuilder
@@ -1155,6 +1157,103 @@ class TestDerivedMetrics:
         assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)   # once, not twice
 
 
+class TestSessionWindows:
+    """`_session_windows_from_ts`: activity-anchored 5h windows, pure over a
+    list of turn timestamps (no DB) — see the module docstring on why a
+    SESSION window is not simply "reset minus 5h"."""
+
+    H = 3600
+
+    def test_a_single_turn_opens_one_window(self):
+        windows = report._session_windows_from_ts([0.0])
+        assert windows == [(0.0, 5 * self.H)]
+
+    def test_activity_within_5h_of_open_stays_in_one_window_even_across_a_lull(self):
+        # A 4h lull between the 2nd and 3rd turns — still under 5h since the
+        # window OPENED, so no new window opens.
+        turns = [0.0, self.H, 4.9 * self.H]
+        windows = report._session_windows_from_ts(turns)
+        assert windows == [(0.0, 5 * self.H)]
+
+    def test_a_5h_plus_gap_opens_a_new_window(self):
+        turns = [0.0, 6 * self.H]  # 6h gap, past the first window's close at 5h
+        windows = report._session_windows_from_ts(turns)
+        assert windows == [(0.0, 5 * self.H), (6 * self.H, 11 * self.H)]
+
+    def test_a_turn_exactly_at_close_opens_a_new_window(self):
+        # >= close, not > close: the window's own boundary is exclusive.
+        turns = [0.0, 5 * self.H]
+        windows = report._session_windows_from_ts(turns)
+        assert windows == [(0.0, 5 * self.H), (5 * self.H, 10 * self.H)]
+
+    def test_no_turns_is_no_windows(self):
+        assert report._session_windows_from_ts([]) == []
+
+
+class TestWindowForHit:
+    def test_finds_the_window_open_at_the_hit(self):
+        windows = [(0.0, 100.0), (200.0, 300.0)]
+        assert report._window_for_hit(windows, 250.0) == (200.0, 300.0)
+
+    def test_a_hit_inside_the_gap_between_windows_gets_the_earlier_one(self):
+        # No turn ever opened a window covering [100, 200) — the account was
+        # rejected without a successful turn in between. The best-known
+        # window is still the last one that had opened.
+        windows = [(0.0, 100.0), (200.0, 300.0)]
+        assert report._window_for_hit(windows, 150.0) == (0.0, 100.0)
+
+    def test_a_hit_before_every_known_window_is_unknowable(self):
+        windows = [(200.0, 300.0)]
+        assert report._window_for_hit(windows, 50.0) is None
+
+    def test_no_windows_at_all(self):
+        assert report._window_for_hit([], 50.0) is None
+
+
+class TestWeeklyAnchor:
+    def test_anchor_read_off_an_observed_reset(self):
+        # 2026-09-06 is a Sunday; 20:00 BST (Europe/London is on daylight
+        # time in September) = 19:00 UTC.
+        resets_at = datetime(2026, 9, 6, 19, 0, tzinfo=ZoneInfo("UTC")).timestamp()
+        anchor = report._weekly_anchor_from_reset(resets_at, "8pm (Europe/London)")
+        assert anchor == WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+
+    def test_no_zone_in_the_reset_text_falls_back_to_utc(self):
+        resets_at = datetime(2026, 9, 6, 20, 0, tzinfo=ZoneInfo("UTC")).timestamp()
+        anchor = report._weekly_anchor_from_reset(resets_at, None)
+        assert anchor == WeeklyAnchor(weekday=6, hour=20, minute=0, tz="UTC")
+
+    def test_nearest_reset_lands_on_the_correct_sunday(self):
+        anchor = WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+        # A Wednesday hit -> the Sunday later that same week.
+        hit = datetime(2026, 9, 2, 10, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        expected = datetime(2026, 9, 6, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        assert report._nearest_weekly_reset(anchor, hit) == expected
+
+    def test_nearest_reset_rolls_to_next_week_when_this_weeks_has_passed(self):
+        anchor = WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+        # A hit on the anchor's own weekday, after the anchor's time of day.
+        hit = datetime(2026, 9, 6, 21, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        expected = datetime(2026, 9, 13, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        assert report._nearest_weekly_reset(anchor, hit) == expected
+
+    def test_nearest_reset_across_a_dst_change_week(self):
+        # UK clocks spring forward on 2026-03-29 (the anchor's own weekday):
+        # a hit earlier that week, while still on GMT, must still resolve to
+        # 20:00 BST that Sunday — not 20:00 GMT (an hour off in UTC terms).
+        anchor = WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+        hit = datetime(2026, 3, 25, 10, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        expected = datetime(2026, 3, 29, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        assert report._nearest_weekly_reset(anchor, hit) == expected
+        # Sanity: that Sunday is indeed on daylight time (+01:00), so the
+        # naive "add 7 days in UTC" answer would have been an hour early.
+        assert datetime.fromtimestamp(expected, tz=ZoneInfo("Europe/London")).utcoffset().total_seconds() == 3600
+
+    def test_unknown_zone_falls_back_to_utc_rather_than_raising(self):
+        anchor = report._weekly_anchor_from_reset(1_000_000.0, "8pm (Nowhere/Fake)")
+        assert anchor.tz == "UTC"
+
+
 class TestLimits:
     SESSION_TEXT = "You've hit your session limit · resets 3pm (Europe/London)"
     WEEKLY_TEXT = "You've hit your weekly limit · resets 8pm (Europe/London)"
@@ -1246,10 +1345,12 @@ class TestLimits:
         assert out["events"] == []
 
     def test_tokens_to_limit_sums_the_account_wide_window(self, projects):
-        window_start = "2026-09-01T10:00:00.000Z"          # resets_at - 5h
+        window_start = "2026-09-01T10:00:00.000Z"          # opens the window this hit falls in
         hit_ts = "2026-09-01T14:55:00.000Z"
         b = TranscriptBuilder(projects, "-a", "s1")
-        b.turn("before", "2026-09-01T09:00:00.000Z")        # excluded: before window
+        # A PRIOR window (00:00-05:00): a 5h+ gap to `window_start` (10:00)
+        # means this turn opens its OWN window, wholly excluded from the sum.
+        b.turn("before", "2026-09-01T00:00:00.000Z")
         b.turn("in-window-1", window_start)                 # included: default usage
         b.turn("in-window-2", "2026-09-01T12:00:00.000Z",   # included: custom usage
               usage={"input_tokens": 10, "cache_read_input_tokens": 0,
@@ -1290,6 +1391,84 @@ class TestLimits:
         conn.commit()
         for event in report.limits(conn)["events"]:
             assert event["tokens_to_limit"] is None
+
+    def test_resets_at_is_not_inferred_when_the_banner_stated_one(self, projects):
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        event = report.limits(conn)["events"][0]
+        assert event["resets_at"] == resets_at
+        assert event["resets_at_inferred"] is False
+
+    def test_a_session_hit_with_no_stated_reset_infers_one_from_its_window(self, projects):
+        # A bare banner with no "resets ..." clause at all: `reset_raw` and
+        # the parsed `resets_at` are both None going in.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.turn("m1", "2026-09-01T10:00:00.000Z")  # opens a window: [10:00, 15:00)
+        b.limit_hit("h1", "2026-09-01T14:00:00.000Z", "You've hit your session limit")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        event = report.limits(conn)["events"][0]
+        assert event["reset_raw"] is None
+        assert event["resets_at"] == parse_ts("2026-09-01T15:00:00.000Z")  # window's close
+        assert event["resets_at_inferred"] is True
+        assert event["tokens_to_limit"] is not None
+
+    def test_a_stated_reset_disagreeing_with_the_window_is_kept_for_display_without_crashing(self, projects):
+        # The window this account's OWN turns imply closes at 15:00; the
+        # banner instead states 15:10 (the ~10-minute quantisation census has
+        # observed on real five-hour boundaries). The display value stays
+        # whatever the banner said; the token sum still starts from the
+        # window's OPEN, not from the stated reset.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.turn("m1", "2026-09-01T10:00:00.000Z")
+        b.limit_hit("h1", "2026-09-01T14:55:00.000Z", self.SESSION_TEXT,
+                   quotaLimits={"resetsAt": parse_ts("2026-09-01T15:10:00.000Z")})
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        event = report.limits(conn)["events"][0]
+        assert event["resets_at"] == parse_ts("2026-09-01T15:10:00.000Z")
+        assert event["resets_at_inferred"] is False
+        assert event["tokens_to_limit"]["window_start"] == parse_ts("2026-09-01T10:00:00.000Z")
+
+    def test_a_weekly_hit_with_no_stated_reset_infers_one_from_the_account_s_other_weekly_hits(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1")
+        # A prior weekly hit that DID parse, so the account has an anchor —
+        # Sunday 8pm Europe/London.
+        b.limit_hit("h1", "2026-08-30T10:00:00.000Z", self.WEEKLY_TEXT,  # 2026-08-30 was a Sunday
+                   quotaLimits={"resetsAt": datetime(2026, 8, 30, 19, 0, tzinfo=ZoneInfo("UTC")).timestamp()})
+        # A later weekly hit with a bare, reset-less banner.
+        b.limit_hit("h2", "2026-09-02T10:00:00.000Z", "You've hit your weekly limit")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        events = {e["hit_at"]: e for e in report.limits(conn)["events"]}
+        bare = events[parse_ts("2026-09-02T10:00:00.000Z")]
+        assert bare["resets_at_inferred"] is True
+        # The next Sunday 8pm after 2026-09-02 is 2026-09-06.
+        assert bare["resets_at"] == datetime(2026, 9, 6, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+
+    def test_a_weekly_hit_with_no_reset_and_no_anchor_stays_unknown(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, "You've hit your weekly limit").write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        event = report.limits(conn)["events"][0]
+        assert event["resets_at"] is None
+        assert event["resets_at_inferred"] is False
+        assert event["tokens_to_limit"] is None
 
     def test_repo_root_scopes_which_sessions_hits_are_read_from(self, projects):
         resets_at = parse_ts("2026-09-01T15:00:00.000Z")

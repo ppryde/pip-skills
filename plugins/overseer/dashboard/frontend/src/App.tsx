@@ -4,7 +4,7 @@ import TopBar from "./components/TopBar";
 import CopyablePath from "./components/CopyablePath";
 import ChunkLoadBoundary from "./components/ChunkLoadBoundary";
 import type { View } from "./components/TopBar";
-import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
+import ChronicleFilterBar, { type ChronicleTimeWindow } from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
 import type { ChronicleQuery } from "./api/types";
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
@@ -350,7 +350,7 @@ function App() {
   // local, no localStorage. The fetch is gated on the view so the board
   // never pays for chronicle polling. An unbegun repo's root is refused on
   // every scoped read, so its scope is pinned to "all" regardless.
-  const [chronicleDays, setChronicleDays] = useState<number | undefined>(30);
+  const [chronicleWindow, setChronicleWindow] = useState<ChronicleTimeWindow>(30);
   const [chronicleAllRepos, setChronicleAllRepos] = useState(false);
   // The Chronicle's branch is its OWN state, not the board's `activeBranch`:
   // its list spans every repo, and a branch chosen there would otherwise dim
@@ -363,7 +363,12 @@ function App() {
   const chronicleScope: ChronicleScope = chronicleScopeFor(selectedRepo, chronicleAllRepos);
   const chronicle = useChronicle(
     activeRoot,
-    { days: chronicleDays, scope: chronicleScope, branch: chronicleBranch },
+    {
+      days: typeof chronicleWindow === "number" ? chronicleWindow : undefined,
+      since: chronicleWindow === "month-to-date" ? "month-to-date" : undefined,
+      scope: chronicleScope,
+      branch: chronicleBranch,
+    },
     view === "chronicle",
     activeAccount
   );
@@ -388,7 +393,7 @@ function App() {
   );
   useEffect(() => {
     setChronicleBranchActivity(new Map());
-  }, [activeRoot, chronicleScope, chronicleDays]);
+  }, [activeRoot, chronicleScope, chronicleWindow]);
   useEffect(() => {
     if (chronicleBranch !== null) return;
     setChronicleBranchActivity((prev) => {
@@ -552,8 +557,8 @@ function App() {
           same "Filters ▾" collapse) — exactly one of the two renders. */}
       {view === "chronicle" && (
         <ChronicleFilterBar
-          days={chronicleDays}
-          onDays={setChronicleDays}
+          timeWindow={chronicleWindow}
+          onTimeWindow={setChronicleWindow}
           syncNote={chronicleSync.note}
           filtersOpen={filtersOpen}
         />

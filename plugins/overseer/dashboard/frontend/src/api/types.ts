@@ -733,9 +733,17 @@ export interface ChronicleLimitEvent {
   /** Epoch seconds of the latest session to log this event (useful when a
    * session kept retrying across a long-open window). */
   last_seen_at: number | null;
-  /** Epoch seconds the banner said it resets, when parseable. */
+  /** Epoch seconds this resets — the banner's own stated time when it
+   * parsed, otherwise DERIVED (a session limit's window close, or a weekly
+   * limit's anchor) — see `resets_at_inferred`. */
   resets_at: number | null;
-  /** The reset clause verbatim ("11:50am (Europe/London)"), before parsing. */
+  /** True when `resets_at` was derived rather than read off the banner
+   * itself (its text carried no reset, or none parsed) — an honest label
+   * for a value this call computed, not one Claude Code stated. */
+  resets_at_inferred: boolean;
+  /** The reset clause verbatim ("11:50am (Europe/London)"), before parsing;
+   * null when the banner stated none (whether or not `resets_at` was later
+   * inferred). */
   reset_raw: string | null;
   /** The full banner text, verbatim. */
   raw_text: string;
@@ -939,8 +947,16 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
 
 /** Query knobs shared by the summary and sessions reads. */
 export interface ChronicleQuery {
-  /** Only sessions active in the last N days; omit for all time. */
+  /** Only sessions active in the last N days; omit for all time. Mutually
+   * exclusive with `since` — `since` wins if both are somehow set (see
+   * `chronicleQuery` in api/client.ts). */
   days?: number;
+  /** The exact-instant sibling of `days` — today only `"month-to-date"`,
+   * resolved to an ISO datetime (local midnight on the 1st, carrying THIS
+   * browser's own UTC offset) at request time, so a poll tick that lands
+   * after a month boundary always names the new month rather than a value
+   * computed when the filter was first chosen. */
+  since?: "month-to-date";
   /** `"all"` drops the repo filter (account-wide); default scopes to the
    * active root exactly like `/api/board`. */
   scope?: "repo" | "all";

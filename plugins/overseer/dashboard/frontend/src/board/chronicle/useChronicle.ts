@@ -99,7 +99,7 @@ export function useChronicle(
   // fast new one, must not paint stale data over fresh (the same epoch
   // guard useBoard uses). Unmount just means no ticket is current.
   const requestIdRef = useRef(0);
-  const { days, scope, branch } = query;
+  const { days, since, scope, branch } = query;
 
   const load = useCallback(async () => {
     const id = ++requestIdRef.current;
@@ -107,10 +107,14 @@ export function useChronicle(
     setActiveAccount(account);
     setLoading(true);
     try {
+      // `since` (e.g. "month-to-date") is resolved to an actual instant
+      // inside getChronicleSummary/Sessions/Limits at THIS call, not before —
+      // so a poll tick that lands after a month boundary asks for the new
+      // month, never a value computed when the filter was first chosen.
       const [sum, list, lims] = await Promise.all([
-        getChronicleSummary({ days, scope, branch }),
-        getChronicleSessions({ days, scope, branch }),
-        getChronicleLimits({ days, scope, branch }),
+        getChronicleSummary({ days, since, scope, branch }),
+        getChronicleSessions({ days, since, scope, branch }),
+        getChronicleLimits({ days, since, scope, branch }),
       ]);
       if (id !== requestIdRef.current) return;
       setSummary(sum);
@@ -123,7 +127,7 @@ export function useChronicle(
     } finally {
       if (id === requestIdRef.current) setLoading(false);
     }
-  }, [root, days, scope, branch, account]);
+  }, [root, days, since, scope, branch, account]);
 
   useEffect(() => {
     const ref = requestIdRef;

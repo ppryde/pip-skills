@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -1072,6 +1073,35 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
         return ["--days", str(days)]
 
+    def _since_args(since: str | None) -> list[str]:
+        # The exact-instant sibling of `--days` (month-to-date needs the 1st
+        # of the month at local midnight, which no `--days` count expresses).
+        # Validated here — same shape chronicle's own `--since` parses, so a
+        # malformed value 400s before a subprocess is ever spawned — but the
+        # value itself is an argv element, never shell-interpolated.
+        if since is None:
+            return []
+        try:
+            parsed = datetime.fromisoformat(since)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            parsed.timestamp()
+        except (ValueError, OverflowError):
+            # `fromisoformat` alone accepts an out-of-range year like 9999 or
+            # 1 — the overflow only surfaces converting it to an aware
+            # datetime or a POSIX timestamp, exactly what chronicle's own
+            # `--since` does. Checked here too, or such a value would reach
+            # chronicle, which exits 2 on it, and `run_chronicle` treats any
+            # non-zero exit as "no data" — a quiet 200 indistinguishable
+            # from a real empty window instead of a 400.
+            raise HTTPException(status_code=400, detail="invalid since value") from None
+        return ["--since", since]
+
+    def _window_args(days: int | None, since: str | None) -> list[str]:
+        if days is not None and since is not None:
+            raise HTTPException(status_code=400, detail="days and since are mutually exclusive")
+        return [*_days_args(days), *_since_args(since)]
+
     def _branch_args(branch: str | None) -> list[str]:
         # A session-level filter on the branch chronicle last saw the session
         # on. Passed through as an exact match; chronicle does no globbing,
@@ -1162,34 +1192,35 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
 
     @app.get("/api/chronicle/summary")
     def chronicle_summary(root: str | None = None, scope: str | None = None,
-                          days: int | None = None, branch: str | None = None,
-                          account: str | None = None) -> dict[str, Any]:
-        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
-                *_account_args(account)]
+                          days: int | None = None, since: str | None = None,
+                          branch: str | None = None, account: str | None = None) -> dict[str, Any]:
+        args = ["summary", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account)]
         data = run_chronicle(*args)
         return data if data is not None else {"totals": None}
 
     @app.get("/api/chronicle/sessions")
     def chronicle_sessions(root: str | None = None, scope: str | None = None,
-                           days: int | None = None, branch: str | None = None,
-                           account: str | None = None, limit: int = 200) -> dict[str, Any]:
+                           days: int | None = None, since: str | None = None,
+                           branch: str | None = None, account: str | None = None,
+                           limit: int = 200) -> dict[str, Any]:
         if limit < 1 or limit > 2000:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
-        args = ["sessions", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
-                *_account_args(account), "--limit", str(limit)]
+        args = ["sessions", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account), "--limit", str(limit)]
         data = run_chronicle(*args)
         return data if data is not None else {"sessions": []}
 
     @app.get("/api/chronicle/limits")
     def chronicle_limits(root: str | None = None, scope: str | None = None,
-                         days: int | None = None, branch: str | None = None,
-                         account: str | None = None) -> dict[str, Any]:
+                         days: int | None = None, since: str | None = None,
+                         branch: str | None = None, account: str | None = None) -> dict[str, Any]:
         """Deduplicated usage-limit hits (see `chronicle limits`): the same
         real-world hit written into every session running at the time,
         folded into one event per (account, kind, reset), with the tokens
         burned reaching it when the window is known."""
-        args = ["limits", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
-                *_account_args(account)]
+        args = ["limits", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account)]
         data = run_chronicle(*args)
         return data if data is not None else {"events": [], "by_kind": {}}
 

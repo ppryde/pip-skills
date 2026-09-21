@@ -11,9 +11,11 @@ import sqlite3
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from scripts import pricing
+from scripts import pricing, transcript
 
 # A session with no recorded end (backfilled transcripts never see a
 # SessionEnd hook) counts as live only while it has been active this recently.
@@ -1217,12 +1219,6 @@ def _within(days: list[dict[str, Any]], since: float | None) -> list[dict[str, A
     return [d for d in days if d["day"] >= first]
 
 
-# The window a limit's stated reset time covers, so tokens-to-limit can be
-# summed back from it. Only the two Claude Code states a clean period for —
-# a monthly-spend or per-model limit's window is not documented anywhere the
-# transcript states, so those are left without a tokens figure rather than
-# guessed at.
-_LIMIT_WINDOW_SECONDS = {"session": 5 * 3600, "weekly": 7 * 86400}
 # How close together two hits with no parseable reset time must be to count
 # as the SAME event (see `_limit_group_key`).
 _LIMIT_BUCKET_SECONDS = 600
@@ -1240,30 +1236,149 @@ def _limit_group_key(row: sqlite3.Row) -> tuple[Any, ...]:
     to retry. Only a hit with no reset time at all falls back to bucketing
     ITS OWN timestamp, which is coarser and can in principle split one real
     event that happened to log with and without a parseable reset time; that
-    has not been observed in practice (see the ingest worker's report)."""
+    has not been observed in practice (see the ingest worker's report).
+
+    Deliberately the RAW stored `resets_at`, never a window-inferred one
+    (see `_session_windows`/`_weekly_anchor` below) — inference depends on
+    the account's OTHER activity, which is a report-time computation and
+    must not change what counts as "the same event"."""
     resets_at = row["resets_at"]
     marker = ("resets_at", resets_at) if resets_at is not None else ("bucket", _limit_bucket(row["ts"]))
     return (row["account_uuid"], row["kind"], row["model"], marker)
 
 
-def _tokens_to_limit(conn: sqlite3.Connection, account_uuid: str | None, kind: str,
-                     resets_at: float | None, hit_ts: float | None) -> dict[str, Any] | None:
-    """Token usage (and cost) an account burned reaching one deduped limit
-    event, summed across ALL its sessions and subagents from the window's
-    start to the moment it was hit.
+# --- usage-limit windows -----------------------------------------------------
+# The banner states only a RESET time, never when the account's usage window
+# OPENED — and the two limits that carry a documented period don't share one
+# shape:
+#
+# - A 5-hour SESSION window is ACTIVITY-anchored: Claude Code opens one on the
+#   account's first turn after the previous window's close, and it runs
+#   exactly 5h from THAT turn — not from a clock boundary, and not stretched
+#   by continued activity. So its start is a fact about when the account
+#   worked, recovered here by walking every turn the account ever made (see
+#   `_session_windows`), not by subtracting 5h from the reset.
+# - A WEEKLY window is the opposite: a FIXED weekly clock boundary (a weekday
+#   + local time) that repeats regardless of activity. Its start IS simply
+#   `resets_at - 7d`; the only thing worth inferring is the reset itself, for
+#   a hit whose own banner didn't parse one (see `_weekly_anchor`).
+#
+# Monthly-spend and per-model limits have no documented window at all, so
+# neither gets one here.
 
-    An APPROXIMATION, and a documented one: the banner states only the RESET
-    time, never when the window opened, so the start is inferred as
-    `resets_at` minus the limit's fixed period (5h / 7d) — assuming the
-    window opened the instant it could have, rather than whenever usage
-    actually began inside it. None for a limit whose window this cannot
-    infer (see `_LIMIT_WINDOW_SECONDS`), or for an event missing the account,
-    the reset time, or the hit time needed to bound the sum.
+_SESSION_WINDOW_SECONDS = 5 * 3600
+_WEEKLY_WINDOW_SECONDS = 7 * 86400
+
+
+def _session_windows_from_ts(timestamps: Iterable[float]) -> list[tuple[float, float]]:
+    """Every 5-hour SESSION window an account opened, from its own turn
+    timestamps in ASCENDING order.
+
+    A window opens at the first timestamp at or after the previous window's
+    close (`open + 5h`) — including the very first timestamp seen at all,
+    which makes that first window best-effort: nothing here can know
+    whether activity preceded the data. Activity inside an open window never
+    extends it — the close is fixed the instant the window opens, which is
+    what "activity-anchored, not clock-anchored" means: WHEN it opens
+    depends on activity, how LONG it lasts does not.
     """
-    window = _LIMIT_WINDOW_SECONDS.get(kind)
-    if not account_uuid or window is None or resets_at is None or hit_ts is None:
-        return None
-    window_start = resets_at - window
+    windows: list[tuple[float, float]] = []
+    close: float | None = None
+    for ts in timestamps:
+        if close is None or ts >= close:
+            close = ts + _SESSION_WINDOW_SECONDS
+            windows.append((ts, close))
+    return windows
+
+
+def _session_windows(conn: sqlite3.Connection, account_uuid: str) -> list[tuple[float, float]]:
+    """`_session_windows_from_ts` over one account's own turns — every
+    session and subagent it owns, across the account's WHOLE history (a
+    window can open on a turn from long before the current report's `since`
+    filter, so this is deliberately unfiltered by it)."""
+    rows = conn.execute(
+        """SELECT t.ts FROM turns t JOIN sessions s ON s.session_id = t.session_id
+           WHERE s.account_uuid = ? AND t.ts IS NOT NULL ORDER BY t.ts""",
+        (account_uuid,),
+    )
+    return _session_windows_from_ts(r[0] for r in rows)
+
+
+def _window_for_hit(windows: list[tuple[float, float]], hit_ts: float) -> tuple[float, float] | None:
+    """The session window open when `hit_ts` landed: the last one opened at
+    or before it. `windows` is ascending by open, so this is a linear scan
+    that stops at the first window opened AFTER the hit. None if the hit
+    precedes every known window (turns before it are unknowable) or the
+    account has none."""
+    found: tuple[float, float] | None = None
+    for open_at, close_at in windows:
+        if open_at > hit_ts:
+            break
+        found = (open_at, close_at)
+    return found
+
+
+@dataclass(frozen=True)
+class WeeklyAnchor:
+    """A weekly reset's fixed schedule: a weekday (Monday=0 .. Sunday=6) and
+    a local time, in a named zone. Deliberately NOT hardcoded anywhere in
+    this module — every account or organisation can run a different
+    schedule, and this is a public repo — so it is always inferred from an
+    OBSERVED reset (see `_weekly_anchor`)."""
+    weekday: int
+    hour: int
+    minute: int
+    tz: str
+
+
+def _weekly_anchor_from_reset(resets_at: float, reset_raw: str | None) -> WeeklyAnchor:
+    """A `WeeklyAnchor` read off one observed weekly reset. The zone comes
+    from the banner's own text when it parsed (`reset_raw`); an unstated or
+    unrecognised zone falls back to UTC — still a fixed, well-defined
+    schedule, just not verified against the account's own stated zone."""
+    zone_name = transcript.reset_zone_name(reset_raw) or "UTC"
+    try:
+        tz: Any = ZoneInfo(zone_name)
+    except ZoneInfoNotFoundError:
+        tz, zone_name = timezone.utc, "UTC"
+    dt = datetime.fromtimestamp(resets_at, tz=tz)
+    return WeeklyAnchor(weekday=dt.weekday(), hour=dt.hour, minute=dt.minute, tz=zone_name)
+
+
+def _weekly_anchor(conn: sqlite3.Connection, account_uuid: str) -> WeeklyAnchor | None:
+    """The account's weekly schedule, inferred from its MOST RECENT weekly
+    hit that carried a readable reset — the schedule an org is on now, if it
+    has ever changed. None when the account has no such hit to infer from."""
+    row = conn.execute(
+        """SELECT h.resets_at, h.reset_raw FROM limit_hits h JOIN sessions s ON s.session_id = h.session_id
+           WHERE s.account_uuid = ? AND h.kind = 'weekly' AND h.resets_at IS NOT NULL
+           ORDER BY h.ts DESC LIMIT 1""",
+        (account_uuid,),
+    ).fetchone()
+    return None if row is None else _weekly_anchor_from_reset(row[0], row[1])
+
+
+def _nearest_weekly_reset(anchor: WeeklyAnchor, hit_ts: float) -> float:
+    """The anchor's next occurrence at or after `hit_ts` — used to infer a
+    weekly hit's own reset when its banner's text carried none."""
+    tz = ZoneInfo(anchor.tz)
+    dt = datetime.fromtimestamp(hit_ts, tz=tz)
+    days_ahead = (anchor.weekday - dt.weekday()) % 7
+    candidate = (dt + timedelta(days=days_ahead)).replace(
+        hour=anchor.hour, minute=anchor.minute, second=0, microsecond=0)
+    if candidate < dt:
+        candidate += timedelta(days=7)
+    return candidate.timestamp()
+
+
+def _sum_account_tokens(conn: sqlite3.Connection, account_uuid: str,
+                        window_start: float, window_end: float) -> dict[str, Any]:
+    """Token usage (and cost) an account burned — across ALL its sessions and
+    subagents — in `[window_start, window_end]`. The shared arithmetic behind
+    every `tokens_to_limit` figure; callers derive the window bounds
+    themselves (see `_session_windows`/`_weekly_anchor` above), since a
+    session and a weekly limit derive theirs completely differently.
+    """
     totals: dict[str, Any] = {"input_tokens": 0, "cache_read_tokens": 0,
                               "cache_creation_tokens": 0, "output_tokens": 0}
     cost = 0.0
@@ -1279,7 +1394,7 @@ def _tokens_to_limit(conn: sqlite3.Connection, account_uuid: str | None, kind: s
            FROM turns t JOIN sessions s ON s.session_id = t.session_id
            WHERE s.account_uuid = ? AND t.ts >= ? AND t.ts <= ?
            GROUP BY t.model""",
-        (account_uuid, window_start, hit_ts),
+        (account_uuid, window_start, window_end),
     ):
         for key in ("input_tokens", "cache_read_tokens", "cache_creation_tokens", "output_tokens"):
             totals[key] += int(r[key])
@@ -1295,6 +1410,54 @@ def _tokens_to_limit(conn: sqlite3.Connection, account_uuid: str | None, kind: s
     return totals
 
 
+def _limit_window_and_tokens(
+    conn: sqlite3.Connection, *, kind: str, account_uuid: str | None, hit_at: float | None,
+    resets_at: float | None, session_windows: dict[str, list[tuple[float, float]]],
+    weekly_anchors: dict[str, WeeklyAnchor | None],
+) -> tuple[float | None, bool, dict[str, Any] | None]:
+    """`(resets_at, resets_at_inferred, tokens_to_limit)` for one deduped
+    event. `session_windows`/`weekly_anchors` are per-account caches the
+    caller (`limits`) fills lazily and reuses across every event of one
+    account — deriving either is one query over that account's whole turn
+    history, and a window with several events sharing one reset must not
+    pay for it more than once.
+
+    SESSION: the window containing the hit is looked up (never recomputed
+    from the reset), and tokens are summed from its OPEN. A message's own
+    stated reset is trusted for DISPLAY exactly as parsed — Claude Code's
+    banner and this account's window can disagree by the ~10-minute
+    quantisation census has observed on real five-hour boundaries, and that
+    is expected, not an error to raise over.
+
+    WEEKLY: the reset itself IS the window's end (`- 7d` is its start), so
+    there is nothing to "look up" — only to infer when the banner's own text
+    carried none, from the account's other weekly hits.
+    """
+    if not account_uuid or hit_at is None:
+        return resets_at, False, None
+    if kind == "session":
+        windows = session_windows.setdefault(account_uuid, _session_windows(conn, account_uuid))
+        window = _window_for_hit(windows, hit_at)
+        if window is None:
+            return resets_at, False, None
+        inferred = resets_at is None
+        effective_resets_at = window[1] if inferred else resets_at
+        return effective_resets_at, inferred, _sum_account_tokens(conn, account_uuid, window[0], hit_at)
+    if kind == "weekly":
+        inferred = False
+        if resets_at is None:
+            if account_uuid not in weekly_anchors:
+                weekly_anchors[account_uuid] = _weekly_anchor(conn, account_uuid)
+            anchor = weekly_anchors[account_uuid]
+            if anchor is None:
+                return None, False, None
+            resets_at = _nearest_weekly_reset(anchor, hit_at)
+            inferred = True
+        tokens = _sum_account_tokens(conn, account_uuid, resets_at - _WEEKLY_WINDOW_SECONDS, hit_at)
+        return resets_at, inferred, tokens
+    return resets_at, False, None
+
+
 def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: float | None = None,
            branch: str | None = None, account: str | None = None) -> dict[str, Any]:
     """Deduplicated usage-limit hits, most recent first, plus a per-kind count.
@@ -1304,7 +1467,13 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
     `limit_hits` are grouped here into distinct EVENTS — one per
     (account, kind, model, reset) — each carrying how many sessions saw it
     and, when the window is known, the tokens burned reaching it (see
-    `_tokens_to_limit`).
+    `_limit_window_and_tokens`).
+
+    Entirely DB-reads: nothing here re-opens a transcript. Window derivation
+    for a SESSION event walks the account's own `turns` (indexed on `ts`;
+    `sessions.account_uuid` is what makes "the account's turns" a query
+    rather than a re-parse), so it costs one ordered scan per DISTINCT
+    account across this whole call (cached below), not one per event.
 
     The filters are session-scoped like every other read here (`repo_root`,
     `branch`, `account` narrow WHICH SESSIONS' hits are considered; `since`
@@ -1337,22 +1506,35 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
             g["last_ts"] = ts if g["last_ts"] is None else max(g["last_ts"], ts)
         g["sessions"].add(r["session_id"])
 
-    events = [
-        {
+    # Per-account caches so a window/anchor derivation — one ordered scan of
+    # that account's whole turn history — is paid at most once per account
+    # for this whole call, however many of its events need it.
+    session_windows: dict[str, list[tuple[float, float]]] = {}
+    weekly_anchors: dict[str, WeeklyAnchor | None] = {}
+
+    events = []
+    for g in groups.values():
+        resets_at, inferred, tokens = _limit_window_and_tokens(
+            conn, kind=g["kind"], account_uuid=g["account_uuid"], hit_at=g["first_ts"],
+            resets_at=g["resets_at"], session_windows=session_windows, weekly_anchors=weekly_anchors,
+        )
+        events.append({
             "account_uuid": g["account_uuid"],
             "kind": g["kind"],
             "model": g["model"],
             "hit_at": g["first_ts"],
             "last_seen_at": g["last_ts"],
-            "resets_at": g["resets_at"],
+            "resets_at": resets_at,
+            # True when the banner's own text (or `quotaLimits`) carried no
+            # reset at all and this is instead the account's derived window
+            # close / weekly anchor — an honest label for a display value
+            # this call computed rather than one Claude Code stated.
+            "resets_at_inferred": inferred,
             "reset_raw": g["reset_raw"],
             "raw_text": g["raw_text"],
             "sessions": len(g["sessions"]),
-            "tokens_to_limit": _tokens_to_limit(
-                conn, g["account_uuid"], g["kind"], g["resets_at"], g["first_ts"]),
-        }
-        for g in groups.values()
-    ]
+            "tokens_to_limit": tokens,
+        })
     # `since` is session-scoped in `_session_filter` above (a session with
     # ANY in-window activity keeps every hit it ever logged); this narrows to
     # hits actually inside the window, the same fix `_within` applies to a

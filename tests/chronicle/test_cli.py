@@ -1,9 +1,13 @@
+import argparse
 import json
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.cli import build_parser, main
+import pytest
+from scripts.cli import _parse_since, build_parser, main
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "chronicle"
 T0 = "2026-09-01T10:00:00.000Z"
@@ -319,6 +323,85 @@ class TestCli:
         assert main(["ingest", "--transcript", str(path), "--session-id", "named"]) == 0
         assert json.loads(capsys.readouterr().out)["lines"] == 1
         assert main(["ingest", "--transcript", str(path.with_name("missing.jsonl"))]) == 1
+
+
+class TestSince:
+    """`--since` is the exact-instant sibling of `--days`: an ISO date or
+    datetime, mutually exclusive with it, feeding the same `since` epoch
+    `report.summary`/`report.sessions` already take. The dashboard uses it
+    for "month to date", which `--days` can only approximate."""
+
+    def test_a_bare_date_is_local_midnight_not_utc(self, monkeypatch):
+        # The owner's ask was explicit: local midnight, not a UTC or
+        # `days`-shaped approximation. Pinning TZ to a non-UTC zone with a
+        # known offset is the only way to catch a `--since 2026-09-01` that
+        # silently meant UTC midnight instead.
+        monkeypatch.setenv("TZ", "America/New_York")
+        time.tzset()
+        try:
+            epoch = _parse_since("2026-09-01")
+        finally:
+            monkeypatch.delenv("TZ", raising=False)
+            time.tzset()
+        # 2026-09-01 is in EDT (UTC-4): local midnight is 04:00 UTC.
+        assert datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat() == "2026-09-01T04:00:00+00:00"
+
+    def test_a_full_iso_datetime_with_offset_is_used_as_is(self):
+        epoch = _parse_since("2026-09-01T00:00:00-04:00")
+        assert datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat() == "2026-09-01T04:00:00+00:00"
+
+    def test_an_unparseable_since_raises(self):
+        with pytest.raises(argparse.ArgumentTypeError):
+            _parse_since("not-a-date")
+
+    def test_an_out_of_range_since_raises_the_same_error_not_a_crash(self):
+        # `datetime.fromisoformat` happily parses "9999-12-31" and
+        # "0001-01-01" — the overflow only surfaces later, in `astimezone()`
+        # or `.timestamp()` (both raise plain ValueError, on some platforms
+        # OverflowError), converting a naive local year at the edge of what
+        # `datetime` can hold in another timezone or as a POSIX timestamp.
+        # Uncaught, that ValueError would crash the CLI instead of failing
+        # cleanly as invalid input.
+        for value in ("9999-12-31", "0001-01-01"):
+            with pytest.raises(argparse.ArgumentTypeError):
+                _parse_since(value)
+
+    def test_since_scopes_summary_and_sessions(self, builder, capsys):
+        builder.prompt("u1", T0).turn("m1", T0, tools=["Edit"]).write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+
+        assert main(["summary", "--since", "2020-01-01"]) == 0
+        assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 1
+        assert main(["summary", "--since", "2030-01-01"]) == 0
+        assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 0
+
+        assert main(["sessions", "--since", "2020-01-01"]) == 0
+        assert len(json.loads(capsys.readouterr().out)["sessions"]) == 1
+        assert main(["sessions", "--since", "2030-01-01"]) == 0
+        assert json.loads(capsys.readouterr().out)["sessions"] == []
+
+    def test_since_and_days_are_mutually_exclusive(self, capsys):
+        # A parser-level rejection (argparse's own mutually-exclusive-group
+        # check), not one of chronicle's `_fail` calls — argparse exits the
+        # process directly rather than returning, same exit code either way.
+        with pytest.raises(SystemExit) as exc:
+            main(["summary", "--days", "7", "--since", "2026-09-01"])
+        assert exc.value.code == 2
+        assert "not allowed" in capsys.readouterr().err
+
+    def test_an_unparseable_since_is_invalid_input_not_a_crash(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["summary", "--since", "not-a-date"])
+        assert exc.value.code == 2
+        assert "invalid --since value" in capsys.readouterr().err
+
+    def test_an_out_of_range_since_is_invalid_input_not_a_crash(self, capsys):
+        for value in ("9999-12-31", "0001-01-01"):
+            with pytest.raises(SystemExit) as exc:
+                main(["summary", "--since", value])
+            assert exc.value.code == 2
+            assert "invalid --since value" in capsys.readouterr().err
 
 
 class TestErrorContract:

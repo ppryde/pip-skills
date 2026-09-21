@@ -317,6 +317,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in present:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # `account_uuid` is a MIGRATED column (added above, not in `_SCHEMA`'s own
+    # `CREATE TABLE sessions`), so its index has to be created here, after the
+    # ALTER that guarantees the column exists — naming it in `_SCHEMA` would
+    # fail outright on a brand-new store, whose table is created without it.
+    # `report._session_windows` scans a single account's turns via this same
+    # join (`turns JOIN sessions ON ... WHERE sessions.account_uuid = ?`), so
+    # this is what keeps that scan from also being a full scan of `sessions`.
+    conn.execute("CREATE INDEX IF NOT EXISTS sessions_account_uuid ON sessions(account_uuid)")
 
 
 def config_dir() -> Path:

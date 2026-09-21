@@ -19,7 +19,7 @@ vi.mock("../../api/client", async (importOriginal) => {
 import { useState } from "react";
 import * as client from "../../api/client";
 import { useChronicle, useChronicleSync } from "../../board/chronicle/useChronicle";
-import ChronicleFilterBar from "./ChronicleFilterBar";
+import ChronicleFilterBar, { type ChronicleTimeWindow } from "./ChronicleFilterBar";
 import ChroniclePage from "./ChroniclePage";
 
 /** App.tsx's wiring in miniature: the filter state, the fetch, the sync
@@ -28,11 +28,13 @@ import ChroniclePage from "./ChroniclePage";
  * — the Sync, All-repos and branch controls here stand in for the top bar's
  * (TopBarChronicle.test.tsx covers those). */
 function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repoScopable: boolean }) {
-  const [days, setDays] = useState<number | undefined>(30);
+  const [timeWindow, setTimeWindow] = useState<ChronicleTimeWindow>(30);
   const [allRepos, setAllRepos] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);
   const scope = allRepos || !repoScopable ? "all" : "repo";
-  const data = useChronicle(activeRoot, { days, scope, branch }, true);
+  const days = typeof timeWindow === "number" ? timeWindow : undefined;
+  const since = timeWindow === "month-to-date" ? ("month-to-date" as const) : undefined;
+  const data = useChronicle(activeRoot, { days, since, scope, branch }, true);
   const { sync, syncing, note } = useChronicleSync(data.refresh);
   return (
     <>
@@ -45,7 +47,7 @@ function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repo
       <button type="button" onClick={() => setBranch("feat/x")}>
         Branch feat/x
       </button>
-      <ChronicleFilterBar days={days} onDays={setDays} syncNote={note} filtersOpen />
+      <ChronicleFilterBar timeWindow={timeWindow} onTimeWindow={setTimeWindow} syncNote={note} filtersOpen />
       <ChroniclePage
         summary={data.summary}
         sessions={data.sessions}
@@ -302,6 +304,32 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Branch feat/x" }));
     await waitFor(() =>
       expect(mocked.getChronicleSessions).toHaveBeenLastCalledWith({ days: undefined, scope: "all", branch: "feat/x" })
+    );
+  });
+
+  it("Month to date sends since instead of days, and All time clears it again", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Month to date" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({
+        days: undefined,
+        since: "month-to-date",
+        scope: "repo",
+        branch: null,
+      })
+    );
+    expect(screen.getByRole("button", { name: "Month to date" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "30 days" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({
+        days: 30,
+        since: undefined,
+        scope: "repo",
+        branch: null,
+      })
     );
   });
 
