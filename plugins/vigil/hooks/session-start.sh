@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Vigil SessionStart hook — re-injects the handover after /clear (or on launch).
 # Fires for matchers startup|clear. Exits 0 always; its additionalContext stdout
-# is emitted before the trap fires. Silent unless the cwd's .vigil/ is active
-# with a pending handover.
+# is emitted before the trap fires. Silent unless the cwd's .claude/vigil/ is
+# active with a pending handover.
 trap 'exit 0' EXIT
 
 input="$(cat)"

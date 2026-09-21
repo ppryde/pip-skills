@@ -287,6 +287,31 @@ export interface ReposResponse {
   repos: RepoEntry[];
 }
 
+/** One account the selector can scope to (WF-116) — the union of every
+ * account uuid chronicle has recorded a session under and every watched
+ * Claude config dir's CURRENT login. `plan`/`config_dirs` come only from a
+ * live login: a uuid chronicle knows but no dir is currently logged into
+ * has `plan: null` and `config_dirs: []`, and is still selectable. No
+ * email or name ever appears — the backend reads a whitelist only. */
+export interface AccountEntry {
+  account_uuid: string;
+  /** First 8 characters of `account_uuid`, for a compact selector label. */
+  short_uuid: string;
+  /** Raw plan value (e.g. "claude_max") — render through `planLabel`
+   * (board/chronicle/plan.ts), never shown raw. */
+  plan: string | null;
+  /** Every watched config dir currently logged into this account — used to
+   * scope live census sessions (`/api/sessions?account=`) to it. */
+  config_dirs: string[];
+  /** Sessions chronicle has recorded under this uuid. */
+  sessions: number;
+  last_activity_at: number | null;
+}
+
+export interface AccountsResponse {
+  accounts: AccountEntry[];
+}
+
 /** POST /api/repo/clear response — the dashboard's clear-data action
  * (per-repo cards-only or full-repo destructive clear, always preceded by
  * a git-trackable backup). `backup_path` is null on a `noop` clear (nothing
@@ -672,6 +697,66 @@ export interface ChronicleJump {
   landed_chars: number;
 }
 
+/** A usage-limit kind, as `chronicle limits` classifies the banner Claude
+ * Code writes into the transcript. `"other"` is an unrecognised wording —
+ * kept, never dropped, so a future banner change still shows up. */
+export type ChronicleLimitKind = "session" | "weekly" | "monthly_spend" | "model" | "other";
+
+/** Token usage (and cost) an account burned reaching one deduped limit event,
+ * summed across all its sessions and subagents from the window's inferred
+ * start to the moment it was hit. `null` on the event itself when the window
+ * can't be inferred (see `ChronicleLimitKind` — only "session" and "weekly"
+ * have a documented window) or there's no account to sum against. */
+export interface ChronicleLimitTokens {
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  unpriced_turns: number;
+  /** Epoch seconds: `resets_at` minus the limit's fixed period. */
+  window_start: number;
+}
+
+/** One deduplicated real-world limit hit — Claude Code writes the SAME hit
+ * into every session and subagent running at the time, folded here into one
+ * event per (account, kind, model), clustering rows that landed close
+ * together in time (so a hit logged with a reset in one session and without
+ * in another still merges). */
+export interface ChronicleLimitEvent {
+  account_uuid: string | null;
+  kind: ChronicleLimitKind;
+  /** The model named in a "reached your <model> limit" banner; null for
+   * every other kind. */
+  model: string | null;
+  /** Epoch seconds of the earliest session to log this event. */
+  hit_at: number | null;
+  /** Epoch seconds of the latest session to log this event (useful when a
+   * session kept retrying across a long-open window). */
+  last_seen_at: number | null;
+  /** Epoch seconds this resets — the banner's own stated time when it
+   * parsed, otherwise DERIVED (a session limit's window close, or a weekly
+   * limit's anchor) — see `resets_at_inferred`. */
+  resets_at: number | null;
+  /** True when `resets_at` was derived rather than read off the banner
+   * itself (its text carried no reset, or none parsed) — an honest label
+   * for a value this call computed, not one Claude Code stated. */
+  resets_at_inferred: boolean;
+  /** The reset clause verbatim ("11:50am (Europe/London)"), before parsing;
+   * null when the banner stated none (whether or not `resets_at` was later
+   * inferred). */
+  reset_raw: string | null;
+  /** How many distinct sessions logged this same event. */
+  sessions: number;
+  tokens_to_limit: ChronicleLimitTokens | null;
+}
+
+export interface ChronicleLimitsResponse {
+  events: ChronicleLimitEvent[];
+  by_kind: Partial<Record<ChronicleLimitKind, number>>;
+}
+
 export interface ChronicleSummary {
   /** `null` when chronicle has no store yet (or the plugin is absent). */
   totals: ChronicleTotals | null;
@@ -862,12 +947,177 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
 
 /** Query knobs shared by the summary and sessions reads. */
 export interface ChronicleQuery {
-  /** Only sessions active in the last N days; omit for all time. */
+  /** Only sessions active in the last N days; omit for all time. Mutually
+   * exclusive with `since` — `since` wins if both are somehow set (see
+   * `chronicleQuery` in api/client.ts). */
   days?: number;
+  /** The exact-instant sibling of `days` — today only `"month-to-date"`,
+   * resolved to an ISO datetime (local midnight on the 1st, carrying THIS
+   * browser's own UTC offset) at request time, so a poll tick that lands
+   * after a month boundary always names the new month rather than a value
+   * computed when the filter was first chosen. */
+  since?: "month-to-date";
   /** `"all"` drops the repo filter (account-wide); default scopes to the
    * active root exactly like `/api/board`. */
   scope?: "repo" | "all";
   /** Only sessions chronicle last saw on this git branch (session-level: a
    * session that switched branches counts wholly where it ended up). */
   branch?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Almoner — the optional inflow-triage plugin (mail / Linear / Slack).
+//
+// Shaped like the chronicle types above because the plugin is optional in the
+// same way: `installed: false` is a normal answer, not an error, and every
+// read degrades to an empty digest rather than failing the page.
+// ---------------------------------------------------------------------------
+
+/** What a source is asking of you. `null` until the judging pass runs — the
+ * CLI alone fetches and filters, and a digest with no skill behind it is
+ * unranked but still usable (that is the boundary test). `"reconcile"` is
+ * the odd one out: nobody sent it, it is derived by joining two sources. */
+export type AlmonerAsks =
+  | "review" | "reply" | "rsvp" | "acknowledge" | "verify" | "reconcile" | "fyi";
+
+/** One message inside a collapsed conversation, for the expanded view.
+ *
+ * These ride INLINE in the digest rather than being fetched when a row is
+ * opened: at real volumes the payload is trivial, and a per-expand fetch
+ * would mean a fresh headless agent run every time you opened a row.
+ *
+ * They ARE persisted. The original design cached nothing a source said; that
+ * non-goal was dropped deliberately (see the 2026-09-13 design doc) so the
+ * page can render instantly from the last gather and history can be browsed.
+ * The consequence is that stored content may diverge from the source — a
+ * historical row is a snapshot stamped with when it was gathered, never a
+ * live view. */
+export interface AlmonerMessage {
+  who?: string;
+  text: string;
+  /** ISO 8601. */
+  at?: string;
+  /** Permalink to this individual message in the source app. */
+  url?: string;
+}
+
+/** One row of the digest: a CONVERSATION, never a single message.
+ *
+ * The conversation grain is the finding that Slack forced — a run of five
+ * messages from one person inside a minute is one thing to deal with, and
+ * five rows of it is noise you would have to re-triage by hand. */
+export interface AlmonerItem {
+  /** Stable across refreshes and across transports; used for dedup. Shaped
+   * `<source>:<conversation>` so the same event seen twice collapses. */
+  id: string;
+  source: string;
+  context: string;
+  /** Who and where — "Group DM · Rhona, Tomas", not the last message's text. */
+  title: string;
+  /** The newest inbound message — what the triage decision is made on. */
+  excerpt?: string;
+  /** How many messages collapsed into this row. */
+  count?: number;
+  /** The collapsed messages, oldest first — what the row expands to show.
+   * Absent for sources with no message grain (a Linear notification, a
+   * derived reconcile item), which therefore do not expand. */
+  messages?: AlmonerMessage[];
+  who?: string;
+  /** ISO 8601. Absent on derived items (`asks: "reconcile"`), which nobody sent. */
+  arrived?: string;
+  due?: string | null;
+  /** A ROLLUP of several machine-written arrivals of one kind — "3 delivery
+   * updates", "4 newsletters" — rather than a conversation.
+   *
+   * A real mailbox scan found eighteen of twenty threads were machine-written.
+   * Dropping them silently loses information ("did my parcel ship?"); listing
+   * them individually drowns the two that a person wrote. Folding each
+   * category into one collapsed row keeps both: the day stays readable, and
+   * nothing has actually gone. `messages` carries the individual items, so it
+   * expands with exactly the same control as a conversation.
+   *
+   * REQUIREMENT on a bundled row: its `excerpt` must name the SUBJECTS, not
+   * restate the count. "3 security alerts" over "3 security alerts" is a row
+   * you must open every time, which defeats the fold; "mail account: new
+   * sign-in, and an app granted access · photo service: login code" can be
+   * dismissed at a glance. Which account, which order, which parcel — the
+   * adapter is expected to extract that, and a rollup that cannot is better
+   * left as individual rows.
+   *
+   * SAFETY RULE: never fold a security or access event the almoner cannot
+   * positively attribute to the reader. A sign-in you made is noise; a
+   * sign-in you did not make, to a bank, is the most urgent thing that can
+   * arrive all week, and burying it under "3 security alerts" beside the
+   * newsletters is worse than not folding at all. When attribution is
+   * uncertain the item escapes the bundle as its own row, `awaiting: true`.
+   * The same caution applies to anything naming money, credentials or a
+   * password reset. Folding is an optimisation; this is the case where the
+   * optimisation is not worth its cost. */
+  bundled?: boolean;
+  /** MECHANICAL, computed by the CLI, identical across transports: the last
+   * message in the conversation is not yours. The single cheapest signal we
+   * have, and deliberately not a judgement — the skill never sets it. */
+  awaiting?: boolean;
+  asks?: AlmonerAsks | null;
+  /** Deep link to the conversation in the source app — the Slack permalink,
+   * the Linear issue. The page's whole job is triage, so acting on a row
+   * means leaving for the app that owns it. */
+  url?: string;
+  /** Every source this was found in — these systems email you, so one event
+   * legitimately arrives twice. */
+  seen_in?: string[];
+  /** Filled by the judging pass; null when it did not run. */
+  rank?: number | null;
+  because?: string | null;
+}
+
+/** One configured source and whether this refresh reached it. A source that
+ * fails degrades to `ok: false` and is NAMED in the UI — a silently short
+ * digest is worse than an error. */
+export interface AlmonerSource {
+  label: string;
+  type: string;
+  ok: boolean;
+  /** How the source was reached: `"agent"` (connector-backed, headless) or
+   * `"api"` (direct token). The swap seam — a config edit, not a refactor. */
+  via?: string;
+  watermark?: number | null;
+  error?: string;
+}
+
+/** GET /api/almoner/status */
+export interface AlmonerStatus {
+  installed: boolean;
+  /** False when the plugin is present but no sources are configured — which
+   * renders "not configured", exactly as chronicle renders "not installed". */
+  configured?: boolean;
+  sources?: AlmonerSource[];
+}
+
+/** GET /api/almoner/digest */
+export interface AlmonerDigest {
+  items: AlmonerItem[];
+  sources?: AlmonerSource[];
+  /** Epoch seconds this digest was assembled. */
+  fetched_at?: number | null;
+  /** True when the judging pass ran; false means `rank` is null throughout
+   * and the page falls back to its own deterministic order. */
+  ranked?: boolean;
+  /** How many candidates the pre-filter discarded before ranking.
+   *
+   * Load-bearing, not a curiosity. A scan of a real mailbox found two human
+   * messages in twenty threads — so a digest of two rows that does not say it
+   * dropped eighteen reads as a quiet inbox rather than as filtering that
+   * worked. It is also the number that makes the `suppressed` audit table
+   * worth opening: a triage filter you cannot see is one you cannot trust. */
+  suppressed?: number;
+  /** Set only when the almoner CLI itself failed — timed out, exited
+   * non-zero, or answered bad JSON — while `items`/`sources` still come back
+   * as empty arrays so old clients degrade gracefully. Distinguishes that
+   * failure from a genuinely empty digest, which carries no `error` at all:
+   * without this, both shapes are byte-identical and a real failure renders
+   * as the silently-short "nothing needs you" empty state the design
+   * forbids. The page treats its presence as a fetch error, same as a
+   * network failure. */
+  error?: string;
 }

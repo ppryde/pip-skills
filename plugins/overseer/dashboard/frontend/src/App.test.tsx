@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import type { BoardCard, BoardResponse, RepoEntry } from "./api/types";
+import type { AccountEntry, BoardCard, BoardResponse, RepoEntry } from "./api/types";
 
 // Only the read endpoints App's mount path touches are stubbed — every
 // other export is the real module (mutations are never exercised by this
@@ -13,6 +13,12 @@ vi.mock("./api/client", async (importOriginal) => {
     getRepos: vi.fn(),
     getBoard: vi.fn(),
     getSessions: vi.fn(),
+    // WF-116: stubbed like the other read endpoints above so tests can
+    // control what `useAccounts` sees — the real implementation (left in
+    // place for every OTHER read this file doesn't stub) would otherwise
+    // attempt a real fetch and swallow it as a permanent failure, which
+    // masks exactly the "loaded vs. not loaded" distinction under test.
+    getAccounts: vi.fn(),
     setActiveRoot: vi.fn(),
   };
 });
@@ -22,6 +28,17 @@ import App from "./App";
 
 function repo(overrides: Partial<RepoEntry> & { label: string; root: string }): RepoEntry {
   return { current: false, has_board: true, live_sessions: 0, ...overrides };
+}
+
+function account(overrides: Partial<AccountEntry> & { account_uuid: string }): AccountEntry {
+  return {
+    short_uuid: overrides.account_uuid.slice(0, 8),
+    plan: null,
+    config_dirs: [],
+    sessions: 0,
+    last_activity_at: null,
+    ...overrides,
+  };
 }
 
 function boardResponse(): BoardResponse {
@@ -659,5 +676,147 @@ describe("<App/> — page in the URL hash", () => {
     window.location.hash = "";
     fireEvent(window, new Event("hashchange"));
     expect(container.querySelector(".board")).toBeInTheDocument();
+  });
+});
+
+// The documented almoner demo URL puts `demo=1` INSIDE the hash's own query
+// (`#almoner?demo=1` — see AlmonerPage.tsx and fixture.ts), not in the page's
+// `location.search`. `viewFromHash` used to compare the whole hash tail
+// against "almoner" verbatim, so the trailing `?demo=1` made that comparison
+// fail, `view` fell back to "board", and the hash-mirroring effect then
+// overwrote the URL's real hash with "" because it trusted that wrong view.
+describe("<App/> — almoner demo URL (#almoner?demo=1)", () => {
+  beforeEach(() => {
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+    vi.mocked(client.getRepos).mockResolvedValue({
+      repos: [repo({ label: "acme", root: "/acme", current: true, has_board: true })],
+    });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    window.history.replaceState(null, "", window.location.pathname);
+  });
+
+  it("opens the Almoner in demo mode from #almoner?demo=1", async () => {
+    window.location.hash = "#almoner?demo=1";
+    render(<App />);
+    await screen.findByText(/Sample data/i);
+    expect(screen.getByRole("button", { name: "Almoner" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("does not wipe the hash's own query once it already names the current page", async () => {
+    window.location.hash = "#almoner?demo=1";
+    render(<App />);
+    await screen.findByText(/Sample data/i);
+    expect(window.location.hash).toBe("#almoner?demo=1");
+  });
+
+  it("also accepts the query in front of the hash (?demo=1#almoner)", async () => {
+    window.history.replaceState(null, "", `${window.location.pathname}?demo=1#almoner`);
+    render(<App />);
+    await screen.findByText(/Sample data/i);
+  });
+});
+
+// Review fix (PR #78): the account reconcile effect used to guard on
+// `accounts.length === 0`, which cannot tell "the /api/accounts fetch
+// hasn't come back yet" from "it came back and there really are no
+// accounts" — a machine with no chronicle history and no oauth logins at
+// all. Collapsing the two left a stale persisted `activeAccount` filtering
+// every session/chronicle read forever, with no way to clear it from the UI
+// (`AccountSelector` hides itself below two accounts). `useAccounts` now
+// exposes `loaded` (true only after a SUCCESSFUL fetch, never on a
+// failure), and the reconcile below is guarded on that instead — these
+// tests exercise every branch: empty-but-loaded, non-empty-but-absent,
+// still-present, still-loading, and a failed fetch.
+const ACTIVE_ACCOUNT_KEY = "overseer.activeAccount";
+
+describe("<App/> — WF-116 account reconcile", () => {
+  beforeEach(() => {
+    vi.mocked(client.getRepos).mockResolvedValue({ repos: [] });
+    vi.mocked(client.getBoard).mockResolvedValue(boardResponse());
+    vi.mocked(client.getSessions).mockResolvedValue({ sessions: [] });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("clears a stale persisted account once the loaded list comes back genuinely empty", async () => {
+    localStorage.setItem(ACTIVE_ACCOUNT_KEY, "stale-uuid");
+    vi.mocked(client.getAccounts).mockResolvedValue({ accounts: [] });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(ACTIVE_ACCOUNT_KEY)).toBeNull();
+    });
+  });
+
+  it("clears a stale persisted account that has dropped out of a non-empty loaded list", async () => {
+    localStorage.setItem(ACTIVE_ACCOUNT_KEY, "stale-uuid");
+    vi.mocked(client.getAccounts).mockResolvedValue({
+      accounts: [account({ account_uuid: "11111111-aaaa" })],
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(ACTIVE_ACCOUNT_KEY)).toBeNull();
+    });
+  });
+
+  it("keeps a persisted account that is still present in the loaded list", async () => {
+    localStorage.setItem(ACTIVE_ACCOUNT_KEY, "11111111-aaaa");
+    vi.mocked(client.getAccounts).mockResolvedValue({
+      accounts: [account({ account_uuid: "11111111-aaaa" })],
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(client.getAccounts).toHaveBeenCalled());
+    // Give the reconcile effect a tick to (not) fire before asserting the
+    // negative — otherwise this would pass trivially before the effect runs.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(localStorage.getItem(ACTIVE_ACCOUNT_KEY)).toBe("11111111-aaaa");
+  });
+
+  it("does not clear a persisted account while the accounts fetch is still in flight", async () => {
+    localStorage.setItem(ACTIVE_ACCOUNT_KEY, "stale-uuid");
+    let resolveAccounts!: (value: { accounts: AccountEntry[] }) => void;
+    vi.mocked(client.getAccounts).mockReturnValue(
+      new Promise((resolve) => {
+        resolveAccounts = resolve;
+      })
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(client.getAccounts).toHaveBeenCalled());
+    expect(localStorage.getItem(ACTIVE_ACCOUNT_KEY)).toBe("stale-uuid");
+
+    resolveAccounts({ accounts: [] });
+    await waitFor(() => {
+      expect(localStorage.getItem(ACTIVE_ACCOUNT_KEY)).toBeNull();
+    });
+  });
+
+  it("does not clear a persisted account when the accounts fetch fails", async () => {
+    localStorage.setItem(ACTIVE_ACCOUNT_KEY, "stale-uuid");
+    vi.mocked(client.getAccounts).mockRejectedValue(new Error("network error"));
+
+    render(<App />);
+
+    await waitFor(() => expect(client.getAccounts).toHaveBeenCalled());
+    // Give any (incorrect) reconcile a chance to fire before asserting it didn't.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(localStorage.getItem(ACTIVE_ACCOUNT_KEY)).toBe("stale-uuid");
   });
 });

@@ -54,7 +54,10 @@ def find_plugin(name: str, _from: Path | None = None) -> Path | None:
     and needs no registry, no hook and no prior run of the plugin being
     looked for. Among cached versions the highest wins: old ones linger (they
     stay marked `.in_use`), and a lexical "first found" would pin 0.10.0
-    below 0.9.0.
+    below 0.9.0 — except a version directory Claude Code has marked
+    `.orphaned_at` (removed or superseded, kept around rather than deleted
+    outright), which is skipped entirely so a stale orphaned version never
+    outranks a live one.
     """
     start = (_from or Path(__file__)).resolve()
     for parent in start.parents:
@@ -67,7 +70,9 @@ def find_plugin(name: str, _from: Path | None = None) -> Path | None:
         versioned = [
             child / "scripts" / "cli.py"
             for child in candidate.iterdir()
-            if child.is_dir() and (child / "scripts" / "cli.py").is_file()
+            if child.is_dir()
+            and not (child / ".orphaned_at").exists()
+            and (child / "scripts" / "cli.py").is_file()
         ]
         if versioned:
             return max(versioned, key=lambda cli: _version_key(cli.parents[1].name))
@@ -77,6 +82,7 @@ def find_plugin(name: str, _from: Path | None = None) -> Path | None:
 _VIGIL_CLI = find_plugin("vigil")
 _CENSUS_CLI = find_plugin("census")
 _CHRONICLE_CLI = find_plugin("chronicle")
+_ALMONER_CLI = find_plugin("almoner")
 
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
@@ -164,16 +170,76 @@ def _census_read(args: list[str], config_dir: Path | None, timeout: int) -> dict
     return data if isinstance(data, dict) and data else None
 
 
+def _claude_dirs() -> list[Path]:
+    """Every watched Claude config dir, primary first. Never raises: a
+    broken machine config must not 500 the board."""
+    try:
+        return overseer_config.claude_dirs()
+    except Exception:  # noqa: BLE001 — a broken machine config must not 500 the board
+        return []
+
+
 def _watched_dirs() -> list[Path]:
     """The Claude config dirs to read census from — one when `CENSUS_STORE`
     pins a single store (tests), else every watched account, primary first.
     Never raises: census is a soft dependency all the way down."""
     if os.environ.get("CENSUS_STORE"):
         return []
+    return _claude_dirs()
+
+
+# The ONLY fields ever read out of a watched dir's `.claude.json`. A
+# whitelist, not a blacklist — that file also holds emailAddress, fullName,
+# displayName, organizationName and more, and this reaches an API response.
+# Deliberately a small copy of chronicle's OWN whitelist
+# (`chronicle/scripts/store.py`'s `ACCOUNT_IDENTITY_FIELDS`/
+# `ACCOUNT_PLAN_FIELDS`) rather than an import: this module reaches every
+# sibling plugin by subprocess only (see
+# TestSiblingPluginContract.test_overseer_never_imports_chronicle), and
+# chronicle's own `claude_dirs` sets the same precedent for why — "a small
+# copy... chronicle stands alone."
+_ACCOUNT_UUID_FIELD = "accountUuid"
+_ACCOUNT_PLAN_FIELD = "organizationType"  # -> chronicle's `plan_organization_type`
+
+
+def _current_account(config_dir: Path) -> dict[str, str] | None:
+    """The account currently logged into `config_dir`, whitelisted fields
+    only — or None (no/unreadable file, or an API-key session with no
+    `oauthAccount` at all)."""
+    path = config_dir / ".claude.json"
     try:
-        return overseer_config.claude_dirs()
-    except Exception:  # noqa: BLE001 — a broken machine config must not 500 the board
-        return []
+        data = json.loads(path.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    oauth = data.get("oauthAccount")
+    if not isinstance(oauth, dict):
+        return None
+    account_uuid = oauth.get(_ACCOUNT_UUID_FIELD)
+    if not isinstance(account_uuid, str) or not account_uuid:
+        return None
+    out = {"account_uuid": account_uuid}
+    plan = oauth.get(_ACCOUNT_PLAN_FIELD)
+    if isinstance(plan, str) and plan:
+        out["plan"] = plan
+    return out
+
+
+def watched_account_profiles() -> list[tuple[Path, dict[str, str]]]:
+    """Every watched config dir CURRENTLY logged into an oauth account,
+    primary first, paired with `_current_account`'s profile. A dir with no
+    login (API key auth, or an unreadable/missing `.claude.json`)
+    contributes nothing — it is simply absent from the result, not present
+    with an empty profile. Always consults every watched dir, unlike
+    `_watched_dirs` — account identity has nothing to do with which census
+    store `CENSUS_STORE` pins in tests."""
+    out: list[tuple[Path, dict[str, str]]] = []
+    for config_dir in _claude_dirs():
+        profile = _current_account(config_dir)
+        if profile is not None:
+            out.append((config_dir, profile))
+    return out
 
 
 def run_census(root: Path, timeout: int = 10) -> dict[str, Any] | None:
@@ -267,6 +333,52 @@ def run_chronicle(*args: str, timeout: int = 20) -> Any:
     try:
         result = subprocess.run(
             [sys.executable, str(_CHRONICLE_CLI), *args],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def almoner_installed() -> bool:
+    """Whether the almoner plugin is present beside this install.
+
+    The Almoner page is OPTIONAL on the same terms as the Chronicle — see
+    `chronicle_installed` for why both halves of the check earn their place.
+    """
+    return _ALMONER_CLI is not None and _ALMONER_CLI.is_file()
+
+
+# A digest is several remote round trips fanned out in parallel, and on the
+# connector-backed transports a headless agent run behind each one. Chronicle's
+# 20s ceiling would guarantee a timeout here; a minute is the honest budget.
+# The CLI is expected to degrade a slow SOURCE internally rather than let one
+# hold the whole digest — this ceiling only catches a wedged process.
+_ALMONER_TIMEOUT = 60
+
+
+def run_almoner(*args: str, timeout: int = _ALMONER_TIMEOUT) -> Any:
+    """Run an almoner READ verb and return its parsed JSON; None if unavailable.
+
+    almoner is a SOFT dependency like census and chronicle: a missing plugin,
+    a timeout, a non-zero exit, or bad JSON yields None rather than raising,
+    so the board never depends on it and the Almoner page degrades to "not
+    installed" / an empty digest.
+
+    Only READ verbs come through here. `dismiss` is a mutation and goes
+    through the token-gated path with the board's other writes — not this one.
+    """
+    if not almoner_installed():
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_ALMONER_CLI), *args],
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except (subprocess.TimeoutExpired, OSError):

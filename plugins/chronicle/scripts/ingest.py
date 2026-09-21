@@ -167,7 +167,45 @@ def file_changed(conn: sqlite3.Connection, path: Path) -> bool:
     return (float(row[0]), int(row[1])) != current
 
 
+def _owned_elsewhere(conn: sqlite3.Connection, table: str, column: str,
+                     ids: set[str], session_id: str) -> set[str]:
+    """Ids from ``table`` already stored under a DIFFERENT session — the
+    signal that a record is a copy, not new work (see ``_write_facts``).
+    Batched to stay clear of SQLite's variable-count limit on a fat resume."""
+    found: set[str] = set()
+    ordered = sorted(ids)
+    for start in range(0, len(ordered), 500):
+        chunk = ordered[start:start + 500]
+        marks = ",".join("?" * len(chunk))
+        found.update(
+            row[0] for row in conn.execute(
+                f"SELECT {column} FROM {table} WHERE session_id <> ? AND {column} IN ({marks})",
+                (session_id, *chunk),
+            )
+        )
+    return found
+
+
 def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> None:
+    # A resumed or forked transcript repeats records from the session it was
+    # resumed/forked FROM, verbatim, under this new session id. Every id here
+    # is otherwise globally unique, so a record already stored under another
+    # session is a copy, not new work — counting it again would inflate every
+    # total that aggregates across sessions by however much was repeated.
+    # Whichever session's ingest reaches a record first keeps it: this is a
+    # first-seen rule, not "parent always wins" — a copy synced before its
+    # source claims the record, and the source then finds it already owned.
+    copied_messages = _owned_elsewhere(
+        conn, "turns", "message_id", {t.message_id for t in facts.turns.values()}, session_id
+    )
+    turns = [t for t in facts.turns.values() if t.message_id not in copied_messages]
+    tool_ids = (
+        {tool_id for t in turns for tool_id, _, _ in t.tool_uses}
+        | set(facts.results) | set(facts.file_edits)
+    )
+    copied_tools = _owned_elsewhere(conn, "tool_calls", "tool_use_id", tool_ids, session_id)
+    copied_events = _owned_elsewhere(conn, "events", "uuid", {e.uuid for e in facts.events}, session_id)
+    results = [r for r in facts.results.values() if r.tool_use_id not in copied_tools]
     # tool_calls rows first: a message split across two ingests (a Stop hook
     # or a dashboard Sync landing mid-write) folds into two DISJOINT Turn
     # objects, one per call, each seeing only the tool_use blocks that were
@@ -188,8 +226,9 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                qualifier = COALESCE(tool_calls.qualifier, excluded.qualifier)""",
         [
             (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts)
-            for t in facts.turns.values()
+            for t in turns
             for tool_id, name, qualifier in t.tool_uses
+            if tool_id not in copied_tools
         ],
     )
     conn.executemany(
@@ -224,20 +263,21 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
              session_id, t.agent_id, t.message_id,
              t.stop_reason, t.effort,
              t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool)
-            for t in facts.turns.values()
+            for t in turns
         ],
     )
     conn.executemany(
         "INSERT OR IGNORE INTO events(session_id, uuid, agent_id, kind, ts, value) "
         "VALUES (?,?,?,?,?,?)",
-        [(session_id, e.uuid, e.agent_id, e.kind, e.ts, e.value) for e in facts.events],
+        [(session_id, e.uuid, e.agent_id, e.kind, e.ts, e.value)
+         for e in facts.events if e.uuid not in copied_events],
     )
     # Results may land in a later ingest than their call (a Stop hook fires
     # between the two), so this is an UPDATE against whatever row exists.
     conn.executemany(
         "UPDATE tool_calls SET result_chars = ?, result_ts = ? "
         "WHERE session_id = ? AND tool_use_id = ?",
-        [(r.chars, r.ts, session_id, r.tool_use_id) for r in facts.results.values()],
+        [(r.chars, r.ts, session_id, r.tool_use_id) for r in results],
     )
     # Keyed by tool_use_id like every other fact table, so a re-read of the
     # same transcript converges rather than double-counting the churn.
@@ -248,6 +288,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
             (session_id, e.tool_use_id, e.agent_id, e.ts, e.file_path, e.operation,
              e.lines_added, e.lines_removed)
             for e in facts.file_edits.values()
+            if e.tool_use_id not in copied_tools
         ],
     )
     conn.executemany(
@@ -256,8 +297,9 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         [
             (session_id, a.tool_use_id, t.agent_id, t.ts, a.url, a.title, a.description,
              a.favicon, int(a.redeploy))
-            for t in facts.turns.values()
+            for t in turns
             for a in t.artifacts.values()
+            if a.tool_use_id not in copied_tools
         ],
     )
     # An artifact whose result landed in THIS ingest but whose call was
@@ -266,30 +308,49 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     conn.executemany(
         "UPDATE artifacts SET url = ? WHERE session_id = ? AND tool_use_id = ? AND url IS NULL",
         [(r.artifact_url, session_id, r.tool_use_id)
-         for r in facts.results.values() if r.artifact_url],
+         for r in results if r.artifact_url],
+    )
+    # Deliberately not filtered through `_owned_elsewhere` like every table
+    # above: the SAME real-world hit is written into every session and
+    # subagent running at the time BY DESIGN, and "how many sessions saw it"
+    # is part of what `report.limits` reads back out. Keyed on the record's
+    # own uuid, like `events`, so re-reading a file from byte 0 converges.
+    conn.executemany(
+        """INSERT OR IGNORE INTO limit_hits(session_id, agent_id, uuid, ts, kind, model,
+               reset_raw, resets_at, raw_text) VALUES (?,?,?,?,?,?,?,?,?)""",
+        [
+            (session_id, h.agent_id, h.uuid, h.ts, h.kind, h.model,
+             h.reset_raw, h.resets_at, h.raw_text)
+            for h in facts.limit_hits
+        ],
     )
 
 
-def _plan_snapshot(conn: sqlite3.Connection, config_dir: str | None,
-                   now: float) -> dict[str, Any]:
-    """The plan columns to stamp on a session, and the `accounts` upsert that
-    goes with them. `{}` when the config dir holds no readable account.
+def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None,
+                      now: float) -> tuple[dict[str, Any], str | None]:
+    """The plan columns to stamp on a session, and the account uuid found —
+    plus the `accounts` upsert that goes with it, as a side effect. `({}, None)`
+    when the config dir holds no readable account.
 
-    Read at INGEST time and stamped per session, because a plan changes: an
-    account that moves from Max to Enterprise would otherwise have every
+    Read at INGEST time. The PLAN is stamped per session because it changes:
+    an account that moves from Max to Enterprise would otherwise have every
     session it ever ran relabelled by the move. `plan_observed_at` records
     when the claim was true, so a row is legible as a snapshot rather than a
-    standing fact.
+    standing fact. The ACCOUNT UUID itself does not change this way — an
+    account keeps its uuid across plan moves — but the caller still treats it
+    as write-once (see `_upsert_session_identity`): a session belongs to
+    whichever account was logged in the FIRST time it was ingested, not to
+    whoever happens to be logged into that config dir on a later resync.
 
     Only the identity half goes in `accounts` — the half that does not change.
     Everything read here is whitelisted by name in `store.account_profile`;
     nothing personal reaches the database.
     """
     if not config_dir:
-        return {}
+        return {}, None
     profile = store.account_profile(Path(config_dir))
     if not profile:      # None (no/unreadable file) or {} (API key: no oauthAccount)
-        return {}
+        return {}, None
     account_uuid = profile.get("accountUuid")
     if account_uuid:
         conn.execute(
@@ -307,7 +368,7 @@ def _plan_snapshot(conn: sqlite3.Connection, config_dir: str | None,
     }
     if snapshot:
         snapshot["plan_observed_at"] = now
-    return snapshot
+    return snapshot, account_uuid
 
 
 def config_dir_of(transcript_path: Path) -> str | None:
@@ -348,18 +409,33 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         conn.execute(
             f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
         )
-    # Write-once, unlike every column above. The plan columns record what was
-    # true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on a later ingest
-    # would let `sync --full` quietly relabel the whole back catalogue with
-    # today's plan — destroying the very history the snapshot exists to keep.
-    # Guarded on plan_observed_at, which is set if and only if a snapshot was.
+    # Write-once, unlike every column above. The plan columns AND account_uuid
+    # record what was true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on
+    # a later ingest would let `sync --full` quietly relabel the whole back
+    # catalogue with today's login — destroying the very history the snapshot
+    # exists to keep. Each is guarded on ITS OWN column being unset, not a
+    # shared flag: a session ingested before `account_uuid` existed already has
+    # `plan_observed_at` set, and sharing one guard would leave it unbackfilled
+    # forever. So a session missing either gets a fresh read of the profile
+    # (cheap — one local file), and each column is then written only if IT is
+    # still unset — the plan and the account uuid each keep whichever value
+    # they saw first, independently.
     already = conn.execute(
-        "SELECT plan_observed_at FROM sessions WHERE session_id = ?", (session_id,)
+        "SELECT plan_observed_at, account_uuid FROM sessions WHERE session_id = ?", (session_id,)
     ).fetchone()
-    if already is None or already[0] is None:
-        for column, value in _plan_snapshot(conn, config, now).items():
+    plan_pending = already is None or already[0] is None
+    account_pending = already is None or already[1] is None
+    if plan_pending or account_pending:
+        snapshot, account_uuid = _account_snapshot(conn, config, now)
+        if plan_pending:
+            for column, value in snapshot.items():
+                conn.execute(
+                    f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
+                )
+        if account_pending and account_uuid:
             conn.execute(
-                f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
+                "UPDATE sessions SET account_uuid = ? WHERE session_id = ?",
+                (account_uuid, session_id),
             )
     if facts.first_ts is not None:
         conn.execute(
@@ -480,6 +556,34 @@ def subagent_files(transcript_path: Path, session_id: str) -> list[tuple[Path, s
     return out
 
 
+def _active_ms(conn: sqlite3.Connection, session_id: str) -> int:
+    """Summed turn durations, each capped at the time elapsed since the turn
+    began (the latest prompt from the same agent, or that agent's previous
+    turn end).
+
+    Claude Code occasionally writes a ``durationMs`` far longer than the
+    session itself — observed after a multi-day resume — and an uncapped sum
+    then exceeds the session's own span. A duration with no earlier prompt
+    from its agent is not counted: there is nothing to measure it against.
+    """
+    total = 0
+    prompted: dict[str, float] = {}
+    for kind, agent_id, ts, value in conn.execute(
+        """SELECT kind, agent_id, ts, value FROM events
+           WHERE session_id = ? AND kind IN ('prompt', 'turn_duration') AND ts IS NOT NULL
+           ORDER BY ts, kind = 'turn_duration'""",
+        (session_id,),
+    ):
+        if kind == "prompt":
+            prompted[agent_id] = ts
+        elif agent_id in prompted:
+            total += min(value or 0, round((ts - prompted[agent_id]) * 1000))
+            # A later duration with no NEW prompt is capped from the end of
+            # this turn, not re-measured from the same stale prompt.
+            prompted[agent_id] = ts
+    return total
+
+
 def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = None) -> None:
     """Recompute the denormalised session totals from the fact tables."""
     if now is None:
@@ -534,10 +638,7 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         "SELECT COUNT(*) FROM events WHERE session_id = ? AND kind = 'compaction'",
         (session_id,),
     ).fetchone()[0]
-    active_ms = conn.execute(
-        "SELECT COALESCE(SUM(value), 0) FROM events WHERE session_id = ? AND kind = 'turn_duration'",
-        (session_id,),
-    ).fetchone()[0]
+    active_ms = _active_ms(conn, session_id)
     models = [
         row[0] for row in conn.execute(
             "SELECT DISTINCT model FROM turns WHERE session_id = ? AND model IS NOT NULL "
@@ -564,6 +665,20 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
         (*totals, peak, cold, artifacts, prompts, compactions, active_ms, json.dumps(models),
          int(churn[0]), int(churn[1]), int(churn[2]),
          size, now, session_id),
+    )
+    # Copied records are skipped by `_write_facts`, but `_upsert_session_identity`
+    # already stamped `started_at` from the raw (unfiltered) transcript, so a
+    # resumed session would show as starting when its PARENT did. The main
+    # agent's own owned records are the truth when it has any; with none (a
+    # copy this session never actually owned) the earlier stamp stands.
+    conn.execute(
+        """UPDATE sessions SET started_at = COALESCE(
+               (SELECT MIN(ts) FROM (SELECT ts FROM turns WHERE session_id = ?1 AND agent_id = ''
+                                     UNION ALL
+                                     SELECT ts FROM events WHERE session_id = ?1 AND agent_id = '')),
+               started_at)
+           WHERE session_id = ?1""",
+        (session_id,),
     )
 
 
@@ -638,6 +753,8 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
     if conn.execute("SELECT 1 FROM meta WHERE key = 'config_dirs_backfilled'").fetchone() is None:
         backfill_config_dirs(conn)
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('config_dirs_backfilled', '1')")
+    # Not one-time-flagged, unlike the sweep above — see `backfill_account_uuids`.
+    backfill_account_uuids(conn, now=now)
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES ('synced_at', ?)", (str(now),)
     )
@@ -649,6 +766,46 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
         "sessions": changed,
         "synced_at": now,
     }
+
+
+def backfill_account_uuids(conn: sqlite3.Connection, *, now: float | None = None) -> int:
+    """Fill ``sessions.account_uuid`` for rows that have none yet, from the
+    CURRENT login of the config dir each was ingested from — the same shape
+    of sweep ``backfill_config_dirs`` runs for the column beside it, so a
+    session ingested before this feature shipped (or one whose config dir was
+    logged out the first time it ran) is not stuck NULL forever.
+
+    Unlike ``backfill_config_dirs`` this is NOT one-time-flagged: its source —
+    whether a config dir is currently logged in, and as whom — can become true
+    only later (someone logs in after weeks of API-key use), so every sync
+    re-checks whatever is still NULL. Cheap either way: the query only ever
+    touches rows with no account, and a config dir's profile is read at most
+    once per call regardless of how many of its sessions are pending.
+
+    Still write-once in effect: a row this fills never has NULL again, so a
+    later run of this same sweep leaves it untouched — the account a session
+    picks up here is the one it keeps.
+    """
+    if now is None:
+        now = time.time()
+    rows = conn.execute(
+        "SELECT session_id, config_dir FROM sessions "
+        "WHERE account_uuid IS NULL AND config_dir IS NOT NULL"
+    ).fetchall()
+    profiles: dict[str, str | None] = {}
+    filled = 0
+    for session_id, config_dir in rows:
+        if config_dir not in profiles:
+            _, profiles[config_dir] = _account_snapshot(conn, config_dir, now)
+        account_uuid = profiles[config_dir]
+        if account_uuid is None:
+            continue
+        conn.execute(
+            "UPDATE sessions SET account_uuid = ? WHERE session_id = ?",
+            (account_uuid, session_id),
+        )
+        filled += 1
+    return filled
 
 
 def backfill_config_dirs(conn: sqlite3.Connection) -> int:

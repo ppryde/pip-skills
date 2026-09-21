@@ -96,7 +96,12 @@ The orchestrate skill gains a **Tasks** section:
   "restart this CLI once to adopt the shared task list — /clear is not sufficient."
 - **Adoption spawn (reinstated relaunch, install-only nicety):** rather than leaving the restart to
   the user, orchestrate MAY programmatically spawn the replacement CLI and invite the user to move:
-  `tmux new-session -d -s <name> -c <worktree> -e CLAUDE_CODE_TASK_LIST_ID=... claude` — then print
+  `(cd "$HOME" && tmux new-session -d -s <name> -c <main-repo> -e CLAUDE_CODE_TASK_LIST_ID=... claude)`
+  — amended 2026-09-18, and the two directories are deliberately different. `cd "$HOME"` sets the
+  tmux SERVER's cwd, which it keeps for life if this command is what starts it; anchoring that in a
+  worktree (or any repo folder that may be moved) leaves every future session on that server
+  starting in a deleted directory, so it is anchored in `$HOME`, which always exists. `-c <main-repo>`
+  sets the SESSION's cwd — the main repo folder via `git-common-dir`, never a worktree — then print
   "attach with `tmux attach -t <name>` and close this session." This resurrects the old
   new-CLI-relaunch mechanism for exactly one purpose (env adoption at install); it is NOT a handover
   path — vigil's in-place `/clear` owns handovers. Spawning under tmux also enables vigil's

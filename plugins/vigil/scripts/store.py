@@ -1,24 +1,29 @@
-"""Filesystem root for vigil state — repo-local `.vigil/`, keyed by cwd."""
+"""Filesystem root for vigil state — repo-local `.claude/vigil/`, keyed by cwd."""
 from __future__ import annotations
 
 from pathlib import Path
 
-VIGIL_DIRNAME = ".vigil"
+CLAUDE_DIRNAME = ".claude"
+VIGIL_DIRNAME = "vigil"
 
 
 def vigil_root(repo_root: Path) -> Path:
-    return repo_root / VIGIL_DIRNAME
+    return repo_root / CLAUDE_DIRNAME / VIGIL_DIRNAME
 
 
 def ensure_root(repo_root: Path) -> Path:
-    """Create `.vigil/` and git-ignore it (idempotent). Returns the root."""
+    """Create `.claude/vigil/` with a self-contained `.gitignore` (idempotent).
+
+    The `.gitignore` lives inside `.claude/vigil/` itself (`*`, same pattern as
+    a tool cache dir) so vigil never has to edit the repo's own top-level
+    `.gitignore` — no diff lands in a consuming repo just from vigil running.
+    Returns the root.
+    """
     root = vigil_root(repo_root)
     root.mkdir(parents=True, exist_ok=True)
-    gitignore = repo_root / ".gitignore"
-    existing = gitignore.read_text() if gitignore.exists() else ""
-    if f"{VIGIL_DIRNAME}/" not in existing.split("\n"):
-        suffix = "" if existing in ("", "\n") or existing.endswith("\n") else "\n"
-        gitignore.write_text(f"{existing}{suffix}{VIGIL_DIRNAME}/\n")
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n")
     return root
 
 

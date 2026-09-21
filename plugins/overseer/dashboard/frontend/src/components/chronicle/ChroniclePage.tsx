@@ -36,7 +36,7 @@ import { planLabel, plansPresent } from "../../board/chronicle/plan";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
-import { BarList, ColumnChart, Donut, StackedColumnChart } from "./ChronicleCharts";
+import { BarList, ColumnChart, Donut, LimitsTimeline, StackedColumnChart } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import CostAttributionPanel from "./CostAttributionPanel";
@@ -131,7 +131,7 @@ function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc
   });
 }
 
-export default function ChroniclePage({ summary, sessions, loading, error, onRetry, scope = "repo" }: ChroniclePageProps) {
+export default function ChroniclePage({ summary, sessions, limits, loading, error, onRetry, scope = "repo" }: ChroniclePageProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("started_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -489,6 +489,18 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               a server's tools were called, and what each cost. */}
           <div className="chronicle__grid chronicle__grid--wide">
             <McpExplorer mcp={summary?.mcp} />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--wide">
+            <section className="chr-panel chr-panel--wide">
+              <h3 className="chr-panel__title">Limits hit</h3>
+              <p className="chr-panel__sub">
+                {limits && limits.events.length > 0
+                  ? `${formatTokens(limits.events.length)} deduplicated hit${limits.events.length === 1 ? "" : "s"} in this window — Claude Code logs the same hit into every session running at the time.`
+                  : "When Claude Code writes a usage-limit banner into a session, it shows up here."}
+              </p>
+              <LimitsTimeline events={limits?.events ?? []} />
+            </section>
           </div>
 
           <div className="chronicle__grid chronicle__grid--wide">

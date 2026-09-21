@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,13 +30,16 @@ from pydantic import BaseModel, field_validator
 
 from app.cli_client import (
     CliError,
+    almoner_installed,
     check_id,
     chronicle_installed,
+    run_almoner,
     run_census,
     run_census_all,
     run_chronicle,
     run_overseer,
     run_vigil,
+    watched_account_profiles,
 )
 
 # backend/app/main.py -> parents: [0]=app [1]=backend [2]=dashboard [3]=overseer
@@ -439,6 +443,53 @@ def _chronicle_roots() -> set[Path]:
     return roots or _CHRONICLE_ROOTS_CACHE
 
 
+def _accounts() -> list[dict[str, Any]]:
+    """The account selector's data (WF-116): every account uuid chronicle has
+    ever recorded a session under, UNIONED with every watched config dir's
+    CURRENT login — so an account with history but no live login (an old
+    machine, a revoked key) is still listed, and a freshly logged-in account
+    with no chronicle history yet is selectable from the first session.
+
+    A uuid matched by one or more watched dirs is enriched with that dir's
+    plan and lists every matching dir's path (``config_dirs``) — used to
+    scope live census sessions to the account (see `get_sessions`'s
+    ``account`` filter). A uuid seen only in chronicle's history (no dir
+    currently logged into it) is listed bare: still selectable, but with
+    no plan and an empty ``config_dirs``.
+
+    No email or name ever appears — `watched_account_profiles` reads a
+    whitelist only (see its module comment in `cli_client`).
+    """
+    seen: dict[str, dict[str, Any]] = {}
+
+    def _entry(uuid: str) -> dict[str, Any]:
+        return seen.setdefault(uuid, {
+            "account_uuid": uuid,
+            "short_uuid": uuid[:8],
+            "plan": None,
+            "config_dirs": [],
+            "sessions": 0,
+            "last_activity_at": None,
+        })
+
+    history = run_chronicle("accounts") if chronicle_installed() else None
+    for row in (history or {}).get("accounts") or []:
+        uuid = row.get("account_uuid")
+        if not uuid:
+            continue
+        entry = _entry(uuid)
+        entry["sessions"] = row.get("sessions") or 0
+        entry["last_activity_at"] = row.get("last_activity_at")
+
+    for config_dir, profile in watched_account_profiles():
+        entry = _entry(profile["account_uuid"])
+        entry["config_dirs"].append(str(config_dir))
+        if profile.get("plan"):
+            entry["plan"] = profile["plan"]
+
+    return sorted(seen.values(), key=lambda a: (-a["sessions"], a["account_uuid"]))
+
+
 def _resolve_root(launch_root: Path, default_root: Path, requested: str | None,
                   also_allowed: set[Path] | None = None) -> Path:
     """Resolve the effective repo root for a request, VALIDATING a
@@ -675,9 +726,24 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         return {"repos": repos_list}
 
     @app.get("/api/sessions")
-    def get_sessions(root: str | None = None) -> dict[str, Any]:
+    def get_sessions(root: str | None = None, account: str | None = None) -> dict[str, Any]:
         effective = _resolve_root(launch_root, _derived_launch_root, root)
-        return {"sessions": _sessions_list(effective)}
+        sessions = _sessions_list(effective)
+        if account:
+            # Multi-account (WF-116): scope live sessions/claims to the
+            # config dir(s) currently logged into `account` — cards
+            # themselves are never hidden by this, only which live session
+            # a claim is shown alongside. A session with no `config_dir` tag
+            # (single-account setups — see `run_census_all`) never matches a
+            # named account, which is correct: there is nothing to pick
+            # between.
+            dirs = {str(d) for d, p in watched_account_profiles() if p["account_uuid"] == account}
+            sessions = [s for s in sessions if s.get("config_dir") in dirs]
+        return {"sessions": sessions}
+
+    @app.get("/api/accounts")
+    def get_accounts() -> dict[str, Any]:
+        return {"accounts": _accounts()}
 
     @app.post("/api/card", dependencies=[Depends(require_token)])
     def create_card(body: CreateBody, root: str | None = None) -> dict[str, Any]:
@@ -1007,6 +1073,35 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="days must be between 1 and 3650")
         return ["--days", str(days)]
 
+    def _since_args(since: str | None) -> list[str]:
+        # The exact-instant sibling of `--days` (month-to-date needs the 1st
+        # of the month at local midnight, which no `--days` count expresses).
+        # Validated here — same shape chronicle's own `--since` parses, so a
+        # malformed value 400s before a subprocess is ever spawned — but the
+        # value itself is an argv element, never shell-interpolated.
+        if since is None:
+            return []
+        try:
+            parsed = datetime.fromisoformat(since)
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            parsed.timestamp()
+        except (ValueError, OverflowError):
+            # `fromisoformat` alone accepts an out-of-range year like 9999 or
+            # 1 — the overflow only surfaces converting it to an aware
+            # datetime or a POSIX timestamp, exactly what chronicle's own
+            # `--since` does. Checked here too, or such a value would reach
+            # chronicle, which exits 2 on it, and `run_chronicle` treats any
+            # non-zero exit as "no data" — a quiet 200 indistinguishable
+            # from a real empty window instead of a 400.
+            raise HTTPException(status_code=400, detail="invalid since value") from None
+        return ["--since", since]
+
+    def _window_args(days: int | None, since: str | None) -> list[str]:
+        if days is not None and since is not None:
+            raise HTTPException(status_code=400, detail="days and since are mutually exclusive")
+        return [*_days_args(days), *_since_args(since)]
+
     def _branch_args(branch: str | None) -> list[str]:
         # A session-level filter on the branch chronicle last saw the session
         # on. Passed through as an exact match; chronicle does no globbing,
@@ -1017,6 +1112,17 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             raise HTTPException(status_code=400, detail="branch name too long")
         return ["--branch", branch]
 
+    def _account_args(account: str | None) -> list[str]:
+        # Multi-account (WF-116): a session-level filter on the account
+        # chronicle stamped it with at first ingest. Same argv-element
+        # treatment as `_branch_args` — passed through as an exact match,
+        # never shell-interpolated.
+        if not account:
+            return []
+        if len(account) > 100:
+            raise HTTPException(status_code=400, detail="account too long")
+        return ["--account", account]
+
     @app.get("/api/chronicle/status")
     def chronicle_status() -> dict[str, Any]:
         if not chronicle_installed():
@@ -1026,23 +1132,97 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             return {"installed": True, "exists": False}
         return {"installed": True, **data}
 
+    # --- Almoner (optional sibling plugin) -------------------------------
+    # Read-only throughout. Both routes degrade to a shape the page can render
+    # rather than erroring, so a dashboard with no almoner installed — or one
+    # whose sources are all unreachable — still draws.
+
+    @app.get("/api/almoner/status")
+    def almoner_status() -> dict[str, Any]:
+        if not almoner_installed():
+            return {"installed": False, "configured": False, "sources": []}
+        data = run_almoner("status")
+        if data is None:
+            return {"installed": True, "configured": False, "sources": []}
+        sources = data.get("sources") or []
+        # "Installed but no sources" is a normal, published state: the plugin
+        # ships an empty source list, so a fresh install renders "not
+        # configured" rather than an empty digest that looks like good news.
+        return {"installed": True, "configured": bool(sources), **data}
+
+    @app.get("/api/almoner/digest")
+    def almoner_digest(hours: int | None = None, context: str | None = None,
+                       new: int | None = None) -> dict[str, Any]:
+        if hours is not None and (hours < 1 or hours > 24 * 30):
+            raise HTTPException(status_code=400, detail="hours out of range")
+        args = ["digest", "--json"]
+        if hours is not None:
+            args += ["--hours", str(hours)]
+        if context:
+            # `context` reaches a subprocess argv, so it goes through the same
+            # metacharacter rule as every other client-supplied token here.
+            # `check_id` raises CliError, which this server translates per
+            # route rather than globally — and "invalid card id" would be the
+            # wrong thing to tell someone who mistyped a context.
+            try:
+                check_id(context)
+            except CliError:
+                raise HTTPException(status_code=400, detail="invalid context") from None
+            args += ["--context", context]
+        if new:
+            args.append("--new")
+        # Not installed is its own, quieter case, checked only AFTER request
+        # validation above (a malformed `context` must still 400 whether or
+        # not the plugin exists) — the page never offers the coin at all when
+        # this is true, so a direct hit on the route just answers the same
+        # empty shape it always has, with no CLI run to have failed.
+        if not almoner_installed():
+            return {"items": [], "sources": []}
+        data = run_almoner(*args)
+        if data is not None:
+            return data
+        # The plugin IS installed but this run failed — timeout, non-zero
+        # exit or bad JSON (see run_almoner). That must not be byte-identical
+        # to a genuinely empty digest: `{"items": [], "sources": []}` alone
+        # renders as "every source answered and none of it was asking
+        # anything", which here is simply false. `error` is what lets the
+        # frontend tell the two apart and render a failure state instead of
+        # the quiet "nothing needs you" empty state.
+        return {"items": [], "sources": [], "error": "almoner did not return a digest"}
+
     @app.get("/api/chronicle/summary")
     def chronicle_summary(root: str | None = None, scope: str | None = None,
-                          days: int | None = None, branch: str | None = None) -> dict[str, Any]:
-        args = ["summary", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch)]
+                          days: int | None = None, since: str | None = None,
+                          branch: str | None = None, account: str | None = None) -> dict[str, Any]:
+        args = ["summary", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account)]
         data = run_chronicle(*args)
         return data if data is not None else {"totals": None}
 
     @app.get("/api/chronicle/sessions")
     def chronicle_sessions(root: str | None = None, scope: str | None = None,
-                           days: int | None = None, branch: str | None = None,
+                           days: int | None = None, since: str | None = None,
+                           branch: str | None = None, account: str | None = None,
                            limit: int = 200) -> dict[str, Any]:
         if limit < 1 or limit > 2000:
             raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
-        args = ["sessions", *_chronicle_scope(root, scope), *_days_args(days), *_branch_args(branch),
-                "--limit", str(limit)]
+        args = ["sessions", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account), "--limit", str(limit)]
         data = run_chronicle(*args)
         return data if data is not None else {"sessions": []}
+
+    @app.get("/api/chronicle/limits")
+    def chronicle_limits(root: str | None = None, scope: str | None = None,
+                         days: int | None = None, since: str | None = None,
+                         branch: str | None = None, account: str | None = None) -> dict[str, Any]:
+        """Deduplicated usage-limit hits (see `chronicle limits`): the same
+        real-world hit written into every session running at the time,
+        folded into one event per (account, kind, reset), with the tokens
+        burned reaching it when the window is known."""
+        args = ["limits", *_chronicle_scope(root, scope), *_window_args(days, since),
+                *_branch_args(branch), *_account_args(account)]
+        data = run_chronicle(*args)
+        return data if data is not None else {"events": [], "by_kind": {}}
 
     @app.post("/api/chronicle/sync")
     def chronicle_sync() -> dict[str, Any]:

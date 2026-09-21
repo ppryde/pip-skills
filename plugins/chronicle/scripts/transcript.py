@@ -32,8 +32,9 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 MAIN_AGENT = ""
 SYNTHETIC_MODEL = "<synthetic>"
@@ -123,6 +124,7 @@ class ToolResult:
     # The published URL when this is an Artifact publish's result — kept here
     # so an ingest that sees the result but not the call can still fill it.
     artifact_url: str | None = None
+    is_error: bool = False
 
 
 @dataclass
@@ -132,6 +134,23 @@ class Event:
     agent_id: str = MAIN_AGENT
     ts: float | None = None
     value: int | None = None
+
+
+@dataclass
+class LimitHit:
+    """One usage-limit banner Claude Code wrote into the transcript after a
+    request was rejected for hitting a limit — the SAME real-world event is
+    written into every session and subagent running at the time, so this is
+    one row per RECORD, not one per underlying event; deduplication across
+    sessions happens on the read side (``report.limits``)."""
+    uuid: str
+    agent_id: str = MAIN_AGENT
+    ts: float | None = None
+    kind: str = "other"  # "session" | "weekly" | "monthly_spend" | "model" | "other"
+    model: str | None = None
+    reset_raw: str | None = None
+    resets_at: float | None = None
+    raw_text: str = ""
 
 
 @dataclass
@@ -146,6 +165,8 @@ class Facts:
     last_ts: float | None = None
     turns: dict[tuple[str, str], Turn] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
+    # Usage-limit banners seen in this batch of lines (see ``LimitHit``).
+    limit_hits: list[LimitHit] = field(default_factory=list)
     # tool_result blocks seen, by tool_use_id (results usually follow their
     # call within the same file, but may land in a later ingest).
     results: dict[str, ToolResult] = field(default_factory=dict)
@@ -381,6 +402,173 @@ def _qualifier(name: str, raw: Any) -> str | None:
     return _opt_str(raw.get(key))
 
 
+# The banner's opening clause is the only part of the text this trusts to
+# stay stable — Claude Code is not obliged to keep the wording, so everything
+# after it (the reset clause, the settings-page pointer) is kept verbatim
+# rather than parsed further. A prefix that stops matching shows up as an
+# "other" hit, never as a dropped one.
+_LIMIT_HIT_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("session", "You've hit your session limit"),
+    ("weekly", "You've hit your weekly limit"),
+    ("monthly_spend", "You've hit your monthly spend limit"),
+)
+_MODEL_LIMIT_RE = re.compile(r"^You've reached your (?P<model>.+?) limit\b")
+_RESET_CLAUSE_RE = re.compile(r"resets\s+(?P<reset>.+)$")
+
+# The banner states local wall-clock time with an explicit IANA zone in
+# parentheses — "11:50am (Europe/London)", "Aug 16 at 8pm (Europe/London)".
+_RESET_TZ_RE = re.compile(r"^(?P<body>.+?)\s*\((?P<tz>[A-Za-z_]+(?:/[A-Za-z_-]+)+)\)\s*$")
+_RESET_BARE_TIME_RE = re.compile(
+    r"^(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)$", re.IGNORECASE)
+_RESET_DATE_TIME_RE = re.compile(
+    r"^(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2})\s+at\s+"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)$", re.IGNORECASE)
+_MONTH_NUMBERS = {name: i for i, name in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def _limit_hit_text(record: dict[str, Any]) -> str | None:
+    """The text of a usage-limit banner, or None for every other record —
+    including every other rate-limited or API-error shape. ``isApiErrorMessage``
+    + ``error == "rate_limit"`` is Claude Code's own marker for a REJECTED
+    request (as opposed to ``server_error``, ``authentication_failed`` or an
+    ``unknown`` API error, which carry unrelated text on the same fields and
+    must never be read as a limit hit)."""
+    if record.get("isApiErrorMessage") is not True or record.get("error") != "rate_limit":
+        return None
+    message = record.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    return None
+
+
+def _classify_limit_text(text: str) -> tuple[str, str | None, str | None]:
+    """(kind, model, reset_raw) read off a banner's text. Unrecognised text
+    -> ("other", None, None) — kept, never dropped (see ``_fold_limit_hit``)."""
+    for kind, prefix in _LIMIT_HIT_PREFIXES:
+        if text.startswith(prefix):
+            reset = _RESET_CLAUSE_RE.search(text)
+            return kind, None, (reset.group("reset").strip() if reset else None)
+    model_match = _MODEL_LIMIT_RE.match(text)
+    if model_match:
+        return "model", model_match.group("model").strip(), None
+    return "other", None, None
+
+
+def _hour_24(hour: str, minute: str | None, ampm: str) -> tuple[int, int]:
+    value = int(hour) % 12
+    if ampm.lower() == "pm":
+        value += 12
+    return value, int(minute) if minute else 0
+
+
+def parse_reset_time(reset_raw: str | None, hit_ts: float) -> float | None:
+    """The banner's stated reset time as an epoch, or None when it cannot be
+    read safely.
+
+    The zone is read FROM THE TEXT (see ``_RESET_TZ_RE``) rather than assumed
+    — without it there is nothing safe to compute against, since a store can
+    be read on a machine in a different zone from the one that wrote the
+    transcript. No zone, no epoch; the raw text still survives on the hit.
+
+    A bare time names no date, so it means the NEXT occurrence of that
+    wall-clock time after the hit — right for a 5-hour window, which always
+    resets within hours of being hit. A full date can still land before the
+    hit within the same calendar year (a weekly reset stated in early January
+    for a hit in late December); rolling the YEAR forward once covers a limit
+    that resets at most every seven days.
+    """
+    if not reset_raw:
+        return None
+    tz_match = _RESET_TZ_RE.match(reset_raw)
+    if not tz_match:
+        return None
+    try:
+        tz = ZoneInfo(tz_match.group("tz"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    body = tz_match.group("body").strip()
+    hit_dt = datetime.fromtimestamp(hit_ts, tz=tz)
+
+    bare = _RESET_BARE_TIME_RE.match(body)
+    if bare:
+        hour, minute = _hour_24(bare.group("hour"), bare.group("minute"), bare.group("ampm"))
+        candidate = hit_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= hit_dt:
+            candidate += timedelta(days=1)
+        return candidate.timestamp()
+
+    dated = _RESET_DATE_TIME_RE.match(body)
+    if dated:
+        month = _MONTH_NUMBERS.get(dated.group("month").lower()[:3])
+        if month is None:
+            return None
+        hour, minute = _hour_24(dated.group("hour"), dated.group("minute"), dated.group("ampm"))
+        try:
+            candidate = hit_dt.replace(month=month, day=int(dated.group("day")),
+                                       hour=hour, minute=minute, second=0, microsecond=0)
+        except ValueError:
+            return None
+        if candidate <= hit_dt:
+            candidate = candidate.replace(year=candidate.year + 1)
+        return candidate.timestamp()
+    return None
+
+
+def reset_zone_name(reset_raw: str | None) -> str | None:
+    """The IANA zone name a reset clause states — "Europe/London" from
+    "11:50am (Europe/London)" — or None when there is none to read.
+
+    Exposed for ``report.py``'s weekly-anchor inference, which needs the zone
+    a stored ``reset_raw`` was written in without re-deriving the whole
+    ``parse_reset_time`` computation.
+    """
+    if not reset_raw:
+        return None
+    match = _RESET_TZ_RE.match(reset_raw)
+    return match.group("tz") if match else None
+
+
+def _quota_resets_at(record: dict[str, Any]) -> float | None:
+    """``quotaLimits.resetsAt`` — an exact epoch some client versions attach
+    to the rejection, alongside (not instead of) the text banner. Preferred
+    over parsing the banner's text when present, since it needs no timezone
+    guess at all; text parsing is the fallback for the versions, and the
+    limit kinds, that don't carry it."""
+    quota = record.get("quotaLimits")
+    if not isinstance(quota, dict):
+        return None
+    value = quota.get("resetsAt")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _fold_limit_hit(facts: Facts, record: dict[str, Any], agent_id: str, ts: float | None) -> None:
+    text = _limit_hit_text(record)
+    if text is None:
+        return
+    uuid = record.get("uuid")
+    if not isinstance(uuid, str) or not uuid:
+        return
+    kind, model, reset_raw = _classify_limit_text(text)
+    resets_at = _quota_resets_at(record)
+    if resets_at is None and reset_raw is not None and ts is not None:
+        resets_at = parse_reset_time(reset_raw, ts)
+    facts.limit_hits.append(LimitHit(
+        uuid=uuid, agent_id=agent_id, ts=ts, kind=kind, model=model,
+        reset_raw=reset_raw, resets_at=resets_at, raw_text=text,
+    ))
+
+
 def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, Any],
                        ts: float | None, agent_id: str = MAIN_AGENT) -> None:
     content = message.get("content")
@@ -394,17 +582,20 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
             continue
         payload = block.get("content")
         text = payload if isinstance(payload, str) else json.dumps(payload) if payload is not None else ""
-        url = artifact_url(text)
+        is_error = block.get("is_error") is True
+        # A refused or invalid publish can echo an artifact URL in its own
+        # error text; it published nothing, so that url is never recorded.
+        url = None if is_error else artifact_url(text)
         facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
-                                            artifact_url=url)
+                                            artifact_url=url, is_error=is_error)
         edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
         if edit is not None:
             facts.file_edits[tool_id] = edit
-        if url:
-            for turn in facts.turns.values():
-                artifact = turn.artifacts.get(tool_id)
-                if artifact is not None:
-                    artifact.url = url
+        for turn in facts.turns.values():
+            if is_error:
+                turn.artifacts.pop(tool_id, None)
+            elif url and tool_id in turn.artifacts:
+                turn.artifacts[tool_id].url = url
 
 
 # Git's marker for a missing trailing newline, which is not a change.
@@ -520,6 +711,10 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
 
     if kind == "assistant":
         _fold_assistant(facts, record, agent_id)
+        # A limit-hit banner is written as a SYNTHETIC assistant record
+        # (no API call happened), which `_fold_assistant` already ignores as
+        # a turn — checked independently here so it is still captured.
+        _fold_limit_hit(facts, record, agent_id, ts)
         return
 
     uuid = record.get("uuid")

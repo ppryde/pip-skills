@@ -4,11 +4,15 @@
  * import the wrappers below instead.
  */
 import type {
+  AccountsResponse,
+  AlmonerDigest,
+  AlmonerStatus,
   BoardResponse,
   CardDetail,
   ChronicleQuery,
   ChronicleSyncResponse,
   ChronicleAgentDetail,
+  ChronicleLimitsResponse,
   ChronicleSessionDetail,
   ChronicleSessionsResponse,
   ChronicleStatus,
@@ -87,12 +91,33 @@ export function setActiveRoot(root: string | null): void {
   activeRoot = root;
 }
 
-/** Appends `?root=...` (or `&root=...` if the url already has a query
- * string) when a root is active; otherwise returns `url` unchanged. */
+/** WF-116: the account selector's choice, same single-choke-point shape as
+ * `activeRoot` above — `null` means "no selection" / "every account",
+ * which every wrapper below treats as "omit the `account` query param
+ * entirely" (unchanged pre-selector behaviour). */
+let activeAccount: string | null = null;
+
+/**
+ * Sets the account every subsequent `withRoot`-routed call threads through
+ * as `?account=...`. Called by the same data hooks `setActiveRoot` is
+ * (`useSessions`, `useChronicle`), at the same point in their effect.
+ */
+export function setActiveAccount(account: string | null): void {
+  activeAccount = account;
+}
+
+/** Appends `?root=...`/`&account=...` (as `?`/`&` the url already needs)
+ * for whichever of `activeRoot`/`activeAccount` is set; returns `url`
+ * unchanged when neither is. */
 function withRoot(url: string): string {
-  if (activeRoot === null) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}root=${encodeURIComponent(activeRoot)}`;
+  let out = url;
+  if (activeRoot !== null) {
+    out += `${out.includes("?") ? "&" : "?"}root=${encodeURIComponent(activeRoot)}`;
+  }
+  if (activeAccount !== null) {
+    out += `${out.includes("?") ? "&" : "?"}account=${encodeURIComponent(activeAccount)}`;
+  }
+  return out;
 }
 
 /**
@@ -166,6 +191,13 @@ export function getBoard(opts?: { signal?: AbortSignal }): Promise<BoardResponse
  * marks whichever entry is its own launch root with `current: true`. */
 export function getRepos(): Promise<ReposResponse> {
   return request<ReposResponse>("GET", "/api/repos");
+}
+
+/** Account discovery (WF-116) — always global, like `getRepos`: the union
+ * of chronicle's account history and every watched config dir's current
+ * login, never scoped by the currently-selected account itself. */
+export function getAccounts(): Promise<AccountsResponse> {
+  return request<AccountsResponse>("GET", "/api/accounts");
 }
 
 /** Census sessions, scoped to the active root (WF-031) — same `withRoot`
@@ -311,12 +343,35 @@ export function clearRepo(
 
 // --- Chronicle (optional) ---------------------------------------------------
 
+/** The 1st of the current month at local midnight, as an ISO datetime
+ * carrying THIS browser's own UTC offset — so the backend (which may run in
+ * a different zone entirely) resolves "month to date" the way the browser
+ * sees it, not its own local midnight. Computed fresh on every call, never
+ * cached: `query.since` is a request-time instruction, not a stored value,
+ * which is what lets a poll tick after a month boundary see the new month. */
+function monthToDateSince(now: Date = new Date()): string {
+  const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offsetMin = -first.getTimezoneOffset(); // minutes EAST of UTC
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMin);
+  const date = `${first.getFullYear()}-${pad(first.getMonth() + 1)}-${pad(first.getDate())}`;
+  const offset = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return `${date}T00:00:00${offset}`;
+}
+
 /** Query-string tail for the chronicle reads. `scope=all` is appended AFTER
- * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`. */
+ * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`.
+ * `since` and `days` are mutually exclusive on the backend, so `since` wins
+ * here rather than sending both and letting the server 400. */
 function chronicleQuery(base: string, query: ChronicleQuery = {}): string {
   const url = withRoot(base);
   const params: string[] = [];
-  if (query.days !== undefined) params.push(`days=${encodeURIComponent(String(query.days))}`);
+  if (query.since === "month-to-date") {
+    params.push(`since=${encodeURIComponent(monthToDateSince())}`);
+  } else if (query.days !== undefined) {
+    params.push(`days=${encodeURIComponent(String(query.days))}`);
+  }
   if (query.scope === "all") params.push("scope=all");
   if (query.branch) params.push(`branch=${encodeURIComponent(query.branch)}`);
   if (params.length === 0) return url;
@@ -344,6 +399,14 @@ export function getChronicleSessions(
   );
 }
 
+/** Deduplicated usage-limit hits (the same real hit is written into every
+ * session running at the time; the backend folds those into one event per
+ * account/kind/reset — see `chronicle limits`), scoped by the same
+ * root/scope/days/branch query every other Chronicle read takes. */
+export function getChronicleLimits(query?: ChronicleQuery): Promise<ChronicleLimitsResponse> {
+  return request<ChronicleLimitsResponse>("GET", chronicleQuery("/api/chronicle/limits", query));
+}
+
 export function getChronicleSession(id: string): Promise<ChronicleSessionDetail> {
   return request<ChronicleSessionDetail>(
     "GET",
@@ -368,4 +431,35 @@ export function getChronicleAgent(
  * the call rather than prompting for a token. */
 export function syncChronicle(opts: { quiet?: boolean } = {}): Promise<ChronicleSyncResponse> {
   return request<ChronicleSyncResponse>("POST", "/api/chronicle/sync", undefined, opts);
+}
+
+/** Whether the almoner plugin is installed beside this dashboard, and whether
+ * any sources are configured — gates the Almoner page's nav entry exactly as
+ * `getChronicleStatus` gates the Chronicle's. */
+export function getAlmonerStatus(): Promise<AlmonerStatus> {
+  return request<AlmonerStatus>("GET", "/api/almoner/status");
+}
+
+/** The merged, deduplicated digest across every configured source.
+ *
+ * Read-only against every remote system — nothing is sent, replied to or
+ * marked read. It is NOT cache-free, though: the CLI persists what it gathers
+ * so the page renders instantly and yesterday keeps the ranking it was
+ * actually given. A stored row is therefore a snapshot of when it was
+ * gathered, never a live view of the source.
+ *
+ * Slow by nature (several network round trips, and a headless agent on the
+ * connector-backed transports), so callers show a pending state rather than
+ * assuming this returns promptly.
+ */
+export function getAlmonerDigest(
+  query: { hours?: number; context?: string; onlyNew?: boolean } = {},
+  opts: { signal?: AbortSignal } = {}
+): Promise<AlmonerDigest> {
+  const params: string[] = [];
+  if (query.hours !== undefined) params.push(`hours=${encodeURIComponent(String(query.hours))}`);
+  if (query.context) params.push(`context=${encodeURIComponent(query.context)}`);
+  if (query.onlyNew) params.push("new=1");
+  const url = "/api/almoner/digest" + (params.length ? `?${params.join("&")}` : "");
+  return request<AlmonerDigest>("GET", url, undefined, opts);
 }

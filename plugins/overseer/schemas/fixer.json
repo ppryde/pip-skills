@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "card": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "commits": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "counts": {
+      "additionalProperties": false,
+      "properties": {
+        "disputed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fixed": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fixed",
+        "disputed"
+      ],
+      "type": "object"
+    },
+    "detail": {
+      "description": "absolute path inside the card's dispatch directory",
+      "minLength": 1,
+      "type": "string"
+    },
+    "learned": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "round": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "schema": {
+      "const": "overseer.fixer/1"
+    },
+    "stage": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "DONE",
+        "DISPUTED",
+        "BLOCKED"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "card",
+    "stage",
+    "round",
+    "status",
+    "counts",
+    "commits",
+    "detail",
+    "learned"
+  ],
+  "title": "overseer.fixer/1",
+  "type": "object"
+}

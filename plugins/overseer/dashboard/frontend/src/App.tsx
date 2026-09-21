@@ -2,11 +2,13 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import TopBar from "./components/TopBar";
 import CopyablePath from "./components/CopyablePath";
+import ChunkLoadBoundary from "./components/ChunkLoadBoundary";
 import type { View } from "./components/TopBar";
-import ChronicleFilterBar from "./components/chronicle/ChronicleFilterBar";
+import ChronicleFilterBar, { type ChronicleTimeWindow } from "./components/chronicle/ChronicleFilterBar";
 import Waylaid from "./components/Waylaid";
 import type { ChronicleQuery } from "./api/types";
 import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chronicle/useChronicle";
+import { useAlmonerStatus } from "./board/almoner/useAlmoner";
 
 /**
  * The Chronicle page is code-split, because the chronicle plugin is OPTIONAL.
@@ -19,6 +21,9 @@ import { useChronicle, useChronicleStatus, useChronicleSync } from "./board/chro
  * lazy import makes the optionality true of the artefact, not just the API.
  */
 const ChroniclePage = lazy(() => import("./components/chronicle/ChroniclePage"));
+/** Code-split for the same reason as the Chronicle: the almoner plugin is
+ * OPTIONAL, so a dashboard without it must not ship the page's bundle. */
+const AlmonerPage = lazy(() => import("./components/almoner/AlmonerPage"));
 import { chronicleScopeFor } from "./board/chronicle/scope";
 import Board from "./components/Board";
 import EpicAtlas from "./components/EpicAtlas";
@@ -31,6 +36,7 @@ import DesignLibrary from "./ui/DesignLibrary";
 import { useBoard } from "./board/useBoard";
 import { useSessions } from "./board/useSessions";
 import { useRepos } from "./board/useRepos";
+import { useAccounts } from "./board/useAccounts";
 import { useCardFilter } from "./board/useCardFilter";
 import { useIconKeyGlow } from "./board/useIconKeyGlow";
 import { buildParty } from "./board/party";
@@ -39,6 +45,10 @@ import { DEFAULT_FILTER, distinctLabels, visibleCardIds } from "./board/cardFilt
 
 /** localStorage key for the repo selector's persisted choice (WF-030). */
 const ACTIVE_ROOT_KEY = "overseer.activeRoot";
+/** localStorage key for the account selector's persisted choice (WF-116) —
+ * same persist-across-reloads treatment as the repo selector (unlike the
+ * branch filter, which is session-local). */
+const ACTIVE_ACCOUNT_KEY = "overseer.activeAccount";
 
 type ChronicleScope = NonNullable<ChronicleQuery["scope"]>;
 
@@ -52,16 +62,42 @@ function readStoredRoot(): string | null {
   }
 }
 
+function readStoredAccount(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_ACCOUNT_KEY);
+  } catch {
+    // Same fallback as readStoredRoot: no persisted choice, "All accounts".
+    return null;
+  }
+}
+
 /** Order-insensitive equality for the filter's two label arrays — used only
  * to decide whether `filter` still equals `DEFAULT_FILTER` (gates the
  * FilterBar's Clear button). */
 /** The page a URL hash names, or null for anything that isn't one of ours
  * (the bare URL, `#design`, a stray anchor). Chronicle is accepted here
  * even before its plugin status is known — the guard effect in App falls
- * back to the board once status says the page isn't offered. */
+ * back to the board once status says the page isn't offered.
+ *
+ * A hash may carry its own query string — `#almoner?demo=1` is the
+ * documented almoner demo URL (AlmonerPage.tsx, fixture.ts) — so the page
+ * name is only the part before a `?`. Without this split, `#almoner?demo=1`
+ * fails every comparison below, `view` falls back to `"board"`, and the
+ * hash-mirroring effect further down then overwrites the URL's own hash with
+ * `""` because it trusts that (wrong) view. */
 function viewFromHash(hash: string): View | null {
-  const name = hash.replace(/^#/, "");
-  return name === "board" || name === "atlas" || name === "chronicle" ? name : null;
+  const name = hash.replace(/^#/, "").split("?")[0];
+  return name === "board" || name === "atlas" || name === "chronicle" || name === "almoner"
+    ? name
+    : null;
+}
+
+/** The query string riding on a `#page?query` hash, as URLSearchParams —
+ * empty when the hash carries none. Mirrors `viewFromHash`'s split so the
+ * two never disagree about where the page name ends and the query begins. */
+function hashQuery(hash: string): URLSearchParams {
+  const at = hash.indexOf("?");
+  return new URLSearchParams(at === -1 ? "" : hash.slice(at + 1));
 }
 
 function sameLabelSet(a: string[], b: string[]): boolean {
@@ -79,6 +115,18 @@ function writeStoredRoot(root: string): void {
   }
 }
 
+/** `null` clears the persisted choice ("All accounts" is not worth carrying
+ * across a reload as a stored empty string) — every other value persists
+ * exactly like `writeStoredRoot`. */
+function writeStoredAccount(account: string | null): void {
+  try {
+    if (account === null) localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+    else localStorage.setItem(ACTIVE_ACCOUNT_KEY, account);
+  } catch {
+    // Best-effort only, same as writeStoredRoot.
+  }
+}
+
 function App() {
   const { repos, reload: reloadRepos } = useRepos();
   // Seeded synchronously from localStorage so the very first board fetch
@@ -87,6 +135,13 @@ function App() {
   // `/api/repos` resolves.
   const [activeRoot, setActiveRootState] = useState<string | null>(
     readStoredRoot
+  );
+  // WF-116 account selector — same persisted-choice shape as the repo
+  // selector above, reconciled the same way once `/api/accounts` resolves
+  // (below).
+  const { accounts, loaded: accountsLoaded } = useAccounts();
+  const [activeAccount, setActiveAccountState] = useState<string | null>(
+    readStoredAccount
   );
 
   // Reconcile the selection against what's actually discoverable once
@@ -100,6 +155,40 @@ function App() {
       return repos.find((r) => r.current)?.root ?? current;
     });
   }, [repos]);
+
+  // Same reconcile idea for the account selector: a persisted uuid that has
+  // since dropped out of `/api/accounts` (a machine's only login moved, or
+  // history aged out) falls back to "All accounts" rather than silently
+  // filtering every scoped fetch to a uuid nothing matches. Unlike the repo
+  // reconcile there is no "current" fallback to prefer — `null` (all
+  // accounts) is itself always a valid, meaningful choice.
+  //
+  // Guarded on `accountsLoaded`, NOT `accounts.length === 0`: the latter
+  // can't tell "the fetch hasn't come back yet" from "it came back and
+  // there really are no accounts" (no chronicle history, no oauth logins
+  // anywhere) — collapsing the two left a stale persisted uuid filtering
+  // every session/chronicle read forever, with nothing in the UI able to
+  // clear it (`AccountSelector` hides itself below two accounts). A failed
+  // fetch never sets `accountsLoaded` (see `useAccounts`), so a hiccup
+  // leaves whatever was persisted untouched rather than being read as "no
+  // accounts exist" — same "don't clear on a failure" rule the repo
+  // reconcile gets for free by falling back to `current` instead of `null`.
+  // Clears the localStorage key too (not just the in-memory state) so the
+  // reconcile does not just re-happen on every reload — `writeStoredAccount`
+  // already treats `null` as "remove the key".
+  useEffect(() => {
+    if (!accountsLoaded) return;
+    setActiveAccountState((current) => {
+      if (current && accounts.some((a) => a.account_uuid === current)) return current;
+      if (current !== null) writeStoredAccount(null);
+      return null;
+    });
+  }, [accounts, accountsLoaded]);
+
+  function handleSelectAccount(account: string | null) {
+    setActiveAccountState(account);
+    writeStoredAccount(account);
+  }
 
   function handleSelectRepo(root: string) {
     // WF-095: the card filters belong to the board the person set them on.
@@ -146,7 +235,7 @@ function App() {
   // (task 10) mirrors `useBoard`'s own gate directly above: an unbegun root
   // 400s `/api/sessions` exactly like it 400s `/api/board`, so this fetch
   // (mount AND poll) must be hard-skipped for it too.
-  const { sessions } = useSessions(activeRoot, !isUnbegun);
+  const { sessions } = useSessions(activeRoot, !isUnbegun, activeAccount);
   // Task 6: 60s post-change glow (live, frontend-only) — observes
   // `board.cards` across polls/mutations and glows any card whose
   // `cardIconKey` changed within the last 60s. `board?.cards ?? []` mirrors
@@ -203,8 +292,15 @@ function App() {
   const [view, setView] = useState<View>(() => viewFromHash(window.location.hash) ?? "board");
   useEffect(() => {
     if (window.location.hash === "#design") return;
+    // Compared by PAGE NAME, not exact string: a hash may carry its own
+    // query (`#almoner?demo=1`) that this effect must leave alone once it
+    // already names the current view — an exact-string compare rewrote it to
+    // the bare `#almoner` on every render, silently dropping `?demo=1`. An
+    // unrecognised/bare hash counts as "board", same fallback `view`'s own
+    // initial state uses, so the board's default (no-op) case still skips.
+    const currentPage = viewFromHash(window.location.hash) ?? "board";
+    if (currentPage === view) return;
     const wanted = view === "board" ? "" : `#${view}`;
-    if (window.location.hash === wanted) return;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${wanted}`);
   }, [view]);
   useEffect(() => {
@@ -220,13 +316,27 @@ function App() {
   // whether the page is offered at all. `null` = not yet known.
   const chronicleStatus = useChronicleStatus();
   const chronicleAvailable = chronicleStatus?.installed === true;
+  // Almoner (optional sibling plugin), gated exactly as the Chronicle is.
+  const almonerStatus = useAlmonerStatus();
+  const almonerAvailable = almonerStatus?.installed === true;
+  // `demo=1` renders the sample digest so the page can be seen before the
+  // almoner CLI exists. Opt-in only, and the page says so in a banner. The
+  // documented URL is `#almoner?demo=1` — the flag rides inside the hash's
+  // own query, not the page's `?query` — but `?demo=1#almoner` is accepted
+  // too, so either order works.
+  const almonerDemo =
+    new URLSearchParams(window.location.search).get("demo") === "1" ||
+    hashQuery(window.location.hash).get("demo") === "1";
   useEffect(() => {
     // Defensive: a stale `#chronicle`-ish selection can't outlive the
     // plugin's absence — fall back to the board once status is known.
     if (view === "chronicle" && chronicleStatus !== null && !chronicleAvailable) {
       setView("board");
     }
-  }, [view, chronicleStatus, chronicleAvailable]);
+    if (view === "almoner" && almonerStatus !== null && !almonerAvailable && !almonerDemo) {
+      setView("board");
+    }
+  }, [view, chronicleStatus, chronicleAvailable, almonerStatus, almonerAvailable, almonerDemo]);
   // The Chronicle's filters and its Sync action are App-owned for the same
   // reason the Atlas toggles are (WF-091): the controls render in the top
   // bar / filter region while the data renders in the page, so both need
@@ -240,7 +350,7 @@ function App() {
   // local, no localStorage. The fetch is gated on the view so the board
   // never pays for chronicle polling. An unbegun repo's root is refused on
   // every scoped read, so its scope is pinned to "all" regardless.
-  const [chronicleDays, setChronicleDays] = useState<number | undefined>(30);
+  const [chronicleWindow, setChronicleWindow] = useState<ChronicleTimeWindow>(30);
   const [chronicleAllRepos, setChronicleAllRepos] = useState(false);
   // The Chronicle's branch is its OWN state, not the board's `activeBranch`:
   // its list spans every repo, and a branch chosen there would otherwise dim
@@ -253,8 +363,14 @@ function App() {
   const chronicleScope: ChronicleScope = chronicleScopeFor(selectedRepo, chronicleAllRepos);
   const chronicle = useChronicle(
     activeRoot,
-    { days: chronicleDays, scope: chronicleScope, branch: chronicleBranch },
-    view === "chronicle"
+    {
+      days: typeof chronicleWindow === "number" ? chronicleWindow : undefined,
+      since: chronicleWindow === "month-to-date" ? "month-to-date" : undefined,
+      scope: chronicleScope,
+      branch: chronicleBranch,
+    },
+    view === "chronicle",
+    activeAccount
   );
   // Chronicle is pull only (no hooks, by design) — while the page shows, the
   // dashboard is what keeps its store current: a quiet sync on open and
@@ -277,7 +393,7 @@ function App() {
   );
   useEffect(() => {
     setChronicleBranchActivity(new Map());
-  }, [activeRoot, chronicleScope, chronicleDays]);
+  }, [activeRoot, chronicleScope, chronicleWindow]);
   useEffect(() => {
     if (chronicleBranch !== null) return;
     setChronicleBranchActivity((prev) => {
@@ -403,6 +519,9 @@ function App() {
         branches={view === "chronicle" ? chronicleBranches : branches}
         activeBranch={view === "chronicle" ? chronicleBranch : activeBranch}
         onSelectBranch={view === "chronicle" ? setChronicleBranch : setActiveBranch}
+        accounts={accounts}
+        activeAccount={activeAccount}
+        onSelectAccount={handleSelectAccount}
         // Task 10: an unbegun repo never populates `party` (sessions are
         // hard-gated off above), so source the questing pill from the SAME
         // `live_sessions` count `<UnbegunHolding/>` already shows below —
@@ -429,6 +548,7 @@ function App() {
         hideVanquished={hideVanquished}
         onToggleVanquished={setHideVanquished}
         chronicleAvailable={chronicleAvailable}
+          almonerAvailable={almonerAvailable || almonerDemo}
         onChronicleSync={() => void chronicleSync.sync()}
         chronicleSyncing={chronicleSync.syncing}
         chronicleAllRepos={{ selected: chronicleScope === "all", onSelect: setChronicleAllRepos }}
@@ -437,8 +557,8 @@ function App() {
           same "Filters ▾" collapse) — exactly one of the two renders. */}
       {view === "chronicle" && (
         <ChronicleFilterBar
-          days={chronicleDays}
-          onDays={setChronicleDays}
+          timeWindow={chronicleWindow}
+          onTimeWindow={setChronicleWindow}
           syncNote={chronicleSync.note}
           filtersOpen={filtersOpen}
         />
@@ -477,19 +597,34 @@ function App() {
         {/* The Chronicle is account-wide data, so unlike Board/Atlas it is
             reachable for an unbegun repo too — the page just locks its
             scope to "All repos" since a boardless root can't be named. */}
-        {view === "chronicle" ? (
-          // The same line the board shows while it loads — the chunk arrives
-          // in a blink over localhost, so anything heavier would be a flash.
-          <Suspense fallback={<p className="board-placeholder">Loading the Chronicle…</p>}>
-            <ChroniclePage
-              scope={chronicleScope}
-              summary={chronicle.summary}
-              sessions={chronicle.sessions}
-              loading={chronicle.loading}
-              error={chronicle.error}
-              onRetry={() => void chronicle.refresh()}
-            />
-          </Suspense>
+        {view === "almoner" ? (
+          // Wrapped like the Chronicle below: both pages are lazy chunks a
+          // stale tab can 404 on after a rebuild.
+          <ChunkLoadBoundary>
+            <Suspense fallback={<p className="board-placeholder">Loading the Almoner…</p>}>
+              <AlmonerPage status={almonerStatus} demo={almonerDemo} />
+            </Suspense>
+          </ChunkLoadBoundary>
+        ) : view === "chronicle" ? (
+          // ChunkLoadBoundary outside Suspense: Suspense only covers the
+          // PENDING state of the lazy import below, not a REJECTED one (a
+          // stale tab's chunk 404ing after a rebuild) — see its own comment.
+          <ChunkLoadBoundary>
+            {/* The same line the board shows while it loads — the chunk
+                arrives in a blink over localhost, so anything heavier would
+                be a flash. */}
+            <Suspense fallback={<p className="board-placeholder">Loading the Chronicle…</p>}>
+              <ChroniclePage
+                scope={chronicleScope}
+                summary={chronicle.summary}
+                sessions={chronicle.sessions}
+                limits={chronicle.limits}
+                loading={chronicle.loading}
+                error={chronicle.error}
+                onRetry={() => void chronicle.refresh()}
+              />
+            </Suspense>
+          </ChunkLoadBoundary>
         ) : isUnbegun && selectedRepo ? (
           <UnbegunHolding
             repo={selectedRepo}

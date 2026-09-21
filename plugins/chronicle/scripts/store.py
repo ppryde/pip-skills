@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts);
 CREATE INDEX IF NOT EXISTS turns_ts ON turns(ts);
+-- Ingest's copied-record check looks each id up across every session.
+CREATE INDEX IF NOT EXISTS turns_message_id ON turns(message_id);
 
 CREATE TABLE IF NOT EXISTS tool_calls (
     session_id   TEXT NOT NULL,
@@ -155,6 +157,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_name ON tool_calls(tool_name);
+CREATE INDEX IF NOT EXISTS tool_calls_tool_use_id ON tool_calls(tool_use_id);
 
 -- One row per file change, from the unified diff Claude Code writes with
 -- every Edit/Write result. Counts only: the diff CONTENT is deliberately not
@@ -198,6 +201,7 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX IF NOT EXISTS events_session_kind ON events(session_id, kind);
+CREATE INDEX IF NOT EXISTS events_uuid ON events(uuid);
 
 CREATE TABLE IF NOT EXISTS accounts (
     -- Identity only, and deliberately only the parts that do not change and
@@ -214,6 +218,34 @@ CREATE TABLE IF NOT EXISTS accounts (
     first_seen        REAL,
     last_seen         REAL
 );
+
+-- One row per usage-limit banner RECORD (see transcript.LimitHit) — the same
+-- real-world hit is written into every session and subagent running at the
+-- time, so this is deliberately not deduplicated at write time: "how many
+-- sessions saw it" is itself part of what `report.limits` answers, on the
+-- read side, by clustering rows close together in time within one
+-- (account, kind, model) family (see `report._cluster_limit_rows`).
+--
+-- `raw_text` extends the "nothing personal is ever written" policy above:
+-- today's banners carry no PII, but `kind='other'` exists precisely to keep
+-- an unrecognised future wording verbatim rather than dropping it, and this
+-- store is read by the dashboard. So `raw_text` is kept here for a person
+-- reading the store directly to debug an `other` classification, but
+-- `report.limits` never selects it and no API route or UI ever surfaces it.
+CREATE TABLE IF NOT EXISTS limit_hits (
+    session_id  TEXT NOT NULL,
+    agent_id    TEXT NOT NULL DEFAULT '',
+    uuid        TEXT NOT NULL,
+    ts          REAL,
+    kind        TEXT NOT NULL DEFAULT 'other',
+    model       TEXT,
+    reset_raw   TEXT,
+    resets_at   REAL,
+    raw_text    TEXT NOT NULL DEFAULT '',  -- debugging only; never leaves this table (see above)
+    PRIMARY KEY (session_id, uuid)
+);
+CREATE INDEX IF NOT EXISTS limit_hits_ts ON limit_hits(ts);
+CREATE INDEX IF NOT EXISTS limit_hits_kind ON limit_hits(kind);
 
 CREATE TABLE IF NOT EXISTS cursors (
     path        TEXT PRIMARY KEY,
@@ -276,6 +308,15 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("turns", "agent_type", "TEXT"),
     ("turns", "mcp_server", "TEXT"),
     ("turns", "mcp_tool", "TEXT"),
+    # Which account this session belongs to: the `accountUuid` of the config
+    # dir its transcript was ingested from, at first ingest. Write-once like
+    # the plan snapshot (see `ingest._upsert_session_identity`) and for the
+    # same reason — an account logging into a different config dir later must
+    # not relabel history. Deliberately NOT the transcript's own top-level
+    # `accountUuid` field: that names the Artifact/claude.ai account a record
+    # was made from (only `artifact-autoreact-ledger` rows carry it), not
+    # who ran the session.
+    ("sessions", "account_uuid", "TEXT"),
 )
 
 
@@ -284,6 +325,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in present:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # `account_uuid` is a MIGRATED column (added above, not in `_SCHEMA`'s own
+    # `CREATE TABLE sessions`), so its index has to be created here, after the
+    # ALTER that guarantees the column exists — naming it in `_SCHEMA` would
+    # fail outright on a brand-new store, whose table is created without it.
+    # `report._session_windows` scans a single account's turns via this same
+    # join (`turns JOIN sessions ON ... WHERE sessions.account_uuid = ?`), so
+    # this is what keeps that scan from also being a full scan of `sessions`.
+    conn.execute("CREATE INDEX IF NOT EXISTS sessions_account_uuid ON sessions(account_uuid)")
 
 
 def config_dir() -> Path:

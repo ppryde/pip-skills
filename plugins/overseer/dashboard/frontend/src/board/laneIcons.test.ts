@@ -18,10 +18,19 @@ describe("laneIconKey", () => {
     expect(laneIconKey(lane({ key: "archive", kind: "archive" }))).toBe("abandoned");
   });
 
-  it("maps the mobile in-progress lane (WF-085 collapseStagesForMobile) to 'in-progress'", () => {
+  it("maps the collapsed group lanes (collapseStages) to their own kind", () => {
     expect(
       laneIconKey(lane({ key: "in-progress", kind: "in-progress" }))
     ).toBe("in-progress");
+    expect(laneIconKey(lane({ key: "in-review", kind: "in-review" }))).toBe(
+      "in-review"
+    );
+  });
+
+  it("gives the in-review lane a real icon and label, not the backlog fallback", () => {
+    expect(laneIcon("in-review")).toBe(laneIcon("awaiting-merge"));
+    expect(laneIcon("in-review")).not.toBe(laneIcon("backlog"));
+    expect(iconKeyLabel("in-review")).toBe("In Review");
   });
 
   it("maps every stage lane to its own stage string", () => {

@@ -3,29 +3,34 @@
  *
  * `useChronicleStatus` — one fetch on mount; tells App whether to offer the
  * page at all. `useChronicle` — the page's summary + session list, re-fetched
- * whenever the selected root / time window / scope / branch changes and
- * polled every 30s while enabled. `useChronicleSync` — the Sync action, plus
- * the quiet auto-sync the page runs while it shows: chronicle is pull only
- * (no hooks, by design), so the dashboard is what keeps the store current.
- * `useChronicleSession` — one session's detail for the drawer.
+ * whenever the selected root / account / time window / scope / branch
+ * changes and polled every 30s while enabled. `useChronicleSync` — the Sync
+ * action, plus the quiet auto-sync the page runs while it shows: chronicle
+ * is pull only (no hooks, by design), so the dashboard is what keeps the
+ * store current. `useChronicleSession` — one session's detail for the
+ * drawer.
  *
- * All three follow the dashboard's data-hook conventions: `setActiveRoot`
- * is called synchronously before the fetch (see `useSessions`), errors are
- * captured rather than thrown, and the previous data is held while a
- * refetch is in flight (no skeleton flash — `loading` lets the page dim).
+ * All three follow the dashboard's data-hook conventions: `setActiveRoot`/
+ * `setActiveAccount` (WF-116) are called synchronously before the fetch (see
+ * `useSessions`), errors are captured rather than thrown, and the previous
+ * data is held while a refetch is in flight (no skeleton flash — `loading`
+ * lets the page dim).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getChronicleAgent,
+  getChronicleLimits,
   getChronicleSession,
   getChronicleSessions,
   getChronicleStatus,
   getChronicleSummary,
+  setActiveAccount,
   setActiveRoot,
   syncChronicle,
 } from "../../api/client";
 import type {
   ChronicleAgentDetail,
+  ChronicleLimitsResponse,
   ChronicleQuery,
   ChronicleSession,
   ChronicleSessionDetail,
@@ -72,6 +77,7 @@ export function useChronicleStatus(): ChronicleStatus | null {
 export interface UseChronicleResult {
   summary: ChronicleSummary | null;
   sessions: ChronicleSession[];
+  limits: ChronicleLimitsResponse | null;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -80,10 +86,12 @@ export interface UseChronicleResult {
 export function useChronicle(
   root: string | null,
   query: ChronicleQuery,
-  enabled: boolean
+  enabled: boolean,
+  account: string | null = null
 ): UseChronicleResult {
   const [summary, setSummary] = useState<ChronicleSummary | null>(null);
   const [sessions, setSessions] = useState<ChronicleSession[]>([]);
+  const [limits, setLimits] = useState<ChronicleLimitsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Every load takes a ticket; only the newest ticket's response lands. A
@@ -91,20 +99,27 @@ export function useChronicle(
   // fast new one, must not paint stale data over fresh (the same epoch
   // guard useBoard uses). Unmount just means no ticket is current.
   const requestIdRef = useRef(0);
-  const { days, scope, branch } = query;
+  const { days, since, scope, branch } = query;
 
   const load = useCallback(async () => {
     const id = ++requestIdRef.current;
     setActiveRoot(root);
+    setActiveAccount(account);
     setLoading(true);
     try {
-      const [sum, list] = await Promise.all([
-        getChronicleSummary({ days, scope, branch }),
-        getChronicleSessions({ days, scope, branch }),
+      // `since` (e.g. "month-to-date") is resolved to an actual instant
+      // inside getChronicleSummary/Sessions/Limits at THIS call, not before —
+      // so a poll tick that lands after a month boundary asks for the new
+      // month, never a value computed when the filter was first chosen.
+      const [sum, list, lims] = await Promise.all([
+        getChronicleSummary({ days, since, scope, branch }),
+        getChronicleSessions({ days, since, scope, branch }),
+        getChronicleLimits({ days, since, scope, branch }),
       ]);
       if (id !== requestIdRef.current) return;
       setSummary(sum);
       setSessions(list.sessions);
+      setLimits(lims);
       setError(null);
     } catch (err) {
       if (id !== requestIdRef.current) return;
@@ -112,7 +127,7 @@ export function useChronicle(
     } finally {
       if (id === requestIdRef.current) setLoading(false);
     }
-  }, [root, days, scope, branch]);
+  }, [root, days, since, scope, branch, account]);
 
   useEffect(() => {
     const ref = requestIdRef;
@@ -129,7 +144,7 @@ export function useChronicle(
   // catch-up load when a hidden tab comes back; a hidden tab polls nothing.
   useVisibleInterval(() => void load(), POLL_INTERVAL_MS, enabled, { immediate: "on-return" });
 
-  return { summary, sessions, loading, error, refresh: load };
+  return { summary, sessions, limits, loading, error, refresh: load };
 }
 
 export function formatSyncSummary(res: ChronicleSyncResponse): string {
