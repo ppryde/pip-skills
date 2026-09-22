@@ -139,12 +139,35 @@ describe("AlmonerPage", () => {
   it("gives each message in an opened conversation its own permalink", () => {
     render(<AlmonerPage status={null} demo />);
     fireEvent.click(screen.getByRole("button", { name: /Show 5 messages/i }));
-    expect(screen.getAllByRole("link", { name: "↗" }).length).toBeGreaterThanOrEqual(5);
+    // The demo's Group DM messages are Slack permalinks, so each one now
+    // renders the app deep link rather than a bare "↗" — see
+    // "opens a Slack message permalink in the app, with the browser link
+    // kept beside it" below for the browser-link half of the same row.
+    expect(
+      screen.getAllByRole("link", { name: "Open in Slack (app)" }).length
+    ).toBeGreaterThanOrEqual(5);
+  });
+
+  it("opens a Slack message permalink in the app, with the browser link kept beside it", () => {
+    // A `slack://` click is silent when the app isn't installed, so the
+    // ordinary https permalink stays reachable next to it, never replaced.
+    render(<AlmonerPage status={null} demo />);
+    fireEvent.click(screen.getByRole("button", { name: /Show 5 messages/i }));
+    const appLinks = screen.getAllByRole("link", { name: "Open in Slack (app)" });
+    const webLinks = screen.getAllByRole("link", { name: "Open in Slack (browser)" });
+    expect(appLinks.length).toBeGreaterThanOrEqual(5);
+    expect(webLinks.length).toBe(appLinks.length);
+    expect(appLinks[0].getAttribute("href")).toMatch(/^slack:\/\/channel\?/);
+    expect(webLinks[0].getAttribute("href")).toMatch(/^https:\/\/example\.slack\.com\//);
   });
 
   it("names the app each row links out to", () => {
     render(<AlmonerPage status={null} demo />);
-    expect(screen.getAllByRole("link", { name: /Open in Slack/i }).length).toBe(1);
+    // The Slack row renders TWO links now — app and browser — each with its
+    // own accessible name; see the DigestTable tests for the row-level
+    // assertion on that split.
+    expect(screen.getByRole("link", { name: "Open in Slack (app)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open in Slack (browser)" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open in Linear/i })).toBeInTheDocument();
   });
 

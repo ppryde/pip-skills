@@ -77,31 +77,36 @@ export const SAMPLE_DIGEST: AlmonerDigest = {
           who: "Rhona Baird",
           text: "Early feedback on the pilot is really positive by the way",
           at: ago(3.2),
-          url: "https://example.slack.com/archives/G01EXAMPLE/p000000000000100",
+          // A plausible Slack permalink timestamp — real ones are the unix
+          // epoch second plus six digits of microseconds, run together with
+          // no separator. This is the shape slackLink() actually has to
+          // parse, so the demo exercises the real code path rather than the
+          // old, implausibly short placeholder.
+          url: "https://example.slack.com/archives/G01EXAMPLE/p1789371022073101",
         },
         {
           who: "Rhona Baird",
           text: "A couple of the alerts are noisy — mostly accounts that are already capped",
           at: ago(2.05),
-          url: "https://example.slack.com/archives/G01EXAMPLE/p000000000000200",
+          url: "https://example.slack.com/archives/G01EXAMPLE/p1789371022073202",
         },
         {
           who: "Rhona Baird",
           text: "No need to apologise, it helps us find the edges",
           at: ago(2.03),
-          url: "https://example.slack.com/archives/G01EXAMPLE/p000000000000300",
+          url: "https://example.slack.com/archives/G01EXAMPLE/p1789371022073303",
         },
         {
           who: "Rhona Baird",
           text: "But it looks great — thanks for turning it round so quickly",
           at: ago(2.01),
-          url: "https://example.slack.com/archives/G01EXAMPLE/p000000000000400",
+          url: "https://example.slack.com/archives/G01EXAMPLE/p1789371022073404",
         },
         {
           who: "Rhona Baird",
           text: "Could we pull Priya into the pilot as well? Smaller book, but she gives good feedback.",
           at: ago(2),
-          url: "https://example.slack.com/archives/G01EXAMPLE/p000000000000500",
+          url: "https://example.slack.com/archives/G01EXAMPLE/p1789371022073505",
         },
       ],
     },
