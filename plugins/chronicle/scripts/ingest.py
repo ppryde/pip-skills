@@ -401,7 +401,6 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         "version": facts.version,
         "entrypoint": facts.entrypoint,
         "title": facts.title,
-        "owner_account_uuid": facts.owner_account_uuid,
     }
     for column, value in updates.items():
         if value is None:
@@ -409,22 +408,29 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         conn.execute(
             f"UPDATE sessions SET {column} = ? WHERE session_id = ?", (value, session_id)
         )
-    # Write-once, unlike every column above. The plan columns AND account_uuid
-    # record what was true WHEN THE SESSION WAS FIRST SEEN; re-stamping them on
-    # a later ingest would let `sync --full` quietly relabel the whole back
-    # catalogue with today's login — destroying the very history the snapshot
-    # exists to keep. Each is guarded on ITS OWN column being unset, not a
-    # shared flag: a session ingested before `account_uuid` existed already has
-    # `plan_observed_at` set, and sharing one guard would leave it unbackfilled
-    # forever. So a session missing either gets a fresh read of the profile
-    # (cheap — one local file), and each column is then written only if IT is
-    # still unset — the plan and the account uuid each keep whichever value
-    # they saw first, independently.
+    # Write-once, unlike every column above. The plan columns, account_uuid,
+    # AND owner_account_uuid record what was true WHEN THE SESSION WAS FIRST
+    # SEEN; re-stamping them on a later ingest would let `sync --full` quietly
+    # relabel the whole back catalogue with today's login — destroying the
+    # very history the snapshot exists to keep. Each is guarded on ITS OWN
+    # column being unset, not a shared flag: a session ingested before
+    # `account_uuid` existed already has `plan_observed_at` set, and sharing
+    # one guard would leave it unbackfilled forever. So a session missing any
+    # of them gets a fresh read (of the profile for plan/account_uuid, of this
+    # batch's facts for owner_account_uuid), and each column is then written
+    # only if IT is still unset — each keeps whichever value it saw first,
+    # independently. owner_account_uuid needs the same guard as account_uuid
+    # for the same reason: a bridged session's account CAN change mid-stream
+    # (a real `/login` observed in the wild re-emits `bridge-session` with a
+    # new `ownerAccountUuid`), and an incremental ingest that lands on the
+    # switched-to account must not relabel the session's original owner.
     already = conn.execute(
-        "SELECT plan_observed_at, account_uuid FROM sessions WHERE session_id = ?", (session_id,)
+        "SELECT plan_observed_at, account_uuid, owner_account_uuid FROM sessions "
+        "WHERE session_id = ?", (session_id,)
     ).fetchone()
     plan_pending = already is None or already[0] is None
     account_pending = already is None or already[1] is None
+    owner_pending = already is None or already[2] is None
     if plan_pending or account_pending:
         snapshot, account_uuid = _account_snapshot(conn, config, now)
         if plan_pending:
@@ -437,6 +443,11 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
                 "UPDATE sessions SET account_uuid = ? WHERE session_id = ?",
                 (account_uuid, session_id),
             )
+    if owner_pending and facts.owner_account_uuid:
+        conn.execute(
+            "UPDATE sessions SET owner_account_uuid = ? WHERE session_id = ?",
+            (facts.owner_account_uuid, session_id),
+        )
     if facts.first_ts is not None:
         conn.execute(
             "UPDATE sessions SET started_at = MIN(COALESCE(started_at, ?), ?) WHERE session_id = ?",
