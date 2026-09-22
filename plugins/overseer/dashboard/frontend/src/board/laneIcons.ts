@@ -42,22 +42,26 @@ const ICONS: Record<string, string> = {
   parked,
   abandoned,
   "in-progress": inProgress,
+  // No dedicated in-review art yet: the group's terminal stage lends its
+  // icon, so the lane reads as "the merge is waiting on you". Drop an
+  // `in-review.png` beside the others and this becomes a one-line swap.
+  "in-review": awaitingMerge,
 };
 
 /** Derives a lane's icon/accent key from its `kind`/`stage` — mirrors
  * Lane.tsx's `accentKey`. `archive` (labelled "Abandoned") maps to
  * `abandoned`; every `stage` lane's key IS its `Stage` string already
  * (STAGES in layout.ts lists exactly the 7 stage icon keys below).
- * `in-progress` (WF-085 mobile collapse — `collapseStagesForMobile`'s
- * synthetic lane) is its own key, mapped to the drawn-shortsword icon. */
+ * `in-progress` and `in-review` (`collapseStages`'s synthetic group lanes —
+ * see STAGE_GROUPS) are each their own key. */
 export function laneIconKey(lane: Lane): string {
   if (lane.kind === "archive") return "abandoned";
   if (lane.kind === "stage") return lane.stage!;
-  return lane.kind; // "backlog" | "parked" | "done" | "in-progress"
+  return lane.kind; // "backlog" | "parked" | "done" | "in-progress" | "in-review"
 }
 
 /** Returns the imported/bundled icon URL for a given icon key (one of the
- * 11 values `laneIconKey` can produce). Falls back to the backlog icon for
+ * 12 values `laneIconKey` can produce). Falls back to the backlog icon for
  * an unrecognised key rather than rendering a broken `<img>` — should never
  * happen in practice since `laneIconKey` only ever emits a known key. */
 export function laneIcon(key: string): string {
@@ -100,6 +104,7 @@ const BUCKET_LABELS: Record<string, string> = {
   done: "Done",
   abandoned: "Abandoned",
   "in-progress": "In Progress",
+  "in-review": "In Review",
 };
 export function iconKeyLabel(key: string): string {
   return (STAGE_LABELS as Record<string, string>)[key] ?? BUCKET_LABELS[key] ?? key;

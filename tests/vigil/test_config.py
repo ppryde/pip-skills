@@ -54,6 +54,6 @@ class TestCorruptFile:
 
 
 class TestPath:
-    def test_config_lives_under_dot_vigil(self, tmp_path):
+    def test_config_lives_under_dot_claude_vigil(self, tmp_path):
         ensure_root(tmp_path)
-        assert config_path(tmp_path) == tmp_path / ".vigil" / "config.json"
+        assert config_path(tmp_path) == tmp_path / ".claude" / "vigil" / "config.json"

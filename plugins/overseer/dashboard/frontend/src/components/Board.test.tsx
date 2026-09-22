@@ -14,7 +14,12 @@ vi.mock("../api/client", () => ({
   getCard: vi.fn(),
   getSessions: vi.fn(),
   getRepos: vi.fn(),
+  // WF-116: App now mounts useAccounts()/threads setActiveAccount()
+  // unconditionally too, same "every read the mount path touches" rationale
+  // as getSessions/getRepos above.
+  getAccounts: vi.fn().mockResolvedValue({ accounts: [] }),
   setActiveRoot: vi.fn(),
+  setActiveAccount: vi.fn(),
 }));
 
 import { getBoard, getCard, getSessions, getRepos } from "../api/client";
@@ -133,14 +138,14 @@ describe("<App/> board render (read-only, Chunk 3)", () => {
 
     render(<App />);
 
-    // Lanes are present (labels from layout.ts). WF-085 follow-up:
-    // `Board.tsx`'s `displayLanes` now runs `collapseStagesForMobile` on
-    // EVERY viewport (desktop included), so the 7 stage lanes never render
-    // individually here — the fixture's one in-flight card (stage
-    // "implementation") surfaces under the merged "In Progress" lane
-    // instead of an "Implementation" lane/header.
+    // Lanes are present (labels from layout.ts). `Board.tsx`'s `displayLanes`
+    // runs `collapseStages` on EVERY viewport (desktop included), so the 7
+    // stage lanes never render individually here — they surface as the two
+    // STAGE_GROUPS lanes. The fixture's one in-flight card (stage
+    // "implementation") lands under "In Progress"; "In Review" renders empty.
     expect(await screen.findByText("Backlog")).toBeInTheDocument();
     expect(screen.getByText("In Progress")).toBeInTheDocument();
+    expect(screen.getByText("In Review")).toBeInTheDocument();
     expect(screen.getByText("Parked")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
 
@@ -633,8 +638,11 @@ describe("mobile board scroll-container (WF-085 review — CSS regression guard)
   });
 });
 
-// WF-085 in-progress lane: `collapseStagesForMobile` (board/layout.ts)
-// merges the 7 stage lanes into ONE "In Progress" tab/pane. Every card now
+// WF-085 in-progress lane: `collapseStages` (board/layout.ts) merges the 7
+// stage lanes into the STAGE_GROUPS tabs/panes — "In Progress"
+// (bootstrap→impl-review) and "In Review" (verification + awaiting-merge).
+// The tests below exercise the In Progress half; the split itself is pinned
+// in layout.test.ts. Every card now
 // carries its own always-on lifecycle icon (task 5, TileShell) regardless
 // of lane — the old mobile-only `CardTile.showStage`/`Lane`'s `kind ===
 // "in-progress"` gate has been removed. WF-085 follow-up (per the user's

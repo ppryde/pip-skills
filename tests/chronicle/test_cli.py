@@ -1,9 +1,13 @@
+import argparse
 import json
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.cli import build_parser, main
+import pytest
+from scripts.cli import _parse_since, build_parser, main
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "plugins" / "chronicle"
 T0 = "2026-09-01T10:00:00.000Z"
@@ -278,6 +282,29 @@ class TestCli:
         assert main(["repos"]) == 0
         assert json.loads(capsys.readouterr().out)["repos"] == []  # /repo isn't a git repo
 
+        assert main(["accounts"]) == 0
+        assert json.loads(capsys.readouterr().out)["accounts"] == []  # no oauthAccount in the fixture
+
+        # --account narrows summary/sessions the same way --branch does.
+        assert main(["summary", "--account", "nope"]) == 0
+        assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 0
+        assert main(["sessions", "--account", "nope"]) == 0
+        assert json.loads(capsys.readouterr().out)["sessions"] == []
+
+        assert main(["limits"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"events": [], "by_kind": {}}
+
+    def test_limits_verb(self, builder, capsys):
+        builder.limit_hit("h1", T0, "You've hit your session limit · resets 11:50am (Europe/London)")
+        builder.write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+        assert main(["limits", "--days", "36500"]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["by_kind"] == {"session": 1}
+        assert out["events"][0]["kind"] == "session"
+        assert out["events"][0]["sessions"] == 1
+
     def test_reports_without_store_are_empty_not_errors(self, capsys):
         assert main(["summary"]) == 0
         assert json.loads(capsys.readouterr().out) == {"totals": None}
@@ -285,6 +312,10 @@ class TestCli:
         assert json.loads(capsys.readouterr().out) == {"sessions": []}
         assert main(["repos"]) == 0
         assert json.loads(capsys.readouterr().out) == {"repos": []}
+        assert main(["accounts"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"accounts": []}
+        assert main(["limits"]) == 0
+        assert json.loads(capsys.readouterr().out) == {"events": [], "by_kind": {}}
         assert main(["session", "x"]) == 1
 
     def test_ingest_verb(self, builder, capsys):
@@ -292,6 +323,130 @@ class TestCli:
         assert main(["ingest", "--transcript", str(path), "--session-id", "named"]) == 0
         assert json.loads(capsys.readouterr().out)["lines"] == 1
         assert main(["ingest", "--transcript", str(path.with_name("missing.jsonl"))]) == 1
+
+
+class TestSince:
+    """`--since` is the exact-instant sibling of `--days`: an ISO date or
+    datetime, mutually exclusive with it, feeding the same `since` epoch
+    `report.summary`/`report.sessions` already take. The dashboard uses it
+    for "month to date", which `--days` can only approximate."""
+
+    def test_a_bare_date_is_local_midnight_not_utc(self, monkeypatch):
+        # The owner's ask was explicit: local midnight, not a UTC or
+        # `days`-shaped approximation. Pinning TZ to a non-UTC zone with a
+        # known offset is the only way to catch a `--since 2026-09-01` that
+        # silently meant UTC midnight instead.
+        monkeypatch.setenv("TZ", "America/New_York")
+        time.tzset()
+        try:
+            epoch = _parse_since("2026-09-01")
+        finally:
+            monkeypatch.delenv("TZ", raising=False)
+            time.tzset()
+        # 2026-09-01 is in EDT (UTC-4): local midnight is 04:00 UTC.
+        assert datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat() == "2026-09-01T04:00:00+00:00"
+
+    def test_a_full_iso_datetime_with_offset_is_used_as_is(self):
+        epoch = _parse_since("2026-09-01T00:00:00-04:00")
+        assert datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat() == "2026-09-01T04:00:00+00:00"
+
+    def test_an_unparseable_since_raises(self):
+        with pytest.raises(argparse.ArgumentTypeError):
+            _parse_since("not-a-date")
+
+    def test_an_out_of_range_since_raises_the_same_error_not_a_crash(self):
+        # `datetime.fromisoformat` happily parses "9999-12-31" and
+        # "0001-01-01" — the overflow only surfaces later, in `astimezone()`
+        # or `.timestamp()` (both raise plain ValueError, on some platforms
+        # OverflowError), converting a naive local year at the edge of what
+        # `datetime` can hold in another timezone or as a POSIX timestamp.
+        # Uncaught, that ValueError would crash the CLI instead of failing
+        # cleanly as invalid input.
+        for value in ("9999-12-31", "0001-01-01"):
+            with pytest.raises(argparse.ArgumentTypeError):
+                _parse_since(value)
+
+    def test_since_scopes_summary_and_sessions(self, builder, capsys):
+        builder.prompt("u1", T0).turn("m1", T0, tools=["Edit"]).write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+
+        assert main(["summary", "--since", "2020-01-01"]) == 0
+        assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 1
+        assert main(["summary", "--since", "2030-01-01"]) == 0
+        assert json.loads(capsys.readouterr().out)["totals"]["sessions"] == 0
+
+        assert main(["sessions", "--since", "2020-01-01"]) == 0
+        assert len(json.loads(capsys.readouterr().out)["sessions"]) == 1
+        assert main(["sessions", "--since", "2030-01-01"]) == 0
+        assert json.loads(capsys.readouterr().out)["sessions"] == []
+
+    def test_since_and_days_are_mutually_exclusive(self, capsys):
+        # A parser-level rejection (argparse's own mutually-exclusive-group
+        # check), not one of chronicle's `_fail` calls — argparse exits the
+        # process directly rather than returning, same exit code either way.
+        with pytest.raises(SystemExit) as exc:
+            main(["summary", "--days", "7", "--since", "2026-09-01"])
+        assert exc.value.code == 2
+        assert "not allowed" in capsys.readouterr().err
+
+    def test_an_unparseable_since_is_invalid_input_not_a_crash(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["summary", "--since", "not-a-date"])
+        assert exc.value.code == 2
+        assert "invalid --since value" in capsys.readouterr().err
+
+    def test_an_out_of_range_since_is_invalid_input_not_a_crash(self, capsys):
+        for value in ("9999-12-31", "0001-01-01"):
+            with pytest.raises(SystemExit) as exc:
+                main(["summary", "--since", value])
+            assert exc.value.code == 2
+            assert "invalid --since value" in capsys.readouterr().err
+
+
+class TestErrorContract:
+    """One contract for every verb: success is a single JSON object on
+    stdout; failure is `{"error": ...}` on stderr — 2 for invalid input,
+    1 for a runtime failure or a thing not found."""
+
+    def test_a_missing_transcript_is_json_on_stderr_not_bare_text(self, tmp_path, capsys):
+        assert main(["ingest", "--transcript", str(tmp_path / "nope.jsonl")]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert json.loads(err) == {"error": f"no transcript at {tmp_path / 'nope.jsonl'}"}
+
+    def test_an_unknown_session_is_json_on_stderr(self, builder, capsys):
+        builder.turn("m1", T0).write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+        assert main(["session", "nope"]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert json.loads(err) == {"error": "no session nope"}
+
+    def test_a_missing_store_is_json_on_stderr(self, capsys):
+        assert main(["session", "s1"]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        payload = json.loads(err)
+        assert payload["error"].startswith("no store at ")
+
+    def test_an_unknown_agent_is_json_on_stderr(self, builder, capsys):
+        builder.turn("m1", T0).write()
+        assert main(["sync"]) == 0
+        capsys.readouterr()
+        assert main(["agent", "s1", "nope"]) == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert json.loads(err) == {"error": "no agent nope in session s1"}
+
+    def test_pull_volume_invalid_input_is_2_and_runtime_failure_is_1(self, monkeypatch, capsys, tmp_path):
+        assert main(["pull-volume", "--volume", "bad name", "--dest", str(tmp_path)]) == 2
+
+        def missing(*a, **k):
+            raise FileNotFoundError()
+        monkeypatch.setattr("scripts.cli.subprocess.run", missing)
+        assert main(["pull-volume", "--volume", "wf", "--dest", str(tmp_path)]) == 1
 
     def test_module_is_runnable_as_script(self, tmp_path):
         result = subprocess.run(

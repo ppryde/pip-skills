@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collapseStagesForMobile, groupIntoLanes, STAGES } from "./layout";
+import { collapseStages, groupIntoLanes, STAGE_GROUPS, STAGES } from "./layout";
 import type { BoardCard } from "../api/types";
 
 /** Minimal card builder — fills every required field with a sane default. */
@@ -307,8 +307,18 @@ describe("groupIntoLanes", () => {
   });
 });
 
-describe("collapseStagesForMobile", () => {
-  it("merges the 7 stage lanes into ONE in-progress lane, in place of the first stage lane, cards in STAGES order", () => {
+describe("STAGE_GROUPS", () => {
+  // The load-bearing invariant: the group lanes are ALL that render, so a
+  // stage belonging to no group would vanish from the board entirely — its
+  // cards silently invisible rather than merely mis-placed. Adding a stage to
+  // models.py + STAGES without assigning it a group must fail here.
+  it("covers every stage in STAGES exactly once, in STAGES order", () => {
+    expect(STAGE_GROUPS.flatMap((g) => [...g.stages])).toEqual(STAGES);
+  });
+});
+
+describe("collapseStages", () => {
+  it("merges the 7 stage lanes into the STAGE_GROUPS lanes, in place of the first stage lane, cards in STAGES order", () => {
     const cards: BoardCard[] = [
       card({ id: "WF-BACKLOG", status: "planned" }),
       ...STAGES.map((stage, i) =>
@@ -320,11 +330,12 @@ describe("collapseStagesForMobile", () => {
     ];
     const lanes = groupIntoLanes(cards);
 
-    const collapsed = collapseStagesForMobile(lanes);
+    const collapsed = collapseStages(lanes);
 
     expect(collapsed.map((l) => l.key)).toEqual([
       "backlog",
       "in-progress",
+      "in-review",
       "parked",
       "done",
       "archive",
@@ -333,11 +344,59 @@ describe("collapseStagesForMobile", () => {
     const inProgress = laneByKey(collapsed, "in-progress");
     expect(inProgress.kind).toBe("in-progress");
     expect(inProgress.label).toBe("In Progress");
-    // One card per stage, concatenated in STAGES order (bootstrap first,
-    // awaiting-merge last) — matches how `cards` above was built.
-    expect(inProgress.cards.map((c) => c.id)).toEqual(
-      STAGES.map((_, i) => `WF-STAGE-${i}`)
-    );
+    // STAGES[0..4] — bootstrap through impl-review, in STAGES order.
+    expect(inProgress.cards.map((c) => c.id)).toEqual([
+      "WF-STAGE-0",
+      "WF-STAGE-1",
+      "WF-STAGE-2",
+      "WF-STAGE-3",
+      "WF-STAGE-4",
+    ]);
+
+    const inReview = laneByKey(collapsed, "in-review");
+    expect(inReview.kind).toBe("in-review");
+    expect(inReview.label).toBe("In Review");
+    // STAGES[5..6] — verification then awaiting-merge, the two stages that
+    // wait on the user rather than on an agent.
+    expect(inReview.cards.map((c) => c.id)).toEqual(["WF-STAGE-5", "WF-STAGE-6"]);
+  });
+
+  it("puts a verification card above an awaiting-merge one inside In Review", () => {
+    // Group order beats recency ACROSS stages: the newer awaiting-merge card
+    // still sorts below the older verification one, because In Review reads
+    // as a pipeline (verify, then merge), not as a recency feed.
+    const cards: BoardCard[] = [
+      card({
+        id: "WF-MERGE",
+        status: "in-flight",
+        stage: "awaiting-merge",
+        updated: "2026-07-20T09:00",
+      }),
+      card({
+        id: "WF-VERIFY",
+        status: "in-flight",
+        stage: "verification",
+        updated: "2026-07-01T09:00",
+      }),
+    ];
+
+    const inReview = laneByKey(collapseStages(groupIntoLanes(cards)), "in-review");
+
+    expect(inReview.cards.map((c) => c.id)).toEqual(["WF-VERIFY", "WF-MERGE"]);
+  });
+
+  it("keeps impl-review in In Progress, not In Review", () => {
+    // The split is by WHO is waiting, not by the word "review": impl-review is
+    // adversarial agent review that needs nothing from the user.
+    const cards: BoardCard[] = [
+      card({ id: "WF-IMPL-REVIEW", status: "in-flight", stage: "impl-review" }),
+    ];
+    const collapsed = collapseStages(groupIntoLanes(cards));
+
+    expect(laneByKey(collapsed, "in-progress").cards.map((c) => c.id)).toEqual([
+      "WF-IMPL-REVIEW",
+    ]);
+    expect(laneByKey(collapsed, "in-review").cards).toHaveLength(0);
   });
 
   it("preserves each stage's own internal (recency) order inside the merged lane", () => {
@@ -363,7 +422,7 @@ describe("collapseStagesForMobile", () => {
     ];
     const lanes = groupIntoLanes(cards);
 
-    const inProgress = laneByKey(collapseStagesForMobile(lanes), "in-progress");
+    const inProgress = laneByKey(collapseStages(lanes), "in-progress");
 
     // bootstrap (STAGES[0]) before implementation (STAGES[3]); within
     // implementation, recency-desc (NEW before OLD) — same order
@@ -384,7 +443,7 @@ describe("collapseStagesForMobile", () => {
     ];
     const lanes = groupIntoLanes(cards);
 
-    const collapsed = collapseStagesForMobile(lanes);
+    const collapsed = collapseStages(lanes);
 
     expect(laneByKey(collapsed, "backlog")).toBe(laneByKey(lanes, "backlog"));
     expect(laneByKey(collapsed, "parked")).toBe(laneByKey(lanes, "parked"));
@@ -392,17 +451,19 @@ describe("collapseStagesForMobile", () => {
     expect(laneByKey(collapsed, "archive")).toBe(laneByKey(lanes, "archive"));
   });
 
-  it("an empty board still gets an empty (faded) in-progress lane, correctly positioned", () => {
-    const collapsed = collapseStagesForMobile(groupIntoLanes([]));
+  it("an empty board still gets empty (faded) group lanes, correctly positioned", () => {
+    const collapsed = collapseStages(groupIntoLanes([]));
 
     expect(collapsed.map((l) => l.key)).toEqual([
       "backlog",
       "in-progress",
+      "in-review",
       "parked",
       "done",
       "archive",
     ]);
     expect(laneByKey(collapsed, "in-progress").cards).toHaveLength(0);
+    expect(laneByKey(collapsed, "in-review").cards).toHaveLength(0);
     expect(collapsed.every((l) => l.cards.length === 0)).toBe(true);
   });
 });

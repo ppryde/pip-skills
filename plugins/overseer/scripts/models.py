@@ -101,6 +101,12 @@ def append_to_section(body: str, header: str, content: str) -> str:
     return "\n".join(lines)
 
 
+def normalize_section_header(name: str) -> str:
+    """'Decisions' or '## Decisions' -> '## Decisions' — the canonical
+    `## ` heading form `append_to_section` matches on."""
+    return f"## {name.strip().lstrip('#').strip()}"
+
+
 @dataclass
 class Card:
     """One unit of work. The card file is the source of truth; the index is a view."""
@@ -382,6 +388,67 @@ class Card:
 
     def review_rounds(self, stage: str) -> int:
         return self.body.count(f"### {stage} — round ")
+
+    def record_review(self, stage: str, round_no: int, slot: str, line: str, now: str) -> None:
+        """One reviewer's verdict line under its round's ``### `` header in
+        ``## Review log`` (WF-113 report hook). Parallel reviewers share one
+        header, so ``review_rounds`` keeps counting rounds, not verdicts. A
+        legacy ``log_review`` header ("… round N (k reviewers)") is joined."""
+        header = f"### {stage} — round {round_no}"
+        entry = f"- {slot}: {line}"
+        lines = self.body.split("\n")
+        start = next(
+            (i for i, text in enumerate(lines)
+             if text == header or text.startswith(header + " (")),
+            None,
+        )
+        if start is None:
+            self.body = append_to_section(self.body, "## Review log", f"{header}\n{entry}")
+        else:
+            end = start + 1
+            while end < len(lines) and not lines[end].startswith(("### ", "## ")):
+                end += 1
+            while end > start + 1 and not lines[end - 1].strip():
+                end -= 1
+            lines.insert(end, entry)
+            self.body = "\n".join(lines)
+        self.updated = now
+
+    def set_section(self, header: str, content: str, now: str) -> None:
+        """Replace a ``## `` section's content (appended if absent). Headers
+        inside ``content`` are demoted to ``### `` so a written plan can never
+        split the card into new top-level sections."""
+        demoted = []
+        for text in content.strip().split("\n"):
+            if text.startswith("# "):
+                text = "### " + text[2:]
+            elif text.startswith("## "):
+                text = "### " + text[3:]
+            demoted.append(text)
+        new = "\n".join(demoted)
+        lines = self.body.split("\n")
+        if header not in lines:
+            self.body = f"{self.body.rstrip()}\n\n{header}\n{new}".lstrip("\n")
+        else:
+            start = lines.index(header)
+            end = start + 1
+            while end < len(lines) and not lines[end].startswith("## "):
+                end += 1
+            tail = lines[end:]
+            self.body = "\n".join([*lines[: start + 1], new, *([""] if tail else []), *tail])
+        self.updated = now
+
+    def append_section(self, section: str, text: str, now: str) -> None:
+        """Append `text` at the end of the named body section, creating it
+        (as a new `## <section>` heading at the end of the body) if absent.
+
+        `section` may be given as bare heading text ('Decisions') or with its
+        `## ` prefix already on ('## Decisions') — both normalise to the same
+        heading. Unlike `log_progress`/`log_review`, the caller's text is
+        appended verbatim, with no formatting applied."""
+        header = normalize_section_header(section)
+        self.body = append_to_section(self.body, header, text)
+        self.updated = now
 
     @property
     def tripwire_breached(self) -> bool:

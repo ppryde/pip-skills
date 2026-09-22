@@ -263,4 +263,42 @@ describe("locateDropTarget", () => {
     const { lane } = locateDropTarget("nonexistent", lanes);
     expect(lane).toBeUndefined();
   });
+
+  // The rendered board shows the COLLAPSED group lanes, but drops resolve
+  // against the real per-stage `lanes` — so a group lane's own key matches no
+  // lane and would silently no-op without GROUP_LANDING_STAGE.
+  it("resolves a drop on the In Review lane's background to the real verification lane", () => {
+    const lanes = groupIntoLanes([]);
+
+    const { lane, index } = locateDropTarget("in-review", lanes);
+
+    expect(lane?.key).toBe("stage:verification");
+    expect(index).toBe(0);
+  });
+
+  it("maps an In Review background drop to a verification stage move", () => {
+    const dragged = card({
+      id: "WF-A",
+      status: "in-flight",
+      stage: "implementation",
+    });
+    const lanes = groupIntoLanes([dragged]);
+
+    const { lane, index } = locateDropTarget("in-review", lanes);
+    const plan = resolveDrop(dragged, lane!, index, lanes);
+
+    expect(plan.calls[0]).toEqual({
+      kind: "move",
+      id: "WF-A",
+      body: { stage: "verification" },
+    });
+  });
+
+  it("leaves the In Progress lane's background a no-op — it has no single landing stage", () => {
+    const lanes = groupIntoLanes([]);
+
+    const { lane } = locateDropTarget("in-progress", lanes);
+
+    expect(lane).toBeUndefined();
+  });
 });

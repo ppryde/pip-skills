@@ -6,6 +6,5 @@
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
   },
-  "keywords": ["pr-review", "code-review", "github", "feedback", "automation"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["pr-review", "code-review", "github", "feedback", "automation"]
 }

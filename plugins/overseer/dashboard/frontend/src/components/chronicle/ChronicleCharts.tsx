@@ -8,9 +8,10 @@
  * hover tooltip that never gates a value, and a `<details>` table view twin
  * under every plot so nothing is reachable by pointer alone.
  */
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { niceTicks } from "../../board/chronicle/format";
+import { formatDay, formatTokens, formatUsd, formatWhen, niceTicks } from "../../board/chronicle/format";
+import type { ChronicleLimitEvent, ChronicleLimitKind } from "../../api/types";
 
 export interface ChartPoint {
   /** Axis label (a day, a turn index). */
@@ -603,6 +604,220 @@ export function LineChart({
           };
         })}
       />
+    </div>
+  );
+}
+
+/* --- usage-limit timeline --------------------------------------------------
+ * "Limits hit": events over time, coloured by kind. A stacked column per day
+ * (kinds are an IDENTITY, not a magnitude, so this is the one chart here that
+ * breaks the single-hue rule) plus a detail table beneath — the same
+ * pointer-optional twin every chart above gives its data.
+ */
+
+/** Label and hue for each kind, in the fixed stacking/legend order. One of
+ * the seven measure hues per kind (`--chr-cost` for the money-shaped one),
+ * reusing the page's existing ramp rather than inventing a new one. */
+export const LIMIT_KIND_META: Record<ChronicleLimitKind, { label: string; hue: string }> = {
+  session: { label: "Session (5h)", hue: "--chr-turns" },
+  weekly: { label: "Weekly", hue: "--chr-peak" },
+  monthly_spend: { label: "Monthly spend", hue: "--chr-cost" },
+  model: { label: "Per-model", hue: "--chr-tools" },
+  other: { label: "Other", hue: "--qb-ink-400" },
+};
+
+const LIMIT_KIND_ORDER: ChronicleLimitKind[] = ["session", "weekly", "monthly_spend", "model", "other"];
+
+/** "2026-09-04" from an epoch, in the VIEWER's local zone — the same zone the
+ * banner's own reset time was read in, and the convention `formatDay`
+ * already renders. */
+function dayKey(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+interface LimitsTimelineProps {
+  events: ChronicleLimitEvent[];
+  height?: number;
+}
+
+/** One stacked bar per day this window saw a hit, segmented by kind, with a
+ * legend and an event-by-event table (kind, when, reset, sessions affected,
+ * tokens burned) beneath — the detail a hover alone could never carry for
+ * every event at once. */
+export function LimitsTimeline({ events, height = 200 }: LimitsTimelineProps) {
+  const [hover, setHover] = useState<number | null>(null);
+  const id = useId();
+  const width = 520;
+  const plotW = width - MARGIN.left - MARGIN.right;
+  const plotH = height - MARGIN.top - MARGIN.bottom;
+
+  const { days, counts, presentKinds } = useMemo(() => {
+    const byDay = new Map<string, Record<ChronicleLimitKind, number>>();
+    const seen = new Set<ChronicleLimitKind>();
+    for (const e of events) {
+      if (e.hit_at === null) continue;
+      const key = dayKey(e.hit_at);
+      const row = byDay.get(key) ?? { session: 0, weekly: 0, monthly_spend: 0, model: 0, other: 0 };
+      row[e.kind] += 1;
+      byDay.set(key, row);
+      seen.add(e.kind);
+    }
+    const sortedDays = [...byDay.keys()].sort();
+    return {
+      days: sortedDays,
+      counts: sortedDays.map((d) => byDay.get(d)!),
+      presentKinds: LIMIT_KIND_ORDER.filter((k) => seen.has(k)),
+    };
+  }, [events]);
+
+  if (events.length === 0) {
+    return <p className="chr-chart__empty">No limit hits in this window.</p>;
+  }
+
+  const totals = counts.map((row) => LIMIT_KIND_ORDER.reduce((sum, k) => sum + row[k], 0));
+  const max = Math.max(0, ...totals);
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1] || 1;
+  const slot = days.length > 0 ? plotW / days.length : plotW;
+  const bar = Math.min(MAX_BAR, Math.max(4, slot - 2));
+  const stride = labelStride(days.length, plotW);
+  const y = (v: number) => MARGIN.top + plotH - (v / top) * plotH;
+
+  return (
+    <div className="chr-chart chr-limits">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="chr-chart__svg"
+        role="img"
+        aria-labelledby={`${id}-title`}
+        onMouseLeave={() => setHover(null)}
+      >
+        <title id={`${id}-title`}>Usage-limit hits per day, by kind</title>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={MARGIN.left} x2={width - MARGIN.right} y1={y(t)} y2={y(t)} className="chr-chart__grid" />
+            <text x={MARGIN.left - 6} y={y(t) + 3} className="chr-chart__tick" textAnchor="end">
+              {Math.round(t)}
+            </text>
+          </g>
+        ))}
+        {days.map((d, i) => {
+          const cx = MARGIN.left + slot * i + slot / 2;
+          const x0 = cx - bar / 2;
+          let stacked = 0;
+          return (
+            <g key={d}>
+              {LIMIT_KIND_ORDER.map((k) => {
+                const v = counts[i][k];
+                if (v === 0) return null;
+                const yTop = y(stacked + v);
+                const yBase = y(stacked);
+                stacked += v;
+                return (
+                  <rect
+                    key={k}
+                    x={x0}
+                    y={yTop}
+                    width={bar}
+                    height={Math.max(0, yBase - yTop)}
+                    className={`chr-limits__seg chr-limits__seg--${k}${hover === i ? " chr-limits__seg--hover" : ""}`}
+                    data-testid="chr-limits-seg"
+                    data-kind={k}
+                  />
+                );
+              })}
+              <rect
+                x={MARGIN.left + slot * i}
+                y={MARGIN.top}
+                width={slot}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHover(i)}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                tabIndex={0}
+                aria-label={`${formatDay(d)}: ${LIMIT_KIND_ORDER.filter((k) => counts[i][k] > 0)
+                  .map((k) => `${counts[i][k]} ${LIMIT_KIND_META[k].label}`)
+                  .join(", ")}`}
+              />
+              {i % stride === 0 && (
+                <text x={cx} y={height - 6} className="chr-chart__tick" textAnchor="middle">
+                  {formatDay(d)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <line
+          x1={MARGIN.left}
+          x2={width - MARGIN.right}
+          y1={MARGIN.top + plotH}
+          y2={MARGIN.top + plotH}
+          className="chr-chart__axis"
+        />
+      </svg>
+      {hover !== null && (
+        <Tooltip x={`${((MARGIN.left + slot * hover + slot / 2) / width) * 100}%` as unknown as number} y={0}>
+          <strong>{formatDay(days[hover])}</strong>
+          {LIMIT_KIND_ORDER.filter((k) => counts[hover][k] > 0).map((k) => (
+            <span key={k}>
+              {LIMIT_KIND_META[k].label}: {counts[hover][k]}
+            </span>
+          ))}
+        </Tooltip>
+      )}
+      <ul className="chr-chart__legend" aria-label="Limit kinds">
+        {presentKinds.map((k) => (
+          <li key={k} className="chr-chart__legend-item">
+            <span
+              className={`chr-limits__swatch chr-limits__swatch--${k}`}
+              aria-hidden="true"
+            />
+            <span>{LIMIT_KIND_META[k].label}</span>
+          </li>
+        ))}
+      </ul>
+      <details className="chr-chart__table">
+        <summary>Table view</summary>
+        <table className="chr-table chr-table--compact">
+          <caption className="sr-only">Usage-limit hits</caption>
+          <thead>
+            <tr>
+              <th scope="col">Kind</th>
+              <th scope="col">Hit at</th>
+              <th scope="col">Resets</th>
+              <th scope="col" className="chr-num">Sessions</th>
+              <th scope="col" className="chr-num">Tokens to limit</th>
+              <th scope="col" className="chr-num">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...events]
+              .sort((a, b) => (b.hit_at ?? 0) - (a.hit_at ?? 0))
+              .map((e, i) => (
+                <tr key={`${i}-${e.hit_at ?? "?"}-${e.kind}`}>
+                  <td>{LIMIT_KIND_META[e.kind].label}{e.model ? ` (${e.model})` : ""}</td>
+                  <td>{formatWhen(e.hit_at)}</td>
+                  <td>
+                    {e.reset_raw ?? (e.resets_at_inferred ? formatWhen(e.resets_at) : "—")}
+                    {e.resets_at_inferred ? " (inferred)" : ""}
+                  </td>
+                  <td className="chr-num">{e.sessions}</td>
+                  <td className="chr-num">
+                    {e.tokens_to_limit ? formatTokens(e.tokens_to_limit.total_tokens) : "—"}
+                  </td>
+                  <td className="chr-num">
+                    {e.tokens_to_limit ? formatUsd(e.tokens_to_limit.cost_usd) : "—"}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }

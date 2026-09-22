@@ -287,6 +287,31 @@ export interface ReposResponse {
   repos: RepoEntry[];
 }
 
+/** One account the selector can scope to (WF-116) — the union of every
+ * account uuid chronicle has recorded a session under and every watched
+ * Claude config dir's CURRENT login. `plan`/`config_dirs` come only from a
+ * live login: a uuid chronicle knows but no dir is currently logged into
+ * has `plan: null` and `config_dirs: []`, and is still selectable. No
+ * email or name ever appears — the backend reads a whitelist only. */
+export interface AccountEntry {
+  account_uuid: string;
+  /** First 8 characters of `account_uuid`, for a compact selector label. */
+  short_uuid: string;
+  /** Raw plan value (e.g. "claude_max") — render through `planLabel`
+   * (board/chronicle/plan.ts), never shown raw. */
+  plan: string | null;
+  /** Every watched config dir currently logged into this account — used to
+   * scope live census sessions (`/api/sessions?account=`) to it. */
+  config_dirs: string[];
+  /** Sessions chronicle has recorded under this uuid. */
+  sessions: number;
+  last_activity_at: number | null;
+}
+
+export interface AccountsResponse {
+  accounts: AccountEntry[];
+}
+
 /** POST /api/repo/clear response — the dashboard's clear-data action
  * (per-repo cards-only or full-repo destructive clear, always preceded by
  * a git-trackable backup). `backup_path` is null on a `noop` clear (nothing
@@ -672,6 +697,66 @@ export interface ChronicleJump {
   landed_chars: number;
 }
 
+/** A usage-limit kind, as `chronicle limits` classifies the banner Claude
+ * Code writes into the transcript. `"other"` is an unrecognised wording —
+ * kept, never dropped, so a future banner change still shows up. */
+export type ChronicleLimitKind = "session" | "weekly" | "monthly_spend" | "model" | "other";
+
+/** Token usage (and cost) an account burned reaching one deduped limit event,
+ * summed across all its sessions and subagents from the window's inferred
+ * start to the moment it was hit. `null` on the event itself when the window
+ * can't be inferred (see `ChronicleLimitKind` — only "session" and "weekly"
+ * have a documented window) or there's no account to sum against. */
+export interface ChronicleLimitTokens {
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  unpriced_turns: number;
+  /** Epoch seconds: `resets_at` minus the limit's fixed period. */
+  window_start: number;
+}
+
+/** One deduplicated real-world limit hit — Claude Code writes the SAME hit
+ * into every session and subagent running at the time, folded here into one
+ * event per (account, kind, model), clustering rows that landed close
+ * together in time (so a hit logged with a reset in one session and without
+ * in another still merges). */
+export interface ChronicleLimitEvent {
+  account_uuid: string | null;
+  kind: ChronicleLimitKind;
+  /** The model named in a "reached your <model> limit" banner; null for
+   * every other kind. */
+  model: string | null;
+  /** Epoch seconds of the earliest session to log this event. */
+  hit_at: number | null;
+  /** Epoch seconds of the latest session to log this event (useful when a
+   * session kept retrying across a long-open window). */
+  last_seen_at: number | null;
+  /** Epoch seconds this resets — the banner's own stated time when it
+   * parsed, otherwise DERIVED (a session limit's window close, or a weekly
+   * limit's anchor) — see `resets_at_inferred`. */
+  resets_at: number | null;
+  /** True when `resets_at` was derived rather than read off the banner
+   * itself (its text carried no reset, or none parsed) — an honest label
+   * for a value this call computed, not one Claude Code stated. */
+  resets_at_inferred: boolean;
+  /** The reset clause verbatim ("11:50am (Europe/London)"), before parsing;
+   * null when the banner stated none (whether or not `resets_at` was later
+   * inferred). */
+  reset_raw: string | null;
+  /** How many distinct sessions logged this same event. */
+  sessions: number;
+  tokens_to_limit: ChronicleLimitTokens | null;
+}
+
+export interface ChronicleLimitsResponse {
+  events: ChronicleLimitEvent[];
+  by_kind: Partial<Record<ChronicleLimitKind, number>>;
+}
+
 export interface ChronicleSummary {
   /** `null` when chronicle has no store yet (or the plugin is absent). */
   totals: ChronicleTotals | null;
@@ -862,8 +947,16 @@ export interface ChronicleSessionDetail extends Omit<ChronicleSession, "subagent
 
 /** Query knobs shared by the summary and sessions reads. */
 export interface ChronicleQuery {
-  /** Only sessions active in the last N days; omit for all time. */
+  /** Only sessions active in the last N days; omit for all time. Mutually
+   * exclusive with `since` — `since` wins if both are somehow set (see
+   * `chronicleQuery` in api/client.ts). */
   days?: number;
+  /** The exact-instant sibling of `days` — today only `"month-to-date"`,
+   * resolved to an ISO datetime (local midnight on the 1st, carrying THIS
+   * browser's own UTC offset) at request time, so a poll tick that lands
+   * after a month boundary always names the new month rather than a value
+   * computed when the filter was first chosen. */
+  since?: "month-to-date";
   /** `"all"` drops the repo filter (account-wide); default scopes to the
    * active root exactly like `/api/board`. */
   scope?: "repo" | "all";

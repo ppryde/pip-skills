@@ -982,6 +982,23 @@ body {
   outline-color: var(--qb-branch-chip-border);
 }
 
+/* WF-116 account selector — same topbar-chip shape as `.topbar__repo-select`
+   (no branch-style colour coding: an account has no analogous per-value
+   tint), sitting right after the branch select so all three wrap into the
+   mobile chip shelf together. */
+.topbar__account-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+  background: transparent;
+  color: var(--qb-ink-500);
+  /* WF-085: same shrink-to-allow-ellipsis rationale as `.topbar__repo-select`
+     above. */
+  min-width: 0;
+}
+
 /* WF-042: wraps ThresholdControl, whose own label now reads "default
    threshold" — the fleet's global default, not any one agent's fact (that
    moved to the Party's hero cards). Replaces the old `.topbar__ctx` block
@@ -1163,6 +1180,8 @@ body {
 .topbar__repo-select-label,
 .topbar__branch-select,
 .topbar__branch-select-label,
+.topbar__account-select,
+.topbar__account-select-label,
 .topbar__threshold,
 .topbar__archive-toggle {
   color: var(--qb-bar-ink-2);
@@ -1292,14 +1311,52 @@ body {
   box-shadow: none;
 }
 
-/* Task 2: the [Filters ▾] [Controls ▾] [＋] cluster — one atomic flex item
-   of `.topbar` (same wrapping-together technique as
-   `.topbar__controls-actions`) so the three buttons never split across a
-   line break. */
-.topbar__toggle-cluster {
+/* Task 2 (revised): Filters ▾ and the Controls ▾/＋(or Sync) actions used to
+   be ONE atomic `.topbar__toggle-cluster` flex item of `.topbar`. Desktop
+   now needs them on two different rows (row 2 vs. row 3 — see TopBar.tsx's
+   own JSX comments), so they're two independent boxes instead: `.topbar__
+   filters-toggle` (Filters ▾ alone) and `.topbar__actions-cluster`
+   (Controls ▾ + ＋/Sync). Both are real boxes on EVERY viewport (never
+   `display: contents`) — there's no third box left to merge them back into
+   below 720px, so the ≤720px override two screens down gives each an
+   `order` that lands them on the SAME wrapped line they used to share, plus
+   a small negative margin on the second to recreate the original cluster's
+   tighter 0.4rem gap against `.topbar`'s own wider 0.75rem inter-item
+   default. */
+.topbar__filters-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.topbar__actions-cluster {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+/* Desktop row wrappers (owner's ask, see TopBar.tsx's JSX comments at each
+   element's call site): `.topbar__row2-left` groups Account/Repo/Branch,
+   `.topbar__row2-right` groups (only) the Filters ▾ toggle, `.topbar__row3`
+   groups everything else (status pills, guild pills, the actions cluster,
+   and the Provisions group). `display: contents` is the base/every-
+   viewport default — same "vanish and let the children become direct flex
+   items of `.topbar`" technique `.topbar__controls-group`/`.topbar__
+   controls-actions` already use above — so mobile (and any width below the
+   grid media query further down this file) is completely unaffected by
+   these wrappers merely existing: each child still flows/gets ordered
+   exactly as if it were a bare `.topbar` child (`.topbar__filters-toggle`/
+   `.topbar__actions-cluster` are real boxes themselves already — see their
+   own rule above — so unwrapping THEIR parent still lands them, not their
+   grandchildren, as the direct `.topbar` flex item). The `@media (min-
+   width: 721px)` block turns `.topbar__row2-left`/`.topbar__row3` into real
+   boxes pinned to their own named grid area; `.topbar__row2-right` stays
+   `display: contents` even there — its one child, `.topbar__filters-
+   toggle`, is the actual grid item (it's a real box on every viewport
+   already). */
+.topbar__row2-left,
+.topbar__row2-right,
+.topbar__row3 {
+  display: contents;
 }
 
 /* WF-091: the Epic Atlas toggles, moved into the Controls group from the
@@ -1969,9 +2026,9 @@ body {
   display: flex;
   align-items: flex-start;
   /* Centre the lane row in the region rather than pinning it left. Desktop
-     shows the COLLAPSED set — Backlog / In Progress / Parked / Done, plus
-     Abandoned when toggled on (Board.tsx applies `collapseStagesForMobile`
-     at every viewport) — so four or five columns sat hard against the left
+     shows the COLLAPSED set — Backlog / In Progress / In Review / Parked /
+     Done, plus Abandoned when toggled on (Board.tsx applies `collapseStages`
+     at every viewport) — so five or six columns sat hard against the left
      edge with a few hundred px of dead parchment to their right.
 
      Centring a flex row inside a scroller is normally the bug where the
@@ -2193,16 +2250,27 @@ body {
   border: 1.5px solid color-mix(in srgb, var(--qb-accent-ash-fill) 60%, white);
 }
 
-/* WF-085 in-progress lane (mobile-only — `collapseStagesForMobile`'s
-   synthetic lane never exists on desktop). Status-coloured (orange
-   in-progress): this is the umbrella over all 7 stages this lane replaces
-   on a phone, and the `in-flight` top-level status is orange (the same
-   hue as `--qb-status-in-progress-*`), so every stage reads consistently
-   orange here regardless of sub-stage — no longer the amber bootstrap
-   group. */
+/* WF-085 in-progress lane (`collapseStages`'s synthetic group lane — now on
+   every viewport, not just mobile). Status-coloured (orange in-progress):
+   this is the umbrella over the 5 agent-driven stages it replaces, and the
+   `in-flight` top-level status is orange (the same hue as
+   `--qb-status-in-progress-*`), so every stage reads consistently orange
+   here regardless of sub-stage — no longer the amber bootstrap group. */
 .lane__header--in-progress {
   background: color-mix(in srgb, var(--qb-accent-orange-fill) 38%, white);
   border: 1.5px solid color-mix(in srgb, var(--qb-accent-orange-fill) 60%, white);
+}
+
+/* In Review lane (`collapseStages`'s second group lane: verification +
+   awaiting-merge). Deliberately NOT the orange of in-progress — this lane
+   waits on the USER rather than on an agent, so it must read as a different
+   kind of waiting at a glance. Uses `--qb-accent-rose-*` (teal/aqua despite
+   the legacy token name — see its declaration), which is already
+   `awaiting-merge`'s own hue in `.lane--accent-awaiting-merge` below, so the
+   group keeps the colour of the stage it exists to surface. */
+.lane__header--in-review {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 38%, white);
+  border: 1.5px solid color-mix(in srgb, var(--qb-accent-rose-fill) 60%, white);
 }
 
 /* WF-092: light lane fill — the same per-accent groups as the header banners
@@ -2223,6 +2291,10 @@ body {
    `.lane__header--in-progress` above. */
 .lane--accent-in-progress {
   background: color-mix(in srgb, var(--qb-accent-orange-fill) 20%, transparent);
+}
+/* In Review group lane — same accent as `.lane__header--in-review` above. */
+.lane--accent-in-review {
+  background: color-mix(in srgb, var(--qb-accent-rose-fill) 20%, transparent);
 }
 /* Done lane gets a green wash like the other status lanes (overrides the
    parchment-muted `.lane--done` fill above — declared later so it wins) so
@@ -2338,6 +2410,16 @@ body {
   --card-accent-fill: var(--qb-accent-orange-fill);
   --card-accent-border: var(--qb-accent-orange-border);
   --card-accent-shadow: var(--qb-accent-orange-cardshadow);
+}
+
+/* In Review group lane's cards — Lane.tsx gives every card in a group lane
+   the LANE's accent key, not its own stage key, so this rule (not the
+   stage-key group above) is what colours a verification/awaiting-merge card.
+   Same accent as `.lane__header--in-review`. */
+.card-tile--accent-in-review {
+  --card-accent-fill: var(--qb-accent-rose-fill);
+  --card-accent-border: var(--qb-accent-rose-border);
+  --card-accent-shadow: var(--qb-accent-rose-cardshadow);
 }
 
 .card-tile {
@@ -5352,18 +5434,24 @@ a.card-drawer__pr-chip:hover {
    ========================================================================== */
 
 /* --- TopBar: view switcher — a row of overlapping "guild coins" ------------
-   One circular icon coin per page (Board, Atlas, and Chronicle when its
-   plugin is present), fanned out to the LEFT of the wordmark so each
-   overlaps its neighbour by half. The active view's coin is the FRONT coin
-   (gold-chip fill, full size); the others sit behind, shrunk and dimmed.
-   Tapping a back coin brings it forward and swaps the view — transform +
-   z-index driven purely by `aria-pressed`. Each coin's slot and the row's
-   width come from two custom properties TopBar.tsx sets (`--coin-i` per
-   coin, `--coin-n` on the row), so adding or removing a page needs NO rule
-   here. That claim used to be made of a `:nth-child` list and a `data-count`
-   list which both stopped at three — so the Almoner's fourth coin was given
-   no slot, sat at left:0 outside a too-narrow row, and covered the wordmark.
-   A list that must be extended by hand is not a rule; this is.
+   One circular icon coin per page (Board, Atlas, and Chronicle/Almoner when
+   their plugins are present), fanned out to the LEFT of the wordmark so each
+   overlaps its neighbour. The active view's coin is always the LEFTMOST,
+   FRONT coin (gold-chip fill, full size); the others follow it in source
+   order, shrunk. TopBar sets each coin's `--slot` (0 = pressed) and the
+   row's `--coin-count`; position and stacking are derived from those, so a
+   coin added or removed never needs this CSS touched.
+
+   A coin's DOM node is keyed by its SLOT and never moves (WF-11x follow-up
+   to #76, which slid coins between slots on every view change — "all of the
+   coins switch places" was the very thing that needed fixing). On a view
+   change, only the slots whose assigned page actually changed spin about
+   their vertical axis in place (`rotate: y`, via the `data-spin="a"`/`"b"`
+   alternation below — same "swap the keyframe name to restart mid-spin"
+   trick #76 used, now scoped to just the coins actually changing). TopBar
+   swaps each spinning coin's icon at the midpoint of that turn — half of
+   `--coin-spin-ms`, set inline from the same `COIN_SPIN_MS` constant its JS
+   timer reads, so the two can never drift out of sync.
 
    Each coin's box is 44px (border included) — meeting the ≥44px touch-target
    floor directly. Active = the same gold-chip fill/border/text trio the
@@ -5371,20 +5459,22 @@ a.card-drawer__pr-chip:hover {
 .topbar__view-toggle {
   position: relative;
   flex: 0 0 auto;
-  /* 44px for the front coin, +30px for every further one (each overlapping
-     its neighbour by about a third). The fallback of 2 is the minimum the
-     dashboard ever shows — Board and Atlas are not optional. */
-  width: calc(44px + (var(--coin-n, 2) - 1) * 30px);
+  /* 44px coin + 30px per further coin (each overlapping the last by about
+     a third) */
+  width: calc(44px + (var(--coin-count, 2) - 1) * 30px);
   height: 44px;
 }
 
 .topbar__view-toggle-btn {
   position: absolute;
   top: 0;
+  left: 0;
   /* Stacking reads left to right: each coin lies over the one to its right,
-     like a fanned hand of cards. The pressed coin tops them all (below). */
-  left: calc(var(--coin-i, 0) * 30px);
-  z-index: calc(20 - var(--coin-i, 0));
+     like a fanned hand of cards, so the pressed coin (slot 0) tops them all.
+     Fixed for the coin's lifetime — the slot a button is born into is the
+     only slot it ever occupies, so this never transitions. */
+  translate: calc(var(--slot, 0) * 30px) 0;
+  z-index: calc(var(--coin-count, 2) - var(--slot, 0));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5404,31 +5494,69 @@ a.card-drawer__pr-chip:hover {
 @media (prefers-reduced-motion: no-preference) {
   .topbar__view-toggle-btn {
     transition:
-      transform 0.28s ease,
-      opacity 0.2s ease,
+      scale 0.28s ease,
       background-color 0.2s ease,
       border-color 0.2s ease;
   }
+
+  /* Only the coins whose assigned page actually changed spin — a two-coin
+     swap (say Board <-> Atlas) turns those two in place and leaves any
+     Chronicle/Almoner coins beside them untouched. */
+  .topbar__view-toggle-btn[data-spin] {
+    animation-duration: var(--coin-spin-ms, 600ms);
+    animation-timing-function: ease-in-out;
+  }
+
+  .topbar__view-toggle-btn[data-spin="a"] {
+    animation-name: topbar-coin-spin-a;
+  }
+
+  .topbar__view-toggle-btn[data-spin="b"] {
+    animation-name: topbar-coin-spin-b;
+  }
 }
 
-/* Front coin — the active view: full size, fully opaque, above its siblings. */
+/* Two identical spins: switching `animation-name` is what restarts the run
+   when a second view change lands before the first spin has finished.
+
+   Never rotates past 90deg (or -90deg) either way — a full 0deg->360deg
+   sweep spends its whole 90deg-270deg middle showing the icon MIRRORED
+   (default backface-visibility renders the flipped side as a horizontally
+   reversed image, not a blank/hidden one), and the old icon would be
+   mirrored right up to a swap that then landed on the new icon ALSO
+   mirrored. Swinging 0deg->90deg, jumping to -90deg (visually identical —
+   edge-on either way) and swinging -90deg->0deg instead keeps the coin
+   showing its true face for the entire turn, with the JS midpoint swap
+   (COIN_SPIN_MS/2, i.e. keyframe 50%) landing exactly on the edge-on jump,
+   where there is nothing to see swap. */
+@keyframes topbar-coin-spin-a {
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; }
+  50.001% { rotate: y -90deg; }
+  100% { rotate: y 0deg; }
+}
+
+@keyframes topbar-coin-spin-b {
+  0% { rotate: y 0deg; }
+  50% { rotate: y 90deg; }
+  50.001% { rotate: y -90deg; }
+  100% { rotate: y 0deg; }
+}
+
+/* Front coin — the active view: full size, above its siblings. */
 .topbar__view-toggle-btn[aria-pressed="true"] {
-  transform: scale(1);
-  /* Above every back coin whatever the count — the old `4` was only ever
-     above three siblings. */
-  z-index: 30;
+  scale: 1;
   opacity: 1;
   border-color: var(--qb-gold-chip-border);
   background: var(--qb-gold-chip-bg);
   color: var(--qb-gold-chip-text);
 }
 
-/* Back coins — the other views: in place and shrunk, behind the front coin,
-   keeping the left-over-right order set per coin above. Opaque: the gold
-   fill and the size step already single out the pressed coin, and a
+/* Back coins — the other views: shrunk, behind the front coin. Opaque: the
+   gold fill and the size step already single out the pressed coin, and a
    dimmed coin made the icon behind it hard to read. */
 .topbar__view-toggle-btn[aria-pressed="false"] {
-  transform: scale(0.9);
+  scale: 0.9;
 }
 
 .topbar__view-toggle-btn[aria-pressed="false"]:hover {
@@ -6460,6 +6588,147 @@ button.trail-tag:focus-visible {
 }
 
 /* ==========================================================================
+   Desktop top-bar rows (>720px) — CSS Grid per the owner's ask (revised):
+   menu left / title right on row 1; account → repo → branch on the left and
+   ONLY the Filters ▾ toggle on the right of row 2 (one line, vertically
+   centred — nothing else shares it); the rare quarantine banner on its own
+   row when present; then "everything else" on row 3, full width — the
+   status pills (rest windows, last-refreshed, gold/vanquished/fleet) on the
+   left, the Controls ▾/＋(or Sync) actions on the right, and the
+   "Provisions" group (Last Orders, Atlas toggles, Labels…/Refresh/
+   Abandoned/Clear…) wrapping onto its own line beneath them when Controls
+   is open. Grid-template-areas place each piece by NAME, independent of
+   DOM/source order, so `.topbar__quarantine-banner` keeps its existing JSX
+   position untouched. `row-gap` applies between EVERY adjacent pair of row
+   tracks regardless of whether either side holds content — an `auto`-sized
+   empty banner track collapses to zero HEIGHT, but the gaps flanking it
+   don't collapse with it, so a naive fixed `row-gap` over a 4-row template
+   still doubles the visible row2→row3 distance whenever the banner is
+   absent (the default state of the app). The `:has()` pair below switches
+   the whole template — banner row included or dropped — so the no-banner
+   case only ever has 2 gaps (row1↔row2, row2↔row3) at exactly 0.75rem,
+   never the leftover 1.5rem a 3-gap/1-empty-track template would produce.
+   This block sits ahead of, and is fully independent from, the "Mobile
+   layout layer" below: `min-width: 721px` here and that layer's
+   `max-width: 720px` can never both match the same viewport, so mobile is
+   untouched by any of this. */
+@media (min-width: 721px) {
+  .topbar {
+    display: grid;
+    /* Row 2's left half is the flexible column (Account/Repo/Branch can
+       need real room); the right half shrinks to fit exactly the Filters ▾
+       button, sitting flush against the bar's right edge rather than
+       claiming a wasted half-width column. Row 1/banner/row 3 each span
+       both columns as one merged cell, so this split only ever matters for
+       row 2. */
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "row1      row1"
+      "row2-left row2-right"
+      "row3      row3";
+    row-gap: 0.75rem;
+    /* Row 2 in particular must read as ONE vertically-centred line even
+       though its two halves can differ in natural height (three selects
+       vs. a single button) — `align-items` on the grid container centres
+       every row's item(s) within that row's own track height. */
+    align-items: center;
+  }
+
+  /* `quarantinedCount > 0` is the one case with a fifth row: re-declare the
+     template with the banner's own track spliced back in between row2 and
+     row3, rather than letting the base rule's fixed `row-gap` leave a
+     doubled gap around an always-present-but-usually-empty track (see the
+     block comment above). `:has(.topbar__quarantine-banner)` tracks the
+     banner's actual conditional render (TopBar.tsx) exactly — no JS/class
+     toggle needed. */
+  .topbar:has(.topbar__quarantine-banner) {
+    grid-template-areas:
+      "row1      row1"
+      "row2-left row2-right"
+      "banner    banner"
+      "row3      row3";
+  }
+
+  .topbar__identity {
+    grid-area: row1;
+  }
+
+  .topbar__row2-left {
+    grid-area: row2-left;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* `.topbar__row2-right` itself stays `display: contents` even here (base
+     rule) — `.topbar__filters-toggle` is already a real box on every
+     viewport (see its own rule above), so IT is the grid item pinned to
+     `row2-right`, the ONLY thing on row 2's right half now. */
+  .topbar__filters-toggle {
+    grid-area: row2-right;
+  }
+
+  .topbar__quarantine-banner {
+    grid-area: banner;
+    /* A grid item stretches to fill its column by default (`align-self`/
+       `justify-self: stretch`) — this pill should stay its own intrinsic
+       size instead, same as every other chip in this bar. */
+    justify-self: start;
+  }
+
+  /* "Everything else" (owner's revised words) — status pills + guild pills
+     + the Controls ▾/＋(or Sync) actions, one full-width wrapping line; the
+     Provisions group (nested inside, see its own comment two rules down)
+     wraps onto its own line beneath via ITS `.topbar__controls-header`'s
+     existing `flex-basis: 100%` trick. */
+  .topbar__row3 {
+    grid-area: row3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* Status pills sit left (plain DOM order within `.topbar__row3`); this
+     pushes the Controls ▾/＋(or Sync) actions to the right end of the SAME
+     line — same `margin-left: auto` trick `.topbar__refresh` already uses
+     one level deeper. Desktop-only: mobile needs a small NEGATIVE margin
+     instead (see the ≤720px override two screens down) to recreate the old
+     combined toggle-cluster's tighter 0.4rem gap against `.topbar__filters-
+     toggle` beside it. */
+  .topbar__actions-cluster {
+    margin-left: auto;
+  }
+
+  /* "The labels row" — really "everything else" now that it's nested a
+     level deeper inside `.topbar__row3` rather than sitting directly in
+     `.topbar`'s own grid: `:not([hidden])` beats the bare
+     `.topbar__controls-group { display: contents }` base rule on
+     specificity, same trick the existing mobile override two screens down
+     already uses. `flex-basis: 100%` (not `grid-area` — this is a flex
+     child of `.topbar__row3` now, not a grid child of `.topbar`) forces it
+     onto its own line within row 3, same mechanism its OWN `.topbar__
+     controls-header` child already uses one level deeper for the
+     "Provisions" caption. */
+  .topbar__controls-group:not([hidden]) {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* The mobile-only row-break spacers (force hard breaks between 320-
+     720px) are still present in the DOM at every width; keep them out of
+     the grid's auto-placement flow entirely rather than let one claim a
+     stray implicit cell. */
+  .topbar__row-break {
+    display: none;
+  }
+}
+
+/* ==========================================================================
    Mobile layout layer (≤720px) — "the guild ledger, one page at a time".
    On a phone the corkboard becomes a ledger you leaf through: each lane is a
    near-full-width parchment page with scroll-snap, a sliver of the next
@@ -6515,11 +6784,13 @@ button.trail-tag:focus-visible {
     flex-basis: 100%;
     height: 0;
   }
-  .topbar__row-break--r2 { order: 12; }
+  .topbar__row-break--r2 { order: 13; }
   .topbar__row-break--r3 { order: 22; }
   .topbar__row-break--r4 { order: 33; }
 
-  /* R2: repo + branch selects, side by side, sharing the row evenly.
+  /* R2: repo + branch + account selects, side by side, sharing the row
+     evenly (account WF-116: slotted into the gap the numbering below left
+     for exactly this — see the "gaps in the numbering" comment above).
      `flex: 1 1 0; min-width: 0` on each CHIP (not just the `<select>`
      inside) is what actually keeps both on one line at any width down to
      320px — same "flex-basis:0 never overflows the line-breaking pass"
@@ -6536,17 +6807,20 @@ button.trail-tag:focus-visible {
      text when the row is tight — the native dropdown's OPEN option list
      is never truncated, only the closed control's label. */
   .topbar__repo-select,
-  .topbar__branch-select {
+  .topbar__branch-select,
+  .topbar__account-select {
     flex: 1 1 0;
     min-width: 0;
   }
   .topbar__repo-select select,
-  .topbar__branch-select select {
+  .topbar__branch-select select,
+  .topbar__account-select select {
     max-width: none;
     width: 100%;
   }
   .topbar__repo-select { order: 10; }
   .topbar__branch-select { order: 11; }
+  .topbar__account-select { order: 12; }
 
   /* R3: Short Rest + Long Rest pills, alone on their own row (both share
      `.topbar__pill` — DOM order between them, Short before Long, already
@@ -6559,13 +6833,26 @@ button.trail-tag:focus-visible {
   .topbar__vanquished-pill { order: 31; }
   .topbar__fleet-pill { order: 32; }
 
-  /* R5: the [Filters ▾][Controls ▾][＋] cluster, pinned right via its own
-     `margin-left: auto` — it's the only item between the r4 and
-     (self-forcing, flex-basis:100%) controls-group breaks, so that auto
-     margin has the whole row's slack to push into. The three buttons
-     inside keep natural DOM order (the cluster is `inline-flex`, not
-     `contents`), so no per-button `order` is needed here. */
-  .topbar__toggle-cluster { order: 40; margin-left: auto; }
+  /* R5: was one atomic [Filters ▾][Controls ▾][＋] `.topbar__toggle-cluster`
+     — now two independent boxes (desktop needs them on different rows, see
+     styles.css's own desktop grid block and TopBar.tsx's JSX comments), so
+     recreating this exact line takes two rules instead of one:
+     `.topbar__filters-toggle` gets the OLD cluster's `order`/`margin-left:
+     auto` (it's the only thing between the r4 and controls-group breaks, so
+     that auto margin still has the whole row's slack to push into — both
+     boxes ride along together, per the next rule), and `.topbar__actions-
+     cluster` gets the next `order` plus a small NEGATIVE margin that
+     cancels `.topbar`'s own mobile inter-item gap back down to the old
+     cluster's tighter internal 0.4rem. Mobile overrides `.topbar`'s `gap`
+     shorthand to `0.4rem 0.5rem` (row-gap column-gap) two screens up, so
+     the horizontal gap this margin is cancelling is the 0.5rem COLUMN-gap,
+     not the desktop rule's 0.75rem — the offset is -0.1rem (0.5rem -
+     0.4rem), not -0.35rem (which was computed against the wrong gap value
+     and rendered only 0.15rem apart, tighter than intended). Same two
+     rendered pixels apart as when Filters ▾ and Controls ▾ were DOM
+     siblings inside one shared box. */
+  .topbar__filters-toggle { order: 40; margin-left: auto; }
+  .topbar__actions-cluster { order: 41; margin-left: -0.1rem; }
 
   /* Rare/optional (`quarantinedCount > 0`) — own full-width row right
      after identity, ahead of R2, so it never crowds into the repo/branch
@@ -8193,6 +8480,66 @@ button.trail-tag:focus-visible {
 .chr-chart__table th {
   padding: 0.1rem 0.6rem 0.1rem 0;
   text-align: left;
+}
+
+/* --- usage-limit timeline ---------------------------------------------------
+   Kind is an IDENTITY here, not a magnitude — the one chart on the page that
+   breaks the single-hue rule, so each kind gets its own step of the existing
+   measure ramp rather than a fresh palette. */
+.chr-limits__seg {
+  transition: opacity 0.12s ease;
+}
+
+.chr-limits__seg--hover {
+  opacity: 0.72;
+}
+
+.chr-limits__seg--session {
+  fill: var(--chr-turns);
+}
+
+.chr-limits__seg--weekly {
+  fill: var(--chr-peak);
+}
+
+.chr-limits__seg--monthly_spend {
+  fill: var(--chr-cost);
+}
+
+.chr-limits__seg--model {
+  fill: var(--chr-tools);
+}
+
+.chr-limits__seg--other {
+  fill: var(--qb-ink-400);
+}
+
+.chr-limits__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.chr-limits__swatch--session {
+  background: var(--chr-turns);
+}
+
+.chr-limits__swatch--weekly {
+  background: var(--chr-peak);
+}
+
+.chr-limits__swatch--monthly_spend {
+  background: var(--chr-cost);
+}
+
+.chr-limits__swatch--model {
+  background: var(--chr-tools);
+}
+
+.chr-limits__swatch--other {
+  background: var(--qb-ink-400);
 }
 
 /* --- ranked bar list ------------------------------------------------------- */

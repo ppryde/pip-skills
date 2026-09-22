@@ -1,25 +1,16 @@
-# Fix Dispatch — {{card_id}} {{stage}} round {{round_no}}
+# Fix bundle — {{card_id}} {{stage}} round {{round_no}}
 
-You are fixing review findings. You are (or continue) the implementer of
-this work; your context of it survives.
+{{charter}}
 
 ## Inputs
-- Complete findings list (fix ALL Critical and Important; Minors only where
-  trivial alongside): {{findings}}
+- Card: {{card_id}} — {{title}}
+- This round's verdict files — fix ALL Critical and Important findings across all of them:
+{{verdict_paths}}
 - Worktree: {{worktree}}
-- Test/gate commands: {{gate_commands}}
-- Relevant knowledge (verify anything marked stale before trusting): {{knowledge}}
+- Gate commands: {{gate_commands}}
+- Binding constraints: {{constraints}}
+- Knowledge (verify anything marked stale before trusting):
+{{knowledge}}
 
-## Rules
-- One dispatch fixes the whole round's findings — do not cherry-pick.
-- Every fix carries covering-test evidence: name the test, run it, show the
-  result. A fix without a covering test is not done.
-- If you believe a finding is wrong, say so with evidence instead of
-  "fixing" it badly — the orchestrator adjudicates.
-- Commit as `fix({{scope}}): <what>` after gates pass.
-
-## Report (final message, under 12 lines)
-- Status, commit SHA(s), per-finding disposition (fixed / disputed with
-  reason), test evidence, tokens spent.
-- Learned: zero or more durable, falsifiable facts worth keeping (one sentence
-  each + suggested tags), or "none". The orchestrator adjudicates.
+## Output
+Write your fix report to `{{reply_path}}` in the format your agent definition gives, then reply with the `overseer-report` block it specifies.

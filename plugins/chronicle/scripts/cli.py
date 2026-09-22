@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +29,23 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from scripts import ingest, report, store
 
+# One error contract for every verb: success prints a single JSON object to
+# stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
+# input (a malformed argument — nothing was attempted) or 1 for a runtime
+# failure or a thing not found (a store, a session, a transcript).
+INVALID_INPUT = 2
+NOT_FOUND = 1
+
+
+def _fail(message: str, *, code: int = NOT_FOUND) -> int:
+    print(json.dumps({"error": message}), file=sys.stderr)
+    return code
+
 
 def cmd_ingest(args: argparse.Namespace) -> int:
     path = Path(args.transcript)
     if not path.is_file():
-        print(f"chronicle: no transcript at {path}", file=sys.stderr)
-        return 1
+        return _fail(f"no transcript at {path}")
     conn = store.connect()
     try:
         result = ingest.ingest_session(conn, path, args.session_id)
@@ -87,13 +99,53 @@ def _since(days: int | None) -> float | None:
     return time.time() - days * 86400 if days else None
 
 
+def _parse_since(value: str) -> float:
+    """``--since`` into a Unix epoch: a bare date (``2026-09-01``) or a full
+    ISO 8601 datetime. A value with no UTC offset is assumed to already be in
+    the LOCAL zone — the same frame ``--days`` measures from via
+    ``time.time()`` — so a bare date means local midnight, not UTC midnight;
+    this is what lets the dashboard's "month to date" mean the 1st of the
+    month where the browser is, not where the server is.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()  # naive -> presumed local, per datetime's own contract
+        return parsed.timestamp()
+    except (ValueError, OverflowError):
+        # `fromisoformat` alone accepts a year like 9999 or 1 — the overflow
+        # only surfaces in `astimezone()`/`timestamp()`, converting a year at
+        # the edge of what `datetime` (or a POSIX timestamp) can hold into
+        # another timezone. Both stages fold into one invalid-input error.
+        raise argparse.ArgumentTypeError(f"invalid --since value: {value!r}") from None
+
+
+def _resolve_since(args: argparse.Namespace) -> float | None:
+    return args.since if args.since is not None else _since(args.days)
+
+
 def cmd_summary(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
         print(json.dumps({"totals": None}))
         return 0
     try:
-        out = report.summary(conn, repo_root=args.root, since=_since(args.days), branch=args.branch)
+        out = report.summary(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
+                             account=args.account)
+    finally:
+        conn.close()
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_limits(args: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"events": [], "by_kind": {}}))
+        return 0
+    try:
+        out = report.limits(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
+                            account=args.account)
     finally:
         conn.close()
     print(json.dumps(out))
@@ -106,8 +158,8 @@ def cmd_sessions(args: argparse.Namespace) -> int:
         print(json.dumps({"sessions": []}))
         return 0
     try:
-        rows = report.sessions(conn, repo_root=args.root, since=_since(args.days), limit=args.limit,
-                               branch=args.branch)
+        rows = report.sessions(conn, repo_root=args.root, since=_resolve_since(args), limit=args.limit,
+                               branch=args.branch, account=args.account)
     finally:
         conn.close()
     print(json.dumps({"sessions": rows}))
@@ -117,15 +169,13 @@ def cmd_sessions(args: argparse.Namespace) -> int:
 def cmd_session(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
-        return 1
+        return _fail(f"no store at {store.db_path()}")
     try:
         detail = report.session_detail(conn, args.session_id)
     finally:
         conn.close()
     if detail is None:
-        print(f"chronicle: no session {args.session_id}", file=sys.stderr)
-        return 1
+        return _fail(f"no session {args.session_id}")
     print(json.dumps(detail))
     return 0
 
@@ -214,20 +264,15 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     Pull only, like every other verb here: nothing watches, nothing daemonises.
     """
     if not _VOLUME_RE.match(args.volume):
-        print(json.dumps({"error": f"invalid volume name: {args.volume!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid volume name: {args.volume!r}", code=INVALID_INPUT)
     source = args.source.strip("/")
     if not _SOURCE_RE.match(source) or ".." in Path(source).parts:
-        print(json.dumps({"error": f"invalid source path: {args.source!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid source path: {args.source!r}", code=INVALID_INPUT)
     if not _IMAGE_RE.match(args.image):
-        print(json.dumps({"error": f"invalid image: {args.image!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid image: {args.image!r}", code=INVALID_INPUT)
     dest = Path(args.dest).expanduser()
     if not dest.is_absolute():
-        print(json.dumps({"error": "dest must be an absolute path (docker requires one)"}),
-              file=sys.stderr)
-        return 2
+        return _fail("dest must be an absolute path (docker requires one)", code=INVALID_INPUT)
     # Created HERE, not by the container: the container needs no shell to
     # mkdir, so nothing is interpolated into one.
     #
@@ -244,8 +289,7 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     try:
         projects.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        print(json.dumps({"error": f"cannot create {projects}: {exc}"}), file=sys.stderr)
-        return 1
+        return _fail(f"cannot create {projects}: {exc}")
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{args.volume}:/v:ro",
@@ -257,15 +301,16 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=_PULL_TIMEOUT_SECONDS, check=False)
     except FileNotFoundError:
-        print(json.dumps({"error": "docker not found on PATH"}), file=sys.stderr)
-        return 1
+        return _fail("docker not found on PATH")
     except subprocess.SubprocessError as exc:
-        print(json.dumps({"error": f"docker run failed: {exc}"}), file=sys.stderr)
-        return 1
+        return _fail(f"docker run failed: {exc}")
     if result.returncode != 0:
+        # More than `_fail` carries (the process's own returncode alongside
+        # the message), so this one stays a direct print rather than going
+        # through the helper.
         print(json.dumps({"error": (result.stderr or result.stdout).strip()[:500],
                           "returncode": result.returncode}), file=sys.stderr)
-        return 1
+        return NOT_FOUND
     account_plan = _pull_account_profile(args, dest)
     pulled = list(projects.rglob("*.jsonl"))
     # A pulled transcript this user cannot read is the failure mode of the
@@ -297,16 +342,13 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
 def cmd_agent(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
-        return 1
+        return _fail(f"no store at {store.db_path()}")
     try:
         detail = report.agent_detail(conn, args.session_id, args.agent_id)
     finally:
         conn.close()
     if detail is None:
-        print(f"chronicle: no agent {args.agent_id} in session {args.session_id}",
-              file=sys.stderr)
-        return 1
+        return _fail(f"no agent {args.agent_id} in session {args.session_id}")
     print(json.dumps(detail))
     return 0
 
@@ -321,6 +363,19 @@ def cmd_repos(_: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(json.dumps({"repos": rows}))
+    return 0
+
+
+def cmd_accounts(_: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"accounts": []}))
+        return 0
+    try:
+        rows = report.accounts(conn)
+    finally:
+        conn.close()
+    print(json.dumps({"accounts": rows}))
     return 0
 
 
@@ -349,15 +404,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("summary", help="aggregate metrics (JSON)")
     p.add_argument("--root", default=None, help="scope to one main repo root")
-    p.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
+    window.add_argument("--since", type=_parse_since, default=None,
+                        help="only sessions active since this ISO date/datetime (a bare date is local "
+                             "midnight; a datetime with no UTC offset is assumed local)")
     p.add_argument("--branch", default=None,
                    help="only sessions whose last-seen git branch matches (session-level)")
+    p.add_argument("--account", default=None,
+                   help="only sessions attributed to this account uuid (session-level)")
     p.set_defaults(fn=cmd_summary)
+
+    p = sub.add_parser("limits", help="deduplicated usage-limit hits, with tokens burned reaching each (JSON)")
+    p.add_argument("--root", default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
+    p.add_argument("--branch", default=None)
+    p.add_argument("--account", default=None)
+    p.set_defaults(fn=cmd_limits)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)
-    p.add_argument("--days", type=int, default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
     p.add_argument("--branch", default=None)
+    p.add_argument("--account", default=None)
     p.add_argument("--limit", type=int, default=200)
     p.set_defaults(fn=cmd_sessions)
 
@@ -371,6 +444,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_agent)
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
+
+    sub.add_parser("accounts", help="account uuids seen, with session counts (JSON)").set_defaults(
+        fn=cmd_accounts)
 
     p = sub.add_parser("pull-volume",
                        help="copy transcripts out of a docker named volume onto this filesystem")
