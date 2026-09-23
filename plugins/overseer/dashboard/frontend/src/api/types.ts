@@ -407,6 +407,10 @@ export interface ChronicleDay {
   peak_context_tokens: number;
   /** That peak as a share of its inferred window. */
   peak_context_pct: number | null;
+  /** Mean main-agent context size that day (subagent turns excluded). */
+  avg_context_tokens: number;
+  /** That average as a share of the SAME window the day's peak infers. */
+  avg_context_pct: number | null;
   cache_hit_rate: number | null;
   cost_usd: number;
   unpriced_turns: number;
@@ -951,12 +955,12 @@ export interface ChronicleQuery {
    * exclusive with `since` — `since` wins if both are somehow set (see
    * `chronicleQuery` in api/client.ts). */
   days?: number;
-  /** The exact-instant sibling of `days` — today only `"month-to-date"`,
-   * resolved to an ISO datetime (local midnight on the 1st, carrying THIS
-   * browser's own UTC offset) at request time, so a poll tick that lands
-   * after a month boundary always names the new month rather than a value
-   * computed when the filter was first chosen. */
-  since?: "month-to-date";
+  /** The exact-instant sibling of `days` — `"today"` (local midnight) or
+   * `"month-to-date"` (local midnight on the 1st), both carrying THIS
+   * browser's own UTC offset and resolved to an ISO datetime at request
+   * time, so a poll tick that lands after a day/month boundary always names
+   * the new one rather than a value computed when the filter was chosen. */
+  since?: "today" | "month-to-date";
   /** `"all"` drops the repo filter (account-wide); default scopes to the
    * active root exactly like `/api/board`. */
   scope?: "repo" | "all";

@@ -224,6 +224,244 @@ export function ColumnChart({
   );
 }
 
+export interface StackedSeries {
+  /** Grouping key — colour is assigned from this, never from position, so a
+   * series keeps its colour as filters change which others are present. */
+  key: string;
+  label: string;
+}
+
+export interface StackedPoint {
+  label: string;
+  detail?: string;
+  /** One entry per `series`, same order, zero-filled where absent. */
+  segments: { key: string; value: number }[];
+}
+
+interface StackedColumnChartProps {
+  points: StackedPoint[];
+  series: StackedSeries[];
+  format: (n: number) => string;
+  title: string;
+  height?: number;
+}
+
+// Validated categorical palette (dataviz skill default, first 7 slots — the
+// 8th slot is reserved for a muted "Other" grey rather than diluting a real
+// series into it). Order is the CVD-safety mechanism: fixed, never cycled.
+// Re-validate with scripts/validate_palette.js before touching these hexes.
+const CAT_PALETTE = [
+  "#2a78d6", // blue
+  "#eb6834", // orange
+  "#1baf7a", // aqua
+  "#eda100", // yellow
+  "#e87ba4", // magenta
+  "#008300", // green
+  "#4a3aa7", // violet
+];
+const CAT_OTHER = "#898781"; // muted ink — "Other" is never mistaken for a named repo
+
+/** Deterministic palette slot for a series key — a small string hash, not
+ * the series' rank, so a repo's colour survives filters that change which
+ * OTHER repos are in view (see costByRepo.ts). */
+function paletteColor(key: string, isOther: boolean): string {
+  if (isOther) return CAT_OTHER;
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return CAT_PALETTE[h % CAT_PALETTE.length];
+}
+
+// 2px surface gap between stacked segments (chart-guidance spacer),
+// expressed as a stroke on each segment so adjacent fills never touch.
+const STACK_GAP = 2;
+
+/** Cost (or any additive measure) per bar, stacked by an identity series
+ * (repos). Unlike ColumnChart's single hue, colour here carries identity —
+ * a fixed categorical palette, a legend, and a per-repo tooltip breakdown,
+ * since the reader is meant to tell the segments apart, not just read one
+ * magnitude. */
+export function StackedColumnChart({ points, series, format, title, height = 180 }: StackedColumnChartProps) {
+  const [hover, setHover] = useState<number | null>(null);
+  const id = useId();
+  const width = 520;
+  const plotW = width - MARGIN.left - MARGIN.right;
+  const plotH = height - MARGIN.top - MARGIN.bottom;
+  const capped = points.length > MAX_POINTS;
+  const rendered = capped ? points.slice(-MAX_POINTS) : points;
+  const totals = rendered.map((p) => p.segments.reduce((sum, s) => sum + Math.max(0, s.value), 0));
+  const max = Math.max(0, ...totals);
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1] || 1;
+  const slot = rendered.length > 0 ? plotW / rendered.length : plotW;
+  const bar = Math.min(MAX_BAR, Math.max(2, slot - 2));
+  const stride = labelStride(rendered.length, plotW);
+  const y = (v: number) => MARGIN.top + plotH - (v / top) * plotH;
+  const colorOf = (key: string) => paletteColor(key, key === "__other__");
+
+  if (points.length === 0 || series.length === 0) {
+    return <p className="chr-chart__empty">No data in this window.</p>;
+  }
+
+  return (
+    <div className="chr-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="chr-chart__svg"
+        role="img"
+        aria-labelledby={`${id}-title`}
+        onMouseLeave={() => setHover(null)}
+      >
+        <title id={`${id}-title`}>{title}</title>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line
+              x1={MARGIN.left}
+              x2={width - MARGIN.right}
+              y1={y(t)}
+              y2={y(t)}
+              className="chr-chart__grid"
+            />
+            <text x={MARGIN.left - 6} y={y(t) + 3} className="chr-chart__tick" textAnchor="end">
+              {format(t)}
+            </text>
+          </g>
+        ))}
+        {rendered.map((p, i) => {
+          const cx = MARGIN.left + slot * i + slot / 2;
+          const x0 = cx - bar / 2;
+          const base = MARGIN.top + plotH;
+          let cursor = base;
+          return (
+            <g key={`${i}-${p.detail ?? p.label}`}>
+              {p.segments.map((seg) => {
+                const h = Math.max(0, (Math.max(0, seg.value) / top) * plotH);
+                if (h === 0) return null;
+                const yTop = cursor - h;
+                const el = (
+                  <rect
+                    key={seg.key}
+                    x={x0}
+                    y={yTop}
+                    width={bar}
+                    height={h}
+                    fill={colorOf(seg.key)}
+                    stroke="var(--qb-panel)"
+                    strokeWidth={STACK_GAP}
+                    className={hover === i ? "chr-chart__bar--hover" : undefined}
+                    data-testid="chr-stack-seg"
+                  />
+                );
+                cursor = yTop;
+                return el;
+              })}
+              {/* Hit target: the whole slot, not the painted pixels. */}
+              <rect
+                x={MARGIN.left + slot * i}
+                y={MARGIN.top}
+                width={slot}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHover(i)}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                tabIndex={0}
+                aria-label={`${p.detail ?? p.label}: ${format(totals[i])}`}
+              />
+              {i % stride === 0 && (
+                <text x={cx} y={height - 6} className="chr-chart__tick" textAnchor="middle">
+                  {p.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <line
+          x1={MARGIN.left}
+          x2={width - MARGIN.right}
+          y1={MARGIN.top + plotH}
+          y2={MARGIN.top + plotH}
+          className="chr-chart__axis"
+        />
+      </svg>
+      {hover !== null && rendered[hover] && (
+        <Tooltip
+          x={`${((MARGIN.left + slot * hover + slot / 2) / width) * 100}%` as unknown as number}
+          y={0}
+        >
+          <strong>{format(totals[hover])}</strong>
+          <span>{rendered[hover].detail ?? rendered[hover].label}</span>
+          <ul className="chr-chart__tooltip-breakdown">
+            {rendered[hover].segments
+              .filter((s) => s.value > 0)
+              .sort((a, b) => b.value - a.value)
+              .map((s) => (
+                <li key={s.key}>
+                  <span
+                    className="chr-chart__legend-swatch"
+                    style={{ background: colorOf(s.key) }}
+                    aria-hidden="true"
+                  />
+                  <span>{series.find((sr) => sr.key === s.key)?.label ?? s.key}</span>
+                  <span className="chr-num">{format(s.value)}</span>
+                </li>
+              ))}
+          </ul>
+        </Tooltip>
+      )}
+      {capped && (
+        <p className="chr-chart__note">
+          Showing the most recent {MAX_POINTS} of {points.length} points — see Table view for the
+          full history.
+        </p>
+      )}
+      <ul className="chr-chart__legend" aria-label={`${title} — repos`}>
+        {series.map((s) => (
+          <li key={s.key} className="chr-chart__legend-item">
+            <span
+              className="chr-chart__legend-swatch"
+              style={{ background: colorOf(s.key) }}
+              aria-hidden="true"
+            />
+            <span>{s.label}</span>
+          </li>
+        ))}
+      </ul>
+      <details className="chr-chart__table">
+        <summary>Table view</summary>
+        <table>
+          <caption className="sr-only">{title}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              {series.map((s) => (
+                <th scope="col" key={s.key}>
+                  {s.label}
+                </th>
+              ))}
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((p, i) => (
+              <tr key={`${i}-${p.detail ?? p.label}`}>
+                <td>{p.detail ?? p.label}</td>
+                {series.map((s) => (
+                  <td className="chr-num" key={s.key}>
+                    {format(p.segments.find((seg) => seg.key === s.key)?.value ?? 0)}
+                  </td>
+                ))}
+                <td className="chr-num">
+                  {format(p.segments.reduce((sum, s) => sum + Math.max(0, s.value), 0))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+    </div>
+  );
+}
+
 export interface BarRow {
   label: string;
   value: number;

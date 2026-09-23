@@ -1632,7 +1632,10 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                                 THEN 1 ELSE 0 END) AS cold_turns,
                        MAX(CASE WHEN t.agent_id = ''
                                 THEN t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens
-                                ELSE 0 END) AS peak_context_tokens
+                                ELSE 0 END) AS peak_context_tokens,
+                       AVG(CASE WHEN t.agent_id = ''
+                                THEN t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens
+                                END) AS avg_context_tokens
                 FROM turns t JOIN sessions s ON s.session_id = t.session_id
                 {where}{' AND' if where else ' WHERE'} t.ts IS NOT NULL
                 GROUP BY day ORDER BY day""",
@@ -1647,6 +1650,14 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             day["input_tokens"], day["cache_read_tokens"], day["cache_creation_tokens"]
         )
         day["peak_context_pct"] = peak_context_pct(day["peak_context_tokens"])
+        day["avg_context_tokens"] = int(day["avg_context_tokens"] or 0)
+        # Same window as the day's peak, not re-inferred from the (smaller)
+        # average — the average is a share of the window actually in play,
+        # not of whatever smaller window its own value would suggest.
+        day["avg_context_pct"] = (
+            day["avg_context_tokens"] / context_window_for(day["peak_context_tokens"])
+            if day["avg_context_tokens"] > 0 else None
+        )
         _attach_cost(day, day_costs, day["day"])
     by_model = [
         dict(r) for r in conn.execute(

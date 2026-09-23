@@ -30,12 +30,13 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
+import { costByRepo } from "../../board/chronicle/costByRepo";
 import { Button } from "../../ui";
 import { planLabel, plansPresent } from "../../board/chronicle/plan";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
-import { BarList, ColumnChart, Donut, LimitsTimeline } from "./ChronicleCharts";
+import { BarList, ColumnChart, Donut, LimitsTimeline, StackedColumnChart } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import CostAttributionPanel from "./CostAttributionPanel";
@@ -198,12 +199,23 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
     detail: `${d.day} · ${formatPct(d.peak_context_pct)} of window`,
     value: d.peak_context_tokens,
   }));
+  const avgPerDay = byDay.map((d) => ({
+    label: formatDay(d.day),
+    detail: `${d.day} · ${formatPct(d.avg_context_pct)} of window`,
+    value: d.avg_context_tokens,
+  }));
   const hitRatePerDay = byDay.map((d) => ({
     label: formatDay(d.day),
     detail: `${d.day} · ${d.cold_turns} cold`,
     value: d.cache_hit_rate ?? 0,
   }));
   const costPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.cost_usd }));
+  // Server-side `by_day` sums every repo in scope into one line — a
+  // per-repo split only exists client-side, from `sessions`. Only worth
+  // computing (and only shown) under "all repos": within one repo it would
+  // always be a single, uninteresting segment.
+  const repoStack = useMemo(() => (scope === "all" ? costByRepo(sessions) : null), [scope, sessions]);
+  const showRepoStack = !!repoStack && repoStack.series.length > 1;
   const churnPerDay = (summary?.churn?.by_day ?? []).map((d) => ({
     label: formatDay(d.day),
     detail: `${d.day} · +${d.lines_added} / -${d.lines_removed} · ${d.edits} edits`,
@@ -394,9 +406,22 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
               />
             </section>
             <section className="chr-panel">
-              <h3 className="chr-panel__title">Cost per day</h3>
-              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
-              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+              <h3 className="chr-panel__title">Cost per day{showRepoStack ? ", by repo" : ""}</h3>
+              <p className="chr-panel__sub">
+                {showRepoStack
+                  ? "What each day's calls would cost at API list prices, split by repo."
+                  : "What each day's calls would cost at API list prices."}
+              </p>
+              {showRepoStack && repoStack ? (
+                <StackedColumnChart
+                  points={repoStack.points}
+                  series={repoStack.series}
+                  format={formatUsd}
+                  title="API-equivalent cost per day, by repo"
+                />
+              ) : (
+                <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+              )}
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
@@ -432,6 +457,11 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
               <h3 className="chr-panel__title">Peak context per day</h3>
               <p className="chr-panel__sub">Largest single window any session reached that day.</p>
               <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Average context per day</h3>
+              <p className="chr-panel__sub">Mean main-agent context size that day, subagent turns excluded.</p>
+              <ColumnChart points={avgPerDay} format={formatTokens} title="Average context tokens per day" hue="--chr-avg" />
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Cache hit rate per day</h3>

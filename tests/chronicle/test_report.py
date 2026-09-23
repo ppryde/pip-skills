@@ -62,6 +62,9 @@ class TestSummary:
         assert out["totals"]["context_window"] == 200_000
         assert round(out["totals"]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
         assert round(out["by_day"][1]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
+        # Every seeded turn is the same size, so the average equals the peak here.
+        assert out["by_day"][1]["avg_context_tokens"] == 1203
+        assert round(out["by_day"][1]["avg_context_pct"], 6) == round(1203 / 200_000, 6)
         assert out["by_day"][1]["cold_turns"] == 0
         assert round(out["by_day"][1]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
         # Cost: every seeded turn is opus-5 with 3 in / 1000 read / 200 written
@@ -73,6 +76,26 @@ class TestSummary:
         assert round(out["by_model"][0]["cost_usd"], 6) == round(4 * TURN_USD, 6)
         assert round(out["shape"]["cost_usd"]["max"], 6) == round(2 * TURN_USD, 6)
         assert round(out["shape"]["cost_usd"]["p50"], 6) == round(TURN_USD, 6)
+
+    def test_avg_context_excludes_subagent_turns_and_differs_from_peak(self, projects):
+        builder = TranscriptBuilder(projects, "-a", "s1")
+        builder.prompt("u1", T0)
+        builder.turn("m1", T0, usage={"input_tokens": 1000, "cache_read_input_tokens": 0,
+                                       "cache_creation_input_tokens": 0, "output_tokens": 10})
+        builder.turn("m2", T0, usage={"input_tokens": 3000, "cache_read_input_tokens": 0,
+                                       "cache_creation_input_tokens": 0, "output_tokens": 10})
+        builder.write()
+        # A subagent turn at the default (1203-token) usage — smaller than the
+        # main loop's peak, so it would silently pull the average down if it
+        # weren't excluded like peak already excludes it.
+        builder.subagent("agent-1", ["a1"], T0)
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.summary(conn)
+        day = out["by_day"][0]
+        assert day["peak_context_tokens"] == 3000
+        assert day["avg_context_tokens"] == 2000
+        assert round(day["avg_context_pct"], 6) == round(2000 / 200_000, 6)
 
     def test_unpriced_model_is_counted_not_guessed(self, projects):
         conn = _seed(projects)

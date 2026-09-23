@@ -343,21 +343,33 @@ export function clearRepo(
 
 // --- Chronicle (optional) ---------------------------------------------------
 
-/** The 1st of the current month at local midnight, as an ISO datetime
- * carrying THIS browser's own UTC offset — so the backend (which may run in
- * a different zone entirely) resolves "month to date" the way the browser
- * sees it, not its own local midnight. Computed fresh on every call, never
- * cached: `query.since` is a request-time instruction, not a stored value,
- * which is what lets a poll tick after a month boundary see the new month. */
-function monthToDateSince(now: Date = new Date()): string {
-  const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+/** Local midnight of the given date, as an ISO datetime carrying THIS
+ * browser's own UTC offset — so the backend (which may run in a different
+ * zone entirely) resolves the day boundary the way the browser sees it, not
+ * its own local midnight. */
+function localMidnightSince(d: Date): string {
+  const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, "0");
-  const offsetMin = -first.getTimezoneOffset(); // minutes EAST of UTC
+  const offsetMin = -midnight.getTimezoneOffset(); // minutes EAST of UTC
   const sign = offsetMin >= 0 ? "+" : "-";
   const abs = Math.abs(offsetMin);
-  const date = `${first.getFullYear()}-${pad(first.getMonth() + 1)}-${pad(first.getDate())}`;
+  const date = `${midnight.getFullYear()}-${pad(midnight.getMonth() + 1)}-${pad(midnight.getDate())}`;
   const offset = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
   return `${date}T00:00:00${offset}`;
+}
+
+/** The 1st of the current month at local midnight. Computed fresh on every
+ * call, never cached: `query.since` is a request-time instruction, not a
+ * stored value, which is what lets a poll tick after a month boundary see
+ * the new month. */
+function monthToDateSince(now: Date = new Date()): string {
+  return localMidnightSince(new Date(now.getFullYear(), now.getMonth(), 1));
+}
+
+/** Today at local midnight. Same request-time-not-cached reasoning as
+ * `monthToDateSince` — a poll tick after midnight sees the new day. */
+function todaySince(now: Date = new Date()): string {
+  return localMidnightSince(now);
 }
 
 /** Query-string tail for the chronicle reads. `scope=all` is appended AFTER
@@ -367,7 +379,9 @@ function monthToDateSince(now: Date = new Date()): string {
 function chronicleQuery(base: string, query: ChronicleQuery = {}): string {
   const url = withRoot(base);
   const params: string[] = [];
-  if (query.since === "month-to-date") {
+  if (query.since === "today") {
+    params.push(`since=${encodeURIComponent(todaySince())}`);
+  } else if (query.since === "month-to-date") {
     params.push(`since=${encodeURIComponent(monthToDateSince())}`);
   } else if (query.days !== undefined) {
     params.push(`days=${encodeURIComponent(String(query.days))}`);
