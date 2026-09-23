@@ -407,6 +407,10 @@ export interface ChronicleDay {
   peak_context_tokens: number;
   /** That peak as a share of its inferred window. */
   peak_context_pct: number | null;
+  /** Mean main-agent context size that day (subagent turns excluded). */
+  avg_context_tokens: number;
+  /** That average as a share of the SAME window the day's peak infers. */
+  avg_context_pct: number | null;
   cache_hit_rate: number | null;
   cost_usd: number;
   unpriced_turns: number;

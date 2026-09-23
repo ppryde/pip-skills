@@ -199,6 +199,11 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
     detail: `${d.day} · ${formatPct(d.peak_context_pct)} of window`,
     value: d.peak_context_tokens,
   }));
+  const avgPerDay = byDay.map((d) => ({
+    label: formatDay(d.day),
+    detail: `${d.day} · ${formatPct(d.avg_context_pct)} of window`,
+    value: d.avg_context_tokens,
+  }));
   const hitRatePerDay = byDay.map((d) => ({
     label: formatDay(d.day),
     detail: `${d.day} · ${d.cold_turns} cold`,
@@ -452,6 +457,11 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
               <h3 className="chr-panel__title">Peak context per day</h3>
               <p className="chr-panel__sub">Largest single window any session reached that day.</p>
               <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
+            </section>
+            <section className="chr-panel">
+              <h3 className="chr-panel__title">Average context per day</h3>
+              <p className="chr-panel__sub">Mean main-agent context size that day, subagent turns excluded.</p>
+              <ColumnChart points={avgPerDay} format={formatTokens} title="Average context tokens per day" hue="--chr-avg" />
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Cache hit rate per day</h3>

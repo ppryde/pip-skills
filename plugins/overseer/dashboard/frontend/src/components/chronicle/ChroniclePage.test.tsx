@@ -117,7 +117,7 @@ function summary(): ChronicleSummary {
       peak_context_tokens: 120_000, peak_context_pct: 0.6, context_window: 200_000,
       cost_usd: 12.3, unpriced_turns: 0, pricing_as_of: "2026-06-24",
     },
-    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
+    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, avg_context_tokens: 800, avg_context_pct: 0.004, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2, result_chars: 1200, median_s: 2.5, subagent_calls: 3 }],
     mcp: {
@@ -242,6 +242,7 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByText("1 live")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Average context tokens per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Cache hit rate per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "API-equivalent cost per day" })).toBeInTheDocument();
     // Cost: the tile (its pricing caveat lives behind the label's

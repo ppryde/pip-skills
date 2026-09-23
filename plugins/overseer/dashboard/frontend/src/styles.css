@@ -7599,6 +7599,7 @@ button.trail-tag:focus-visible {
   --chr-context: #256abf; /* blue — context processed */
   --chr-output: #c2571f; /* rust — tokens the model wrote */
   --chr-peak: #7a3fa8; /* plum — peak context */
+  --chr-avg: #b58a1f; /* gold — average context */
   --chr-cache: #1f7a52; /* forest — cache warmth */
   --chr-turns: #1f6f7a; /* teal — turns and time */
   --chr-tools: #9a5b12; /* bronze — tool calls */
