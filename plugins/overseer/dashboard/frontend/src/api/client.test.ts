@@ -613,6 +613,52 @@ describe("api/client", () => {
     });
   });
 
+  describe('chronicle: since="today"', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sends today's date at local midnight, in this browser's own offset", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 15, 10, 30, 0)); // local: 15 Sep 2026
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+
+      await client.getChronicleSummary({ since: "today" });
+
+      const offsetMin = -new Date(2026, 8, 15).getTimezoneOffset();
+      const sign = offsetMin >= 0 ? "+" : "-";
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const offset = `${sign}${pad(Math.floor(Math.abs(offsetMin) / 60))}:${pad(Math.abs(offsetMin) % 60)}`;
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).toBe(`/api/chronicle/summary?since=${encodeURIComponent(`2026-09-15T00:00:00${offset}`)}`);
+    });
+
+    it("is recomputed on every call, so a fetch made after midnight names the new day", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 15, 23, 59, 0)); // 15 Sep, just before midnight
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+      await client.getChronicleSummary({ since: "today" });
+      expect(fetchMock.mock.calls[0][0]).toContain(encodeURIComponent("2026-09-15T00:00:00"));
+
+      vi.setSystemTime(new Date(2026, 8, 16, 0, 2, 0)); // rolled over to 16 Sep
+      fetchMock.mockResolvedValueOnce(jsonResponse({ totals: null }));
+      await client.getChronicleSummary({ since: "today" });
+      expect(fetchMock.mock.calls[1][0]).toContain(encodeURIComponent("2026-09-16T00:00:00"));
+    });
+
+    it("never sends days alongside it, even if a caller passed both", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 15));
+      fetchMock.mockResolvedValueOnce(jsonResponse({ sessions: [] }));
+
+      await client.getChronicleSessions({ days: 30, since: "today" });
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).not.toContain("days=");
+      expect(url).toContain("since=");
+    });
+  });
+
   it("throws an Error with the backend detail message on a non-2xx response", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ detail: "nope" }, 400));
 

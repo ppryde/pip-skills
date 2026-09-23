@@ -33,7 +33,8 @@ function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repo
   const [branch, setBranch] = useState<string | null>(null);
   const scope = allRepos || !repoScopable ? "all" : "repo";
   const days = typeof timeWindow === "number" ? timeWindow : undefined;
-  const since = timeWindow === "month-to-date" ? ("month-to-date" as const) : undefined;
+  const since =
+    timeWindow === "today" || timeWindow === "month-to-date" ? timeWindow : undefined;
   const data = useChronicle(activeRoot, { days, since, scope, branch }, true);
   const { sync, syncing, note } = useChronicleSync(data.refresh);
   return (
@@ -330,6 +331,22 @@ describe("<ChroniclePage/>", () => {
         branch: null,
       })
     );
+  });
+
+  it("Today sends since instead of days", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({
+        days: undefined,
+        since: "today",
+        scope: "repo",
+        branch: null,
+      })
+    );
+    expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("pins scope to all repos when the repo is not scopable", async () => {

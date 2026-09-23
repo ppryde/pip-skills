@@ -365,7 +365,10 @@ function App() {
     activeRoot,
     {
       days: typeof chronicleWindow === "number" ? chronicleWindow : undefined,
-      since: chronicleWindow === "month-to-date" ? "month-to-date" : undefined,
+      since:
+        chronicleWindow === "today" || chronicleWindow === "month-to-date"
+          ? chronicleWindow
+          : undefined,
       scope: chronicleScope,
       branch: chronicleBranch,
     },

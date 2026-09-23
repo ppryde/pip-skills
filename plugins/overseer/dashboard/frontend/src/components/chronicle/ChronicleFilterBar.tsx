@@ -12,12 +12,13 @@
 import { Button, Label } from "../../ui";
 import scrollIcon from "../../assets/ui-icons/scroll.png";
 
-/** A day count (a fixed rolling window), `"month-to-date"` (recomputed at
- * request time from the 1st of the current month — see `chronicleQuery` in
- * api/client.ts), or `undefined` for all time. */
-export type ChronicleTimeWindow = number | "month-to-date" | undefined;
+/** A day count (a fixed rolling window), `"today"` or `"month-to-date"`
+ * (both recomputed at request time from local midnight — see
+ * `chronicleQuery` in api/client.ts), or `undefined` for all time. */
+export type ChronicleTimeWindow = number | "today" | "month-to-date" | undefined;
 
 export const CHRONICLE_WINDOWS: { label: string; window: ChronicleTimeWindow }[] = [
+  { label: "Today", window: "today" },
   { label: "7 days", window: 7 },
   { label: "30 days", window: 30 },
   { label: "90 days", window: 90 },
