@@ -755,6 +755,31 @@ class TestAccountAndPlan:
             "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-bridge'"
         ).fetchone()[0] == "acc-9"
 
+    def test_owner_account_uuid_is_write_once(self, projects):
+        path = projects / "-repo" / "s-bridge2.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join([
+            json.dumps({"type": "bridge-session", "sessionId": "s-bridge2",
+                        "ownerAccountUuid": "acc-9", "ownerOrganizationUuid": "org-9"}),
+            json.dumps(_assistant("m1", ts=T0, session_id="s-bridge2")),
+        ]) + "\n")
+        conn = store.connect()
+        ingest.ingest_session(conn, path)
+        # The account bridged into this session switches mid-stream — a real
+        # `/login` observed in the wild re-emits `bridge-session` with a new
+        # `ownerAccountUuid` — and a later incremental ingest picks up that
+        # new record. The session must keep the account it was FIRST bridged
+        # to, not whoever the bridge points at now.
+        with path.open("a") as fh:
+            fh.write(json.dumps({"type": "bridge-session", "sessionId": "s-bridge2",
+                                  "ownerAccountUuid": "acc-10",
+                                  "ownerOrganizationUuid": "org-10"}) + "\n")
+            fh.write(json.dumps(_assistant("m2", ts=T0, session_id="s-bridge2")) + "\n")
+        ingest.ingest_session(conn, path)
+        assert conn.execute(
+            "SELECT owner_account_uuid FROM sessions WHERE session_id = 's-bridge2'"
+        ).fetchone()[0] == "acc-9"
+
     def test_a_session_without_that_record_has_no_owner(self, projects):
         from .conftest import TranscriptBuilder
         path = TranscriptBuilder(projects, session_id="s-plain").turn("m1", ts=T0).write()

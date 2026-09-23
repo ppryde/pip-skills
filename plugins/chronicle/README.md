@@ -211,7 +211,12 @@ Sources differ, and so does coverage:
 
 `owner_account_uuid` is named for what the record literally says — the account
 owning the bridge — not "the billed account", which the data does not state.
-NULL means *not stated*, never *no account*, so consumers must render nothing
+It is also **write-once**: a bridged session's account can change mid-stream
+(`/login` re-emits `bridge-session` with a new `ownerAccountUuid`), and a
+later incremental ingest that lands on the switched-to account must not
+relabel the session's original owner — the column keeps whichever value it
+saw first, same as `account_uuid`. NULL means *not stated*, never *no account*,
+so consumers must render nothing
 rather than guessing.
 
 An **API-key session has no `oauthAccount` at all**, which is the one positive

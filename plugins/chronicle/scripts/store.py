@@ -279,7 +279,12 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("tool_calls", "qualifier", "TEXT"),
     # The account that owns this session's bridge, from its `bridge-session`
     # record. Sparse: only sessions bridged from claude.ai carry one, so NULL
-    # is the common case and means "not stated", never "no account".
+    # is the common case and means "not stated", never "no account". A bridged
+    # session's account CAN change mid-stream (`/login` re-emits
+    # `bridge-session` with a new `ownerAccountUuid`), so this is write-once
+    # per session like `account_uuid` below (see
+    # `ingest._upsert_session_identity`) — an incremental ingest that lands on
+    # the switched-to account must not relabel the session's original owner.
     ("sessions", "owner_account_uuid", "TEXT"),
     # The plan AS IT WAS when this session was ingested, read from the config
     # dir the transcript came from. Pinned per session rather than per account

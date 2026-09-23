@@ -9860,6 +9860,15 @@ button.trail-tag:focus-visible {
 .alm-row__chev:hover,
 .alm-row__open:hover { background: var(--qb-tab-track); }
 
+/* The browser-link half of a Slack row's pair: same control, deliberately
+   NOT the same glyph as the `slack://` app link beside it — a `slack://`
+   click is silent when the app is not installed, so the two must read as
+   different affordances, not a doubled-up one. */
+.alm-row__open--web {
+  font-size: 0.66rem;
+  margin-left: 0.2rem;
+}
+
 /* --- the conversation, opened in place ------------------------------------ */
 .alm-thread {
   margin: 0.15rem 0 0.5rem;
@@ -9886,6 +9895,7 @@ button.trail-tag:focus-visible {
 }
 
 .alm-msg__link { margin-left: auto; font-size: 0.76rem; text-decoration: none; }
+.alm-msg__link--web { margin-left: 0.3rem; font-size: 0.66rem; }
 
 .alm-msg__text { margin: 0.05rem 0 0; font-size: 0.86rem; }
 
