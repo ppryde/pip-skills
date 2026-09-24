@@ -643,6 +643,51 @@ def peak_context_pct(peak_tokens: int) -> float | None:
     return peak_tokens / context_window_for(peak_tokens)
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether ``table`` has ``column`` yet — the read-only migration guard
+    (see `_qualifier_sql`) as a predicate."""
+    return column in {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _effective_account_sql(conn: sqlite3.Connection, t: str = "t", s: str = "s") -> str | None:
+    """The SQL expression for the account a TURN counts toward, or None when
+    the store records no accounts at all.
+
+    `COALESCE(t.account_uuid, s.account_uuid)`: the bridge owner in force when
+    the turn was written (`turns.account_uuid`), falling back to the account of
+    the config dir the session was ingested from. NULL turn stamps are the
+    common case — a turn before the first bridge record, or any turn of a
+    session never bridged from claude.ai — and they keep the config-dir
+    attribution they always had. A store not yet resynced since the per-turn
+    column shipped has no such column, and reads as session-level."""
+    if not _has_column(conn, "sessions", "account_uuid"):
+        return None
+    if _has_column(conn, "turns", "account_uuid"):
+        return f"COALESCE({t}.account_uuid, {s}.account_uuid)"
+    return f"{s}.account_uuid"
+
+
+def _with_turn_account(where: str, params: list[Any], account: str | None,
+                       conn: sqlite3.Connection) -> tuple[str, list[Any]]:
+    """``where`` narrowed to the ACCOUNT'S OWN turns, for a query that joins
+    ``turns t`` to ``sessions s``. ``_session_filter``'s clause selects
+    sessions; without this a mixed session would contribute the other
+    account's turns to a per-account sum. A no-op without an account filter,
+    so an unfiltered read is byte-identical to before."""
+    expr = _effective_account_sql(conn) if account else None
+    if expr is None:
+        return where, params
+    return f"{where}{' AND' if where else ' WHERE'} {expr} = ?", [*params, account]
+
+
+def _turn_scoped(conn: sqlite3.Connection, account: str | None) -> bool:
+    """Whether an account-filtered read has to recompute session rollups from
+    the account's own turns: only when turns carry a stamp that could differ
+    from the session's account."""
+    return (bool(account) and _has_column(conn, "sessions", "account_uuid")
+            and _has_column(conn, "turns", "account_uuid"))
+
+
 def _session_filter(repo_root: str | None, since: float | None,
                     alias: str = "s", branch: str | None = None,
                     account: str | None = None,
@@ -652,16 +697,22 @@ def _session_filter(repo_root: str | None, since: float | None,
     (a session can check out several), so a branch-scoped read attributes
     each session wholly to where it ended up. Turns carry no branch.
 
-    ``account`` is likewise session-level — a session belongs to whichever
-    account was logged in when it was first ingested (see
-    ``ingest._upsert_session_identity``). ``conn`` is needed only to guard
-    it: `account_uuid` is a migrated column, and the report verbs open the
-    store READ-ONLY — a path that returns before `_migrate` can add it (the
-    same trap `_qualifier_sql` documents). Without the guard, an
-    account-filtered read against a store not yet resynced since this shipped
-    would raise `OperationalError` for a store with a thousand sessions in
-    it; with it, the filter is silently dropped (a store with no such column
-    has recorded no account for anything, so there is nothing to match).
+    ``account`` selects the sessions with at least one turn whose EFFECTIVE
+    account matches (see ``_effective_account_sql``), so a session that moved
+    between accounts mid-run appears under BOTH. A session with no turns yet
+    has nothing to split and belongs to its config-dir account. Anything that
+    SUMS turns for the scope must additionally narrow to the account's own
+    turns (``_with_turn_account``), or a mixed session would bring the other
+    account's spend along with it.
+
+    ``conn`` is needed only to guard it: `account_uuid` is a migrated column
+    (on both `sessions` and `turns`), and the report verbs open the store
+    READ-ONLY — a path that returns before `_migrate` can add it (the same
+    trap `_qualifier_sql` documents). Without the guard, an account-filtered
+    read against a store not yet resynced since this shipped would raise
+    `OperationalError` for a store with a thousand sessions in it. With it: no
+    `sessions.account_uuid` drops the filter (nothing has an account to match),
+    and no `turns.account_uuid` falls back to the session-level match.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -671,11 +722,17 @@ def _session_filter(repo_root: str | None, since: float | None,
     if branch:
         clauses.append(f"{alias}.git_branch = ?")
         params.append(branch)
-    if account and (conn is None
-                    or "account_uuid" in {row[1] for row in conn.execute(
-                        "PRAGMA table_info(sessions)")}):
-        clauses.append(f"{alias}.account_uuid = ?")
-        params.append(account)
+    if account and (conn is None or _has_column(conn, "sessions", "account_uuid")):
+        if conn is None or _has_column(conn, "turns", "account_uuid"):
+            clauses.append(
+                f"(EXISTS (SELECT 1 FROM turns ta WHERE ta.session_id = {alias}.session_id"
+                f" AND COALESCE(ta.account_uuid, {alias}.account_uuid) = ?)"
+                f" OR ({alias}.account_uuid = ? AND NOT EXISTS"
+                f" (SELECT 1 FROM turns tn WHERE tn.session_id = {alias}.session_id)))")
+            params.extend([account, account])
+        else:
+            clauses.append(f"{alias}.account_uuid = ?")
+            params.append(account)
     if since is not None:
         clauses.append(f"COALESCE({alias}.last_activity_at, {alias}.started_at, 0) >= ?")
         params.append(since)
@@ -754,7 +811,7 @@ def _attach_cost(row: dict[str, Any], costs: dict[Any, dict[str, Any]], key: Any
     row["unpriced_turns"] = entry["unpriced_turns"]
 
 
-def _row_to_session(row: sqlite3.Row, now: float | None = None) -> dict[str, Any]:
+def _row_to_session(row: sqlite3.Row | dict[str, Any], now: float | None = None) -> dict[str, Any]:
     if now is None:
         now = time.time()
     out = dict(row)
@@ -795,6 +852,13 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+# The rollup columns `sessions()` recomputes from an account's own turns.
+_SESSION_TURN_COLUMNS = (
+    "turns", "input_tokens", "cache_read_tokens", "cache_creation_tokens", "output_tokens",
+    "thinking_tokens", "tool_calls", "cold_turns", "peak_context_tokens", "subagents",
+)
+
+
 def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
              since: float | None = None, limit: int = 200,
              branch: str | None = None, account: str | None = None) -> list[dict[str, Any]]:
@@ -805,11 +869,39 @@ def sessions(conn: sqlite3.Connection, *, repo_root: str | None = None,
         (*params, int(limit)),
     ).fetchall()
     now = time.time()
-    out = [_row_to_session(r, now) for r in rows]
+    records = [dict(r) for r in rows]
+    ids = [r["session_id"] for r in records]
+    marks = ",".join("?" * len(ids))
+    if records and _turn_scoped(conn, account):
+        # The rollup columns cover the WHOLE session; a session that moved
+        # between accounts must show only this account's share.
+        by_id = {r["session_id"]: r for r in records}
+        for r in conn.execute(
+            f"""SELECT t.session_id AS session_id, COUNT(*) AS turns,
+                       SUM(t.input_tokens) AS input_tokens,
+                       SUM(t.cache_read_tokens) AS cache_read_tokens,
+                       SUM(t.cache_creation_tokens) AS cache_creation_tokens,
+                       SUM(t.output_tokens) AS output_tokens,
+                       SUM(t.thinking_tokens) AS thinking_tokens,
+                       SUM(t.tool_calls) AS tool_calls,
+                       SUM(CASE WHEN t.agent_id = '' AND t.cache_creation_tokens > t.cache_read_tokens
+                                THEN 1 ELSE 0 END) AS cold_turns,
+                       MAX(CASE WHEN t.agent_id = ''
+                                THEN t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens
+                                ELSE 0 END) AS peak_context_tokens,
+                       COUNT(DISTINCT CASE WHEN t.agent_id <> '' THEN t.agent_id END) AS subagents
+                FROM turns t JOIN sessions s ON s.session_id = t.session_id
+                WHERE t.session_id IN ({marks}) AND {_effective_account_sql(conn)} = ?
+                GROUP BY t.session_id""",
+            [*ids, account],
+        ):
+            by_id[r["session_id"]].update(
+                {key: r[key] for key in _SESSION_TURN_COLUMNS})
+    out = [_row_to_session(r, now) for r in records]
     if out:
-        ids = [r["session_id"] for r in out]
-        marks = ",".join("?" * len(ids))
-        costs = _costs_by(conn, "t.session_id", f" WHERE t.session_id IN ({marks})", ids)
+        cost_where, cost_params = _with_turn_account(
+            f" WHERE t.session_id IN ({marks})", ids, account, conn)
+        costs = _costs_by(conn, "t.session_id", cost_where, cost_params)
         for r in out:
             _attach_cost(r, costs, r["session_id"])
     return out
@@ -833,10 +925,14 @@ def repos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 def accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """One row per account uuid seen on a session: session count, and when it
-    was last active. Read straight off ``sessions.account_uuid`` — what a
-    session was actually attributed to at ingest — rather than the
-    ``accounts`` table, which only records identity for a config dir that was
-    readable AT INGEST TIME and carries no session count of its own.
+    was last active. Read off the accounts sessions were actually attributed
+    to — a session counts under EVERY account that owns at least one of its
+    turns (``_effective_account_sql``), so one that moved between accounts
+    mid-run is listed under both, and an account known only from a bridge
+    record still appears. A session with no turns yet counts under its
+    config-dir account. Not the ``accounts`` table, which only records
+    identity for a config dir that was readable AT INGEST TIME and carries no
+    session count of its own. ``last_activity_at`` is the SESSION's.
 
     Same read-only migration trap as `repos`' column-guarded siblings: naming
     `account_uuid` unconditionally would raise on a store not yet resynced
@@ -844,10 +940,29 @@ def accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     have = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
     if "account_uuid" not in have:
         return []
+    if not _has_column(conn, "turns", "account_uuid"):
+        rows = conn.execute(
+            """SELECT account_uuid, COUNT(*) AS sessions,
+                      MAX(COALESCE(last_activity_at, started_at)) AS last_activity_at
+               FROM sessions WHERE account_uuid IS NOT NULL
+               GROUP BY account_uuid ORDER BY sessions DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
     rows = conn.execute(
         """SELECT account_uuid, COUNT(*) AS sessions,
                   MAX(COALESCE(last_activity_at, started_at)) AS last_activity_at
-           FROM sessions WHERE account_uuid IS NOT NULL
+           FROM (
+               SELECT DISTINCT s.session_id AS session_id,
+                      COALESCE(t.account_uuid, s.account_uuid) AS account_uuid,
+                      s.last_activity_at AS last_activity_at, s.started_at AS started_at
+               FROM sessions s JOIN turns t ON t.session_id = s.session_id
+               UNION
+               SELECT s.session_id, s.account_uuid, s.last_activity_at, s.started_at
+               FROM sessions s
+               WHERE s.account_uuid IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.session_id)
+           )
+           WHERE account_uuid IS NOT NULL
            GROUP BY account_uuid ORDER BY sessions DESC"""
     ).fetchall()
     return [dict(r) for r in rows]
@@ -1310,10 +1425,14 @@ def _session_windows(conn: sqlite3.Connection, account_uuid: str) -> list[tuple[
     """`_session_windows_from_ts` over one account's own turns — every
     session and subagent it owns, across the account's WHOLE history (a
     window can open on a turn from long before the current report's `since`
-    filter, so this is deliberately unfiltered by it)."""
+    filter, so this is deliberately unfiltered by it).
+
+    "Its own" is per TURN (``_effective_account_sql``): a session that moved
+    between accounts spends each account's window only on that account's turns."""
     rows = conn.execute(
-        """SELECT t.ts FROM turns t JOIN sessions s ON s.session_id = t.session_id
-           WHERE s.account_uuid = ? AND t.ts IS NOT NULL ORDER BY t.ts""",
+        f"""SELECT t.ts FROM turns t JOIN sessions s ON s.session_id = t.session_id
+            WHERE {_effective_account_sql(conn) or "s.account_uuid"} = ?
+              AND t.ts IS NOT NULL ORDER BY t.ts""",
         (account_uuid,),
     )
     return _session_windows_from_ts(r[0] for r in rows)
@@ -1360,14 +1479,30 @@ def _weekly_anchor_from_reset(resets_at: float, reset_raw: str | None) -> Weekly
     return WeeklyAnchor(weekday=dt.weekday(), hour=dt.hour, minute=dt.minute, tz=zone_name)
 
 
+def _hit_account_sql(conn: sqlite3.Connection) -> str:
+    """The SQL expression for the account a limit hit belongs to (`limit_hits h`
+    joined to `sessions s`).
+
+    A hit is a moment in a session, and a session can change accounts mid-run:
+    it belongs to the account of the session's latest turn at or before the hit
+    (`_effective_account_sql` of that turn). With no turn before it — or a
+    store without per-turn accounts — it falls back to the session's account,
+    which is what every hit used to be attributed to."""
+    if not _has_column(conn, "turns", "account_uuid"):
+        return "s.account_uuid"
+    return ("COALESCE((SELECT COALESCE(ht.account_uuid, s.account_uuid) FROM turns ht"
+            " WHERE ht.session_id = h.session_id AND ht.ts <= h.ts"
+            " ORDER BY ht.ts DESC, ht.rowid DESC LIMIT 1), s.account_uuid)")
+
+
 def _weekly_anchor(conn: sqlite3.Connection, account_uuid: str) -> WeeklyAnchor | None:
     """The account's weekly schedule, inferred from its MOST RECENT weekly
     hit that carried a readable reset — the schedule an org is on now, if it
     has ever changed. None when the account has no such hit to infer from."""
     row = conn.execute(
-        """SELECT h.resets_at, h.reset_raw FROM limit_hits h JOIN sessions s ON s.session_id = h.session_id
-           WHERE s.account_uuid = ? AND h.kind = 'weekly' AND h.resets_at IS NOT NULL
-           ORDER BY h.ts DESC LIMIT 1""",
+        f"""SELECT h.resets_at, h.reset_raw FROM limit_hits h JOIN sessions s ON s.session_id = h.session_id
+            WHERE {_hit_account_sql(conn)} = ? AND h.kind = 'weekly' AND h.resets_at IS NOT NULL
+            ORDER BY h.ts DESC LIMIT 1""",
         (account_uuid,),
     ).fetchone()
     return None if row is None else _weekly_anchor_from_reset(row[0], row[1])
@@ -1399,7 +1534,7 @@ def _sum_account_tokens(conn: sqlite3.Connection, account_uuid: str,
     cost = 0.0
     unpriced_turns = 0
     for r in conn.execute(
-        """SELECT t.model AS model, COUNT(*) AS turns,
+        f"""SELECT t.model AS model, COUNT(*) AS turns,
                   COALESCE(SUM(t.input_tokens), 0) AS input_tokens,
                   COALESCE(SUM(t.cache_read_tokens), 0) AS cache_read_tokens,
                   COALESCE(SUM(t.cache_creation_tokens), 0) AS cache_creation_tokens,
@@ -1407,7 +1542,8 @@ def _sum_account_tokens(conn: sqlite3.Connection, account_uuid: str,
                   COALESCE(SUM(t.cache_1h_tokens), 0) AS cache_1h_tokens,
                   COALESCE(SUM(t.output_tokens), 0) AS output_tokens
            FROM turns t JOIN sessions s ON s.session_id = t.session_id
-           WHERE s.account_uuid = ? AND t.ts >= ? AND t.ts <= ?
+           WHERE {_effective_account_sql(conn) or "s.account_uuid"} = ?
+             AND t.ts >= ? AND t.ts <= ?
            GROUP BY t.model""",
         (account_uuid, window_start, window_end),
     ):
@@ -1491,9 +1627,13 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
     reading the store directly, not for the dashboard to render (see the
     table's own comment in `store.py`).
 
+    A hit belongs to the account its session was on WHEN IT LANDED (see
+    `_hit_account_sql`), not to the session's config-dir account: one session
+    can hit the limit under either account it moved between.
+
     Entirely DB-reads: nothing here re-opens a transcript. Window derivation
     for a SESSION event walks the account's own `turns` (indexed on `ts`;
-    `sessions.account_uuid` is what makes "the account's turns" a query
+    the per-turn `account_uuid` is what makes "the account's turns" a query
     rather than a re-parse), so it costs one ordered scan per DISTINCT
     account across this whole call (cached below), not one per event.
 
@@ -1506,10 +1646,16 @@ def limits(conn: sqlite3.Connection, *, repo_root: str | None = None, since: flo
     if not _has_table(conn, "limit_hits"):
         return {"events": [], "by_kind": {}}
     where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
+    hit_account = _hit_account_sql(conn)
+    if account and _has_column(conn, "sessions", "account_uuid"):
+        # `where` selected the SESSIONS that touch the account; a mixed session
+        # also holds the other account's hits, which are not this account's.
+        where = f"{where}{' AND' if where else ' WHERE'} {hit_account} = ?"
+        params = [*params, account]
     rows = conn.execute(
         f"""SELECT h.session_id AS session_id, h.ts AS ts, h.kind AS kind, h.model AS model,
                    h.reset_raw AS reset_raw, h.resets_at AS resets_at,
-                   s.account_uuid AS account_uuid
+                   {hit_account} AS account_uuid
             FROM limit_hits h JOIN sessions s ON s.session_id = h.session_id
             {where}""",
         params,
@@ -1583,6 +1729,10 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             since: float | None = None, branch: str | None = None,
             account: str | None = None) -> dict[str, Any]:
     where, params = _session_filter(repo_root, since, branch=branch, account=account, conn=conn)
+    # For every query below that SUMS TURNS: `where` picks the sessions that
+    # touch the account, this narrows to the account's own turns. Identical to
+    # `where` without an account filter.
+    twhere, tparams = _with_turn_account(where, params, account, conn)
     totals_row = conn.execute(
         f"""SELECT COUNT(*) AS sessions,
                    COALESCE(SUM(turns), 0) AS turns,
@@ -1605,16 +1755,44 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         (time.time() - LIVE_HORIZON_SECONDS, *params),
     ).fetchone()
     totals = dict(totals_row)
+    account_peak: int | None = None
+    if _turn_scoped(conn, account):
+        # The rollup columns summed above cover WHOLE sessions; recompute what
+        # turns can answer from the account's own turns. Prompts, compactions,
+        # artifacts, active time, transcript size and liveness have no
+        # per-turn split and stay session-level (see the README).
+        own = conn.execute(
+            f"""SELECT COUNT(*) AS turns,
+                       COALESCE(SUM(t.input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(t.cache_read_tokens), 0) AS cache_read_tokens,
+                       COALESCE(SUM(t.cache_creation_tokens), 0) AS cache_creation_tokens,
+                       COALESCE(SUM(t.output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(t.thinking_tokens), 0) AS thinking_tokens,
+                       COALESCE(SUM(t.tool_calls), 0) AS tool_calls,
+                       COALESCE(SUM(CASE WHEN t.agent_id = ''
+                                          AND t.cache_creation_tokens > t.cache_read_tokens
+                                         THEN 1 ELSE 0 END), 0) AS cold_turns,
+                       COUNT(DISTINCT CASE WHEN t.agent_id <> ''
+                                           THEN t.session_id || '/' || t.agent_id END) AS subagents,
+                       COALESCE(MAX(CASE WHEN t.agent_id = ''
+                                         THEN t.input_tokens + t.cache_read_tokens
+                                              + t.cache_creation_tokens
+                                         ELSE 0 END), 0) AS peak_context_tokens
+                FROM turns t JOIN sessions s ON s.session_id = t.session_id{twhere}""",
+            tparams,
+        ).fetchone()
+        totals.update({key: own[key] for key in own.keys() if key != "peak_context_tokens"})  # noqa: SIM118
+        account_peak = int(own["peak_context_tokens"])
     totals["cache_hit_rate"] = cache_hit_rate(
         totals["input_tokens"], totals["cache_read_tokens"], totals["cache_creation_tokens"]
     )
     ttl = conn.execute(
         f"""SELECT COALESCE(SUM(t.cache_5m_tokens), 0), COALESCE(SUM(t.cache_1h_tokens), 0)
-            FROM turns t JOIN sessions s ON s.session_id = t.session_id{where}""",
-        params,
+            FROM turns t JOIN sessions s ON s.session_id = t.session_id{twhere}""",
+        tparams,
     ).fetchone()
     totals["cache_5m_tokens"], totals["cache_1h_tokens"] = int(ttl[0]), int(ttl[1])
-    session_costs = _costs_by(conn, "t.session_id", where, params)
+    session_costs = _costs_by(conn, "t.session_id", twhere, tparams)
     totals["cost_usd"] = round(sum(c["cost_usd"] for c in session_costs.values()), 6)
     totals["unpriced_turns"] = sum(c["unpriced_turns"] for c in session_costs.values())
     totals["pricing_as_of"] = pricing.PRICING_AS_OF
@@ -1637,13 +1815,13 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                                 THEN t.input_tokens + t.cache_read_tokens + t.cache_creation_tokens
                                 END) AS avg_context_tokens
                 FROM turns t JOIN sessions s ON s.session_id = t.session_id
-                {where}{' AND' if where else ' WHERE'} t.ts IS NOT NULL
+                {twhere}{' AND' if twhere else ' WHERE'} t.ts IS NOT NULL
                 GROUP BY day ORDER BY day""",
-            params,
+            tparams,
         )
     ]
     by_day = _within(by_day, since)
-    day_costs = _costs_by(conn, "date(t.ts, 'unixepoch', 'localtime')", where, params,
+    day_costs = _costs_by(conn, "date(t.ts, 'unixepoch', 'localtime')", twhere, tparams,
                           extra="t.ts IS NOT NULL")
     for day in by_day:
         day["cache_hit_rate"] = cache_hit_rate(
@@ -1670,9 +1848,9 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
                        SUM(t.cache_1h_tokens) AS cache_1h_tokens,
                        SUM(t.output_tokens) AS output_tokens
                 FROM turns t JOIN sessions s ON s.session_id = t.session_id
-                {where}{' AND' if where else ' WHERE'} t.model IS NOT NULL
+                {twhere}{' AND' if twhere else ' WHERE'} t.model IS NOT NULL
                 GROUP BY t.model ORDER BY turns DESC""",
-            params,
+            tparams,
         )
     ]
     for m in by_model:
@@ -1700,7 +1878,8 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         for r in shape_rows
         if r["started_at"] and r["last_activity_at"] and r["last_activity_at"] >= r["started_at"]
     ]
-    peak_overall = max((int(r["peak_context_tokens"]) for r in shape_rows), default=0)
+    peak_overall = (account_peak if account_peak is not None
+                    else max((int(r["peak_context_tokens"]) for r in shape_rows), default=0))
     totals["peak_context_tokens"] = peak_overall
     totals["peak_context_pct"] = peak_context_pct(peak_overall)
     totals["context_window"] = context_window_for(peak_overall)
@@ -1732,7 +1911,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         "tools": tools,
         "context_growth": _context_growth(conn, where, params),
         "churn": churn,
-        "attribution": _attribution(conn, where, params),
+        "attribution": _attribution(conn, twhere, tparams),
         "delegation": _delegation(conn, where, params),
         "mcp": mcp_block,
         "plugins": plugins_block,
