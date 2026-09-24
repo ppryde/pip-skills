@@ -149,6 +149,9 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
   // narrows the rows already on screen. Keeping it here means toggling it can
   // never silently reshape the totals the reader just looked at.
   const [liveOnly, setLiveOnly] = useState(false);
+  // Which per-day context series the shared panel draws; average is the more
+  // typical picture, peak the worst case.
+  const [ctxMetric, setCtxMetric] = useState<"avg" | "peak">("avg");
   const [planFilter, setPlanFilter] = useState<string | null>(null);
   // Offered only across repos, and only when there is actually a split to
   // show — one plan is not a choice, it is a label.
@@ -454,14 +457,25 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
               <ColumnChart points={outputPerDay} format={formatTokens} title="Output tokens per day" hue="--chr-output" />
             </section>
             <section className="chr-panel">
-              <h3 className="chr-panel__title">Peak context per day</h3>
-              <p className="chr-panel__sub">Largest single window any session reached that day.</p>
-              <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
-            </section>
-            <section className="chr-panel">
-              <h3 className="chr-panel__title">Average context per day</h3>
-              <p className="chr-panel__sub">Mean main-agent context size that day, subagent turns excluded.</p>
-              <ColumnChart points={avgPerDay} format={formatTokens} title="Average context tokens per day" hue="--chr-avg" />
+              <h3 className="chr-panel__title">{ctxMetric === "avg" ? "Average" : "Peak"} context per day</h3>
+              <p className="chr-panel__sub">
+                {ctxMetric === "avg"
+                  ? "Mean main-agent context size that day, subagent turns excluded."
+                  : "Largest single window any session reached that day."}
+              </p>
+              <div className="chronicle__segment" role="group" aria-label="Context per day metric">
+                <Button aria-pressed={ctxMetric === "avg"} onClick={() => setCtxMetric("avg")} className="chronicle__seg-btn">
+                  Average
+                </Button>
+                <Button aria-pressed={ctxMetric === "peak"} onClick={() => setCtxMetric("peak")} className="chronicle__seg-btn">
+                  Peak
+                </Button>
+              </div>
+              {ctxMetric === "avg" ? (
+                <ColumnChart points={avgPerDay} format={formatTokens} title="Average context tokens per day" hue="--chr-avg" />
+              ) : (
+                <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
+              )}
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Cache hit rate per day</h3>
