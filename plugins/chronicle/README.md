@@ -208,6 +208,7 @@ Sources differ, and so does coverage:
 |---|---|---|
 | plan / seat / billing / rate-limit tier | `<config_dir>/.claude.json` at ingest | every session whose config dir has the file |
 | `owner_account_uuid` | a `bridge-session` record in the transcript | only sessions bridged from claude.ai |
+| `turns.account_uuid` / `bridge_owner_uuid` | the `bridge-session` record in force at each turn (see "Account attribution") | only bridged sessions; `sync --full` backfills |
 
 `owner_account_uuid` is named for what the record literally says — the account
 owning the bridge — not "the billed account", which the data does not state.
@@ -232,6 +233,75 @@ that is copied onto the host.
 
 Note that a config dir is not an account: the same dir can hold sessions from
 different accounts over time, so nothing here is inferred from the dir itself.
+
+#### Account attribution
+
+A session is not always one account's. A `bridge-session` record names the
+account that owns the bridge, and `/login` re-emits it with a new
+`ownerAccountUuid`, so one session can start on one account and finish on
+another. Attributing it wholly to the config dir's account (`sessions.account_uuid`)
+charges one account with the other's spend. So the account is also recorded
+**per turn**:
+
+- `turns.account_uuid` is the bridge owner in force when the turn was written.
+  Bridge records carry no timestamp, so this is by **position in the transcript**:
+  ingest walks the lines in order, remembers the latest owner, and stamps every
+  turn with it. A subagent's turns take the session's current owner.
+- `sessions.bridge_owner_uuid` is the *last* owner seen, kept so an incremental
+  ingest can resume the walk when a bridge record and the turns it governs land
+  in different batches. It is mutable, unlike the write-once `owner_account_uuid`
+  (the *first* owner), which is left alone.
+- **The effective account of a turn** is `COALESCE(turns.account_uuid,
+  sessions.account_uuid)`. A turn before the first bridge record has no stamp and
+  falls back to the session's config-dir account; and only bridged sessions carry
+  an owner at all, so a session never bridged from claude.ai keeps its config-dir
+  attribution exactly as before.
+
+With `--account` (the dashboard's account selector):
+
+- a session is included if **at least one of its turns** belongs to the account,
+  so a session that moved between accounts appears under **both**; a session with
+  no turns yet belongs to its config-dir account;
+- everything that sums turns counts **only that account's turns**: totals
+  (tokens, turns, cost), the by-day and by-model breakdowns, cache figures,
+  attribution (plugins, skills, agents, MCP), and the per-session token and cost
+  columns of the session list. Per-session rollups are recomputed from the
+  account's turns rather than read from the session row;
+- `accounts` (the selector's list) counts a session under every account that
+  owns one of its turns, so an account known only through a bridge record is
+  listed too;
+- the 5-hour window and limit accounting (`limits`, `tokens_to_limit`) use the
+  effective account, and a usage-limit hit belongs to the account the session
+  was on at the moment it landed (the account of the session's latest turn at or
+  before it).
+
+**Limitations.** These have no clean per-turn split and stay **session-level**:
+a session that touches the account counts *whole* — including turns the other
+account made — in
+
+- the tool leaderboard, MCP and plugin usage (`tools`, `mcp`, `plugins`),
+- context growth (result size per tool),
+- churn (lines added/removed, files),
+- delegation (subagent share of turns, output and tool calls),
+- artifacts,
+- session-shape quantiles (`shape`: turns, prompts, duration, transcript size,
+  peak context per session),
+- the session-level totals `prompts`, `compactions`, `artifacts`, `active_ms`,
+  `transcript_bytes` and `live`, and each account's `last_activity_at` in the
+  selector list.
+
+Two approximations to know about: a subagent's turns take whichever owner the
+session has when they are ingested (its transcript has no position relative to
+the main one), and a turn's owner is the latest bridge record *above* it in the
+file, which is the only order the data offers.
+
+**Backfilling an existing store.** Turns ingested before this shipped have no
+stamp, and re-reading a transcript from byte 0 is what writes one. Run
+`chronicle sync --full` once after upgrading; it is idempotent, and every stamp
+converges to the same value however many times it is repeated. Until then a
+store reads exactly as it did (every turn falls back to the session's account),
+and a read-only store that has not been migrated yet still reports rather than
+erroring.
 
 ### Pull only — no hooks
 

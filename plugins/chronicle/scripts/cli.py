@@ -440,7 +440,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--branch", default=None,
                    help="only sessions whose last-seen git branch matches (session-level)")
     p.add_argument("--account", default=None,
-                   help="only sessions attributed to this account uuid (session-level)")
+                   help="only this account uuid's share: sessions with at least one of its turns, "
+                        "counting only those turns' tokens and cost (see the README's "
+                        "\"Account attribution\")")
     p.set_defaults(fn=cmd_summary)
 
     p = sub.add_parser("limits", help="deduplicated usage-limit hits, with tokens burned reaching each (JSON)")

@@ -69,6 +69,9 @@ class Turn:
     agent_type: str | None = None
     mcp_server: str | None = None
     mcp_tool: str | None = None
+    # The bridge owner in force when this turn was written (see
+    # `Facts.bridge_owner_uuid`); None before any bridge record was seen.
+    account_uuid: str | None = None
     # (tool_use_id, name, qualifier) — see `_qualifier`.
     tool_uses: list[tuple[str, str, str | None]] = field(default_factory=list)
     # Artifact publishes issued in this turn, keyed by tool_use_id.
@@ -183,6 +186,13 @@ class Facts:
     # account", which is an interpretation the data does not state.
     owner_account_uuid: str | None = None
     owner_organization_uuid: str | None = None
+    # The bridge owner IN FORCE at this point of the fold — unlike
+    # `owner_account_uuid` (first record wins) this follows the LATEST
+    # `bridge-session` record, because a session can change accounts mid-run
+    # (`/login`). Seeded by `fold(initial_owner=...)`, updated as bridge
+    # records are read, and stamped onto every turn created after it. Bridge
+    # records carry no timestamp, so position in the file is the only order.
+    bridge_owner_uuid: str | None = None
     lines: int = 0
 
 
@@ -320,6 +330,7 @@ def _fold_assistant(facts: Facts, record: dict[str, Any], agent_id: str) -> None
             agent_type=_opt_str(record.get("attributionAgent")),
             mcp_server=_opt_str(record.get("attributionMcpServer")),
             mcp_tool=_opt_str(record.get("attributionMcpTool")),
+            account_uuid=facts.bridge_owner_uuid,
         )
         facts.turns[key] = turn
     else:
@@ -653,9 +664,15 @@ def artifact_url(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def fold(lines: Iterable[str], *, default_agent: str = MAIN_AGENT) -> Facts:
-    """Fold raw transcript lines into ``Facts``. Skips anything unparseable."""
-    facts = Facts()
+def fold(lines: Iterable[str], *, default_agent: str = MAIN_AGENT,
+         initial_owner: str | None = None) -> Facts:
+    """Fold raw transcript lines into ``Facts``. Skips anything unparseable.
+
+    ``initial_owner`` is the bridge owner already in force when these lines
+    begin: ingest is incremental by byte cursor, so the `bridge-session` record
+    may sit in an earlier batch than the turns it governs. None reads the
+    lines from a clean slate (a first read, or one from byte 0)."""
+    facts = Facts(bridge_owner_uuid=initial_owner)
     for raw in lines:
         raw = raw.strip()
         if not raw:
@@ -690,6 +707,10 @@ def _fold_record(facts: Facts, record: dict[str, Any], default_agent: str) -> No
             value = record.get(key)
             if isinstance(value, str) and value and getattr(facts, attr) is None:
                 setattr(facts, attr, value)
+        # The first owner above is kept as-is; THIS one follows every record.
+        owner = record.get("ownerAccountUuid")
+        if isinstance(owner, str) and owner:
+            facts.bridge_owner_uuid = owner
         return
     if kind == "summary":  # older transcripts: {"type":"summary","summary":"..."}
         summary = record.get("summary")
