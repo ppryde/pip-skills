@@ -2,6 +2,7 @@
 the account whose bridge owned it (`COALESCE(t.account_uuid, s.account_uuid)`),
 so a session that moved between accounts splits its cost and tokens.
 """
+import time
 from pathlib import Path
 
 from scripts import ingest, report, store
@@ -185,6 +186,65 @@ class TestLimitAccounting:
         for account, kind in (("acc-A", "session"), ("acc-B", "weekly")):
             events = report.limits(conn, account=account)["events"]
             assert [(e["account_uuid"], e["kind"]) for e in events] == [(account, kind)]
+
+
+class TestAccountFilterScales:
+    """The account clause must be evaluated ONCE, not once per joined row.
+
+    A correlated `EXISTS (... turns WHERE session_id = s.session_id ...)` is
+    re-run for every tool_call / turn row the query joins, and for a session
+    that belongs to ANOTHER account each run scans all of that session's turns:
+    O(rows x turns-per-session). On a real 414k-turn store the filtered summary
+    ran past 200s. Tiny fixtures cannot see it; this one is shaped like the
+    real thing, small enough to stay quick."""
+
+    BIG_TURNS = 40_000
+    BIG_CALLS = 4_000
+
+    def _big_store(self):
+        conn = store.connect()
+        rows_s = [("big", "acc-B", 0.0), ("mine", "acc-A", 0.0)]
+        rows_s += [(f"other{i}", "acc-B", 0.0) for i in range(200)]
+        conn.executemany(
+            "INSERT INTO sessions(session_id, account_uuid, updated_at, last_activity_at) "
+            "VALUES (?,?,?,1e9)", rows_s)
+        conn.executemany(
+            "INSERT INTO turns(session_id, agent_id, message_id, ts, model, input_tokens, "
+            "output_tokens) VALUES (?,?,?,?,?,?,?)",
+            [("big", "", f"b{i}", 1e9 + i, "claude-opus-5", 10, 5) for i in range(self.BIG_TURNS)]
+            + [("mine", "", f"m{i}", 1e9 + i, "claude-opus-5", 10, 5) for i in range(5)]
+            + [(f"other{i}", "", f"o{i}", 1e9, "claude-opus-5", 10, 5) for i in range(200)])
+        conn.executemany(
+            "INSERT INTO tool_calls(session_id, tool_use_id, agent_id, message_id, tool_name) "
+            "VALUES (?,?,?,?,?)",
+            [("big", f"tb{i}", "", f"b{i}", "Bash") for i in range(self.BIG_CALLS)]
+            + [("mine", f"tm{i}", "", f"m{i}", "Read") for i in range(5)])
+        conn.commit()
+        return conn
+
+    def test_a_filtered_summary_over_a_huge_other_account_session_is_fast_and_right(self):
+        conn = self._big_store()
+        started = time.monotonic()
+        mine = report.summary(conn, account="acc-A")
+        theirs = report.summary(conn, account="acc-B")
+        elapsed = time.monotonic() - started
+        assert elapsed < 5, f"account-filtered summary took {elapsed:.1f}s"
+        assert mine["totals"]["sessions"] == 1
+        assert mine["totals"]["turns"] == 5
+        assert mine["totals"]["output_tokens"] == 25
+        assert [t["tool_name"] for t in mine["tools"]] == ["Read"]
+        assert theirs["totals"]["sessions"] == 201
+        assert theirs["totals"]["turns"] == self.BIG_TURNS + 200
+        assert theirs["tools"][0]["calls"] == self.BIG_CALLS
+
+    def test_the_other_account_reads_stay_fast_too(self):
+        conn = self._big_store()
+        started = time.monotonic()
+        assert len(report.sessions(conn, account="acc-A")) == 1
+        assert {r["account_uuid"]: r["sessions"] for r in report.accounts(conn)} == {
+            "acc-A": 1, "acc-B": 201}
+        report.limits(conn, account="acc-A")
+        assert time.monotonic() - started < 5
 
 
 def test_the_test_module_never_touches_a_real_store(tmp_path: Path):

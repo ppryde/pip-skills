@@ -724,11 +724,18 @@ def _session_filter(repo_root: str | None, since: float | None,
         params.append(branch)
     if account and (conn is None or _has_column(conn, "sessions", "account_uuid")):
         if conn is None or _has_column(conn, "turns", "account_uuid"):
+            # Both membership tests are UNCORRELATED on purpose: SQLite builds
+            # each subquery's result once per statement, whereas a correlated
+            # EXISTS is re-run for every joined row (every tool call, every
+            # turn) and, for a session that belongs to another account, scans
+            # all of that session's turns each time. On a 414k-turn store
+            # that made the filtered summary take minutes.
             clauses.append(
-                f"(EXISTS (SELECT 1 FROM turns ta WHERE ta.session_id = {alias}.session_id"
-                f" AND COALESCE(ta.account_uuid, {alias}.account_uuid) = ?)"
-                f" OR ({alias}.account_uuid = ? AND NOT EXISTS"
-                f" (SELECT 1 FROM turns tn WHERE tn.session_id = {alias}.session_id)))")
+                f"({alias}.session_id IN (SELECT ta.session_id FROM turns ta"
+                f" JOIN sessions sa ON sa.session_id = ta.session_id"
+                f" WHERE COALESCE(ta.account_uuid, sa.account_uuid) = ?)"
+                f" OR ({alias}.account_uuid = ?"
+                f" AND {alias}.session_id NOT IN (SELECT tn.session_id FROM turns tn)))")
             params.extend([account, account])
         else:
             clauses.append(f"{alias}.account_uuid = ?")
@@ -960,7 +967,7 @@ def accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                SELECT s.session_id, s.account_uuid, s.last_activity_at, s.started_at
                FROM sessions s
                WHERE s.account_uuid IS NOT NULL
-                 AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.session_id = s.session_id)
+                 AND s.session_id NOT IN (SELECT t.session_id FROM turns t)
            )
            WHERE account_uuid IS NOT NULL
            GROUP BY account_uuid ORDER BY sessions DESC"""
