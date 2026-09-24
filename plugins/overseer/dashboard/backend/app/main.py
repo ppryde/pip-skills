@@ -1125,8 +1125,9 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         return ["--branch", branch]
 
     def _account_args(account: str | None) -> list[str]:
-        # Multi-account (WF-116): a session-level filter on the account
-        # chronicle stamped it with at first ingest. Same argv-element
+        # Multi-account (WF-116): the account's share, attributed per turn
+        # (WF-118 — a session can move between accounts; see chronicle's
+        # README, "Account attribution"). Same argv-element
         # treatment as `_branch_args` — passed through as an exact match,
         # never shell-interpolated.
         if not account:
