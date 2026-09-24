@@ -118,28 +118,31 @@ def project_slug_of(transcript_path: Path) -> str:
     return transcript_path.parent.name
 
 
-def _read_new_lines(path: Path, offset: int) -> tuple[list[str], int]:
-    """Lines appended after ``offset``, and the new offset (after the last
-    complete line). A file that shrank (rewritten) restarts from 0."""
+def _read_new_lines(path: Path, offset: int) -> tuple[list[str], int, int]:
+    """Lines appended after ``offset``, the new offset (after the last
+    complete line), and the offset the read actually STARTED at. A file that
+    shrank (rewritten) restarts from 0 — which is why the start is returned:
+    a caller that seeds state from "what came before" needs to know whether
+    this read has a "before" at all (see ``ingest_file``'s bridge owner)."""
     try:
         size = path.stat().st_size
     except OSError:
-        return [], offset
+        return [], offset, offset
     if offset > size:
         offset = 0
     if offset == size:
-        return [], offset
+        return [], offset, offset
     try:
         with open(path, "rb") as handle:
             handle.seek(offset)
             chunk = handle.read()
     except OSError:
-        return [], offset
+        return [], offset, offset
     last_nl = chunk.rfind(b"\n")
     if last_nl < 0:
-        return [], offset
+        return [], offset, offset
     complete = chunk[: last_nl + 1]
-    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete)
+    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete), offset
 
 
 def _cursor(conn: sqlite3.Connection, path: Path) -> int:
@@ -235,11 +238,11 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         """INSERT INTO turns(session_id, agent_id, message_id, request_id, ts, model,
                input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
                thinking_tokens, cache_5m_tokens, cache_1h_tokens, tool_calls, stop_reason, effort,
-               skill, plugin, agent_type, mcp_server, mcp_tool)
+               skill, plugin, agent_type, mcp_server, mcp_tool, account_uuid)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,
                (SELECT COUNT(*) FROM tool_calls
                 WHERE session_id = ? AND agent_id = ? AND message_id = ?),
-               ?,?,?,?,?,?,?)
+               ?,?,?,?,?,?,?,?)
            ON CONFLICT(session_id, agent_id, message_id) DO UPDATE SET
                request_id = excluded.request_id, ts = excluded.ts, model = excluded.model,
                input_tokens = excluded.input_tokens, cache_read_tokens = excluded.cache_read_tokens,
@@ -255,14 +258,18 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                plugin = COALESCE(excluded.plugin, turns.plugin),
                agent_type = COALESCE(excluded.agent_type, turns.agent_type),
                mcp_server = COALESCE(excluded.mcp_server, turns.mcp_server),
-               mcp_tool = COALESCE(excluded.mcp_tool, turns.mcp_tool)""",
+               mcp_tool = COALESCE(excluded.mcp_tool, turns.mcp_tool),
+               -- COALESCE for the same reason, and one more: a turn written
+               -- before any bridge record legitimately carries NULL, which
+               -- must never erase a stamp an earlier ingest already made.
+               account_uuid = COALESCE(excluded.account_uuid, turns.account_uuid)""",
         [
             (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
              t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
              t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens,
              session_id, t.agent_id, t.message_id,
              t.stop_reason, t.effort,
-             t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool)
+             t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool, t.account_uuid)
             for t in turns
         ],
     )
@@ -471,13 +478,36 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         )
 
 
+def _initial_owner(conn: sqlite3.Connection, session_id: str, agent_id: str,
+                   start_offset: int) -> str | None:
+    """The bridge owner already in force where this read begins.
+
+    A MAIN transcript read from byte 0 begins with no owner at all: the
+    session's stored ``bridge_owner_uuid`` is the LAST owner it ever had, so
+    seeding a from-the-top walk with it (a ``sync --full``) would stamp the
+    turns before the first bridge record with an owner that did not exist yet.
+    Mid-file, the bridge record may be in an earlier batch than the turns it
+    governs, so the walk resumes from the stored owner.
+
+    A SUBAGENT transcript holds no bridge records of its own and carries no
+    position relative to the main file's, so its turns take whatever owner the
+    session currently has — a documented approximation (see the README's
+    "Account attribution")."""
+    if agent_id == MAIN_AGENT and start_offset == 0:
+        return None
+    row = conn.execute(
+        "SELECT bridge_owner_uuid FROM sessions WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    return row[0] if row else None
+
+
 def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id: str,
                 *, now: float | None = None) -> int:
     """Ingest lines appended to ``path`` since its cursor. Returns lines read."""
     if now is None:
         now = time.time()
     offset = _cursor(conn, path)
-    lines, new_offset = _read_new_lines(path, offset)
+    lines, new_offset, start_offset = _read_new_lines(path, offset)
     stat = _stat(path) or (0.0, 0)
     if not lines:
         # Nothing new to parse, but remember the file as seen so a later
@@ -495,9 +525,17 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
             (str(path), session_id, agent_id, offset, stat[0], stat[1], now),
         )
         return 0
-    facts = fold(lines, default_agent=agent_id)
+    facts = fold(lines, default_agent=agent_id,
+                 initial_owner=_initial_owner(conn, session_id, agent_id, start_offset))
     if agent_id == MAIN_AGENT:
         _upsert_session_identity(conn, session_id, facts, path, now)
+        # The LAST owner, so the next incremental batch can carry on from it.
+        # Deliberately not `owner_account_uuid`, which is the first and write-once.
+        if facts.bridge_owner_uuid:
+            conn.execute(
+                "UPDATE sessions SET bridge_owner_uuid = ? WHERE session_id = ?",
+                (facts.bridge_owner_uuid, session_id),
+            )
     else:
         conn.execute(
             "INSERT OR IGNORE INTO sessions(session_id, updated_at) VALUES (?, ?)",

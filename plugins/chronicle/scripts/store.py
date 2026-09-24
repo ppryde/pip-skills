@@ -322,6 +322,22 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # was made from (only `artifact-autoreact-ledger` rows carry it), not
     # who ran the session.
     ("sessions", "account_uuid", "TEXT"),
+    # A session can move between accounts mid-run: `bridge-session` carries
+    # `ownerAccountUuid` and `/login` re-emits it with a new owner. So the
+    # account is ALSO recorded per turn — `turns.account_uuid` is the bridge
+    # owner in force when the turn was written, NULL for a turn before any
+    # bridge record (or in a session never bridged), which reads as "fall back
+    # to the session's config-dir account" (`COALESCE(t.account_uuid,
+    # s.account_uuid)` — see `report._effective_account_sql`). Bridge records
+    # carry no timestamp, so this is by position in the JSONL (see
+    # `transcript.fold`). Backfilled by `chronicle sync --full`.
+    ("turns", "account_uuid", "TEXT"),
+    # The LAST bridge owner seen in the session's transcript — what an
+    # incremental ingest seeds its walk with, since the bridge record can land
+    # in an earlier batch than the turns it governs. Mutable, deliberately
+    # distinct from the write-once `owner_account_uuid` (the FIRST owner),
+    # which must stay untouched.
+    ("sessions", "bridge_owner_uuid", "TEXT"),
 )
 
 
