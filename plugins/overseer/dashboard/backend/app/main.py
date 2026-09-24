@@ -393,6 +393,18 @@ def _census_activity_by_root() -> dict[Path, dict[str, float]]:
     return out
 
 
+# Claude Code's per-session scratchpad: `<tmp>/claude-<uid>/<slug>/<session>/scratchpad/…`.
+# Benchmark and e2e harnesses build throwaway checkouts (all named `repo`) in there.
+_SCRATCH_ROOT_RE = re.compile(r"/claude-\d+/.*/scratchpad(?:/|$)")
+
+
+def _is_scratch_root(root: Path) -> bool:
+    """True for a root inside a Claude scratchpad — a disposable checkout, not a
+    repo worth a selector entry. Matches the scratchpad layout rather than
+    "anything under /tmp", which would also swallow pytest's `tmp_path` repos."""
+    return _SCRATCH_ROOT_RE.search(root.as_posix()) is not None
+
+
 def _chronicle_last_activity_by_root() -> dict[Path, float]:
     """Per repo root, the newest session activity chronicle has recorded —
     history census has long forgotten. `{}` when chronicle is absent."""
@@ -685,7 +697,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
             board_roots.add(root)
 
         for root, stats in census.items():
-            if root in board_roots or stats["live"] <= 0:
+            if root in board_roots or stats["live"] <= 0 or _is_scratch_root(root):
                 continue
             repos_list.append({
                 "label": derive_repo_label(root) or root.name,
@@ -702,7 +714,7 @@ def create_app(root: Path, *, host: str = "127.0.0.1", dist_dir: Path | None = N
         # and are unreachable from the selector (WF-108).
         listed = {Path(r["root"]).resolve() for r in repos_list}
         for root in sorted(history):
-            if root in listed:
+            if root in listed or _is_scratch_root(root):
                 continue
             repos_list.append({
                 "label": derive_repo_label(root) or root.name,

@@ -241,8 +241,14 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByText("Scroll sideways for more columns →")).toBeInTheDocument();
     expect(screen.getByText("1 live")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
+    // One panel, two series: average by default, peak a click away.
     expect(screen.getByRole("img", { name: "Average context tokens per day" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Peak context tokens per day" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Average" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Peak" }));
+    expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Average context tokens per day" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Peak" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("img", { name: "Cache hit rate per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "API-equivalent cost per day" })).toBeInTheDocument();
     // Cost: the tile (its pricing caveat lives behind the label's
