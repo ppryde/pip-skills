@@ -336,6 +336,27 @@ class TestChronicleOnlyRoots:
         assert entry["chronicled"] is True       # but the Chronicle may be scoped to it
         assert entry["live_sessions"] == 0       # census knows nothing of it
 
+    def test_repos_hides_a_scratchpad_checkout(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        # Benchmark/e2e harnesses build disposable checkouts, all named `repo`,
+        # under Claude's per-session scratchpad. They are data, not repos.
+        scratch = tmp_path / "claude-502" / "-Users-x-repos-y" / "sess" / "scratchpad" / "bench" / "repo"
+        scratch.mkdir(parents=True)
+        _seed(root, tmp_path, repo_root=str(scratch.resolve()))
+        roots = {r["root"] for r in client.get("/api/repos").json()["repos"]}
+        assert str(scratch.resolve()) not in roots
+
+    def test_repos_keeps_a_lookalike_outside_the_scratchpad_layout(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        # `scratchpad` alone (no `claude-<uid>` ancestor) is a real project name.
+        keeper = tmp_path / "scratchpad" / "my-repo"
+        keeper.mkdir(parents=True)
+        _seed(root, tmp_path, repo_root=str(keeper.resolve()))
+        roots = {r["root"] for r in client.get("/api/repos").json()["repos"]}
+        assert str(keeper.resolve()) in roots
+
 
 class TestSiblingPluginContract:
     """The seam between overseer and chronicle is a FILESYSTEM layout plus a
