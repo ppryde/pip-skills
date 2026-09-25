@@ -437,9 +437,7 @@ def normalise_volume(name: object, claude_dir: object = DEFAULT_VOLUME_CLAUDE_DI
     ``/v/`` inside the helper container)."""
     if not isinstance(name, str) or not _VOLUME_NAME_RE.match(name):
         raise ValueError(f"invalid volume name: {name!r}")
-    if not isinstance(claude_dir, str):
-        raise ValueError(f"invalid claude dir: {claude_dir!r}")
-    clean = claude_dir.strip("/")
+    clean = claude_dir.strip("/") if isinstance(claude_dir, str) else ""
     if not _CLAUDE_DIR_RE.match(clean) or ".." in Path(clean).parts:
         raise ValueError(f"invalid claude dir: {claude_dir!r}")
     return Volume(name, clean)
