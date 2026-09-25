@@ -353,6 +353,11 @@ export interface ChronicleSyncResponse {
   /** Ids of the sessions that changed. */
   sessions: string[];
   synced_at: number;
+  /** Docker volumes read in place, one entry per volume that synced. Absent on an older chronicle. */
+  volumes?: { name: string; scanned: number; changed: number; lines: number; partial?: boolean }[];
+  /** A configured volume that could not be read (docker down, volume missing, timeout); local dirs
+   *  still synced. `volume` is null for a config entry skipped as invalid. */
+  volume_errors?: { volume: string | null; error: string }[];
 }
 
 export interface ChronicleTotals {
