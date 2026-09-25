@@ -99,6 +99,9 @@ function churnCell(s: ChronicleSession): string {
 
 const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => string }[] = [
   { key: "started_at", label: "Started", render: (s) => formatWhen(s.started_at) },
+  // Beside Started so "what did that cost" is on screen without scrolling
+  // sideways, and one click ranks the sessions by spend.
+  { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
   { key: "duration_s", label: "Span", render: (s) => formatDuration(s.duration_s) },
   { key: "turns", label: "Turns", render: (s) => String(s.turns) },
   { key: "prompts", label: "Prompts", render: (s) => String(s.prompts) },
@@ -116,7 +119,6 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "files_touched", label: "Files", render: (s) => (s.files_touched > 0 ? String(s.files_touched) : "—") },
   { key: "lines", label: "Lines", render: churnCell },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
-  { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {
