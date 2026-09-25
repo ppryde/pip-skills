@@ -27,7 +27,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
-from scripts import chrome_profile, ingest, report, store
+from scripts import chrome_profile, ingest, report, store, volumes
 
 # One error contract for every verb: success prints a single JSON object to
 # stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
@@ -57,19 +57,77 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Reconcile the store with the transcripts on disk (see ``ingest.sync``).
-    Defaults to every watched config dir's ``projects/``; ``--projects`` (one
-    or more) replaces that set."""
-    projects = [Path(p) for p in args.projects] if args.projects else store.projects_dirs()
+    Defaults to every watched config dir's ``projects/`` PLUS every configured
+    Docker volume, read in place (``chronicle volumes``); ``--projects`` (one
+    or more) replaces that set with exactly those dirs and reads no volumes.
+
+    Docker trouble never fails the sync: it comes back as ``volume_errors``."""
+    explicit = bool(args.projects)
+    projects = [Path(p) for p in args.projects] if explicit else store.projects_dirs()
+    configured, problems = ([], []) if explicit else store.load_volumes()
     conn = store.connect()
     try:
-        result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)))
+        result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)),
+                             volumes=[volumes.VolumeSource.of(v) for v in configured])
     finally:
         conn.close()
+    # Config entries that were skipped as invalid are volume errors too: a
+    # volume the user believes is being synced and is not deserves the same
+    # visibility as one whose docker call failed.
+    result["volume_errors"] = [{"volume": None, "error": p} for p in problems] + result["volume_errors"]
     out: dict[str, Any] = {
         **result,
         "projects_dirs": [str(p) for p in projects],
         "db": str(store.db_path()),
     }
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_volumes(args: argparse.Namespace) -> int:
+    """`chronicle volumes list|add|rm` — the Docker named volumes `sync` reads
+    in place, kept in the shared machine config's ``volumes`` list.
+
+    ``add`` checks the volume with docker first (so a typo is refused instead
+    of being synced as a silent nothing) and validates the name and Claude dir
+    before either can reach a docker argv. Without docker it fails with a clear
+    message and writes nothing."""
+    current, problems = store.load_volumes()
+    if args.action == "list":
+        print(json.dumps({
+            "volumes": [{"name": v.name, "claude_dir": v.claude_dir, "label": v.label}
+                        for v in current],
+            "problems": problems,
+            "config": str(store.config_dir().joinpath(*store.MACHINE_CONFIG_RELPATH)),
+        }))
+        return 0
+    if args.action == "add":
+        try:
+            volume = store.normalise_volume(args.name, args.claude_dir)
+        except ValueError as exc:
+            return _fail(str(exc), code=INVALID_INPUT)
+        try:
+            exists = volumes.volume_exists(volume.name)
+        except volumes.VolumeError as exc:
+            return _fail(f"cannot check volume {volume.name!r} with docker: {exc}")
+        if not exists:
+            return _fail(f"docker volume not found: {volume.name}")
+        updated = [v for v in current if v.name != volume.name] + [volume]
+        changed = volume not in current
+    else:                                           # rm
+        updated = [v for v in current if v.name != args.name]
+        changed = len(updated) != len(current)
+    if changed:
+        try:
+            store.save_volumes(updated)
+        except (ValueError, OSError) as exc:
+            return _fail(f"cannot update the machine config: {exc}")
+    out: dict[str, Any] = {
+        "volumes": [{"name": v.name, "claude_dir": v.claude_dir, "label": v.label} for v in updated],
+        "changed": changed,
+    }
+    if args.action == "add":
+        out["hint"] = "run `chronicle sync` to ingest it; the dashboard's Sync does the same"
     print(json.dumps(out))
     return 0
 
@@ -251,9 +309,12 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
 
 
 def cmd_pull_volume(args: argparse.Namespace) -> int:
-    """`chronicle pull-volume` — copy transcripts out of a docker named volume
-    onto this filesystem, so a containerised account can be watched like any
-    other config dir.
+    """`chronicle pull-volume` — LEGACY: superseded by `chronicle volumes add`,
+    which `sync` reads in place and so never goes stale. Kept because it still
+    works and some setups may depend on it.
+
+    Copy transcripts out of a docker named volume onto this filesystem, so a
+    containerised account can be watched like any other config dir.
 
     A named volume lives inside the Docker VM; on macOS its Mountpoint is not a
     host path at all, so it cannot simply be listed in `claude_dirs`. A helper
@@ -325,6 +386,8 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         "transcripts": len(pulled),
         "bytes": sum(f.stat().st_size for f in pulled),
         "hint": f"watch it with: overseer claude-dirs add {dest}",
+        "legacy": "a copy goes stale until the next pull; `chronicle volumes add "
+                  f"{args.volume}` reads the volume in place on every sync instead",
     }
     if account_plan:
         out["plan"] = account_plan
@@ -375,6 +438,11 @@ def cmd_open(args: argparse.Namespace) -> int:
     browser identity instead of whichever Chrome window has focus."""
     if sys.platform != "darwin":
         print("chronicle open: macOS only (uses `open --args --profile-directory`)",
+              file=sys.stderr)
+        return 1
+    if store.is_volume_label(args.config_dir):
+        print(f"chronicle open: {args.config_dir} is a docker volume, not a config dir with a "
+              "signed-in browser identity; pass the host config dir of that account",
               file=sys.stderr)
         return 1
     config_dir = Path(args.config_dir) if args.config_dir else store.config_dir()
@@ -485,8 +553,20 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("accounts", help="account uuids seen, with session counts (JSON)").set_defaults(
         fn=cmd_accounts)
 
+    p = sub.add_parser("volumes",
+                       help="docker named volumes to read transcripts from IN PLACE, on every sync")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="the configured volumes (JSON)")
+    add = actions.add_parser("add", help="watch a volume (checked with docker first)")
+    add.add_argument("name", help="docker named volume, e.g. wf-state")
+    add.add_argument("--claude-dir", default=store.DEFAULT_VOLUME_CLAUDE_DIR,
+                     help="the Claude config dir within the volume (default: %(default)s)")
+    actions.add_parser("rm", help="stop watching a volume (its ingested history stays)").add_argument("name")
+    p.set_defaults(fn=cmd_volumes)
+
     p = sub.add_parser("pull-volume",
-                       help="copy transcripts out of a docker named volume onto this filesystem")
+                       help="LEGACY, superseded by `volumes add`: manually copy a docker "
+                            "volume's transcripts onto this filesystem (goes stale)")
     p.add_argument("--volume", required=True, help="docker named volume, e.g. wf-state")
     p.add_argument("--dest", required=True,
                    help="absolute host dir to copy into; watch it with `overseer claude-dirs add`")
