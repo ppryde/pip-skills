@@ -23,11 +23,14 @@ import re
 import sqlite3
 import subprocess
 import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from scripts import store
 from scripts.transcript import MAIN_AGENT, Facts, fold
+from scripts.volumes import RemoteSession, VolumeError, VolumeSource, group_sessions
 
 _GIT_TIMEOUT_SECONDS = 2
 _AGENT_FILE_RE = re.compile(r"^agent-(?P<agent>[^.]+)\.jsonl$")
@@ -138,14 +141,23 @@ def _read_new_lines(path: Path, offset: int) -> tuple[list[str], int, int]:
             chunk = handle.read()
     except OSError:
         return [], offset, offset
+    lines, new_offset = _complete_lines(chunk, offset)
+    return lines, new_offset, offset
+
+
+def _complete_lines(chunk: bytes, offset: int) -> tuple[list[str], int]:
+    """The COMPLETE lines in ``chunk`` (bytes read starting at ``offset``) and
+    the offset after the last of them. A trailing partial line is left for the
+    next read: the writer may still be mid-line. Shared by the local and the
+    docker-volume readers so both cut lines identically."""
     last_nl = chunk.rfind(b"\n")
     if last_nl < 0:
-        return [], offset, offset
+        return [], offset
     complete = chunk[: last_nl + 1]
-    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete), offset
+    return complete.decode("utf-8", errors="replace").splitlines(), offset + len(complete)
 
 
-def _cursor(conn: sqlite3.Connection, path: Path) -> int:
+def _cursor(conn: sqlite3.Connection, path: Path | str) -> int:
     row = conn.execute("SELECT byte_offset FROM cursors WHERE path = ?", (str(path),)).fetchone()
     return int(row[0]) if row else 0
 
@@ -333,8 +345,49 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     )
 
 
-def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None,
-                      now: float) -> tuple[dict[str, Any], str | None]:
+class ProfileResolver:
+    """``config_dir`` label -> the non-personal account facts it holds now.
+
+    A host dir is read off this filesystem. A ``docker://<volume>`` label is
+    read through the volume's helper container — lazily, and AT MOST ONCE per
+    resolver (so once per sync, however many sessions ask), because each read
+    is a container start. A volume whose sync failed is `disable`d: asking it
+    again would just spend another docker timeout on a daemon known to be down.
+    A label nobody registered (a volume since removed from the config) resolves
+    to None without touching docker."""
+
+    def __init__(self, volumes: Sequence[VolumeSource] = ()) -> None:
+        self._volumes = {v.label: v for v in volumes}
+        self._loaded: dict[str, dict[str, str] | None] = {}
+        self.read: set[str] = set()      # labels a helper container was really asked
+
+    def __call__(self, config_dir: str) -> dict[str, str] | None:
+        if not store.is_volume_label(config_dir):
+            return store.account_profile(Path(config_dir))
+        if config_dir not in self._loaded:
+            source = self._volumes.get(config_dir)
+            self._loaded[config_dir] = source.read_account() if source else None
+            if source:
+                self.read.add(config_dir)
+        return self._loaded[config_dir]
+
+    def probed(self, config_dir: str) -> bool:
+        return config_dir in self._loaded
+
+    def knows(self, config_dir: str) -> bool:
+        return config_dir in self._volumes
+
+    def disable(self, config_dir: str) -> None:
+        self._loaded[config_dir] = None
+        self.read.discard(config_dir)
+
+
+ProfileOf = Callable[[str], "dict[str, str] | None"]
+
+
+def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None, now: float,
+                      profile_of: ProfileOf | None = None,
+                      ) -> tuple[dict[str, Any], str | None]:
     """The plan columns to stamp on a session, and the account uuid found —
     plus the `accounts` upsert that goes with it, as a side effect. `({}, None)`
     when the config dir holds no readable account.
@@ -355,7 +408,7 @@ def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None,
     """
     if not config_dir:
         return {}, None
-    profile = store.account_profile(Path(config_dir))
+    profile = (profile_of or ProfileResolver())(config_dir)
     if not profile:      # None (no/unreadable file) or {} (API key: no oauthAccount)
         return {}, None
     account_uuid = profile.get("accountUuid")
@@ -388,8 +441,27 @@ def config_dir_of(transcript_path: Path) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class _Origin:
+    """Where a transcript file lives, as the store records it. For a host file
+    ``key`` is its path; for a docker volume it is the synthetic
+    ``docker://<volume>/<relpath>`` — never something to `Path()` or `stat()`."""
+    key: str                      # the cursor key, and `sessions.transcript_path`
+    slug: str
+    config_dir: str | None
+    description: str | None = None    # a subagent's short label, from its meta file
+
+
+def _local_origin(path: Path, agent_id: str) -> _Origin:
+    return _Origin(
+        key=str(path), slug=project_slug_of(path), config_dir=config_dir_of(path),
+        description=agent_description(path) if agent_id != MAIN_AGENT else None,
+    )
+
+
 def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: Facts,
-                             transcript_path: Path, now: float) -> None:
+                             origin: _Origin, now: float,
+                             profile_of: ProfileOf | None = None) -> None:
     """Create the session row if absent, then fill identity columns from the
     facts without clobbering a known value with None."""
     conn.execute(
@@ -397,10 +469,10 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
         (session_id, now),
     )
     cwd = facts.cwd
-    config = config_dir_of(transcript_path)
+    config = origin.config_dir
     updates: dict[str, Any] = {
-        "project_slug": project_slug_of(transcript_path),
-        "transcript_path": str(transcript_path),
+        "project_slug": origin.slug,
+        "transcript_path": origin.key,
         "config_dir": config,
         "cwd": cwd,
         "repo_root": repo_root_of(cwd) if cwd else None,
@@ -439,7 +511,7 @@ def _upsert_session_identity(conn: sqlite3.Connection, session_id: str, facts: F
     account_pending = already is None or already[1] is None
     owner_pending = already is None or already[2] is None
     if plan_pending or account_pending:
-        snapshot, account_uuid = _account_snapshot(conn, config, now)
+        snapshot, account_uuid = _account_snapshot(conn, config, now, profile_of)
         if plan_pending:
             for column, value in snapshot.items():
                 conn.execute(
@@ -501,6 +573,23 @@ def _initial_owner(conn: sqlite3.Connection, session_id: str, agent_id: str,
     return row[0] if row else None
 
 
+def _touch_cursor(conn: sqlite3.Connection, key: str, session_id: str, agent_id: str,
+                  offset: int, stat: tuple[float, int], now: float) -> None:
+    """Remember a file as seen with nothing new to parse, so a later sync does
+    not re-stat it as "changed" (e.g. a touched-but-empty tail). An upsert, not
+    a bare UPDATE: a file seen for the first time with no complete line yet (an
+    empty transcript, or a live session whose first line is still being
+    written) has no cursor row, so a plain UPDATE would match zero rows and
+    `file_changed` would keep reporting it changed forever."""
+    conn.execute(
+        """INSERT INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, updated_at)
+           VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(path) DO UPDATE SET
+               mtime = excluded.mtime, size = excluded.size, updated_at = excluded.updated_at""",
+        (key, session_id, agent_id, offset, stat[0], stat[1], now),
+    )
+
+
 def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id: str,
                 *, now: float | None = None) -> int:
     """Ingest lines appended to ``path`` since its cursor. Returns lines read."""
@@ -510,25 +599,24 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
     lines, new_offset, start_offset = _read_new_lines(path, offset)
     stat = _stat(path) or (0.0, 0)
     if not lines:
-        # Nothing new to parse, but remember the file as seen so a later
-        # sync does not re-stat it as "changed" (e.g. a touched-but-empty
-        # tail). An upsert, not a bare UPDATE: a file seen for the first
-        # time with no complete line yet (an empty transcript, or a live
-        # session whose first line is still being written) has no cursor
-        # row, so a plain UPDATE would match zero rows and file_changed
-        # would keep reporting it changed forever.
-        conn.execute(
-            """INSERT INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, updated_at)
-               VALUES (?,?,?,?,?,?,?)
-               ON CONFLICT(path) DO UPDATE SET
-                   mtime = excluded.mtime, size = excluded.size, updated_at = excluded.updated_at""",
-            (str(path), session_id, agent_id, offset, stat[0], stat[1], now),
-        )
+        _touch_cursor(conn, str(path), session_id, agent_id, offset, stat, now)
         return 0
+    return _ingest_lines(conn, _local_origin(path, agent_id), session_id, agent_id,
+                         lines, new_offset, start_offset, stat, now)
+
+
+def _ingest_lines(conn: sqlite3.Connection, origin: _Origin, session_id: str, agent_id: str,
+                  lines: list[str], new_offset: int, start_offset: int,
+                  stat: tuple[float, int], now: float,
+                  profile_of: ProfileOf | None = None) -> int:
+    """Fold ``lines`` (read from ``origin`` starting at ``start_offset``) into
+    the fact tables and advance the file's cursor. Where the bytes CAME from —
+    a host file or a docker volume — is the caller's business; from here on it
+    is one code path, which is what keeps the two sources agreeing."""
     facts = fold(lines, default_agent=agent_id,
                  initial_owner=_initial_owner(conn, session_id, agent_id, start_offset))
     if agent_id == MAIN_AGENT:
-        _upsert_session_identity(conn, session_id, facts, path, now)
+        _upsert_session_identity(conn, session_id, facts, origin, now, profile_of)
         # The LAST owner, so the next incremental batch can carry on from it.
         # Deliberately not `owner_account_uuid`, which is the first and write-once.
         if facts.bridge_owner_uuid:
@@ -552,13 +640,13 @@ def ingest_file(conn: sqlite3.Connection, path: Path, session_id: str, agent_id:
                ON CONFLICT(session_id, agent_id) DO UPDATE SET
                    task = COALESCE(excluded.task, agents.task),
                    description = COALESCE(excluded.description, agents.description)""",
-            (session_id, agent_id, facts.task, agent_description(path)),
+            (session_id, agent_id, facts.task, origin.description),
         )
     _write_facts(conn, session_id, facts)
     conn.execute(
         "INSERT OR REPLACE INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, "
         "updated_at) VALUES (?,?,?,?,?,?,?)",
-        (str(path), session_id, agent_id, new_offset, stat[0], stat[1], now),
+        (origin.key, session_id, agent_id, new_offset, stat[0], stat[1], now),
     )
     if agent_id == MAIN_AGENT:
         conn.execute(
@@ -586,8 +674,17 @@ def agent_description(transcript_path: Path) -> str | None:
     if not meta.is_file():
         return None
     try:
-        data = json.loads(meta.read_text() or "{}")
-    except (OSError, json.JSONDecodeError):
+        return description_from_meta(meta.read_text())
+    except OSError:
+        return None
+
+
+def description_from_meta(text: str) -> str | None:
+    """The ``description`` in an ``agent-<id>.meta.json``'s TEXT — the seam a
+    docker volume's meta file goes through — or None on anything unusable."""
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
         return None
     value = data.get("description") if isinstance(data, dict) else None
     return value.strip() if isinstance(value, str) and value.strip() else None
@@ -700,10 +797,18 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
     ).fetchone()
     size = 0
     if transcript and transcript[0]:
-        try:
-            size = os.path.getsize(transcript[0])
-        except OSError:
-            size = 0
+        if store.is_volume_label(transcript[0]):
+            # Not a host path: the size is what the volume's listing said when
+            # the cursor last saw it. `getsize` on it would stat some relative
+            # "docker:/..." path under whatever the cwd happens to be.
+            row = conn.execute(
+                "SELECT size FROM cursors WHERE path = ?", (transcript[0],)).fetchone()
+            size = int(row[0]) if row else 0
+        else:
+            try:
+                size = os.path.getsize(transcript[0])
+            except OSError:
+                size = 0
     conn.execute(
         """UPDATE sessions SET turns=?, input_tokens=?, cache_read_tokens=?, cache_creation_tokens=?,
                output_tokens=?, thinking_tokens=?, tool_calls=?, subagents=?, peak_context_tokens=?,
@@ -761,8 +866,150 @@ def scan_transcripts(projects: Path) -> list[Path]:
     return out
 
 
+# Most bytes one helper-container read is asked for. A first sync of a big
+# volume is a lot of history; reading it in one call would hold all of it in
+# memory and give the dashboard's 120s ceiling nothing to show for a kill.
+# Batched, each batch is committed as it lands, so progress survives either.
+_VOLUME_BATCH_BYTES = 64 * 1024 * 1024
+# Wall-clock a sync spends on volumes before it stops starting new batches and
+# reports `partial`. Under the dashboard's 120s subprocess ceiling, so a large
+# first backfill finishes over a few polls instead of being killed mid-flight.
+VOLUME_BUDGET_SECONDS = 80.0
+# How often a volume with sessions still lacking an account is asked who is
+# logged in. An API-key volume never gets one, and re-asking on every
+# once-a-minute poll would start a container each time for nothing.
+_ACCOUNT_PROBE_INTERVAL_SECONDS = 3600.0
+
+
+def _cursor_row(conn: sqlite3.Connection, key: str) -> tuple[int, float, int] | None:
+    row = conn.execute(
+        "SELECT byte_offset, mtime, size FROM cursors WHERE path = ?", (key,)).fetchone()
+    return (int(row[0]), float(row[1]), int(row[2])) if row else None
+
+
+def _volume_moves(conn: sqlite3.Connection, source: VolumeSource,
+                  session: RemoteSession) -> dict[str, tuple[Any, int]]:
+    """``{relpath: (file, offset to read from)}`` for the session's files that
+    moved since their cursor last saw them (a never-seen file has no cursor and
+    counts as moved). Same test as `file_changed`, over the listing's
+    mtime/size instead of a stat. The offset is the cursor's when the file
+    only GREW; one that shrank (rewritten) restarts from 0."""
+    moves: dict[str, tuple[Any, int]] = {}
+    for file in session.files:
+        row = _cursor_row(conn, source.key(file.relpath))
+        if row is None:
+            moves[file.relpath] = (file, 0)
+        elif (row[1], row[2]) != (file.mtime, file.size):
+            moves[file.relpath] = (file, row[0] if row[0] <= file.size else 0)
+    return moves
+
+
+def _ingest_volume_session(conn: sqlite3.Connection, source: VolumeSource, session: RemoteSession,
+                           moves: Mapping[str, tuple[Any, int]], chunks: Mapping[str, bytes],
+                           *, now: float, profile_of: ProfileOf) -> int:
+    """Ingest the moved files of one volume session from the bytes already
+    read, then roll it up — `ingest_session`'s counterpart. Returns lines."""
+    total = 0
+    ordered = [(session.main, MAIN_AGENT), *((f, agent) for agent, f in session.subagents)]
+    for file, agent_id in ordered:
+        if file.relpath not in moves:
+            continue
+        offset = moves[file.relpath][1]
+        key = source.key(file.relpath)
+        stat = (file.mtime, file.size)
+        if offset >= file.size:
+            chunk = b""                    # only the mtime moved: nothing to read
+        else:
+            got = chunks.get(file.relpath)
+            if got is None:
+                continue                   # vanished between the listing and the read
+            chunk = got
+        lines, new_offset = _complete_lines(chunk, offset)
+        if not lines:
+            _touch_cursor(conn, key, session.session_id, agent_id, offset, stat, now)
+            continue
+        description = None
+        if agent_id != MAIN_AGENT:
+            meta = chunks.get(file.meta_relpath)
+            description = description_from_meta(meta.decode(errors="replace")) if meta else None
+        origin = _Origin(key=key, slug=session.slug, config_dir=source.label,
+                         description=description)
+        total += _ingest_lines(conn, origin, session.session_id, agent_id, lines, new_offset,
+                               offset, stat, now, profile_of)
+    if conn.execute("SELECT 1 FROM sessions WHERE session_id = ?",
+                    (session.session_id,)).fetchone():
+        rollup(conn, session.session_id, now=now)
+    conn.commit()
+    return total
+
+
+def sync_volume(conn: sqlite3.Connection, source: VolumeSource, *, now: float,
+                profile_of: ProfileOf, deadline: float | None = None) -> dict[str, Any]:
+    """Reconcile the store against one Docker volume, read in place.
+
+    One helper call lists every transcript; sessions with no file that moved
+    are skipped on the listing alone, so a sync with nothing new is that one
+    call. For those that did move, only the moved files' NEW bytes are read
+    (plus each moved subagent's tiny meta file), in size-capped batches, each
+    ingested and committed before the next is read.
+
+    ``deadline`` (a `time.monotonic()` value) is checked between batches, never
+    before the first: some progress is always made. Past it, the rest waits for
+    the next sync and the result says ``partial``. A failed LISTING raises
+    `VolumeError` (nothing was done); a failed READ part-way is returned as
+    ``error`` beside the counts of what earlier batches did commit. `sync`
+    records either and moves on.
+    """
+    sessions = group_sessions(source.list_files())
+    result: dict[str, Any] = {
+        "name": source.name, "scanned": sum(len(s.files) for s in sessions),
+        "changed": 0, "lines": 0,
+    }
+    pending = [(s, moves) for s in sessions if (moves := _volume_moves(conn, source, s))]
+    changed: list[str] = []
+    batch: list[tuple[RemoteSession, dict[str, tuple[Any, int]]]] = []
+    batch_bytes = 0
+
+    def flush() -> None:
+        nonlocal batch, batch_bytes
+        requests: list[tuple[str, int]] = []
+        for session, moves in batch:
+            for relpath, (file, offset) in moves.items():
+                if offset < file.size:
+                    requests.append((relpath, offset))
+                if relpath != session.main.relpath:
+                    requests.append((file.meta_relpath, 0))
+        chunks = source.read(requests)
+        for session, moves in batch:
+            result["lines"] += _ingest_volume_session(
+                conn, source, session, moves, chunks, now=now, profile_of=profile_of)
+            changed.append(session.session_id)
+        batch, batch_bytes = [], 0
+
+    try:
+        for index, (session, moves) in enumerate(pending):
+            if batch and batch_bytes >= _VOLUME_BATCH_BYTES:
+                flush()
+                if deadline is not None and time.monotonic() > deadline:
+                    result["partial"] = True
+                    result["remaining"] = len(pending) - index
+                    break
+            batch.append((session, moves))
+            batch_bytes += sum(max(file.size - offset, 0) for file, offset in moves.values())
+        if batch:       # empty exactly when the loop broke out on the deadline
+            flush()
+    except VolumeError as exc:
+        # A read failed part-way. What earlier batches committed stays, and is
+        # counted: the caller still needs to know those sessions changed.
+        result["error"] = str(exc)
+    result["changed"] = len(changed)
+    result["sessions"] = changed
+    return result
+
+
 def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | None = None,
-         full: bool = False) -> dict[str, Any]:
+         full: bool = False, volumes: Sequence[VolumeSource] = (),
+         volume_budget: float | None = VOLUME_BUDGET_SECONDS) -> dict[str, Any]:
     """Pull-on-demand reconciliation of the store against the transcripts on
     disk: stat every transcript (and its subagent files), ingest the tail of
     each one whose mtime/size moved since the cursor last saw it, and record
@@ -777,10 +1024,18 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
     — the way to populate columns added by a schema migration for turns that
     were ingested before it. Safe because every write is idempotent.
 
-    Returns ``{"scanned", "changed", "lines", "sessions": [ids...], "synced_at"}``.
+    ``volumes`` are Docker volumes read in place after the local dirs (see
+    `sync_volume`). Docker trouble NEVER raises out of here: a volume that
+    cannot be read is skipped and named in ``volume_errors``, and the local
+    dirs above it have already synced.
+
+    Returns ``{"scanned", "changed", "lines", "sessions": [ids...], "synced_at",
+    "volumes": [per-volume counts], "volume_errors": [{"volume", "error"}]}``
+    — the totals span local dirs and volumes alike.
     """
     if now is None:
         now = time.time()
+    started = time.monotonic()
     if full:
         conn.execute("DELETE FROM cursors")
     roots = [projects] if isinstance(projects, Path) else list(projects)
@@ -796,6 +1051,24 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
         result = ingest_session(conn, transcript, sid, now=now)
         lines += result["lines"]
         changed.append(sid)
+    resolver = ProfileResolver(volumes)
+    volume_results: list[dict[str, Any]] = []
+    volume_errors: list[dict[str, str]] = []
+    deadline = None if volume_budget is None else started + volume_budget
+    for source in volumes:
+        try:
+            outcome = sync_volume(conn, source, now=now, profile_of=resolver, deadline=deadline)
+        except VolumeError as exc:
+            resolver.disable(source.label)
+            volume_errors.append({"volume": source.name, "error": str(exc)})
+            continue
+        if "error" in outcome:
+            resolver.disable(source.label)
+            volume_errors.append({"volume": source.name, "error": outcome.pop("error")})
+        scanned += outcome["scanned"]
+        lines += outcome["lines"]
+        changed.extend(outcome.pop("sessions"))
+        volume_results.append(outcome)
     # One-time: fill `config_dir` on rows from before the column existed. Every
     # row ingested since carries it, so once the sweep has run there is
     # nothing left for it to find — the flag spares every later sync the scan.
@@ -803,7 +1076,10 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
         backfill_config_dirs(conn)
         conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('config_dirs_backfilled', '1')")
     # Not one-time-flagged, unlike the sweep above — see `backfill_account_uuids`.
-    backfill_account_uuids(conn, now=now)
+    backfill_account_uuids(conn, now=now, profile_of=resolver)
+    for label in resolver.read:
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                     (_PROBE_KEY + label, str(now)))
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES ('synced_at', ?)", (str(now),)
     )
@@ -814,10 +1090,30 @@ def sync(conn: sqlite3.Connection, projects: Path | list[Path], *, now: float | 
         "lines": lines,
         "sessions": changed,
         "synced_at": now,
+        "volumes": volume_results,
+        "volume_errors": volume_errors,
     }
 
 
-def backfill_account_uuids(conn: sqlite3.Connection, *, now: float | None = None) -> int:
+_PROBE_KEY = "account_probe:"
+
+
+def _probe_due(conn: sqlite3.Connection, resolver: ProfileResolver, label: str,
+               now: float) -> bool:
+    """Whether a volume's account should be (re)read to backfill its sessions:
+    yes if a helper already read it this sync (free), or if it has not been
+    asked within `_ACCOUNT_PROBE_INTERVAL_SECONDS`; never for a label no
+    configured volume owns."""
+    if not resolver.knows(label):
+        return False
+    if resolver.probed(label):
+        return True
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (_PROBE_KEY + label,)).fetchone()
+    return row is None or now - float(row[0]) >= _ACCOUNT_PROBE_INTERVAL_SECONDS
+
+
+def backfill_account_uuids(conn: sqlite3.Connection, *, now: float | None = None,
+                           profile_of: ProfileResolver | None = None) -> int:
     """Fill ``sessions.account_uuid`` for rows that have none yet, from the
     CURRENT login of the config dir each was ingested from — the same shape
     of sweep ``backfill_config_dirs`` runs for the column beside it, so a
@@ -834,9 +1130,13 @@ def backfill_account_uuids(conn: sqlite3.Connection, *, now: float | None = None
     Still write-once in effect: a row this fills never has NULL again, so a
     later run of this same sweep leaves it untouched — the account a session
     picks up here is the one it keeps.
+
+    A ``docker://`` config dir is asked through ``profile_of`` (a container
+    start per read), so it is rate-limited — see `_probe_due`.
     """
     if now is None:
         now = time.time()
+    resolver = profile_of or ProfileResolver()
     rows = conn.execute(
         "SELECT session_id, config_dir FROM sessions "
         "WHERE account_uuid IS NULL AND config_dir IS NOT NULL"
@@ -845,7 +1145,10 @@ def backfill_account_uuids(conn: sqlite3.Connection, *, now: float | None = None
     filled = 0
     for session_id, config_dir in rows:
         if config_dir not in profiles:
-            _, profiles[config_dir] = _account_snapshot(conn, config_dir, now)
+            if store.is_volume_label(config_dir) and not _probe_due(conn, resolver, config_dir, now):
+                profiles[config_dir] = None
+            else:
+                _, profiles[config_dir] = _account_snapshot(conn, config_dir, now, resolver)
         account_uuid = profiles[config_dir]
         if account_uuid is None:
             continue
@@ -868,6 +1171,8 @@ def backfill_config_dirs(conn: sqlite3.Connection) -> int:
     ).fetchall()
     filled = 0
     for session_id, transcript_path in rows:
+        if store.is_volume_label(transcript_path):
+            continue      # not a host path; volume rows are stamped at ingest
         config_dir = config_dir_of(Path(transcript_path))
         if config_dir is None:
             continue

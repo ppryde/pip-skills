@@ -31,7 +31,11 @@ CLAUDE_DIRS_ENV = "CLAUDE_CONFIG_DIRS"
 REPO_CONFIG_DIRNAME = ".overseer"
 # The ONE machine-level config file, under the primary config dir. Shared with
 # the chronicle plugin (which reads the same file with its own small loader):
-#   { "claude_dirs": ["~/.claude-personal", ...] }
+#   { "claude_dirs": ["~/.claude-personal", ...],
+#     "volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}] }
+# `volumes` (Docker named volumes chronicle reads in place) and `path_map` are
+# chronicle's: overseer only ever read-modify-writes `claude_dirs`, and every
+# edit here must preserve the other keys (see `_update_claude_dirs`).
 MACHINE_CONFIG_RELPATH = ("overseer", "config.json")
 
 

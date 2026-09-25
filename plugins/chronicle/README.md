@@ -56,6 +56,7 @@ chronicle session <id>         # one session with its per-turn context series
 chronicle repos                # repo roots seen, with session counts
 chronicle ingest --transcript PATH [--session-id ID]   # one transcript, now
 chronicle open <url> [--config-dir DIR]   # macOS: open url in the right account's Chrome profile
+chronicle volumes list | add <name> [--claude-dir D] | rm <name>   # docker volumes read in place
 ```
 
 `sync` is the on-demand path and the one the dashboard's **Sync** button drives: it stats
@@ -98,15 +99,80 @@ signed in as which email), and launches a **new** Chrome window (`open -na`, nev
 whatever has focus) on that profile. No match names the profiles it did find, so you can see
 what's actually signed in rather than guess.
 
+### Docker volumes
+
+A dev container's Claude config often lives in a Docker *named volume* (the Wayflyer one is
+`wf-state`). Its files sit inside the Docker VM — on macOS not a host path at all — so no
+host process can list them in `claude_dirs`. Tell chronicle about the volume once and every
+`sync` reads it **in place**:
+
+```
+chronicle volumes add wf-state          # default --claude-dir is .config/claude
+chronicle volumes list
+chronicle sync                          # the dashboard's Sync button and its once-a-minute poll run this too
+chronicle volumes rm wf-state           # stop watching (what is already ingested stays)
+```
+
+`add` checks with docker that the volume exists (a typo is refused instead of syncing an empty
+nothing) and validates the name and Claude dir before either reaches a `docker` command line.
+It lands in the same machine config as `claude_dirs` (`<primary>/overseer/config.json`):
+
+```json
+{"claude_dirs": ["~/.claude-personal"],
+ "volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}]}
+```
+
+A config without `volumes` behaves exactly as before, and `overseer claude-dirs add|remove`
+keeps the key when it edits the file.
+
+**How it reads.** One short-lived helper container (`docker run --rm -v wf-state:/v:ro
+--network none alpine ...`) lists every transcript, main and subagent, with its mtime and size.
+Files whose mtime/size match the cursor are skipped on that listing alone, so a sync with
+nothing new is **one** docker call. For files that moved, a second helper reads only the bytes
+appended since the cursor (the whole file if it shrank or was never seen), in batches of at
+most 64 MB that are committed as they land. Nothing is ever copied to the host, and the volume
+is mounted read-only every time — chronicle cannot write to it, and a missing volume is never
+created by a stray `docker run -v`.
+
+A first sync of a large volume can be long. It stops starting new batches after ~80 seconds
+(inside the dashboard's 120-second ceiling), reports `"partial": true` for that volume, and the
+next sync carries on where it stopped.
+
+**Accounts and plans.** The volume's `<claude_dir>/.claude.json` is read through the helper and
+only the whitelisted fields ever leave it — the same whitelist as any local config dir (see
+[Accounts and plans](#accounts-and-plans)); email, name and organisation name never reach the
+store. It is read at most once per sync and only when a session needs stamping. Per-turn bridge
+owners (WF-118) work exactly as for local transcripts.
+
+**What the store records.** A volume's sessions carry `config_dir = docker://wf-state` and a
+`transcript_path` / cursor key of `docker://wf-state/<slug>/<session>.jsonl` — labels, not host
+paths, and nothing stats them. Every write is keyed by session, agent and message id, so a
+session already in the store from an earlier `pull-volume` copy (say `~/.claude-wayflyer`)
+converges instead of double counting; the session's `config_dir` becomes the volume's label.
+Once you rely on the volume, drop the stale copy from `claude_dirs` — left in, it is just a
+frozen second reader of the same sessions.
+
+**When docker is not there.** Docker absent, the daemon down, the volume missing, a helper that
+exits non-zero or times out: `sync` never fails and never blocks the local dirs. That volume is
+skipped and named in the result, which the dashboard's Sync route passes straight through:
+
+```json
+{"changed": 3, "volume_errors": [{"volume": "wf-state", "error": "docker not found on PATH"}]}
+```
+
+A `volumes` entry that failed validation is skipped and reported the same way (`"volume": null`).
+`chronicle sync --projects DIR` reads exactly the dirs you name and no volumes.
+
 ### Sessions from a container
 
 A containerised dev environment writes its transcripts inside the container, and records the
 paths it saw there. Two things are then in the way, and both have to be dealt with:
 
 **1. The files are not on this filesystem.** If the container's config dir is a Docker *named
-volume*, its contents live inside the Docker VM — on macOS `/var/lib/docker/volumes/...` is
-not a host path at all, so it cannot simply be listed in `claude_dirs`. Copy it out with a
-helper container, then watch the copy:
+volume*, use [`volumes add`](#docker-volumes) above. The rest of this item is the **legacy**
+`pull-volume` route, superseded by it and kept because it still works: it copies the volume
+out with a helper container, and the copy goes **stale** until you run it again — which is
+exactly how weeks of Enterprise sessions once went missing.
 
 ```
 chronicle pull-volume --volume wf-state --dest ~/.claude-wayflyer
@@ -224,7 +290,8 @@ An **API-key session has no `oauthAccount` at all**, which is the one positive
 signal separating key auth from a subscription. That case stamps no plan and
 adds no account row.
 
-`pull-volume` copies the account's whitelisted fields to `<dest>/.claude.json`
+(`volumes add` reads the volume's own `.claude.json` in place instead, through the same
+whitelist.) The legacy `pull-volume` copies the account's whitelisted fields to `<dest>/.claude.json`
 alongside the transcripts, so a containerised account resolves its plan too —
 without it those sessions have transcripts but no account to read, which left
 75 of 342 sessions here unattributable. Only the whitelist crosses; the

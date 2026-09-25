@@ -228,6 +228,21 @@ class TestClaudeDirs:
         assert config.remove_claude_dir(personal) == []
         assert config.claude_dirs() == [primary]
 
+    def test_editing_claude_dirs_preserves_every_other_key(self, tmp_path, monkeypatch):
+        # The machine config is SHARED with chronicle, which keeps `volumes`
+        # (Docker volumes read in place) and `path_map` beside `claude_dirs`.
+        # `overseer claude-dirs add|remove` is a read-modify-write of that file
+        # and must never drop a key it does not own.
+        _primary, personal, work = self._dirs(tmp_path, monkeypatch, "claude", "personal", "work")
+        volumes = [{"name": "wf-state", "claude_dir": ".config/claude"}]
+        path_map = {"/workspaces/app": "/Users/me/repos/app"}
+        config.save_machine_config({"volumes": volumes, "path_map": path_map,
+                                    "claude_dirs": [str(personal)]})
+        config.add_claude_dir(work)
+        config.remove_claude_dir(personal)
+        saved = json.loads(config.machine_config_path().read_text())
+        assert saved == {"volumes": volumes, "path_map": path_map, "claude_dirs": [str(work)]}
+
     def test_env_list_and_dedup_and_missing(self, tmp_path, monkeypatch):
         primary, personal, work = self._dirs(tmp_path, monkeypatch, "claude", "personal", "work")
         config.add_claude_dir(work)

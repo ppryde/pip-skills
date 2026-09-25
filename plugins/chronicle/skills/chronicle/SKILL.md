@@ -26,6 +26,11 @@ The store only knows what has been synced. Run `sync` before answering any quest
 usage — it stats every transcript on disk and ingests only the files that moved, so it is
 cheap to run every time. `backfill` is the same verb for a first run.
 
+If the user works in a dev container whose Claude config lives in a Docker named volume (e.g.
+`wf-state`) and its sessions are missing or stale, run `chronicle volumes add <name>` once:
+`sync` then reads the volume in place, read-only, on every run. Do not reach for the legacy
+`pull-volume` copy — it goes stale the day nobody re-runs it.
+
 ## Answering questions
 - **Totals for a window / repo:** `summary --days N [--root <main repo root>]` — totals,
   per-day series, by-model breakdown, tool leaderboard, and session-shape quantiles

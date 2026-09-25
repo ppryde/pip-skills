@@ -132,6 +132,41 @@ def test_sync_pulls_new_transcripts(client: TestClient, root: Path, tmp_path: Pa
     assert status["synced_at"] == again["synced_at"]
 
 
+def test_sync_survives_a_configured_docker_volume_that_cannot_be_read(
+        client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Docker volume in the machine config is read in place by the SAME
+    `chronicle sync` the Sync button (and its once-a-minute poll) runs. With the
+    daemon unreachable the request must still succeed, the local dir must still
+    sync, and the failure must come back as `volume_errors` for the page to show.
+
+    chronicle runs here as a real subprocess, so docker is replaced by a stub on
+    PATH that always fails — nothing in this test can reach a real docker."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    stub = bin_dir / "docker"
+    stub.write_text("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    config_dir = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    (config_dir / "overseer").mkdir(parents=True, exist_ok=True)
+    (config_dir / "overseer" / "config.json").write_text(
+        json.dumps({"volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}]}))
+    transcript = config_dir / "projects" / "-repo" / "sess1.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(json.dumps(_record("assistant", "a1", "2026-09-01T10:00:05Z", message={
+        "id": "m1", "model": "claude-opus-5", "role": "assistant",
+        "usage": {"input_tokens": 1, "output_tokens": 2},
+        "content": [{"type": "text", "text": "hi"}]})) + "\n")
+
+    response = client.post("/api/chronicle/sync")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sessions"] == ["sess1"]
+    assert body["volume_errors"] == [
+        {"volume": "wf-state", "error": "Cannot connect to the Docker daemon"}]
+
+
 def test_sync_is_not_token_gated(root: Path) -> None:
     # Deliberate: sync writes only what the transcripts already say, is
     # idempotent and cheap, so the page's timed sync must work from a browser

@@ -42,8 +42,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
+from typing import NamedTuple
 
 DB_ENV = "CHRONICLE_DB"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
@@ -401,6 +403,119 @@ def claude_dirs() -> list[Path]:
     return out
 
 
+DEFAULT_VOLUME_CLAUDE_DIR = ".config/claude"
+# What `sessions.config_dir` and a cursor path carry for a transcript read out
+# of a Docker volume: not a host path, so nothing may `Path()`/`stat()` it.
+VOLUME_LABEL_PREFIX = "docker://"
+
+# A volume name and the Claude dir within it are interpolated into a `docker`
+# argv, where a leading "-" would be read as an option and a quote or space
+# would change what runs. Validated wherever one enters the system (the CLI,
+# and the config loader — a hand-edited file is no more trustworthy).
+_VOLUME_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_CLAUDE_DIR_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9_./-]*$")
+
+
+class Volume(NamedTuple):
+    """A Docker named volume holding a Claude config dir, read in place."""
+    name: str
+    claude_dir: str = DEFAULT_VOLUME_CLAUDE_DIR
+
+    @property
+    def label(self) -> str:
+        """The stable stand-in for a host config dir: ``docker://<name>``."""
+        return f"{VOLUME_LABEL_PREFIX}{self.name}"
+
+
+def is_volume_label(value: str | None) -> bool:
+    return bool(value) and str(value).startswith(VOLUME_LABEL_PREFIX)
+
+
+def normalise_volume(name: object, claude_dir: object = DEFAULT_VOLUME_CLAUDE_DIR) -> Volume:
+    """A validated ``Volume``; ``ValueError`` names what is wrong with it.
+    ``claude_dir`` is stored without surrounding slashes (it is joined onto
+    ``/v/`` inside the helper container)."""
+    if not isinstance(name, str) or not _VOLUME_NAME_RE.match(name):
+        raise ValueError(f"invalid volume name: {name!r}")
+    clean = claude_dir.strip("/") if isinstance(claude_dir, str) else ""
+    if not _CLAUDE_DIR_RE.match(clean) or ".." in Path(clean).parts:
+        raise ValueError(f"invalid claude dir: {claude_dir!r}")
+    return Volume(name, clean)
+
+
+def _read_machine_config() -> dict:
+    """The machine config as a dict; ``{}`` if absent, unreadable or not an
+    object. Never raises: a broken file must degrade, not stop an ingest."""
+    machine = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    try:
+        data = json.loads(machine.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_volumes() -> tuple[list[Volume], list[str]]:
+    """The configured Docker volumes, plus a description of every entry that
+    had to be skipped.
+
+    Configured beside ``claude_dirs`` in the shared machine config::
+
+        {"volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}]}
+
+    ``claude_dir`` defaults to ``.config/claude``. A config with no ``volumes``
+    key — every file written before this existed — yields none. An invalid
+    entry (wrong shape, an injection-shaped name) is dropped and reported, not
+    raised: it must never stop the local dirs syncing, but neither should it
+    vanish without a word, so `sync` surfaces the problems it gets back.
+    """
+    raw = _read_machine_config().get("volumes")
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], ["volumes must be a list of {name, claude_dir} objects"]
+    found: dict[str, Volume] = {}
+    problems: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            problems.append(f"skipped volume entry {entry!r}: not an object")
+            continue
+        try:
+            volume = normalise_volume(entry.get("name"),
+                                      entry.get("claude_dir", DEFAULT_VOLUME_CLAUDE_DIR))
+        except ValueError as exc:
+            problems.append(f"skipped volume entry {entry!r}: {exc}")
+            continue
+        found.setdefault(volume.name, volume)
+    return list(found.values()), problems
+
+
+def volumes() -> list[Volume]:
+    return load_volumes()[0]
+
+
+def save_volumes(vols: list[Volume]) -> Path:
+    """Write ``vols`` into the machine config, PRESERVING every other key
+    (``claude_dirs``, ``path_map``, anything overseer keeps there). A file that
+    exists but is not valid JSON raises ``ValueError`` rather than being
+    overwritten — a typo is the user's to fix, not ours to erase."""
+    path = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text() or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: malformed config JSON: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{path}: config is not a JSON object")
+        data = loaded
+    data["volumes"] = [{"name": v.name, "claude_dir": v.claude_dir} for v in vols]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
 # The ONLY fields ever read out of `.claude.json`. A whitelist, not a
 # blacklist: that file also holds emailAddress, fullName, displayName,
 # organizationName and more, and this store is read by the dashboard and can
@@ -428,10 +543,21 @@ def account_profile(config_dir: Path) -> dict[str, str] | None:
     signal that distinguishes key auth from a subscription; that case returns
     an empty dict, distinct from None (no file / unreadable / malformed).
     """
-    path = config_dir / ".claude.json"
     try:
-        data = json.loads(path.read_text() or "{}")
-    except (OSError, json.JSONDecodeError):
+        text = (config_dir / ".claude.json").read_text()
+    except OSError:
+        return None
+    return parse_account_profile(text)
+
+
+def parse_account_profile(text: str) -> dict[str, str] | None:
+    """`account_profile`'s whitelist applied to ``.claude.json`` TEXT — the
+    seam a Docker volume's file goes through, having been read by a helper
+    container rather than off this filesystem. Same contract: None for text
+    that is not a JSON object, ``{}`` for no ``oauthAccount`` (API-key auth)."""
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
         return None
