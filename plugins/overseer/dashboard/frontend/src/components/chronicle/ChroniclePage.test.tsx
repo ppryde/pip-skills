@@ -182,7 +182,7 @@ afterEach(() => {
 /** Position of the Subagents cell in a session row: the two leading columns
  * (Session, Repo · branch) plus its place among the sortable ones. Named so
  * the assertion reads as a column rather than a magic number. */
-const COLUMN_INDEX_SUBAGENTS = 2 + 5;
+const COLUMN_INDEX_SUBAGENTS = 2 + 6;
 
 /** The page renders from props alone; these tests drive it directly rather
  * than through the fetch harness, since only the scope prop is under test. */
@@ -389,6 +389,30 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
     rows = table().getAllByRole("row").slice(1);
     expect(rows[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("ranks sessions by cost, with Cost sitting right after Started", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "Cheap one", cost_usd: 1.25, started_at: 2000 }),
+        session({ session_id: "bbbb2222-x", title: "Pricey one", cost_usd: 88.5, started_at: 1000 }),
+        session({ session_id: "cccc3333-x", title: "Middling", cost_usd: 12, started_at: 1500 }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Cheap one")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    const headers = table().getAllByRole("columnheader").map((h) => h.textContent?.replace(/[ ↑↓]/g, ""));
+    expect(headers.slice(2, 4)).toEqual(["Started", "Cost"]);
+
+    fireEvent.click(table().getByRole("button", { name: /^Cost/ }));
+    let rows = table().getAllByRole("row").slice(1);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining("Pricey one"), expect.stringContaining("Middling"), expect.stringContaining("Cheap one"),
+    ]);
+    fireEvent.click(table().getByRole("button", { name: /^Cost/ })); // second click flips to ascending
+    rows = table().getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Cheap one");
   });
 
   it("shows what each session changed, ranked by lines moved", async () => {
