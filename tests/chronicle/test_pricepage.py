@@ -187,7 +187,7 @@ class TestFetchBodies:
         return seen
 
     def test_plain_text(self, monkeypatch):
-        self._serve(monkeypatch, "| Model |\n".encode())
+        self._serve(monkeypatch, b"| Model |\n")
         assert pricepage.fetch_text("https://example.test/p").startswith("| Model")
 
     def test_gzip_bodies_are_decoded_and_asked_for(self, monkeypatch):

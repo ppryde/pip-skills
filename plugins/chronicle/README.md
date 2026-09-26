@@ -34,7 +34,8 @@ work account never commingle. WAL journal, busy timeout, schema migrations on op
 | `artifacts` | one per Artifact publish | title (falling back to the file stem), description, favicon, the published url parsed from the tool result, and a redeploy flag when the url was already published earlier in the session |
 | `events` | prompts, compactions, turn durations | timestamp, value (ms) |
 | `cursors` | one per transcript file | byte offset after the last complete line + the file's mtime/size as last seen |
-| `meta` | | schema version, last sync time |
+| `price_history` | one per (model, effective-from) | list prices in USD/MTok with the time each took effect, its source and when it was observed — append-only (see [Pricing](#pricing)) |
+| `meta` | | schema version, last sync time, last pricing refresh |
 
 Subagent transcripts (`<session>/subagents/agent-*.jsonl`) are folded into their parent
 session and tagged by agent, so a session's totals include the work its agents did; peak
@@ -97,6 +98,10 @@ chronicle repos                # repo roots seen, with session counts
 chronicle ingest --transcript PATH [--session-id ID]   # one transcript, now
 chronicle open <url> [--config-dir DIR]   # macOS: open url in the right account's Chrome profile
 chronicle volumes list | add <name> [--claude-dir D] | rm <name>   # docker volumes read in place
+chronicle pricing status       # rates per model with effective ranges, as-of date, last refresh
+chronicle pricing seed         # write the built-in rate table into the store's history
+chronicle pricing refresh [--dry-run]   # fetch the pricing page, append changed/new rates
+chronicle pricing backfill [--from YYYY-MM] [--dry-run] [--limit N]   # past rates, from the Internet Archive
 ```
 
 `sync` is the on-demand path and the one the dashboard's **Sync** button drives: it stats
@@ -436,14 +441,71 @@ with the tool results that landed before each, artifacts published, tools and su
 ### Cost
 
 Every session, day, model and turn carries `cost_usd`: what the same API calls would have
-cost at Anthropic's first-party list prices (`scripts/pricing.py`). A subscription session is
+cost at Anthropic's first-party list prices (see **Pricing** below). A subscription session is
 not billed per token, so this is a yardstick for comparing sessions, not an invoice. It is
 computed at read time from the per-turn token counts — input, cache reads, cache writes by
-TTL (1.25× input for 5-minute, 2× for 1-hour), and output (thinking included) — so editing
-the price table takes effect on the next read with no re-sync. Subagent turns count. A
-turn on a model the table does not know is never guessed at: it contributes nothing and is
-counted in `unpriced_turns`, which the page surfaces. `pricing_as_of` records when the
-table was last checked against the pricing page.
+TTL, and output (thinking included) — so a new rate takes effect on the next read with no
+re-sync. Subagent turns count. A turn on a model no rate covers is never guessed at: it
+contributes nothing and is counted in `unpriced_turns`, which the page surfaces.
+`totals.pricing_as_of` is the date the newest rate was observed and `totals.rates_changed`
+lists the models whose rate changed inside the report window.
+
+### Pricing
+
+Rates are USD per million tokens and live in the store's append-only `price_history` table:
+`(model, effective_from, input, output, cache_read, cache_write_5m, cache_write_1h, source,
+observed_at)`, keyed by `(model, effective_from)`. `effective_from` is epoch seconds; `0`
+means "from the beginning of time". Cache writes are stored as the page's own dollar
+figures; where a source lacks them the 1.25× (5-minute) / 2× (1-hour) multipliers apply.
+
+- **Source.** `platform.claude.com/docs/en/about-claude/pricing.md`, the "Model pricing" table
+  (parsed by header keyword, so column order is not load-bearing; footnote markers and
+  retired rows are handled; display names map to API ids, e.g. `Claude Opus 5.5` ->
+  `claude-opus-5-5`, `Claude Haiku 3.5` -> `claude-3-5-haiku`). Claude Code's own
+  `cost-state` transcript records are **not** used: they are periodic snapshots of a running
+  total, not per-call prices.
+- **Point-in-time costing.** A turn is priced at the newest row with `effective_from <=` its
+  timestamp. A model's first row applies backwards too — a model first *seen* at T existed
+  before T — so its earliest known rate prices earlier turns rather than leaving them
+  unpriced. A model id is matched exactly, else by its longest `-`-boundary prefix (a dated
+  snapshot resolves to its family). Grouped costs add a *rate period* to the SQL `GROUP BY`
+  (the stretches between instants where some model's rate changed), so a report costs the
+  same to compute as before; with no change on record the query is unchanged.
+- **Offline fallback.** `scripts/pricing.py`'s table is the seed and the fallback: an empty
+  or not-yet-migrated store, a store never refreshed, or a model with no row is priced from
+  it, exactly as before history existed. `chronicle pricing seed` (and the first refresh)
+  copy it into the store at `effective_from = 0`, `source = builtin`. Once the Archive has
+  supplied a model's history its seed row stands aside, so today's rate is not applied to
+  turns before that history begins.
+- **Refresh.** `chronicle pricing refresh [--dry-run]` fetches the page and appends a row for
+  every changed rate and every new model, stamped `source = pricing-page@<date>`,
+  `effective_from = ` the moment it was observed. A page cannot say when a change really took
+  effect, so **`effective_from` found by a refresh is an upper bound**: turns between the real
+  change and the observation are priced at the old rate. It is idempotent (an unchanged page
+  writes nothing) and soft: a network error, a timeout, a layout it does not recognise, or
+  a rate that moved more than 10x (a mis-parse, not a price cut) returns a status and writes
+  nothing.
+- **Automatic refresh.** `chronicle sync` — and so the dashboard's poll — runs a refresh at
+  most once per 24 hours (5-second timeout), records every attempt, failures included, in
+  `meta` so a down network is not retried each minute, and reports it in the sync JSON as
+  `pricing: {status, changed, added, ...}`. It also runs once, early, when newly synced turns
+  use a model no row covers. It never raises into the sync. Set
+  `CHRONICLE_NO_PRICING_REFRESH=1` to turn it off (offline machines, CI; the test suites do).
+- **Backfill.** `chronicle pricing backfill [--from YYYY-MM] [--dry-run] [--limit N]` walks
+  Internet Archive snapshots of the page oldest to newest (markdown or HTML, one parser),
+  diffs consecutive price sets, and inserts `archive@<timestamp>` rows: a model's first
+  appearance and each later change, at the first snapshot that shows it — again upper
+  bounds. It is manual (never on the sync path), polite (sequential, at least a second between
+  requests, `--limit` caps all requests per run, listings included) and resumable (snapshots
+  already handled are remembered in `meta`); a snapshot that fails to fetch is skipped and
+  retried next run, one that cannot be parsed is recorded and skipped, nothing is invented.
+  The Archive's coverage of this page starts in May 2026 and its pages sometimes show a
+  model's price as time-limited rows ("through August 31" / "starting September 1"), which
+  are skipped rather than guessed at.
+- **Status.** `chronicle pricing status` lists each model's effective ranges, `pricing_as_of`
+  and the last refresh attempt and result.
+
+Price history is only ever appended to: nothing updates or deletes a row.
 
 Routes: `GET /api/chronicle/{status,summary,sessions,session/{id}}`, `POST /api/chronicle/sync`.
 Reads take the same `root` as `/api/board` (validated against the repo allowlist) or
