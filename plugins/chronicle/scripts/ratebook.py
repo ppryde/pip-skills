@@ -37,6 +37,9 @@ from scripts import pricing
 TABLE = "price_history"
 RATE_FIELDS = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
 BUILTIN_SOURCE = "builtin"
+# Rows `pricing backfill` reads out of Internet Archive snapshots of the pricing
+# page: `archive@<snapshot timestamp>`.
+ARCHIVE_PREFIX = "archive@"
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,13 @@ class RateBook:
         by_model: dict[str, list[RateRow]] = {}
         for r in sorted(rows, key=lambda r: (r.model, r.effective_from)):
             by_model.setdefault(r.model, []).append(r)
+        # The seed row (``effective_from`` 0, today's rate) is a placeholder for
+        # "no history known". Once the archive has supplied a model's history it
+        # would only shadow it — its rate at 0 would price every turn before the
+        # first archived row at today's rate — so it stands aside for that model.
+        for model, rs in by_model.items():
+            if any(r.source.startswith(ARCHIVE_PREFIX) for r in rs):
+                by_model[model] = [r for r in rs if r.source != BUILTIN_SOURCE]
         self._rows = by_model
         self._froms = {m: [r.effective_from for r in rs] for m, rs in by_model.items()}
         self._rates = {m: [r.rates() for r in rs] for m, rs in by_model.items()}

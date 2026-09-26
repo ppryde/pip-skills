@@ -71,6 +71,24 @@ class TestSelection:
         assert "cache_write_5m" not in RateBook([row("m", 0, 5, 25, 0.5)]).rates_for("m", 1)
 
 
+class TestArchiveRowsSupersedeTheSeed:
+    def test_seed_row_stands_aside_once_the_archive_has_history(self):
+        book = RateBook([
+            row("m", 0, 2, 10, 0.2, source="builtin"),
+            row("m", 1000, 3, 15, 0.3, source="archive@20260601000000"),
+            row("m", 2000, 2, 10, 0.2, source="archive@20260715000000"),
+        ])
+        assert book.rates_for("m", 5)["input"] == 3        # before the first archived row: it, not today's
+        assert book.rates_for("m", 1500)["input"] == 3
+        assert book.rates_for("m", 2500)["input"] == 2
+        assert [c["model"] for c in book.changes_since(None)] == ["m"]
+
+    def test_seed_row_still_anchors_history_that_did_not_come_from_the_archive(self):
+        book = RateBook([row("m", 0, 5, 25, 0.5, source="builtin"),
+                         row("m", 1000, 4, 20, 0.4, source="pricing-page@2026-09-02")])
+        assert book.rates_for("m", 500)["input"] == 5
+
+
 class TestPeriods:
     def test_boundaries_are_change_points_only(self):
         book = RateBook([row("a", 0, 1, 1, 1), row("a", 500, 2, 2, 2), row("b", 900, 1, 1, 1),

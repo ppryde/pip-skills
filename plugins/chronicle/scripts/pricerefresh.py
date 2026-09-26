@@ -51,7 +51,7 @@ def _date(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
 
 
-def _effective(row: ratebook.RateRow | pricepage.PagePrice) -> tuple[float, ...]:
+def effective(row: ratebook.RateRow | pricepage.PagePrice) -> tuple[float, ...]:
     """The six numbers a row prices with: cache writes fall back to the
     multipliers, so a source that omits them compares equal to one that states
     the multiplied value."""
@@ -63,11 +63,11 @@ def _effective(row: ratebook.RateRow | pricepage.PagePrice) -> tuple[float, ...]
     return (row.input, row.output, row.cache_read, cw5, cw1)
 
 
-def _same(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
+def same_rates(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
     return all(math.isclose(x, y, rel_tol=1e-9, abs_tol=1e-12) for x, y in zip(a, b, strict=True))
 
 
-def _implausible(old: tuple[float, ...], new: tuple[float, ...]) -> bool:
+def implausible(old: tuple[float, ...], new: tuple[float, ...]) -> bool:
     return any(o > 0 and (n / o > MAX_RATE_RATIO or n / o < 1 / MAX_RATE_RATIO)
                for o, n in zip(old, new, strict=True))
 
@@ -111,10 +111,10 @@ def refresh(conn: sqlite3.Connection, *, dry_run: bool = False, now: float | Non
                 out["added"].append(model)
                 out["details"].append({"model": model, "previous": None, "current": row.rates()})
                 continue
-            old_eff, new_eff = _effective(prev), _effective(price)
-            if _same(old_eff, new_eff):
+            old_eff, new_eff = effective(prev), effective(price)
+            if same_rates(old_eff, new_eff):
                 continue
-            if _implausible(old_eff, new_eff):
+            if implausible(old_eff, new_eff):
                 refused.append(model)
                 continue
             # Strictly after the row it supersedes, whatever the clock says.

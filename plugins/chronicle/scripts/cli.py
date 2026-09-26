@@ -29,7 +29,16 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 import sqlite3
 
-from scripts import chrome_profile, dedupe, ingest, pricerefresh, report, store, volumes
+from scripts import (
+    chrome_profile,
+    dedupe,
+    ingest,
+    pricehistory,
+    pricerefresh,
+    report,
+    store,
+    volumes,
+)
 
 # One error contract for every verb: success prints a single JSON object to
 # stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
@@ -92,7 +101,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_pricing(args: argparse.Namespace) -> int:
-    """`chronicle pricing status|seed|refresh` — the rate history behind every
+    """`chronicle pricing status|seed|refresh|backfill` — the rate history behind every
     cost figure (see ``scripts.pricerefresh`` and the README's "Pricing").
 
     ``refresh --dry-run`` and ``status`` only read (a dry run on a missing store
@@ -119,6 +128,22 @@ def cmd_pricing(args: argparse.Namespace) -> int:
             conn.close()
         print(json.dumps({**out, "db": str(store.db_path())}))
         return 0
+    if args.action == "backfill":
+        if args.since_month is not None and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", args.since_month):
+            return _fail(f"invalid --from value: {args.since_month!r} (want YYYY-MM)", code=INVALID_INPUT)
+        if args.limit < 1:
+            return _fail("--limit must be at least 1", code=INVALID_INPUT)
+        if args.dry_run:
+            conn = _open_readonly() or sqlite3.connect(":memory:")
+        else:
+            conn = store.connect()
+        try:
+            result = pricehistory.backfill(conn, since_month=args.since_month,
+                                           dry_run=bool(args.dry_run), limit=args.limit)
+        finally:
+            conn.close()
+        print(json.dumps(result))
+        return 1 if result["status"] == "error" else 0
     # refresh
     if args.dry_run:
         conn = _open_readonly() or sqlite3.connect(":memory:")
@@ -577,6 +602,14 @@ def build_parser() -> argparse.ArgumentParser:
         "refresh", help="fetch the pricing page and append any changed or new rates")
     refresh.add_argument("--dry-run", action="store_true",
                          help="show what would change; write nothing")
+    backfill = actions.add_parser(
+        "backfill", help="recover past rates from Internet Archive snapshots of the pricing page "
+                         "(manual, polite, resumable, best-effort)")
+    backfill.add_argument("--from", dest="since_month", default=None, metavar="YYYY-MM",
+                          help="earliest month to look at (default: 2026-05)")
+    backfill.add_argument("--dry-run", action="store_true", help="show the rows it would add; write nothing")
+    backfill.add_argument("--limit", type=int, default=pricehistory.DEFAULT_LIMIT,
+                          help="most requests to make this run, listings included (default: %(default)s)")
     p.set_defaults(fn=cmd_pricing)
 
     p = sub.add_parser("summary", help="aggregate metrics (JSON)")
