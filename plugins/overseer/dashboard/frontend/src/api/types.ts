@@ -395,8 +395,20 @@ export interface ChronicleTotals {
    * not know contribute nothing and are counted in `unpriced_turns`. */
   cost_usd: number;
   unpriced_turns: number;
-  /** ISO date the pricing table was last checked. */
+  /** ISO date the newest rate was observed (see chronicle's `price_history`). */
   pricing_as_of: string;
+  /** Models whose list price changed inside this window: each side of the
+   * change is costed at its own rate. `effective_from` (epoch s) is an upper
+   * bound on when it really changed when a refresh detected it. */
+  rates_changed?: ChronicleRateChange[];
+}
+
+export interface ChronicleRateChange {
+  model: string;
+  effective_from: number;
+  source: string;
+  previous: Record<string, number>;
+  current: Record<string, number>;
 }
 
 export interface ChronicleDay {

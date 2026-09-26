@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from scripts import pricing, transcript
+from scripts import pricing, ratebook, transcript
 
 # A session with no recorded end (backfilled transcripts never see a
 # SessionEnd hook) counts as live only while it has been active this recently.
@@ -768,26 +768,35 @@ _COST_COLUMNS = """COUNT(*) AS turns,
               COALESCE(SUM(t.output_tokens), 0) AS output_tokens"""
 
 
-def _cost_of(row: sqlite3.Row | dict[str, Any]) -> float | None:
+def _cost_of(row: sqlite3.Row | dict[str, Any], book: ratebook.RateBook,
+             ts: float | None = None) -> float | None:
+    """API-equivalent USD for one row of (summed) token counts, priced at the
+    rate in force at ``ts`` (None: the newest — see `ratebook.RateBook`). A
+    grouped row is priced at its rate period's representative timestamp."""
     return pricing.turn_cost(
         row["model"],
         input_tokens=row["input_tokens"], cache_read_tokens=row["cache_read_tokens"],
         cache_creation_tokens=row["cache_creation_tokens"],
         cache_5m_tokens=row["cache_5m_tokens"], cache_1h_tokens=row["cache_1h_tokens"],
-        output_tokens=row["output_tokens"],
+        output_tokens=row["output_tokens"], book=book, ts=ts,
     )
 
 
 def _costs_by(conn: sqlite3.Connection, key_sql: str, where: str, params: list[Any],
-              extra: str = "") -> dict[Any, dict[str, Any]]:
+              extra: str = "", book: ratebook.RateBook | None = None) -> dict[Any, dict[str, Any]]:
     """API-equivalent cost grouped by ``key_sql`` (a turns/sessions expression).
 
-    Cost is a per-model rate times per-model token counts, so the query
-    groups by (key, model) and the table sums the priced models in Python;
-    turns on a model the pricing table does not know are counted in
+    Cost is a per-model rate times per-model token counts, and the rate depends
+    on WHEN the turn ran, so the query groups by (key, model, rate period) —
+    a period being the stretch between two instants at which some model's rate
+    changed (`RateBook.period_sql`; no extra grouping at all when nothing ever
+    changed) — and each group is priced once, at its period's rate, summing in
+    Python. Turns on a model the pricing table does not know are counted in
     ``unpriced_turns`` rather than priced as something else. Subagent turns
     are included — they cost the same money as the main agent's.
     """
+    if book is None:
+        book = ratebook.load(conn)
     # Parenthesised, always. `extra` is caller-supplied SQL and `_attribution`
     # passes a multi-clause `a OR b OR c` — spliced bare after the window's own
     # `s.repo_root = ?` that degrades to `(repo_root = ? AND a) OR b OR c`,
@@ -797,14 +806,17 @@ def _costs_by(conn: sqlite3.Connection, key_sql: str, where: str, params: list[A
     # multi-clause ones correct by construction.
     clause = f"{where}{' AND' if where else ' WHERE'} ({extra})" if extra else where
     out: dict[Any, dict[str, Any]] = {}
+    periods = book.boundaries
+    period_col = f", {book.period_sql('t.ts')} AS period" if periods else ""
+    period_group = ", period" if periods else ""
     for r in conn.execute(
-        f"""SELECT {key_sql} AS key, t.model AS model, {_COST_COLUMNS}
+        f"""SELECT {key_sql} AS key, t.model AS model{period_col}, {_COST_COLUMNS}
             FROM turns t JOIN sessions s ON s.session_id = t.session_id{clause}
-            GROUP BY key, t.model""",
+            GROUP BY key, t.model{period_group}""",
         params,
     ):
         entry = out.setdefault(r["key"], {"cost_usd": 0.0, "unpriced_turns": 0})
-        cost = _cost_of(r)
+        cost = _cost_of(r, book, book.period_ts(r["period"]) if periods else None)
         if cost is None:
             entry["unpriced_turns"] += int(r["turns"])
         else:
@@ -980,8 +992,9 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
     if row is None:
         return None
     detail = _row_to_session(row)
-    _attach_cost(detail, _costs_by(conn, "t.session_id", " WHERE t.session_id = ?", [session_id]),
-                 session_id)
+    book = ratebook.load(conn)
+    _attach_cost(detail, _costs_by(conn, "t.session_id", " WHERE t.session_id = ?", [session_id],
+                                   book=book), session_id)
     series: list[dict[str, Any]] = []
     previous_ts: float | None = None
     for r in conn.execute(
@@ -1008,7 +1021,7 @@ def session_detail(conn: sqlite3.Connection, session_id: str) -> dict[str, Any] 
             # the previous call) says whether an idle stretch lapsed the TTL.
             "cold": r["cache_creation_tokens"] > r["cache_read_tokens"],
             "gap_s": gap,
-            "cost_usd": _cost_of(r),
+            "cost_usd": _cost_of(r, book, ts),
         })
         if ts is not None:
             previous_ts = ts
@@ -1148,7 +1161,8 @@ def agent_detail(conn: sqlite3.Connection, session_id: str,
     detail["cache_hit_rate"] = cache_hit_rate(
         detail["input_tokens"], detail["cache_read_tokens"], detail["cache_creation_tokens"])
     where, params = " WHERE t.session_id = ? AND t.agent_id = ?", [session_id, agent_id]
-    _attach_cost(detail, _costs_by(conn, "t.agent_id", where, params), agent_id)
+    book = ratebook.load(conn)
+    _attach_cost(detail, _costs_by(conn, "t.agent_id", where, params, book=book), agent_id)
 
     series: list[dict[str, Any]] = []
     previous_ts: float | None = None
@@ -1173,7 +1187,7 @@ def agent_detail(conn: sqlite3.Connection, session_id: str,
             "stop_reason": r["stop_reason"],
             "cold": r["cache_creation_tokens"] > r["cache_read_tokens"],
             "gap_s": round(ts - previous_ts) if ts is not None and previous_ts is not None else None,
-            "cost_usd": _cost_of(r),
+            "cost_usd": _cost_of(r, book, ts),
         })
         if ts is not None:
             previous_ts = ts
@@ -1540,8 +1554,11 @@ def _sum_account_tokens(conn: sqlite3.Connection, account_uuid: str,
                               "cache_creation_tokens": 0, "output_tokens": 0}
     cost = 0.0
     unpriced_turns = 0
+    book = ratebook.load(conn)
+    periods = book.boundaries
+    period_col = f", {book.period_sql('t.ts')} AS period" if periods else ""
     for r in conn.execute(
-        f"""SELECT t.model AS model, COUNT(*) AS turns,
+        f"""SELECT t.model AS model{period_col}, COUNT(*) AS turns,
                   COALESCE(SUM(t.input_tokens), 0) AS input_tokens,
                   COALESCE(SUM(t.cache_read_tokens), 0) AS cache_read_tokens,
                   COALESCE(SUM(t.cache_creation_tokens), 0) AS cache_creation_tokens,
@@ -1551,12 +1568,12 @@ def _sum_account_tokens(conn: sqlite3.Connection, account_uuid: str,
            FROM turns t JOIN sessions s ON s.session_id = t.session_id
            WHERE {_effective_account_sql(conn) or "s.account_uuid"} = ?
              AND t.ts >= ? AND t.ts <= ?
-           GROUP BY t.model""",
+           GROUP BY t.model{", period" if periods else ""}""",
         (account_uuid, window_start, window_end),
     ):
         for key in ("input_tokens", "cache_read_tokens", "cache_creation_tokens", "output_tokens"):
             totals[key] += int(r[key])
-        priced = _cost_of(r)
+        priced = _cost_of(r, book, book.period_ts(r["period"]) if periods else None)
         if priced is None:
             unpriced_turns += int(r["turns"])
         else:
@@ -1799,10 +1816,16 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
         tparams,
     ).fetchone()
     totals["cache_5m_tokens"], totals["cache_1h_tokens"] = int(ttl[0]), int(ttl[1])
-    session_costs = _costs_by(conn, "t.session_id", twhere, tparams)
+    book = ratebook.load(conn)
+    session_costs = _costs_by(conn, "t.session_id", twhere, tparams, book=book)
     totals["cost_usd"] = round(sum(c["cost_usd"] for c in session_costs.values()), 6)
     totals["unpriced_turns"] = sum(c["unpriced_turns"] for c in session_costs.values())
-    totals["pricing_as_of"] = pricing.PRICING_AS_OF
+    # When the newest rate was observed, and which models' rates changed inside
+    # this window — a figure spanning a change is priced at each side's own rate,
+    # so the page can say why a model's cost per token is not constant. An
+    # `effective_from` a refresh found is an upper bound on the real change.
+    totals["pricing_as_of"] = book.pricing_as_of()
+    totals["rates_changed"] = book.changes_since(since)
 
     by_day = [
         dict(r) for r in conn.execute(
@@ -1829,7 +1852,7 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
     ]
     by_day = _within(by_day, since)
     day_costs = _costs_by(conn, "date(t.ts, 'unixepoch', 'localtime')", twhere, tparams,
-                          extra="t.ts IS NOT NULL")
+                          extra="t.ts IS NOT NULL", book=book)
     for day in by_day:
         day["cache_hit_rate"] = cache_hit_rate(
             day["input_tokens"], day["cache_read_tokens"], day["cache_creation_tokens"]
@@ -1860,9 +1883,17 @@ def summary(conn: sqlite3.Connection, *, repo_root: str | None = None,
             tparams,
         )
     ]
+    # Per-model cost, period-aware: with no rate change ever recorded the
+    # aggregated row prices in one step; otherwise it takes a period-grouped query.
+    model_costs = (_costs_by(conn, "t.model", twhere, tparams, extra="t.model IS NOT NULL",
+                             book=book) if book.boundaries else {})
     for m in by_model:
-        cost = _cost_of(m)
-        m["cost_usd"] = None if cost is None else round(cost, 6)
+        if book.boundaries:
+            entry = model_costs.get(m["model"], {"cost_usd": 0.0, "unpriced_turns": 0})
+            m["cost_usd"] = None if entry["unpriced_turns"] else round(entry["cost_usd"], 6)
+        else:
+            cost = _cost_of(m, book)
+            m["cost_usd"] = None if cost is None else round(cost, 6)
     usage_rows = conn.execute(
         f"""SELECT c.session_id AS session_id, c.tool_name AS tool_name,
                    {_qualifier_sql(conn, "c.")} AS qualifier,

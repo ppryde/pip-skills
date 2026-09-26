@@ -29,6 +29,7 @@ from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import pairwise
 from typing import Any
 
 from scripts import pricing
@@ -166,7 +167,7 @@ class RateBook:
         change found by a refresh is an UPPER bound on when it really changed."""
         out: list[dict[str, Any]] = []
         for model, rs in self._rows.items():
-            for prev, cur in zip(rs, rs[1:], strict=False):
+            for prev, cur in pairwise(rs):
                 if (since is None or cur.effective_from >= since) and not cur.same_rates(prev):
                     out.append({"model": model, "effective_from": cur.effective_from,
                                 "source": cur.source, "previous": prev.rates(),
