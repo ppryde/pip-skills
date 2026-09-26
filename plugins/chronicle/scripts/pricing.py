@@ -11,14 +11,15 @@ input rate for the 5-minute prefix, 2× for the 1-hour one; cache reads are
 0.1× input on every model except Claude Fable 5.1 and Claude Mythos 5.1,
 whose reads are $0.25 (0.025× — a quarter of Claude Fable 5's cache-read
 rate; whether Claude Mythos 5.1 truly shares Claude Fable 5.1's rate was
-still open when this table was last checked, so it is assumed here).
+still open when this table was last checked, so it is assumed here), and
+Claude Opus 5.5, whose reads are $0.20 (0.05× its $4 input rate).
 ``PRICING_AS_OF`` is the date these were last checked against the pricing
 page — if a model is missing, its turns are counted as *unpriced* rather than
 guessed, and the report says how many.
 """
 from __future__ import annotations
 
-PRICING_AS_OF = "2026-06-24"
+PRICING_AS_OF = "2026-09-25"
 
 # model id (or id prefix — see ``rates_for``) -> USD per MTok
 _RATES: dict[str, dict[str, float]] = {
@@ -26,6 +27,7 @@ _RATES: dict[str, dict[str, float]] = {
     "claude-mythos-5-1": {"input": 10.0, "output": 50.0, "cache_read": 0.25},
     "claude-fable-5":    {"input": 10.0, "output": 50.0, "cache_read": 1.00},
     "claude-mythos-5":   {"input": 10.0, "output": 50.0, "cache_read": 1.00},
+    "claude-opus-5-5":   {"input": 4.0,  "output": 20.0, "cache_read": 0.20},
     "claude-opus-5":     {"input": 5.0,  "output": 25.0, "cache_read": 0.50},
     "claude-opus-4-8":   {"input": 5.0,  "output": 25.0, "cache_read": 0.50},
     "claude-opus-4-7":   {"input": 5.0,  "output": 25.0, "cache_read": 0.50},
