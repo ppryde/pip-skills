@@ -29,7 +29,9 @@ Tables (see ``_SCHEMA``):
                  nothing here depends on it).
 - ``cursors``    per-transcript-file byte offset + the file's mtime/size as
                  last seen, so ``sync`` can skip files that have not moved.
-- ``meta``       schema version, last sync time.
+- ``price_history`` list prices per model with the time each took effect, so a
+                 turn is costed at the rate in force when it ran.
+- ``meta``       schema version, last sync time, last pricing refresh.
 
 Why SQLite: the writers are many short-lived hook processes (one per session,
 per Stop), the readers are the CLI and the dashboard, and the data is tabular
@@ -248,6 +250,26 @@ CREATE TABLE IF NOT EXISTS limit_hits (
 );
 CREATE INDEX IF NOT EXISTS limit_hits_ts ON limit_hits(ts);
 CREATE INDEX IF NOT EXISTS limit_hits_kind ON limit_hits(kind);
+
+-- Anthropic's list prices WITH HISTORY, USD per million tokens (see
+-- `scripts.ratebook`). A row is the rate a model had from `effective_from`
+-- (epoch seconds; 0 = the beginning of time) until its next row. Append-only:
+-- only `pricing rebuild` ever deletes. A change found by polling the pricing
+-- page is stamped with the time it was OBSERVED, which is an UPPER bound on
+-- when it really took effect. `cache_write_*` may be NULL (the source did not
+-- say): the reader then falls back to the 1.25x / 2x multipliers.
+CREATE TABLE IF NOT EXISTS price_history (
+    model          TEXT NOT NULL,
+    effective_from REAL NOT NULL,
+    input          REAL NOT NULL,
+    output         REAL NOT NULL,
+    cache_read     REAL NOT NULL,
+    cache_write_5m REAL,
+    cache_write_1h REAL,
+    source         TEXT NOT NULL DEFAULT '',
+    observed_at    REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (model, effective_from)
+);
 
 CREATE TABLE IF NOT EXISTS cursors (
     path        TEXT PRIMARY KEY,
