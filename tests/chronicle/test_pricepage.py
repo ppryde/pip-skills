@@ -157,3 +157,58 @@ class TestFetch:
         monkeypatch.setattr(urllib.request, "urlopen", boom)
         with pytest.raises(pricepage.FetchError):
             pricepage.fetch_text("https://example.test/x", timeout=1)
+
+
+class _Response:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self, n=-1):
+        return self._body if n < 0 else self._body[:n]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestFetchBodies:
+    """Bodies as the network delivers them (no network is touched)."""
+
+    def _serve(self, monkeypatch, body: bytes):
+        import urllib.request
+        seen = {}
+
+        def fake(request, timeout=None):
+            seen["accept-encoding"] = request.get_header("Accept-encoding")
+            return _Response(body)
+        monkeypatch.setattr(urllib.request, "urlopen", fake)
+        return seen
+
+    def test_plain_text(self, monkeypatch):
+        self._serve(monkeypatch, "| Model |\n".encode())
+        assert pricepage.fetch_text("https://example.test/p").startswith("| Model")
+
+    def test_gzip_bodies_are_decoded_and_asked_for(self, monkeypatch):
+        import gzip
+        seen = self._serve(monkeypatch, gzip.compress(md().encode()))
+        text = pricepage.fetch_text("https://example.test/p")
+        assert parse_pricing(text).error is None
+        assert seen["accept-encoding"] == "gzip"
+
+    def test_corrupt_gzip_is_a_fetch_error(self, monkeypatch):
+        self._serve(monkeypatch, b"\x1f\x8b garbage that is not gzip")
+        with pytest.raises(pricepage.FetchError):
+            pricepage.fetch_text("https://example.test/p")
+
+    def test_oversized_bodies_are_refused(self, monkeypatch):
+        self._serve(monkeypatch, b"x" * 100)
+        with pytest.raises(pricepage.FetchError):
+            pricepage.fetch_text("https://example.test/p", max_bytes=10)
+
+    def test_a_gzip_bomb_is_refused(self, monkeypatch):
+        import gzip
+        self._serve(monkeypatch, gzip.compress(b"0" * 5_000))
+        with pytest.raises(pricepage.FetchError):
+            pricepage.fetch_text("https://example.test/p", max_bytes=1_000)

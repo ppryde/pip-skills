@@ -41,7 +41,7 @@ SOURCE_URLS = (
 DEFAULT_FROM = "2026-05"
 DEFAULT_LIMIT = 40
 REQUEST_GAP_SECONDS = 1.0
-CDX_TIMEOUT = 20.0
+CDX_TIMEOUT = 60.0
 SNAPSHOT_TIMEOUT = 15.0
 _META_DONE = "pricing_backfill_snapshots"     # JSON {timestamp: "ok" | "unparseable" | "suspect"}
 

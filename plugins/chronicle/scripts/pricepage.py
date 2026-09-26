@@ -17,7 +17,9 @@ raises only ``FetchError``.
 """
 from __future__ import annotations
 
+import gzip
 import html as htmllib
+import io
 import re
 import urllib.request
 from dataclasses import dataclass, field
@@ -55,7 +57,9 @@ def fetch_text(url: str, *, timeout: float = 5.0, max_bytes: int = MAX_BYTES) ->
     http(s) 200 within the size cap."""
     if not url.startswith(("https://", "http://")):
         raise FetchError(f"refusing non-http(s) url: {url!r}")
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    # gzip only: urllib does not decode a body, and the stdlib cannot read br/zstd.
+    request = urllib.request.Request(
+        url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read(max_bytes + 1)
@@ -63,6 +67,14 @@ def fetch_text(url: str, *, timeout: float = 5.0, max_bytes: int = MAX_BYTES) ->
         raise FetchError(f"{type(exc).__name__}: {exc}") from exc
     if len(raw) > max_bytes:
         raise FetchError(f"response larger than {max_bytes} bytes")
+    if raw[:2] == b"\x1f\x8b":        # gzip, whether or not the headers said so (the Archive's raw replay)
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
+                raw = gz.read(max_bytes + 1)
+        except (OSError, EOFError) as exc:
+            raise FetchError(f"undecodable gzip body: {exc}") from exc
+        if len(raw) > max_bytes:
+            raise FetchError(f"decompressed response larger than {max_bytes} bytes")
     return raw.decode("utf-8", errors="replace")
 
 
