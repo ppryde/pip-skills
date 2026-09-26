@@ -40,6 +40,9 @@ def _isolate_overseer_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     # -> $CLAUDE_CONFIG_DIR/chronicle/sessions.db; the config dir is already
     # pinned above, but pin the file too so no test can reach a real store.
     monkeypatch.setenv("CHRONICLE_DB", str(tmp_path / "chronicle.db"))
+    # `chronicle sync` (what the sync route runs) refreshes list prices from the
+    # network at most daily; a test must never reach it.
+    monkeypatch.setenv("CHRONICLE_NO_PRICING_REFRESH", "1")
 
 
 @pytest.fixture()

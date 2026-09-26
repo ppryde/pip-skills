@@ -67,7 +67,7 @@ class RateRow:
         return all(getattr(self, f) == getattr(other, f) for f in RATE_FIELDS)
 
 
-def _seed_rows() -> list[RateRow]:
+def builtin_rows() -> list[RateRow]:
     observed = datetime.strptime(pricing.PRICING_AS_OF, "%Y-%m-%d").replace(
         tzinfo=timezone.utc).timestamp()
     return [
@@ -224,7 +224,7 @@ def seed_builtin(conn: sqlite3.Connection) -> int:
     """Insert the built-in table at ``effective_from = 0`` for every model that
     has no history yet. Idempotent. Does not commit."""
     have = {r[0] for r in conn.execute(f"SELECT DISTINCT model FROM {TABLE}")}
-    return insert_rows(conn, [r for r in _seed_rows() if r.model not in have])
+    return insert_rows(conn, [r for r in builtin_rows() if r.model not in have])
 
 
 def newest_by_model(conn: sqlite3.Connection) -> dict[str, RateRow]:

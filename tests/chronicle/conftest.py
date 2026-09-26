@@ -19,6 +19,10 @@ def _isolate_chronicle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("CHRONICLE_DB", str(tmp_path / "config" / "chronicle" / "sessions.db"))
     monkeypatch.delenv("CLAUDE_CONFIG_DIRS", raising=False)
+    # `chronicle sync` refreshes prices from the network at most daily; nothing
+    # in the suite may ever reach it. Tests of the refresh path unset this and
+    # patch `pricepage.fetch_text` instead.
+    monkeypatch.setenv("CHRONICLE_NO_PRICING_REFRESH", "1")
 
 
 def _assistant(message_id: str, *, ts: str, model: str = "claude-opus-5", blocks=None,
