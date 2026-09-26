@@ -27,7 +27,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
-from scripts import chrome_profile, ingest, report, store, volumes
+from scripts import chrome_profile, dedupe, ingest, report, store, volumes
 
 # One error contract for every verb: success prints a single JSON object to
 # stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
@@ -81,6 +81,18 @@ def cmd_sync(args: argparse.Namespace) -> int:
         "db": str(store.db_path()),
     }
     print(json.dumps(out))
+    return 0
+
+
+def cmd_dedupe(args: argparse.Namespace) -> int:
+    """Collapse calls the store holds more than once (see ``scripts.dedupe``).
+    A dry run unless ``--apply``; prints what was or would be removed."""
+    conn = store.connect()
+    try:
+        result = dedupe.dedupe(conn, apply=bool(args.apply))
+    finally:
+        conn.close()
+    print(json.dumps({**result, "db": str(store.db_path())}))
     return 0
 
 
@@ -495,6 +507,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--full", action="store_true",
                        help="forget every cursor and re-read all transcripts (after a schema change)")
         p.set_defaults(fn=cmd_sync)
+
+    p = sub.add_parser("dedupe",
+                       help="collapse API calls stored more than once (a dry run unless --apply)")
+    p.add_argument("--apply", action="store_true",
+                   help="really delete the duplicate rows and recompute the affected sessions")
+    p.set_defaults(fn=cmd_dedupe)
 
     sub.add_parser("status", help="store location and row counts (JSON)").set_defaults(fn=cmd_status)
 
