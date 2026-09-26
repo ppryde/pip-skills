@@ -40,6 +40,45 @@ Subagent transcripts (`<session>/subagents/agent-*.jsonl`) are folded into their
 session and tagged by agent, so a session's totals include the work its agents did; peak
 context is a main-agent figure.
 
+### One API call is counted once
+
+A resumed agent's transcript re-writes its history into a new file, so the same API call
+(same `message.id`, usage and timestamp) appears in every successive snapshot file; forks
+and teammates can likewise repeat earlier assistant messages. Counted per file, one call
+was counted once per file that repeats it (a session with 64 snapshot files counted the
+same calls up to 64 times; ~29% of one real store's turns and tokens were such copies).
+The rule, applied identically at ingest and by `chronicle dedupe`: **one
+`(session_id, message_id)` is one `turns` row.**
+
+- The **main agent's copy** (`agent_id = ''`) wins whenever one exists, whichever order the
+  files are read in (a main copy arriving later replaces the subagent copies already stored).
+- Otherwise exactly **one agent-file copy** survives: the most complete (most output tokens —
+  a copy captured mid-stream is partial), then the one from the **longest snapshot** (the
+  agent file with the most bytes read, i.e. the latest snapshot), then the lowest agent id.
+- **Which agent "owns" a replayed call is arbitrary.** It only moves the call within the
+  per-agent breakdown and never changes a total. As a consequence a snapshot file whose
+  every call is owned by a longer snapshot owns no turns, so `sessions.subagents` (agents
+  that own a turn) counts one resumed agent once rather than once per snapshot; the
+  `agents` table still lists every file.
+- `tool_calls`, `artifacts` and `file_edits` follow the surviving copy's agent, and session
+  rollups are recomputed from the surviving rows, so incremental ingest, `sync --full` and
+  `dedupe` converge on the same rows.
+- A history copied into a *different session* (a resume or fork) is a separate, older
+  rule: the first session to reach a record keeps it (`_owned_elsewhere`).
+
+`chronicle dedupe` applies the same rule to a store built before it existed, including
+sessions whose transcripts are gone from disk:
+
+```bash
+chronicle dedupe            # dry run: rows, tokens and API-equivalent cost that would go, per account
+chronicle dedupe --apply    # delete the copies and recompute only the affected sessions
+```
+
+It runs in one write transaction under the store's busy timeout (safe beside a live sync),
+is idempotent, and touches no session without duplicates. To repair an existing store, run
+`chronicle dedupe --apply` (SQL only, no transcripts needed); a normal `chronicle sync`
+afterwards keeps it clean. `sync --full` is not required, and either order converges.
+
 ## Usage
 
 Locate `cli.py` relative to the plugin root (when installed from the marketplace the scripts
@@ -49,6 +88,7 @@ live under `~/.claude/plugins/chronicle/`):
 chronicle sync                 # reconcile the store with every transcript on disk
 chronicle backfill             # alias of sync (a first run over an empty store)
 chronicle sync --full          # forget every cursor and re-read all transcripts (after a schema change)
+chronicle dedupe [--apply]     # collapse API calls stored more than once (dry run by default)
 chronicle status               # store path, row counts, last sync (JSON)
 chronicle summary [--root R] [--days N]     # totals, per-day series, by-model, tools, session shape, cost
 chronicle sessions [--root R] [--days N] [--limit N]

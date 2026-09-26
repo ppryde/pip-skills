@@ -24,12 +24,12 @@ import sqlite3
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from scripts import store
-from scripts.transcript import MAIN_AGENT, Facts, fold
+from scripts import replay, store
+from scripts.transcript import MAIN_AGENT, Facts, Turn, fold
 from scripts.volumes import RemoteSession, VolumeError, VolumeSource, group_sessions
 
 _GIT_TIMEOUT_SECONDS = 2
@@ -201,7 +201,39 @@ def _owned_elsewhere(conn: sqlite3.Connection, table: str, column: str,
     return found
 
 
-def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> None:
+def _resolve_replays(conn: sqlite3.Connection, session_id: str, turns: list[Turn],
+                     snapshot_bytes: int) -> tuple[list[Turn], dict[str, str], list[tuple[str, str]]]:
+    """Apply the one-call-one-row rule (see ``scripts.replay``) to a batch.
+
+    A call may already be stored under ANOTHER agent (a resumed agent's later
+    snapshot file, or a fork, repeats its history). Returns
+    ``(turns to write, {message_id: surviving agent}, [(message_id, agent)] to
+    adopt)``. A batch turn that loses is not written; one that wins deletes the
+    other agents' rows first. ``snapshot_bytes`` is how far this batch's file has
+    been read, which ranks this copy against the stored ones by snapshot length.
+    """
+    stored = replay.stored_copies(conn, session_id, [t.message_id for t in turns])
+    keep: list[Turn] = []
+    owner: dict[str, str] = {}
+    adopt: list[tuple[str, str]] = []
+    for t in turns:
+        others = [c for c in stored.get(t.message_id, []) if c.agent_id != t.agent_id]
+        if not others:
+            keep.append(t)
+            owner[t.message_id] = t.agent_id
+            continue
+        mine = replay.Copy(t.agent_id, t.output_tokens, t.stop_reason, snapshot_bytes)
+        winner = replay.canonical([mine, *others])
+        owner[t.message_id] = winner.agent_id
+        replay.drop_all_but(conn, session_id, t.message_id, winner.agent_id)
+        if winner is mine:
+            keep.append(t)
+        adopt.append((t.message_id, winner.agent_id))
+    return keep, owner, adopt
+
+
+def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts,
+                 snapshot_bytes: int = 0) -> None:
     # A resumed or forked transcript repeats records from the session it was
     # resumed/forked FROM, verbatim, under this new session id. Every id here
     # is otherwise globally unique, so a record already stored under another
@@ -213,9 +245,18 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
     copied_messages = _owned_elsewhere(
         conn, "turns", "message_id", {t.message_id for t in facts.turns.values()}, session_id
     )
-    turns = [t for t in facts.turns.values() if t.message_id not in copied_messages]
+    fresh = [t for t in facts.turns.values() if t.message_id not in copied_messages]
+    # Within ONE session the same call can still appear in several files (a
+    # resumed agent re-writes its history into a new file); it is one row.
+    # `turns` are the rows this batch writes; `tool_turns` are every fresh
+    # turn re-homed to the agent that OWNS its call, so a skipped copy's tool
+    # uses, artifacts and edits are recorded once, under the surviving row.
+    turns, owner, adopted = _resolve_replays(conn, session_id, fresh, snapshot_bytes)
+    tool_turns = [t if owner[t.message_id] == t.agent_id else replace(t, agent_id=owner[t.message_id])
+                  for t in fresh]
+    tool_owner = {tool_id: t.agent_id for t in tool_turns for tool_id, _, _ in t.tool_uses}
     tool_ids = (
-        {tool_id for t in turns for tool_id, _, _ in t.tool_uses}
+        {tool_id for t in tool_turns for tool_id, _, _ in t.tool_uses}
         | set(facts.results) | set(facts.file_edits)
     )
     copied_tools = _owned_elsewhere(conn, "tool_calls", "tool_use_id", tool_ids, session_id)
@@ -241,7 +282,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                qualifier = COALESCE(tool_calls.qualifier, excluded.qualifier)""",
         [
             (session_id, tool_id, t.agent_id, t.message_id, name, qualifier, t.ts)
-            for t in turns
+            for t in tool_turns
             for tool_id, name, qualifier in t.tool_uses
             if tool_id not in copied_tools
         ],
@@ -253,7 +294,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
                skill, plugin, agent_type, mcp_server, mcp_tool, account_uuid)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,
                (SELECT COUNT(*) FROM tool_calls
-                WHERE session_id = ? AND agent_id = ? AND message_id = ?),
+                WHERE session_id = ? AND message_id = ?),
                ?,?,?,?,?,?,?,?)
            ON CONFLICT(session_id, agent_id, message_id) DO UPDATE SET
                request_id = excluded.request_id, ts = excluded.ts, model = excluded.model,
@@ -279,12 +320,16 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
             (session_id, t.agent_id, t.message_id, t.request_id, t.ts, t.model,
              t.input_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.output_tokens,
              t.thinking_tokens, t.cache_5m_tokens, t.cache_1h_tokens,
-             session_id, t.agent_id, t.message_id,
+             session_id, t.message_id,
              t.stop_reason, t.effort,
              t.skill, t.plugin, t.agent_type, t.mcp_server, t.mcp_tool, t.account_uuid)
             for t in turns
         ],
     )
+    # A call that lost (or replaced) other copies: its tool rows and the
+    # surviving turn's tool count are made to agree with the surviving agent.
+    for message_id, agent_id in adopted:
+        replay.adopt(conn, session_id, message_id, agent_id)
     conn.executemany(
         "INSERT OR IGNORE INTO events(session_id, uuid, agent_id, kind, ts, value) "
         "VALUES (?,?,?,?,?,?)",
@@ -304,7 +349,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         """INSERT OR REPLACE INTO file_edits(session_id, tool_use_id, agent_id, ts, file_path,
                operation, lines_added, lines_removed) VALUES (?,?,?,?,?,?,?,?)""",
         [
-            (session_id, e.tool_use_id, e.agent_id, e.ts, e.file_path, e.operation,
+            (session_id, e.tool_use_id, tool_owner.get(e.tool_use_id, e.agent_id), e.ts, e.file_path, e.operation,
              e.lines_added, e.lines_removed)
             for e in facts.file_edits.values()
             if e.tool_use_id not in copied_tools
@@ -316,7 +361,7 @@ def _write_facts(conn: sqlite3.Connection, session_id: str, facts: Facts) -> Non
         [
             (session_id, a.tool_use_id, t.agent_id, t.ts, a.url, a.title, a.description,
              a.favicon, int(a.redeploy))
-            for t in turns
+            for t in tool_turns
             for a in t.artifacts.values()
             if a.tool_use_id not in copied_tools
         ],
@@ -642,7 +687,7 @@ def _ingest_lines(conn: sqlite3.Connection, origin: _Origin, session_id: str, ag
                    description = COALESCE(excluded.description, agents.description)""",
             (session_id, agent_id, facts.task, origin.description),
         )
-    _write_facts(conn, session_id, facts)
+    _write_facts(conn, session_id, facts, new_offset)
     conn.execute(
         "INSERT OR REPLACE INTO cursors(path, session_id, agent_id, byte_offset, mtime, size, "
         "updated_at) VALUES (?,?,?,?,?,?,?)",
@@ -739,6 +784,10 @@ def rollup(conn: sqlite3.Connection, session_id: str, *, now: float | None = Non
                   COALESCE(SUM(input_tokens), 0), COALESCE(SUM(cache_read_tokens), 0),
                   COALESCE(SUM(cache_creation_tokens), 0), COALESCE(SUM(output_tokens), 0),
                   COALESCE(SUM(thinking_tokens), 0), COALESCE(SUM(tool_calls), 0),
+                  -- Agents that OWN a turn. A snapshot file whose every call is
+                  -- a replay owned by a longer snapshot (see `scripts.replay`)
+                  -- owns none and so is not counted: one resumed agent is one
+                  -- subagent, not one per snapshot file it left behind.
                   COUNT(DISTINCT CASE WHEN agent_id <> '' THEN agent_id END)
            FROM turns WHERE session_id = ?""",
         (session_id,),
