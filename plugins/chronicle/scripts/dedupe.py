@@ -24,14 +24,15 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from scripts import ingest, pricing, replay
+from scripts import ingest, pricing, ratebook, replay
 
 _DUPLICATED = """
     SELECT t.session_id, t.message_id, t.agent_id, t.model, t.input_tokens, t.cache_read_tokens,
            t.cache_creation_tokens, t.cache_5m_tokens, t.cache_1h_tokens, t.output_tokens,
            t.stop_reason, COALESCE(t.account_uuid, s.account_uuid),
            COALESCE((SELECT MAX(c.byte_offset) FROM cursors c
-                     WHERE c.session_id = t.session_id AND c.agent_id = t.agent_id), 0)
+                     WHERE c.session_id = t.session_id AND c.agent_id = t.agent_id), 0),
+           t.ts
     FROM turns t LEFT JOIN sessions s ON s.session_id = t.session_id
     WHERE (t.session_id, t.message_id) IN (
         SELECT session_id, message_id FROM turns GROUP BY session_id, message_id HAVING COUNT(*) > 1)
@@ -43,6 +44,7 @@ def dedupe(conn: sqlite3.Connection, *, apply: bool = False,
     """Collapse duplicated calls; return what was (``apply``) or would be removed."""
     if now is None:
         now = time.time()
+    book = ratebook.load(conn)
     groups: dict[tuple[str, str], list[tuple[Any, ...]]] = defaultdict(list)
     for row in conn.execute(_DUPLICATED):
         groups[(row[0], row[1])].append(tuple(row))
@@ -63,7 +65,8 @@ def dedupe(conn: sqlite3.Connection, *, apply: bool = False,
             row_tokens = r[4] + r[5] + r[6] + r[9]
             usd = pricing.turn_cost(
                 r[3], input_tokens=r[4], cache_read_tokens=r[5], cache_creation_tokens=r[6],
-                cache_5m_tokens=r[7], cache_1h_tokens=r[8], output_tokens=r[9])
+                cache_5m_tokens=r[7], cache_1h_tokens=r[8], output_tokens=r[9],
+                book=book, ts=r[13])
             tokens += row_tokens
             cost += usd or 0.0
             unpriced += usd is None
@@ -84,7 +87,7 @@ def dedupe(conn: sqlite3.Connection, *, apply: bool = False,
         "tokens_removed": tokens,
         "cost_usd_removed": round(cost, 2),
         "unpriced_rows_removed": unpriced,
-        "pricing_as_of": pricing.PRICING_AS_OF,
+        "pricing_as_of": book.pricing_as_of(),
         "by_account": {
             account: {**bucket, "cost_usd": round(bucket["cost_usd"], 2)}
             for account, bucket in sorted(by_account.items())

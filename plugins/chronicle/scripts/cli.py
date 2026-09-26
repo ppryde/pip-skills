@@ -27,7 +27,18 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
-from scripts import chrome_profile, dedupe, ingest, report, store, volumes
+import sqlite3
+
+from scripts import (
+    chrome_profile,
+    dedupe,
+    ingest,
+    pricehistory,
+    pricerefresh,
+    report,
+    store,
+    volumes,
+)
 
 # One error contract for every verb: success prints a single JSON object to
 # stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
@@ -69,6 +80,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
     try:
         result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)),
                              volumes=[volumes.VolumeSource.of(v) for v in configured])
+        # List prices, at most daily and never fatal: the outcome rides in the
+        # result (`pricing: {status, changed, ...}`) and a failure changes
+        # nothing else about the sync. Off with CHRONICLE_NO_PRICING_REFRESH=1.
+        pricing = pricerefresh.maybe_refresh(conn)
     finally:
         conn.close()
     # Config entries that were skipped as invalid are volume errors too: a
@@ -77,11 +92,74 @@ def cmd_sync(args: argparse.Namespace) -> int:
     result["volume_errors"] = [{"volume": None, "error": p} for p in problems] + result["volume_errors"]
     out: dict[str, Any] = {
         **result,
+        "pricing": pricing,
         "projects_dirs": [str(p) for p in projects],
         "db": str(store.db_path()),
     }
     print(json.dumps(out))
     return 0
+
+
+def cmd_pricing(args: argparse.Namespace) -> int:
+    """`chronicle pricing status|seed|refresh|backfill` — the rate history behind every
+    cost figure (see ``scripts.pricerefresh`` and the README's "Pricing").
+
+    ``refresh --dry-run`` and ``status`` only read (a dry run on a missing store
+    compares against the built-in table and creates nothing); ``seed`` and a
+    real ``refresh`` write. A refresh that could not complete prints its JSON
+    status and exits 1."""
+    if args.action == "status":
+        conn = _open_readonly()
+        if conn is None:
+            print(json.dumps({"db": str(store.db_path()), "exists": False,
+                              **pricerefresh.status(sqlite3.connect(":memory:"))}))
+            return 0
+        try:
+            out = {"db": str(store.db_path()), "exists": True, **pricerefresh.status(conn)}
+        finally:
+            conn.close()
+        print(json.dumps(out))
+        return 0
+    if args.action == "seed":
+        conn = store.connect()
+        try:
+            out = pricerefresh.seed(conn)
+        finally:
+            conn.close()
+        print(json.dumps({**out, "db": str(store.db_path())}))
+        return 0
+    if args.action == "backfill":
+        if args.since_month is not None and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", args.since_month):
+            return _fail(f"invalid --from value: {args.since_month!r} (want YYYY-MM)", code=INVALID_INPUT)
+        if args.limit < 1:
+            return _fail("--limit must be at least 1", code=INVALID_INPUT)
+        if args.dry_run:
+            conn = _open_readonly() or sqlite3.connect(":memory:")
+        else:
+            conn = store.connect()
+        try:
+            result = pricehistory.backfill(conn, since_month=args.since_month,
+                                           dry_run=bool(args.dry_run), limit=args.limit)
+        finally:
+            conn.close()
+        print(json.dumps(result))
+        return 1 if result["status"] == "error" else 0
+    # refresh
+    if args.dry_run:
+        conn = _open_readonly() or sqlite3.connect(":memory:")
+        try:
+            result = pricerefresh.refresh(conn, dry_run=True)
+        finally:
+            conn.close()
+    else:
+        conn = store.connect()
+        try:
+            result = pricerefresh.refresh(conn)
+            pricerefresh.record_attempt(conn, result, time.time())
+        finally:
+            conn.close()
+    print(json.dumps(result))
+    return 1 if result["status"] in ("error", "refused") else 0
 
 
 def cmd_dedupe(args: argparse.Namespace) -> int:
@@ -515,6 +593,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_dedupe)
 
     sub.add_parser("status", help="store location and row counts (JSON)").set_defaults(fn=cmd_status)
+
+    p = sub.add_parser("pricing", help="list-price history behind the cost figures")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("status", help="rates per model with effective ranges, as-of, last refresh (JSON)")
+    actions.add_parser("seed", help="write the built-in rate table into the store's history")
+    refresh = actions.add_parser(
+        "refresh", help="fetch the pricing page and append any changed or new rates")
+    refresh.add_argument("--dry-run", action="store_true",
+                         help="show what would change; write nothing")
+    backfill = actions.add_parser(
+        "backfill", help="recover past rates from Internet Archive snapshots of the pricing page "
+                         "(manual, polite, resumable, best-effort)")
+    backfill.add_argument("--from", dest="since_month", default=None, metavar="YYYY-MM",
+                          help="earliest month to look at (default: 2026-05)")
+    backfill.add_argument("--dry-run", action="store_true", help="show the rows it would add; write nothing")
+    backfill.add_argument("--limit", type=int, default=pricehistory.DEFAULT_LIMIT,
+                          help="most requests to make this run, listings included (default: %(default)s)")
+    p.set_defaults(fn=cmd_pricing)
 
     p = sub.add_parser("summary", help="aggregate metrics (JSON)")
     p.add_argument("--root", default=None, help="scope to one main repo root")

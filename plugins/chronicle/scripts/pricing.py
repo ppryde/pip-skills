@@ -4,20 +4,31 @@ Claude Code sessions on a subscription are not billed per token, so the
 figure chronicle reports is *what the same calls would have cost at API list
 prices* — a stable yardstick for comparing sessions, not an invoice. It is
 computed at read time from the per-turn token counts (never stored), so a
-price change here is reflected the moment the page reloads, with no re-sync.
+change to a rate is reflected the moment the page reloads, with no re-sync.
+
+Where the rates come from: the store's ``price_history`` table
+(``scripts.ratebook`` — rates WITH HISTORY, so a turn is priced at the rate in
+force when it ran, refreshed from the pricing page by ``scripts.pricerefresh``).
+``_RATES`` below is the *seed and the offline fallback*: it is what an empty or
+not-yet-migrated store, or a model the table has never heard of, is priced
+with, and what ``chronicle pricing seed`` writes into the table. It is only
+hand-maintained as a last resort now — ``PRICING_AS_OF`` is the date it was
+last checked against the pricing page.
 
 Rates are USD per million tokens. Cache writes are priced by TTL: 1.25× the
-input rate for the 5-minute prefix, 2× for the 1-hour one; cache reads are
-0.1× input on every model except Claude Fable 5.1 and Claude Mythos 5.1,
-whose reads are $0.25 (0.025× — a quarter of Claude Fable 5's cache-read
-rate; whether Claude Mythos 5.1 truly shares Claude Fable 5.1's rate was
-still open when this table was last checked, so it is assumed here), and
-Claude Opus 5.5, whose reads are $0.20 (0.05× its $4 input rate).
-``PRICING_AS_OF`` is the date these were last checked against the pricing
-page — if a model is missing, its turns are counted as *unpriced* rather than
-guessed, and the report says how many.
+input rate for the 5-minute prefix, 2× for the 1-hour one (the table stores the
+page's own dollar figures and falls back to these multipliers when a source
+lacks them); cache reads are 0.1× input on every model except Claude Fable 5.1
+and Claude Mythos 5.1, whose reads are $0.25 (0.025× — a quarter of Claude
+Fable 5's cache-read rate; whether Claude Mythos 5.1 truly shares Claude Fable
+5.1's rate was still open when this table was last checked, so it is assumed
+here), and Claude Opus 5.5, whose reads are $0.20 (0.05× its $4 input rate).
+If a model is missing everywhere, its turns are counted as *unpriced* rather
+than guessed, and the report says how many.
 """
 from __future__ import annotations
+
+from typing import Any
 
 PRICING_AS_OF = "2026-09-25"
 
@@ -43,12 +54,13 @@ _MTOK = 1_000_000
 
 
 def rates_for(model: str | None) -> dict[str, float] | None:
-    """Rates for a model id, or None when it is not in the table.
+    """Built-in rates for a model id, or None when it is not in the table.
 
     Exact id first; otherwise the longest table key the id extends on a
     ``-`` boundary, so a dated snapshot (``claude-haiku-4-5-20251001``)
     resolves to its family and ``claude-fable-5-1`` never matches
-    ``claude-fable-5``'s row.
+    ``claude-fable-5``'s row. (``ratebook.RateBook.rates_for`` has the same
+    semantics over the store's history.)
     """
     if not model:
         return None
@@ -63,25 +75,32 @@ def rates_for(model: str | None) -> dict[str, float] | None:
 
 def turn_cost(model: str | None, *, input_tokens: int = 0, cache_read_tokens: int = 0,
               cache_creation_tokens: int = 0, cache_5m_tokens: int = 0,
-              cache_1h_tokens: int = 0, output_tokens: int = 0) -> float | None:
+              cache_1h_tokens: int = 0, output_tokens: int = 0,
+              book: Any = None, ts: float | None = None) -> float | None:
     """USD for one API call at list prices; None when the model is unpriced.
+
+    With a ``book`` (a ``ratebook.RateBook``) the model is priced at the rate in
+    force at ``ts``; without one, at the built-in table.
 
     ``output_tokens`` already includes thinking (the API bills them as
     output). Cache-creation tokens are billed by TTL from the 5m/1h split;
     any creation the split does not account for (a transcript written before
     the API reported the split) is billed at the 5-minute rate, the default.
     """
-    rates = rates_for(model)
+    rates = rates_for(model) if book is None else book.rates_for(model, ts)
     if rates is None:
         return None
     split = cache_5m_tokens + cache_1h_tokens
     unsplit = max(0, cache_creation_tokens - split)
     write_5m = cache_5m_tokens + unsplit
+    w5 = rates.get("cache_write_5m")
+    w1 = rates.get("cache_write_1h")
     usd = (
         input_tokens * rates["input"]
         + cache_read_tokens * rates["cache_read"]
-        + write_5m * rates["input"] * CACHE_WRITE_5M_MULTIPLIER
-        + cache_1h_tokens * rates["input"] * CACHE_WRITE_1H_MULTIPLIER
+        + (write_5m * rates["input"] * CACHE_WRITE_5M_MULTIPLIER if w5 is None else write_5m * w5)
+        + (cache_1h_tokens * rates["input"] * CACHE_WRITE_1H_MULTIPLIER
+           if w1 is None else cache_1h_tokens * w1)
         + output_tokens * rates["output"]
     )
     return usd / _MTOK
