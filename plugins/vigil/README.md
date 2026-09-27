@@ -30,6 +30,9 @@ other plugin.
   content, `--inline <path>` files, and your notes) and arms an in-process
   `/clear`; `SessionStart` re-injects it and clears the gate. `vigil
   pause`/`resume` suspend/re-arm auto-handover (and release the gate).
+  `--title "<task name>"` also renames the tmux window when the Stop hook
+  dispatches `/clear` — auto mode only, so a bank of parallel sessions stays
+  labeled with what each one is doing.
 - Injected `additionalContext` alone never starts a turn — the fresh session
   just sits idle. So after an automatic `/clear` (`SessionStart` fired with
   `source == "clear"`, tmux reachable, pane known), vigil also types a short

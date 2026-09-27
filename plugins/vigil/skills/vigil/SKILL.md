@@ -40,7 +40,7 @@ point; (b) you finish a coherent unit of work; or (c) the user asks. Run:
 
 ```
 handover [--notes "the critical prose a fresh you must know"] \
-         [--content-file F | -] [--no-snapshot]
+         [--content-file F | -] [--no-snapshot] [--title "short task name"]
 ```
 
 The handover document is assembled from a generic session snapshot (cwd, git
@@ -53,6 +53,12 @@ archived to `.claude/vigil/archive/` on inject) — and you resume lean. After a
 `/clear`, injected context alone can't start a turn, so vigil also types a
 resume prompt into the pane so the fresh session picks the work back up
 hands-free — no human keystroke needed to get going again.
+
+Pass `--title "<3-6 word summary>"` to also rename the tmux window at the
+moment the Stop hook dispatches `/clear` — so a window showing many parallel
+sessions tells you what each one is doing without attaching. Auto mode
+(tmux) only: there's no window to rename in manual mode, and the title is
+silently dropped if the cycle never dispatches.
 
 ## Defer and pause
 Never clear a discussion out from under a live human. While a live exchange is
