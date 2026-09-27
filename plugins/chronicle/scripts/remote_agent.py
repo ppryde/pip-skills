@@ -113,19 +113,26 @@ def _iter_project_files(projects_root):
 
 
 def _read_jsonl_frame(full_path, relpath, offset, size, fidelity, deadline, bytes_left):
-    """One ``file`` frame for ``relpath``, or None if there is nothing new to
-    send (offset already at size, and it did not shrink)."""
+    """One ``file`` frame for ``relpath`` as ``(frame_or_None, sent_bytes,
+    finished)`` — ``finished`` is False whenever this file has more
+    (original) bytes past ``to_offset`` that this call did not get to, so the
+    caller can tell "budget ran out mid-file" apart from "this file is fully
+    caught up", which the RETURNED BYTE COUNT alone cannot: a small
+    redacted-output count can still mean a large unread remainder (redaction
+    shrinks lines a lot), and reading exactly `bytes_left` original bytes can
+    still land mid-line. ``None`` for the frame itself means there is nothing
+    NEW to send (offset already at size, and it did not shrink)."""
     start = 0 if offset > size else offset
     truncated = offset > size
     if start >= size and not truncated:
-        return None, 0
+        return None, 0, True
     lines_out = []
     sent_bytes = 0
     to_offset = start
     try:
         handle = open(full_path, "rb")  # noqa: SIM115 - OSError here is caught separately from the read loop
     except OSError:
-        return None, 0
+        return None, 0, True
     with handle:
         limit = max(0, min(bytes_left, size - start))
         for raw, end in iter_complete_lines(  # noqa: F821 - defined by redact.py, bundled ahead of this file
@@ -139,10 +146,11 @@ def _read_jsonl_frame(full_path, relpath, offset, size, fidelity, deadline, byte
                 sent_bytes += len(slimmed)
             if sent_bytes >= bytes_left or deadline.expired():
                 break
+    finished = to_offset >= size
     if not lines_out and to_offset == start and not truncated:
-        return None, 0
-    return {"t": "file", "file": relpath, "from_offset": start, "to_offset": to_offset,
-            "lines": lines_out, "truncated": truncated}, sent_bytes
+        return None, 0, finished
+    return ({"t": "file", "file": relpath, "from_offset": start, "to_offset": to_offset,
+            "lines": lines_out, "truncated": truncated}, sent_bytes, finished)
 
 
 def _read_meta_frame(full_path, relpath, known_size, size, fidelity):
@@ -250,7 +258,10 @@ def run(request):
         offset = known.get("offset", 0) if isinstance(known, dict) else 0
         if not isinstance(offset, int) or offset < 0:
             offset = 0
-        frame, sent = _read_jsonl_frame(full, relpath, offset, size, fidelity, deadline, bytes_left)
+        frame, sent, finished = _read_jsonl_frame(full, relpath, offset, size, fidelity, deadline,
+                                                  bytes_left)
+        if not finished:
+            partial = True
         if frame is not None:
             _emit(frame)
             files_sent += 1
