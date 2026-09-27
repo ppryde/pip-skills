@@ -13,6 +13,7 @@ Your prompt is the absolute path of your bundle. Read it first.
 - Run every gate command in the bundle and record the exact command and result.
 - Exercise the change end-to-end the way a user would (run the CLI, hit the endpoint, open the page) and record what you did and saw.
 - Do not fix anything. A failure is a FAIL with evidence.
+- Be concise, not terse: no restated context, no hedging, no padding — but never drop a detail the orchestrator needs to decide or act on.
 
 ## Verification file (the reply path in your bundle)
 One entry per gate (command → result) and per end-to-end check (action → observation). This file becomes the card's `## Verification` verbatim — status and Learned facts go in your reply block below, not here.

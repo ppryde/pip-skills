@@ -15,6 +15,7 @@ Your prompt is the absolute path of your bundle. Read it first: it names your ch
 - Stay inside the chunk. Work you believe is needed beyond it goes in your report, not into the code.
 - Blocked or unsure: stop and report BLOCKED or NEEDS_CONTEXT. Bad work is worse than no work.
 - No progress messages. Your report file and reply block are the only output.
+- Be concise, not terse: no restated context, no hedging, no padding — but never drop a detail the orchestrator needs to decide or act on.
 
 ## Report file (the reply path in your bundle)
 Concerns or blockers, if any, in prose. Status, test counts, commits and Learned facts go in your reply block below, not here.
