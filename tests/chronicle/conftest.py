@@ -23,6 +23,11 @@ def _isolate_chronicle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # in the suite may ever reach it. Tests of the refresh path unset this and
     # patch `pricepage.fetch_text` instead.
     monkeypatch.setenv("CHRONICLE_NO_PRICING_REFRESH", "1")
+    # Same idea, ABSOLUTE: nothing in the suite may ever invoke a real `ssh`.
+    # `test_remote.py`/`test_cli_remotes.py` are the two files that exercise
+    # the real code path — they unset this themselves and use an injected
+    # fake transport instead, never a real host.
+    monkeypatch.setenv("CHRONICLE_NO_REMOTES", "1")
 
 
 def _assistant(message_id: str, *, ts: str, model: str = "claude-opus-5", blocks=None,

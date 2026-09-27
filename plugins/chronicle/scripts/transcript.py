@@ -597,7 +597,15 @@ def _fold_tool_results(facts: Facts, record: dict[str, Any], message: dict[str, 
         # A refused or invalid publish can echo an artifact URL in its own
         # error text; it published nothing, so that url is never recorded.
         url = None if is_error else artifact_url(text)
-        facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=len(text), ts=ts,
+        # `_len` is a redacted transcript's stand-in for a result's character
+        # count (see scripts.redact): the remote-agent pipeline strips the
+        # actual text but keeps this number so `result_chars` still matches. A
+        # real transcript never carries this key, so `len(text)` (== 0 for the
+        # empty string a redacted block's `content` holds) is the fallback.
+        chars = block.get("_len")
+        if not isinstance(chars, int) or isinstance(chars, bool):
+            chars = len(text)
+        facts.results[tool_id] = ToolResult(tool_use_id=tool_id, chars=chars, ts=ts,
                                             artifact_url=url, is_error=is_error)
         edit = _file_edit(tool_id, record.get("toolUseResult"), ts, agent_id)
         if edit is not None:
@@ -633,21 +641,32 @@ def _file_edit(tool_id: str, raw: Any, ts: float | None,
     """
     if not isinstance(raw, dict):
         return None
-    patch = raw.get("structuredPatch")
     file_path = _opt_str(raw.get("filePath"))
-    if not isinstance(patch, list) or not file_path:
+    if not file_path:
         return None
-    added = removed = 0
-    for hunk in patch:
-        if not isinstance(hunk, dict):
-            continue
-        for line in hunk.get("lines") or []:
-            if not isinstance(line, str) or line.startswith(_DIFF_HEADERS):
+    # `_lines` is a redacted transcript's stand-in for the diff's +/- COUNTS
+    # (see scripts.redact._line_counts): the remote-agent pipeline strips the
+    # actual patch content but keeps this pair so churn still matches. A real
+    # transcript never carries this key.
+    precomputed = raw.get("_lines")
+    if (isinstance(precomputed, list) and len(precomputed) == 2
+            and all(isinstance(n, int) and not isinstance(n, bool) for n in precomputed)):
+        added, removed = precomputed
+    else:
+        patch = raw.get("structuredPatch")
+        if not isinstance(patch, list):
+            return None
+        added = removed = 0
+        for hunk in patch:
+            if not isinstance(hunk, dict):
                 continue
-            if line.startswith("+"):
-                added += 1
-            elif line.startswith("-"):
-                removed += 1
+            for line in hunk.get("lines") or []:
+                if not isinstance(line, str) or line.startswith(_DIFF_HEADERS):
+                    continue
+                if line.startswith("+"):
+                    added += 1
+                elif line.startswith("-"):
+                    removed += 1
     return FileEdit(
         tool_use_id=tool_id,
         file_path=file_path,

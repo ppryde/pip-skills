@@ -49,6 +49,8 @@ import sqlite3
 from pathlib import Path
 from typing import NamedTuple
 
+from scripts.redact import FIDELITIES
+
 DB_ENV = "CHRONICLE_DB"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 CLAUDE_DIRS_ENV = "CLAUDE_CONFIG_DIRS"
@@ -531,6 +533,183 @@ def save_volumes(vols: list[Volume]) -> Path:
             raise ValueError(f"{path}: config is not a JSON object")
         data = loaded
     data["volumes"] = [{"name": v.name, "claude_dir": v.claude_dir} for v in vols]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Remote boxes (WF-122): Enterprise "prod-access" machines whose Claude runs
+# never touch this filesystem, read over ssh and redacted before a byte
+# leaves the box (see `scripts.remote_agent`, `scripts.remote`). A remote's
+# LOCAL mirror of its own redacted transcripts is ingested exactly like any
+# other Claude config dir; `sessions.config_dir` carries the synthetic label
+# below instead of the mirror's real path — the same trick `docker://` plays
+# for a volume, and for the same reason: the mirror is an implementation
+# detail, not something a person should have to know to filter by account.
+
+REMOTE_LABEL_PREFIX = "remote://"
+DEFAULT_REMOTE_CLAUDE_DIR = "/opt/wf-state/.config/claude"
+DEFAULT_REMOTE_FIDELITY = "minimal"
+DEFAULT_REMOTE_INTERVAL_S = 900
+MIN_REMOTE_INTERVAL_S = 60
+
+# `name` and `host` are interpolated into an `ssh` argv, where a leading "-"
+# is read as an option and a space/quote/shell metacharacter can change what
+# runs. `claude_dir` travels only as JSON in the request the remote script
+# reads off its own stdin (never through a shell) but is held to the same
+# discipline — it is still an absolute path opinion a hostile config could
+# abuse to point outside `projects/`.
+_REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_REMOTE_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_REMOTE_CLAUDE_DIR_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+
+
+class Remote(NamedTuple):
+    """One Enterprise box read over ssh, at most once every ``interval_s``."""
+    name: str
+    host: str
+    claude_dir: str = DEFAULT_REMOTE_CLAUDE_DIR
+    fidelity: str = DEFAULT_REMOTE_FIDELITY
+    mirror_dir: str | None = None
+    interval_s: int = DEFAULT_REMOTE_INTERVAL_S
+    enabled: bool = True
+
+    @property
+    def label(self) -> str:
+        """The stable stand-in for a host config dir: ``remote://<name>``."""
+        return f"{REMOTE_LABEL_PREFIX}{self.name}"
+
+    def mirror_root(self) -> Path:
+        """Where this remote's redacted, append-only mirror lives on THIS
+        filesystem: the ``mirror_dir`` override, or
+        ``<config_dir>/chronicle/remotes/<name>``."""
+        if self.mirror_dir:
+            return Path(self.mirror_dir).expanduser()
+        return config_dir() / "chronicle" / "remotes" / self.name
+
+
+def is_remote_label(value: str | None) -> bool:
+    return bool(value) and str(value).startswith(REMOTE_LABEL_PREFIX)
+
+
+def normalise_remote(name: object, host: object, *, claude_dir: object = DEFAULT_REMOTE_CLAUDE_DIR,
+                     fidelity: object = DEFAULT_REMOTE_FIDELITY, mirror_dir: object = None,
+                     interval_s: object = DEFAULT_REMOTE_INTERVAL_S, enabled: object = True) -> Remote:
+    """A validated ``Remote``; ``ValueError`` names what is wrong with it.
+    Never connects — this is pure validation."""
+    if not isinstance(name, str) or not _REMOTE_NAME_RE.match(name):
+        raise ValueError(f"invalid remote name: {name!r}")
+    if not isinstance(host, str) or not _REMOTE_HOST_RE.match(host):
+        raise ValueError(f"invalid remote host: {host!r}")
+    clean_dir = claude_dir if isinstance(claude_dir, str) else ""
+    if not _REMOTE_CLAUDE_DIR_RE.match(clean_dir) or ".." in Path(clean_dir).parts:
+        raise ValueError(f"invalid claude dir: {claude_dir!r}")
+    if fidelity not in FIDELITIES:
+        raise ValueError(f"invalid fidelity: {fidelity!r}")
+    clean_mirror: str | None = None
+    if mirror_dir:
+        if not isinstance(mirror_dir, str) or not mirror_dir.strip():
+            raise ValueError(f"invalid mirror_dir: {mirror_dir!r}")
+        clean_mirror = mirror_dir
+    try:
+        if isinstance(interval_s, bool) or not isinstance(interval_s, (int, float, str)):
+            raise TypeError
+        clean_interval = max(MIN_REMOTE_INTERVAL_S, int(interval_s))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid interval_s: {interval_s!r}") from exc
+    return Remote(name, host, clean_dir, fidelity, clean_mirror, clean_interval, bool(enabled))
+
+
+def load_remotes() -> tuple[list[Remote], list[str]]:
+    """The configured remote boxes, plus a description of every entry that
+    had to be skipped (never raised — one bad entry must not stop the local
+    dirs, or the other remotes, from syncing)."""
+    raw = _read_machine_config().get("remotes")
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], ["remotes must be a list of {name, host, ...} objects"]
+    found: dict[str, Remote] = {}
+    problems: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            problems.append(f"skipped remote entry {entry!r}: not an object")
+            continue
+        try:
+            remote = normalise_remote(
+                entry.get("name"), entry.get("host"),
+                claude_dir=entry.get("claude_dir", DEFAULT_REMOTE_CLAUDE_DIR),
+                fidelity=entry.get("fidelity", DEFAULT_REMOTE_FIDELITY),
+                mirror_dir=entry.get("mirror_dir"),
+                interval_s=entry.get("interval_s", DEFAULT_REMOTE_INTERVAL_S),
+                enabled=entry.get("enabled", True),
+            )
+        except ValueError as exc:
+            problems.append(f"skipped remote entry {entry!r}: {exc}")
+            continue
+        found.setdefault(remote.name, remote)
+    return list(found.values()), problems
+
+
+def remotes() -> list[Remote]:
+    return load_remotes()[0]
+
+
+def remote_mirror_dir_for(label: str | None) -> Path | None:
+    """The mirror root a ``remote://<name>`` label resolves to, or None when
+    no configured remote owns it (removed from the config, or not a remote
+    label at all)."""
+    if not is_remote_label(label):
+        return None
+    assert label is not None
+    name = label[len(REMOTE_LABEL_PREFIX):]
+    for remote in remotes():
+        if remote.name == name:
+            return remote.mirror_root()
+    return None
+
+
+def remote_label_for(config_dir: Path) -> str | None:
+    """The reverse of `remote_mirror_dir_for`: the ``remote://<name>`` label
+    for a config dir that IS a configured remote's mirror root, or None for
+    every other path (an ordinary host dir, a mirror since removed from the
+    config). Used by `ingest.config_dir_of` so a session read out of a
+    remote's mirror is stamped with the stable label rather than the mirror's
+    real (and irrelevant to a person filtering by account) path."""
+    try:
+        resolved = config_dir.resolve()
+    except OSError:
+        return None
+    for remote in remotes():
+        try:
+            if remote.mirror_root().resolve() == resolved:
+                return remote.label
+        except OSError:
+            continue
+    return None
+
+
+def save_remotes(rems: list[Remote]) -> Path:
+    """Write ``rems`` into the machine config, PRESERVING every other key —
+    same contract as `save_volumes`."""
+    path = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text() or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: malformed config JSON: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{path}: config is not a JSON object")
+        data = loaded
+    data["remotes"] = [
+        {"name": r.name, "host": r.host, "claude_dir": r.claude_dir, "fidelity": r.fidelity,
+         "mirror_dir": r.mirror_dir, "interval_s": r.interval_s, "enabled": r.enabled}
+        for r in rems
+    ]
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n")

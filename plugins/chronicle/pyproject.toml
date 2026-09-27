@@ -12,3 +12,13 @@ python_version = "3.11"
 disallow_untyped_defs = true
 warn_unused_ignores = true
 ignore_missing_imports = true
+
+# remote_agent.py is never imported: it is concatenated with redact.py and fed
+# to whatever python3 a remote "prod-access" box happens to have (see
+# scripts/remote.py:bundle_source). It stays deliberately minimal, untyped
+# source rather than an internal API this project type-checks; its contract
+# is enforced instead by tests/chronicle's fake-ssh round-trip tests and the
+# python3.8 ast.parse grammar check.
+[[tool.mypy.overrides]]
+module = "scripts.remote_agent"
+disallow_untyped_defs = false

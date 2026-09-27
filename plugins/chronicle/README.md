@@ -208,6 +208,94 @@ skipped and named in the result, which the dashboard's Sync route passes straigh
 A `volumes` entry that failed validation is skipped and reported the same way (`"volume": null`).
 `chronicle sync --projects DIR` reads exactly the dirs you name and no volumes.
 
+### Remote boxes
+
+Some Enterprise usage happens on AWS Ubuntu "prod-access" machines, reached over ssh, where
+Claude runs as root with `CLAUDE_CONFIG_DIR=/opt/wf-state/.config/claude`. Those transcripts
+never touch this laptop, and their tool output can carry **production data** — so unlike a
+Docker volume, a remote box is never read into the store directly. Instead, a small read-only
+script is fed to the box's own `python3` over ssh, **redacts every line there**, and only the
+redacted bytes ever cross the wire. What lands locally is an append-only mirror of the redacted
+transcripts, which `sync` then ingests exactly like any other Claude config dir.
+
+```
+chronicle remotes add prod-access-env prod-access-env.wayflyer.team \
+    --mirror-dir ~/claude-transcript-archive/remotes/prod-access-env
+chronicle remotes probe                 # one read-only connection: lists, pulls nothing, writes nothing
+chronicle remotes sync --dry-run        # what would pull, without pulling it
+chronicle remotes sync                  # pull now, ignoring the usual interval
+chronicle remotes list
+chronicle remotes status
+chronicle remotes rm prod-access-env    # stop watching (the mirror and its ingested history stay)
+```
+
+`add` **never connects** — `name`/`host`/`claude_dir` are checked against strict regexes (they
+end up in an `ssh` argv or the remote agent's own request) and saved. It lands in the same
+machine config as `claude_dirs`/`volumes`:
+
+```json
+{"claude_dirs": ["~/.claude-personal"],
+ "volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}],
+ "remotes": [{"name": "prod-access-env", "host": "prod-access-env.wayflyer.team",
+              "claude_dir": "/opt/wf-state/.config/claude", "fidelity": "minimal",
+              "mirror_dir": "/Users/me/claude-transcript-archive/remotes/prod-access-env",
+              "interval_s": 900, "enabled": true}]}
+```
+
+**What leaves the box.** Only redacted usage frames — never a prompt, an assistant reply,
+thinking, a tool call's INPUT, a tool result's TEXT, a title, or a subagent's task line, except
+at the `titles` fidelity, which knowingly opts into the last two. The redaction runs ON the
+remote (`scripts/redact.py`, bundled with the tiny agent script and fed to `python3 -` over
+ssh — see `scripts/remote_agent.py`'s module docstring for the exact protocol), so message
+content is gone before a byte is ever written to the ssh pipe.
+
+**The three fidelities** (`--fidelity`, default `minimal`), each a strict superset of the one
+before — verified by ingesting one fixture transcript both ways (as written, and through the
+redaction pipeline at each fidelity) and diffing what the store derives; not yet re-measured
+against a real transcript sample from an actual prod-access box:
+
+| Fidelity | Keeps, beyond the previous level | Loses (until you opt up) |
+|---|---|---|
+| `minimal` | ids, timestamps, session/agent ids, cwd, git branch, model, the API `usage` block, stop_reason, tool NAMES (no inputs), bridge/cost-state account ids, turn durations | effort; skill/plugin/mcp/agent-type attribution; qualifiers (which skill, which agent type); tool result SIZES; file edits and their line churn; Artifact publishes; usage-limit banners; titles; subagent task lines |
+| `attribution` | effort, the attribution stamps, Skill name, Agent `subagent_type`, MCP tool names, each tool result's LENGTH (a number, never its text), Edit/Write's file path + added/removed line COUNTS (content never kept), Artifact facts (action, file path, favicon, published URL), usage-limit banners | titles; subagent task lines; Artifact title/description (falls back to the file's stem) |
+| `titles` | session titles, and subagent task lines truncated to ~80 characters | — (this is the top level) |
+
+`titles` is the one level that knowingly admits customer or production detail: a session title
+or a subagent's opening line is model- or user-written prose, and can say anything. Opt into it
+per remote, not by default.
+
+**The mirror.** `sync` (and `chronicle remotes sync`) appends new redacted lines to
+`<mirror_dir>/projects/<same relative path as on the remote>` — append-only, never rewritten in
+place, so it doubles as a redacted, rolling backup of what that box has run. It is not a
+substitute for the real transcripts: it is what redaction left. `sessions.config_dir` for a
+session read out of it is the synthetic `remote://prod-access-env` label — the same trick
+Docker volumes use — and its account facts come from the mirror's own whitelisted
+`.claude.json` (identical whitelist, identical guarantee: email, name and organisation name
+never reach it, let alone the store).
+
+**Crash safety.** The mirror tracks, per file, the REMOTE's original byte offset it has
+consumed and the mirror file's own length at that checkpoint. Before appending anything, it
+checks the mirror file is still exactly that length — if a previous run appended bytes but
+crashed before recording the new checkpoint, the mirror is truncated back to the last good
+length first. A run killed at any point converges to what an uninterrupted run would have
+reached; it never duplicates a line.
+
+**Interval and backoff.** Each enabled remote is pulled at most once every `interval_s`
+(default 900, minimum 60) — `chronicle remotes sync` ignores this and pulls now. A remote that
+fails backs off exponentially from that interval, capped at one hour, so a box that is down does
+not get hammered every sync. `CHRONICLE_NO_REMOTES=1` disables every remote before any ssh call
+is made — set for the whole test suite, on purpose.
+
+**Failure modes.** A nonzero ssh exit, a timeout, or a garbled response skips that remote for
+this round and is reported in `remote_errors` — the local dirs, the configured volumes, and
+every OTHER remote still sync. `sync_remotes` never raises.
+
+**Security.** ssh runs with `BatchMode=yes` (never prompts), `StrictHostKeyChecking=yes` (never
+disabled, never `/dev/null` known_hosts), no agent or X11 forwarding, and the host always after
+a literal `--` — a hostile-looking (but regex-validated) host string can never be read as an
+option. The remote script only reads: it opens nothing for writing, deletes nothing, and makes
+no network call of its own. Nothing is ever left on the remote box.
+
 ### Sessions from a container
 
 A containerised dev environment writes its transcripts inside the container, and records the
