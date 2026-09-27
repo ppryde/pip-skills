@@ -348,6 +348,27 @@ class TestBundle:
         import ast
         ast.parse(remote_mod.bundle_source(), feature_version=(3, 8))
 
+    def test_remote_agent_alone_also_parses_under_python_3_8_grammar(self):
+        import ast
+        source = (remote_mod._SCRIPTS_DIR / "remote_agent.py").read_text()
+        ast.parse(source, feature_version=(3, 8))
+
+    def test_remote_agent_imports_nothing_beyond_the_stdlib(self):
+        import ast
+        source = (remote_mod._SCRIPTS_DIR / "remote_agent.py").read_text()
+        tree = ast.parse(source)
+        roots = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)
+                for a in n.names}
+        roots |= {n.module.split(".")[0] for n in ast.walk(tree)
+                 if isinstance(n, ast.ImportFrom) and n.module}
+        assert roots <= {"base64", "binascii", "json", "os", "re", "sys", "time", "__future__"}
+        assert "redact" not in roots   # nothing on the remote disk to import it from
+
+    def test_bundle_carries_exactly_one_future_import(self):
+        lines = remote_mod.bundle_source().splitlines()
+        count = sum(1 for line in lines if line.strip() == "from __future__ import annotations")
+        assert count == 1
+
     def test_ssh_argv_never_disables_host_key_checking_or_enables_forwarding(self, remote):
         argv = remote_mod.ssh_argv(remote, "abc")
         joined = " ".join(argv)
