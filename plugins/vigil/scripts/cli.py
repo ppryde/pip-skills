@@ -120,7 +120,7 @@ def cmd_handover(args: argparse.Namespace) -> int:
         print("handover refused: nothing to hand over "
               "(pass --notes/--content-file, or drop --no-snapshot)", file=sys.stderr)
         return 1
-    result = st.request_clear(args.root, document)
+    result = st.request_clear(args.root, document, title=args.title)
     if result == "armed":
         if os.environ.get("TMUX"):
             print("handover armed — auto (/clear via tmux at end of turn)")
@@ -168,8 +168,12 @@ def _hook_session_id(payload: dict[str, object], args: argparse.Namespace) -> st
 
 def cmd_stop_hook(args: argparse.Namespace) -> int:
     payload = _read_hook_payload()
-    if st.consume_clear_flag(_hook_root(payload, args)):
+    root = _hook_root(payload, args)
+    if st.consume_clear_flag(root):
         print("DISPATCH_CLEAR")
+        title = st.consume_rename_title(root)
+        if title:
+            print(f"TITLE:{title}")
     return 0
 
 
@@ -402,6 +406,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--content-file", dest="content_file")
     p.add_argument("--no-snapshot", dest="no_snapshot", action="store_true")
     p.add_argument("--inline", dest="inline", action="append", default=[])
+    p.add_argument(
+        "--title",
+        help="short task summary — renames the tmux window on dispatch (auto mode only)",
+    )
     p.set_defaults(func=cmd_handover)
 
     sub.add_parser("stop-hook").set_defaults(func=cmd_stop_hook)

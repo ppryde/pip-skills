@@ -22,6 +22,7 @@ from scripts.store import _uniquify, ensure_root, vigil_root
 
 COOLDOWN_TTL_SECONDS = 300
 GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
+MAX_TITLE_LENGTH = 60  # keeps a tmux window title readable in the status bar
 
 
 def active_marker(repo_root: Path) -> Path:
@@ -46,6 +47,18 @@ def cooldown_marker(repo_root: Path) -> Path:
 
 def handoff_path(repo_root: Path) -> Path:
     return vigil_root(repo_root) / "handoff.md"
+
+
+def rename_title_path(repo_root: Path) -> Path:
+    return vigil_root(repo_root) / "rename-title"
+
+
+def _sanitize_title(title: str) -> str | None:
+    """Collapse to a single line and cap length for a tmux window title."""
+    collapsed = " ".join(title.split())
+    if not collapsed:
+        return None
+    return collapsed[:MAX_TITLE_LENGTH]
 
 
 def handoff_archive_dir(repo_root: Path) -> Path:
@@ -128,7 +141,7 @@ def clear_requested(repo_root: Path) -> bool:
     return clear_flag(repo_root).exists()
 
 
-def request_clear(repo_root: Path, handoff_text: str) -> str:
+def request_clear(repo_root: Path, handoff_text: str, title: str | None = None) -> str:
     if not is_active(repo_root):
         return "inactive"
     if is_paused(repo_root):
@@ -137,8 +150,27 @@ def request_clear(repo_root: Path, handoff_text: str) -> str:
         return "cooldown"
     ensure_root(repo_root)
     handoff_path(repo_root).write_text(handoff_text)
+    sanitized = _sanitize_title(title) if title else None
+    if sanitized:
+        rename_title_path(repo_root).write_text(sanitized)
+    else:
+        # A stale title from an earlier arm must not bleed into this one.
+        rename_title_path(repo_root).unlink(missing_ok=True)
     clear_flag(repo_root).touch()
     return "armed"
+
+
+def consume_rename_title(repo_root: Path) -> str | None:
+    """Read the pending window-rename title, then delete it (at most once)."""
+    path = rename_title_path(repo_root)
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text().strip()
+    except OSError:
+        return None
+    path.unlink(missing_ok=True)
+    return text or None
 
 
 def consume_clear_flag(repo_root: Path) -> bool:
@@ -171,6 +203,7 @@ def begin_cycle(repo_root: Path) -> None:
     """
     ensure_root(repo_root)
     clear_flag(repo_root).unlink(missing_ok=True)
+    rename_title_path(repo_root).unlink(missing_ok=True)
     clear_gate(repo_root)
     cooldown_marker(repo_root).touch()
 
