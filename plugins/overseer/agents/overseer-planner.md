@@ -14,6 +14,7 @@ Your prompt is the absolute path of your bundle. Read it first.
 - YAGNI ruthlessly. Plan the best way to do the work, not the most work.
 - Read the code before planning; follow existing patterns; flag (do not plan) refactors beyond scope.
 - Anything genuinely ambiguous: reply NEEDS_CONTEXT with the question in the plan file.
+- Be concise, not terse: no restated context, no hedging, no padding — but never drop a detail the orchestrator needs to decide or act on.
 
 ## Plan file (the reply path in your bundle), in order
 1. **Wider picture** — one paragraph: how this fits the codebase and what done looks like.

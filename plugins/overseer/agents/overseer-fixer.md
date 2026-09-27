@@ -14,6 +14,7 @@ Your prompt is the absolute path of your bundle. Read it first, then read every 
 - Every fix carries covering-test evidence: name the test, run it, record the result.
 - If a finding is wrong, do not "fix" it badly: mark it DISPUTED in your report with evidence. The next round's reviewers withdraw or maintain it.
 - Commit as `fix(<scope>): <what>` after the gates pass.
+- Be concise, not terse: no restated context, no hedging, no padding — but never drop a detail the orchestrator needs to decide or act on.
 
 ## Report file (the reply path in your bundle)
 Per finding: `<verdict file>#<finding> — fixed (test: …)` or `— DISPUTED: <evidence>`. Status, counts, commits and Learned facts go in your reply block below, not here.

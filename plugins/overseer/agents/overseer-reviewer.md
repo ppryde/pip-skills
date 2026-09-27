@@ -17,6 +17,7 @@ Your prompt is the absolute path of your bundle. Read it first: it holds your in
 - For every finding a fixer marked DISPUTED in a prior fix report, state WITHDRAWN or MAINTAINED — maintained only with new evidence.
 - Do not modify the worktree. The only file you write is your verdict.
 - Evidence: file:line for every finding.
+- Be concise, not terse: no restated context, no hedging, no padding — but never drop a detail the orchestrator needs to decide or act on.
 
 ## Verdict file (the reply path in your bundle)
 Findings tiered Critical / Important / Minor (file:line, what is wrong, why it matters, the fix if not obvious); then a Disputes section if any. Status, counts and Learned facts go in your reply block below, not here.
