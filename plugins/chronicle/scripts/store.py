@@ -672,6 +672,26 @@ def remote_mirror_dir_for(label: str | None) -> Path | None:
     return None
 
 
+def remote_label_for(config_dir: Path) -> str | None:
+    """The reverse of `remote_mirror_dir_for`: the ``remote://<name>`` label
+    for a config dir that IS a configured remote's mirror root, or None for
+    every other path (an ordinary host dir, a mirror since removed from the
+    config). Used by `ingest.config_dir_of` so a session read out of a
+    remote's mirror is stamped with the stable label rather than the mirror's
+    real (and irrelevant to a person filtering by account) path."""
+    try:
+        resolved = config_dir.resolve()
+    except OSError:
+        return None
+    for remote in remotes():
+        try:
+            if remote.mirror_root().resolve() == resolved:
+                return remote.label
+        except OSError:
+            continue
+    return None
+
+
 def save_remotes(rems: list[Remote]) -> Path:
     """Write ``rems`` into the machine config, PRESERVING every other key —
     same contract as `save_volumes`."""

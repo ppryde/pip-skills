@@ -407,6 +407,13 @@ class ProfileResolver:
         self.read: set[str] = set()      # labels a helper container was really asked
 
     def __call__(self, config_dir: str) -> dict[str, str] | None:
+        if store.is_remote_label(config_dir):
+            # A remote's mirror is an ordinary local dir (see scripts.remote):
+            # reading its `.claude.json` is a plain file read, not a helper
+            # container start, so this needs none of the lazy-once-per-sync
+            # caching a volume's docker read does.
+            mirror = store.remote_mirror_dir_for(config_dir)
+            return store.account_profile(mirror) if mirror else None
         if not store.is_volume_label(config_dir):
             return store.account_profile(Path(config_dir))
         if config_dir not in self._loaded:
@@ -479,10 +486,16 @@ def _account_snapshot(conn: sqlite3.Connection, config_dir: str | None, now: flo
 def config_dir_of(transcript_path: Path) -> str | None:
     """The Claude config dir a main transcript belongs to, from its layout
     ``<config>/projects/<slug>/<session>.jsonl`` — None for any other shape
-    (a test fixture, a copied file)."""
+    (a test fixture, a copied file). A transcript read out of a configured
+    remote's local mirror (see `scripts.remote`) is stamped with the stable
+    ``remote://<name>`` label instead of the mirror's real path — the same
+    trick WF-120 plays for `docker://<volume>`, and for the same reason: the
+    mirror directory is an implementation detail of HOW the transcript got
+    here, not a fact about the account it belongs to."""
     parents = transcript_path.resolve().parents
     if len(parents) >= 3 and parents[1].name == "projects":
-        return str(parents[2])
+        candidate = parents[2]
+        return store.remote_label_for(candidate) or str(candidate)
     return None
 
 
