@@ -35,6 +35,8 @@ from scripts import (
     ingest,
     pricehistory,
     pricerefresh,
+    redact,
+    remote,
     report,
     store,
     volumes,
@@ -69,15 +71,24 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_sync(args: argparse.Namespace) -> int:
     """Reconcile the store with the transcripts on disk (see ``ingest.sync``).
     Defaults to every watched config dir's ``projects/`` PLUS every configured
-    Docker volume, read in place (``chronicle volumes``); ``--projects`` (one
-    or more) replaces that set with exactly those dirs and reads no volumes.
+    Docker volume, read in place (``chronicle volumes``), PLUS every enabled
+    remote box's local mirror, pulled first (``chronicle remotes``);
+    ``--projects`` (one or more) replaces that set with exactly those dirs and
+    reads no volumes and no remotes.
 
-    Docker trouble never fails the sync: it comes back as ``volume_errors``."""
+    Docker trouble never fails the sync: it comes back as ``volume_errors``.
+    Neither does a remote's: it comes back as ``remote_errors``, and
+    ``CHRONICLE_NO_REMOTES=1`` skips remotes entirely, before any ssh call."""
     explicit = bool(args.projects)
     projects = [Path(p) for p in args.projects] if explicit else store.projects_dirs()
     configured, problems = ([], []) if explicit else store.load_volumes()
+    remote_list, remote_problems = ([], []) if explicit else store.load_remotes()
     conn = store.connect()
     try:
+        remote_result = (remote.sync_remotes(conn, remote_list) if remote_list
+                         else {"remotes": [], "remote_errors": []})
+        if not explicit:
+            projects.extend(r.mirror_root() / "projects" for r in remote_list if r.enabled)
         result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)),
                              volumes=[volumes.VolumeSource.of(v) for v in configured])
         # List prices, at most daily and never fatal: the outcome rides in the
@@ -86,13 +97,17 @@ def cmd_sync(args: argparse.Namespace) -> int:
         pricing = pricerefresh.maybe_refresh(conn)
     finally:
         conn.close()
-    # Config entries that were skipped as invalid are volume errors too: a
-    # volume the user believes is being synced and is not deserves the same
-    # visibility as one whose docker call failed.
+    # Config entries that were skipped as invalid are volume/remote errors
+    # too: one the user believes is being synced and is not deserves the same
+    # visibility as one whose connection failed.
     result["volume_errors"] = [{"volume": None, "error": p} for p in problems] + result["volume_errors"]
+    result["remote_errors"] = (
+        [{"remote": None, "error": p} for p in remote_problems] + remote_result["remote_errors"]
+    )
     out: dict[str, Any] = {
         **result,
         "pricing": pricing,
+        "remotes": remote_result["remotes"],
         "projects_dirs": [str(p) for p in projects],
         "db": str(store.db_path()),
     }
@@ -220,6 +235,95 @@ def cmd_volumes(args: argparse.Namespace) -> int:
         out["hint"] = "run `chronicle sync` to ingest it; the dashboard's Sync does the same"
     print(json.dumps(out))
     return 0
+
+
+def _remote_json(r: store.Remote) -> dict[str, Any]:
+    return {"name": r.name, "host": r.host, "claude_dir": r.claude_dir, "fidelity": r.fidelity,
+           "mirror_dir": str(r.mirror_root()), "interval_s": r.interval_s, "enabled": r.enabled,
+           "label": r.label}
+
+
+def cmd_remotes(args: argparse.Namespace) -> int:
+    """`chronicle remotes list|add|rm|status|sync|probe` — Enterprise
+    "prod-access" boxes read over ssh and redacted before a byte leaves them
+    (see the README's "Remote boxes" section and ``scripts.remote``), kept in
+    the shared machine config's ``remotes`` list.
+
+    ``add`` NEVER CONNECTS — it only validates (name/host/claude_dir are held
+    to strict regexes, since they end up in an ssh argv or the remote agent's
+    request) and saves. ``probe`` is the one read-only connection: it lists
+    the remote's transcripts without pulling any content and writes nothing,
+    remote or local. ``sync`` (unlike the one `chronicle sync` folds in on
+    every regular sync) ignores the per-remote throttle."""
+    current, problems = store.load_remotes()
+    by_name = {r.name: r for r in current}
+    if args.action == "list":
+        print(json.dumps({"remotes": [_remote_json(r) for r in current], "problems": problems,
+                          "config": str(store.config_dir().joinpath(*store.MACHINE_CONFIG_RELPATH))}))
+        return 0
+    if args.action == "add":
+        try:
+            entry = store.normalise_remote(
+                args.name, args.host, claude_dir=args.claude_dir, fidelity=args.fidelity,
+                mirror_dir=args.mirror_dir, interval_s=args.interval, enabled=True,
+            )
+        except ValueError as exc:
+            return _fail(str(exc), code=INVALID_INPUT)
+        updated = [r for r in current if r.name != entry.name] + [entry]
+        changed = by_name.get(entry.name) != entry
+        try:
+            store.save_remotes(updated)
+        except (ValueError, OSError) as exc:
+            return _fail(f"cannot update the machine config: {exc}")
+        print(json.dumps({
+            "remotes": [_remote_json(r) for r in updated], "changed": changed,
+            "hint": "run `chronicle remotes probe` to check it, then `chronicle remotes sync` "
+                    "(or the next regular `chronicle sync`) to pull it",
+        }))
+        return 0
+    if args.action == "rm":
+        updated = [r for r in current if r.name != args.name]
+        changed = len(updated) != len(current)
+        if changed:
+            try:
+                store.save_remotes(updated)
+            except (ValueError, OSError) as exc:
+                return _fail(f"cannot update the machine config: {exc}")
+        print(json.dumps({"remotes": [_remote_json(r) for r in updated], "changed": changed}))
+        return 0
+    names = [args.name] if getattr(args, "name", None) else list(by_name)
+    unknown = [n for n in names if n not in by_name]
+    if args.action == "status":
+        conn = _open_readonly()
+        try:
+            statuses = [remote.status_of(conn, by_name[n]) if conn is not None
+                       else {**_remote_json(by_name[n]), "note": "no store yet — never synced"}
+                       for n in names if n in by_name]
+        finally:
+            if conn is not None:
+                conn.close()
+        statuses += [{"name": n, "error": "not configured"} for n in unknown]
+        print(json.dumps({"remotes": statuses}))
+        return 0
+    if args.action == "probe":
+        results = [remote.probe_remote(by_name[n]) for n in names if n in by_name]
+        results += [{"name": n, "ok": False, "error": "not configured"} for n in unknown]
+        print(json.dumps({"remotes": results}))
+        return 0
+    if args.action == "sync":
+        conn = store.connect()
+        try:
+            result = remote.sync_remotes(
+                conn, [by_name[n] for n in names if n in by_name], force=True,
+                only=(args.name if getattr(args, "name", None) else None),
+                dry_run=bool(getattr(args, "dry_run", False)),
+            )
+        finally:
+            conn.close()
+        result["problems"] = [{"remote": n, "error": "not configured"} for n in unknown]
+        print(json.dumps(result))
+        return 0
+    return _fail(f"unknown action: {args.action}", code=INVALID_INPUT)
 
 
 def _open_readonly() -> Any:
@@ -677,6 +781,35 @@ def build_parser() -> argparse.ArgumentParser:
                      help="the Claude config dir within the volume (default: %(default)s)")
     actions.add_parser("rm", help="stop watching a volume (its ingested history stays)").add_argument("name")
     p.set_defaults(fn=cmd_volumes)
+
+    p = sub.add_parser("remotes",
+                       help="Enterprise 'prod-access' boxes read over ssh and redacted before a "
+                            "byte leaves them (see README: Remote boxes)")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="the configured remotes (JSON)")
+    add = actions.add_parser("add", help="watch a remote (never connects — validates and saves)")
+    add.add_argument("name", help="a short local label, e.g. prod-access-env")
+    add.add_argument("host", help="an ssh host or alias, e.g. prod-access-env.wayflyer.team")
+    add.add_argument("--claude-dir", default=store.DEFAULT_REMOTE_CLAUDE_DIR,
+                     help="CLAUDE_CONFIG_DIR on the remote box (default: %(default)s)")
+    add.add_argument("--fidelity", default=store.DEFAULT_REMOTE_FIDELITY, choices=list(redact.FIDELITIES),
+                     help="what survives redaction (default: %(default)s)")
+    add.add_argument("--mirror-dir", default=None,
+                     help="where the redacted, append-only mirror lives (default: "
+                          "<config dir>/chronicle/remotes/<name>)")
+    add.add_argument("--interval", type=int, default=store.DEFAULT_REMOTE_INTERVAL_S,
+                     help="seconds between pulls, minimum %(default)s not enforced here "
+                          f"(clamped to >= {store.MIN_REMOTE_INTERVAL_S}) (default: %(default)s)")
+    actions.add_parser("rm", help="stop watching a remote (its mirror and ingested history stay)"
+                       ).add_argument("name")
+    status = actions.add_parser("status", help="last sync outcome per remote (JSON)")
+    status.add_argument("name", nargs="?", default=None, help="one remote (default: every configured one)")
+    sync = actions.add_parser("sync", help="pull now, ignoring the per-remote throttle")
+    sync.add_argument("name", nargs="?", default=None, help="one remote (default: every enabled one)")
+    sync.add_argument("--dry-run", action="store_true", help="report what would sync; write nothing")
+    probe = actions.add_parser("probe", help="one read-only connection: lists, pulls no content, writes nothing")
+    probe.add_argument("name", nargs="?", default=None, help="one remote (default: every configured one)")
+    p.set_defaults(fn=cmd_remotes)
 
     p = sub.add_parser("pull-volume",
                        help="LEGACY, superseded by `volumes add`: manually copy a docker "
