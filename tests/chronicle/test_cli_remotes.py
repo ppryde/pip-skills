@@ -20,6 +20,10 @@ T0 = "2026-09-01T10:00:00.000Z"
 
 @pytest.fixture(autouse=True)
 def _no_real_ssh(monkeypatch):
+    # The conftest autouse fixture sets CHRONICLE_NO_REMOTES=1 for the whole
+    # suite; this file exists to exercise the real `remotes`/`sync` CLI
+    # surface, always against the fake transport below, never a real host.
+    monkeypatch.delenv(remote_mod.DISABLE_ENV, raising=False)
     monkeypatch.setattr(remote_mod, "_run_ssh", local_transport)
 
 

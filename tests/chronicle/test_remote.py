@@ -27,6 +27,16 @@ T1 = "2026-09-01T10:01:00.000Z"
 T2 = "2026-09-01T10:02:00.000Z"
 
 
+@pytest.fixture(autouse=True)
+def _remotes_enabled_for_this_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The conftest autouse fixture sets CHRONICLE_NO_REMOTES=1 for the whole
+    suite (nothing may reach a real ssh by accident); this file exists
+    specifically to exercise the real code path, always with a fake
+    transport, so it unsets it here. `TestChronicleNoRemotesEnv` re-sets it
+    for its own test to prove the env var itself works."""
+    monkeypatch.delenv(remote_mod.DISABLE_ENV, raising=False)
+
+
 @pytest.fixture
 def remote_box(tmp_path: Path) -> Path:
     return write_remote_claude_dir(

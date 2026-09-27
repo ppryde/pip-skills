@@ -43,6 +43,10 @@ def _isolate_overseer_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     # `chronicle sync` (what the sync route runs) refreshes list prices from the
     # network at most daily; a test must never reach it.
     monkeypatch.setenv("CHRONICLE_NO_PRICING_REFRESH", "1")
+    # Same idea, ABSOLUTE: `chronicle sync` also pulls configured remote boxes
+    # over ssh (WF-122). No test here configures one, but this is the backstop
+    # that guarantees the sync route can never open a real ssh connection.
+    monkeypatch.setenv("CHRONICLE_NO_REMOTES", "1")
 
 
 @pytest.fixture()

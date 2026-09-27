@@ -639,6 +639,11 @@ def cmd_open(args: argparse.Namespace) -> int:
               "signed-in browser identity; pass the host config dir of that account",
               file=sys.stderr)
         return 1
+    if store.is_remote_label(args.config_dir):
+        print(f"chronicle open: {args.config_dir} is a remote box, not a config dir with a "
+              "signed-in browser identity on THIS machine; there is no local Chrome profile for it",
+              file=sys.stderr)
+        return 1
     config_dir = Path(args.config_dir) if args.config_dir else store.config_dir()
     email = chrome_profile.account_email(config_dir)
     if not email:
