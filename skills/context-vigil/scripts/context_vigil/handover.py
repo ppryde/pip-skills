@@ -77,7 +77,12 @@ def validate(notes: str) -> None:
 
 def summary(document: str, written_at: Optional[float]) -> str:
     """One line for the launch notice: when, branch, goal."""
-    when = datetime.fromtimestamp(written_at).strftime("%a %H:%M") if written_at else "earlier"
+    when = "earlier"
+    if written_at:
+        try:
+            when = datetime.fromtimestamp(written_at).strftime("%a %H:%M")
+        except (OverflowError, OSError, ValueError):
+            pass
     branch = re.search(r"- Branch: `([^`]+)`", document)
     goal = parse_sections(document).get("Goal", "").splitlines()
     text = f"a handover is waiting from {when}"

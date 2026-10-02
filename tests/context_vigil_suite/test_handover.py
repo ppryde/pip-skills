@@ -104,3 +104,8 @@ def test_cli_handover_rejects_bad_notes(run_cli, repo: Path, iso: Path) -> None:
     result = run_cli("handover", "--file", str(notes), cwd=repo)
     assert result.returncode == 1
     assert "Failed Attempts" in result.stderr
+
+
+def test_summary_survives_corrupt_mtime() -> None:
+    assert "from earlier" in handover.summary("## Goal\nx\n", 1e30)
+    assert "from earlier" in handover.summary("## Goal\nx\n", -1e30)

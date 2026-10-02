@@ -73,3 +73,10 @@ def test_launcher_runs_help(run_cli) -> None:
 def test_launcher_hook_always_exits_zero(run_cli) -> None:
     result = run_cli("hook", "no-such-hook", stdin="not json")
     assert result.returncode == 0
+
+
+def test_launcher_hook_swallows_broken_interpreter(run_cli) -> None:
+    result = run_cli("hook", "nudge", stdin="{}",
+                     env={"CONTEXT_VIGIL_PYTHON": "/nonexistent/python"})
+    assert result.returncode == 0
+    assert result.stdout == ""
