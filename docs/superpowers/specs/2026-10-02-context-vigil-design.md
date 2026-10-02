@@ -58,6 +58,7 @@ context-vigil/
   scripts/
     context-vigil          # launcher: python3 shim, resolves its own dir, any cwd
     capture.sh             # capture-only status line: tee payload to census, print nothing
+    claude-tmux            # opt-in bash launcher: runs claude in tmux safely (see Launcher)
     context_vigil/         # one package
       __init__.py
       cli.py               # argparse dispatch for every subcommand
@@ -89,12 +90,13 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/<ts>.md        # injected handovers
-    sessions/<name>/       # same files, used only when VIGIL_SESSION=<name> is set
+    sessions/<name>/       # same files, used only when CONTEXT_VIGIL_SESSION=<name> is set
 ```
 
 - **Keyed by worktree, not session id.** `/clear` mints a new session id; the
   fresh session finds its handover by worktree path, which is stable.
-- `VIGIL_SESSION` scoping is kept for two sessions sharing one worktree.
+- Session scoping (vigil's `VIGIL_SESSION`, renamed `CONTEXT_VIGIL_SESSION`) is
+  kept for two sessions sharing one worktree; `claude-tmux` sets it.
 - `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups).
 - census path: `census.json` here, not `$CLAUDE_CONFIG_DIR/census/status.json`.
   The existing census plugin honours `CENSUS_STORE`, so a machine running both
@@ -109,6 +111,7 @@ errors go to stderr with non-zero exit.
 |---|---|
 | `install [--yes] [--threshold N]` | Show planned changes as a diff, ask for the threshold, apply on consent, report auto/manual |
 | `uninstall` | Remove exactly what `install.json` records |
+| `launcher [always\|on-demand\|off]` | Re-run the launch-preference walkthrough (no arg) or set it directly |
 | `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
 | `context` | `ctx NN%` for this session (threshold appended when over) |
 | `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
@@ -144,6 +147,51 @@ take effect on the next turn with no restart:
 each effective value and which layer it came from. Users may also just ask the
 agent ("nudge me at 60%"); SKILL.md maps that to `config set`.
 
+## Launcher (optional tmux)
+
+Auto mode needs Claude running inside tmux. Not everyone wants every session
+in a tmux window, so launching is a **user choice made at install**, never
+imposed, and changeable any time with `context-vigil launcher`.
+
+### Choices
+
+| Choice | What install does | Effect |
+|---|---|---|
+| **always** | Adds a sentinel-delimited `alias claude='<skill>/scripts/claude-tmux'` to the shell rc | Every `claude` launch is in tmux → auto mode everywhere. `CLAUDE_NO_TMUX=1 claude` escapes for one launch |
+| **on-demand** | Adds `alias claude-tmux='<skill>/scripts/claude-tmux'` instead | Plain `claude` stays as it is (manual mode); `claude-tmux` when they want a hands-free run |
+| **not now** | Nothing | Manual mode; `context-vigil launcher` revisits |
+
+The shell rc is `~/.zshrc` or `~/.bashrc` per `$SHELL`; any other shell gets
+the alias line printed to add themselves. The edit is shown as a diff and
+needs consent; `uninstall` (and `launcher off`) remove it by sentinel. The
+choice is recorded in `install.json`.
+
+### Why a launcher, not "just run `tmux claude`"
+
+`claude-tmux` is a portable bash port of the author's proven `claude()` zsh
+wrapper. A bare `tmux claude` hits problems the wrapper already solved:
+
+1. **Stale-server rot (the main reason).** A tmux server left up for weeks
+   loses its macOS per-user temp namespace to OS cleanup; Claude Code (a Bun
+   single-file binary that extracts there at launch) then dies with
+   `ENOENT: Bun could not find a file` for every fresh spawn. The launcher uses
+   a dedicated socket (`tmux -L "${CLAUDE_TMUX_SOCK:-claude}"`), so it never
+   rides the long-lived default server.
+2. **Two sessions in one worktree.** Each launch gets the lowest free name
+   `cc-<repo>-<N>` (never a silent attach) and exports
+   `CONTEXT_VIGIL_SESSION=<name>`, so their handovers don't collide.
+   `claude-tmux attach [N|name]` reattaches deliberately.
+3. **Environment passthrough.** A new session on an already-running server
+   inherits the *server's* environment, not the caller's. The launcher passes
+   `CLAUDE_CONFIG_DIR` and the `CONTEXT_VIGIL_*` variables through with `-e`.
+   Most work machines have a single `~/.claude`, so for most users this is
+   defensive — it matters only for the few with a second account or per-shell
+   `CONTEXT_VIGIL_*` overrides.
+
+Fall-through: already inside tmux, tmux missing, or `CLAUDE_NO_TMUX=1` → exec
+plain `claude "$@"` unchanged. Arguments are quoted individually for tmux's
+`/bin/sh`.
+
 ## Lifecycle
 
 ### 0. Install (once)
@@ -173,12 +221,21 @@ agent ("nudge me at 60%"); SKILL.md maps that to `config set`.
    `config.json` (`--threshold N` answers non-interactively). Re-install keeps
    an existing value unless `--threshold` is given.
 6. Record every added entry in `install.json`.
-7. Detect tmux (`$TMUX` set and `tmux display -p '#{pane_id}'` succeeds) and
-   report. No tmux:
-   > tmux not detected — auto-clear is off. You'll get a nudge, I'll write the
-   > handover, and you type `/clear`; I resume automatically after that. Run
-   > Claude inside tmux to go hands-free.
-8. Remind: hooks and the status line take effect in new sessions.
+7. **Launch preference walkthrough** (see Launcher). Explain auto vs manual in
+   two lines, then branch on what is detected:
+   - **tmux installed** (inside it now or not): offer the three launch choices —
+     *always*, *on-demand*, *not now* — with one line each on what changes,
+     apply the chosen one (shell-rc edit shown as a diff, on consent), and say
+     how to change it later (`context-vigil launcher`). If the user is already
+     inside tmux, also say that auto mode works for this session right now.
+   - **tmux not installed:** say auto-clear is off and why, give the install
+     command for the OS (`brew install tmux`, `apt install tmux`, …), confirm
+     manual mode works today:
+     > You'll get a nudge, I'll write the handover, and you type `/clear`;
+     > I resume automatically after that.
+     and point at `context-vigil launcher` once tmux is installed.
+8. Remind: hooks, the status line and any shell-rc change take effect in new
+   sessions / new shells.
 
 Install is idempotent: re-running detects its own entries (by command path /
 sentinel) and changes nothing.
@@ -295,6 +352,8 @@ The rule from both originals: **a broken context-vigil never breaks Claude Code.
 | Malformed `settings.json` at install | Stop, report, change nothing |
 | Status-line script without a recognisable stdin slurp | Print manual line + placement; do not edit |
 | `uninstall` after the user edited entries | Remove only exact matches recorded in `install.json`; report anything not found |
+| Shell rc missing, unwritable, or unknown shell | Print the alias line to add by hand; record choice anyway |
+| `claude-tmux` can't start a session (tmux error) | Print the tmux error, then exec plain `claude` (manual mode) rather than fail the launch |
 
 Concurrency: census keeps its `fcntl.flock` read-modify-write and atomic
 replace; per-worktree state writes are atomic replace.
@@ -318,6 +377,13 @@ real `~/.claude*`.
 - **install / uninstall** — round-trips against fixture `settings.json`:
   none, existing script status line, inline-command status line, existing
   hooks, malformed JSON, re-install idempotence.
+- **launcher** — rc-file edits for always / on-demand / off against fixture
+  `.zshrc`/`.bashrc` in `tmp_path` (`HOME` pinned), switch between choices,
+  idempotence, uninstall removal; walkthrough branches for tmux present,
+  inside tmux, and absent.
+- **claude-tmux** — with a stub `tmux` and stub `claude` on `PATH`: dedicated
+  socket used, lowest-free naming, `-e` passthrough of `CLAUDE_CONFIG_DIR` and
+  `CONTEXT_VIGIL_*`, argument quoting, every fall-through path.
 - **hooks end-to-end** — feed hook JSON on stdin; tmux stubbed on `PATH` to
   assert `send-keys` calls for `/clear` and the kick; manual-mode messages.
 - **Manual smoke** before shipping: real tmux session, low threshold (e.g. 5%),
