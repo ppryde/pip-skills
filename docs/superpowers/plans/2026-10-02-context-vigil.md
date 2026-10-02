@@ -39,13 +39,15 @@
 5. **Transcript fallback reads the hook payload's `transcript_path`** instead of reconstructing a slug under a hardcoded `~/.claude`.
 6. **tmux window rename on dispatch dropped** (YAGNI).
 7. **Python floor 3.9**, not 3.11 (see Global Constraints).
+8. **Scope fallback to the tmux pane.** Scope name = `CONTEXT_VIGIL_SESSION`, else (inside tmux) `tmux-<socket>-<pane>` from `$TMUX`/`$TMUX_PANE`, else the bare worktree scope. A pane id survives `/clear` and is unique per tmux server, so people running `tmux` + `claude` themselves get per-session isolation without `claude-tmux`.
+9. **Launch never auto-injects a waiting handover.** After `/clear` (`source == "clear"`) the handover is injected and archived as before. On any other launch with a handover waiting, the hook only shows a notice (`systemMessage` to the user + a one-line `additionalContext` to the agent) and leaves it in place; `handover --resume` loads it, `handover --discard` archives it unread. This replaces vigil's inject-on-every-start, which could force a stale or another session's handover onto a fresh one.
 
 ## Review Focus
 
 1. **Stock macOS python3 (3.9).** Hooks run whatever `python3` is first on Claude's PATH; a 3.10-only construct silently disables every hook. → Task 12 adds a `/usr/bin/python3` smoke run of the real CLI.
 2. **A `settings.json` with existing hooks/statusLine the user cares about.** Install must append, never replace, and uninstall must leave their entries byte-identical. → Task 9 round-trip test with foreign hooks under every event.
 3. **Re-running install** (a colleague runs it twice, or after upgrading the skill to a new path). Must not duplicate hooks or status-line blocks. → Task 9 idempotence test; Task 9 also replaces entries whose launcher path changed.
-4. **Two sessions in one worktree without `claude-tmux`** (no `CONTEXT_VIGIL_SESSION`). They share one scope; one session's handover must not be injected into the other on its next `startup`. Handover injection on `startup` is skipped when the handoff is older than 6h, and the census lookup is always by session id first. → Task 7 test for a stale handoff on `startup`.
+4. **A handover left waiting at a plain launch** (manual mode: terminal closed before `/clear`; or a crash before the tmux `/clear`). The user must be told it exists and choose; it must never be forced into, or consumed by, a session that didn't ask. → Task 7 notice tests; Task 6 `--resume`/`--discard` tests.
 5. **Notes file with emoji / differently-cased headings** (Andrew's template uses `## 🎯 Goal`). Validation must match headings regardless of emoji and case. → Task 6 test.
 
 ---
@@ -100,7 +102,7 @@ tests/run.sh                       # Task 1 (add suite)
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-02-context-vigil-design.md`
 
-- [ ] **Step 1:** In the spec, apply the seven deltas above:
+- [ ] **Step 1:** In the spec, apply the nine deltas above (8 and 9 are already in the spec — verify only):
   - Data-root block: replace `state.json  # armed, paused, cooldown_until, gate_until` with `paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)`.
   - Lifecycle §2 / install step 2: hooks are `SessionStart` (matcher `startup|clear`), `Stop`, `UserPromptSubmit`, and `PostToolUse` (matcher `TaskCreate|TaskUpdate`), the last two both running `hook nudge`.
   - Lifecycle §3: add "suppressed for 5 minutes after any session start (cooldown — census can lag ≤ 90s behind a `/clear`)".
@@ -127,7 +129,7 @@ Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 - Modify: `tests/run.sh`
 
 **Interfaces:**
-- Produces (`paths`): `config_dir() -> Path`, `data_root() -> Path`, `skill_dir() -> Path`, `launcher_path() -> Path`, `worktree_key(cwd: Path) -> str`, `worktree_slug(cwd: Path) -> str`, `worktree_dir(cwd: Path) -> Path`, `scope_dir(cwd: Path, session: str | None = None) -> Path`, `census_path() -> Path`, `global_config_path() -> Path`, `worktree_config_path(cwd: Path) -> Path`, `install_record_path() -> Path`, constants `HOME_ENV = "CONTEXT_VIGIL_HOME"`, `SESSION_ENV = "CONTEXT_VIGIL_SESSION"`.
+- Produces (`paths`): `config_dir() -> Path`, `data_root() -> Path`, `skill_dir() -> Path`, `launcher_path() -> Path`, `worktree_key(cwd: Path) -> str`, `worktree_slug(cwd: Path) -> str`, `worktree_dir(cwd: Path) -> Path`, `session_name() -> str | None`, `scope_dir(cwd: Path, session: str | None = None) -> Path`, `census_path() -> Path`, `global_config_path() -> Path`, `worktree_config_path(cwd: Path) -> Path`, `install_record_path() -> Path`, constants `HOME_ENV = "CONTEXT_VIGIL_HOME"`, `SESSION_ENV = "CONTEXT_VIGIL_SESSION"`.
 - Produces (`cli`): `build_parser() -> argparse.ArgumentParser`, `main(argv: list[str] | None = None) -> int`. Subcommands are registered by later tasks inside `build_parser`.
 - Produces (fixtures): `iso` (autouse) — returns `tmp_path`; `home` → `tmp_path / "home"`; `cfg` → `tmp_path / "claude"`; `repo` → a `tmp_path / "repo"` directory; `run_cli(*args, stdin="", env=None) -> subprocess.CompletedProcess` invoking the bash launcher.
 
@@ -277,6 +279,19 @@ def test_scope_dir_uses_env_session(repo: Path, monkeypatch: pytest.MonkeyPatch)
     assert paths.scope_dir(repo) == paths.worktree_dir(repo) / "sessions" / "cc-repo-2"
 
 
+def test_scope_dir_falls_back_to_tmux_pane(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TMUX", "/private/tmp/tmux-501/default,123,0")
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    assert paths.scope_dir(repo).name == "tmux-default-7"
+
+
+def test_explicit_session_beats_pane(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TMUX", "/private/tmp/tmux-501/default,123,0")
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")
+    assert paths.scope_dir(repo).name == "cc-repo-1"
+
+
 def test_scope_dir_sanitises_session_name(repo: Path) -> None:
     scope = paths.scope_dir(repo, session="../evil name")
     assert scope.parent == paths.worktree_dir(repo) / "sessions"
@@ -364,8 +379,29 @@ def worktree_dir(cwd: Path) -> Path:
     return data_root() / "worktrees" / worktree_slug(cwd)
 
 
+def session_name() -> Optional[str]:
+    """Who this session is, for per-session scoping within one worktree.
+
+    ``CONTEXT_VIGIL_SESSION`` (set by claude-tmux) wins. Otherwise, inside tmux,
+    the pane id: it survives ``/clear`` (same process, same pane) and is unique
+    per tmux server, so the socket name is folded in to keep two servers' ``%3``
+    apart. Outside tmux there is no stable per-session key, so all sessions in a
+    worktree share its scope — harmless, because outside tmux ``/clear`` is
+    typed by hand in one place at a time.
+    """
+    explicit = os.environ.get(SESSION_ENV)
+    if explicit:
+        return explicit
+    tmux_env = os.environ.get("TMUX")
+    pane = os.environ.get("TMUX_PANE")
+    if tmux_env and pane:
+        socket = os.path.basename(tmux_env.split(",", 1)[0]) or "tmux"
+        return f"tmux-{socket}-{pane.lstrip('%')}"
+    return None
+
+
 def scope_dir(cwd: Path, session: Optional[str] = None) -> Path:
-    name = session if session is not None else os.environ.get(SESSION_ENV)
+    name = session if session is not None else session_name()
     base = worktree_dir(cwd)
     if not name:
         return base
@@ -815,7 +851,7 @@ Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 
 **Interfaces:**
 - Consumes: nothing but a `scope: Path` (from `paths.scope_dir`).
-- Produces (all take `scope: Path`, never raise): `is_paused`, `pause`, `resume`, `cooldown_active`, `set_gate`, `gate_active`, `clear_gate`, `clear_requested`, `request_clear(scope, handoff_text: str) -> str` (`"armed"|"paused"|"cooldown"`), `consume_clear_flag(scope) -> bool`, `begin_cycle(scope)`, `read_handoff(scope) -> str | None`, `handoff_age_seconds(scope) -> float | None`, `consume_handoff(scope) -> str | None`, path helpers `handoff_path`, `clear_flag`, `gate_marker`, `cooldown_marker`, `paused_flag`, `handoff_archive_dir`; constants `COOLDOWN_TTL_SECONDS = 300`, `GATE_TTL_SECONDS = 21600`, `HANDOFF_STARTUP_MAX_AGE_SECONDS = 21600`.
+- Produces (all take `scope: Path`, never raise): `is_paused`, `pause`, `resume`, `cooldown_active`, `set_gate`, `gate_active`, `clear_gate`, `clear_requested`, `request_clear(scope, handoff_text: str) -> str` (`"armed"|"paused"|"cooldown"`), `consume_clear_flag(scope) -> bool`, `begin_cycle(scope)`, `read_handoff(scope) -> str | None`, `handoff_written_at(scope) -> float | None`, `consume_handoff(scope) -> str | None`, path helpers `handoff_path`, `clear_flag`, `gate_marker`, `cooldown_marker`, `paused_flag`, `handoff_archive_dir`; constants `COOLDOWN_TTL_SECONDS = 300`, `GATE_TTL_SECONDS = 21600`.
 
 - [ ] **Step 1: Port the tests**
 
@@ -832,11 +868,12 @@ Copy `tests/vigil/test_state.py` → `tests/context_vigil_suite/test_state.py`, 
 - Delete tests asserting a `.gitignore` is created.
 - Add:
   ```python
-  def test_handoff_age(scope):
-      assert st.handoff_age_seconds(scope) is None
+  def test_handoff_written_at(scope):
+      import time
+      assert st.handoff_written_at(scope) is None
       st.request_clear(scope, "x")
-      age = st.handoff_age_seconds(scope)
-      assert age is not None and 0 <= age < 5
+      written = st.handoff_written_at(scope)
+      assert written is not None and abs(time.time() - written) < 5
   ```
 
 - [ ] **Step 2: Run to verify failure** — `pytest ../../tests/context_vigil_suite/test_state.py`; expected `ImportError`.
@@ -849,12 +886,9 @@ Copy `tests/vigil/test_state.py` → `tests/context_vigil_suite/test_state.py`, 
 4. Delete `active_marker`, `begin`, `is_active`, `rename_title_path`, `_sanitize_title`, `consume_rename_title`, `MAX_TITLE_LENGTH`, the `title` parameter of `request_clear`, and every `is_active(...)` check (always on: `clear_requested` and `consume_clear_flag` check only `is_paused`; `request_clear` no longer returns `"inactive"`).
 5. Add:
    ```python
-   HANDOFF_STARTUP_MAX_AGE_SECONDS = 6 * 60 * 60
-
-
-   def handoff_age_seconds(scope: Path) -> float | None:
+   def handoff_written_at(scope: Path) -> float | None:
        try:
-           return max(0.0, time.time() - handoff_path(scope).stat().st_mtime)
+           return handoff_path(scope).stat().st_mtime
        except OSError:
            return None
    ```
@@ -1029,7 +1063,7 @@ def context_line(pct: Optional[int], threshold: int) -> str:
 
 **Interfaces:**
 - Consumes: `state.request_clear`, `paths.scope_dir`, `config.mode`, `tmux.reachable` (Task 7 — until then the CLI uses `os.environ.get("TMUX")`; Task 7 swaps it).
-- Produces: `class HandoverError(ValueError)`, `SECTIONS`, `RESUME_PREAMBLE: str`, `parse_sections(notes: str) -> dict[str, str]`, `validate(notes: str) -> None`, `assemble(notes: str, cwd: Path, inline: list[Path], include_snapshot: bool) -> str`, `template_path() -> Path`. CLI: `handover --file F [--inline P]... [--no-snapshot]`.
+- Produces: `class HandoverError(ValueError)`, `SECTIONS`, `RESUME_PREAMBLE: str`, `parse_sections(notes: str) -> dict[str, str]`, `validate(notes: str) -> None`, `assemble(notes: str, cwd: Path, inline: list[Path], include_snapshot: bool) -> str`, `summary(document: str, written_at: float | None) -> str`, `template_path() -> Path`. CLI: `handover --file F [--inline P]... [--no-snapshot]` | `handover --resume` | `handover --discard`.
 
 - [ ] **Step 1: Template**
 
@@ -1147,6 +1181,27 @@ def test_cli_handover_arms(run_cli, repo: Path, iso: Path) -> None:
     assert state.clear_requested(paths.scope_dir(repo))
 
 
+def test_cli_resume_and_discard(run_cli, repo: Path) -> None:
+    from context_vigil import paths, state
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "WAITING DOC")
+    out = run_cli("handover", "--resume", cwd=repo)
+    assert out.returncode == 0
+    assert out.stdout.startswith("Resume from this handover.") and "WAITING DOC" in out.stdout
+    assert state.read_handoff(scope) is None
+    assert run_cli("handover", "--discard", cwd=repo).returncode == 1  # nothing waiting
+    state.request_clear(scope, "AGAIN")
+    out = run_cli("handover", "--discard", cwd=repo)
+    assert out.returncode == 0 and "WAITING" not in out.stdout
+    assert state.read_handoff(scope) is None
+
+
+def test_summary_line() -> None:
+    doc = "# Handover\n\n## Goal\nShip it.\n\n## Git\n\n- Branch: `feat/x`\n"
+    line = handover.summary(doc, None)
+    assert line == 'a handover is waiting from earlier on `feat/x`: "Ship it."'
+
+
 def test_cli_handover_rejects_bad_notes(run_cli, repo: Path, iso: Path) -> None:
     notes = iso / "notes.md"
     notes.write_text("## Goal\nx\n")
@@ -1175,7 +1230,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from context_vigil import paths, snapshot
 
@@ -1240,6 +1295,19 @@ def validate(notes: str) -> None:
         raise HandoverError("'## Next Step' must hold exactly one action, not a list")
 
 
+def summary(document: str, written_at: Optional[float]) -> str:
+    """One line for the launch notice: when, branch, goal."""
+    when = datetime.fromtimestamp(written_at).strftime("%a %H:%M") if written_at else "earlier"
+    branch = re.search(r"- Branch: `([^`]+)`", document)
+    goal = parse_sections(document).get("Goal", "").splitlines()
+    text = f"a handover is waiting from {when}"
+    if branch:
+        text += f" on `{branch.group(1)}`"
+    if goal and goal[0].strip():
+        text += f": \"{goal[0].strip()[:80]}\""
+    return text
+
+
 def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool) -> str:
     validate(notes)
     parts = [f"# Handover — {datetime.now().strftime('%Y-%m-%d %H:%M')}", notes.strip()]
@@ -1258,6 +1326,14 @@ In `cli.py` (imports `os`, `from context_vigil import handover, paths, state`):
 ```python
 def _cmd_handover(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
+    scope = paths.scope_dir(cwd)
+    if args.resume or args.discard:
+        text = state.consume_handoff(scope)
+        if text is None:
+            raise CliError("no handover is waiting here")
+        print(f"{handover.RESUME_PREAMBLE}\n\n{text}" if args.resume
+              else "handover discarded (kept in the archive)")
+        return 0
     try:
         notes = Path(args.file).read_text()
     except OSError as exc:
@@ -1281,7 +1357,10 @@ def _cmd_handover(args: argparse.Namespace) -> int:
 Parser:
 ```python
     hp = sub.add_parser("handover", help="validate notes, save the handover, arm /clear")
-    hp.add_argument("--file", required=True, help="notes following templates/handover.md")
+    hmode = hp.add_mutually_exclusive_group(required=True)
+    hmode.add_argument("--file", help="notes following templates/handover.md")
+    hmode.add_argument("--resume", action="store_true", help="load a waiting handover")
+    hmode.add_argument("--discard", action="store_true", help="archive a waiting handover unread")
     hp.add_argument("--inline", action="append", default=[], help="embed a file (remote mode)")
     hp.add_argument("--no-snapshot", action="store_true")
     hp.set_defaults(func=_cmd_handover)
@@ -1449,23 +1528,50 @@ def test_session_start_injects_once_with_preamble(repo: Path) -> None:
 
 def test_session_start_kicks_only_on_clear(repo: Path, fake_tmux: Path) -> None:
     scope = paths.scope_dir(repo)
-    state.request_clear(scope, "doc")
-    assert hooks.session_start(_payload(repo, source="startup")) is not None
+    state.request_clear(scope, "## Goal\nShip it.\n")
+    hooks.session_start(_payload(repo, source="startup"))
     time.sleep(0.3)
     assert not fake_tmux.exists() or "send-keys" not in fake_tmux.read_text()
-    state.cooldown_marker(scope).unlink()  # begin_cycle's cooldown would refuse the re-arm
-    assert state.request_clear(scope, "doc") == "armed"
     hooks.session_start(_payload(repo, source="clear"))
     assert "Next Step" in _wait_for(fake_tmux, "send-keys")
 
 
-def test_session_start_skips_stale_handoff_on_startup(repo: Path) -> None:
+def test_startup_with_waiting_handover_only_notifies(repo: Path) -> None:
     scope = paths.scope_dir(repo)
-    state.request_clear(scope, "OLD")
-    old = time.time() - state.HANDOFF_STARTUP_MAX_AGE_SECONDS - 60
-    os.utime(state.handoff_path(scope), (old, old))
+    state.request_clear(scope, "# Handover\n\n## Goal\nShip the installer.\n")
+    out = hooks.session_start(_payload(repo, source="startup"))
+    assert out is not None
+    data = json.loads(out)
+    assert "Ship the installer." in data["systemMessage"]
+    assert "resume the handover" in data["systemMessage"]
+    ctx = data["hookSpecificOutput"]["additionalContext"]
+    assert "NOT been loaded" in ctx and "--resume" in ctx
+    assert "Resume from this handover" not in out
+    assert state.read_handoff(scope) is not None  # still waiting, not archived
+
+
+def test_startup_without_handover_is_silent(repo: Path) -> None:
     assert hooks.session_start(_payload(repo, source="startup")) is None
-    assert state.read_handoff(scope) == "OLD"  # left for an explicit /clear
+
+
+def test_resume_source_also_only_notifies(repo: Path) -> None:
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "doc")
+    out = hooks.session_start(_payload(repo, source="resume"))
+    assert out is not None and "systemMessage" in json.loads(out)
+    assert state.read_handoff(scope) == "doc"
+
+
+def test_pane_scoping_isolates_two_tmux_sessions(repo: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TMUX", "/tmp/tmux-501/default,1,0")
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    state.request_clear(paths.scope_dir(repo), "PANE ONE")
+    monkeypatch.setenv("TMUX_PANE", "%2")
+    assert hooks.session_start(_payload(repo, source="clear")) is None
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    out = hooks.session_start(_payload(repo, source="clear"))
+    assert out is not None and "PANE ONE" in out
 
 
 def test_session_start_opens_a_new_cycle(repo: Path) -> None:
@@ -1646,10 +1752,7 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
     scope = paths.scope_dir(_cwd(payload))
     source = _str(payload, "source")
     out: Optional[str] = None
-    age = state.handoff_age_seconds(scope)
-    fresh_enough = source == "clear" or (
-        age is not None and age <= state.HANDOFF_STARTUP_MAX_AGE_SECONDS)
-    if age is not None and fresh_enough:
+    if source == "clear":
         text = state.consume_handoff(scope)
         if text:
             out = json.dumps({"hookSpecificOutput": {
@@ -1657,9 +1760,24 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
                 "additionalContext": f"{handover.RESUME_PREAMBLE}\n\n{text}",
             }})
             target = tmux.pane()
-            if source == "clear" and target is not None and tmux.reachable():
+            if target is not None and tmux.reachable():
                 delay = os.environ.get("CONTEXT_VIGIL_KICK_DELAY", "2")
                 tmux.send_detached(target, [["-l", KICK_PROMPT], ["Enter"]], delay)
+    else:
+        waiting = state.read_handoff(scope)
+        if waiting:
+            summary = handover.summary(waiting, state.handoff_written_at(scope))
+            out = json.dumps({
+                "systemMessage": f"context-vigil: {summary}. Say \"resume the handover\" "
+                                 "to load it, or \"discard the handover\" to drop it.",
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": (
+                        f"context-vigil: {summary}. It has NOT been loaded. Only if the user "
+                        f"asks, run `\"{paths.launcher_path()}\" handover --resume` (load) "
+                        "or `handover --discard` (drop)."),
+                },
+            })
     state.begin_cycle(scope)
     return out
 
@@ -2892,6 +3010,13 @@ natural stopping points in long work.
 
 The handover is injected for you with resume instructions. Start with its
 Next Step; don't redo anything marked done or retry its Failed Attempts.
+
+## A handover waiting at launch
+
+If a fresh launch says a handover is waiting, it has NOT been loaded. Do
+nothing with it unless the user asks: "resume the handover" → run
+`handover --resume` and follow what it prints; "discard the handover" → run
+`handover --discard`.
 
 ## Settings
 

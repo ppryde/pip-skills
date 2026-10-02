@@ -90,13 +90,17 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/<ts>.md        # injected handovers
-    sessions/<name>/       # same files, used only when CONTEXT_VIGIL_SESSION=<name> is set
+    sessions/<name>/       # same files, per session: CONTEXT_VIGIL_SESSION, else tmux-<socket>-<pane>
 ```
 
 - **Keyed by worktree, not session id.** `/clear` mints a new session id; the
   fresh session finds its handover by worktree path, which is stable.
 - Session scoping (vigil's `VIGIL_SESSION`, renamed `CONTEXT_VIGIL_SESSION`) is
-  kept for two sessions sharing one worktree; `claude-tmux` sets it.
+  kept for two sessions sharing one worktree; `claude-tmux` sets it. Inside
+  tmux without it, the scope falls back to `tmux-<socket>-<pane>` — the pane id
+  survives `/clear` and is unique per tmux server, so `tmux` + plain `claude`
+  is isolated too. Outside tmux all sessions in a worktree share one scope;
+  that is harmless because `/clear` is then typed by hand, in one place at a time.
 - `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups).
 - census path: `census.json` here, not `$CLAUDE_CONFIG_DIR/census/status.json`.
   The existing census plugin honours `CENSUS_STORE`, so a machine running both
@@ -115,6 +119,7 @@ errors go to stderr with non-zero exit.
 | `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
 | `context` | `ctx NN%` for this session (threshold appended when over) |
 | `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
+| `handover --resume` / `--discard` | Load a handover waiting from an earlier session / archive it unread |
 | `pause` / `resume` | Opt this worktree out / back in; resume also releases the gate |
 | `config get\|set KEY [VAL] [--worktree]` | Read or write a setting globally, or for this worktree only (see Configuration) |
 | `ingest` | Read a status-line payload on stdin into census (quarantined) |
@@ -334,17 +339,29 @@ and arms the reset (`armed = true`).
 
 ### 6. Resume
 
-`SessionStart` with `source == "clear"` (or `startup`) and a pending
-`handoff.md`:
+**After `/clear`** (`SessionStart` with `source == "clear"`) and a pending
+`handoff.md` in this scope:
 
 1. Inject `handoff.md` as `additionalContext`, prefixed with:
    > Resume from this handover. Don't re-investigate anything marked complete,
    > don't retry anything under Failed Attempts — start with the Next Step.
 2. Move `handoff.md` to `archive/`, disarm, clear the gate.
-3. **Auto only** (source `clear`, pane reachable): after
-   `CONTEXT_VIGIL_KICK_DELAY` (default 2s) type a short resume prompt into the
-   pane, since injected context alone never starts a turn. A plain launch or a
-   manual `/clear` is never kicked.
+3. **Auto only** (pane reachable): after `CONTEXT_VIGIL_KICK_DELAY` (default
+   2s) type a short resume prompt into the pane, since injected context alone
+   never starts a turn.
+
+**Any other launch** (`startup`, `resume`) with a handover waiting — e.g. the
+terminal was closed before a manual `/clear`, or a crash beat the tmux
+`/clear` — never injects it automatically. The hook shows the user a notice
+(`systemMessage`), e.g.
+
+> context-vigil: a handover is waiting from Fri 14:32 on `feat/x`: "Ship the
+> installer". Say "resume the handover" to load it, or "discard the handover"
+> to drop it.
+
+and tells the agent the same in one line (not loaded; run `handover --resume`
+or `handover --discard` only if asked). The handover stays in place until one
+of those runs or the next `/clear` injects it.
 
 ## SKILL.md content
 
