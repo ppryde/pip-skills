@@ -3,12 +3,11 @@ stderr with a non-zero exit. ``hook`` subcommands never fail (see hooks.py)."""
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import List, Optional
 
-from context_vigil import config, handover, paths, state
+from context_vigil import config, handover, hooks, paths, state, tmux
 
 
 class CliError(Exception):
@@ -70,7 +69,7 @@ def _cmd_handover(args: argparse.Namespace) -> int:
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
     if result == "cooldown":
         raise CliError("handover refused: a /clear just happened — cooldown active")
-    if os.environ.get("TMUX"):
+    if tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
         print("handover saved — type /clear to continue in a fresh context")
@@ -94,7 +93,10 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 def _cmd_hook(args: argparse.Namespace) -> int:
-    return 0  # replaced in Task 7
+    out = hooks.run(args.name, sys.stdin.read())
+    if out:
+        print(out)
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:
