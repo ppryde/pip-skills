@@ -210,3 +210,16 @@ def test_launcher_hook_round_trip(run_cli, repo: Path) -> None:
     result = run_cli("hook", "session-start", stdin=json.dumps(_payload(repo, source="clear")))
     assert result.returncode == 0
     assert "VIA LAUNCHER" in result.stdout
+
+
+def test_default_tmux_is_inert(repo: Path, iso: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from context_vigil import tmux
+
+    monkeypatch.setenv("TMUX", "/tmp/fake,1,0")
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    state.request_clear(paths.scope_dir(repo), "WAITING")
+    assert not tmux.reachable()
+    out = hooks.session_start(_payload(repo, source="clear"))
+    assert out is not None and "WAITING" in out
+    time.sleep(0.2)
+    assert not (iso / "no-tmux-here").exists()

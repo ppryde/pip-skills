@@ -19,6 +19,7 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     The developer runs this suite inside tmux: an inherited TMUX/TMUX_PANE
     would let a dispatch path type real keystrokes into their pane, and an
     unpinned CLAUDE_CONFIG_DIR would write into their real ~/.claude*.
+    CONTEXT_VIGIL_TMUX_BIN names a missing binary: only a test's own stub is reachable.
     """
     for var in list(os.environ):
         if var.startswith("CONTEXT_VIGIL_") or var in _STRIP:
@@ -28,6 +29,7 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("CONTEXT_VIGIL_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("CONTEXT_VIGIL_TMUX_BIN", str(tmp_path / "no-tmux-here"))
     return tmp_path
 
 
