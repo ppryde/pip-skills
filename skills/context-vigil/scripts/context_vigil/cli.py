@@ -3,11 +3,12 @@ stderr with a non-zero exit. ``hook`` subcommands never fail (see hooks.py)."""
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
 
-from context_vigil import config
+from context_vigil import config, handover, paths, state
 
 
 class CliError(Exception):
@@ -34,7 +35,46 @@ def build_parser() -> argparse.ArgumentParser:
                       help="set for this worktree only")
     cget.set_defaults(func=_cmd_config, worktree=False)
     cset.set_defaults(func=_cmd_config)
+    hp = sub.add_parser("handover", help="validate notes, save the handover, arm /clear")
+    hmode = hp.add_mutually_exclusive_group(required=True)
+    hmode.add_argument("--file", help="notes following templates/handover.md")
+    hmode.add_argument("--resume", action="store_true", help="load a waiting handover")
+    hmode.add_argument("--discard", action="store_true", help="archive a waiting handover unread")
+    hp.add_argument("--inline", action="append", default=[], help="embed a file (remote mode)")
+    hp.add_argument("--no-snapshot", action="store_true")
+    hp.set_defaults(func=_cmd_handover)
     return parser
+
+
+def _cmd_handover(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    scope = paths.scope_dir(cwd)
+    if args.resume or args.discard:
+        text = state.consume_handoff(scope)
+        if text is None:
+            raise CliError("no handover is waiting here")
+        print(f"{handover.RESUME_PREAMBLE}\n\n{text}" if args.resume
+              else "handover discarded (kept in the archive)")
+        return 0
+    try:
+        notes = Path(args.file).read_text()
+    except OSError as exc:
+        raise CliError(f"--file unreadable: {exc}") from exc
+    try:
+        document = handover.assemble(
+            notes, cwd, [Path(p) for p in args.inline], include_snapshot=not args.no_snapshot)
+    except handover.HandoverError as exc:
+        raise CliError(f"handover refused: {exc}") from exc
+    result = state.request_clear(paths.scope_dir(cwd), document)
+    if result == "paused":
+        raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
+    if result == "cooldown":
+        raise CliError("handover refused: a /clear just happened — cooldown active")
+    if os.environ.get("TMUX"):
+        print("handover saved — /clear will be sent at the end of this turn")
+    else:
+        print("handover saved — type /clear to continue in a fresh context")
+    return 0
 
 
 def _cmd_config(args: argparse.Namespace) -> int:
