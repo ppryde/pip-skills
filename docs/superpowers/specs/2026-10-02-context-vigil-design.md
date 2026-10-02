@@ -81,11 +81,12 @@ inside repositories.
 
 ```
 $CLAUDE_CONFIG_DIR/context-vigil/
-  config.json              # global: threshold (35), window (200000), mode (local)
+  config.json              # global settings (see Configuration)
   census.json              # census store, schema identical to census status.json
   install.json             # record of every entry install added (for uninstall)
   worktrees/<slug>/        # slug = sanitised absolute worktree path
     state.json             # armed, paused, cooldown_until, gate_until
+    config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/<ts>.md        # injected handovers
     sessions/<name>/       # same files, used only when VIGIL_SESSION=<name> is set
@@ -106,15 +107,42 @@ errors go to stderr with non-zero exit.
 
 | Command | Purpose |
 |---|---|
-| `install [--yes]` | Show planned changes as a diff, apply on consent, report auto/manual |
+| `install [--yes] [--threshold N]` | Show planned changes as a diff, ask for the threshold, apply on consent, report auto/manual |
 | `uninstall` | Remove exactly what `install.json` records |
 | `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
 | `context` | `ctx NN%` for this session (threshold appended when over) |
 | `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
 | `pause` / `resume` | Opt this worktree out / back in; resume also releases the gate |
-| `config get\|set KEY [VAL]` | `context.threshold`, `context.window`, `context.mode` |
+| `config get\|set KEY [VAL] [--worktree]` | Read or write a setting globally, or for this worktree only (see Configuration) |
 | `ingest` | Read a status-line payload on stdin into census (quarantined) |
 | `hook session-start\|stop\|nudge` | Hook entrypoints (read hook JSON on stdin, always exit 0) |
+
+## Configuration
+
+Every tunable is a first-class setting, never a hardcoded number in the hooks
+or SKILL.md. The threshold in particular is the knob users will reach for.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
+| `context.window` | 200000 | Window size for the transcript fallback only (census carries the real size) |
+| `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`) |
+
+**Resolution order** — first match wins, re-read on every hook call so changes
+take effect on the next turn with no restart:
+
+1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`,
+   `CONTEXT_VIGIL_MODE` (per-session override, e.g. one long unattended run;
+   settable in `settings.json` `env`).
+2. Worktree: `worktrees/<slug>/config.json`, written by
+   `config set KEY VAL --worktree` (e.g. a heavy monorepo wants an earlier nudge).
+3. Global: `config.json`, written by `config set KEY VAL`.
+4. Built-in default.
+
+`config set` validates (threshold integer 1–95, window positive integer, mode
+`local|remote`) and rejects bad values with the allowed range. `status` shows
+each effective value and which layer it came from. Users may also just ask the
+agent ("nudge me at 60%"); SKILL.md maps that to `config set`.
 
 ## Lifecycle
 
@@ -139,13 +167,18 @@ errors go to stderr with non-zero exit.
      nothing, so no visible status line appears) with `refreshInterval: 60`.
 4. Show the full diff of `settings.json` and any status-line script; apply only
    on consent (`--yes` skips the prompt).
-5. Record every added entry in `install.json`.
-6. Detect tmux (`$TMUX` set and `tmux display -p '#{pane_id}'` succeeds) and
+5. Ask for the threshold: show the default (35%) with one line of guidance —
+   lower hands over sooner with a leaner context; higher means fewer handovers
+   but more degradation before each — and write the answer to global
+   `config.json` (`--threshold N` answers non-interactively). Re-install keeps
+   an existing value unless `--threshold` is given.
+6. Record every added entry in `install.json`.
+7. Detect tmux (`$TMUX` set and `tmux display -p '#{pane_id}'` succeeds) and
    report. No tmux:
    > tmux not detected — auto-clear is off. You'll get a nudge, I'll write the
    > handover, and you type `/clear`; I resume automatically after that. Run
    > Claude inside tmux to go hands-free.
-7. Remind: hooks and the status line take effect in new sessions.
+8. Remind: hooks and the status line take effect in new sessions.
 
 Install is idempotent: re-running detects its own entries (by command path /
 sentinel) and changes nothing.
@@ -276,6 +309,7 @@ real `~/.claude*`.
   blank-window keep, worktree/session lookup).
 - **context** — census-by-session, census-by-worktree, stale fallback,
   transcript fallback, no reading.
+- **config** — resolution order (env > worktree > global > default), validation rejects, `status` reports the source layer, change takes effect next hook call.
 - **state / gate** — arm, cooldown, gate TTL self-heal, pause/resume, session
   scoping.
 - **handover** — template validation (missing Failed Attempts / Next Step /
