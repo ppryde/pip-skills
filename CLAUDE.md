@@ -22,6 +22,11 @@ section is "Plugins" and not "Skills".
 - **tribunal** — PR comment review, categorisation, prioritisation and resolution (reckoning)
 - **vigil** — portable context handover: measure ctx %, hand over in-process via /clear, resume from a re-injected handover (vigil)
 
+Standalone skills (folders under `skills/`, no plugin wrapper — destined for
+the agents.md library):
+
+- **context-vigil** — census + vigil + handover-work in one portable skill: ctx % watch, nudge, structured handover, tmux auto-/clear, resume; self-installs its hooks
+
 ## Tool Discipline
 
 Skills in this repo instruct Claude to read doctrine files, scan templates, and search codebases.
