@@ -146,7 +146,7 @@ def test_apply_records_before_touching_user_files(cfg: Path, monkeypatch) -> Non
         assert paths.install_record_path().exists()
         raise OSError("disk full")
 
-    monkeypatch.setattr(install, "_write_atomic", boom)
+    monkeypatch.setattr(install, "write_atomic", boom)
     with pytest.raises(OSError):
         install.apply(plan)
     assert json.loads(paths.install_record_path().read_text())["statusline"]["kind"] == "spliced"
@@ -203,7 +203,7 @@ def test_unsplice_without_end_marker_is_untouched(cfg: Path) -> None:
     script.write_text(broken)
     plan = install.plan_uninstall()
     assert script not in [c.path for c in plan.changes]
-    assert any("end marker" in m for m in plan.manual)
+    assert any("look damaged" in m for m in plan.manual)
     install.apply(plan)
     assert script.read_text() == broken
 

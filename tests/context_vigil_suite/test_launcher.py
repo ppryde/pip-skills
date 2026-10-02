@@ -170,3 +170,97 @@ def test_rc_path_is_always_inside_tmp(
     monkeypatch.setenv("ZDOTDIR", str(iso / "zd"))
     rc = launcher.rc_path()
     assert rc is not None and iso in rc.parents
+
+
+_S, _E = launcher.RC_START, launcher.RC_END
+_DAMAGED = {
+    "start-without-end": f"export A=1\n\n{_S}\nalias x=y\nexport KEEP=1\n",
+    "end-without-start": f"export A=1\n{_E}\nexport KEEP=1\n",
+    "end-before-start": f"{_E}\nexport KEEP=1\n{_S}\n",
+    "two-starts": f"{_S}\na\n{_E}\nexport KEEP=1\n{_S}\nb\n{_E}\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_DAMAGED))
+def test_damaged_rc_is_never_edited(zsh: Path, name: str) -> None:
+    zsh.write_text(_DAMAGED[name])
+    with pytest.raises(install.DamagedMarkers, match="look damaged"):
+        launcher.plan_rc("on-demand")
+    plan = install.plan_install(threshold=None, launcher="on-demand")
+    assert all(c.path != zsh for c in plan.changes)
+    assert any("look damaged" in line and str(zsh) in line for line in plan.manual)
+    assert zsh.read_text() == _DAMAGED[name]
+
+
+@pytest.mark.parametrize("name", sorted(_DAMAGED))
+def test_damaged_rc_uninstall_leaves_file_and_notes(zsh: Path, cfg: Path, name: str) -> None:
+    install.apply(install.plan_install(threshold=None))
+    paths.install_record_path().write_text(json.dumps({"rc_path": str(zsh)}))
+    zsh.write_text(_DAMAGED[name])
+    plan = install.plan_uninstall()
+    assert all(c.path != zsh for c in plan.changes)
+    assert any("look damaged" in line for line in plan.manual)
+
+
+def test_marker_quoted_in_a_user_line_is_safe(zsh: Path) -> None:
+    text = f'echo "{_S}"\nexport KEEP=1\n'
+    zsh.write_text(text)
+    assert launcher.strip_rc(text) == text
+    change = _change("on-demand")
+    assert change.after.startswith(text)
+    assert launcher.strip_rc(change.after) == text
+
+
+def test_no_trailing_newline_round_trips(zsh: Path) -> None:
+    zsh.write_text("export FOO=1")
+    install.apply(install.Plan(changes=[_change("on-demand")]))
+    assert launcher.RC_START in zsh.read_text()
+    assert _change("on-demand").before == _change("on-demand").after
+    install.apply(install.Plan(changes=[_change("not-now")]))
+    assert zsh.read_text() == "export FOO=1"
+
+
+@pytest.fixture
+def sl_script(cfg: Path) -> Path:
+    script = cfg / "sl.sh"
+    script.write_text("#!/bin/bash\ninput=$(cat)\necho hi\n")
+    (cfg / "settings.json").write_text(json.dumps(
+        {"statusLine": {"type": "command", "command": f"bash {script}"}}))
+    return script
+
+
+def _sl_damaged(name: str) -> str:
+    s, e = install.SL_START, install.SL_END
+    return {
+        "start-without-end": f"input=$(cat)\n{s}\nx\necho KEEP\n",
+        "end-without-start": f"input=$(cat)\n{e}\necho KEEP\n",
+        "quoted": f'input=$(cat)\necho "{s}"\n',
+        "two-starts": f"input=$(cat)\n{s}\nx\n{e}\necho KEEP\n{s}\ny\n{e}\n",
+    }[name]
+
+
+@pytest.mark.parametrize("name", ["start-without-end", "end-without-start", "two-starts"])
+def test_damaged_statusline_script_untouched(sl_script: Path, name: str) -> None:
+    sl_script.write_text(_sl_damaged(name))
+    plan = install.plan_install(threshold=None)
+    assert all(c.path != sl_script for c in plan.changes)
+    assert any("look damaged" in line for line in plan.manual)
+    assert sl_script.read_text() == _sl_damaged(name)
+
+
+@pytest.mark.parametrize("name", ["start-without-end", "end-without-start", "two-starts"])
+def test_damaged_statusline_script_uninstall_notes(sl_script: Path, name: str) -> None:
+    install.apply(install.plan_install(threshold=None))
+    sl_script.write_text(_sl_damaged(name))
+    plan = install.plan_uninstall()
+    assert all(c.path != sl_script for c in plan.changes)
+    assert any("look damaged" in line for line in plan.manual)
+
+
+def test_quoted_marker_in_statusline_script_is_not_a_block(sl_script: Path) -> None:
+    sl_script.write_text(_sl_damaged("quoted"))
+    plan = install.plan_install(threshold=None)
+    change = next(c for c in plan.changes if c.path == sl_script)
+    assert change.after.startswith(_sl_damaged("quoted").split("\n", 2)[0])
+    assert install.remove_marked_block(change.after, install.SL_START, install.SL_END) \
+        == _sl_damaged("quoted")

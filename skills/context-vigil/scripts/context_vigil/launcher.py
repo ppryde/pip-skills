@@ -8,10 +8,10 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from context_vigil import paths, tmux
-from context_vigil.install import Change
+from context_vigil.install import Change, DamagedMarkers, damaged_note, remove_marked_block
 
 CHOICES = ("on-demand", "always", "not-now")
 RC_START = "# --- context-vigil launcher (managed; do not edit) ---"
@@ -60,20 +60,9 @@ def alias_line(choice: str) -> Optional[str]:
     return None
 
 
-def strip_rc(text: str) -> str:
-    out: List[str] = []
-    skipping = False
-    for line in text.splitlines(keepends=True):
-        if RC_START in line:
-            skipping = True
-            if out and out[-1].strip() == "":
-                out.pop()
-            continue
-        if skipping:
-            skipping = RC_END not in line
-            continue
-        out.append(line)
-    return "".join(out)
+def strip_rc(text: str) -> Optional[str]:
+    """Text without our block, or None when its markers are damaged."""
+    return remove_marked_block(text, RC_START, RC_END, drop_separator=True)
 
 
 def plan_rc(choice: str) -> Optional[Change]:
@@ -82,10 +71,17 @@ def plan_rc(choice: str) -> Optional[Change]:
         return None
     before = path.read_text() if path.exists() else ""
     after = strip_rc(before)
+    if after is None:
+        raise DamagedMarkers(damaged_note(path))
     line = alias_line(choice)
     if line:
-        sep = "" if after == "" or after.endswith("\n") else "\n"
-        after = f"{after}{sep}\n{RC_START}\n{line}\n{RC_END}\n"
+        block = f"{RC_START}\n{line}\n{RC_END}\n"
+        if after and not after.endswith("\n"):
+            # No trailing newline to begin with: leave the block unterminated
+            # too, so strip_rc can give the file back byte for byte.
+            after = f"{after}\n\n{block[:-1]}"
+        else:
+            after = f"{after}\n{block}"
     return Change(path, before, after)
 
 

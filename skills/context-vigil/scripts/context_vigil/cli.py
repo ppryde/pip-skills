@@ -232,7 +232,7 @@ def _record_launcher(choice: str, rc: Path) -> None:
         return
     record["launcher"] = choice
     record["rc_path"] = str(rc)
-    record_path.write_text(json.dumps(record, indent=2) + "\n")
+    install.write_atomic(record_path, json.dumps(record, indent=2) + "\n")
 
 
 def _cmd_launcher(args: argparse.Namespace) -> int:
@@ -243,7 +243,7 @@ def _cmd_launcher(args: argparse.Namespace) -> int:
         raise CliError("`always` takes over the claude command — re-run with --confirm-always")
     try:
         change = launcher.plan_rc(args.choice)
-    except (OSError, UnicodeError) as exc:
+    except (install.InstallError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
     if change is None:
         line = launcher.alias_line(args.choice)

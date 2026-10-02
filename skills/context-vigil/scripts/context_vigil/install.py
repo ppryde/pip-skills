@@ -37,6 +37,10 @@ class InstallError(Exception):
     """Install cannot proceed safely; nothing was changed."""
 
 
+class DamagedMarkers(InstallError):
+    """A managed block's markers are damaged; the file was left untouched."""
+
+
 @dataclass
 class Change:
     path: Path
@@ -151,9 +155,47 @@ def statusline_script(command: str) -> Optional[Path]:
     return path if path.is_file() else None
 
 
-def splice_statusline(text: str) -> Optional[str]:
-    if SL_START in text:
+def _is_marker(line: str, marker: str) -> bool:
+    return line.rstrip("\r\n") == marker
+
+
+def has_marker(text: str, start: str, end: str) -> bool:
+    """True if any line is exactly a START or END marker."""
+    return any(_is_marker(line, start) or _is_marker(line, end)
+               for line in text.splitlines())
+
+
+def remove_marked_block(text: str, start: str, end: str,
+                        drop_separator: bool = False) -> Optional[str]:
+    """Remove the single managed block delimited by whole-line START/END markers.
+
+    Returns the text unchanged when there are no markers, and None when they
+    are damaged (START without END, END without START, END before START, or
+    more than one block): the caller must then leave the file alone. Markers
+    match whole lines only, so a user line that merely quotes one is safe.
+    ``drop_separator`` also drops the one blank line we insert before a block.
+    A block that ends the file without a newline takes the newline of the line
+    before it too, so add/remove round-trips a file that lacked one.
+    """
+    lines = text.splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if _is_marker(line, start)]
+    ends = [i for i, line in enumerate(lines) if _is_marker(line, end)]
+    if not starts and not ends:
         return text
+    if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+        return None
+    first, last = starts[0], ends[0]
+    if drop_separator and first > 0 and lines[first - 1].strip() == "":
+        first -= 1
+    kept = "".join(lines[:first] + lines[last + 1:])
+    if not lines[last].endswith("\n") and kept.endswith("\n"):
+        kept = kept[:-1]
+    return kept
+
+
+def splice_statusline(text: str) -> Optional[str]:
+    if has_marker(text, SL_START, SL_END):
+        return text if remove_marked_block(text, SL_START, SL_END) is not None else None
     out: List[str] = []
     done = False
     for line in text.splitlines(keepends=True):
@@ -165,25 +207,8 @@ def splice_statusline(text: str) -> Optional[str]:
     return "".join(out) if done else None
 
 
-def splice_intact(text: str) -> bool:
-    start = text.find(SL_START)
-    return start != -1 and SL_END in text[start:]
-
-
-def unsplice_statusline(text: str) -> str:
-    if not splice_intact(text):
-        return text
-    out: List[str] = []
-    skipping = False
-    for line in text.splitlines(keepends=True):
-        if SL_START in line:
-            skipping = True
-            continue
-        if skipping:
-            skipping = SL_END not in line
-            continue
-        out.append(line)
-    return "".join(out)
+def damaged_note(path: Path) -> str:
+    return f"context-vigil markers in {path} look damaged — remove the block by hand"
 
 
 def _manual_line() -> str:
@@ -227,26 +252,35 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
         record["statusline"] = {"kind": "capture"}
     else:
         script = statusline_script(command)
-        spliced = splice_statusline(script.read_text()) if script else None
-        if script is not None and spliced is not None:
-            plan.changes.append(Change(script, script.read_text(), spliced))
+        script_text = script.read_text() if script else ""
+        spliced = splice_statusline(script_text) if script else None
+        if script is not None and has_marker(script_text, SL_START, SL_END) \
+                and spliced is None:
+            plan.manual.append(damaged_note(script))
+        elif script is not None and spliced is not None:
+            plan.changes.append(Change(script, script_text, spliced))
             record["statusline"] = {"kind": "spliced", "path": str(script)}
         else:
             plan.manual.append(_manual_line())
     if launcher is not None:
         from context_vigil import launcher as launch
-        rc = launch.plan_rc(launcher)
+        try:
+            rc = launch.plan_rc(launcher)
+        except DamagedMarkers as exc:
+            plan.manual.append(str(exc))
+            rc = None
+        else:
+            if rc is None and launcher in ("on-demand", "always"):
+                plan.manual.append(f"Add to your shell rc: {launch.alias_line(launcher)}")
         if rc is not None:
             plan.changes.append(rc)
             record["rc_path"] = str(rc.path)
-        elif launcher in ("on-demand", "always"):
-            plan.manual.append(f"Add to your shell rc: {launch.alias_line(launcher)}")
     plan.changes.insert(0, Change(settings_path(), before, _dump(data)))
     plan.record = record
     return plan
 
 
-def _write_atomic(path: Path, text: str) -> None:
+def write_atomic(path: Path, text: str) -> None:
     target = path.resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".context-vigil.tmp")
@@ -273,7 +307,7 @@ def apply(plan: Plan) -> None:
         if change.after == "" and change.path == settings_path():
             change.path.unlink(missing_ok=True)
             continue
-        _write_atomic(change.path, change.after)
+        write_atomic(change.path, change.after)
     if uninstalling:
         record_path.unlink(missing_ok=True)
         return
@@ -298,11 +332,11 @@ def plan_uninstall() -> Plan:
         script = Path(str(sl.get("path", "")))
         if script.is_file():
             text = script.read_text()
-            if splice_intact(text):
-                plan.changes.append(Change(script, text, unsplice_statusline(text)))
-            elif SL_START in text:
-                plan.manual.append(f"{script}: context-vigil block has no end marker "
-                                   f"({SL_END!r}); remove it by hand")
+            stripped = remove_marked_block(text, SL_START, SL_END)
+            if stripped is None:
+                plan.manual.append(damaged_note(script))
+            elif stripped != text:
+                plan.changes.append(Change(script, text, stripped))
         else:
             plan.manual.append(f"status-line script {script} no longer exists — nothing to remove")
     if data:
@@ -315,6 +349,10 @@ def plan_uninstall() -> Plan:
     if record.get("rc_path") and rc.is_file():
         from context_vigil import launcher as launch
         text = rc.read_text()
-        plan.changes.append(Change(rc, text, launch.strip_rc(text)))
+        stripped_rc = launch.strip_rc(text)
+        if stripped_rc is None:
+            plan.manual.append(damaged_note(rc))
+        else:
+            plan.changes.append(Change(rc, text, stripped_rc))
     plan.changes.insert(0, Change(settings_path(), before, after))
     return plan
