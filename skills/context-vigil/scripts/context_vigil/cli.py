@@ -7,7 +7,19 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from context_vigil import census, config, context, handover, hooks, paths, state, tmux
+from context_vigil import (
+    census,
+    config,
+    context,
+    handover,
+    hooks,
+    install,
+    paths,
+    state,
+    tmux,
+)
+
+_LAUNCH_CHOICES = ("on-demand", "always", "not-now")
 
 
 class CliError(Exception):
@@ -52,6 +64,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("resume", help="re-enable this worktree").set_defaults(func=_cmd_resume)
     sub.add_parser("status", help="show install, mode and settings").set_defaults(
         func=_cmd_status)
+    ip = sub.add_parser("install", help="wire hooks + status line (dry run without --yes)")
+    ip.add_argument("--yes", action="store_true")
+    ip.add_argument("--threshold", type=int, default=None)
+    ip.add_argument("--launcher", choices=_LAUNCH_CHOICES, default=None)
+    ip.set_defaults(func=_cmd_install)
+    up = sub.add_parser("uninstall", help="remove exactly what install added")
+    up.add_argument("--yes", action="store_true")
+    up.set_defaults(func=_cmd_uninstall)
     return parser
 
 
@@ -151,6 +171,50 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"data: {paths.data_root()}",
     ]
     print("\n".join(lines))
+    return 0
+
+
+def _cmd_install(args: argparse.Namespace) -> int:
+    try:
+        plan = install.plan_install(args.threshold, args.launcher)
+    except (install.InstallError, config.ConfigError) as exc:
+        raise CliError(str(exc)) from exc
+    diffs = [c.diff() for c in plan.changes if c.before != c.after]
+    if not args.yes:
+        print("context-vigil install — DRY RUN, nothing changed yet.\n")
+        print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
+        for line in plan.manual:
+            print(f"\nMANUAL STEP: {line}")
+        current = config.threshold(Path.cwd())
+        print(f"\nThreshold: nudge at {current}% context (default 35). Lower hands over "
+              "sooner with a leaner context; higher means fewer handovers but more "
+              "degradation before each.")
+        print("\nApply with:  context-vigil install --yes [--threshold N] "
+              "[--launcher on-demand|always|not-now]")
+        return 0
+    install.apply(plan)
+    print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
+    for line in plan.manual:
+        print(f"\nMANUAL STEP: {line}")
+    print(f"\ncontext-vigil installed. {_mode_line()}. "
+          "Hooks and the status line take effect in new sessions.")
+    return 0
+
+
+def _cmd_uninstall(args: argparse.Namespace) -> int:
+    try:
+        plan = install.plan_uninstall()
+    except install.InstallError as exc:
+        raise CliError(str(exc)) from exc
+    diffs = [c.diff() for c in plan.changes if c.before != c.after]
+    print("\n".join(diffs) if diffs else "Nothing of context-vigil's is installed.")
+    for line in plan.manual:
+        print(f"\nNOTE: {line}")
+    if not args.yes:
+        print("\nDRY RUN — apply with:  context-vigil uninstall --yes")
+        return 0
+    install.apply(plan)
+    print(f"\ncontext-vigil uninstalled. Data left at {paths.data_root()} (delete it by hand).")
     return 0
 
 
