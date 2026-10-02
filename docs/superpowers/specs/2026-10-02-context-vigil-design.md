@@ -151,14 +151,15 @@ agent ("nudge me at 60%"); SKILL.md maps that to `config set`.
 
 Auto mode needs Claude running inside tmux. Not everyone wants every session
 in a tmux window, so launching is a **user choice made at install**, never
-imposed, and changeable any time with `context-vigil launcher`.
+imposed, and changeable any time with `context-vigil launcher`. The default
+leaves the bare `claude` command alone; taking it over is an explicit opt-in.
 
 ### Choices
 
 | Choice | What install does | Effect |
 |---|---|---|
-| **always** | Adds a sentinel-delimited `alias claude='<skill>/scripts/claude-tmux'` to the shell rc | Every `claude` launch is in tmux → auto mode everywhere. `CLAUDE_NO_TMUX=1 claude` escapes for one launch |
-| **on-demand** | Adds `alias claude-tmux='<skill>/scripts/claude-tmux'` instead | Plain `claude` stays as it is (manual mode); `claude-tmux` when they want a hands-free run |
+| **on-demand** (recommended, default) | Adds a sentinel-delimited `alias claude-tmux='<skill>/scripts/claude-tmux'` to the shell rc | Plain `claude` is untouched (manual mode); `claude-tmux` when they want a hands-free run |
+| **always** | Adds `alias claude='<skill>/scripts/claude-tmux'` instead | Every `claude` launch is in tmux → auto mode everywhere. `CLAUDE_NO_TMUX=1 claude` escapes for one launch |
 | **not now** | Nothing | Manual mode; `context-vigil launcher` revisits |
 
 The shell rc is `~/.zshrc` or `~/.bashrc` per `$SHELL`; any other shell gets
@@ -224,7 +225,7 @@ plain `claude "$@"` unchanged. Arguments are quoted individually for tmux's
 7. **Launch preference walkthrough** (see Launcher). Explain auto vs manual in
    two lines, then branch on what is detected:
    - **tmux installed** (inside it now or not): offer the three launch choices —
-     *always*, *on-demand*, *not now* — with one line each on what changes,
+     *on-demand* (recommended, default on Enter), *always*, *not now* — with one line each on what changes,
      apply the chosen one (shell-rc edit shown as a diff, on consent), and say
      how to change it later (`context-vigil launcher`). If the user is already
      inside tmux, also say that auto mode works for this session right now.
