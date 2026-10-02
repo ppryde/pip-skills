@@ -43,8 +43,10 @@ it, they are told so and get the same flow with one manual `/clear`.
   setting must point at *some* command for census to receive data.
 - **Multi-account:** all state roots at `$CLAUDE_CONFIG_DIR` (default
   `~/.claude`), the boundary Claude Code itself uses between accounts.
-- **Dependencies:** Python 3.11+ stdlib, bash. tmux optional (auto mode).
-  No jq, no third-party packages.
+- **Dependencies:** Python 3.9+ stdlib, bash. tmux optional (auto mode).
+  No jq, no third-party packages. The floor is 3.9 because that is the
+  `python3` stock macOS ships (Xcode command-line tools); a 3.11 floor would
+  fail on a colleague's untouched machine.
 
 ## Layout
 
@@ -65,7 +67,7 @@ context-vigil/
       paths.py             # data root + worktree slug resolution
       census.py            # census store, ported verbatim (ingest/merge/prune/limits/read)
       context.py           # ctx % for this session: census first, transcript fallback
-      state.py             # per-worktree state: active/armed/paused/cooldown/gate
+      state.py             # per-scope marker files: paused/cooldown/handover-gate/clear-requested
       config.py            # threshold/window/mode get/set
       snapshot.py          # git snapshot (cwd, branch, status, recent files)
       handover.py          # assemble + validate handover, write handoff.md
@@ -86,7 +88,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   census.json              # census store, schema identical to census status.json
   install.json             # record of every entry install added (for uninstall)
   worktrees/<slug>/        # slug = sanitised absolute worktree path
-    state.json             # armed, paused, cooldown_until, gate_until
+    paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/<ts>.md        # injected handovers
@@ -113,7 +115,7 @@ errors go to stderr with non-zero exit.
 
 | Command | Purpose |
 |---|---|
-| `install [--yes] [--threshold N]` | Show planned changes as a diff, ask for the threshold, apply on consent, report auto/manual |
+| `install [--yes] [--threshold N] [--launcher CHOICE]` | Without `--yes`: dry run that prints the plan and questions. With `--yes`: apply, report auto/manual |
 | `uninstall` | Remove exactly what `install.json` records |
 | `launcher [always\|on-demand\|off]` | Re-run the launch-preference walkthrough (no arg) or set it directly |
 | `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
@@ -229,12 +231,17 @@ plain `claude "$@"` unchanged. Arguments are quoted individually for tmux's
 
 ### 0. Install (once)
 
-`context-vigil install`:
+`context-vigil install` is a dry run without `--yes`: it prints the plan and the
+questions (threshold, launch choice) and changes nothing. The agent relays the
+plan and questions to the user, then runs
+`install --yes --threshold N --launcher CHOICE` with their answers. The steps:
 
 1. Resolve config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and `settings.json`.
    If `settings.json` is malformed JSON: stop, say so, change nothing.
 2. Plan hooks — `SessionStart` (matcher `startup|clear`), `Stop`,
-   `UserPromptSubmit`, each `"command": "<abs skill dir>/scripts/context-vigil hook <name>"`.
+   `UserPromptSubmit`, and `PostToolUse` (matcher `TaskCreate|TaskUpdate`; the
+   last two both run `hook nudge`, because unattended runs get no user prompts),
+   each `"command": "<abs skill dir>/scripts/context-vigil hook <name>"`.
    Existing hook entries are left in place; ours are appended.
 3. Plan the status-line feed:
    - **Existing `statusLine` command that is a script file:** splice a
@@ -247,7 +254,7 @@ plain `claude "$@"` unchanged. Arguments are quoted individually for tmux's
    - **No `statusLine`:** set it to `bash <skill>/scripts/capture.sh` (prints
      nothing, so no visible status line appears) with `refreshInterval: 60`.
 4. Show the full diff of `settings.json` and any status-line script; apply only
-   on consent (`--yes` skips the prompt).
+   on consent (`--yes` is that consent; without it nothing is applied).
 5. Ask for the threshold: show the default (35%) with one line of guidance —
    lower hands over sooner with a leaner context; higher means fewer handovers
    but more degradation before each — and write the answer to global
@@ -281,18 +288,23 @@ reachable via tmux, else **manual**.
 
 ### 2. Measure
 
-Every render, the status line feeds census. On every `UserPromptSubmit` the
-`nudge` hook reads this session's ctx %:
+Every render, the status line feeds census. On every `UserPromptSubmit` and
+`PostToolUse` (`TaskCreate|TaskUpdate`) the `nudge` hook reads this session's ctx %:
 
 1. census entry for the hook's `session_id`, if fresh (< 90s);
 2. else freshest census entry for this worktree;
-3. else transcript estimate (last usage record ÷ configured window);
+3. else transcript estimate (last usage record in the transcript at the hook
+   payload's `transcript_path`, ÷ configured window);
 4. else no reading → no nudge this turn.
 
 ### 3. Nudge — once per cycle
 
-When ctx % ≥ threshold, not paused, and the gate is not armed: emit one
-`additionalContext` instruction and arm the gate (`gate_until = now + 6h`).
+When ctx % ≥ threshold, not paused, not in cooldown, and the gate is not armed:
+emit one `additionalContext` instruction and arm the gate (`handover-gate`
+marker, 6h TTL from its mtime). The nudge is suppressed for 5 minutes after any
+session start (the `cooldown` marker — census can lag ≤ 90s behind a `/clear`,
+so a fresh session could otherwise read the old session's high ctx % and
+re-nudge instantly).
 The instruction tells the agent to:
 
 - finish or park in-flight work (subagents, running commands) first;
@@ -326,15 +338,15 @@ message otherwise. It then writes `handoff.md`:
 4. Inlined files (`--inline`, repeatable) — used when `context.mode=remote`,
    since a remote session cannot open paths.
 
-and arms the reset (`armed = true`).
+and arms the reset (writes the `clear-requested` marker).
 
 ### 5. Reset
 
-- **Auto:** the `Stop` hook, seeing `armed`, sends `/clear` to the pane via
+- **Auto:** the `Stop` hook, seeing `clear-requested`, sends `/clear` to the pane via
   `tmux send-keys` after `CONTEXT_VIGIL_CLEAR_DELAY` (default 2s).
 - **Manual:** the agent's turn ends with "Handover saved — type `/clear` to
   continue in a fresh context." The `Stop` hook repeats this if armed and no
-  tmux is reachable (never silent).
+  tmux is reachable and `clear-requested` is set (never silent).
 - **tmux lost mid-session:** handled as manual.
 
 ### 6. Resume
@@ -345,7 +357,8 @@ and arms the reset (`armed = true`).
 1. Inject `handoff.md` as `additionalContext`, prefixed with:
    > Resume from this handover. Don't re-investigate anything marked complete,
    > don't retry anything under Failed Attempts — start with the Next Step.
-2. Move `handoff.md` to `archive/`, disarm, clear the gate.
+2. Move `handoff.md` to `archive/`, remove `clear-requested`, clear the gate,
+   and start the 5-minute `cooldown`.
 3. **Auto only** (pane reachable): after `CONTEXT_VIGIL_KICK_DELAY` (default
    2s) type a short resume prompt into the pane, since injected context alone
    never starts a turn.
@@ -414,7 +427,8 @@ real `~/.claude*`.
 - **context** — census-by-session, census-by-worktree, stale fallback,
   transcript fallback, no reading.
 - **config** — resolution order (env > worktree > global > default), validation rejects, `status` reports the source layer, change takes effect next hook call.
-- **state / gate** — arm, cooldown, gate TTL self-heal, pause/resume, session
+- **state / gate** — marker files (`clear-requested`, `cooldown`,
+  `handover-gate`, `paused`), mtime-based TTL self-heal, pause/resume, session
   scoping.
 - **handover** — template validation (missing Failed Attempts / Next Step /
   multiple next steps rejected; `None` accepted), assembly order, `--inline`,
