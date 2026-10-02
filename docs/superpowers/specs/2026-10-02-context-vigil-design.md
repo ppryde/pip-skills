@@ -1,0 +1,301 @@
+# context-vigil — portable context watch + handover skill
+
+_Date: 2026-10-02 · Status: design approved in conversation, awaiting spec review_
+
+## Goal
+
+One self-contained skill that colleagues can install from the shared
+`wayflyer/agents.md` skills library and get what the "automated `/clear`" talk
+demonstrated: live context-% measurement, a nudge at a threshold, a structured
+handover, an in-process `/clear`, and an automatic resume.
+
+It merges the best of three existing pieces:
+
+| Source | What it contributes |
+|---|---|
+| **census** (pip-skills plugin) | Status-line payload store: per-session live `context_window.used_percentage`, worktree-correct, flock-safe. Ported as-is, same schema. |
+| **vigil** (pip-skills plugin) | The engine: measure, once-per-cycle nudge gate, git snapshot, handover assembly, tmux `/clear`, `SessionStart` re-inject, auto-typed resume prompt, archive, pause/resume, fail-safe hooks, `--inline` for remote mode. |
+| **handover-work** (agents.md skill, by Andrew OE, #150) | The handover *content* structure: Goal, Current State, Files in Flight, Failed Attempts, exactly one Next Step, and the "don't re-investigate, don't retry" resume wording. |
+
+Success: a colleague runs one install command, sees what was changed, and from
+then on every session is watched. With tmux, handovers are hands-free; without
+it, they are told so and get the same flow with one manual `/clear`.
+
+## Non-goals
+
+- Cursor support (agents.md skills can target it; this skill relies on Claude
+  Code hooks and the status line, which Cursor lacks).
+- Shipping a visible status line. Users with none get a capture-only script.
+- Replacing or editing `handover-work` in agents.md — it stays untouched.
+- Changing pip-skills' `census` and `vigil` plugins. They remain (overseer
+  depends on vigil's `--content-file` composability).
+- A context-% history/timeline. census stores the latest reading per session.
+
+## Constraints
+
+- **agents.md ships folders, not plugins.** `wf agents add skills X --global`
+  copies a directory; there is no `hooks.json` and no `${CLAUDE_PLUGIN_ROOT}`.
+  The skill must wire its own hooks.
+- **Skill-frontmatter hooks are not viable.** They are active only while the
+  skill is loaded; the post-`/clear` `SessionStart` fires into a fresh session
+  where it is not, so re-injection would break.
+- **Status line is the only source of the live payload.** The `statusLine`
+  setting must point at *some* command for census to receive data.
+- **Multi-account:** all state roots at `$CLAUDE_CONFIG_DIR` (default
+  `~/.claude`), the boundary Claude Code itself uses between accounts.
+- **Dependencies:** Python 3.11+ stdlib, bash. tmux optional (auto mode).
+  No jq, no third-party packages.
+
+## Layout
+
+### Skill directory
+
+```
+context-vigil/
+  SKILL.md                 # agent protocol (see "SKILL.md content")
+  README.md                # human docs: install, auto vs manual, uninstall, data
+  templates/handover.md    # the notes template the agent fills
+  scripts/
+    context-vigil          # launcher: python3 shim, resolves its own dir, any cwd
+    capture.sh             # capture-only status line: tee payload to census, print nothing
+    context_vigil/         # one package
+      __init__.py
+      cli.py               # argparse dispatch for every subcommand
+      paths.py             # data root + worktree slug resolution
+      census.py            # census store, ported verbatim (ingest/merge/prune/limits/read)
+      context.py           # ctx % for this session: census first, transcript fallback
+      state.py             # per-worktree state: active/armed/paused/cooldown/gate
+      config.py            # threshold/window/mode get/set
+      snapshot.py          # git snapshot (cwd, branch, status, recent files)
+      handover.py          # assemble + validate handover, write handoff.md
+      hooks.py             # session-start / stop / nudge entrypoints
+      tmux.py              # detect, send /clear, send resume prompt
+      install.py           # settings.json + status-line wiring, uninstall
+  tests/                   # pytest; stays in pip-skills, not copied to agents.md
+```
+
+### Data root — one folder
+
+Everything the skill writes lives under one directory. Nothing is written
+inside repositories.
+
+```
+$CLAUDE_CONFIG_DIR/context-vigil/
+  config.json              # global: threshold (35), window (200000), mode (local)
+  census.json              # census store, schema identical to census status.json
+  install.json             # record of every entry install added (for uninstall)
+  worktrees/<slug>/        # slug = sanitised absolute worktree path
+    state.json             # armed, paused, cooldown_until, gate_until
+    handoff.md             # pending handover (at most one)
+    archive/<ts>.md        # injected handovers
+    sessions/<name>/       # same files, used only when VIGIL_SESSION=<name> is set
+```
+
+- **Keyed by worktree, not session id.** `/clear` mints a new session id; the
+  fresh session finds its handover by worktree path, which is stable.
+- `VIGIL_SESSION` scoping is kept for two sessions sharing one worktree.
+- `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups).
+- census path: `census.json` here, not `$CLAUDE_CONFIG_DIR/census/status.json`.
+  The existing census plugin honours `CENSUS_STORE`, so a machine running both
+  can point census at this file; otherwise they are two independent writers.
+
+## CLI surface
+
+`scripts/context-vigil <command>`; every command prints a short human line,
+errors go to stderr with non-zero exit.
+
+| Command | Purpose |
+|---|---|
+| `install [--yes]` | Show planned changes as a diff, apply on consent, report auto/manual |
+| `uninstall` | Remove exactly what `install.json` records |
+| `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
+| `context` | `ctx NN%` for this session (threshold appended when over) |
+| `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
+| `pause` / `resume` | Opt this worktree out / back in; resume also releases the gate |
+| `config get\|set KEY [VAL]` | `context.threshold`, `context.window`, `context.mode` |
+| `ingest` | Read a status-line payload on stdin into census (quarantined) |
+| `hook session-start\|stop\|nudge` | Hook entrypoints (read hook JSON on stdin, always exit 0) |
+
+## Lifecycle
+
+### 0. Install (once)
+
+`context-vigil install`:
+
+1. Resolve config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and `settings.json`.
+   If `settings.json` is malformed JSON: stop, say so, change nothing.
+2. Plan hooks — `SessionStart` (matcher `startup|clear`), `Stop`,
+   `UserPromptSubmit`, each `"command": "<abs skill dir>/scripts/context-vigil hook <name>"`.
+   Existing hook entries are left in place; ours are appended.
+3. Plan the status-line feed:
+   - **Existing `statusLine` command that is a script file:** splice a
+     sentinel-delimited block after the line that reads stdin into a variable:
+     `printf '%s' "$input" | "<skill>/scripts/context-vigil" ingest 2>/dev/null || true`.
+     If no stdin-slurp line can be found, show the user the one line and where
+     it must go, and do not edit the script.
+   - **Existing `statusLine` that is an inline command (not a file):** do not
+     rewrite it; print the manual instruction as above.
+   - **No `statusLine`:** set it to `bash <skill>/scripts/capture.sh` (prints
+     nothing, so no visible status line appears) with `refreshInterval: 60`.
+4. Show the full diff of `settings.json` and any status-line script; apply only
+   on consent (`--yes` skips the prompt).
+5. Record every added entry in `install.json`.
+6. Detect tmux (`$TMUX` set and `tmux display -p '#{pane_id}'` succeeds) and
+   report. No tmux:
+   > tmux not detected — auto-clear is off. You'll get a nudge, I'll write the
+   > handover, and you type `/clear`; I resume automatically after that. Run
+   > Claude inside tmux to go hands-free.
+7. Remind: hooks and the status line take effect in new sessions.
+
+Install is idempotent: re-running detects its own entries (by command path /
+sentinel) and changes nothing.
+
+### 1. Always on
+
+Once installed, every session in every worktree is watched. `pause` opts a
+worktree out. Mode is decided per turn: **auto** when the session's pane is
+reachable via tmux, else **manual**.
+
+### 2. Measure
+
+Every render, the status line feeds census. On every `UserPromptSubmit` the
+`nudge` hook reads this session's ctx %:
+
+1. census entry for the hook's `session_id`, if fresh (< 90s);
+2. else freshest census entry for this worktree;
+3. else transcript estimate (last usage record ÷ configured window);
+4. else no reading → no nudge this turn.
+
+### 3. Nudge — once per cycle
+
+When ctx % ≥ threshold, not paused, and the gate is not armed: emit one
+`additionalContext` instruction and arm the gate (`gate_until = now + 6h`).
+The instruction tells the agent to:
+
+- finish or park in-flight work (subagents, running commands) first;
+- not interrupt a live discussion — if the user is mid-exchange, wait for a
+  natural break or ask;
+- then fill `templates/handover.md` and run `handover`.
+
+The gate prevents repeat nudges until the cycle completes (handover injected),
+`resume` is run, or the 6h TTL lapses (self-heal after a crash).
+
+### 4. Handover
+
+The agent writes notes following `templates/handover.md`:
+
+| Section | Rule |
+|---|---|
+| **Goal** | 1–2 sentences: the objective and what "done" looks like |
+| **Current State** | Done ✅ / In progress 🚧 / Verified working 🔬 (commands that pass) |
+| **Files in Flight** | *Why* each open file matters — not a list; the snapshot lists files |
+| **Failed Attempts** | **Required.** `Tried X → failed because Y`; the literal `None` is allowed |
+| **Next Step** | **Required.** Exactly one concrete action |
+
+`handover --file notes.md` validates that Failed Attempts and Next Step are
+present and non-empty — Next Step must hold exactly one bullet or one paragraph — rejecting with a precise
+message otherwise. It then writes `handoff.md`:
+
+1. Header (date, worktree, branch).
+2. The agent's notes.
+3. The git snapshot (cwd, branch, `git status --short`, 10 most recently
+   modified tracked files) — unless `--no-snapshot`.
+4. Inlined files (`--inline`, repeatable) — used when `context.mode=remote`,
+   since a remote session cannot open paths.
+
+and arms the reset (`armed = true`).
+
+### 5. Reset
+
+- **Auto:** the `Stop` hook, seeing `armed`, sends `/clear` to the pane via
+  `tmux send-keys` after `CONTEXT_VIGIL_CLEAR_DELAY` (default 2s).
+- **Manual:** the agent's turn ends with "Handover saved — type `/clear` to
+  continue in a fresh context." The `Stop` hook repeats this if armed and no
+  tmux is reachable (never silent).
+- **tmux lost mid-session:** handled as manual.
+
+### 6. Resume
+
+`SessionStart` with `source == "clear"` (or `startup`) and a pending
+`handoff.md`:
+
+1. Inject `handoff.md` as `additionalContext`, prefixed with:
+   > Resume from this handover. Don't re-investigate anything marked complete,
+   > don't retry anything under Failed Attempts — start with the Next Step.
+2. Move `handoff.md` to `archive/`, disarm, clear the gate.
+3. **Auto only** (source `clear`, pane reachable): after
+   `CONTEXT_VIGIL_KICK_DELAY` (default 2s) type a short resume prompt into the
+   pane, since injected context alone never starts a turn. A plain launch or a
+   manual `/clear` is never kicked.
+
+## SKILL.md content
+
+Frontmatter `name: context-vigil` and a description triggering on: context
+full / filling up, "how full is my context", hand over, reset and resume,
+start fresh, hitting context limits, long or unattended sessions, install or
+uninstall the context watch.
+
+Body sections, terse and imperative:
+
+1. **First run** — if `status` says not installed: explain what install
+   changes, run `install`, relay its auto/manual report verbatim.
+2. **Measure** — `context` at natural stop points.
+3. **On the nudge / when asked to hand over** — finish or park work; never
+   clear out from under a live discussion; fill the template; run `handover`;
+   then per mode (auto: end the turn; manual: tell the user to type `/clear`).
+4. **Pause / resume** — when a human joins an unattended run, or on request.
+5. **Config** — the three keys and defaults.
+6. **Uninstall.**
+
+## Failure handling
+
+The rule from both originals: **a broken context-vigil never breaks Claude Code.**
+
+| Failure | Behaviour |
+|---|---|
+| Any hook error (missing python, corrupt state, lock timeout) | Trap, exit 0, no output → no nudge this turn |
+| Bad payload into `ingest` | Quarantined (`2>/dev/null \|\| true`); status line unaffected |
+| census store unreadable/corrupt | Treated as empty; next ingest rewrites it atomically |
+| No usable ctx reading | Transcript fallback, else skip silently |
+| Armed but tmux unreachable at Stop | Loud manual instruction to type `/clear` |
+| Handover written, `/clear` never happens | Stays pending; injects on next start/clear in the worktree; gate self-heals at 6h |
+| Malformed `settings.json` at install | Stop, report, change nothing |
+| Status-line script without a recognisable stdin slurp | Print manual line + placement; do not edit |
+| `uninstall` after the user edited entries | Remove only exact matches recorded in `install.json`; report anything not found |
+
+Concurrency: census keeps its `fcntl.flock` read-modify-write and atomic
+replace; per-worktree state writes are atomic replace.
+
+## Testing
+
+pytest, following the repo's isolation rule: an autouse fixture pins
+`CLAUDE_CONFIG_DIR` and `CONTEXT_VIGIL_HOME` to `tmp_path`; nothing touches the
+real `~/.claude*`.
+
+- **census** — port census's existing tests (merge, prune, limits latch,
+  blank-window keep, worktree/session lookup).
+- **context** — census-by-session, census-by-worktree, stale fallback,
+  transcript fallback, no reading.
+- **state / gate** — arm, cooldown, gate TTL self-heal, pause/resume, session
+  scoping.
+- **handover** — template validation (missing Failed Attempts / Next Step /
+  multiple next steps rejected; `None` accepted), assembly order, `--inline`,
+  `--no-snapshot`.
+- **install / uninstall** — round-trips against fixture `settings.json`:
+  none, existing script status line, inline-command status line, existing
+  hooks, malformed JSON, re-install idempotence.
+- **hooks end-to-end** — feed hook JSON on stdin; tmux stubbed on `PATH` to
+  assert `send-keys` calls for `/clear` and the kick; manual-mode messages.
+- **Manual smoke** before shipping: real tmux session, low threshold (e.g. 5%),
+  observe nudge → handover → auto-clear → resume; repeat without tmux.
+
+## Delivery
+
+1. **Build in pip-skills** at `skills/context-vigil/` on `feat/context-vigil`,
+   with tests under `tests/context_vigil/` (a new top-level `skills/` dir, since this is a bare skill, not a plugin), run via the repo's venv. Porting
+   copies code from `plugins/census` and `plugins/vigil`; those plugins are not
+   modified.
+2. **Ship to agents.md** as a separate PR: copy the skill directory (minus
+   tests) to `library/skills/context-vigil/`, add
+   `docs/library/skills/context-vigil.rst` (modelled on claude-context-ui's),
+   and credit Andrew OE's `handover-work` for the handover structure.
