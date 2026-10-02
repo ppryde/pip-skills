@@ -162,6 +162,33 @@ leaves the bare `claude` command alone; taking it over is an explicit opt-in.
 | **always** | Adds `alias claude='<skill>/scripts/claude-tmux'` instead | Every `claude` launch is in tmux → auto mode everywhere. `CLAUDE_NO_TMUX=1 claude` escapes for one launch |
 | **not now** | Nothing | Manual mode; `context-vigil launcher` revisits |
 
+### Walkthrough copy
+
+The walkthrough states the consequence of each choice in plain words, so
+nobody picks *always* without realising it takes over `claude`. Shown as:
+
+```
+How do you want to launch Claude for hands-free handovers?
+
+  1. On demand (recommended)
+     Adds a `claude-tmux` command. Use it when you want a session that clears
+     and resumes itself; plain `claude` keeps working exactly as it does now.
+
+  2. Always
+     Makes `claude` itself ALWAYS launch inside tmux — every session, every
+     repo. If you only want tmux some of the time, choose 1 and use
+     `claude-tmux` instead. (One-off escape: `CLAUDE_NO_TMUX=1 claude`.)
+
+  3. Not now
+     Change nothing. You'll get nudges and type `/clear` yourself.
+
+Choose 1–3 [1]:
+```
+
+Choosing **always** asks one confirmation that repeats the consequence
+("`claude` will always start in tmux from your next shell — continue?")
+before the rc diff is shown. README.md carries the same explanation.
+
 The shell rc is `~/.zshrc` or `~/.bashrc` per `$SHELL`; any other shell gets
 the alias line printed to add themselves. The edit is shown as a diff and
 needs consent; `uninstall` (and `launcher off`) remove it by sentinel. The
