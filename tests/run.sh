@@ -31,6 +31,9 @@ for p in "${SUITES[@]}"; do
   ( cd "$ROOT/plugins/$p" && "$PY" -m pytest "$@" ) || FAIL=1
 done
 
+echo "=================== context-vigil ==================="
+( cd "$ROOT/skills/context-vigil" && "$PY" -m pytest "$@" ) || FAIL=1
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "All plugin suites passed."
