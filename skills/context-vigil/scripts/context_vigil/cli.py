@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from context_vigil import config, handover, hooks, paths, state, tmux
+from context_vigil import census, config, context, handover, hooks, paths, state, tmux
 
 
 class CliError(Exception):
@@ -42,6 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
     hp.add_argument("--inline", action="append", default=[], help="embed a file (remote mode)")
     hp.add_argument("--no-snapshot", action="store_true")
     hp.set_defaults(func=_cmd_handover)
+    sub.add_parser("ingest", help="record a status-line payload from stdin").set_defaults(
+        func=_cmd_ingest)
+    ctxp = sub.add_parser("context", help="print ctx NN%% for this session")
+    ctxp.add_argument("--session-id", default=None)
+    ctxp.set_defaults(func=_cmd_context)
+    sub.add_parser("pause", help="stop nudges/auto-clear in this worktree").set_defaults(
+        func=_cmd_pause)
+    sub.add_parser("resume", help="re-enable this worktree").set_defaults(func=_cmd_resume)
+    sub.add_parser("status", help="show install, mode and settings").set_defaults(
+        func=_cmd_status)
     return parser
 
 
@@ -89,6 +99,58 @@ def _cmd_config(args: argparse.Namespace) -> int:
         raise CliError(str(exc)) from exc
     value, layer = config.resolve(cwd)[args.key]
     print(f"{args.key} = {value} ({layer})")
+    return 0
+
+
+def _cmd_ingest(args: argparse.Namespace) -> int:
+    census.ingest(sys.stdin.read())
+    return 0
+
+
+def _cmd_context(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    pct = context.current_percent(cwd, args.session_id, None, config.window(cwd))
+    print(context.context_line(pct, config.threshold(cwd)))
+    return 0
+
+
+def _cmd_pause(args: argparse.Namespace) -> int:
+    state.pause(paths.scope_dir(Path.cwd()))
+    print("context-vigil paused here — no nudges or auto-clear until `resume`")
+    return 0
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    state.resume(paths.scope_dir(Path.cwd()))
+    print("context-vigil resumed here")
+    return 0
+
+
+def _mode_line() -> str:
+    if tmux.reachable():
+        return "mode: auto (inside tmux — /clear is sent for you)"
+    if tmux.installed():
+        return "mode: manual (not inside tmux — launch with claude-tmux for auto)"
+    return "mode: manual (tmux not installed — you type /clear after a handover)"
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    scope = paths.scope_dir(cwd)
+    record = paths.install_record_path()
+    resolved = config.resolve(cwd)
+    threshold, layer = resolved["context.threshold"]
+    lines = [
+        f"installed: {'yes' if record.exists() else 'no'}",
+        _mode_line(),
+        f"threshold: {threshold}% ({layer})",
+        f"context.mode: {resolved['context.mode'][0]} ({resolved['context.mode'][1]})",
+        f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
+        f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
+        f"pending handover: {'yes' if state.read_handoff(scope) else 'no'}",
+        f"data: {paths.data_root()}",
+    ]
+    print("\n".join(lines))
     return 0
 
 
