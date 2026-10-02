@@ -11,6 +11,12 @@ from .conftest import SKILL
 SCRIPT = SKILL / "scripts" / "claude-tmux"
 
 
+@pytest.fixture(autouse=True)
+def _clean_launcher_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("CLAUDE_TMUX_SOCK", "CLAUDE_NO_TMUX"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def stubs(iso: Path) -> Path:
     """bin/ with logging stubs for tmux and claude; tmux has-session fails."""
@@ -65,7 +71,8 @@ def test_falls_through_to_plain_claude(stubs: Path, repo: Path, env: dict) -> No
 
 def test_falls_through_without_tmux(stubs: Path, repo: Path) -> None:
     (stubs / "tmux").unlink()
-    assert "claude" in _run(stubs, repo)
+    log = _run(stubs, repo)
+    assert "claude" in log and "new-session" not in log
 
 
 def test_quotes_arguments(stubs: Path, repo: Path) -> None:
@@ -78,3 +85,55 @@ def test_runs_under_macos_bash32(stubs: Path, repo: Path) -> None:
     result = subprocess.run(["/bin/bash", str(SCRIPT)], cwd=repo, env=full,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture
+def live(stubs: Path):
+    """Make the tmux stub list the given sessions and log argv."""
+    def _set(*names: str) -> None:
+        (stubs.parent / "sessions").write_text("".join(f"{n}\n" for n in names))
+        (stubs / "tmux").write_text(
+            f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
+            f'[[ " $* " == *" list-sessions "* ]] && cat "{stubs.parent / "sessions"}"\n'
+            'exit 0\n')
+    return _set
+
+
+def _attach(stubs: Path, cwd: Path, *args: str, shell: str = "bash"):
+    full = dict(os.environ, PATH=f"{stubs}:/usr/bin:/bin")
+    (stubs.parent / "calls.log").touch()
+    result = subprocess.run([shell, str(SCRIPT), "attach", *args], cwd=cwd, env=full,
+                            capture_output=True, text=True, timeout=10)
+    return result, (stubs.parent / "calls.log").read_text()
+
+
+def test_attach_without_live_sessions_fails(stubs: Path, repo: Path, live) -> None:
+    live()
+    result, log = _attach(stubs, repo)
+    assert result.returncode == 1
+    assert "attach-session" not in log
+
+
+@pytest.mark.parametrize("shell", ["bash", "/bin/bash"])
+def test_attach_single_live_session(stubs: Path, repo: Path, live, shell: str) -> None:
+    live("cc-repo-1", "cc-other-1")
+    result, log = _attach(stubs, repo, shell=shell)
+    assert result.returncode == 0, result.stderr
+    assert "attach-session -t =cc-repo-1" in log
+
+
+@pytest.mark.parametrize("shell", ["bash", "/bin/bash"])
+def test_attach_multiple_sessions_lists_and_fails(stubs: Path, repo: Path, live,
+                                                  shell: str) -> None:
+    live("cc-repo-1", "cc-repo-2")
+    result, log = _attach(stubs, repo, shell=shell)
+    assert result.returncode == 1
+    assert "cc-repo-1" in result.stdout and "cc-repo-2" in result.stdout
+    assert "attach-session" not in log
+
+
+def test_attach_by_number(stubs: Path, repo: Path, live) -> None:
+    live("cc-repo-1", "cc-repo-2")
+    result, log = _attach(stubs, repo, "2")
+    assert result.returncode == 0, result.stderr
+    assert "attach-session -t =cc-repo-2" in log
