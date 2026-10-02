@@ -134,3 +134,112 @@ def test_cli_apply(run_cli, cfg: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert (cfg / "settings.json").exists()
     assert "new sessions" in result.stdout
+
+
+def test_apply_records_before_touching_user_files(cfg: Path, monkeypatch) -> None:
+    script = cfg / "sl.sh"
+    script.write_text("input=$(cat)\n")
+    _write(cfg, {"statusLine": {"type": "command", "command": str(script)}})
+    plan = install.plan_install(threshold=None)
+
+    def boom(path, text):
+        assert paths.install_record_path().exists()
+        raise OSError("disk full")
+
+    monkeypatch.setattr(install, "_write_atomic", boom)
+    with pytest.raises(OSError):
+        install.apply(plan)
+    assert json.loads(paths.install_record_path().read_text())["statusline"]["kind"] == "spliced"
+
+
+def test_failed_write_leaves_no_tmp(cfg: Path, monkeypatch) -> None:
+    import os as _os
+    plan = install.plan_install(threshold=None)
+    monkeypatch.setattr(_os, "replace", lambda *a: (_ for _ in ()).throw(OSError("x")))
+    with pytest.raises(OSError):
+        install.apply(plan)
+    assert not list(cfg.glob("*.context-vigil.tmp"))
+
+
+def test_uninstall_without_record_says_so(cfg: Path) -> None:
+    assert any("no install record" in m for m in install.plan_uninstall().manual)
+
+
+def test_cli_oserror_is_clean_error(run_cli, cfg: Path) -> None:
+    (cfg / "settings.json").mkdir(parents=True)
+    result = run_cli("install", "--yes")
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr and "error:" in result.stderr
+
+
+def test_script_mode_preserved(cfg: Path) -> None:
+    script = cfg / "sl.sh"
+    script.write_text("input=$(cat)\n")
+    script.chmod(0o755)
+    _write(cfg, {"statusLine": {"type": "command", "command": str(script)}})
+    (cfg / "settings.json").chmod(0o600)
+    install.apply(install.plan_install(threshold=None))
+    assert script.stat().st_mode & 0o777 == 0o755
+    assert (cfg / "settings.json").stat().st_mode & 0o777 == 0o600
+    install.apply(install.plan_uninstall())
+    assert script.stat().st_mode & 0o777 == 0o755
+
+
+def test_symlinked_settings_survives(cfg: Path, iso: Path) -> None:
+    real = iso / "dotfiles-settings.json"
+    real.write_text("{}\n")
+    (cfg / "settings.json").symlink_to(real)
+    install.apply(install.plan_install(threshold=None))
+    assert (cfg / "settings.json").is_symlink()
+    assert "hooks" in json.loads(real.read_text())
+
+
+def test_unsplice_without_end_marker_is_untouched(cfg: Path) -> None:
+    script = cfg / "sl.sh"
+    script.write_text("input=$(cat)\n")
+    _write(cfg, {"statusLine": {"type": "command", "command": str(script)}})
+    install.apply(install.plan_install(threshold=None))
+    broken = script.read_text().replace(install.SL_END, "") + "echo user-after\n"
+    script.write_text(broken)
+    plan = install.plan_uninstall()
+    assert script not in [c.path for c in plan.changes]
+    assert any("end marker" in m for m in plan.manual)
+    install.apply(plan)
+    assert script.read_text() == broken
+
+
+def test_uninstall_keeps_preexisting_empty_settings(cfg: Path) -> None:
+    _write(cfg, {"hooks": {}})
+    install.apply(install.plan_install(threshold=None))
+    install.apply(install.plan_uninstall())
+    assert (cfg / "settings.json").read_text() == "{}\n"
+    install.apply(install.plan_install(threshold=None))
+    install.apply(install.plan_install(threshold=None))
+    install.apply(install.plan_uninstall())
+    assert (cfg / "settings.json").exists()
+
+
+def test_uninstall_removes_settings_it_created(cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None))
+    install.apply(install.plan_install(threshold=None))
+    install.apply(install.plan_uninstall())
+    assert not (cfg / "settings.json").exists()
+
+
+def test_dry_run_announces_threshold_write(run_cli, cfg: Path) -> None:
+    result = run_cli("install", "--threshold", "50")
+    assert "will set context.threshold = 50" in result.stdout
+    assert not (cfg / "settings.json").exists()
+    applied = run_cli("install", "--yes", "--threshold", "50")
+    assert "will set context.threshold = 50" in applied.stdout
+
+
+@pytest.mark.parametrize("hooks", ["oops", {"Stop": "oops"}])
+def test_malformed_hooks_shape_refuses(cfg: Path, hooks) -> None:
+    _write(cfg, {"hooks": hooks})
+    before = (cfg / "settings.json").read_text()
+    with pytest.raises(install.InstallError, match="hooks"):
+        install.plan_install(threshold=None)
+    with pytest.raises(install.InstallError, match="hooks"):
+        install.plan_uninstall()
+    assert (cfg / "settings.json").read_text() == before

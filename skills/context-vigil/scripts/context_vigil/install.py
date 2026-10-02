@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,6 +55,7 @@ class Plan:
     manual: List[str] = field(default_factory=list)
     record: Dict[str, Any] = field(default_factory=dict)
     threshold: Optional[int] = None
+    notes: List[str] = field(default_factory=list)
 
 
 def settings_path() -> Path:
@@ -83,6 +85,11 @@ def _read_settings() -> Tuple[str, Dict[str, Any]]:
         raise InstallError(f"{path} is not valid JSON ({exc}); fix it and re-run") from exc
     if not isinstance(data, dict):
         raise InstallError(f"{path} is not a JSON object; fix it and re-run")
+    hooks = data.get("hooks")
+    if hooks is not None and (not isinstance(hooks, dict) or any(
+            not isinstance(v, list) for v in hooks.values())):
+        raise InstallError(f"{path}: unexpected shape for \"hooks\" (want an object of "
+                           "lists); fix it and re-run")
     return text, data
 
 
@@ -158,7 +165,14 @@ def splice_statusline(text: str) -> Optional[str]:
     return "".join(out) if done else None
 
 
+def splice_intact(text: str) -> bool:
+    start = text.find(SL_START)
+    return start != -1 and SL_END in text[start:]
+
+
 def unsplice_statusline(text: str) -> str:
+    if not splice_intact(text):
+        return text
     out: List[str] = []
     skipping = False
     for line in text.splitlines(keepends=True):
@@ -177,13 +191,31 @@ def _manual_line() -> str:
             f"reads stdin (e.g. input=$(cat)):\n  {ingest_command('input')}")
 
 
+def _read_record() -> Dict[str, Any]:
+    try:
+        record = json.loads(paths.install_record_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return record if isinstance(record, dict) else {}
+
+
+def _settings_existed_before() -> bool:
+    """True if settings.json predates our first install (kept across reinstalls)."""
+    prior = _read_record().get("settings_existed")
+    return prior if isinstance(prior, bool) else settings_path().exists()
+
+
 def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Plan:
     if threshold is not None:
         config.coerce("context.threshold", threshold)
     before, data = _read_settings()
     plan = Plan(threshold=threshold)
     record: Dict[str, Any] = {"skill_dir": str(paths.skill_dir()), "statusline": None,
-                              "launcher": launcher}
+                              "launcher": launcher,
+                              "settings_existed": _settings_existed_before()}
+    if threshold is not None:
+        plan.notes.append(f"will set context.threshold = {threshold} "
+                          f"(global config: {paths.global_config_path()})")
     data = _with_hooks(data)
     status = data.get("statusLine")
     command = status.get("command") if isinstance(status, dict) else None
@@ -206,49 +238,70 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
     return plan
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".context-vigil.tmp")
+    try:
+        tmp.write_text(text)
+        if target.exists():
+            shutil.copymode(target, tmp)
+        os.replace(tmp, target)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def apply(plan: Plan) -> None:
+    record_path = paths.install_record_path()
+    uninstalling = bool(plan.record.get("uninstall"))
+    if not uninstalling:
+        # Record first: a crash mid-apply must never leave an unrecorded edit.
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        record_path.write_text(json.dumps(plan.record, indent=2) + "\n")
     for change in plan.changes:
         if change.before == change.after:
             continue
         if change.after == "" and change.path == settings_path():
             change.path.unlink(missing_ok=True)
             continue
-        change.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = change.path.with_name(change.path.name + ".context-vigil.tmp")
-        tmp.write_text(change.after)
-        os.replace(tmp, change.path)
-    record_path = paths.install_record_path()
-    if plan.record.get("uninstall"):
+        _write_atomic(change.path, change.after)
+    if uninstalling:
         record_path.unlink(missing_ok=True)
         return
     if plan.threshold is not None:
         config.set_value(Path.cwd(), "context.threshold", str(plan.threshold))
-    record_path.parent.mkdir(parents=True, exist_ok=True)
-    record_path.write_text(json.dumps(plan.record, indent=2) + "\n")
 
 
 def plan_uninstall() -> Plan:
     before, data = _read_settings()
-    try:
-        record = json.loads(paths.install_record_path().read_text())
-    except (OSError, ValueError):
-        record = {}
+    record = _read_record()
     plan = Plan(record={"uninstall": True})
+    if not record:
+        plan.manual.append("no install record found; removing only entries recognisably "
+                           "ours (hooks and capture status line)")
     data = _without_hooks(data)
     status = data.get("statusLine")
     if isinstance(status, dict) and "capture.sh" in str(status.get("command", "")) \
             and str(paths.skill_dir()) in str(status.get("command", "")):
         del data["statusLine"]
-    sl = record.get("statusline") if isinstance(record, dict) else None
+    sl = record.get("statusline")
     if isinstance(sl, dict) and sl.get("kind") == "spliced":
-        script = Path(sl["path"])
-        if script.exists():
+        script = Path(str(sl.get("path", "")))
+        if script.is_file():
             text = script.read_text()
-            plan.changes.append(Change(script, text, unsplice_statusline(text)))
+            if splice_intact(text):
+                plan.changes.append(Change(script, text, unsplice_statusline(text)))
+            elif SL_START in text:
+                plan.manual.append(f"{script}: context-vigil block has no end marker "
+                                   f"({SL_END!r}); remove it by hand")
         else:
             plan.manual.append(f"status-line script {script} no longer exists — nothing to remove")
-    after = _dump(data) if data else ""
-    if before and not data and before.strip() == "{}":
-        after = before
+    if data:
+        after = _dump(data)
+    elif record.get("settings_existed") is False:
+        after = ""
+    else:
+        after = "{}\n" if before else ""
     plan.changes.insert(0, Change(settings_path(), before, after))
     return plan

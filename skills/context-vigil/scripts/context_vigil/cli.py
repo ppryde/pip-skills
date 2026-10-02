@@ -177,7 +177,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 def _cmd_install(args: argparse.Namespace) -> int:
     try:
         plan = install.plan_install(args.threshold, args.launcher)
-    except (install.InstallError, config.ConfigError) as exc:
+    except (install.InstallError, config.ConfigError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
     diffs = [c.diff() for c in plan.changes if c.before != c.after]
     if not args.yes:
@@ -185,6 +185,8 @@ def _cmd_install(args: argparse.Namespace) -> int:
         print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
         for line in plan.manual:
             print(f"\nMANUAL STEP: {line}")
+        for line in plan.notes:
+            print(f"\n{line}")
         current = config.threshold(Path.cwd())
         print(f"\nThreshold: nudge at {current}% context (default 35). Lower hands over "
               "sooner with a leaner context; higher means fewer handovers but more "
@@ -192,10 +194,15 @@ def _cmd_install(args: argparse.Namespace) -> int:
         print("\nApply with:  context-vigil install --yes [--threshold N] "
               "[--launcher on-demand|always|not-now]")
         return 0
-    install.apply(plan)
+    try:
+        install.apply(plan)
+    except OSError as exc:
+        raise CliError(f"install failed part-way ({exc}); re-run, or `uninstall --yes`") from exc
     print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
     for line in plan.manual:
         print(f"\nMANUAL STEP: {line}")
+    for line in plan.notes:
+        print(f"\n{line}")
     print(f"\ncontext-vigil installed. {_mode_line()}. "
           "Hooks and the status line take effect in new sessions.")
     return 0
@@ -204,7 +211,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
 def _cmd_uninstall(args: argparse.Namespace) -> int:
     try:
         plan = install.plan_uninstall()
-    except install.InstallError as exc:
+    except (install.InstallError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
     diffs = [c.diff() for c in plan.changes if c.before != c.after]
     print("\n".join(diffs) if diffs else "Nothing of context-vigil's is installed.")
@@ -213,7 +220,10 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
     if not args.yes:
         print("\nDRY RUN — apply with:  context-vigil uninstall --yes")
         return 0
-    install.apply(plan)
+    try:
+        install.apply(plan)
+    except OSError as exc:
+        raise CliError(f"uninstall failed ({exc}); nothing more was changed") from exc
     print(f"\ncontext-vigil uninstalled. Data left at {paths.data_root()} (delete it by hand).")
     return 0
 
