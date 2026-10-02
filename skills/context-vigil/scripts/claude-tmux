@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# claude-tmux — launch Claude Code inside tmux so context-vigil can /clear and
+# resume hands-free. Bash port of a proven zsh wrapper:
+#  * dedicated tmux socket (-L): a tmux server left up for weeks loses its macOS
+#    temp namespace and every fresh claude it spawns dies with Bun ENOENT;
+#  * a fresh session per launch, lowest free cc-<repo>-<N>, never a silent attach;
+#  * CONTEXT_VIGIL_SESSION=<name> so two sessions in one worktree keep separate
+#    handovers;
+#  * env passthrough with -e: a new session on a running server inherits the
+#    SERVER's env, not yours (matters for CLAUDE_CONFIG_DIR and CONTEXT_VIGIL_*).
+# Falls through to plain `claude` when already in tmux, tmux is missing, or
+# CLAUDE_NO_TMUX=1. Usage: claude-tmux [claude args…] | claude-tmux attach [N|name]
+set -u
+
+bin="$(type -P claude)" || { echo "claude-tmux: claude not found on PATH" >&2; exit 127; }
+
+sock="${CLAUDE_TMUX_SOCK:-}"
+if [ -z "$sock" ]; then
+  tag="$(basename "${CLAUDE_CONFIG_DIR:-.claude}")"
+  tag="${tag#.}"; tag="${tag#claude}"; tag="${tag//[^A-Za-z0-9_-]/-}"; tag="${tag#-}"
+  sock="claude${tag:+-$tag}"
+fi
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+name_base="$(basename "$root")"
+base="cc-${name_base//[^A-Za-z0-9_-]/-}"
+
+if [ "${1:-}" = "attach" ]; then
+  command -v tmux >/dev/null || { echo "claude-tmux: tmux not found" >&2; exit 127; }
+  [ -n "${TMUX:-}" ] && { echo "claude-tmux: already inside tmux — detach first" >&2; exit 1; }
+  sel="${2:-}"
+  if [ -z "$sel" ]; then
+    live=(); while IFS= read -r s; do live+=("$s"); done < <(tmux -L "$sock" list-sessions -F '#S' 2>/dev/null | grep -E "^${base}-[0-9]+$")
+    [ "${#live[@]}" -eq 0 ] && { echo "claude-tmux: no live sessions for $base" >&2; exit 1; }
+    [ "${#live[@]}" -gt 1 ] && { printf 'live sessions:\n'; printf '  %s\n' "${live[@]}"; \
+      echo "claude-tmux: pick one: claude-tmux attach <N|name>" >&2; exit 1; }
+    sel="${live[0]}"
+  elif [[ "$sel" =~ ^[0-9]+$ ]]; then
+    sel="${base}-${sel}"
+  fi
+  exec tmux -L "$sock" attach-session -t "=$sel"
+fi
+
+if [ -n "${TMUX:-}" ] || [ -n "${CLAUDE_NO_TMUX:-}" ] || ! command -v tmux >/dev/null; then
+  exec "$bin" "$@"
+fi
+
+n=1
+while tmux -L "$sock" has-session -t "=${base}-${n}" 2>/dev/null; do n=$((n + 1)); done
+name="${base}-${n}"
+
+cmd="$(printf '%q' "$bin")"
+for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done
+
+envargs=(-e "CONTEXT_VIGIL_SESSION=$name")
+[ -n "${CLAUDE_CONFIG_DIR:-}" ] && envargs+=(-e "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR")
+while IFS='=' read -r var _; do
+  [ "$var" = "CONTEXT_VIGIL_SESSION" ] && continue
+  envargs+=(-e "$var=${!var}")
+done < <(env | grep -E '^CONTEXT_VIGIL_[A-Z_]+=' )
+
+if ! tmux -L "$sock" new-session -s "$name" -c "$root" "${envargs[@]}" "$cmd"; then
+  echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2
+  exec "$bin" "$@"
+fi
