@@ -9,7 +9,36 @@ import pytest
 SKILL = Path(__file__).resolve().parents[2] / "skills" / "context-vigil"
 LAUNCHER = SKILL / "scripts" / "context-vigil"
 
-_STRIP = ("TMUX", "TMUX_PANE", "CLAUDE_PROJECT_DIR")
+_STRIP = ("TMUX", "TMUX_PANE", "CLAUDE_PROJECT_DIR", "ZDOTDIR")
+
+# Captured at import, before any monkeypatch, so they name the developer's real files.
+_REAL_HOME = Path(os.path.expanduser("~"))
+_REAL_ZDOTDIR = os.environ.get("ZDOTDIR")
+_REAL_RCS = [_REAL_HOME / name for name in (".zshrc", ".bashrc", ".bash_profile", ".profile")]
+if _REAL_ZDOTDIR:
+    _REAL_RCS.append(Path(_REAL_ZDOTDIR) / ".zshrc")
+
+
+def _snapshot() -> dict[Path, tuple[bool, int, int]]:
+    snap: dict[Path, tuple[bool, int, int]] = {}
+    for rc in _REAL_RCS:
+        try:
+            st = rc.stat()
+            snap[rc] = (True, st.st_mtime_ns, st.st_size)
+        except OSError:
+            snap[rc] = (False, 0, 0)
+    return snap
+
+
+@pytest.fixture(autouse=True)
+def real_rc_tripwire():
+    """Fail loudly if any test touches the developer's real shell rc files."""
+    before = _snapshot()
+    yield
+    after = _snapshot()
+    for rc, state in before.items():
+        if after[rc] != state:
+            pytest.fail(f"test modified real shell rc: {rc}")
 
 
 @pytest.fixture(autouse=True)
