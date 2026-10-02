@@ -22,8 +22,9 @@ def transcript_percent(transcript_path: Optional[str], window: int) -> Optional[
     if not transcript_path or window <= 0:
         return None
     try:
-        lines = Path(transcript_path).read_text().splitlines()
-    except OSError:
+        lines = Path(transcript_path).read_text(
+            encoding="utf-8", errors="replace").splitlines()
+    except (OSError, ValueError):
         return None
     latest = None
     for line in lines:
@@ -39,14 +40,17 @@ def transcript_percent(transcript_path: Optional[str], window: int) -> Optional[
         return None
     try:
         tokens = sum(int(latest.get(field, 0) or 0) for field in _USAGE_FIELDS)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return round(100 * tokens / window)
 
 
 def current_percent(cwd: Path, session_id: Optional[str],
                     transcript_path: Optional[str], window: int) -> Optional[int]:
-    pct = census.context_percent(cwd, session_id=session_id)
+    try:
+        pct = census.context_percent(cwd, session_id=session_id)
+    except Exception:  # measurement must never raise; use the transcript
+        pct = None
     if pct is not None:
         return pct
     return transcript_percent(transcript_path, window)

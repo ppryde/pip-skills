@@ -55,3 +55,26 @@ def test_context_line() -> None:
     assert context.context_line(None, 35) == "ctx unknown"
     assert context.context_line(20, 35) == "ctx 20%"
     assert context.context_line(40, 35) == "ctx 40% — over the 35% threshold"
+
+
+def test_transcript_invalid_utf8_does_not_raise(iso: Path) -> None:
+    path = iso / "bad.jsonl"
+    path.write_bytes(b'\xff\xfe\n' + json.dumps(
+        {"message": {"usage": {"input_tokens": 1000}}}).encode() + b"\n")
+    assert context.transcript_percent(str(path), 200000) in (None, 0, 1)
+
+
+def test_transcript_infinity_tokens_is_none(iso: Path) -> None:
+    path = iso / "inf.jsonl"
+    path.write_text('{"message": {"usage": {"input_tokens": Infinity}}}\n')
+    assert context.transcript_percent(str(path), 200000) is None
+
+
+def test_census_raising_falls_back_to_transcript(
+        repo: Path, iso: Path, monkeypatch) -> None:
+    def boom(*args, **kwargs):
+        raise OverflowError("cannot convert float infinity to integer")
+
+    monkeypatch.setattr(census, "context_percent", boom)
+    path = _transcript(iso, 50000)
+    assert context.current_percent(repo, "a", str(path), 200000) == 25
