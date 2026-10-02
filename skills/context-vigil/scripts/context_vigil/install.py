@@ -233,6 +233,14 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
             record["statusline"] = {"kind": "spliced", "path": str(script)}
         else:
             plan.manual.append(_manual_line())
+    if launcher is not None:
+        from context_vigil import launcher as launch
+        rc = launch.plan_rc(launcher)
+        if rc is not None:
+            plan.changes.append(rc)
+            record["rc_path"] = str(rc.path)
+        elif launcher in ("on-demand", "always"):
+            plan.manual.append(f"Add to your shell rc: {launch.alias_line(launcher)}")
     plan.changes.insert(0, Change(settings_path(), before, _dump(data)))
     plan.record = record
     return plan
@@ -255,7 +263,7 @@ def _write_atomic(path: Path, text: str) -> None:
 def apply(plan: Plan) -> None:
     record_path = paths.install_record_path()
     uninstalling = bool(plan.record.get("uninstall"))
-    if not uninstalling:
+    if plan.record and not uninstalling:
         # Record first: a crash mid-apply must never leave an unrecorded edit.
         record_path.parent.mkdir(parents=True, exist_ok=True)
         record_path.write_text(json.dumps(plan.record, indent=2) + "\n")
@@ -303,5 +311,10 @@ def plan_uninstall() -> Plan:
         after = ""
     else:
         after = "{}\n" if before else ""
+    rc = Path(str(record.get("rc_path") or ""))
+    if record.get("rc_path") and rc.is_file():
+        from context_vigil import launcher as launch
+        text = rc.read_text()
+        plan.changes.append(Change(rc, text, launch.strip_rc(text)))
     plan.changes.insert(0, Change(settings_path(), before, after))
     return plan

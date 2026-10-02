@@ -3,6 +3,7 @@ stderr with a non-zero exit. ``hook`` subcommands never fail (see hooks.py)."""
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -14,6 +15,7 @@ from context_vigil import (
     handover,
     hooks,
     install,
+    launcher,
     paths,
     state,
     tmux,
@@ -68,7 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--yes", action="store_true")
     ip.add_argument("--threshold", type=int, default=None)
     ip.add_argument("--launcher", choices=_LAUNCH_CHOICES, default=None)
+    ip.add_argument("--confirm-always", action="store_true")
     ip.set_defaults(func=_cmd_install)
+    lp = sub.add_parser("launcher", help="choose how Claude launches (tmux)")
+    lp.add_argument("choice", nargs="?", choices=launcher.CHOICES)
+    lp.add_argument("--yes", action="store_true")
+    lp.add_argument("--confirm-always", action="store_true")
+    lp.set_defaults(func=_cmd_launcher)
     up = sub.add_parser("uninstall", help="remove exactly what install added")
     up.add_argument("--yes", action="store_true")
     up.set_defaults(func=_cmd_uninstall)
@@ -191,9 +199,14 @@ def _cmd_install(args: argparse.Namespace) -> int:
         print(f"\nThreshold: nudge at {current}% context (default 35). Lower hands over "
               "sooner with a leaner context; higher means fewer handovers but more "
               "degradation before each.")
+        print("\n" + launcher.walkthrough_text())
+        print(f"\nIf choosing Always, confirm: {launcher.ALWAYS_CONFIRM}")
         print("\nApply with:  context-vigil install --yes [--threshold N] "
               "[--launcher on-demand|always|not-now]")
         return 0
+    if args.launcher == "always" and not args.confirm_always:
+        raise CliError("--launcher always also needs --confirm-always "
+                       "(it takes over the claude command)")
     try:
         install.apply(plan)
     except OSError as exc:
@@ -205,6 +218,49 @@ def _cmd_install(args: argparse.Namespace) -> int:
         print(f"\n{line}")
     print(f"\ncontext-vigil installed. {_mode_line()}. "
           "Hooks and the status line take effect in new sessions.")
+    return 0
+
+
+def _record_launcher(choice: str, rc: Path) -> None:
+    """Keep an existing install.json in step; never create one from `launcher` alone."""
+    record_path = paths.install_record_path()
+    try:
+        record = json.loads(record_path.read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(record, dict):
+        return
+    record["launcher"] = choice
+    record["rc_path"] = str(rc)
+    record_path.write_text(json.dumps(record, indent=2) + "\n")
+
+
+def _cmd_launcher(args: argparse.Namespace) -> int:
+    if args.choice is None:
+        print(launcher.walkthrough_text())
+        return 0
+    if args.choice == "always" and args.yes and not args.confirm_always:
+        raise CliError("`always` takes over the claude command — re-run with --confirm-always")
+    try:
+        change = launcher.plan_rc(args.choice)
+    except (OSError, UnicodeError) as exc:
+        raise CliError(str(exc)) from exc
+    if change is None:
+        line = launcher.alias_line(args.choice)
+        print(f"Unknown shell — add this to your shell rc yourself:\n  {line}" if line
+              else "Nothing to change.")
+        return 0
+    print(change.diff() or "Already set.")
+    if not args.yes:
+        print("\nDRY RUN — apply with:  context-vigil launcher "
+              f"{args.choice} --yes" + (" --confirm-always" if args.choice == "always" else ""))
+        return 0
+    try:
+        install.apply(install.Plan(changes=[change]))
+        _record_launcher(args.choice, change.path)
+    except OSError as exc:
+        raise CliError(f"launcher change failed ({exc}); nothing more was changed") from exc
+    print(f"\nDone. Open a new shell (or `source {change.path}`) for it to take effect.")
     return 0
 
 
