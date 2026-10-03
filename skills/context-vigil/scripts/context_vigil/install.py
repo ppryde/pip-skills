@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from context_vigil import config, paths
 
 HOOKS: List[Tuple[str, Optional[str], str]] = [
-    ("SessionStart", "startup|clear", "session-start"),
+    ("SessionStart", "startup|clear|resume", "session-start"),
     ("Stop", None, "stop"),
     ("UserPromptSubmit", None, "nudge"),
     ("PostToolUse", "TaskCreate|TaskUpdate", "nudge"),
@@ -289,7 +289,7 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
         record["statusline"] = {"kind": "capture"}
     elif _is_capture(command, prior):
         record["statusline"] = {"kind": "capture"}
-        if str(paths.skill_dir()) not in command:
+        if str(paths.skill_dir()) not in command and isinstance(status, dict):
             data["statusLine"] = {**status, "command": capture_command()}
     else:
         script = statusline_script(command)

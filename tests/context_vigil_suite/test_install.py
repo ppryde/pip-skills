@@ -305,3 +305,8 @@ def test_non_ascii_settings_round_trip(cfg: Path) -> None:
     install.apply(install.plan_install(threshold=None))
     text = (cfg / "settings.json").read_text(encoding="utf-8")
     assert "café — 日本" in text and "\\u" not in text
+
+
+def test_session_start_matcher_includes_resume() -> None:
+    matcher = dict((e, m) for e, m, _ in install.HOOKS)["SessionStart"]
+    assert matcher == "startup|clear|resume"

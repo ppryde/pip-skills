@@ -109,3 +109,16 @@ def test_cli_handover_rejects_bad_notes(run_cli, repo: Path, iso: Path) -> None:
 def test_summary_survives_corrupt_mtime() -> None:
     assert "from earlier" in handover.summary("## Goal\nx\n", 1e30)
     assert "from earlier" in handover.summary("## Goal\nx\n", -1e30)
+
+
+def test_cli_handover_cooldown_message(run_cli, repo: Path, iso: Path) -> None:
+    from context_vigil import paths, state
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "H")
+    state.consume_clear_flag(scope)  # sets cooldown
+    notes = iso / "notes.md"
+    notes.write_text(GOOD)
+    result = run_cli("handover", "--file", str(notes), cwd=repo)
+    assert result.returncode == 1
+    assert "a session just started" in result.stderr and "cooldown" in result.stderr
+    assert "/clear just happened" not in result.stderr

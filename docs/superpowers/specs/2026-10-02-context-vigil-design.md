@@ -198,7 +198,7 @@ before the rc diff is shown. README.md carries the same explanation.
 
 The shell rc is `~/.zshrc` or `~/.bashrc` per `$SHELL`; any other shell gets
 the alias line printed to add themselves. The edit is shown as a diff and
-needs consent; `uninstall` (and `launcher off`) remove it by sentinel. The
+needs consent; `uninstall` (and `launcher not-now`) remove it by sentinel. The
 choice is recorded in `install.json`.
 
 ### Why a launcher, not "just run `tmux claude`"
@@ -238,7 +238,7 @@ plan and questions to the user, then runs
 
 1. Resolve config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and `settings.json`.
    If `settings.json` is malformed JSON: stop, say so, change nothing.
-2. Plan hooks — `SessionStart` (matcher `startup|clear`), `Stop`,
+2. Plan hooks — `SessionStart` (matcher `startup|clear|resume`), `Stop`,
    `UserPromptSubmit`, and `PostToolUse` (matcher `TaskCreate|TaskUpdate`; the
    last two both run `hook nudge`, because unattended runs get no user prompts),
    each `"command": "<abs skill dir>/scripts/context-vigil hook <name>"`.
