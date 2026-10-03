@@ -87,7 +87,7 @@ inside repositories.
 ```
 $CLAUDE_CONFIG_DIR/context-vigil/
   config.json              # global settings (see Configuration)
-  census.json              # census store, schema identical to census status.json
+  census.json              # census store, a subset of census status.json (no rate limits); unknown keys are preserved
   windows.json             # learned model id -> context window size, from every status-line payload
   sessions/<session_id>.json  # per-session record, script-written, pruned after ~7 days (see Measure)
   install.json             # record of every entry install added (for uninstall)
