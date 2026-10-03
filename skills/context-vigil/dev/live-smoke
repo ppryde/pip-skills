@@ -548,6 +548,12 @@ def cmd_auto(a: argparse.Namespace) -> int:
         cmd_send(argparse.Namespace(text=(
             "Read every file in this repo (README.md, app.py, notes.txt) with the Read tool, "
             "then write a thorough multi-paragraph summary of each. Do not hand over yet.")))
+        # the nudge rides UserPromptSubmit (PostToolUse only for Task tools): the first
+        # prompt lands near 0%, so a second one, after the reading, is what crosses it
+        wait_until(lambda: "esc to interrupt" in pane_text(8), 30, "first turn to start", 1)
+        wait_until(lambda: "esc to interrupt" not in pane_text(8), 180, "first turn", 3)
+        time.sleep(2)
+        cmd_send(argparse.Namespace(text="Thanks. In one sentence: what does app.py do?"))
 
         def nudged() -> bool:
             if any(isinstance(r.get("last_nudged_pct"), int)
