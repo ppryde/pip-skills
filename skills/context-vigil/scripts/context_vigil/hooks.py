@@ -61,9 +61,14 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
         return None
     threshold = config.threshold(cwd)
     session_id = _str(payload, "session_id")
-    pct = context.current_percent(
+    reading = context.current_reading(
         cwd, session_id, _str(payload, "transcript_path"), config.window(cwd))
+    pct = reading.pct
     if pct is None or pct < threshold:
+        return None
+    if not reading.confident and reading.headless is not True:
+        # the window is only the configured guess and an interactive session's
+        # status line will soon tell the truth: a quiet turn, no gate, no last %
         return None
     # Re-nudge every repeat_step % past the last nudge. The gate marks "nudged
     # this cycle" (SessionStart / resume clear it, which resets the sequence);

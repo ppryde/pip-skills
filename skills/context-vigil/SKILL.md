@@ -44,7 +44,7 @@ user has seen its dry-run diff and agreed.
 
 ## Measure
 
-`context` prints `ctx NN%` (and the threshold when over it). Check it at
+`context` prints `ctx NN%` (and the threshold when over it; `ctx ~NN% (window unconfirmed)` while the window is only the configured fallback, which never nudges an interactive session). Check it at
 natural stopping points in long work. Headless runs (`claude -p`, the SDK) have
 no status line: the percentage comes from the transcript against a window the
 script works out itself. Set `CONTEXT_VIGIL_WINDOW` there only if the model has

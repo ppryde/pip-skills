@@ -123,7 +123,7 @@ errors go to stderr with non-zero exit.
 | `uninstall` | Remove our hook commands and the status-line/rc edits `install.json` records; user commands are kept |
 | `launcher [always\|on-demand\|off]` | Re-run the launch-preference walkthrough (no arg) or set it directly |
 | `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
-| `context` | `ctx NN%` for this session (threshold appended when over) |
+| `context` | `ctx NN%` for this session (threshold appended when over); `ctx ~NN% (window unconfirmed)` while the window is only the configured fallback |
 | `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
 | `handover --resume` / `--discard` | Load a handover waiting from an earlier session / archive it unread |
 | `pause` / `resume` | Opt this worktree out / back in; resume also releases the gate |
@@ -316,7 +316,7 @@ Every render, the status line feeds census. On every `UserPromptSubmit` and
    (truncated or rotated) restarts from the tail;
 4. else no reading → no nudge this turn.
 
-**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000). While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. The chain (first hit wins; the source is recorded): (a) census
+**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000). While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. A reading on the unconfident fallback is shown as `ctx ~NN% (window unconfirmed)` and never nudges an interactive session (`headless` not true): a quiet turn, no gate, no `last_nudged_pct`, until a confident source answers (its status line will report in). Headless sessions have no status line and keep the config fallback. The chain (first hit wins; the source is recorded): (a) census
 `context_window_size` for this session id, even when stale; (b) the learned
 `windows.json` entry for the census entry's `model.id`; (c) the transcript's
 model id (last `attachment.identity.modelId` record, else `message.model`) in the
@@ -327,9 +327,9 @@ payload. `identity.modelId` is undocumented: absent or renamed falls through.
 
 **Per-session record** (`sessions/<session_id>.json`, written only by scripts,
 nothing model-visible): `headless` (bool|null), `has_statusline` (true once census
-has ingested the id; until then census is not consulted for the session), `window` + `window_source` + `window_confident`, `transcript_ino`/`transcript_dev` (a replaced file resets offset and usage peaks), `transcript_offset`,
+has ingested the id; until then census is not consulted for the session), `window` + `window_source` + `window_confident`, `transcript_ino`/`transcript_dev`/`transcript_size`/`transcript_head` (a replaced file, a shrunken file or a changed first line resets offset and usage peaks), `transcript_offset`,
 `transcript_path`, `last_usage_tokens`, `max_usage_tokens`, `model_id`,
-`message_model`, `head_checked`, `last_nudged_pct`. Read-modify-write of a record, and the nudge gate's check-and-set, run under an flock on `sessions/<id>.lock` (bounded wait; on failure the update is skipped, the nudge stays quiet). The handover size estimate is chars/4 and approximate (it undercounts non-ASCII text).
+`message_model`, `head_checked`, `last_nudged_pct`. Read-modify-write of a record, and the nudge gate's check-and-set, run under an flock on `sessions/<id>.lock` (bounded wait of about 1 s; on failure the update is skipped, the nudge stays quiet). Pruning drops records older than 7 days and never touches `*.lock` files on their own: a lock goes only with its pruned record, and only if it is free at that moment. The handover size estimate is chars/4 and approximate (it undercounts non-ASCII text).
 
 ### 3. Nudge — repeated every `nudge.repeat_step` %
 

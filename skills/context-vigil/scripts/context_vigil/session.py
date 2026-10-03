@@ -11,8 +11,9 @@ reaches the model. A record lives at ``sessions/<session_id>.json`` and holds:
 - ``window`` / ``window_source`` / ``window_confident``: the context window used,
   where it came from, and whether that source is authoritative (census, learned
   table, ``[1m]`` suffix, evidence) rather than the configured fallback;
-- ``transcript_offset`` / ``transcript_path`` / ``transcript_ino`` / ``transcript_dev``:
-  how far the transcript has been read, and which file that offset belongs to;
+- ``transcript_offset`` / ``transcript_path`` / ``transcript_ino`` / ``transcript_dev`` /
+  ``transcript_size`` / ``transcript_head`` (hash of the first line): how far the
+  transcript has been read, and which file that offset belongs to;
 - ``last_usage_tokens`` / ``max_usage_tokens``: the latest and largest usage total seen;
 - ``model_id`` / ``message_model``: the latest model ids seen in the transcript;
 - ``head_checked``: the transcript head was read once for ``headless``;
@@ -35,7 +36,7 @@ from typing import Any, Dict, Iterator, Optional
 from context_vigil import paths
 
 RECORD_TTL_SECONDS = 7 * 24 * 3600
-_LOCK_ATTEMPTS = 300             # 300 x 10ms = 3s bounded wait for a record lock
+_LOCK_ATTEMPTS = 100             # 100 x 10ms = 1s bounded wait (hooks are latency-bound)
 _LOCK_DELAY_SECONDS = 0.01
 
 _DEFAULTS: Dict[str, Any] = {
@@ -48,6 +49,8 @@ _DEFAULTS: Dict[str, Any] = {
     "transcript_path": None,
     "transcript_ino": None,
     "transcript_dev": None,
+    "transcript_size": None,
+    "transcript_head": None,
     "last_usage_tokens": None,
     "max_usage_tokens": None,
     "model_id": None,
@@ -128,14 +131,37 @@ def save(session_id: str, record: Dict[str, Any]) -> None:
         return
 
 
+def _lock_free(lock: Path) -> bool:
+    """Can ``lock`` be flock'd right now? (non-blocking; released again at once)"""
+    try:
+        with open(lock, "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        return True
+    except OSError:
+        return False
+
+
 def prune(now: Optional[float] = None) -> None:
-    """Drop records untouched for a week; opportunistic, on first write of a new one."""
+    """Drop records untouched for a week; opportunistic, on first write of a new one.
+
+    ``*.lock`` sidecars are never pruned on their own age (their mtime is creation
+    time, and unlinking a held lock lets a second process lock a fresh inode): one
+    goes only together with its pruned record, and only if it is free right then.
+    """
     cutoff = (time.time() if now is None else now) - RECORD_TTL_SECONDS
     try:
         for entry in paths.sessions_dir().iterdir():
+            if entry.suffix == ".lock":
+                continue
             try:
-                if entry.stat().st_mtime < cutoff:
-                    entry.unlink(missing_ok=True)
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+                entry.unlink(missing_ok=True)
+                if entry.suffix == ".json":
+                    lock = paths.session_lock_path(entry.stem)
+                    if lock.exists() and _lock_free(lock):
+                        lock.unlink(missing_ok=True)
             except OSError:
                 continue
     except OSError:

@@ -145,9 +145,9 @@ def _env_session_id() -> Optional[str]:
 
 def _cmd_context(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
-    pct = context.current_percent(
+    reading = context.current_reading(
         cwd, args.session_id or _env_session_id(), None, config.window(cwd))
-    print(context.context_line(pct, config.threshold(cwd)))
+    print(context.context_line(reading.pct, config.threshold(cwd), reading.confident))
     return 0
 
 
@@ -177,11 +177,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
     record = paths.install_record_path()
     resolved = config.resolve(cwd)
     threshold, layer = resolved["context.threshold"]
-    pct = context.current_percent(cwd, _env_session_id(), None, config.window(cwd))
+    reading = context.current_reading(cwd, _env_session_id(), None, config.window(cwd))
     lines = [
         f"installed: {'yes' if record.exists() else 'no'}",
         _mode_line(),
-        f"{context.context_line(pct, int(str(threshold)))}",
+        f"{context.context_line(reading.pct, int(str(threshold)), reading.confident)}",
         f"threshold: {threshold}% ({layer})",
         f"window: {resolved['context.window'][0]} ({resolved['context.window'][1]})",
         f"context.mode: {resolved['context.mode'][0]} ({resolved['context.mode'][1]})",

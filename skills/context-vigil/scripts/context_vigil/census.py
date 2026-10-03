@@ -502,9 +502,9 @@ def ingest(raw: str, now: float | None = None) -> None:
             tmux_pane = os.environ.get("TMUX_PANE") or None
             merge(store, payload, worktree_cwd(payload), tmux_pane, now)
             _atomic_write(path, store)
-            _note_session(payload)
     except OSError:
         return
+    _note_session(payload)   # independent of the store write: never under the census lock
 
 
 def _note_session(payload: dict[str, Any]) -> None:

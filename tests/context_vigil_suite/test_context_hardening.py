@@ -78,7 +78,7 @@ _NUDGE = (
 
 
 def test_parallel_nudges_emit_exactly_once_and_keep_last_nudged(repo: Path, iso: Path) -> None:
-    transcript_path = _write(iso / "t.jsonl", [_usage(150_000)])
+    transcript_path = _write(iso / "t.jsonl", [_identity("claude-x[1m]"), _usage(750_000)])
     payload = json.dumps({"session_id": "s", "cwd": str(repo), "transcript_path": str(transcript_path),
                           "hook_event_name": "PostToolUse"})
     env = dict(os.environ, PYTHONPATH=str(SKILL / "scripts"), CONTEXT_VIGIL_THRESHOLD="40")
@@ -104,7 +104,7 @@ def test_parallel_nudges_emit_exactly_once_and_keep_last_nudged(repo: Path, iso:
             if proc.poll() is None:
                 proc.kill()
     assert outs.count("NUDGED") == 1, outs
-    assert session.load("s")["last_nudged_pct"] == 75
+    assert session.load("s")["last_nudged_pct"] == 75   # 750k of a [1m] window
 
 
 def test_lock_failure_skips_the_update_and_never_raises(repo: Path, iso: Path, monkeypatch) -> None:
@@ -215,3 +215,118 @@ def test_census_is_not_consulted_before_the_first_ingest(repo: Path, iso: Path, 
     _ingest(repo, "s", 77, now=time.time() + 5)
     assert context.current_percent(repo, "s", str(path), 200_000) == 77
     assert calls == ["s"]
+
+
+# --- round 3: N1 unconfident window, N2 lock scope, N3 rewrite, N4 prune, N5 wait ----
+
+def _nudge_payload(repo: Path, path: Path) -> dict:
+    return {"cwd": str(repo), "session_id": "s", "transcript_path": str(path),
+            "hook_event_name": "UserPromptSubmit"}
+
+
+def test_interactive_session_with_unconfirmed_window_gets_no_nudge(repo: Path, iso: Path) -> None:
+    path = _write(iso / "t.jsonl", [_usage(150_000)])           # unknown model, 75% on config
+    assert hooks.nudge(_nudge_payload(repo, path)) is None
+    assert session.load("s")["last_nudged_pct"] is None
+    from context_vigil import state
+    assert not state.gate_active(paths.scope_dir(repo))
+    _ingest(repo, "s", 15, size=1_000_000)                      # status line reports in: 15%
+    assert hooks.nudge(_nudge_payload(repo, path)) is None
+
+
+def test_headless_session_keeps_the_config_fallback_nudge(repo: Path, iso: Path) -> None:
+    path = _write(iso / "t.jsonl", [_usage(150_000)], entrypoint="sdk-cli")
+    out = hooks.nudge(_nudge_payload(repo, path))
+    assert out is not None and "75%" in out
+    assert session.load("s")["last_nudged_pct"] == 75
+
+
+def test_context_line_marks_an_unconfirmed_window() -> None:
+    assert context.context_line(75, 35, confident=False) == "ctx ~75% (window unconfirmed)"
+    assert context.context_line(75, 35) == "ctx 75% — over the 35% threshold"
+
+
+def test_reading_flags_the_config_fallback_as_unconfident(repo: Path, iso: Path) -> None:
+    path = _write(iso / "t.jsonl", [_usage(150_000)])
+    reading = context.current_reading(repo, "s", str(path), 200_000)
+    assert reading.pct == 75 and reading.confident is False and reading.headless is False
+
+
+def test_note_session_runs_outside_the_census_lock(repo: Path, monkeypatch) -> None:
+    import fcntl
+    held = []
+
+    def probe(payload: dict) -> None:
+        path = census.store_path()
+        with open(path.with_name(path.name + ".lock"), "a") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(False)
+            except OSError:
+                held.append(True)
+    monkeypatch.setattr(census, "_note_session", probe)
+    _ingest(repo, "s", 10)
+    assert held == [False]
+
+
+def test_in_place_rewrite_with_new_head_resets_offset_and_peaks(repo: Path, iso: Path) -> None:
+    path = _write(iso / "t.jsonl", [_usage(300_000)])
+    context.current_percent(repo, "s", str(path), 200_000)
+    ino = os.stat(path).st_ino
+    with open(path, "w") as f:                                   # same inode, new session, larger
+        f.write(json.dumps({"type": "user", "entrypoint": "cli", "sessionId": "other"}) + "\n")
+        for _ in range(20):
+            f.write(json.dumps({"type": "user", "t": "y" * 100}) + "\n")
+        f.write(_usage(20_000) + "\n")
+    assert os.stat(path).st_ino == ino
+    context.current_percent(repo, "s", str(path), 200_000)
+    record = session.load("s")
+    assert record["last_usage_tokens"] == 20_000 and record["max_usage_tokens"] == 20_000
+
+
+def test_shrunken_file_with_same_head_resets_peaks(repo: Path, iso: Path) -> None:
+    path = _write(iso / "t.jsonl", [_usage(300_000)] + [json.dumps({"type": "user", "t": "z" * 50})] * 5)
+    context.current_percent(repo, "s", str(path), 200_000)
+    _write(path, [_usage(10_000)])                               # same head line, smaller
+    context.current_percent(repo, "s", str(path), 200_000)
+    assert session.load("s")["max_usage_tokens"] == 10_000
+
+
+def test_prune_leaves_lock_files_of_live_records_alone(repo: Path) -> None:
+    session.save("live", session.blank())
+    with session.locked("live"):
+        pass
+    lock = paths.session_lock_path("live")
+    scope_lock = paths.session_lock_path("_windows")
+    scope_lock.write_text("")
+    old = time.time() - 30 * 24 * 3600
+    os.utime(lock, (old, old))
+    os.utime(scope_lock, (old, old))
+    session.prune()
+    assert lock.exists() and scope_lock.exists()
+
+
+def test_prune_removes_a_free_lock_with_its_pruned_record(repo: Path) -> None:
+    session.save("ancient", session.blank())
+    with session.locked("ancient"):
+        pass
+    old = time.time() - 8 * 24 * 3600
+    os.utime(paths.session_record_path("ancient"), (old, old))
+    session.prune()
+    assert not paths.session_record_path("ancient").exists()
+    assert not paths.session_lock_path("ancient").exists()
+
+
+def test_prune_keeps_a_held_lock_of_a_pruned_record(repo: Path) -> None:
+    session.save("ancient", session.blank())
+    old = time.time() - 8 * 24 * 3600
+    os.utime(paths.session_record_path("ancient"), (old, old))
+    with session.locked("ancient") as got:
+        assert got
+        session.prune()
+        assert paths.session_lock_path("ancient").exists()
+    assert not paths.session_record_path("ancient").exists()
+
+
+def test_hook_lock_wait_is_about_one_second() -> None:
+    assert session._LOCK_ATTEMPTS * session._LOCK_DELAY_SECONDS <= 1.0

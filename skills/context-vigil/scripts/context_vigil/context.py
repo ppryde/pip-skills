@@ -11,16 +11,23 @@ offset (``transcript.py``). Quarantine-safe: any failure yields None.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 from context_vigil import census, session, transcript
 
 EXTENDED_WINDOW = 1_000_000
 _STANDARD_WINDOW = 200_000
 _FRESH_TOLERANCE_SECONDS = 0.5   # the status line renders just after the transcript write
+
+
+class Reading(NamedTuple):
+    pct: Optional[int]
+    confident: bool            # the window behind pct is authoritative, not the config fallback
+    headless: Optional[bool]
 
 
 def _positive_int(value: Any) -> Optional[int]:
@@ -114,17 +121,36 @@ def _file_identity(path: str) -> Tuple[Optional[int], Optional[int]]:
     return st.st_ino, st.st_dev
 
 
+def _size_and_head(path: str) -> Tuple[Optional[int], Optional[str]]:
+    """File size and a hash of its first line (at most 256 bytes)."""
+    try:
+        with open(path, "rb") as f:
+            first = f.readline(256)
+            size = os.fstat(f.fileno()).st_size
+    except OSError:
+        return None, None
+    return size, hashlib.sha1(first).hexdigest()
+
+
 def _transcript_percent(path: str, record: Dict[str, Any], entry: Optional[Dict[str, Any]],
                         configured: int) -> Optional[int]:
     ino, dev = _file_identity(path)
+    size, head = _size_and_head(path)
     replaced = (record.get("transcript_ino") is not None
                 and (record["transcript_ino"], record["transcript_dev"]) != (ino, dev))
-    if record.get("transcript_path") != path or replaced:
+    # inodes get recycled and files get rewritten in place: a shrunken file, or a
+    # changed first line, is a different transcript whatever its inode says
+    rewritten = ((record.get("transcript_size") is not None and size is not None
+                  and size < record["transcript_size"])
+                 or (record.get("transcript_head") is not None and head is not None
+                     and head != record["transcript_head"]))
+    if record.get("transcript_path") != path or replaced or rewritten:
         # a different file: its offset and usage peaks mean nothing here
         record["transcript_path"] = path
         for key in ("transcript_offset", "last_usage_tokens", "max_usage_tokens"):
             record[key] = None
     record["transcript_ino"], record["transcript_dev"] = ino, dev
+    record["transcript_size"], record["transcript_head"] = size, head
     tail = transcript.read_tail(path, record.get("transcript_offset"))
     if tail is None:
         return None
@@ -184,27 +210,32 @@ def _detect_headless(record: Dict[str, Any], transcript_path: str) -> None:
 
 def current_percent(cwd: Path, session_id: Optional[str],
                     transcript_path: Optional[str], window: int) -> Optional[int]:
+    return current_reading(cwd, session_id, transcript_path, window).pct
+
+
+def current_reading(cwd: Path, session_id: Optional[str],
+                    transcript_path: Optional[str], window: int) -> Reading:
     try:
-        return _current_percent(cwd, session_id, transcript_path, window)
+        return _current_reading(cwd, session_id, transcript_path, window)
     except Exception:  # measurement must never raise
-        return None
+        return Reading(None, False, None)
 
 
-def _current_percent(cwd: Path, session_id: Optional[str],
-                     transcript_path: Optional[str], window: int) -> Optional[int]:
+def _current_reading(cwd: Path, session_id: Optional[str],
+                     transcript_path: Optional[str], window: int) -> Reading:
     if session_id is None:
         return _measure(cwd, None, session.blank(), transcript_path, window)
     with session.locked(session_id) as got:   # one writer at a time per session record
         record = session.load(session_id)
         before = dict(record)
-        pct = _measure(cwd, session_id, record, transcript_path, window)
+        reading = _measure(cwd, session_id, record, transcript_path, window)
         if got and record != before:
             session.save(session_id, record)
-    return pct
+    return reading
 
 
 def _measure(cwd: Path, session_id: Optional[str], record: Dict[str, Any],
-             transcript_path: Optional[str], window: int) -> Optional[int]:
+             transcript_path: Optional[str], window: int) -> Reading:
     if (transcript_path and record["headless"] is None and not record["head_checked"]):
         _detect_headless(record, transcript_path)
     entry: Optional[Dict[str, Any]] = None
@@ -216,14 +247,18 @@ def _measure(cwd: Path, session_id: Optional[str], record: Dict[str, Any],
             pct = _census_percent(cwd, session_id, transcript_path, entry)
         except Exception:  # census trouble: use the transcript
             pct = None
-    if pct is None and transcript_path and window > 0:
+    if pct is not None:
+        return Reading(pct, True, record["headless"])   # census: Claude Code's own figure
+    if transcript_path and window > 0:
         pct = _transcript_percent(transcript_path, record, entry, window)
-    return pct
+    return Reading(pct, record.get("window_confident") is True, record["headless"])
 
 
-def context_line(pct: Optional[int], threshold: int) -> str:
+def context_line(pct: Optional[int], threshold: int, confident: bool = True) -> str:
     if pct is None:
         return "ctx unknown"
+    if not confident:
+        return f"ctx ~{pct}% (window unconfirmed)"
     if pct >= threshold:
         return f"ctx {pct}% — over the {threshold}% threshold"
     return f"ctx {pct}%"
