@@ -142,7 +142,7 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
     out: Optional[str] = None
     loaded = False
     if source == "clear":
-        text = state.consume_handoff(kept)
+        text = state.consume_handoff(kept, config.archive_keep(cwd))
         if text:
             loaded = True
             out = json.dumps({"hookSpecificOutput": {

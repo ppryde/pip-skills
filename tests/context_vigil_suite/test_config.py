@@ -11,7 +11,7 @@ def test_defaults(repo: Path) -> None:
     assert config.load(repo) == {
         "context.threshold": 35, "context.window": 200000, "context.mode": "local",
         "nudge.repeat_step": 5, "handover.max_tokens": 8000,
-        "handover.cooldown_seconds": 60,
+        "handover.cooldown_seconds": 60, "handover.archive_keep": 20,
     }
     assert config.resolve(repo)["context.threshold"] == (35, "default")
 

@@ -101,7 +101,7 @@ def _load(path: Path) -> dict[str, Any]:
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    paths.ensure_dir(path.parent)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".status.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
@@ -349,8 +349,7 @@ def ingest(raw: str, now: float | None = None) -> None:
     path = store_path()
     lock_path = path.with_name(path.name + ".lock")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "w") as lock:
+        with os.fdopen(paths.open_private(lock_path, os.O_WRONLY | os.O_CREAT), "w") as lock:
             if not _acquire(lock):
                 return
             store = _load(path)

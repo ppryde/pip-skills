@@ -142,7 +142,8 @@ def test_threshold_written_and_kept(cfg: Path, repo: Path) -> None:
 def test_cli_dry_run_changes_nothing(run_cli, cfg: Path) -> None:
     result = run_cli("install")
     assert result.returncode == 0
-    assert "--yes" in result.stdout and "+++" in result.stdout
+    assert "--yes" in result.stdout and "creates the file" in result.stdout
+    assert f"+ hooks.Stop: {json.dumps(install.hook_command('stop'))}" in result.stdout
     assert not (cfg / "settings.json").exists()
 
 

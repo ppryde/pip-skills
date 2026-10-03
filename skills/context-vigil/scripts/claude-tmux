@@ -82,6 +82,9 @@ envfile="$(umask 077; mktemp "${TMPDIR:-/tmp}/claude-tmux-env.XXXXXX")" \
 trap 'rm -f -- "$envfile"' EXIT
 trap 'rm -f -- "$envfile"; exit 1' HUP INT TERM
 fwd='PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+'
+# `bash -x claude-tmux` (or SHELLOPTS=xtrace) would trace every `printf … "${!var}"`
+# below, secret values included, to stderr: tracing is off while the file is written.
+case "$-" in *x*) cv_xtrace=1; set +x ;; *) cv_xtrace=0 ;; esac
 {
   echo 'rm -f -- "$0"'
   # A new session inherits the tmux SERVER's environment: a forwarded name the server holds
@@ -106,6 +109,7 @@ fwd='PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIG
   for a in "$@"; do printf ' %q' "$a"; done
   echo
 } > "$envfile"
+[ "$cv_xtrace" = 1 ] && set -x
 
 # The session command is separate argv words (tmux >= 3.0 execs them directly), so the
 # server's default-shell (fish, csh, ...) never parses a quoted string.

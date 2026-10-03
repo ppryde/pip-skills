@@ -82,7 +82,13 @@ context-vigil/
 ### Data root — one folder
 
 Everything the skill writes lives under one directory. Nothing is written
-inside repositories.
+inside repositories. The data root and every directory under it are created
+0700 (each missing component by `os.mkdir(path, 0o700)`); every file in it —
+handovers, archives, session records, `census.json`, `windows.json`, config,
+`install.json`, lock and marker files — is created 0600 from the first byte
+(`mkstemp` / `os.open(..., 0o600)`, never chmod-after), temp files included. A
+file left wider by an older version is tightened on its next write (the atomic
+replace carries the temp file's 0600), and a wider data root on its next write.
 
 ```
 $CLAUDE_CONFIG_DIR/context-vigil/
@@ -95,7 +101,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
-    archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
+    archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists); the newest `handover.archive_keep` (default 20, 0 = none) are kept, older ones deleted
     headless/handoff.md    # headless handoff + archive/, per worktree (see Headless sessions)
     sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
                            # else tmux-<socket>-<pane>; headless-<session_id> markers for a headless (sdk-*) session
@@ -163,6 +169,7 @@ or SKILL.md. The threshold in particular is the knob users will reach for.
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
 | `context.window` | 200000 | Last-resort window for the transcript estimate (see the window lookup under Measure) |
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
+| `handover.archive_keep` | 20 | used handovers kept per scope in `archive/`, newest by mtime first (integer 0–1000; 0 keeps none) |
 | `handover.cooldown_seconds` | 60 | after a `/clear` that loaded a handover, nudges are suppressed this long; startup/resume start none; an explicit `handover` is never refused (integer 0–3600) |
 | `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | After the first nudge, re-nudge each time ctx % has grown by this many points (integer 1–50) |
@@ -171,7 +178,7 @@ or SKILL.md. The threshold in particular is the knob users will reach for.
 take effect on the next turn with no restart:
 
 1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`,
-   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`, `CONTEXT_VIGIL_COOLDOWN_SECONDS` (per-session override, e.g. one long unattended run;
+   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`, `CONTEXT_VIGIL_COOLDOWN_SECONDS`, `CONTEXT_VIGIL_ARCHIVE_KEEP` (per-session override, e.g. one long unattended run;
    settable in `settings.json` `env`).
 2. Worktree: `worktrees/<slug>/config.json`, written by
    `config set KEY VAL --worktree` (e.g. a heavy monorepo wants an earlier nudge).
@@ -223,10 +230,12 @@ Choose 1–3 [1]:
 
 Choosing **always** asks one confirmation that repeats the consequence
 ("`claude` will always start in tmux from your next shell — continue?")
-before the rc diff is shown. README.md carries the same explanation.
+before the rc change is shown. README.md carries the same explanation.
 
 The shell rc is `~/.zshrc` or `~/.bashrc` per `$SHELL`; any other shell gets
-the alias line printed to add themselves. The edit is shown as a diff and
+the alias line printed to add themselves. The edit is shown as a summary —
+the rc path, "adds N lines after line L" / "removes our block (N lines)" and our
+exact lines, never a line of the user's rc (where API keys are exported) — and
 needs consent; `uninstall` (and `launcher not-now`) remove it by sentinel. The
 choice is recorded in `install.json`.
 
@@ -255,7 +264,11 @@ wrapper. A bare `tmux claude` hits problems the wrapper already solved:
 Environment: a new session on a running server inherits the server's env, so the
 caller's `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and `CONTEXT_VIGIL_*`
 are passed through a private (0600) temp file the session command runs and which deletes itself first, never as `-e KEY=VAL` argv where `ps` would show API keys (only `CONTEXT_VIGIL_SESSION` rides on `-e`; needs tmux >= 3.2; the enclosing session's
-`CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` are not forwarded).
+`CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` are not forwarded). xtrace is
+switched off (and restored) around writing that file, so `bash -x claude-tmux`
+never traces a value. A long-running tmux server keeps the environment it was
+started with, names outside the forwarded set included, and hands it to every
+new session until the server is restarted; the README says so.
 
 Fall-through: already inside tmux, tmux missing, tmux older than 3.2 (one-line
 reason on stderr), `CLAUDE_NO_TMUX=1`, stdin or stdout not a terminal, or a
@@ -294,8 +307,18 @@ plan and questions to the user, then runs
      rewrite it; print the manual instruction as above.
    - **No `statusLine`:** set it to `bash <skill>/scripts/capture.sh` (prints
      nothing, so no visible status line appears) with `refreshInterval: 60`.
-4. Show the full diff of `settings.json` and any status-line script; apply only
-   on consent (`--yes` is that consent; without it nothing is applied).
+4. Show a summary of OUR changes — never a text diff — and apply only on
+   consent (`--yes` is that consent; without it nothing is applied). The agent
+   runs install through Bash, so its output reaches the transcript, and rc
+   files, `settings.json` and status-line scripts routinely hold secrets. So:
+   for `settings.json`, a structural line per entry of ours
+   (`+ hooks.SessionStart[matcher=startup|clear|resume]: "<our command>"`,
+   `+ statusLine.command: "<capture.sh command>"`); for a status-line script,
+   `~ statusLine: spliced capture line into <script>` plus "adds 3 lines after
+   line L" and our three lines. `env`, `apiKeyHelper`, other hooks' commands and
+   every other user value are never printed; on uninstall a block whose content
+   is not exactly ours is counted, not echoed, and damaged markers are reported
+   by path only. Semantically unchanged settings are not rewritten.
 5. Ask for the threshold: show the default (35%) with one line of guidance —
    lower hands over sooner with a leaner context; higher means fewer handovers
    but more degradation before each — and write the answer to global
@@ -306,7 +329,7 @@ plan and questions to the user, then runs
    two lines, then branch on what is detected:
    - **tmux installed** (inside it now or not): offer the three launch choices —
      *on-demand* (recommended, default on Enter), *always*, *not now* — with one line each on what changes,
-     apply the chosen one (shell-rc edit shown as a diff, on consent), and say
+     apply the chosen one (shell-rc edit shown as a summary of our lines, on consent), and say
      how to change it later (`context-vigil launcher`). If the user is already
      inside tmux, also say that auto mode works for this session right now.
    - **tmux not installed:** say auto-clear is off and why, give the install
@@ -443,7 +466,7 @@ and arms the reset (writes the `clear-requested` marker).
 1. Inject `handoff.md` as `additionalContext`, prefixed with:
    > Resume from this handover. Don't re-investigate anything marked complete,
    > don't retry anything under Failed Attempts — start with the Next Step.
-2. Move `handoff.md` to `archive/`, remove `clear-requested`, clear the gate,
+2. Move `handoff.md` to `archive/` (pruned to `handover.archive_keep`), remove `clear-requested`, clear the gate,
    and start the `cooldown` (`handover.cooldown_seconds`) — only because a handover was loaded.
 3. **Auto only** (pane reachable): after `CONTEXT_VIGIL_KICK_DELAY` (default
    2s) type a short resume prompt into the pane, since injected context alone

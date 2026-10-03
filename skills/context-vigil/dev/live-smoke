@@ -36,6 +36,10 @@ KICK_MARK = "handover received"
 TRUST_RE = r"(?i)do you trust|trust this folder|trust the files|yes, i trust"
 READY_RE = r"(?i)\? for shortcuts|esc to interrupt|shift\+tab"
 SECRET_KEY = re.compile(r"(?i)token|secret|key|password|env|auth|cookie")
+# Belt and braces for pane text: the sandbox never puts a secret there, but a model
+# can echo one it finds (an env dump, a tool output), and peek/wait output reaches
+# the transcript of whoever drives the harness.
+SECRET_SHAPE = re.compile(r"(sk-[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{16}|(KEY|TOKEN|SECRET)[A-Z_]*=\S+)")
 
 # Mirrors install.HOOKS exactly: (event, matcher, hook name).
 HOOKS: List[Tuple[str, Optional[str], str]] = [
@@ -95,6 +99,11 @@ def tmux_new_session_cmd(repo: Path, claude_bin: str, args: List[str]) -> List[s
             "-x", "200", "-y", "50", "-c", str(repo), inner]
 
 
+def redact(text: str) -> str:
+    """Mask anything secret-shaped (API keys, AWS key ids, KEY/TOKEN/SECRET=value)."""
+    return SECRET_SHAPE.sub("[redacted]", text)
+
+
 def safe_fields(record: Dict[str, Any]) -> Dict[str, Any]:
     """Scalar, non-secret-looking fields of a session record."""
     return {k: v for k, v in record.items()
@@ -132,6 +141,7 @@ def load_state() -> Dict[str, Any]:
 
 
 def pane_text(lines: int = 60) -> str:
+    """Raw pane text, for matching only; anything printed goes through ``redact``."""
     out = tmux("capture-pane", "-p", "-t", SESSION, "-S", f"-{lines}")
     return out.stdout if out.returncode == 0 else ""
 
@@ -207,7 +217,7 @@ def cmd_peek(a: argparse.Namespace) -> int:
     rows = [r.rstrip() for r in text.splitlines()]
     while rows and not rows[-1]:
         rows.pop()
-    print("\n".join(rows[-a.n:]) if rows else "(pane empty or no session)")
+    print(redact("\n".join(rows[-a.n:])) if rows else "(pane empty or no session)")
     return 0
 
 
@@ -219,7 +229,7 @@ def wait_until(check: Callable[[], bool], timeout: float, what: str,
             return True, ""
         time.sleep(interval)
     tail = [r.strip() for r in pane_text(15).splitlines() if r.strip()][-4:]
-    return False, f"timeout waiting for {what}; last seen: {' | '.join(tail)[:300]}"
+    return False, f"timeout waiting for {what}; last seen: {redact(' | '.join(tail))[:300]}"
 
 
 def cmd_wait_for(a: argparse.Namespace) -> int:
@@ -270,7 +280,7 @@ def first_line(path: Path) -> str:
     try:
         for line in path.read_text(errors="replace").splitlines():
             if line.strip():
-                return line.strip()[:100]
+                return redact(line.strip())[:100]
     except OSError:
         pass
     return ""
@@ -374,7 +384,7 @@ def accept_trust_and_wait_ready(timeout: float = 90.0) -> Tuple[bool, str]:
             return True, ""
         time.sleep(2)
     tail = [r.strip() for r in pane_text(15).splitlines() if r.strip()][-4:]
-    return False, "not ready; last seen: " + " | ".join(tail)[:300]
+    return False, "not ready; last seen: " + redact(" | ".join(tail))[:300]
 
 
 def cmd_auto(a: argparse.Namespace) -> int:
@@ -442,7 +452,7 @@ def run_claude_p(st: Dict[str, Any], prompt: str, model: str, timeout: int) -> T
         r = subprocess.run(cmd, cwd=st["repo"], capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return 124, "timed out"
-    return r.returncode, (r.stdout or r.stderr).strip()[-400:]
+    return r.returncode, redact((r.stdout or r.stderr).strip())[-400:]
 
 
 def cmd_headless(a: argparse.Namespace) -> int:
@@ -464,7 +474,7 @@ def cmd_headless(a: argparse.Namespace) -> int:
                        env={**os.environ, "CONTEXT_VIGIL_HOME": str(data),
                             "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"})
     rep.step(r.returncode == 0 and "Next Step" in r.stdout,
-             "second run's `handover --resume` finds it", (r.stdout or r.stderr)[:200])
+             "second run's `handover --resume` finds it", redact(r.stdout or r.stderr)[:200])
     return rep.finish()
 
 

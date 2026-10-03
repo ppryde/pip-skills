@@ -15,7 +15,12 @@ by default, `--model haiku`); run it only with the owner's approval.
   `kill-server` on `down`.
 - Uses the real `CLAUDE_CONFIG_DIR` for auth and writes the session transcripts
   there as any claude run does. It never writes your real `settings.json`, rc
-  files or `~/.claude*` config, and never prints environment values.
+  files or `~/.claude*` config, and never prints environment values or the
+  sandbox settings' `env`. The sandbox lives in `$TMPDIR`. Everything it echoes
+  from the pane or a run (`peek`, timeout tails, `state` first lines, headless
+  output) is passed through a redactor that masks `sk-…` keys, `AKIA…` key ids
+  and `…KEY/TOKEN/SECRET…=value` as `[redacted]` — belt and braces, in case the
+  model prints something it found.
 - Permissions are narrow: `Bash(<this checkout>/scripts/context-vigil:*)`,
   `Bash(cp:*)`, Read, Write, Edit. `--yolo` skips permission prompts instead.
 - Pointer file `${TMPDIR}/cv-smoke-current.json` records the active sandbox.

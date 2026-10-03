@@ -31,6 +31,66 @@ def data_root() -> Path:
     return Path(override) if override else config_dir() / "context-vigil"
 
 
+PRIVATE_DIR_MODE = 0o700
+PRIVATE_FILE_MODE = 0o600
+
+
+def ensure_dir(path: Path) -> Path:
+    """Create ``path`` and any missing parents as 0700, and tighten the data root.
+
+    Each missing component is made with ``os.mkdir(..., 0o700)``, so no directory
+    is ever wider than that, even for an instant. A data root left wider by an
+    older version is tightened here, on its next write."""
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for directory in reversed(missing):
+        try:
+            os.mkdir(directory, PRIVATE_DIR_MODE)
+        except FileExistsError:
+            pass
+    root = data_root()
+    try:
+        if (path == root or root in path.parents) and root.is_dir() \
+                and root.stat().st_mode & 0o077:
+            os.chmod(root, PRIVATE_DIR_MODE)
+    except OSError:
+        pass
+    return path
+
+
+def open_private(path: Path, flags: int = os.O_WRONLY | os.O_CREAT | os.O_APPEND) -> int:
+    """An fd for ``path``, created 0600 (lock files and other sidecars)."""
+    ensure_dir(path.parent)
+    return os.open(str(path), flags, PRIVATE_FILE_MODE)
+
+
+def write_private(path: Path, text: str) -> None:
+    """Atomically replace ``path`` with ``text``, as a 0600 file from the first byte.
+
+    The temp file comes from ``mkstemp`` (0600, O_EXCL, random name) in the same
+    directory, so a crash leaves at worst a private stray, never a readable copy;
+    ``os.replace`` gives the target the temp file's mode, so an existing file left
+    wider by an older version is tightened by this write."""
+    import tempfile
+    ensure_dir(path.parent)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def skill_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 

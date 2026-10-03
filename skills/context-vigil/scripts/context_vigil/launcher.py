@@ -8,10 +8,18 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from context_vigil import paths, tmux
-from context_vigil.install import Change, DamagedMarkers, damaged_note, remove_marked_block
+from context_vigil.install import (
+    Change,
+    DamagedMarkers,
+    added_lines,
+    damaged_note,
+    marked_span,
+    remove_marked_block,
+    removed_block,
+)
 
 CHOICES = ("on-demand", "always", "not-now")
 RC_START = "# --- context-vigil launcher (managed; do not edit) ---"
@@ -66,7 +74,22 @@ def strip_rc(text: str) -> Optional[str]:
     return remove_marked_block(text, RC_START, RC_END, drop_separator=True)
 
 
+def _is_our_rc_line(line: str) -> bool:
+    return line in ("", RC_START, RC_END) or line in {
+        alias_line(c) for c in CHOICES if alias_line(c)}
+
+
+def removal_summary(path: Path, text: str) -> List[str]:
+    """Our block's removal, in our own lines only — never a line of the user's rc."""
+    span = marked_span(text, RC_START, RC_END, drop_separator=True)
+    if span is None:
+        return [f"{path}: removes our block"]
+    return removed_block(path, text.splitlines()[span[0]:span[1] + 1], _is_our_rc_line)
+
+
 def plan_rc(choice: str) -> Optional[Change]:
+    """The rc edit for ``choice``. Its summary names the file and prints only the
+    lines we add or remove: an rc file is where API keys are exported."""
     path = rc_path()
     if path is None:
         return None
@@ -74,8 +97,10 @@ def plan_rc(choice: str) -> Optional[Change]:
     after = strip_rc(before)
     if after is None:
         raise DamagedMarkers(damaged_note(path))
+    summary = removal_summary(path, before) if after != before else []
     line = alias_line(choice)
     if line:
+        summary += added_lines(path, len(after.splitlines()), ["", RC_START, line, RC_END])
         block = f"{RC_START}\n{line}\n{RC_END}\n"
         if after and not after.endswith("\n"):
             # No trailing newline to begin with: leave the block unterminated
@@ -83,7 +108,7 @@ def plan_rc(choice: str) -> Optional[Change]:
             after = f"{after}\n\n{block[:-1]}"
         else:
             after = f"{after}\n{block}"
-    return Change(path, before, after)
+    return Change(path, before, after, summary)
 
 
 def _tmux_install_hint() -> str:

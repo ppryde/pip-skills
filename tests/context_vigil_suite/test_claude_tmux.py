@@ -46,6 +46,21 @@ def stubs(iso: Path) -> Path:
     return bindir
 
 
+# The stubs log what they see, so the script gets an allow-list of names (all pinned
+# into tmp_path by ``iso``) plus whatever canaries a test sets — never the developer's
+# real environment, which may hold real API keys.
+_ENV_ALLOW = ("HOME", "TMPDIR", "CLAUDE_CONFIG_DIR", "CONTEXT_VIGIL_HOME",
+              "CONTEXT_VIGIL_TMUX_BIN", "CLAUDE_TMUX_SOCK", "LANG", "LC_ALL", "TERM",
+              "TMUX")
+
+
+def _env(stubs: Path, **extra: str) -> dict:
+    env = {k: os.environ[k] for k in _ENV_ALLOW if k in os.environ}
+    env["PATH"] = str(stubs)
+    env.update(extra)
+    return env
+
+
 def _pty_run(argv: list, cwd: Path, env: dict, tty: bool = True):
     """Run argv with stdin and stdout on a pty (a terminal) unless ``tty=False``."""
     master, slave = pty.openpty()
@@ -60,7 +75,7 @@ def _pty_run(argv: list, cwd: Path, env: dict, tty: bool = True):
 
 
 def _run(stubs: Path, cwd: Path, *args: str, tty: bool = True, **env: str) -> str:
-    full = dict(os.environ, PATH=str(stubs), **env)
+    full = _env(stubs, **env)
     (stubs.parent / "calls.log").touch()
     result = _pty_run(["bash", str(SCRIPT), *args], cwd, full, tty)
     assert result.returncode == 0, result.stderr
@@ -131,7 +146,7 @@ def test_quotes_arguments(stubs: Path, repo: Path) -> None:
 
 
 def test_runs_under_macos_bash32(stubs: Path, repo: Path) -> None:
-    full = dict(os.environ, PATH=str(stubs))
+    full = _env(stubs)
     result = _pty_run(["/bin/bash", str(SCRIPT)], repo, full)
     assert result.returncode == 0, result.stderr
 
@@ -149,7 +164,7 @@ def live(stubs: Path):
 
 
 def _attach(stubs: Path, cwd: Path, *args: str, shell: str = "bash"):
-    full = dict(os.environ, PATH=str(stubs))
+    full = _env(stubs)
     (stubs.parent / "calls.log").touch()
     result = subprocess.run([shell, str(SCRIPT), "attach", *args], cwd=cwd, env=full,
                             capture_output=True, text=True, timeout=10)
@@ -232,7 +247,7 @@ def test_failed_new_session_falls_back_to_plain_claude(stubs: Path, repo: Path) 
         f'#!/usr/bin/env bash\necho "tmux $*" >> "{log_path}"\n'
         '[[ " $* " == *" new-session "* ]] && exit 1\n'
         '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
-    full = dict(os.environ, PATH=str(stubs))
+    full = _env(stubs)
     result = _pty_run(["bash", str(SCRIPT), "--model", "opus"], repo, full)
     log = log_path.read_text()
     assert result.returncode == 0
@@ -266,7 +281,7 @@ def test_attach_without_tmux_is_127(stubs: Path, repo: Path) -> None:
 
 def test_missing_claude_is_127(stubs: Path, repo: Path) -> None:
     (stubs / "claude").unlink()
-    full = dict(os.environ, PATH=str(stubs))
+    full = _env(stubs)
     result = subprocess.run(["bash", str(SCRIPT)], cwd=repo, env=full,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 127
@@ -311,7 +326,7 @@ def test_env_file_is_private_and_removed_when_tmux_fails(
         'if [[ " $* "', 1)
     (stubs / "tmux").write_text(tmux)
     (stubs / "stat").symlink_to(shutil.which("stat"))
-    full = dict(os.environ, PATH=str(stubs), TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
+    full = _env(stubs, TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
     result = _pty_run(["bash", str(SCRIPT)], repo, full)
     assert result.returncode == 0 and "manual mode" in result.stderr
     assert list(tmpdir.iterdir()) == []
@@ -335,7 +350,7 @@ def test_old_tmux_says_why_and_falls_back(stubs: Path, repo: Path) -> None:
     (stubs / "tmux").write_text(
         f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
         '[[ "$1" == "-V" ]] && echo "tmux 3.1c"\nexit 0\n')
-    full = dict(os.environ, PATH=str(stubs))
+    full = _env(stubs)
     result = _pty_run(["bash", str(SCRIPT)], repo, full)
     log = (stubs.parent / "calls.log").read_text()
     assert "older than 3.2" in result.stderr and "3.1" in result.stderr
@@ -409,7 +424,22 @@ def test_env_file_is_removed_when_claude_tmux_is_terminated(stubs: Path, repo: P
     (stubs / "tmux").write_text(
         '#!/usr/bin/env bash\n[[ " $* " == *" has-session "* ]] && exit 1\n'
         '[[ " $* " == *" new-session "* ]] && { kill -TERM $PPID; sleep 0.3; }\nexit 0\n')
-    full = dict(os.environ, PATH=str(stubs), TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
+    full = _env(stubs, TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
     result = _pty_run(["bash", str(SCRIPT)], repo, full)
     assert result.returncode != 0
     assert list(tmpdir.iterdir()) == []
+
+
+def test_xtrace_never_traces_forwarded_values(stubs: Path, repo: Path, iso: Path) -> None:
+    """`bash -x claude-tmux` must not trace the env-file writes (printf of each value)."""
+    _running_tmux(stubs)
+    canary = "sk-FAKE-canary-xtrace"
+    full = _env(stubs, ANTHROPIC_API_KEY=canary, AWS_SECRET_ACCESS_KEY=canary + "-aws")
+    (stubs.parent / "calls.log").touch()
+    result = _pty_run(["bash", "-x", str(SCRIPT), "--model", "opus"], repo, full)
+    assert result.returncode == 0
+    assert canary not in result.stderr, "a forwarded value was traced"
+    assert "new-session" in result.stderr            # tracing is back on after the block
+    claude = [ln for ln in (stubs.parent / "calls.log").read_text().splitlines()
+              if ln.startswith("claude ")][0]
+    assert f"key={canary}" in claude                  # and the value still reached claude

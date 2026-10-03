@@ -82,8 +82,7 @@ def locked(key: str) -> Iterator[bool]:
     it was got. On False the caller skips its update. Never raises on lock trouble."""
     try:
         path = paths.session_lock_path(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(path, "a")
+        handle = os.fdopen(paths.open_private(path), "a")
     except OSError:
         yield False
         return
@@ -116,14 +115,7 @@ def load(session_id: str) -> Dict[str, Any]:
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        tmp.write_text(text)
-        os.replace(tmp, path)
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        raise
+    paths.write_private(path, text)
 
 
 def save(session_id: str, record: Dict[str, Any]) -> None:
@@ -143,7 +135,7 @@ def _unlink_lock_if_free(lock: Path) -> None:
     already opened it just gets a lock on a dead inode, which ``locked`` tolerates
     only because the record it guarded is gone too)."""
     try:
-        with open(lock, "a") as handle:
+        with os.fdopen(paths.open_private(lock), "a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             try:
                 lock.unlink(missing_ok=True)

@@ -2,13 +2,22 @@
 
 Needs a real Claude session and a human. Record results in the PR description.
 
-Use a scratch config dir so nothing touches the real account:
+Use a scratch config dir so nothing touches the real account, and
+`--launcher not-now` so nothing touches your real shell rc (call `claude-tmux`
+by path instead of through the alias):
 
 ```bash
 export CLAUDE_CONFIG_DIR=$(mktemp -d)/claude   # then log in when prompted
-skills/context-vigil/scripts/context-vigil install --yes --threshold 5 --launcher on-demand
+skills/context-vigil/scripts/context-vigil install --yes --threshold 5 --launcher not-now
+alias claude-tmux="$PWD/skills/context-vigil/scripts/claude-tmux"
 ```
 
+To exercise the rc edit itself, point it at a scratch home, never your own:
+`HOME=$(mktemp -d) ZDOTDIR= SHELL=/bin/zsh skills/context-vigil/scripts/context-vigil launcher on-demand`
+(dry run; add `--yes` to apply inside that scratch home).
+
+- [ ] The `install` / `launcher` / `uninstall` output is a summary — file paths, our own lines and command strings — with no line of the rc file, no settings `env` and no other hook's command.
+- [ ] `ls -ld "$CLAUDE_CONFIG_DIR/context-vigil"` is `drwx------`, and the files under it are `-rw-------`.
 - [ ] `claude-tmux` in a scratch repo; work until the nudge appears (about 5%).
 - [ ] The agent writes notes and runs `handover --file`.
 - [ ] `/clear` is sent automatically.

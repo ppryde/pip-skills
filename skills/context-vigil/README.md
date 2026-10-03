@@ -20,12 +20,21 @@ With tmux the `/clear` and the resume are hands-free; without it you type
 
 Then ask Claude to "set up context-vigil". The agent runs `install` as a dry
 run, asks you the threshold and launch questions, then re-runs it with your
-answers but still without `--yes` so you see the exact diff (the shell-rc edit
-included), and applies it with `install --yes` only after you agree. Hooks, the status
+answers but still without `--yes` so you see exactly what it will add (the
+shell-rc edit included), and applies it with `install --yes` only after you agree. Hooks, the status
 line and any shell-rc change take effect in new sessions and new shells.
 
-`install` rewrites `settings.json` as 2-space-indented JSON, and always shows
-the diff first. Your existing hooks and status line are kept; if the status line
+`install` always shows a summary first, never a diff. Your rc file,
+`settings.json` and status-line script are where API keys tend to live, and the
+agent runs these commands through Bash, so whatever they print lands in the
+transcript. The summary therefore names each file and prints only what
+context-vigil itself adds or removes: for `settings.json`, the path of each of
+our entries and our own command string (`+ hooks.SessionStart[matcher=startup|clear|resume]: "…"`,
+`+ statusLine.command: "…"`, `~ statusLine: spliced capture line into <script>`);
+for the status-line script and the rc, "adds N lines after line L" or "removes
+our block (N lines)" and our exact lines. It never prints your own lines, `env`,
+`apiKeyHelper` or any other hook's command. `settings.json` is rewritten as
+2-space-indented JSON only when something of ours actually changes. Your existing hooks and status line are kept; if the status line
 is a script file a marked block is spliced in, and if it is an inline command
 you are given the one line to add yourself. If you have no status line, a silent
 capture-only one is added. A malformed `settings.json` stops the install with
@@ -84,7 +93,7 @@ Choose 1–3 [1]:
 Choosing **Always** asks one extra confirmation, and `install` / `launcher`
 require `--confirm-always` for it. The edit goes into `~/.zshrc` or `~/.bashrc`
 per `$SHELL` (other shells are given the alias line to add by hand), is shown as
-a diff, and is removed by `uninstall`. Change your mind any time with
+the lines added (never your own rc lines), and is removed by `uninstall`. Change your mind any time with
 `context-vigil launcher`.
 
 `claude-tmux` uses a dedicated tmux socket (`CLAUDE_TMUX_SOCK`; by default
@@ -95,6 +104,10 @@ stdout is not a terminal, or the call is non-interactive (`-p`/`--print`, `--out
 `plugin`, `setup-token`, `config`, `migrate-installer`; or `--version`/`-v`/`--help`/`-h`). It forwards your
 `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and `CONTEXT_VIGIL_*` to the new session and unsets
 those names the tmux server holds but you do not, so a running server's stale environment does not apply.
+Values travel through a private (0600) temp file that deletes itself, never on a command line, and are not
+traced even under `bash -x`. A long-running tmux server keeps the environment it was started with (names
+outside the forwarded set included — say an old `OPENAI_API_KEY`) and hands it to every new session until
+the server is restarted (`tmux -L <socket> kill-server`).
 
 ## How the percentage is measured
 
@@ -115,11 +128,12 @@ line and use the transcript only. Per-session bookkeeping lives under
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
 | `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4, which is approximate and undercounts non-ASCII text; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | re-nudge each time ctx % has grown this many points past the last nudge (integer 1–50) |
+| `handover.archive_keep` | 20 | used handovers kept per scope in `archive/`, newest first; older ones are deleted (integer 0–1000; 0 keeps none) |
 | `handover.cooldown_seconds` | 60 | after a `/clear` that loaded a handover, nudges are suppressed this long (census can lag a `/clear`); startup/resume start none and an explicit `handover` is never refused (integer 0–3600) |
 
 Resolution order, first match wins, re-read on every hook call:
 
-1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`, `CONTEXT_VIGIL_COOLDOWN_SECONDS`
+1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`, `CONTEXT_VIGIL_COOLDOWN_SECONDS`, `CONTEXT_VIGIL_ARCHIVE_KEEP`
 2. Worktree: `config set KEY VALUE --worktree`
 3. Global: `config set KEY VALUE`
 4. Built-in default
@@ -140,6 +154,17 @@ run that never uses the Task tools is nudged at the next prompt
 
 Everything is under `$CONTEXT_VIGIL_HOME`, or `$CLAUDE_CONFIG_DIR/context-vigil/`
 (default `~/.claude/context-vigil/`). Nothing is written inside repositories.
+The data root and every directory under it are created 0700, and every file in
+it (handovers and their archive, session records, `census.json`,
+`windows.json`, config, `install.json`, locks and markers) is created 0600 from
+the first byte, temp files included; a file or data root left wider by an older
+version is tightened on its next write.
+
+A handover holds whatever the agent wrote into it, plus any `--inline` file
+verbatim. It is kept on disk (the newest `handover.archive_keep` per scope) and
+`handover --resume` and the post-`/clear` injection print it back into the next
+session's transcript by design, so never put a credential in one or inline a
+secret-bearing file (`.env`, keys, tokens).
 
 ```
 $CLAUDE_CONFIG_DIR/context-vigil/
@@ -150,7 +175,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
-    archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
+    archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists); newest `handover.archive_keep` kept
     headless/handoff.md    # a headless (sdk-*) run's handoff + archive/: shared by the worktree's headless runs (each run has a new session id), never seen by an interactive session
     sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
                            # else tmux-<socket>-<pane>; headless-<session_id> markers for a headless (sdk-*) session

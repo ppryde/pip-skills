@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,46 @@ if _REAL_ZDOTDIR:
 # Claude settings files install/uninstall would edit if the pinning ever failed.
 _REAL_RCS += [_REAL_HOME / ".claude" / "settings.json",
               _REAL_HOME / ".claude-personal" / "settings.json"]
+
+
+# Secret-shaped names: scrubbed from every test's environment by ``iso``, and the
+# real values (captured once, at import, held only in memory and never printed) are
+# what ``no_real_secret_recorded`` hunts for in everything a test leaves on disk.
+SECRET_NAME = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)", re.IGNORECASE)
+_SCRUB_PREFIXES = ("ANTHROPIC_", "AWS_")
+_MIN_SECRET_LEN = 8   # shorter values ("1", "true") are not secrets and would false-positive
+_REAL_SECRETS: tuple[bytes, ...] = tuple(
+    value.encode("utf-8", "surrogateescape") for name, value in os.environ.items()
+    if SECRET_NAME.search(name) and len(value) >= _MIN_SECRET_LEN)
+
+
+def leaked_files(root: Path, secrets: tuple[bytes, ...]) -> list[Path]:
+    """Files under ``root`` that contain any of ``secrets`` (compared in-process)."""
+    if not secrets:
+        return []
+    hits: list[Path] = []
+    for path in root.rglob("*"):
+        try:
+            if not path.is_file() or path.is_symlink():
+                continue
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if any(s in data for s in secrets):
+            hits.append(path)
+    return hits
+
+
+@pytest.fixture(autouse=True)
+def no_real_secret_recorded(tmp_path: Path):
+    """Fail if any file a test (or a stub it ran) wrote holds a real secret env value.
+
+    Names the file only: the value itself is never printed."""
+    yield
+    hits = leaked_files(tmp_path, _REAL_SECRETS)
+    if hits:
+        pytest.fail("a real secret env value was recorded in: "
+                    + ", ".join(str(p.relative_to(tmp_path)) for p in hits), pytrace=False)
 
 
 def _snapshot() -> dict[Path, tuple[bool, int, int]]:
@@ -53,9 +94,12 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     would let a dispatch path type real keystrokes into their pane, and an
     unpinned CLAUDE_CONFIG_DIR would write into their real ~/.claude*.
     CONTEXT_VIGIL_TMUX_BIN names a missing binary: only a test's own stub is reachable.
+    Secret-shaped names (and every ANTHROPIC_* / AWS_*) are removed too, so no
+    subprocess or stub a test runs can ever see, log or echo a real credential.
     """
     for var in list(os.environ):
-        if var.startswith("CONTEXT_VIGIL_") or var in _STRIP:
+        if (var.startswith("CONTEXT_VIGIL_") or var in _STRIP
+                or var.startswith(_SCRUB_PREFIXES) or SECRET_NAME.search(var)):
             monkeypatch.delenv(var, raising=False)
     (tmp_path / "home").mkdir()
     (tmp_path / "claude").mkdir()

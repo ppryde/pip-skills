@@ -60,7 +60,7 @@ def test_status_shows_context_percent_and_window(run_cli, repo: Path) -> None:
     assert "window: 1000000 (worktree)" in run_cli("status", cwd=repo).stdout
 
 
-def test_install_yes_shows_diff_before_applying(
+def test_install_yes_shows_summary_before_applying(
         repo: Path, cfg: Path, capsys, monkeypatch) -> None:
     from context_vigil import cli, install
 
@@ -70,7 +70,7 @@ def test_install_yes_shows_diff_before_applying(
     monkeypatch.setattr(install, "apply", boom)
     assert cli.main(["install", "--yes"]) == 1
     out = capsys.readouterr().out
-    assert "settings.json" in out and "+" in out  # the diff was printed first
+    assert "settings.json" in out and "+ hooks." in out  # the summary was printed first
 
 
 def test_context_uses_claude_session_id_env(run_cli, repo: Path) -> None:

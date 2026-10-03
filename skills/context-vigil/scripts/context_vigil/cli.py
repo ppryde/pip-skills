@@ -91,11 +91,12 @@ def _cmd_handover(args: argparse.Namespace) -> int:
     scope = _scope(cwd)
     kept = session.handoff_scope(cwd, _env_session_id())
     if args.resume or args.discard:
-        text = state.consume_handoff(kept)
+        keep = config.archive_keep(cwd)
+        text = state.consume_handoff(kept, keep)
         if text is None:
             raise CliError("no handover is waiting here")
         print(f"{handover.RESUME_PREAMBLE}\n\n{text}" if args.resume
-              else "handover discarded (kept in the archive)")
+              else "handover discarded" + (" (kept in the archive)" if keep else ""))
         return 0
     try:
         notes = Path(args.file).read_text()
@@ -112,11 +113,11 @@ def _cmd_handover(args: argparse.Namespace) -> int:
         # no /clear is sent to a headless run: leave the handoff where the next run looks
         if state.is_paused(scope):
             raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
-        state.write_handoff(kept, document)
+        state.write_handoff(kept, document, config.archive_keep(cwd))
         print(f"handover saved to {state.handoff_path(kept)} — the next headless run in this "
               "worktree can `handover --resume` it")
         return 0
-    result = state.request_clear(scope, document)
+    result = state.request_clear(scope, document, config.archive_keep(cwd))
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
     if tmux.reachable():
@@ -209,6 +210,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"({resolved['handover.max_tokens'][1]})",
         f"handover.cooldown_seconds: {resolved['handover.cooldown_seconds'][0]} "
         f"({resolved['handover.cooldown_seconds'][1]})",
+        f"handover.archive_keep: {resolved['handover.archive_keep'][0]} "
+        f"({resolved['handover.archive_keep'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
         f"pending handover: {'yes' if pending else 'no'}",
@@ -218,15 +221,22 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _summaries(plan: install.Plan) -> List[str]:
+    """What each planned edit does, in context-vigil's own lines only — never a
+    diff: rc files, settings.json and status-line scripts hold secrets, and this
+    output reaches the terminal and the agent's transcript."""
+    return [c.describe() for c in plan.changes if c.before != c.after]
+
+
 def _cmd_install(args: argparse.Namespace) -> int:
     try:
         plan = install.plan_install(args.threshold, args.launcher)
     except (install.InstallError, config.ConfigError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
-    diffs = [c.diff() for c in plan.changes if c.before != c.after]
+    summaries = _summaries(plan)
     if not args.yes:
         print("context-vigil install — DRY RUN, nothing changed yet.\n")
-        print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
+        print("\n".join(summaries) if summaries else "Hooks and status line already wired.")
         for line in plan.manual:
             print(f"\nMANUAL STEP: {line}")
         for line in plan.notes:
@@ -246,7 +256,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
                        "(it takes over the claude command)")
     # Show what is about to change BEFORE changing it, so the record of the
     # edit (the rc file included) is on screen even if apply fails part-way.
-    print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
+    print("\n".join(summaries) if summaries else "Hooks and status line already wired.")
     for line in plan.manual:
         print(f"\nMANUAL STEP: {line}")
     for line in plan.notes:
@@ -272,7 +282,7 @@ def _record_launcher(choice: str, rc: Path) -> None:
         return
     record["launcher"] = choice
     record["rc_path"] = str(rc)
-    install.write_atomic(record_path, json.dumps(record, indent=2) + "\n")
+    paths.write_private(record_path, json.dumps(record, indent=2) + "\n")
 
 
 def _cmd_launcher(args: argparse.Namespace) -> int:
@@ -290,7 +300,7 @@ def _cmd_launcher(args: argparse.Namespace) -> int:
         print(f"Unknown shell — add this to your shell rc yourself:\n  {line}" if line
               else "Nothing to change.")
         return 0
-    print(change.diff() or "Already set.")
+    print(change.describe() if change.before != change.after else "Already set.")
     if not args.yes:
         print("\nDRY RUN — apply with:  context-vigil launcher "
               f"{args.choice} --yes" + (" --confirm-always" if args.choice == "always" else ""))
@@ -309,8 +319,8 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
         plan = install.plan_uninstall()
     except (install.InstallError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
-    diffs = [c.diff() for c in plan.changes if c.before != c.after]
-    print("\n".join(diffs) if diffs else "Nothing of context-vigil's is installed.")
+    summaries = _summaries(plan)
+    print("\n".join(summaries) if summaries else "Nothing of context-vigil's is installed.")
     for line in plan.manual:
         print(f"\nNOTE: {line}")
     if not args.yes:

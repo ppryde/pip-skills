@@ -20,6 +20,7 @@ DEFAULTS: Dict[str, object] = {
     "nudge.repeat_step": 5,
     "handover.max_tokens": 8000,
     "handover.cooldown_seconds": 60,
+    "handover.archive_keep": 20,
 }
 KEYS = tuple(DEFAULTS)
 ENV_VARS: Dict[str, str] = {
@@ -29,6 +30,7 @@ ENV_VARS: Dict[str, str] = {
     "nudge.repeat_step": "CONTEXT_VIGIL_REPEAT_STEP",
     "handover.max_tokens": "CONTEXT_VIGIL_HANDOVER_MAX_TOKENS",
     "handover.cooldown_seconds": "CONTEXT_VIGIL_COOLDOWN_SECONDS",
+    "handover.archive_keep": "CONTEXT_VIGIL_ARCHIVE_KEEP",
 }
 _MODES = ("local", "remote")
 
@@ -58,6 +60,8 @@ def coerce(key: str, raw: object) -> object:
         raise ConfigError("handover.max_tokens must be a positive whole number")
     if key == "handover.cooldown_seconds" and not 0 <= number <= 3600:
         raise ConfigError("handover.cooldown_seconds must be a whole number 0–3600")
+    if key == "handover.archive_keep" and not 0 <= number <= 1000:
+        raise ConfigError("handover.archive_keep must be a whole number 0–1000")
     return number
 
 
@@ -108,10 +112,7 @@ def set_value(cwd: Path, key: str, raw: str, worktree: bool = False) -> object:
     path = paths.worktree_config_path(cwd) if worktree else paths.global_config_path()
     data = _read(path)
     data[key] = value
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-    os.replace(tmp, path)
+    paths.write_private(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
     return value
 
 
@@ -137,3 +138,7 @@ def handover_max_tokens(cwd: Path) -> int:
 
 def cooldown_seconds(cwd: Path) -> int:
     return int(str(load(cwd)["handover.cooldown_seconds"]))
+
+
+def archive_keep(cwd: Path) -> int:
+    return int(str(load(cwd)["handover.archive_keep"]))

@@ -16,7 +16,11 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from typing import List, Tuple
 
+from context_vigil import paths
+
+ARCHIVE_KEEP = 20  # default; the live value is config `handover.archive_keep`
 COOLDOWN_SECONDS = 60  # default; the live value is config `handover.cooldown_seconds`
 GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal for a stranded gate
 
@@ -60,8 +64,7 @@ def is_paused(scope: Path) -> bool:
 
 
 def pause(scope: Path) -> None:
-    scope.mkdir(parents=True, exist_ok=True)
-    paused_flag(scope).touch()
+    _touch(paused_flag(scope))
 
 
 def resume(scope: Path) -> None:
@@ -98,8 +101,7 @@ def cooldown_active(scope: Path, seconds: int = COOLDOWN_SECONDS) -> bool:
 
 
 def set_gate(scope: Path) -> None:
-    scope.mkdir(parents=True, exist_ok=True)
-    gate_marker(scope).touch()
+    _touch(gate_marker(scope))
 
 
 def gate_active(scope: Path) -> bool:
@@ -124,29 +126,77 @@ def clear_requested(scope: Path) -> bool:
     return clear_flag(scope).exists()
 
 
-def write_handoff(scope: Path, handoff_text: str) -> None:
-    """Save the handoff atomically; an unconsumed older one is archived (uniquified),
-    never destroyed."""
-    scope.mkdir(parents=True, exist_ok=True)
+def _touch(marker: Path) -> None:
+    """Create (0600) or refresh a marker; its mtime is what the TTL checks read."""
+    fd = paths.open_private(marker, os.O_WRONLY | os.O_CREAT)
+    try:
+        os.fchmod(fd, paths.PRIVATE_FILE_MODE)   # tighten one left wider by an older version
+    finally:
+        os.close(fd)
+    os.utime(str(marker), None)
+
+
+def _archived(archive: Path) -> List[Path]:
+    """Archived handovers, newest first (by mtime, then name)."""
+    try:
+        files = [f for f in archive.iterdir() if f.is_file()]
+    except OSError:
+        return []
+
+    def key(f: Path) -> Tuple[int, str]:
+        try:
+            return (f.stat().st_mtime_ns, f.name)
+        except OSError:
+            return (0, f.name)
+    return sorted(files, key=key, reverse=True)
+
+
+def prune_archive(scope: Path, keep: int = ARCHIVE_KEEP) -> None:
+    """Keep only the newest ``keep`` archived handovers (0 keeps none). Never raises."""
+    for old in _archived(handoff_archive_dir(scope))[max(keep, 0):]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
+def _archive(scope: Path, path: Path, keep: int) -> None:
+    """Move a handoff into the archive (0600), or drop it when ``keep`` is 0; then prune.
+
+    Raises OSError on failure; callers decide whether that matters."""
+    if keep <= 0:
+        path.unlink(missing_ok=True)
+        prune_archive(scope, 0)
+        return
+    archive = paths.ensure_dir(handoff_archive_dir(scope))
+    target = _uniquify(archive / "handoff.md")
+    path.rename(target)
+    try:
+        os.chmod(str(target), paths.PRIVATE_FILE_MODE)   # one written by an older version
+    except OSError:
+        pass
+    prune_archive(scope, keep)
+
+
+def write_handoff(scope: Path, handoff_text: str, keep: int = ARCHIVE_KEEP) -> None:
+    """Save the handoff atomically (0600); an unconsumed older one is archived
+    (uniquified), and the archive is pruned to the newest ``keep``."""
+    paths.ensure_dir(scope)
     target = handoff_path(scope)
     if target.exists():
         try:
-            archive = handoff_archive_dir(scope)
-            archive.mkdir(parents=True, exist_ok=True)
-            target.rename(_uniquify(archive / "handoff.md"))
+            _archive(scope, target, keep)
         except OSError:
             pass  # replacing below still keeps the new handoff; the old one is best-effort
-    tmp = scope / "handoff.md.tmp"
-    tmp.write_text(handoff_text)
-    os.replace(tmp, target)
+    paths.write_private(target, handoff_text)
 
 
-def request_clear(scope: Path, handoff_text: str) -> str:
+def request_clear(scope: Path, handoff_text: str, keep: int = ARCHIVE_KEEP) -> str:
     """Save the handoff and arm /clear. An explicit handover is never refused for a cooldown."""
     if is_paused(scope):
         return "paused"
-    write_handoff(scope, handoff_text)
-    clear_flag(scope).touch()
+    write_handoff(scope, handoff_text, keep)
+    _touch(clear_flag(scope))
     return "armed"
 
 
@@ -175,11 +225,11 @@ def begin_cycle(scope: Path, cooldown: bool = False) -> None:
     only; an explicit ``handover --file`` always proceeds. A plain startup,
     resume or bare /clear starts none.
     """
-    scope.mkdir(parents=True, exist_ok=True)
+    paths.ensure_dir(scope)
     clear_flag(scope).unlink(missing_ok=True)
     clear_gate(scope)
     if cooldown:
-        cooldown_marker(scope).touch()
+        _touch(cooldown_marker(scope))
 
 
 def read_handoff(scope: Path) -> str | None:
@@ -199,11 +249,12 @@ def handoff_written_at(scope: Path) -> float | None:
         return None
 
 
-def consume_handoff(scope: Path) -> str | None:
+def consume_handoff(scope: Path, keep: int = ARCHIVE_KEEP) -> str | None:
     """Read the pending handoff, then archive it so it injects at most once.
 
     Returns the handoff text, or None if there is no pending handoff. Archiving
-    (move to <scope>/archive/, uniquified) clears the re-injection gate —
+    (move to <scope>/archive/, uniquified, pruned to the newest ``keep``; with
+    ``keep`` 0 the handoff is deleted instead) clears the re-injection gate —
     the handoff file's presence IS that gate — so a later unrelated launch will
     not re-inject a stale briefing. Quarantine-safe: on any archive failure it
     still removes the live handoff so re-injection cannot repeat, and never
@@ -221,10 +272,7 @@ def consume_handoff(scope: Path) -> str | None:
     # still try to remove the live handoff so a stale briefing cannot re-inject,
     # and even that removal is guarded.
     try:
-        archive = handoff_archive_dir(scope)
-        archive.mkdir(parents=True, exist_ok=True)
-        target = _uniquify(archive / "handoff.md")
-        path.rename(target)
+        _archive(scope, path, keep)
     except OSError:
         try:
             path.unlink(missing_ok=True)

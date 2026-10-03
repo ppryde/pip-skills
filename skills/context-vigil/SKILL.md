@@ -31,8 +31,14 @@ If `status` says `installed: no`, or the user asks to set it up:
    continuing. If tmux is not installed, relay that text instead and skip the
    launcher question.
 3. Run `install --threshold N --launcher on-demand|always|not-now` with NO
-   `--yes`. Show the user THAT diff, including any shell-rc change, and get an
-   explicit yes.
+   `--yes`. Show the user THAT summary and get an explicit yes. It is not a
+   diff: it names each file and prints only what context-vigil adds or removes
+   (our hook entries and command strings in settings.json, our lines in the
+   status-line script and shell rc, with the line they go after). It never
+   prints the user's own lines, `env`, `apiKeyHelper` or other hooks — those
+   files hold API keys. Do not `cat`, `diff` or otherwise print those files to
+   "show more"; if the user wants to see the result, they open the file
+   themselves.
 4. Only then run the same command with `--yes`. Choosing Always needs
    `--confirm-always` as well — add it only after the user has confirmed
    Always, never otherwise.
@@ -40,7 +46,7 @@ If `status` says `installed: no`, or the user asks to set it up:
    it takes effect in new sessions (and a new shell for the launcher).
 
 Never run any `--yes` command (`install`, `launcher`, `uninstall`) until the
-user has seen its dry-run diff and agreed.
+user has seen its dry-run summary and agreed.
 
 ## Measure
 
@@ -71,7 +77,9 @@ stopping points. A nudge repeats every `nudge.repeat_step`
 4. Only if `config get context.mode` is `remote` (a remote session cannot open
    paths), add `--inline <path>` for every file the next session must read;
    each is cut at about 2000 tokens with a truncation marker. In local mode,
-   reference files by path instead.
+   reference files by path instead. Never inline or paste a secret — `.env`
+   files, credentials, keys, tokens: a handover is stored on disk and printed
+   back into the next session's transcript verbatim.
 5. Run `handover --file <notes>`. It prints what happens next:
    - auto: end your turn; /clear is sent for you when the turn ends and the
      session resumes itself.
@@ -97,13 +105,15 @@ nothing with it unless the user asks: "resume the handover" → run
 - "Nudge me at 60%": `config set context.threshold 60` (all repos), or add
   `--worktree` for this repo only. 1–95.
 - `status` shows each setting and where it came from.
+- `handover.archive_keep` (default 20, 0 keeps none): how many used handovers
+  each scope keeps in its archive.
 - `pause` / `resume`: stop or restart nudges and auto-clear for this session (this tmux pane; the whole
   worktree outside tmux).
   Run them only when the user asks.
 - `launcher`: show or change how Claude launches (tmux). Run it without
-  `--yes` first, show the diff, and apply (`--yes`) only on the user's say-so.
+  `--yes` first, show the summary, and apply (`--yes`) only on the user's say-so.
 
 ## Uninstall
 
-`uninstall` (dry run), show the user the diff, then `uninstall --yes` only
+`uninstall` (dry run), show the user the summary, then `uninstall --yes` only
 after they agree.

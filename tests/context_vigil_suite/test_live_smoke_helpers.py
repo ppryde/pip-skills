@@ -45,6 +45,31 @@ def test_slug_and_claude_args() -> None:
     assert "--dangerously-skip-permissions" in ls.claude_args(Path("/s.json"), "haiku", True)
 
 
+def test_redact_masks_secret_shapes() -> None:
+    text = ("key sk-FAKE-canary-123456 and AKIAFAKECANARY123456 then "
+            "MY_API_KEY=abc OTHER_TOKEN_X=def SECRET=ghi plain=ok")
+    out = ls.redact(text)
+    for bad in ("sk-FAKE-canary-123456", "AKIAFAKECANARY123456", "=abc", "=def", "=ghi"):
+        assert bad not in out
+    assert "plain=ok" in out and "[redacted]" in out
+
+
+def test_peek_redacts_pane_text(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    import argparse
+    pane = "hello\nexport X_TOKEN=sk-FAKE-canary-99\n"
+    monkeypatch.setattr(ls, "pane_text", lambda lines=60: pane)
+    ls.cmd_peek(argparse.Namespace(n=10))
+    out = capsys.readouterr().out
+    assert "sk-FAKE-canary" not in out and "hello" in out
+
+
+def test_wait_timeout_tail_is_redacted(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    pane = "AWS_SECRET_ACCESS_KEY=sk-FAKE-canary-77\n"
+    monkeypatch.setattr(ls, "pane_text", lambda lines=60: pane)
+    ok, why = ls.wait_until(lambda: False, 0, "x", 0)
+    assert not ok and "sk-FAKE-canary" not in why
+
+
 def test_state_helpers_hide_secrets() -> None:
     rec = {"headless": False, "api_token": "x", "env": "y", "nested": {"a": 1}, "n": 3}
     assert ls.safe_fields(rec) == {"headless": False, "n": 3}
