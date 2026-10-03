@@ -71,7 +71,7 @@ context-vigil/
       session.py           # per-session records + the learned model -> window table
       state.py             # per-scope marker files: paused/cooldown/handover-gate/clear-requested
       config.py            # threshold/window/mode get/set
-      snapshot.py          # git snapshot (cwd, branch, status, recent files)
+      snapshot.py          # pointer-only git snapshot (cwd, branch, base, counts)
       handover.py          # assemble + validate handover, write handoff.md
       hooks.py             # session-start / stop / nudge entrypoints
       tmux.py              # detect, send /clear, send resume prompt
@@ -95,7 +95,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
-    archive/<ts>.md        # injected handovers
+    archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
     sessions/<name>/       # same files, per session: CONTEXT_VIGIL_SESSION, else tmux-<socket>-<pane>
 ```
 
@@ -140,14 +140,15 @@ or SKILL.md. The threshold in particular is the knob users will reach for.
 |---|---|---|
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
 | `context.window` | 200000 | Last-resort window for the transcript estimate (see the window lookup under Measure) |
-| `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`) |
+| `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
+| `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | After the first nudge, re-nudge each time ctx % has grown by this many points (integer 1–50) |
 
 **Resolution order** — first match wins, re-read on every hook call so changes
 take effect on the next turn with no restart:
 
 1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`,
-   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP` (per-session override, e.g. one long unattended run;
+   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS` (per-session override, e.g. one long unattended run;
    settable in `settings.json` `env`).
 2. Worktree: `worktrees/<slug>/config.json`, written by
    `config set KEY VAL --worktree` (e.g. a heavy monorepo wants an earlier nudge).
@@ -276,8 +277,9 @@ plan and questions to the user, then runs
    - **tmux not installed:** say auto-clear is off and why, give the install
      command for the OS (`brew install tmux`, `apt install tmux`, …), confirm
      manual mode works today:
-     > You'll get a nudge, I'll write the handover, and you type `/clear`;
-     > I resume automatically after that.
+     > You'll get a nudge, I'll write the handover, and you type `/clear` and
+     > then send any message (e.g. "go") — the handover is injected after
+     > `/clear`, but the resumed turn starts when you send something.
      and point at `context-vigil launcher` once tmux is installed.
 8. Remind: hooks, the status line and any shell-rc change take effect in new
    sessions / new shells.
@@ -369,10 +371,18 @@ message otherwise. It then writes `handoff.md`:
 
 1. Header (date, worktree, branch).
 2. The agent's notes.
-3. The git snapshot (cwd, branch, `git status --short`, 10 most recently
-   modified tracked files) — unless `--no-snapshot`.
-4. Inlined files (`--inline`, repeatable) — used when `context.mode=remote`,
-   since a remote session cannot open paths.
+3. The git snapshot — unless `--no-snapshot`. Fixed size, never a file list:
+   cwd; branch @ short HEAD; base (merge-base with the default remote branch,
+   else `origin/main`/`origin/master`/`main`/`master`) @ short sha;
+   modified / staged / untracked counts; and the commands for detail
+   (`git status --short`, `git diff --stat <base>...HEAD`, `git diff`).
+4. Inlined files (`--inline`, repeatable) — for `context.mode=remote` only,
+   since a remote session cannot open paths. Each file is cut at about 2000
+   tokens with `… [truncated: N more lines — <path>]`.
+
+The assembled document is estimated at chars/4 tokens; above
+`handover.max_tokens` the command refuses (exit 1, one line naming how many
+tokens to trim) and arms nothing. It never truncates the agent's notes.
 
 and arms the reset (writes the `clear-requested` marker).
 
@@ -380,8 +390,9 @@ and arms the reset (writes the `clear-requested` marker).
 
 - **Auto:** the `Stop` hook, seeing `clear-requested`, sends `/clear` to the pane via
   `tmux send-keys` after `CONTEXT_VIGIL_CLEAR_DELAY` (default 2s).
-- **Manual:** the agent's turn ends with "Handover saved — type `/clear` to
-  continue in a fresh context." The `Stop` hook repeats this if armed and no
+- **Manual:** the agent's turn ends with "Handover saved — type `/clear`, then
+  send any message (e.g. "go") to start the resumed turn." Without tmux the
+  handover is injected after `/clear` but nothing types for the user. The `Stop` hook repeats this if armed and no
   tmux is reachable and `clear-requested` is set (never silent).
 - **tmux lost mid-session:** handled as manual.
 

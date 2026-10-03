@@ -62,6 +62,48 @@ def test_assemble_without_snapshot(repo: Path) -> None:
     assert "Session snapshot" not in doc
 
 
+def test_assemble_over_budget_refuses_with_trim_amount(repo: Path) -> None:
+    big = GOOD.replace("- ✅ Done: a", "word " * 2000)          # ~2500 tokens of extra notes
+    with pytest.raises(handover.HandoverError) as err:
+        handover.assemble(big, repo, [], include_snapshot=False, max_tokens=500)
+    msg = str(err.value)
+    assert "handover.max_tokens" in msg and "500" in msg and "trim" in msg
+    assert "\n" not in msg                      # one line
+    import re
+    over = int(re.search(r"trim ~(\d+)", msg).group(1))
+    assert over > 1500
+
+
+def test_assemble_within_budget_is_untouched(repo: Path) -> None:
+    doc = handover.assemble(GOOD, repo, [], include_snapshot=False, max_tokens=8000)
+    assert "Ship it." in doc
+
+
+def test_inline_file_is_capped_with_marker(repo: Path, iso: Path) -> None:
+    big = iso / "big.md"
+    big.write_text("\n".join(f"line {i:05d} " + "x" * 40 for i in range(2000)))
+    doc = handover.assemble(GOOD, repo, [big], include_snapshot=False, max_tokens=10**6)
+    assert "line 00000" in doc and "line 01999" not in doc
+    match = __import__("re").search(
+        r"… \[truncated: (\d+) more lines — " + __import__("re").escape(str(big)) + r"\]", doc)
+    assert match and int(match.group(1)) > 1000
+    assert len(doc) < handover.INLINE_MAX_TOKENS * 4 + 2000
+
+
+def test_inline_small_file_is_whole(repo: Path, iso: Path) -> None:
+    small = iso / "small.md"
+    small.write_text("a\nb\nc")
+    doc = handover.assemble(GOOD, repo, [small], include_snapshot=False)
+    assert "a\nb\nc" in doc and "truncated" not in doc
+
+
+def test_inline_counts_against_budget(repo: Path, iso: Path) -> None:
+    f = iso / "f.md"
+    f.write_text("y" * 7000)                     # under the per-file cap
+    with pytest.raises(handover.HandoverError, match="max_tokens"):
+        handover.assemble(GOOD, repo, [f], include_snapshot=False, max_tokens=500)
+
+
 def test_assemble_unreadable_inline(repo: Path, iso: Path) -> None:
     with pytest.raises(handover.HandoverError, match="--inline"):
         handover.assemble(GOOD, repo, [iso / "missing.md"], include_snapshot=False)
@@ -122,3 +164,28 @@ def test_cli_handover_cooldown_message(run_cli, repo: Path, iso: Path) -> None:
     assert result.returncode == 1
     assert "a session just started" in result.stderr and "cooldown" in result.stderr
     assert "/clear just happened" not in result.stderr
+
+
+def test_cli_handover_refuses_over_budget(run_cli, repo: Path, iso: Path) -> None:
+    notes = iso / "notes.md"
+    notes.write_text(GOOD.replace("- ✅ Done: a", "word " * 12000))
+    result = run_cli("handover", "--file", str(notes), cwd=repo)
+    assert result.returncode == 1
+    assert "handover refused" in result.stderr and "trim" in result.stderr
+    from context_vigil import paths, state
+    assert not state.clear_requested(paths.scope_dir(repo))     # never armed
+
+
+def test_cli_handover_budget_is_configurable(run_cli, repo: Path, iso: Path) -> None:
+    notes = iso / "notes.md"
+    notes.write_text(GOOD.replace("- ✅ Done: a", "word " * 12000))
+    result = run_cli("handover", "--file", str(notes), cwd=repo,
+                     env={"CONTEXT_VIGIL_HANDOVER_MAX_TOKENS": "50000"})
+    assert result.returncode == 0, result.stderr
+
+
+def test_cli_no_tmux_message_says_send_a_message(run_cli, repo: Path, iso: Path) -> None:
+    notes = iso / "notes.md"
+    notes.write_text(GOOD)
+    result = run_cli("handover", "--file", str(notes), cwd=repo)
+    assert "type /clear" in result.stdout and "go" in result.stdout

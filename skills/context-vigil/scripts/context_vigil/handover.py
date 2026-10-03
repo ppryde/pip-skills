@@ -16,6 +16,9 @@ from context_vigil import paths, snapshot
 
 SECTIONS = ("Goal", "Current State", "Files in Flight", "Failed Attempts", "Next Step")
 REQUIRED = ("Failed Attempts", "Next Step")
+# Rough token estimate: chars / 4. Cheap, dependency-free, good enough to bound size.
+CHARS_PER_TOKEN = 4
+INLINE_MAX_TOKENS = 2000
 RESUME_PREAMBLE = (
     "Resume from this handover. Don't re-investigate anything marked complete, "
     "don't retry anything under Failed Attempts — start with the Next Step."
@@ -93,7 +96,24 @@ def summary(document: str, written_at: Optional[float]) -> str:
     return text
 
 
-def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool) -> str:
+def estimate_tokens(text: str) -> int:
+    return -(-len(text) // CHARS_PER_TOKEN)
+
+
+def _cap_inline(body: str, path: Path) -> str:
+    """Cut an inlined file at INLINE_MAX_TOKENS, saying exactly what was left out."""
+    limit = INLINE_MAX_TOKENS * CHARS_PER_TOKEN
+    if len(body) <= limit:
+        return body
+    kept = body[:limit]
+    if "\n" in kept:
+        kept = kept[:kept.rindex("\n")]
+    more = len(body[len(kept):].strip("\n").splitlines())
+    return f"{kept}\n… [truncated: {more} more lines — {path}]"
+
+
+def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool,
+             max_tokens: Optional[int] = None) -> str:
     validate(notes)
     parts = [f"# Handover — {datetime.now().strftime('%Y-%m-%d %H:%M')}", notes.strip()]
     if include_snapshot:
@@ -103,5 +123,13 @@ def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool) 
             body = path.read_text().strip()
         except OSError as exc:
             raise HandoverError(f"--inline unreadable: {path}: {exc}") from exc
-        parts.append(f"## Inlined: `{path}`\n\n```\n{body}\n```")
-    return "\n\n".join(parts) + "\n"
+        parts.append(f"## Inlined: `{path}`\n\n```\n{_cap_inline(body, path)}\n```")
+    document = "\n\n".join(parts) + "\n"
+    if max_tokens is not None:
+        size = estimate_tokens(document)
+        if size > max_tokens:
+            raise HandoverError(
+                f"~{size} tokens exceeds handover.max_tokens ({max_tokens}) — "
+                f"trim ~{size - max_tokens} tokens from the notes (or drop --inline "
+                "files) and re-run")
+    return document

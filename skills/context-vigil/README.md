@@ -48,7 +48,9 @@ The mode is decided per turn.
 - **Auto** — Claude is running inside tmux. After the handover is written the
   `Stop` hook sends `/clear` to the pane, and the resume prompt is typed for you.
 - **Manual** — no reachable tmux. You get the nudge, the agent writes the
-  handover, and you type `/clear`; the resume is automatic after that.
+  handover, and you type `/clear`. The handover is injected after `/clear`, but
+  without tmux nothing types for you: send any message (e.g. "go") to start
+  the resumed turn.
 
 If a session starts fresh (not after `/clear`) while a handover is waiting —
 say you closed the terminal before clearing — it is never loaded on its own. You
@@ -104,12 +106,13 @@ line and use the transcript only. Per-session bookkeeping lives under
 |---|---|---|
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
 | `context.window` | 200000 | last-resort window for the transcript estimate (census, a learned model table, `[1m]` model ids and observed usage over 200k all take precedence) |
-| `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`) |
+| `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
+| `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | re-nudge each time ctx % has grown this many points past the last nudge (integer 1–50) |
 
 Resolution order, first match wins, re-read on every hook call:
 
-1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`
+1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`
 2. Worktree: `config set KEY VALUE --worktree`
 3. Global: `config set KEY VALUE`
 4. Built-in default
@@ -137,7 +140,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
-    archive/<ts>.md        # injected handovers
+    archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
     sessions/<name>/       # same files, per session: CONTEXT_VIGIL_SESSION, else tmux-<socket>-<pane>
 ```
 

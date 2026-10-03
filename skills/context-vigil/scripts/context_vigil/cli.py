@@ -100,7 +100,8 @@ def _cmd_handover(args: argparse.Namespace) -> int:
         raise CliError(f"--file unreadable: {exc}") from exc
     try:
         document = handover.assemble(
-            notes, cwd, [Path(p) for p in args.inline], include_snapshot=not args.no_snapshot)
+            notes, cwd, [Path(p) for p in args.inline], include_snapshot=not args.no_snapshot,
+            max_tokens=config.handover_max_tokens(cwd))
     except handover.HandoverError as exc:
         raise CliError(f"handover refused: {exc}") from exc
     result = state.request_clear(paths.scope_dir(cwd), document)
@@ -112,7 +113,8 @@ def _cmd_handover(args: argparse.Namespace) -> int:
     if tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
-        print("handover saved — type /clear to continue in a fresh context")
+        print("handover saved — type /clear, then send any message (e.g. \"go\") "
+              "to start the resumed turn")
     return 0
 
 
@@ -185,6 +187,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"context.mode: {resolved['context.mode'][0]} ({resolved['context.mode'][1]})",
         f"nudge.repeat_step: {resolved['nudge.repeat_step'][0]}% "
         f"({resolved['nudge.repeat_step'][1]})",
+        f"handover.max_tokens: {resolved['handover.max_tokens'][0]} "
+        f"({resolved['handover.max_tokens'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
         f"pending handover: {'yes' if state.read_handoff(scope) else 'no'}",

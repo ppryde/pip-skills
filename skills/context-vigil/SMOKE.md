@@ -13,7 +13,8 @@ skills/context-vigil/scripts/context-vigil install --yes --threshold 5 --launche
 - [ ] The agent writes notes and runs `handover --file`.
 - [ ] `/clear` is sent automatically.
 - [ ] The fresh session resumes with the handover's Next Step.
-- [ ] Plain `claude` (no tmux): nudge, then handover, then "Handover saved — type `/clear`".
-- [ ] After typing `/clear` the session resumes from the handover.
+- [ ] Plain `claude` (no tmux): nudge, then handover, then "handover saved — type /clear, then send any message".
+- [ ] After typing `/clear` the handover is injected, but nothing happens until you send a message (e.g. "go"); then it resumes from the Next Step.
+- [ ] The handover's git section is a few pointer lines (branch, base, counts, commands), with no file list.
 - [ ] Close the terminal after a handover but before `/clear`; a fresh launch shows the "handover is waiting" notice and does not load it.
 - [ ] `context-vigil uninstall --yes` leaves `settings.json` and the rc file identical to their pre-install contents.

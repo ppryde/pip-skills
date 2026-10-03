@@ -10,7 +10,7 @@ from context_vigil import config, paths
 def test_defaults(repo: Path) -> None:
     assert config.load(repo) == {
         "context.threshold": 35, "context.window": 200000, "context.mode": "local",
-        "nudge.repeat_step": 5,
+        "nudge.repeat_step": 5, "handover.max_tokens": 8000,
     }
     assert config.resolve(repo)["context.threshold"] == (35, "default")
 
@@ -86,3 +86,14 @@ def test_repeat_step_validated_and_env(repo: Path, monkeypatch: pytest.MonkeyPat
     assert config.resolve(repo)["nudge.repeat_step"] == (7, "env")
     monkeypatch.setenv("CONTEXT_VIGIL_REPEAT_STEP", "99")
     assert config.resolve(repo)["nudge.repeat_step"] == (10, "global")
+
+
+def test_handover_max_tokens_validated_and_env(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert config.handover_max_tokens(repo) == 8000
+    config.set_value(repo, "handover.max_tokens", "12000")
+    assert config.handover_max_tokens(repo) == 12000
+    for bad in ("0", "-5", "abc"):
+        with pytest.raises(config.ConfigError):
+            config.set_value(repo, "handover.max_tokens", bad)
+    monkeypatch.setenv("CONTEXT_VIGIL_HANDOVER_MAX_TOKENS", "9000")
+    assert config.resolve(repo)["handover.max_tokens"] == (9000, "env")

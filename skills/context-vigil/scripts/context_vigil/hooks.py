@@ -96,8 +96,9 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
     target = tmux.pane()
     if not tmux.reachable() or target is None:
         return json.dumps({"systemMessage": (
-            "context-vigil: handover saved — type /clear to continue in a fresh "
-            "context. (Run Claude inside tmux for hands-free handovers.)")})
+            "context-vigil: handover saved — type /clear, then send any message "
+            "(e.g. \"go\") to start the resumed turn. (Run Claude inside tmux "
+            "for hands-free handovers.)")})
     if state.consume_clear_flag(scope):
         delay = os.environ.get("CONTEXT_VIGIL_CLEAR_DELAY", "2")
         tmux.send_detached(target, [["/clear", "Enter"]], delay)

@@ -38,8 +38,9 @@ NO_TMUX = """\
 tmux not detected — auto-clear is off. Install it to go hands-free:
   {install}
 Manual mode works today: you'll get a nudge, I'll write the handover, and you
-type `/clear`; I resume automatically after that. Once tmux is installed, run
-`context-vigil launcher` to pick how Claude launches."""
+type `/clear` and then send any message (e.g. "go") — the handover is injected
+after `/clear`, but the resumed turn only starts when you send something. Once tmux is installed,
+run `context-vigil launcher` to pick how Claude launches."""
 
 
 def rc_path() -> Optional[Path]:

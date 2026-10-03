@@ -62,13 +62,19 @@ never been seen in an interactive session (otherwise the learned table and
    call, nobody typing) hands over on its own at a sensible stopping point.
 3. Copy `templates/handover.md` to a scratch file and fill it in for a cold
    reader. **Failed Attempts** (write `None` if nothing failed) and exactly
-   **one Next Step** are required. Don't list changed files — the snapshot does.
-4. If `config get context.mode` is `remote`, add `--inline <path>` for every
-   file the next session must read.
+   **one Next Step** are required. Don't list changed files — the snapshot gives only counts and the git
+   commands to list them. Keep the whole handover under `handover.max_tokens`
+   (default 8000, ~4 chars per token); it refuses, naming the excess, if not.
+4. Only if `config get context.mode` is `remote` (a remote session cannot open
+   paths), add `--inline <path>` for every file the next session must read;
+   each is cut at about 2000 tokens with a truncation marker. In local mode,
+   reference files by path instead.
 5. Run `handover --file <notes>`. It prints what happens next:
    - auto: end your turn; /clear is sent for you when the turn ends and the
      session resumes itself.
-   - manual: tell the user "Handover saved — type `/clear` to continue."
+   - manual: tell the user "Handover saved — type `/clear`, then send any
+     message (e.g. "go") to start the resumed turn." Without tmux the handover
+     is injected after `/clear`, but nothing types for the user.
 6. If it refuses, fix exactly what the message says and re-run.
 
 ## After /clear
