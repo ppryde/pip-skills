@@ -121,9 +121,9 @@ class TestContextPercentBySessionId:
         )
         assert census.context_percent(tmp_path, now=now, session_id="s-mine") is None
 
-    def test_session_id_absent_from_store_falls_back_to_worktree_scan(self, tmp_path, store_file):
+    def test_session_id_absent_from_store_is_unknown_not_a_sibling(self, tmp_path, store_file):
         _store(store_file, tmp_path, 37)  # keyed "s1" by the _store helper
-        assert census.context_percent(tmp_path, session_id="no-such-session") == 37
+        assert census.context_percent(tmp_path, session_id="no-such-session") is None
 
     def test_no_session_id_keeps_existing_worktree_scan_behaviour(self, tmp_path, store_file):
         _store(store_file, tmp_path, 37)

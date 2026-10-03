@@ -181,7 +181,8 @@ def test_missing_or_renamed_identity_record_never_raises(repo: Path, iso: Path) 
 def test_ingest_learns_model_window(repo: Path) -> None:
     _ingest(repo, "a", 5, size=1_000_000, model="claude-z")
     assert session.windows() == {"claude-z": 1_000_000}
-    assert session.lookup_window("claude-z[1m]") == 1_000_000
+    assert session.lookup_window("claude-z") == 1_000_000
+    assert session.lookup_window("claude-z[1m]") is None   # a [1m] id never borrows the bare entry
 
 
 # --- headless / statusline -----------------------------------------------------

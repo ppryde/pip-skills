@@ -17,10 +17,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional, Tuple
 
-from context_vigil import census, session, transcript
+from context_vigil import census, paths, session, transcript
 
 EXTENDED_WINDOW = 1_000_000
 _STANDARD_WINDOW = 200_000
+_HEAD_ATTEMPTS = 5               # re-reads of a still-being-written transcript head
 _FRESH_TOLERANCE_SECONDS = 0.5   # the status line renders just after the transcript write
 
 
@@ -64,7 +65,7 @@ def resolve_window(entry: Optional[Dict[str, Any]], record: Dict[str, Any],
     re-runs on every call until a confident source answers. First hit wins.
     """
     stored = _positive_int(record.get("window"))
-    if stored and record.get("window_confident") is True:
+    if stored and record.get("window_confident") is True:   # (a model change cleared this)
         if stored == _STANDARD_WINDOW and _usage_exceeds_standard(record):
             return EXTENDED_WINDOW, "evidence", True
         return stored, str(record.get("window_source") or "census"), True
@@ -75,10 +76,14 @@ def resolve_window(entry: Optional[Dict[str, Any]], record: Dict[str, Any],
     if size:
         return size, "learned", True
     model_id, message_model = record.get("model_id"), record.get("message_model")
-    size = session.lookup_window(model_id) or session.lookup_window(message_model)
-    if size:                                           # c. the transcript's model
+    suffixed = isinstance(model_id, str) and "[1m]" in model_id
+    # c. the transcript's model; an explicit [1m] suffix is never answered by the
+    # bare message.model (which drops the suffix) or the bare model's learned entry
+    size = session.lookup_window(model_id) or (
+        None if suffixed else session.lookup_window(message_model))
+    if size:
         return size, "learned", True
-    if isinstance(model_id, str) and "[1m]" in model_id:
+    if suffixed:
         return EXTENDED_WINDOW, "model-suffix", True
     if _usage_exceeds_standard(record):                # d. evidence: more than 200k cannot fit
         return EXTENDED_WINDOW, "evidence", True
@@ -108,8 +113,8 @@ def _census_percent(cwd: Path, session_id: Optional[str], transcript_path: Optio
     if entry is None:
         # unknown to census: a transcript is better evidence than a sibling's entry
         return None if transcript_path else census.context_percent(cwd, session_id=session_id)
-    if not _census_unchanged(entry, transcript_path):
-        return None
+    if entry.get("carried") or not _census_unchanged(entry, transcript_path):
+        return None        # a carried-forward reading is a stale one, not a fresh one
     return census.entry_percent(entry)
 
 
@@ -165,6 +170,11 @@ def _transcript_percent(path: str, record: Dict[str, Any], entry: Optional[Dict[
         if not isinstance(peak, int) or tail.tokens > peak:
             record["max_usage_tokens"] = tail.tokens
     tokens = record.get("last_usage_tokens")
+    latest = (_entry_model(entry) or record.get("model_id") or record.get("message_model"))
+    if (latest and record.get("window_model") and latest != record["window_model"]):
+        record["window_confident"] = False       # the model changed: its window may differ
+    if latest:
+        record["window_model"] = latest
     window, source, confident = resolve_window(entry, record, configured)
     record["window"], record["window_source"] = window, source
     record["window_confident"] = confident
@@ -202,7 +212,9 @@ def _guarded(fn: Any) -> Optional[int]:
 
 def _detect_headless(record: Dict[str, Any], transcript_path: str) -> None:
     settled, headless = transcript.read_entrypoint(transcript_path)
-    if settled:
+    if not settled:
+        record["head_attempts"] = (record.get("head_attempts") or 0) + 1
+    if settled or (record.get("head_attempts") or 0) >= _HEAD_ATTEMPTS:
         record["head_checked"] = True
     if headless is not None:
         record["headless"] = headless
@@ -228,6 +240,7 @@ def _current_reading(cwd: Path, session_id: Optional[str],
     with session.locked(session_id) as got:   # one writer at a time per session record
         record = session.load(session_id)
         before = dict(record)
+        transcript_path = transcript_path or record.get("transcript_path")   # CLI / `status`
         reading = _measure(cwd, session_id, record, transcript_path, window)
         if got and record != before:
             session.save(session_id, record)
@@ -236,7 +249,10 @@ def _current_reading(cwd: Path, session_id: Optional[str],
 
 def _measure(cwd: Path, session_id: Optional[str], record: Dict[str, Any],
              transcript_path: Optional[str], window: int) -> Reading:
-    if (transcript_path and record["headless"] is None and not record["head_checked"]):
+    from_env = paths.headless_from_env()
+    if from_env is not None:
+        record["headless"] = from_env            # the hook's own environment is the truth
+    elif (transcript_path and record["headless"] is None and not record["head_checked"]):
         _detect_headless(record, transcript_path)
     entry: Optional[Dict[str, Any]] = None
     pct: Optional[int] = None

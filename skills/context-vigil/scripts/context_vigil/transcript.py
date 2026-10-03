@@ -14,6 +14,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, Optional, Tuple
 
+from context_vigil import paths
+
 CHUNK = 64 * 1024
 MAX_FORWARD = 8 * 1024 * 1024   # a bigger gap than this is read from the tail instead
 MAX_BACK = 8 * 1024 * 1024      # the most a backward scan reads per call
@@ -21,8 +23,6 @@ HEAD_CAP = 1024 * 1024          # the most of the head read to find the first re
 _MODEL_LOOKAHEAD_CHUNKS = 4     # past the usage record, look this far for an identity record
 _USAGE_FIELDS = (
     "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-
-_ENTRYPOINTS = {"sdk-cli": True, "cli": False, "claude-desktop": False}
 
 
 @dataclass
@@ -179,5 +179,5 @@ def read_entrypoint(path: str) -> Tuple[bool, Optional[bool]]:
         readable = True
         entrypoint = record.get("entrypoint")
         if isinstance(entrypoint, str):
-            return True, _ENTRYPOINTS.get(entrypoint)
+            return True, paths.headless_from_entrypoint(entrypoint)
     return readable or (not at_eof and size >= HEAD_CAP and b"\n" not in head), None

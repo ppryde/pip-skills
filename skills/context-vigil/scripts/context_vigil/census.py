@@ -415,12 +415,16 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
     return branch
 
 
+_COMPUTE: Any = object()   # merge(): look the branch up itself
+
+
 def merge(
     store: dict[str, Any],
     payload: dict[str, Any],
     worktree: str | None,
     tmux_pane: str | None,
     now: float,
+    branch: Any = _COMPUTE,
 ) -> dict[str, Any]:
     """Fold one status-line payload into ``store`` in place; return ``store``.
 
@@ -433,6 +437,9 @@ def merge(
       above the stored one — a frozen reading from a dormant session must not
       clobber the current account figure.
     - Prunes stale sessions.
+
+    ``branch`` is the already-looked-up branch name (a subprocess, so ``ingest``
+    computes it before taking the lock); left out, it is looked up here.
     """
     sid = payload.get("session_id")
     if not isinstance(sid, str) or not sid:
@@ -441,21 +448,25 @@ def merge(
     sessions = store["sessions"]
     previous = sessions.get(sid)
 
+    carried = False
     if _context_is_blank(payload) and isinstance(previous, dict):
         prior_payload = previous.get("payload")
         if isinstance(prior_payload, dict) and isinstance(
             prior_payload.get("context_window"), dict
         ):
             payload = {**payload, "context_window": prior_payload["context_window"]}
+            carried = True   # the reading is the previous one, not a fresh one
 
     active = _active_at(previous, payload, now)
     sessions[sid] = {
         "worktree_cwd": worktree,
         "updated_at": now,
         "active_at": active,
-        "branch": _git_branch(worktree),
+        "branch": _git_branch(worktree) if branch is _COMPUTE else branch,
         "payload": payload,
     }
+    if carried:
+        sessions[sid]["carried"] = True
     # Sibling fields (worktree_cwd, payload) are replaced wholesale on every
     # ingest, not merged with the previous entry — an untethered session (e.g.
     # one that has moved out of tmux) must not go on reporting a stale pane.
@@ -488,6 +499,8 @@ def ingest(raw: str, now: float | None = None) -> None:
     if not isinstance(payload, dict) or not payload.get("session_id"):
         return
 
+    worktree = worktree_cwd(payload)
+    branch = _git_branch(worktree)   # a subprocess: never inside the census lock
     path = store_path()
     lock_path = path.with_name(path.name + ".lock")
     try:
@@ -500,7 +513,7 @@ def ingest(raw: str, now: float | None = None) -> None:
             # session process (the status-line pipeline), so TMUX_PANE is
             # already in its environment — no new plumbing needed to capture it.
             tmux_pane = os.environ.get("TMUX_PANE") or None
-            merge(store, payload, worktree_cwd(payload), tmux_pane, now)
+            merge(store, payload, worktree, tmux_pane, now, branch)
             _atomic_write(path, store)
     except OSError:
         return
@@ -630,18 +643,20 @@ def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict 
             if now - ts <= STALE_HORIZON_SECONDS:
                 return own
             return None
-        # Not (yet) in the store — fall through to the worktree scan below.
+        # Not in the store: unknown, never a sibling's reading in its place.
+        return None
 
     key = normalise(str(root))
     best: dict | None = None
-    best_ts = -1.0
+    best_rank = (-1.0, -1.0)
     for entry in sessions.values():
         if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
             continue
-        ts = _entry_ts(entry)
-        if ts > best_ts:
-            best_ts, best = ts, entry
-    if best is None or now - best_ts > STALE_HORIZON_SECONDS:
+        # rank on activity (see _entry_activity), not on timer-driven updated_at
+        rank = (_entry_activity(entry), _entry_ts(entry))
+        if rank > best_rank:
+            best_rank, best = rank, entry
+    if best is None or now - _entry_ts(best) > STALE_HORIZON_SECONDS:
         return None
     return best
 
@@ -658,13 +673,14 @@ def context_percent(
     When ``session_id`` is given and the store has an entry for it, that entry
     is used directly (still subject to the staleness horizon) — this is what
     keeps two live sessions sharing a worktree from reading each other's
-    context %. Falls back to the worktree newest-write scan when no
-    ``session_id`` is given, or when the store has no entry for it.
+    context %. A ``session_id`` the store has no entry for yields None (never a
+    sibling's reading); the worktree scan, ranked by activity, serves only a
+    call with no ``session_id``. A carried-forward reading yields None.
     """
     if now is None:
         now = time.time()
     entry = _fresh_entry(root, now, session_id)
-    if entry is None:
+    if entry is None or entry.get("carried"):
         return None
     return entry_percent(entry)
 

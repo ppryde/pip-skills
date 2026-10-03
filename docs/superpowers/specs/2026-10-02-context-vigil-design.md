@@ -316,8 +316,9 @@ reachable via tmux, else **manual**.
 Every render, the status line feeds census. On every `UserPromptSubmit` and
 `PostToolUse` (`TaskCreate|TaskUpdate`) the `nudge` hook reads this session's ctx %:
 
-1. **Headless sessions** (transcript `entrypoint` = `sdk-cli`) have no status line
-   and skip census; every other session tries census first. The entrypoint is
+1. **Headless sessions** (hook env `CLAUDE_CODE_ENTRYPOINT`, else the transcript
+   `entrypoint`: `sdk-cli`, `sdk-ts`, `sdk-py` ⇒ headless; `cli`, `claude-vscode`,
+   `claude-desktop` ⇒ interactive) have no status line and skip census; every other session tries census first. The entrypoint is
    read once from the transcript head; an unrecognised or unreadable one stays
    unknown — a missing census entry on an interactive first turn never means
    "headless";
@@ -334,11 +335,11 @@ Every render, the status line feeds census. On every `UserPromptSubmit` and
    (truncated or rotated) restarts from the tail;
 4. else no reading → no nudge this turn.
 
-**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000). While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. A reading on the unconfident fallback is shown as `ctx ~NN% (window unconfirmed)` and never nudges an interactive session (`headless` not true): a quiet turn, no gate, no `last_nudged_pct`, until a confident source answers (its status line will report in). Headless sessions have no status line and keep the config fallback. The chain (first hit wins; the source is recorded): (a) census
+**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000), unless the session's latest model (census `model.id`, else the transcript's) differs from `window_model`, the model the window was resolved for: then it is un-fixed and the chain re-runs. While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. A reading on the unconfident fallback is shown as `ctx ~NN% (window unconfirmed)` and never nudges an interactive session (`headless` not true): a quiet turn, no gate, no `last_nudged_pct`, until a confident source answers (its status line will report in). Headless sessions have no status line and keep the config fallback. The chain (first hit wins; the source is recorded): (a) census
 `context_window_size` for this session id, even when stale; (b) the learned
 `windows.json` entry for the census entry's `model.id`; (c) the transcript's
 model id (last `attachment.identity.modelId` record, else `message.model`) in the
-learned table, with and without a `[1m]` suffix, then a `[1m]` suffix ⇒ 1,000,000;
+learned table (the exact id, else the bare model for any suffix but `[1m]`; an explicit `[1m]` id never borrows the bare model's entry), then a `[1m]` suffix ⇒ 1,000,000;
 (d) evidence — any usage total seen above 200,000 ⇒ 1,000,000; (e) configured
 `context.window`. `windows.json` is updated by `ingest` from every status-line
 payload. `identity.modelId` is undocumented: absent or renamed falls through.
@@ -347,7 +348,7 @@ payload. `identity.modelId` is undocumented: absent or renamed falls through.
 nothing model-visible): `headless` (bool|null), `has_statusline` (true once census
 has ingested the id; until then census is not consulted for the session), `window` + `window_source` + `window_confident`, `transcript_ino`/`transcript_dev`/`transcript_size`/`transcript_head` (a replaced file, a shrunken file or a changed first line resets offset and usage peaks), `transcript_offset`,
 `transcript_path`, `last_usage_tokens`, `max_usage_tokens`, `model_id`,
-`message_model`, `head_checked`, `last_nudged_pct`. Read-modify-write of a record, and the nudge gate's check-and-set, run under an flock on `sessions/<id>.lock` (bounded wait of about 1 s; on failure the update is skipped, the nudge stays quiet). Pruning drops records older than 7 days and never touches `*.lock` files on their own: a lock goes only with its pruned record, and only if it is free at that moment. The handover size estimate is chars/4 and approximate (it undercounts non-ASCII text).
+`message_model`, `window_model`, `head_checked` (+ `head_attempts`, bounded at 5), `last_nudged_pct`. `context`/`status` fall back to the record's `transcript_path`, so a headless session reads from its transcript. A census entry whose context window was carried forward across a blank (post-`/compact`) payload is flagged `carried` and is not a fresh reading. Read-modify-write of a record, and the nudge gate's check-and-set, run under an flock on `sessions/<id>.lock` (bounded wait of about 1 s; on failure the update is skipped, the nudge stays quiet). Pruning drops records older than 7 days and never touches `*.lock` files on their own: a lock goes only with its pruned record, and only if it is free at that moment. The handover size estimate is chars/4 and approximate (it undercounts non-ASCII text).
 
 ### 3. Nudge — repeated every `nudge.repeat_step` %
 

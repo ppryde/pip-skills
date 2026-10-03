@@ -3,9 +3,11 @@
 Everything here is measured or decided by scripts and written to disk; nothing
 reaches the model. A record lives at ``sessions/<session_id>.json`` and holds:
 
-- ``headless`` (bool|null): true for ``entrypoint == "sdk-cli"``, false for
-  ``cli`` / ``claude-desktop``, null while unknown. Never inferred from "no
-  status line seen yet" — an interactive session's first turn has no census entry;
+- ``headless`` (bool|null): true for the SDK entrypoints (``sdk-cli``, ``sdk-ts``,
+  ``sdk-py``), false for ``cli`` / ``claude-vscode`` / ``claude-desktop``, null while
+  unknown; the hook's ``CLAUDE_CODE_ENTRYPOINT`` wins over the transcript head.
+  Never inferred from "no status line seen yet" — an interactive session's first
+  turn has no census entry;
 - ``has_statusline`` (bool): census has ingested this session id; until it has,
   census is not consulted for the session at all;
 - ``window`` / ``window_source`` / ``window_confident``: the context window used,
@@ -16,6 +18,8 @@ reaches the model. A record lives at ``sessions/<session_id>.json`` and holds:
   transcript has been read, and which file that offset belongs to;
 - ``last_usage_tokens`` / ``max_usage_tokens``: the latest and largest usage total seen;
 - ``model_id`` / ``message_model``: the latest model ids seen in the transcript;
+- ``window_model``: the latest model the window was resolved for (a change re-resolves it);
+- ``head_attempts``: reads of a still-unsettled transcript head (bounded);
 - ``head_checked``: the transcript head was read once for ``headless``;
 - ``last_nudged_pct``: the ctx % of the most recent nudge in this cycle.
 
@@ -55,6 +59,8 @@ _DEFAULTS: Dict[str, Any] = {
     "max_usage_tokens": None,
     "model_id": None,
     "message_model": None,
+    "window_model": None,
+    "head_attempts": 0,
     "head_checked": False,
     "last_nudged_pct": None,
 }
@@ -217,14 +223,16 @@ def learn_from_payload(payload: Dict[str, Any]) -> None:
 
 
 def lookup_window(model_id: Optional[str]) -> Optional[int]:
-    """The learned window for a model id, with the ``[1m]`` suffix and without."""
+    """The learned window for a model id: the exact entry, else (for any suffix but
+    ``[1m]``) the bare model's."""
     if not model_id:
         return None
     table = windows()
     if model_id in table:
         return table[model_id]
-    bare = model_id.split("[", 1)[0]
-    return table.get(bare)
+    if "[1m]" in model_id:
+        return None            # an explicit 1M suffix never borrows the bare model's window
+    return table.get(model_id.split("[", 1)[0])
 
 
 def is_headless(session_id: Optional[str]) -> bool:

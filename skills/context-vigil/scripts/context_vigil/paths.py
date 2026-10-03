@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 HOME_ENV = "CONTEXT_VIGIL_HOME"
 SESSION_ENV = "CONTEXT_VIGIL_SESSION"
@@ -47,15 +47,19 @@ _GIT_TIMEOUT_SECONDS = 2
 _toplevels: dict = {}  # per-process only: realpath(cwd) -> worktree key
 
 
-def headless_from_env() -> Optional[bool]:
-    """Headless-ness from the hook/CLI environment (Claude Code sets the entrypoint
-    on its own process and its children inherit it); None when absent or unknown."""
-    entrypoint = os.environ.get(ENTRYPOINT_ENV)
+def headless_from_entrypoint(entrypoint: Any) -> Optional[bool]:
+    """The SDK entrypoints are headless, the interactive ones are not, others unknown."""
     if entrypoint in _HEADLESS_ENTRYPOINTS:
         return True
     if entrypoint in _INTERACTIVE_ENTRYPOINTS:
         return False
     return None
+
+
+def headless_from_env() -> Optional[bool]:
+    """Headless-ness from the hook/CLI environment (Claude Code sets the entrypoint
+    on its own process and its children inherit it); None when absent or unknown."""
+    return headless_from_entrypoint(os.environ.get(ENTRYPOINT_ENV))
 
 
 def worktree_key(cwd: Path) -> str:
