@@ -21,6 +21,7 @@ if [ -z "$sock" ]; then
   sock="claude${tag:+-$tag}"
 fi
 
+# $root only names the session; the session itself starts where the user is.
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
 name_base="$(basename "$root")"
 base="cc-${name_base//[^A-Za-z0-9_-]/-}"
@@ -59,7 +60,7 @@ while IFS='=' read -r var _; do
   envargs+=(-e "$var=${!var}")
 done < <(env | grep -E '^CONTEXT_VIGIL_[A-Z_]+=' )
 
-if ! tmux -L "$sock" new-session -s "$name" -c "$root" "${envargs[@]}" "$cmd"; then
+if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" "${envargs[@]}" "$cmd"; then
   echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2
   exec "$bin" "$@"
 fi

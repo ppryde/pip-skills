@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -11,10 +12,17 @@ from .conftest import SKILL
 SCRIPT = SKILL / "scripts" / "claude-tmux"
 
 
+# The only real programs the script needs. PATH is the stubs dir alone, so a real
+# tmux (Linux ships /usr/bin/tmux) can never be reached by a test.
+_COREUTILS = ("bash", "env", "basename", "grep", "cat", "dirname")
+
+
 @pytest.fixture(autouse=True)
-def _clean_launcher_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("CLAUDE_TMUX_SOCK", "CLAUDE_NO_TMUX"):
+def _clean_launcher_env(iso: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("CLAUDE_NO_TMUX",):
         monkeypatch.delenv(var, raising=False)
+    # A socket no real server uses, even if a tmux binary were somehow reached.
+    monkeypatch.setenv("CLAUDE_TMUX_SOCK", str(iso / "no-such-socket"))
 
 
 @pytest.fixture
@@ -30,17 +38,23 @@ def stubs(iso: Path) -> Path:
     (bindir / "git").write_text("#!/usr/bin/env bash\nexit 1\n")
     for f in bindir.iterdir():
         f.chmod(0o755)
+    for tool in _COREUTILS:
+        real = shutil.which(tool)
+        assert real, tool
+        (bindir / tool).symlink_to(real)
     return bindir
 
 
 def _run(stubs: Path, cwd: Path, *args: str, **env: str) -> str:
-    full = dict(os.environ, PATH=f"{stubs}:/usr/bin:/bin", **env)
+    full = dict(os.environ, PATH=str(stubs), **env)
     subprocess.run(["bash", str(SCRIPT), *args], cwd=cwd, env=full, check=True,
                    capture_output=True, text=True, timeout=10)
     return (stubs.parent / "calls.log").read_text()
 
 
-def test_new_session_on_dedicated_socket_with_env(stubs: Path, repo: Path) -> None:
+def test_new_session_on_dedicated_socket_with_env(
+        stubs: Path, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CLAUDE_TMUX_SOCK")  # tmux is a stub here; test the default name
     log = _run(stubs, repo, "--model", "opus")
     line = [ln for ln in log.splitlines() if "new-session" in ln][0]
     assert "-L claude " in line
@@ -81,7 +95,7 @@ def test_quotes_arguments(stubs: Path, repo: Path) -> None:
 
 
 def test_runs_under_macos_bash32(stubs: Path, repo: Path) -> None:
-    full = dict(os.environ, PATH=f"{stubs}:/usr/bin:/bin")
+    full = dict(os.environ, PATH=str(stubs))
     result = subprocess.run(["/bin/bash", str(SCRIPT)], cwd=repo, env=full,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
@@ -100,7 +114,7 @@ def live(stubs: Path):
 
 
 def _attach(stubs: Path, cwd: Path, *args: str, shell: str = "bash"):
-    full = dict(os.environ, PATH=f"{stubs}:/usr/bin:/bin")
+    full = dict(os.environ, PATH=str(stubs))
     (stubs.parent / "calls.log").touch()
     result = subprocess.run([shell, str(SCRIPT), "attach", *args], cwd=cwd, env=full,
                             capture_output=True, text=True, timeout=10)
@@ -137,3 +151,18 @@ def test_attach_by_number(stubs: Path, repo: Path, live) -> None:
     result, log = _attach(stubs, repo, "2")
     assert result.returncode == 0, result.stderr
     assert "attach-session -t =cc-repo-2" in log
+
+
+def test_session_starts_in_current_directory_not_repo_root(stubs: Path, repo: Path) -> None:
+    sub = repo / "pkg" / "deep"
+    sub.mkdir(parents=True)
+    (stubs / "git").write_text(f'#!/usr/bin/env bash\necho "{repo}"\n')
+    log = _run(stubs, sub)
+    line = [ln for ln in log.splitlines() if "new-session" in ln][0]
+    assert f"-c {sub.resolve()} " in line or f"-c {sub} " in line
+    assert "-s cc-repo-1" in line  # the name still comes from the repo root
+
+
+def test_path_is_stub_only_so_no_real_tmux_is_reachable(stubs: Path) -> None:
+    for entry in os.listdir(stubs):
+        assert entry in {"tmux", "claude", "git", *_COREUTILS}
