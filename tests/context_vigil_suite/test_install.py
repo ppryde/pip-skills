@@ -142,7 +142,11 @@ def test_apply_records_before_touching_user_files(cfg: Path, monkeypatch) -> Non
     _write(cfg, {"statusLine": {"type": "command", "command": str(script)}})
     plan = install.plan_install(threshold=None)
 
+    real = install.write_atomic
+
     def boom(path, text):
+        if path == paths.install_record_path():
+            return real(path, text)
         assert paths.install_record_path().exists()
         raise OSError("disk full")
 
@@ -243,3 +247,61 @@ def test_malformed_hooks_shape_refuses(cfg: Path, hooks) -> None:
     with pytest.raises(install.InstallError, match="hooks"):
         install.plan_uninstall()
     assert (cfg / "settings.json").read_text() == before
+
+
+def _record_skill_dir(old: str) -> None:
+    record = json.loads(paths.install_record_path().read_text())
+    record["skill_dir"] = old
+    paths.install_record_path().write_text(json.dumps(record))
+
+
+def test_reinstall_repoints_capture_statusline_from_old_skill_dir(cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None))
+    _record_skill_dir("/old/skill")
+    s = _settings(cfg)
+    s["statusLine"]["command"] = 'bash "/old/skill/scripts/capture.sh"'
+    _write(cfg, s)
+    plan = install.plan_install(threshold=None)
+    assert plan.record["statusline"] == {"kind": "capture"}
+    assert not plan.manual
+    install.apply(plan)
+    assert _settings(cfg)["statusLine"]["command"] == install.capture_command()
+
+
+def test_uninstall_removes_capture_statusline_from_recorded_old_skill_dir(
+        cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None))
+    _record_skill_dir("/old/skill")
+    s = _settings(cfg)
+    s["statusLine"]["command"] = 'bash "/old/skill/scripts/capture.sh"'
+    _write(cfg, s)
+    install.apply(install.plan_uninstall())
+    assert not (cfg / "settings.json").exists()
+
+
+def test_reinstall_rewrites_stale_spliced_block(cfg: Path) -> None:
+    script = cfg / "sl.sh"
+    script.write_text("#!/bin/bash\ninput=$(cat)\necho hi\n")
+    script.chmod(0o755)
+    _write(cfg, {"statusLine": {"type": "command", "command": str(script)}})
+    install.apply(install.plan_install(threshold=None))
+    old = '"/old/skill/scripts/context-vigil"'
+    stale = script.read_text().replace(f'"{paths.launcher_path()}"', old)
+    assert old in stale
+    script.write_text(stale)
+    _record_skill_dir("/old/skill")
+    install.apply(install.plan_install(threshold=None))
+    text = script.read_text()
+    assert "/old/skill" not in text
+    assert text.count(install.SL_START) == 1
+    assert install.ingest_command("input") in text
+    install.apply(install.plan_uninstall())
+    assert script.read_text() == "#!/bin/bash\ninput=$(cat)\necho hi\n"
+
+
+def test_non_ascii_settings_round_trip(cfg: Path) -> None:
+    (cfg / "settings.json").write_text(
+        json.dumps({"note": "café — 日本"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    install.apply(install.plan_install(threshold=None))
+    text = (cfg / "settings.json").read_text(encoding="utf-8")
+    assert "café — 日本" in text and "\\u" not in text

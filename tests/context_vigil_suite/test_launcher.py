@@ -264,3 +264,31 @@ def test_quoted_marker_in_statusline_script_is_not_a_block(sl_script: Path) -> N
     assert change.after.startswith(_sl_damaged("quoted").split("\n", 2)[0])
     assert install.remove_marked_block(change.after, install.SL_START, install.SL_END) \
         == _sl_damaged("quoted")
+
+
+def test_reinstall_without_launcher_keeps_rc_record(zsh: Path, cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None, launcher="on-demand"))
+    install.apply(install.plan_install(threshold=None))
+    record = json.loads(paths.install_record_path().read_text())
+    assert record["launcher"] == "on-demand" and record["rc_path"] == str(zsh)
+    install.apply(install.plan_uninstall())
+    assert zsh.read_text() == "export FOO=1\n"
+
+
+def test_uninstall_strips_intact_rc_block_even_without_rc_record(
+        zsh: Path, cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None, launcher="always"))
+    record = json.loads(paths.install_record_path().read_text())
+    for key in ("launcher", "rc_path"):
+        record.pop(key, None)
+    paths.install_record_path().write_text(json.dumps(record))
+    install.apply(install.plan_uninstall())
+    assert zsh.read_text() == "export FOO=1\n"
+
+
+def test_uninstall_without_rc_record_notes_damaged_block(zsh: Path, cfg: Path) -> None:
+    install.apply(install.plan_install(threshold=None))
+    zsh.write_text(f"export FOO=1\n{launcher.RC_START}\nalias claude='x'\n")
+    plan = install.plan_uninstall()
+    assert any("damaged" in line for line in plan.manual)
+    assert all(c.path != zsh for c in plan.changes)

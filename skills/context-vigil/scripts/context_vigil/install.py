@@ -78,11 +78,24 @@ def capture_command() -> str:
     return f'bash "{paths.skill_dir() / "scripts" / "capture.sh"}"'
 
 
+def _skill_dirs(record: Dict[str, Any]) -> List[str]:
+    """The current skill dir plus the one the last install recorded (it may have moved)."""
+    dirs = [str(paths.skill_dir())]
+    old = record.get("skill_dir")
+    if isinstance(old, str) and old and old not in dirs:
+        dirs.append(old)
+    return dirs
+
+
+def _is_capture(command: str, record: Dict[str, Any]) -> bool:
+    return "capture.sh" in command and any(d in command for d in _skill_dirs(record))
+
+
 def _read_settings() -> Tuple[str, Dict[str, Any]]:
     path = settings_path()
     if not path.exists():
         return "", {}
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     try:
         data = json.loads(text) if text.strip() else {}
     except ValueError as exc:
@@ -98,7 +111,7 @@ def _read_settings() -> Tuple[str, Dict[str, Any]]:
 
 
 def _dump(data: Dict[str, Any]) -> str:
-    return json.dumps(data, indent=2) + "\n"
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
 def _is_ours(entry: Any) -> bool:
@@ -193,9 +206,28 @@ def remove_marked_block(text: str, start: str, end: str,
     return kept
 
 
+_INGEST_VAR = re.compile(r"\"\$([A-Za-z_][A-Za-z0-9_]*)\"")
+
+
+def _refresh_block(text: str) -> str:
+    """Point an intact spliced block's ingest line at the current launcher."""
+    lines = text.splitlines(keepends=True)
+    first = next(i for i, line in enumerate(lines) if _is_marker(line, SL_START))
+    last = next(i for i, line in enumerate(lines) if _is_marker(line, SL_END))
+    found = _INGEST_VAR.search("".join(lines[first + 1:last]))
+    if found is None:
+        return text
+    body = f"{ingest_command(found.group(1))}\n"
+    if "".join(lines[first + 1:last]) == body:
+        return text
+    return "".join(lines[:first + 1] + [body] + lines[last:])
+
+
 def splice_statusline(text: str) -> Optional[str]:
     if has_marker(text, SL_START, SL_END):
-        return text if remove_marked_block(text, SL_START, SL_END) is not None else None
+        if remove_marked_block(text, SL_START, SL_END) is None:
+            return None
+        return _refresh_block(text)
     out: List[str] = []
     done = False
     for line in text.splitlines(keepends=True):
@@ -235,9 +267,16 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
         config.coerce("context.threshold", threshold)
     before, data = _read_settings()
     plan = Plan(threshold=threshold)
+    prior = _read_record()
     record: Dict[str, Any] = {"skill_dir": str(paths.skill_dir()), "statusline": None,
                               "launcher": launcher,
                               "settings_existed": _settings_existed_before()}
+    if launcher is None:
+        # A reinstall that does not touch the launcher must not forget the rc
+        # block an earlier one added, or uninstall would leave it behind.
+        for key in ("launcher", "rc_path"):
+            if prior.get(key) is not None:
+                record[key] = prior[key]
     if threshold is not None:
         plan.notes.append(f"will set context.threshold = {threshold} "
                           f"(global config: {paths.global_config_path()})")
@@ -248,8 +287,10 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
         data["statusLine"] = {"type": "command", "command": capture_command(),
                               "refreshInterval": 60}
         record["statusline"] = {"kind": "capture"}
-    elif "capture.sh" in command and str(paths.skill_dir()) in command:
+    elif _is_capture(command, prior):
         record["statusline"] = {"kind": "capture"}
+        if str(paths.skill_dir()) not in command:
+            data["statusLine"] = {**status, "command": capture_command()}
     else:
         script = statusline_script(command)
         script_text = script.read_text() if script else ""
@@ -285,7 +326,7 @@ def write_atomic(path: Path, text: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".context-vigil.tmp")
     try:
-        tmp.write_text(text)
+        tmp.write_text(text, encoding="utf-8")
         if target.exists():
             shutil.copymode(target, tmp)
         os.replace(tmp, target)
@@ -299,8 +340,7 @@ def apply(plan: Plan) -> None:
     uninstalling = bool(plan.record.get("uninstall"))
     if plan.record and not uninstalling:
         # Record first: a crash mid-apply must never leave an unrecorded edit.
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-        record_path.write_text(json.dumps(plan.record, indent=2) + "\n")
+        write_atomic(record_path, json.dumps(plan.record, indent=2) + "\n")
     for change in plan.changes:
         if change.before == change.after:
             continue
@@ -324,8 +364,7 @@ def plan_uninstall() -> Plan:
                            "ours (hooks and capture status line)")
     data = _without_hooks(data)
     status = data.get("statusLine")
-    if isinstance(status, dict) and "capture.sh" in str(status.get("command", "")) \
-            and str(paths.skill_dir()) in str(status.get("command", "")):
+    if isinstance(status, dict) and _is_capture(str(status.get("command", "")), record):
         del data["statusLine"]
     sl = record.get("statusline")
     if isinstance(sl, dict) and sl.get("kind") == "spliced":
@@ -345,9 +384,11 @@ def plan_uninstall() -> Plan:
         after = ""
     else:
         after = "{}\n" if before else ""
-    rc = Path(str(record.get("rc_path") or ""))
-    if record.get("rc_path") and rc.is_file():
-        from context_vigil import launcher as launch
+    from context_vigil import launcher as launch
+    # No rc_path on record (older install, or a reinstall that dropped it):
+    # still strip an intact block from the shell's rc, notes if damaged.
+    rc = Path(str(record["rc_path"])) if record.get("rc_path") else launch.rc_path()
+    if rc is not None and rc.is_file():
         text = rc.read_text()
         stripped_rc = launch.strip_rc(text)
         if stripped_rc is None:
