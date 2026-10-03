@@ -10,6 +10,8 @@ from typing import List, Optional
 import pytest
 from context_vigil import census, context, session, transcript
 
+from .conftest import ENTRYPOINT_HEADLESS
+
 
 def _usage(tokens: int, model: Optional[str] = None) -> str:
     message: dict = {"usage": {"input_tokens": tokens}}
@@ -195,8 +197,7 @@ def test_ingest_learns_model_window(repo: Path) -> None:
 
 # --- headless / statusline -----------------------------------------------------
 
-@pytest.mark.parametrize("entrypoint, expected", [
-    ("sdk-cli", True), ("cli", False), ("claude-desktop", False), ("mystery", None)])
+@pytest.mark.parametrize("entrypoint, expected", ENTRYPOINT_HEADLESS)
 def test_headless_detection(repo: Path, iso: Path, entrypoint: str,
                             expected: Optional[bool]) -> None:
     sid = f"s-{entrypoint}"

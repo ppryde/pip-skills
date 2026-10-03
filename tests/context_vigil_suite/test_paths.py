@@ -8,6 +8,8 @@ from typing import Optional
 import pytest
 from context_vigil import paths
 
+from .conftest import ENTRYPOINT_HEADLESS
+
 
 def test_data_root_honours_override(iso: Path) -> None:
     assert paths.data_root() == iso / "data"
@@ -83,9 +85,7 @@ def test_headless_from_env_unset() -> None:
     assert paths.headless_from_env() is None
 
 
-@pytest.mark.parametrize("value, expected", [
-    ("sdk-cli", True), ("sdk-ts", True), ("sdk-py", True),
-    ("cli", False), ("claude-vscode", False), ("weird", None)])
+@pytest.mark.parametrize("value, expected", ENTRYPOINT_HEADLESS)
 def test_headless_from_env(monkeypatch: pytest.MonkeyPatch, value: str,
                            expected: Optional[bool]) -> None:
     monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", value)

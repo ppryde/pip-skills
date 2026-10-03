@@ -7,6 +7,12 @@ from pathlib import Path
 
 import pytest
 
+# One table of Claude Code entrypoints and whether each is headless (None = unknown),
+# shared by every layer that interprets CLAUDE_CODE_ENTRYPOINT.
+ENTRYPOINT_HEADLESS = [
+    ("sdk-cli", True), ("sdk-ts", True), ("sdk-py", True),
+    ("cli", False), ("claude-vscode", False), ("claude-desktop", False), ("mystery", None)]
+
 SKILL = Path(__file__).resolve().parents[2] / "skills" / "context-vigil"
 LAUNCHER = SKILL / "scripts" / "context-vigil"
 

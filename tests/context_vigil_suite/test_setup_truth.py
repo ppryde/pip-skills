@@ -83,11 +83,11 @@ def test_walkthrough_never_claims_auto_mode(inside_tmux: dict) -> None:
     assert "auto mode" not in launcher.walkthrough_text().split("How do you want")[0]
 
 
+@pytest.mark.parametrize("args", [("install",), ("launcher",)])
 def test_dry_run_and_launcher_inside_tmux_make_no_auto_claim(run_cli, inside_tmux: dict,
-                                                             cfg: Path) -> None:
-    for args in (("install",), ("launcher",)):
-        out = run_cli(*args).stdout
-        assert "already works" not in out and "mode: auto" not in out, args
+                                                             cfg: Path, args: tuple) -> None:
+    out = run_cli(*args).stdout
+    assert "already works" not in out and "mode: auto" not in out, args
 
 
 def test_install_yes_inside_tmux_claims_auto_only_conditionally(run_cli, inside_tmux: dict,
@@ -115,22 +115,30 @@ def test_status_before_install(run_cli, repo: Path, cfg: Path) -> None:
     assert "re-run install" not in out
 
 
-def test_status_after_install_counts_hooks_from_settings(run_cli, repo: Path, cfg: Path) -> None:
-    assert run_cli("install", "--yes").returncode == 0
-    out = run_cli("status", cwd=repo).stdout
-    assert "installed: yes" in out
-    assert f"hooks: 4/4 in {cfg / 'settings.json'}" in out
-    assert "status line: capture" in out
-    data = _settings(cfg)
+def _drop_stop_hook(data: dict) -> None:
     del data["hooks"]["Stop"]
-    (cfg / "settings.json").write_text(json.dumps(data))
-    out = run_cli("status", cwd=repo).stdout
-    assert "installed: partial" in out
-    assert "hooks: 3/4" in out and "MISSING — re-run install" in out
+
+
+def _drop_all_hooks(data: dict) -> None:
+    del data["hooks"]["Stop"]
     del data["hooks"]
-    (cfg / "settings.json").write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize("edit, expected", [
+    (None, ["installed: yes", "hooks: 4/4 in {settings}", "status line: capture"]),
+    (_drop_stop_hook, ["installed: partial", "hooks: 3/4", "MISSING — re-run install"]),
+    (_drop_all_hooks, ["installed: no", "hooks: 0/4", "MISSING — re-run install"]),
+], ids=["intact", "stop-hook-removed", "hooks-removed"])
+def test_status_after_install_counts_hooks_from_settings(run_cli, repo: Path, cfg: Path,
+                                                         edit, expected: list) -> None:
+    assert run_cli("install", "--yes").returncode == 0
+    if edit is not None:
+        data = _settings(cfg)
+        edit(data)
+        (cfg / "settings.json").write_text(json.dumps(data))
     out = run_cli("status", cwd=repo).stdout
-    assert "installed: no" in out and "hooks: 0/4" in out and "MISSING — re-run install" in out
+    for needle in expected:
+        assert needle.format(settings=cfg / "settings.json") in out, needle
 
 
 def test_status_hooks_pointing_at_a_moved_skill_do_not_count(run_cli, repo: Path,
@@ -147,23 +155,36 @@ def test_status_unreadable_settings_says_so(run_cli, repo: Path, cfg: Path) -> N
     assert "hooks: unreadable" in result.stdout
 
 
-def test_status_line_kinds(run_cli, repo: Path, cfg: Path) -> None:
+def _plain_echo(data: dict) -> None:
+    data["statusLine"]["command"] = "echo hi"
+
+
+def _hand_wired(data: dict) -> None:
+    data["statusLine"]["command"] = "input=$(cat); " + install.ingest_command("input")
+
+
+@pytest.mark.parametrize("edit, present, absent", [
+    (None, ["status line: spliced"], []),
+    (_plain_echo, ["status line: missing", "WARNING: status line not feeding context-vigil"],
+     []),
+    (_hand_wired, ["status line: manual"], ["WARNING"]),
+], ids=["spliced", "not-feeding", "manual"])
+def test_status_line_kinds(run_cli, repo: Path, cfg: Path, edit, present: list,
+                           absent: list) -> None:
     script = cfg / "sl.sh"
     script.write_text("input=$(cat)\necho hi\n")
     (cfg / "settings.json").write_text(json.dumps(
         {"statusLine": {"type": "command", "command": f"bash {script}"}}))
     assert run_cli("install", "--yes").returncode == 0
-    assert "status line: spliced" in run_cli("status", cwd=repo).stdout
-    data = _settings(cfg)
-    data["statusLine"]["command"] = "echo hi"
-    (cfg / "settings.json").write_text(json.dumps(data))
+    if edit is not None:
+        data = _settings(cfg)
+        edit(data)
+        (cfg / "settings.json").write_text(json.dumps(data))
     out = run_cli("status", cwd=repo).stdout
-    assert "status line: missing" in out
-    assert "WARNING: status line not feeding context-vigil" in out
-    data["statusLine"]["command"] = "input=$(cat); " + install.ingest_command("input")
-    (cfg / "settings.json").write_text(json.dumps(data))
-    out = run_cli("status", cwd=repo).stdout
-    assert "status line: manual" in out and "WARNING" not in out
+    for needle in present:
+        assert needle in out, needle
+    for needle in absent:
+        assert needle not in out, needle
 
 
 def test_status_last_reading_for_this_worktree(run_cli, repo: Path) -> None:

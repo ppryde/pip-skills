@@ -11,6 +11,7 @@ import pytest
 
 from context_vigil import census, context, session, transcript
 
+from .conftest import ENTRYPOINT_HEADLESS
 from .test_context_window import _identity, _ingest, _usage, _write
 
 
@@ -79,9 +80,7 @@ def test_census_model_change_re_resolves(repo: Path, iso: Path) -> None:
 
 # --- GEN-I-005: entrypoints -----------------------------------------------------
 
-@pytest.mark.parametrize("entrypoint,expected", [
-    ("sdk-cli", True), ("sdk-ts", True), ("sdk-py", True),
-    ("cli", False), ("claude-vscode", False), ("claude-desktop", False), ("mystery", None)])
+@pytest.mark.parametrize("entrypoint,expected", ENTRYPOINT_HEADLESS)
 def test_transcript_entrypoints(iso: Path, entrypoint: str, expected: Optional[bool]) -> None:
     path = _write(iso / "t.jsonl", [_usage(1)], entrypoint)
     assert transcript.read_entrypoint(str(path)) == (True, expected)

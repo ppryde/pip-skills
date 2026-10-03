@@ -590,6 +590,20 @@ def _handoff_saved(repo: Path) -> bool:
     return state.handoff_path(paths.scope_dir(repo)).exists()
 
 
+@pytest.fixture
+def remote_notes(repo: Path, iso: Path) -> Path:
+    """Remote mode, with good notes saved in the sandbox: what every `--inline` test needs."""
+    _remote(repo)
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    return notes
+
+
+def _inline(run_cli, repo: Path, notes: Path, target: Path):  # type: ignore[no-untyped-def]
+    return run_cli("handover", "--file", str(notes), "--inline", str(target),
+                   "--no-snapshot", cwd=repo)
+
+
 def test_inline_is_refused_in_local_mode(run_cli, repo: Path, iso: Path) -> None:
     notes = iso / "n.md"
     notes.write_text(GOOD_NOTES)
@@ -610,18 +624,15 @@ def test_inline_is_refused_in_local_mode(run_cli, repo: Path, iso: Path) -> None
                                   "id_ed25519", "aws_credentials", "my-secret.txt", ".netrc",
                                   ".npmrc", ".pypirc", "cert.p12", ".zshrc"])
 def test_inline_refuses_secret_bearing_names_even_through_a_symlink(
-        run_cli, repo: Path, iso: Path, name: str) -> None:
-    _remote(repo)
-    notes = iso / "n.md"
-    notes.write_text(GOOD_NOTES)
+        run_cli, repo: Path, iso: Path, remote_notes: Path, name: str) -> None:
+    notes = remote_notes
     target = iso / "files" / name
     target.parent.mkdir()
     target.write_text("nothing key-shaped here\n")
     link = iso / "innocuous.txt"
     link.symlink_to(target)
     for given in (target, link):
-        result = run_cli("handover", "--file", str(notes), "--inline", str(given),
-                         "--no-snapshot", cwd=repo)
+        result = _inline(run_cli, repo, notes, given)
         _one_clean_line(result)
         assert str(given) in result.stderr and "nothing key-shaped" not in result.stderr
     assert not _handoff_saved(repo)
@@ -631,28 +642,20 @@ def test_inline_refuses_secret_bearing_names_even_through_a_symlink(
                                    ".config/gh/hosts.yml", ".claude/CLAUDE.md",
                                    ".claude-personal/notes.md"])
 def test_inline_refuses_files_under_credential_dirs(run_cli, repo: Path, home: Path,
-                                                    iso: Path, where: str) -> None:
-    _remote(repo)
-    notes = iso / "n.md"
-    notes.write_text(GOOD_NOTES)
+                                                    remote_notes: Path, where: str) -> None:
     target = home / where
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("plain words\n")
-    result = run_cli("handover", "--file", str(notes), "--inline", str(target),
-                     "--no-snapshot", cwd=repo)
+    result = _inline(run_cli, repo, remote_notes, target)
     _one_clean_line(result)
     assert str(target) in result.stderr and not _handoff_saved(repo)
 
 
 def test_inline_refuses_the_config_dir_and_the_data_root(run_cli, repo: Path, cfg: Path,
-                                                         iso: Path) -> None:
-    _remote(repo)
-    notes = iso / "n.md"
-    notes.write_text(GOOD_NOTES)
+                                                         remote_notes: Path) -> None:
     for target in (cfg / "statusline.sh", paths.data_root() / "census.json"):
         target.write_text("plain words\n")
-        result = run_cli("handover", "--file", str(notes), "--inline", str(target),
-                         "--no-snapshot", cwd=repo)
+        result = _inline(run_cli, repo, remote_notes, target)
         _one_clean_line(result)
         assert str(target) in result.stderr
     assert not _handoff_saved(repo)

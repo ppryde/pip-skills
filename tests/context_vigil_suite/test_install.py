@@ -250,6 +250,9 @@ def test_dry_run_announces_threshold_write(run_cli, cfg: Path) -> None:
     result = run_cli("install", "--threshold", "50")
     assert "will set context.threshold = 50" in result.stdout
     assert not (cfg / "settings.json").exists()
+    assert "nudge at 50% context" in result.stdout
+    assert "nudge at 35% context" not in result.stdout
+    assert "nudge at 35% context" in run_cli("install").stdout
     applied = run_cli("install", "--yes", "--threshold", "50")
     assert "will set context.threshold = 50" in applied.stdout
 
@@ -393,8 +396,3 @@ def test_reinstall_with_changed_matcher_replaces_our_entry(cfg: Path,
     assert len(entries) == 1 and entries[0]["matcher"] == "Task.*|Bash"
 
 
-def test_dry_run_shows_the_threshold_that_will_be_set(run_cli, cfg: Path) -> None:
-    result = run_cli("install", "--threshold", "50")
-    assert "nudge at 50% context" in result.stdout
-    assert "nudge at 35% context" not in result.stdout
-    assert "nudge at 35% context" in run_cli("install").stdout
