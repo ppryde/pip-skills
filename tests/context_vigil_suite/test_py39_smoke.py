@@ -12,7 +12,16 @@ from .conftest import LAUNCHER
 PY39 = Path("/usr/bin/python3")
 
 
-@pytest.mark.skipif(not PY39.exists(), reason="no system python3")
+def _is_py39() -> bool:
+    try:
+        out = subprocess.run([str(PY39), "--version"], capture_output=True, text=True,
+                             timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and (out.stdout + out.stderr).startswith("Python 3.9.")
+
+
+@pytest.mark.skipif(not _is_py39(), reason="/usr/bin/python3 is not a working 3.9")
 def test_full_flow_under_system_python(repo: Path, iso: Path) -> None:
     env = dict(os.environ, CONTEXT_VIGIL_PYTHON=str(PY39))
 

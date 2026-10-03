@@ -352,12 +352,13 @@ def test_default_tmux_is_inert(repo: Path, iso: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setenv("TMUX", "/tmp/fake,1,0")
     monkeypatch.setenv("TMUX_PANE", "%7")
+    sent: list = []
+    monkeypatch.setattr(tmux, "send_detached", lambda *a, **k: sent.append(a))
     state.request_clear(paths.scope_dir(repo), "WAITING")
     assert not tmux.reachable()
     out = hooks.session_start(_payload(repo, source="clear"))
     assert out is not None and "WAITING" in out
-    time.sleep(0.2)
-    assert not (iso / "no-tmux-here").exists()
+    assert sent == []
 
 
 def _nudge_text(repo: Path, event: str) -> str:

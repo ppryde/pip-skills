@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from context_vigil import census, context, hooks, paths, session, transcript
+from context_vigil import census, context, hooks, paths, session, state, transcript
 
 from .conftest import SKILL
 from .test_context_window import _identity, _ingest, _usage, _write
@@ -108,7 +108,8 @@ def test_parallel_nudges_emit_exactly_once_and_keep_last_nudged(repo: Path, iso:
 
 
 def test_lock_failure_skips_the_update_and_never_raises(repo: Path, iso: Path, monkeypatch) -> None:
-    path = _write(iso / "t.jsonl", [_usage(40_000)])
+    # 75% of a confident [1m] window: over the threshold, so only the lock can silence it
+    path = _write(iso / "t.jsonl", [_identity("claude-x[1m]"), _usage(750_000)])
     monkeypatch.setattr(session, "_LOCK_ATTEMPTS", 2)
     monkeypatch.setattr(session, "_LOCK_DELAY_SECONDS", 0.001)
     import fcntl
@@ -116,12 +117,17 @@ def test_lock_failure_skips_the_update_and_never_raises(repo: Path, iso: Path, m
     held = open(paths.session_lock_path("s"), "a")
     fcntl.flock(held, fcntl.LOCK_EX)
     try:
-        assert context.current_percent(repo, "s", str(path), 200_000) == 20
+        assert context.current_percent(repo, "s", str(path), 200_000) == 75
         assert session.load("s")["transcript_offset"] is None      # nothing saved
         assert hooks.nudge({"session_id": "s", "cwd": str(repo),
                             "transcript_path": str(path)}) is None
+        assert session.load("s")["last_nudged_pct"] is None
+        assert not state.gate_active(paths.scope_dir(repo))
     finally:
         held.close()
+    # control: the same nudge with the lock free does fire, so the silence above was the lock
+    assert hooks.nudge({"session_id": "s", "cwd": str(repo),
+                        "transcript_path": str(path)}) is not None
 
 
 # --- M2: head read grows ----------------------------------------------------------
@@ -178,8 +184,11 @@ def test_path_change_resets_peaks(repo: Path, iso: Path) -> None:
 
 # --- M5 / M6 / M7 -------------------------------------------------------------------
 
-def test_freshness_tolerance_is_at_most_half_a_second() -> None:
-    assert context._FRESH_TOLERANCE_SECONDS <= 0.5
+def test_freshness_tolerance_trusts_04s_but_not_06s(iso: Path) -> None:
+    path = _write(iso / "t.jsonl", [_usage(1_000)])
+    mtime = path.stat().st_mtime
+    assert context._census_unchanged({"updated_at": mtime - 0.4}, str(path)) is True
+    assert context._census_unchanged({"updated_at": mtime - 0.6}, str(path)) is False
 
 
 def test_unreadable_usage_keeps_the_last_good_reading(repo: Path, iso: Path) -> None:
@@ -328,5 +337,16 @@ def test_prune_keeps_a_held_lock_of_a_pruned_record(repo: Path) -> None:
     assert not paths.session_record_path("ancient").exists()
 
 
-def test_hook_lock_wait_is_about_one_second() -> None:
-    assert session._LOCK_ATTEMPTS * session._LOCK_DELAY_SECONDS <= 1.0
+def test_hook_lock_wait_is_about_one_second(repo: Path) -> None:
+    import fcntl
+    paths.sessions_dir().mkdir(parents=True, exist_ok=True)
+    held = open(paths.session_lock_path("w"), "a")
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        start = time.monotonic()
+        with session.locked("w") as got:
+            waited = time.monotonic() - start
+        assert got is False
+        assert waited < 1.5          # a hook never stalls the prompt for long
+    finally:
+        held.close()

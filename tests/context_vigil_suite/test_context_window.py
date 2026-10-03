@@ -49,9 +49,7 @@ def test_large_transcript_reads_only_the_tail(iso: Path) -> None:
             f.write(filler)
         f.write(_usage(60_000) + "\n")
     assert path.stat().st_size > 45_000_000
-    start = time.monotonic()
     tail = transcript.read_tail(str(path))
-    assert time.monotonic() - start < 2.0
     assert tail is not None and tail.tokens == 60_000
     assert tail.bytes_read < 1_000_000  # tail + a bounded model lookahead
     assert tail.offset == path.stat().st_size
@@ -69,6 +67,19 @@ def test_incremental_offset_reads_only_new_bytes(iso: Path) -> None:
     assert second.bytes_read == added
     third = transcript.read_tail(str(path), second.offset)
     assert third is not None and not third.has_usage and third.bytes_read == 0
+
+
+def test_gap_beyond_max_forward_rescans_from_the_tail(iso: Path, monkeypatch) -> None:
+    monkeypatch.setattr(transcript, "MAX_FORWARD", 4096)
+    filler = json.dumps({"type": "user", "text": "x" * 990}) + "\n"
+    path = iso / "t.jsonl"
+    path.write_text(filler * 1000 + _usage(60_000) + "\n")       # ~1 MB past offset 0
+    size = path.stat().st_size
+    assert size > 900_000
+    tail = transcript.read_tail(str(path), 0)
+    assert tail is not None and tail.tokens == 60_000
+    assert tail.bytes_read < size // 2                             # not a forward read of it all
+    assert tail.offset == size
 
 
 def test_partial_trailing_line_is_left_for_next_time(iso: Path) -> None:

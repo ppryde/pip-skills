@@ -91,6 +91,16 @@ def test_existing_script_statusline_is_spliced(cfg: Path) -> None:
     assert script.read_text() == '#!/usr/bin/env bash\ninput=$(cat)\necho "hi"\n'
 
 
+def test_tilde_statusline_command_is_spliced(cfg: Path, home: Path) -> None:
+    script = home / ".claude" / "statusline-command.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text('#!/usr/bin/env bash\ninput=$(cat)\necho "hi"\n')
+    _write(cfg, {"statusLine": {"type": "command",
+                                "command": "bash ~/.claude/statusline-command.sh"}})
+    plan = install.plan_install(threshold=None)
+    assert any(c.path == script and install.SL_START in c.after for c in plan.changes)
+
+
 def test_statusline_with_other_variable_name(cfg: Path) -> None:
     script = cfg / "sl.sh"
     script.write_text("payload=$(cat)\n")
@@ -170,6 +180,7 @@ def test_failed_write_leaves_no_tmp(cfg: Path, monkeypatch) -> None:
     with pytest.raises(OSError):
         install.apply(plan)
     assert not list(cfg.glob("*.context-vigil.tmp"))
+    assert not list(paths.data_root().glob("*.context-vigil.tmp"))   # where the write failed
 
 
 def test_uninstall_without_record_says_so(cfg: Path) -> None:

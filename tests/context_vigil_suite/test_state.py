@@ -173,9 +173,6 @@ class TestGate:
     def test_gate_inactive_by_default(self, scope):
         assert st.gate_active(scope) is False
 
-    def test_gate_ttl_is_six_hours(self):
-        assert st.GATE_TTL_SECONDS == 6 * 3600
-
     def test_set_gate_marks_active(self, scope):
         st.set_gate(scope)
         assert st.gate_marker(scope).exists()

@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from context_vigil import census, context
+from context_vigil import census, context, session
 
 
 def _ingest(repo: Path, sid: str, pct: float) -> None:
@@ -75,6 +75,10 @@ def test_census_raising_falls_back_to_transcript(
     def boom(*args, **kwargs):
         raise OverflowError("cannot convert float infinity to integer")
 
-    monkeypatch.setattr(census, "context_percent", boom)
     path = _transcript(iso, 50000)
+    # a session census has heard from, so the census branch really runs
+    census.ingest(json.dumps({"session_id": "a", "workspace": {"current_dir": str(repo)},
+                              "context_window": {"used_percentage": 90}}))
+    assert session.load("a")["has_statusline"] is True
+    monkeypatch.setattr(census, "for_session", boom)
     assert context.current_percent(repo, "a", str(path), 200000) == 25
