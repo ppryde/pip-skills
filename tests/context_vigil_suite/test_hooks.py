@@ -223,3 +223,43 @@ def test_default_tmux_is_inert(repo: Path, iso: Path, monkeypatch: pytest.Monkey
     assert out is not None and "WAITING" in out
     time.sleep(0.2)
     assert not (iso / "no-tmux-here").exists()
+
+
+def _nudge_text(repo: Path, event: str) -> str:
+    _over(repo)
+    out = hooks.nudge(_payload(repo, hook_event_name=event))
+    assert out is not None
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_nudge_on_user_prompt_asks_before_handing_over(repo: Path) -> None:
+    text = _nudge_text(repo, "UserPromptSubmit")
+    assert "Answer the user's message first" in text
+    assert "ASK whether to hand over now" in text
+    assert "Do not run `handover` until they agree" in text
+    assert "80%" in text
+    assert "subagent" not in text
+
+
+def test_nudge_on_post_tool_use_hands_over_unattended(repo: Path) -> None:
+    text = _nudge_text(repo, "PostToolUse")
+    assert "subagent" in text and "handover --file" in text
+    assert "ASK whether" not in text
+
+
+def test_nudge_unknown_event_is_unattended(repo: Path) -> None:
+    assert "handover --file" in _nudge_text(repo, "Whatever")
+
+
+def test_clear_delay_defaults_to_two_seconds(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from context_vigil import tmux
+    monkeypatch.delenv("CONTEXT_VIGIL_CLEAR_DELAY", raising=False)
+    monkeypatch.setenv("TMUX", "/tmp/fake,1,0")
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    sent = []
+    monkeypatch.setattr(tmux, "reachable", lambda: True)
+    monkeypatch.setattr(tmux, "send_detached", lambda t, keys, delay: sent.append(delay))
+    state.request_clear(paths.scope_dir(repo), "H")
+    hooks.stop({"cwd": str(repo)})
+    assert sent == ["2"]

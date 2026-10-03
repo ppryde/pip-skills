@@ -49,3 +49,25 @@ def test_capture_sh_prints_nothing_and_records(repo: Path, iso: Path) -> None:
     assert result.returncode == 0 and result.stdout == ""
     store = json.loads(paths.census_path().read_text())
     assert store["sessions"]["s1"]["payload"]["context_window"]["used_percentage"] == 61
+
+
+def test_status_shows_context_percent_and_window(run_cli, repo: Path) -> None:
+    run_cli("ingest", stdin=_payload(repo, pct=42))
+    out = run_cli("status", cwd=repo).stdout
+    assert "ctx 42%" in out
+    assert "window: 200000 (default)" in out
+    run_cli("config", "set", "context.window", "1000000", "--worktree", cwd=repo)
+    assert "window: 1000000 (worktree)" in run_cli("status", cwd=repo).stdout
+
+
+def test_install_yes_shows_diff_before_applying(
+        repo: Path, cfg: Path, capsys, monkeypatch) -> None:
+    from context_vigil import cli, install
+
+    def boom(plan) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(install, "apply", boom)
+    assert cli.main(["install", "--yes"]) == 1
+    out = capsys.readouterr().out
+    assert "settings.json" in out and "+" in out  # the diff was printed first

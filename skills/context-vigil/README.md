@@ -18,8 +18,9 @@ With tmux the `/clear` and the resume are hands-free; without it you type
     wf agents add skills context-vigil --global
 
 Then ask Claude to "set up context-vigil". The agent runs `install` as a dry
-run, shows you what it would change, asks you the threshold and launch
-questions, and only then applies it with `install --yes`. Hooks, the status
+run, asks you the threshold and launch questions, then re-runs it with your
+answers but still without `--yes` so you see the exact diff (the shell-rc edit
+included), and applies it with `install --yes` only after you agree. Hooks, the status
 line and any shell-rc change take effect in new sessions and new shells.
 
 `install` rewrites `settings.json` as 2-space-indented JSON, and always shows
@@ -103,7 +104,13 @@ Resolution order, first match wins, re-read on every hook call:
 4. Built-in default
 
 `status` shows each effective value and the layer it came from. `pause` /
-`resume` opt the current worktree out of and back into nudges and auto-clear.
+`resume` opt the current worktree out of and back into nudges and auto-clear;
+the agent runs them only when you ask.
+
+When a nudge fires right after you typed a message, the agent answers you first
+and asks whether to hand over; it does not hand over until you agree. In
+unattended runs (nudges from `PostToolUse`) it hands over at a sensible stopping
+point on its own. With tmux, the automatic `/clear` fires when the turn ends.
 
 ## Where data lives
 

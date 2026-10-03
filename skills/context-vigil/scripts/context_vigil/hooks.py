@@ -17,7 +17,15 @@ KICK_PROMPT = (
     "context-vigil: handover received — resume from the injected handover now, "
     "starting with its Next Step."
 )
-NUDGE_TEXT = (
+NUDGE_ATTENDED = (
+    "**context-vigil: context at {pct}% — over the {threshold}% threshold.** "
+    "A person just typed to you. Answer the user's message first. Then tell them "
+    "context is at {pct}% and ASK whether to hand over now. Do not run `handover` "
+    "until they agree. If they do, write handover notes following `{template}` "
+    "(Failed Attempts and exactly one Next Step are required) and run:\n"
+    "   `\"{launcher}\" handover --file <your notes file>`"
+)
+NUDGE_UNATTENDED = (
     "**context-vigil: context at {pct}% — over the {threshold}% threshold.** "
     "At your next sensible stopping point:\n"
     "1. If any subagent or background command you started has not reported back, "
@@ -56,12 +64,14 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
     if pct is None or pct < threshold:
         return None
     state.set_gate(scope)
-    text = NUDGE_TEXT.format(pct=pct, threshold=threshold,
-                             template=handover.template_path(), launcher=paths.launcher_path())
+    event = _str(payload, "hook_event_name")
+    template = NUDGE_ATTENDED if event == "UserPromptSubmit" else NUDGE_UNATTENDED
+    text = template.format(pct=pct, threshold=threshold,
+                           template=handover.template_path(), launcher=paths.launcher_path())
     if config.mode(cwd) == "remote":
         text += NUDGE_REMOTE
     return json.dumps({"hookSpecificOutput": {
-        "hookEventName": _str(payload, "hook_event_name") or "UserPromptSubmit",
+        "hookEventName": event or "UserPromptSubmit",
         "additionalContext": text,
     }})
 
@@ -76,7 +86,7 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
             "context-vigil: handover saved — type /clear to continue in a fresh "
             "context. (Run Claude inside tmux for hands-free handovers.)")})
     if state.consume_clear_flag(scope):
-        delay = os.environ.get("CONTEXT_VIGIL_CLEAR_DELAY", "1")
+        delay = os.environ.get("CONTEXT_VIGIL_CLEAR_DELAY", "2")
         tmux.send_detached(target, [["/clear", "Enter"]], delay)
     return None
 

@@ -106,7 +106,8 @@ def _cmd_handover(args: argparse.Namespace) -> int:
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
     if result == "cooldown":
-        raise CliError("handover refused: a /clear just happened — cooldown active")
+        raise CliError("handover refused: a session just started — try again in a few "
+                       "minutes (cooldown)")
     if tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
@@ -168,10 +169,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
     record = paths.install_record_path()
     resolved = config.resolve(cwd)
     threshold, layer = resolved["context.threshold"]
+    pct = context.current_percent(cwd, None, None, config.window(cwd))
     lines = [
         f"installed: {'yes' if record.exists() else 'no'}",
         _mode_line(),
+        f"{context.context_line(pct, int(str(threshold)))}",
         f"threshold: {threshold}% ({layer})",
+        f"window: {resolved['context.window'][0]} ({resolved['context.window'][1]})",
         f"context.mode: {resolved['context.mode'][0]} ({resolved['context.mode'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
@@ -207,15 +211,18 @@ def _cmd_install(args: argparse.Namespace) -> int:
     if args.launcher == "always" and not args.confirm_always:
         raise CliError("--launcher always also needs --confirm-always "
                        "(it takes over the claude command)")
-    try:
-        install.apply(plan)
-    except OSError as exc:
-        raise CliError(f"install failed part-way ({exc}); re-run, or `uninstall --yes`") from exc
+    # Show what is about to change BEFORE changing it, so the record of the
+    # edit (the rc file included) is on screen even if apply fails part-way.
     print("\n".join(diffs) if diffs else "Hooks and status line already wired.")
     for line in plan.manual:
         print(f"\nMANUAL STEP: {line}")
     for line in plan.notes:
         print(f"\n{line}")
+    sys.stdout.flush()
+    try:
+        install.apply(plan)
+    except OSError as exc:
+        raise CliError(f"install failed part-way ({exc}); re-run, or `uninstall --yes`") from exc
     print(f"\ncontext-vigil installed. {_mode_line()}. "
           "Hooks and the status line take effect in new sessions.")
     return 0
