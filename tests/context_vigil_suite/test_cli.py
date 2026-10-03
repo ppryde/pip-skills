@@ -71,3 +71,15 @@ def test_install_yes_shows_diff_before_applying(
     assert cli.main(["install", "--yes"]) == 1
     out = capsys.readouterr().out
     assert "settings.json" in out and "+" in out  # the diff was printed first
+
+
+def test_context_uses_claude_session_id_env(run_cli, repo: Path) -> None:
+    import json as _json
+    for sid, pct in (("a", 20), ("b", 70)):
+        run_cli("ingest", stdin=_json.dumps({
+            "session_id": sid, "workspace": {"current_dir": str(repo)},
+            "context_window": {"used_percentage": pct}}))
+    out = run_cli("context", cwd=repo, env={"CLAUDE_SESSION_ID": "a"})
+    assert "ctx 20%" in out.stdout
+    status = run_cli("status", cwd=repo, env={"CLAUDE_SESSION_ID": "a"})
+    assert "ctx 20%" in status.stdout and "nudge.repeat_step: 5%" in status.stdout

@@ -10,6 +10,7 @@ from context_vigil import config, paths
 def test_defaults(repo: Path) -> None:
     assert config.load(repo) == {
         "context.threshold": 35, "context.window": 200000, "context.mode": "local",
+        "nudge.repeat_step": 5,
     }
     assert config.resolve(repo)["context.threshold"] == (35, "default")
 
@@ -72,3 +73,16 @@ def test_cli_set_rejects_with_range(run_cli, repo: Path) -> None:  # type: ignor
     out = run_cli("config", "set", "context.threshold", "99", cwd=repo)
     assert out.returncode == 1
     assert "1–95" in out.stderr
+
+
+def test_repeat_step_validated_and_env(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert config.repeat_step(repo) == 5
+    config.set_value(repo, "nudge.repeat_step", "10")
+    assert config.repeat_step(repo) == 10
+    for bad in ("0", "51", "x"):
+        with pytest.raises(config.ConfigError):
+            config.set_value(repo, "nudge.repeat_step", bad)
+    monkeypatch.setenv("CONTEXT_VIGIL_REPEAT_STEP", "7")
+    assert config.resolve(repo)["nudge.repeat_step"] == (7, "env")
+    monkeypatch.setenv("CONTEXT_VIGIL_REPEAT_STEP", "99")
+    assert config.resolve(repo)["nudge.repeat_step"] == (10, "global")

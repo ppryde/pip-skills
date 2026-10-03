@@ -17,12 +17,14 @@ DEFAULTS: Dict[str, object] = {
     "context.threshold": 35,
     "context.window": 200000,
     "context.mode": "local",
+    "nudge.repeat_step": 5,
 }
 KEYS = tuple(DEFAULTS)
 ENV_VARS: Dict[str, str] = {
     "context.threshold": "CONTEXT_VIGIL_THRESHOLD",
     "context.window": "CONTEXT_VIGIL_WINDOW",
     "context.mode": "CONTEXT_VIGIL_MODE",
+    "nudge.repeat_step": "CONTEXT_VIGIL_REPEAT_STEP",
 }
 _MODES = ("local", "remote")
 
@@ -46,6 +48,8 @@ def coerce(key: str, raw: object) -> object:
         raise ConfigError("context.threshold must be a whole number 1–95")
     if key == "context.window" and number <= 0:
         raise ConfigError("context.window must be a positive whole number")
+    if key == "nudge.repeat_step" and not 1 <= number <= 50:
+        raise ConfigError("nudge.repeat_step must be a whole number 1–50")
     return number
 
 
@@ -113,3 +117,7 @@ def window(cwd: Path) -> int:
 
 def mode(cwd: Path) -> str:
     return str(load(cwd)["context.mode"])
+
+
+def repeat_step(cwd: Path) -> int:
+    return int(str(load(cwd)["nudge.repeat_step"]))

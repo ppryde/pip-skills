@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -136,9 +137,14 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _env_session_id() -> Optional[str]:
+    return os.environ.get("CLAUDE_SESSION_ID") or None
+
+
 def _cmd_context(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
-    pct = context.current_percent(cwd, args.session_id, None, config.window(cwd))
+    pct = context.current_percent(
+        cwd, args.session_id or _env_session_id(), None, config.window(cwd))
     print(context.context_line(pct, config.threshold(cwd)))
     return 0
 
@@ -169,7 +175,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     record = paths.install_record_path()
     resolved = config.resolve(cwd)
     threshold, layer = resolved["context.threshold"]
-    pct = context.current_percent(cwd, None, None, config.window(cwd))
+    pct = context.current_percent(cwd, _env_session_id(), None, config.window(cwd))
     lines = [
         f"installed: {'yes' if record.exists() else 'no'}",
         _mode_line(),
@@ -177,6 +183,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"threshold: {threshold}% ({layer})",
         f"window: {resolved['context.window'][0]} ({resolved['context.window'][1]})",
         f"context.mode: {resolved['context.mode'][0]} ({resolved['context.mode'][1]})",
+        f"nudge.repeat_step: {resolved['nudge.repeat_step'][0]}% "
+        f"({resolved['nudge.repeat_step'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
         f"pending handover: {'yes' if state.read_handoff(scope) else 'no'}",

@@ -66,7 +66,9 @@ context-vigil/
       cli.py               # argparse dispatch for every subcommand
       paths.py             # data root + worktree slug resolution
       census.py            # census store, ported verbatim (ingest/merge/prune/limits/read)
-      context.py           # ctx % for this session: census first, transcript fallback
+      context.py           # ctx % for this session: census when unchanged, else transcript tail
+      transcript.py        # incremental tail-only transcript reader (offset, partial lines, rotation)
+      session.py           # per-session records + the learned model -> window table
       state.py             # per-scope marker files: paused/cooldown/handover-gate/clear-requested
       config.py            # threshold/window/mode get/set
       snapshot.py          # git snapshot (cwd, branch, status, recent files)
@@ -86,6 +88,8 @@ inside repositories.
 $CLAUDE_CONFIG_DIR/context-vigil/
   config.json              # global settings (see Configuration)
   census.json              # census store, schema identical to census status.json
+  windows.json             # learned model id -> context window size, from every status-line payload
+  sessions/<session_id>.json  # per-session record, script-written, pruned after ~7 days (see Measure)
   install.json             # record of every entry install added (for uninstall)
   worktrees/<slug>/        # slug = sanitised absolute worktree path
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
@@ -135,14 +139,15 @@ or SKILL.md. The threshold in particular is the knob users will reach for.
 | Key | Default | Meaning |
 |---|---|---|
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
-| `context.window` | 200000 | Window size for the transcript fallback only (census carries the real size) |
+| `context.window` | 200000 | Last-resort window for the transcript estimate (see the window lookup under Measure) |
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`) |
+| `nudge.repeat_step` | 5 | After the first nudge, re-nudge each time ctx % has grown by this many points (integer 1–50) |
 
 **Resolution order** — first match wins, re-read on every hook call so changes
 take effect on the next turn with no restart:
 
 1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`,
-   `CONTEXT_VIGIL_MODE` (per-session override, e.g. one long unattended run;
+   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP` (per-session override, e.g. one long unattended run;
    settable in `settings.json` `env`).
 2. Worktree: `worktrees/<slug>/config.json`, written by
    `config set KEY VAL --worktree` (e.g. a heavy monorepo wants an earlier nudge).
@@ -150,7 +155,7 @@ take effect on the next turn with no restart:
 4. Built-in default.
 
 `config set` validates (threshold integer 1–95, window positive integer, mode
-`local|remote`) and rejects bad values with the allowed range. `status` shows
+`local|remote`, repeat step integer 1–50) and rejects bad values with the allowed range. `status` shows
 each effective value and which layer it came from. Users may also just ask the
 agent ("nudge me at 60%"); SKILL.md maps that to `config set`.
 
@@ -291,16 +296,44 @@ reachable via tmux, else **manual**.
 Every render, the status line feeds census. On every `UserPromptSubmit` and
 `PostToolUse` (`TaskCreate|TaskUpdate`) the `nudge` hook reads this session's ctx %:
 
-1. census entry for the hook's `session_id`, if fresh (< 90s);
-2. else freshest census entry for this worktree;
-3. else transcript estimate (last usage record in the transcript at the hook
-   payload's `transcript_path`, ÷ configured window);
+1. **Headless sessions** (transcript `entrypoint` = `sdk-cli`) have no status line
+   and skip census; every other session tries census first. The entrypoint is
+   read once from the transcript head; an unrecognised or unreadable one stays
+   unknown — a missing census entry on an interactive first turn never means
+   "headless";
+2. census entry for the hook's `session_id`, trusted while the transcript has not
+   changed since census last wrote it (transcript mtime ≤ entry `updated_at`,
+   2 s tolerance). Freshness is by transcript change, not wall clock, so an idle
+   session's reading stays good. With no `session_id` the worktree's newest entry
+   is used if under 90 s old;
+3. else the transcript tail: the last record carrying `message.usage` (input +
+   cache read + cache creation tokens) ÷ the session's window. The transcript is
+   read incrementally — first read backwards from EOF in 64 KB chunks, later
+   reads forward from a stored offset — so the cost is O(new bytes). A partial
+   trailing line waits for the next read; a file shorter than the offset
+   (truncated or rotated) restarts from the tail;
 4. else no reading → no nudge this turn.
 
-### 3. Nudge — once per cycle
+**Window lookup** (first hit wins; the source is recorded): (a) census
+`context_window_size` for this session id, even when stale; (b) the learned
+`windows.json` entry for the census entry's `model.id`; (c) the transcript's
+model id (last `attachment.identity.modelId` record, else `message.model`) in the
+learned table, with and without a `[1m]` suffix, then a `[1m]` suffix ⇒ 1,000,000;
+(d) evidence — any usage total seen above 200,000 ⇒ 1,000,000; (e) configured
+`context.window`. `windows.json` is updated by `ingest` from every status-line
+payload. `identity.modelId` is undocumented: absent or renamed falls through.
 
-When ctx % ≥ threshold, not paused, not in cooldown, and the gate is not armed:
-emit one `additionalContext` instruction and arm the gate (`handover-gate`
+**Per-session record** (`sessions/<session_id>.json`, written only by scripts,
+nothing model-visible): `headless` (bool|null), `has_statusline` (true once census
+has ingested the id), `window` + `window_source`, `transcript_offset`,
+`transcript_path`, `last_usage_tokens`, `max_usage_tokens`, `model_id`,
+`message_model`, `head_checked`, `last_nudged_pct`.
+
+### 3. Nudge — repeated every `nudge.repeat_step` %
+
+When ctx % ≥ threshold, not paused, not in cooldown, no clear already armed, and
+either nothing has been nudged this cycle (the gate is clear) or ctx % ≥ the last
+nudged % + `nudge.repeat_step`: emit one `additionalContext` instruction and arm the gate (`handover-gate`
 marker, 6h TTL from its mtime). The nudge is suppressed for 5 minutes after any
 session start (the `cooldown` marker — census can lag ≤ 90s behind a `/clear`,
 so a fresh session could otherwise read the old session's high ctx % and
@@ -312,8 +345,11 @@ The instruction tells the agent to:
   natural break or ask;
 - then fill `templates/handover.md` and run `handover`.
 
-The gate prevents repeat nudges until the cycle completes (handover injected),
-`resume` is run, or the 6h TTL lapses (self-heal after a crash).
+The gate marks "nudged this cycle" and the last nudged % sits in the session
+record, so a nudge ignored at 35% repeats at 40%, 45%, … (attended and unattended
+alike). A new cycle (session start, handover injected), `resume`, or the 6h TTL
+clears the gate and so the sequence. Without a `session_id` there is nowhere to
+keep the last %, so such a hook payload nudges once per cycle.
 
 ### 4. Handover
 

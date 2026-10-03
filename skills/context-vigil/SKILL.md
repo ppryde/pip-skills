@@ -45,7 +45,12 @@ user has seen its dry-run diff and agreed.
 ## Measure
 
 `context` prints `ctx NN%` (and the threshold when over it). Check it at
-natural stopping points in long work.
+natural stopping points in long work. Headless runs (`claude -p`, the SDK) have
+no status line: the percentage comes from the transcript against a window the
+script works out itself. Set `CONTEXT_VIGIL_WINDOW` there only if the model has
+never been seen in an interactive session (otherwise the learned table and
+`[1m]` model ids already cover it). A nudge repeats every `nudge.repeat_step`
+(default 5) points until you hand over.
 
 ## When nudged, or asked to hand over
 

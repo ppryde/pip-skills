@@ -87,6 +87,18 @@ def census_path() -> Path:
     return data_root() / "census.json"
 
 
+def sessions_dir() -> Path:
+    return data_root() / "sessions"
+
+
+def session_record_path(session_id: str) -> Path:
+    return sessions_dir() / f"{_UNSAFE.sub('-', session_id)}.json"
+
+
+def windows_path() -> Path:
+    return data_root() / "windows.json"
+
+
 def global_config_path() -> Path:
     return data_root() / "config.json"
 

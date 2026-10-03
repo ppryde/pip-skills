@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from context_vigil import config, context, handover, paths, state, tmux
+from context_vigil import config, context, handover, paths, session, state, tmux
 
 KICK_PROMPT = (
     "context-vigil: handover received — resume from the injected handover now, "
@@ -56,14 +56,27 @@ def _str(payload: Dict[str, object], key: str) -> Optional[str]:
 def nudge(payload: Dict[str, object]) -> Optional[str]:
     cwd = _cwd(payload)
     scope = paths.scope_dir(cwd)
-    if state.is_paused(scope) or state.cooldown_active(scope) or state.gate_active(scope):
+    if state.is_paused(scope) or state.cooldown_active(scope) or state.clear_requested(scope):
         return None
     threshold = config.threshold(cwd)
+    session_id = _str(payload, "session_id")
     pct = context.current_percent(
-        cwd, _str(payload, "session_id"), _str(payload, "transcript_path"), config.window(cwd))
+        cwd, session_id, _str(payload, "transcript_path"), config.window(cwd))
     if pct is None or pct < threshold:
         return None
+    # Re-nudge every repeat_step % past the last nudge. The gate marks "nudged
+    # this cycle" (SessionStart / resume clear it, which resets the sequence);
+    # the last nudged % lives in the session record. Without a session id there
+    # is nowhere to keep it, so the gate alone holds: one nudge per cycle.
+    record = session.load(session_id) if session_id else None
+    if state.gate_active(scope):
+        last = record["last_nudged_pct"] if record is not None else None
+        if not isinstance(last, int) or pct < last + config.repeat_step(cwd):
+            return None
     state.set_gate(scope)
+    if session_id and record is not None:
+        record["last_nudged_pct"] = pct
+        session.save(session_id, record)
     event = _str(payload, "hook_event_name")
     template = NUDGE_ATTENDED if event == "UserPromptSubmit" else NUDGE_UNATTENDED
     text = template.format(pct=pct, threshold=threshold,

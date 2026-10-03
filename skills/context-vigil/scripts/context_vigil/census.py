@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from context_vigil import paths
+from context_vigil import paths, session
 
 SCHEMA_VERSION = 1
 
@@ -502,7 +502,18 @@ def ingest(raw: str, now: float | None = None) -> None:
             tmux_pane = os.environ.get("TMUX_PANE") or None
             merge(store, payload, worktree_cwd(payload), tmux_pane, now)
             _atomic_write(path, store)
+            _note_session(payload)
     except OSError:
+        return
+
+
+def _note_session(payload: dict[str, Any]) -> None:
+    """Side records for the context reader: this session has a status line, and
+    which window this model has — learned, not configured. Never raises."""
+    try:
+        session.mark_statusline(str(payload["session_id"]))
+        session.learn_from_payload(payload)
+    except Exception:
         return
 
 
@@ -655,6 +666,11 @@ def context_percent(
     entry = _fresh_entry(root, now, session_id)
     if entry is None:
         return None
+    return entry_percent(entry)
+
+
+def entry_percent(entry: dict[str, Any]) -> int | None:
+    """``used_percentage`` of one census entry, rounded; None when absent or unreadable."""
     payload = entry.get("payload")
     window = payload.get("context_window") if isinstance(payload, dict) else None
     pct = window.get("used_percentage") if isinstance(window, dict) else None
@@ -662,5 +678,5 @@ def context_percent(
         return None
     try:
         return round(float(pct))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None

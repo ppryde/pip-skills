@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from context_vigil import census, config, hooks, paths, state
+from context_vigil import census, config, hooks, paths, session, state
 
 
 def _payload(repo: Path, **extra: object) -> dict:
@@ -53,6 +53,49 @@ def test_nudge_fires_once_over_threshold(repo: Path) -> None:
     assert "80%" in body["additionalContext"]
     assert str(paths.launcher_path()) in body["additionalContext"]
     assert hooks.nudge(_payload(repo)) is None  # gate holds
+
+
+def test_nudge_repeats_every_repeat_step(repo: Path) -> None:
+    payload = _payload(repo, hook_event_name="PostToolUse")
+    _over(repo, 35)
+    assert hooks.nudge(payload) is not None
+    _over(repo, 38)
+    assert hooks.nudge(payload) is None        # under last + 5
+    _over(repo, 40)
+    assert hooks.nudge(payload) is not None    # last + 5 reached
+    _over(repo, 42)
+    assert hooks.nudge(payload) is None
+    assert session.load("s1")["last_nudged_pct"] == 40
+
+
+def test_nudge_repeat_step_is_configurable(repo: Path) -> None:
+    config.set_value(repo, "nudge.repeat_step", "2")
+    _over(repo, 40)
+    assert hooks.nudge(_payload(repo)) is not None
+    _over(repo, 41)
+    assert hooks.nudge(_payload(repo)) is None
+    _over(repo, 42)
+    assert hooks.nudge(_payload(repo)) is not None
+
+
+def test_new_cycle_resets_the_repeat_sequence(repo: Path) -> None:
+    _over(repo, 50)
+    assert hooks.nudge(_payload(repo)) is not None
+    state.begin_cycle(paths.scope_dir(repo))
+    (paths.scope_dir(repo) / "cooldown").unlink()
+    assert hooks.nudge(_payload(repo)) is not None   # same %, fresh cycle
+
+
+def test_nudge_without_session_id_fires_once_per_cycle(repo: Path) -> None:
+    _over(repo, 50)
+    census.ingest(json.dumps({"session_id": "x", "workspace": {"current_dir": str(repo)},
+                              "context_window": {"used_percentage": 50}}))
+    payload = {"cwd": str(repo)}
+    assert hooks.nudge(payload) is not None
+    _over(repo, 90)
+    census.ingest(json.dumps({"session_id": "x", "workspace": {"current_dir": str(repo)},
+                              "context_window": {"used_percentage": 90}}))
+    assert hooks.nudge(payload) is None
 
 
 def test_nudge_silent_under_threshold(repo: Path) -> None:

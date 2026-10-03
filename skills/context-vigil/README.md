@@ -88,17 +88,28 @@ a diff, and is removed by `uninstall`. Change your mind any time with
 `claude`, suffixed per config dir for a second account), names sessions `cc-<repo>-<N>`, and falls back to plain `claude` if
 tmux is missing, you are already inside tmux, or `CLAUDE_NO_TMUX=1`.
 
+## How the percentage is measured
+
+Census (the status line) is trusted while the session's transcript has not
+changed since census last wrote; otherwise the transcript's tail is read
+incrementally (cost is the new bytes, never the whole file) against a window
+found from census, a table learned from every status-line payload, the model id
+(`[1m]`), or observed usage. Headless runs (`claude -p`, the SDK) have no status
+line and use the transcript only. Per-session bookkeeping lives under
+`sessions/` in the data root; none of it is shown to the model.
+
 ## Settings
 
 | Key | Default | Meaning |
 |---|---|---|
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
-| `context.window` | 200000 | window size for the transcript fallback only |
+| `context.window` | 200000 | last-resort window for the transcript estimate (census, a learned model table, `[1m]` model ids and observed usage over 200k all take precedence) |
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`) |
+| `nudge.repeat_step` | 5 | re-nudge each time ctx % has grown this many points past the last nudge (integer 1–50) |
 
 Resolution order, first match wins, re-read on every hook call:
 
-1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`
+1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`
 2. Worktree: `config set KEY VALUE --worktree`
 3. Global: `config set KEY VALUE`
 4. Built-in default
