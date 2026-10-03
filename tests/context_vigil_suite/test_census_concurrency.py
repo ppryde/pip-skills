@@ -56,3 +56,33 @@ def test_concurrent_writers_do_not_lose_entries(store_file, tmp_path):
     sessions = json.loads(store_file.read_text())["sessions"]
     assert set(sessions) == set(ids), "the flock read-modify-write lost concurrent entries"
     assert all(sessions[sid]["worktree_cwd"] == f"/wt/{sid}" for sid in ids)
+
+
+def test_concurrent_first_use_of_a_new_data_root_loses_nothing(store_file, tmp_path):
+    """N writers released together into a data root that does not exist yet all race
+    to create and claim it (dir, marker, .gitignore): none may lose its entry, fail,
+    or leave the root anything but one private, marked directory."""
+    root = store_file.parent
+    assert not root.exists()
+    ids = [f"s{i}" for i in range(24)]
+    go = tmp_path / "go"
+    readies = [tmp_path / f"ready-{sid}" for sid in ids]
+    procs = [_spawn_ingest(sid, r, go) for sid, r in zip(ids, readies)]
+    try:
+        deadline = time.time() + 90
+        while not all(r.exists() for r in readies):
+            assert time.time() < deadline, "children never became ready"
+            time.sleep(0.01)
+        go.touch()
+        for proc in procs:
+            proc.wait(timeout=90)
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                proc.kill()
+    assert [proc.returncode for proc in procs] == [0] * len(ids)
+
+    assert set(json.loads(store_file.read_text())["sessions"]) == set(ids)
+    assert [p.name for p in root.iterdir() if p.name == paths.ROOT_MARKER] == [paths.ROOT_MARKER]
+    assert (root / ".gitignore").read_text() == "*\n"
+    assert root.stat().st_mode & 0o777 == 0o700

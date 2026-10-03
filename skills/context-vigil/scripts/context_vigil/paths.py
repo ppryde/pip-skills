@@ -107,7 +107,11 @@ def _claimable(directory: Path) -> bool:
         names = os.listdir(str(directory))
     except OSError:
         return False
-    return not names or _is_legacy_root(directory, names)
+    if not names:
+        return True
+    # A concurrent first use may have claimed the directory between the marker check
+    # above and the listing: re-check, or a root just made ours reads as foreign.
+    return _has_marker(directory) or _is_legacy_root(directory, names)
 
 
 def data_root() -> Path:
