@@ -35,7 +35,9 @@ RESUME_PREAMBLE = "Resume from this handover."
 KICK_MARK = "handover received"
 TRUST_RE = (r"(?i)do you trust|trust this folder|trust the files|yes, i trust"
             r"|quick safety check|one you trust")
-READY_RE = r"(?i)\? for shortcuts|esc to interrupt|shift\+tab"
+TRUST_OPTION_RE = r"(?i)(\d+\.\s*)?(yes|no)\b"
+# newer builds drop the "? for shortcuts" hint; the input box (a ❯ row under a rule) remains
+READY_RE = r"(?im)\? for shortcuts|esc to interrupt|shift\+tab|^\s*─{10,}\s*\n\s*❯"
 SECRET_KEY = re.compile(r"(?i)token|secret|key|password|env|auth|cookie")
 # Only these session-record fields are ever printed by `state` (an allow-list: a new
 # field stays hidden until someone decides it is safe), and string values that look
@@ -511,8 +513,9 @@ def accept_trust_and_wait_ready(timeout: float = 90.0) -> Tuple[bool, str]:
         if not server_alive():
             return False, "tmux session gone (claude exited)"
         text = pane_text(60)
-        if re.search(TRUST_RE, text):
-            choice = trust_cursor_line(text) or ""
+        choice = trust_cursor_line(text) or ""
+        # trust text lingers in scrollback; the menu is live only while its cursor is on an option
+        if re.search(TRUST_RE, text) and re.match(TRUST_OPTION_RE, choice):
             if re.match(r"(?i)(\d+\.\s*)?yes\b", choice):
                 tmux("send-keys", "-t", SESSION, "Enter")
                 time.sleep(3)

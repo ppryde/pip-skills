@@ -177,3 +177,14 @@ def test_headless_prompt_keeps_notes_out_of_the_repo() -> None:
 def test_trust_cursor_line_reads_the_selected_option(screen: str, choice: object) -> None:
     assert ls.trust_cursor_line(screen) == choice
     assert (re.search(ls.TRUST_RE, screen) is not None) == (choice is not None)
+
+
+@pytest.mark.parametrize(("screen", "ready"), [
+    ("─" * 40 + "\n❯ Try \"fix lint errors\"\n" + "─" * 40 + "\n", True),
+    ("  ? for shortcuts\n", True),
+    ("Quick safety check\n ❯ 1. No, exit\n   2. Yes, I trust this folder\n", False),
+])
+def test_ready_re_sees_the_input_box_not_the_trust_menu(screen: str, ready: bool) -> None:
+    assert (re.search(ls.READY_RE, screen) is not None) is ready
+    assert (re.match(ls.TRUST_OPTION_RE, ls.trust_cursor_line(screen) or "") is not None) \
+        is (not ready)
