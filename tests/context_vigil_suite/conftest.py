@@ -9,7 +9,8 @@ import pytest
 SKILL = Path(__file__).resolve().parents[2] / "skills" / "context-vigil"
 LAUNCHER = SKILL / "scripts" / "context-vigil"
 
-_STRIP = ("TMUX", "TMUX_PANE", "CLAUDE_PROJECT_DIR", "ZDOTDIR")
+_STRIP = ("TMUX", "TMUX_PANE", "CLAUDE_PROJECT_DIR", "ZDOTDIR", "CLAUDE_SESSION_ID",
+          "CLAUDE_CODE_ENTRYPOINT")
 
 # Captured at import, before any monkeypatch, so they name the developer's real files.
 _REAL_HOME = Path(os.path.expanduser("~"))

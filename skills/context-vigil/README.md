@@ -11,7 +11,8 @@ With tmux the `/clear` and the resume are hands-free; without it you type
 
 - python3 3.9 or newer (the stock macOS `/usr/bin/python3` is enough); stdlib only
 - bash
-- tmux (optional) — only needed for hands-free auto mode
+- tmux 3.2 or newer (optional) — only needed for hands-free auto mode; older tmux
+  lacks `new-session -e`, and `claude-tmux` says so and starts plain `claude`
 
 ## Install
 
@@ -88,7 +89,10 @@ a diff, and is removed by `uninstall`. Change your mind any time with
 
 `claude-tmux` uses a dedicated tmux socket (`CLAUDE_TMUX_SOCK`; by default
 `claude`, suffixed per config dir for a second account), names sessions `cc-<repo>-<N>`, and falls back to plain `claude` if
-tmux is missing, you are already inside tmux, or `CLAUDE_NO_TMUX=1`.
+tmux is missing or older than 3.2, you are already inside tmux, `CLAUDE_NO_TMUX=1`, stdin or
+stdout is not a terminal, or the call is non-interactive (`-p`/`--print`, `--output-format`,
+`--input-format`). It forwards your `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and
+`CONTEXT_VIGIL_*` to the new session, so a running tmux server's stale environment does not apply.
 
 ## How the percentage is measured
 
@@ -118,7 +122,8 @@ Resolution order, first match wins, re-read on every hook call:
 4. Built-in default
 
 `status` shows each effective value and the layer it came from. `pause` /
-`resume` opt the current worktree out of and back into nudges and auto-clear;
+`resume` opt the current session's scope (this tmux pane; the whole worktree outside tmux) out of
+and back into nudges and auto-clear;
 the agent runs them only when you ask.
 
 When a nudge fires right after you typed a message, the agent answers you first
@@ -136,12 +141,13 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   config.json              # global settings
   census.json              # latest status-line reading per session
   install.json             # record of every entry install added (for uninstall)
-  worktrees/<slug>/        # slug = sanitised absolute worktree path
+  worktrees/<slug>/        # slug = sanitised git top level (realpath(cwd) outside git) + hash
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
-    sessions/<name>/       # same files, per session: CONTEXT_VIGIL_SESSION, else tmux-<socket>-<pane>
+    sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
+                           # else tmux-<socket>-<pane>; headless-<session_id> for a headless (sdk-*) session
 ```
 
 ## Uninstall

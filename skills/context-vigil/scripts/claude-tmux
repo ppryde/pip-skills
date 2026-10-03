@@ -7,9 +7,11 @@
 #  * CONTEXT_VIGIL_SESSION=<name> so two sessions in one worktree keep separate
 #    handovers;
 #  * env passthrough with -e: a new session on a running server inherits the
-#    SERVER's env, not yours (matters for CLAUDE_CONFIG_DIR and CONTEXT_VIGIL_*).
-# Falls through to plain `claude` when already in tmux, tmux is missing, or
-# CLAUDE_NO_TMUX=1. Usage: claude-tmux [claude args…] | claude-tmux attach [N|name]
+#    SERVER's env, not yours, so PATH, HOME, CLAUDE_*, ANTHROPIC_*, AWS_* and
+#    CONTEXT_VIGIL_* are passed explicitly (needs tmux >= 3.2 for new-session -e).
+# Falls through to plain `claude` when already in tmux, tmux is missing or older
+# than 3.2, CLAUDE_NO_TMUX=1, stdin/stdout is not a terminal, or the call is
+# non-interactive (-p/--print, --output-format, --input-format). Usage: claude-tmux [claude args…] | claude-tmux attach [N|name]
 set -u
 
 bin="$(type -P claude)" || { echo "claude-tmux: claude not found on PATH" >&2; exit 127; }
@@ -42,8 +44,23 @@ if [ "${1:-}" = "attach" ]; then
   exec tmux -L "$sock" attach-session -t "=$sel"
 fi
 
-if [ -n "${TMUX:-}" ] || [ -n "${CLAUDE_NO_TMUX:-}" ] || ! command -v tmux >/dev/null; then
+noninteractive=0
+for a in "$@"; do
+  case "$a" in
+    -p|--print|--output-format|--output-format=*|--input-format|--input-format=*) noninteractive=1 ;;
+  esac
+done
+if [ -n "${TMUX:-}" ] || [ -n "${CLAUDE_NO_TMUX:-}" ] || ! command -v tmux >/dev/null \
+    || [ "$noninteractive" = 1 ] || [ ! -t 0 ] || [ ! -t 1 ]; then
   exec "$bin" "$@"
+fi
+
+# new-session -e arrived in tmux 3.2; say why instead of failing every launch.
+if [[ "$(tmux -V 2>/dev/null)" =~ ([0-9]+)\.([0-9]+) ]]; then
+  if [ "${BASH_REMATCH[1]}" -lt 3 ] || { [ "${BASH_REMATCH[1]}" -eq 3 ] && [ "${BASH_REMATCH[2]}" -lt 2 ]; }; then
+    echo "claude-tmux: tmux ${BASH_REMATCH[1]}.${BASH_REMATCH[2]} is older than 3.2 (new-session -e) — launching plain claude (manual mode)" >&2
+    exec "$bin" "$@"
+  fi
 fi
 
 n=1
@@ -54,11 +71,14 @@ cmd="$(printf '%q' "$bin")"
 for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done
 
 envargs=(-e "CONTEXT_VIGIL_SESSION=$name")
-[ -n "${CLAUDE_CONFIG_DIR:-}" ] && envargs+=(-e "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR")
-while IFS='=' read -r var _; do
-  [ "$var" = "CONTEXT_VIGIL_SESSION" ] && continue
+# Names only (compgen -e), values by indirection: a value may hold a newline. The
+# session and entrypoint of an enclosing Claude must not leak into a fresh one.
+while IFS= read -r var; do
+  case "$var" in
+    CONTEXT_VIGIL_SESSION|CLAUDE_SESSION_ID|CLAUDE_CODE_ENTRYPOINT) continue ;;
+  esac
   envargs+=(-e "$var=${!var}")
-done < <(env | grep -E '^CONTEXT_VIGIL_[A-Z_]+=' )
+done < <(compgen -e | grep -E '^(PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+)$')
 
 if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" "${envargs[@]}" "$cmd"; then
   echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2

@@ -91,22 +91,33 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   windows.json             # learned model id -> context window size, from every status-line payload
   sessions/<session_id>.json  # per-session record, script-written, pruned after ~7 days (see Measure)
   install.json             # record of every entry install added (for uninstall)
-  worktrees/<slug>/        # slug = sanitised absolute worktree path
+  worktrees/<slug>/        # slug = sanitised git top level (realpath(cwd) outside git) + hash
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
-    sessions/<name>/       # same files, per session: CONTEXT_VIGIL_SESSION, else tmux-<socket>-<pane>
+    sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
+                           # else tmux-<socket>-<pane>; headless-<session_id> for a headless (sdk-*) session
 ```
 
 - **Keyed by worktree, not session id.** `/clear` mints a new session id; the
-  fresh session finds its handover by worktree path, which is stable.
+  fresh session finds its handover by worktree, which is stable. The worktree is
+  the git top level (`git rev-parse --show-toplevel`, 2s timeout, realpath; the
+  realpath of the cwd outside git), so hooks (payload cwd) and the CLI (process
+  cwd) agree from any sub-directory.
 - Session scoping (vigil's `VIGIL_SESSION`, renamed `CONTEXT_VIGIL_SESSION`) is
   kept for two sessions sharing one worktree; `claude-tmux` sets it. Inside
-  tmux without it, the scope falls back to `tmux-<socket>-<pane>` — the pane id
+  tmux the pane id is appended (`<name>-<pane>`): a new window or split inherits
+  the tmux session environment, so the name alone would be shared by two Claude
+  instances. Inside tmux without it, the scope falls back to `tmux-<socket>-<pane>` — the pane id
   survives `/clear` and is unique per tmux server, so `tmux` + plain `claude`
   is isolated too. Outside tmux all sessions in a worktree share one scope;
   that is harmless because `/clear` is then typed by hand, in one place at a time.
+- **Headless sessions** (hook env `CLAUDE_CODE_ENTRYPOINT` = `sdk-cli`/`sdk-ts`/`sdk-py`, else the
+  session record's `headless`) get their own scope `sessions/headless-<session_id>` and never touch
+  tmux: a child `claude -p` inherits `TMUX`, `TMUX_PANE` and `CONTEXT_VIGIL_SESSION` from its parent
+  and must not reset or act on the parent's cycle, gate, cooldown, clear flag or handoff. The CLI
+  resolves the same scope from `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_SESSION_ID`.
 - `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups).
 - census path: `census.json` here, not `$CLAUDE_CONFIG_DIR/census/status.json`.
   The existing census plugin honours `CENSUS_STORE`, so a machine running both
@@ -126,7 +137,7 @@ errors go to stderr with non-zero exit.
 | `context` | `ctx NN%` for this session (threshold appended when over); `ctx ~NN% (window unconfirmed)` while the window is only the configured fallback |
 | `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
 | `handover --resume` / `--discard` | Load a handover waiting from an earlier session / archive it unread |
-| `pause` / `resume` | Opt this worktree out / back in; resume also releases the gate |
+| `pause` / `resume` | Opt this session's scope out / back in (this tmux pane, or the worktree outside tmux); resume also releases the gate |
 | `config get\|set KEY [VAL] [--worktree]` | Read or write a setting globally, or for this worktree only (see Configuration) |
 | `ingest` | Read a status-line payload on stdin into census (quarantined) |
 | `hook session-start\|stop\|nudge` | Hook entrypoints (read hook JSON on stdin, always exit 0) |
@@ -229,7 +240,14 @@ wrapper. A bare `tmux claude` hits problems the wrapper already solved:
    defensive — it matters only for the few with a second account or per-shell
    `CONTEXT_VIGIL_*` overrides.
 
-Fall-through: already inside tmux, tmux missing, or `CLAUDE_NO_TMUX=1` → exec
+Environment: a new session on a running server inherits the server's env, so the
+caller's `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and `CONTEXT_VIGIL_*`
+are passed with `-e` (needs tmux >= 3.2; the enclosing session's
+`CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` are not forwarded).
+
+Fall-through: already inside tmux, tmux missing, tmux older than 3.2 (one-line
+reason on stderr), `CLAUDE_NO_TMUX=1`, stdin or stdout not a terminal, or a
+non-interactive call (`-p`/`--print`, `--output-format`, `--input-format`) → exec
 plain `claude "$@"` unchanged. Arguments are quoted individually for tmux's
 `/bin/sh`.
 

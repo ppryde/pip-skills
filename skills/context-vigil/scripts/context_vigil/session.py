@@ -225,3 +225,19 @@ def lookup_window(model_id: Optional[str]) -> Optional[int]:
         return table[model_id]
     bare = model_id.split("[", 1)[0]
     return table.get(bare)
+
+
+def is_headless(session_id: Optional[str]) -> bool:
+    """Headless by the environment's entrypoint when present, else by the record."""
+    from_env = paths.headless_from_env()
+    if from_env is not None:
+        return from_env
+    return bool(session_id) and load(session_id or "").get("headless") is True
+
+
+def scope(cwd: Path, session_id: Optional[str]) -> Path:
+    """The scope a hook or the CLI acts on: the headless session's own, else the
+    worktree/session/pane scope."""
+    if is_headless(session_id):
+        return paths.headless_scope(cwd, session_id)
+    return paths.scope_dir(cwd)

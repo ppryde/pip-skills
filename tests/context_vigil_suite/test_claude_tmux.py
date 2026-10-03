@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pty
 import shutil
 import subprocess
 from pathlib import Path
@@ -45,10 +46,24 @@ def stubs(iso: Path) -> Path:
     return bindir
 
 
-def _run(stubs: Path, cwd: Path, *args: str, **env: str) -> str:
+def _pty_run(argv: list, cwd: Path, env: dict, tty: bool = True):
+    """Run argv with stdin and stdout on a pty (a terminal) unless ``tty=False``."""
+    master, slave = pty.openpty()
+    try:
+        return subprocess.run(
+            argv, cwd=cwd, env=env, stdin=slave if tty else subprocess.DEVNULL,
+            stdout=slave if tty else subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, timeout=10)
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def _run(stubs: Path, cwd: Path, *args: str, tty: bool = True, **env: str) -> str:
     full = dict(os.environ, PATH=str(stubs), **env)
-    subprocess.run(["bash", str(SCRIPT), *args], cwd=cwd, env=full, check=True,
-                   capture_output=True, text=True, timeout=10)
+    (stubs.parent / "calls.log").touch()
+    result = _pty_run(["bash", str(SCRIPT), *args], cwd, full, tty)
+    assert result.returncode == 0, result.stderr
     return (stubs.parent / "calls.log").read_text()
 
 
@@ -90,14 +105,13 @@ def test_falls_through_without_tmux(stubs: Path, repo: Path) -> None:
 
 
 def test_quotes_arguments(stubs: Path, repo: Path) -> None:
-    log = _run(stubs, repo, "-p", "it's a test")
+    log = _run(stubs, repo, "--model", "it's a test")
     assert "it\\'s\\ a\\ test" in log or "'it'\"'\"'s a test'" in log
 
 
 def test_runs_under_macos_bash32(stubs: Path, repo: Path) -> None:
     full = dict(os.environ, PATH=str(stubs))
-    result = subprocess.run(["/bin/bash", str(SCRIPT)], cwd=repo, env=full,
-                            capture_output=True, text=True, timeout=10)
+    result = _pty_run(["/bin/bash", str(SCRIPT)], repo, full)
     assert result.returncode == 0, result.stderr
 
 
@@ -198,8 +212,7 @@ def test_failed_new_session_falls_back_to_plain_claude(stubs: Path, repo: Path) 
         '[[ " $* " == *" new-session "* ]] && exit 1\n'
         '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
     full = dict(os.environ, PATH=str(stubs))
-    result = subprocess.run(["bash", str(SCRIPT), "--model", "opus"], cwd=repo, env=full,
-                            capture_output=True, text=True, timeout=10)
+    result = _pty_run(["bash", str(SCRIPT), "--model", "opus"], repo, full)
     log = log_path.read_text()
     assert result.returncode == 0
     assert "manual mode" in result.stderr
@@ -237,3 +250,52 @@ def test_missing_claude_is_127(stubs: Path, repo: Path) -> None:
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 127
     assert "claude not found" in result.stderr
+
+
+def _new_session(log: str) -> str:
+    return [ln for ln in log.splitlines() if "new-session" in ln][0]
+
+
+def test_forwards_the_callers_environment_explicitly(stubs: Path, repo: Path) -> None:
+    line = _new_session(_run(
+        stubs, repo, ANTHROPIC_MODEL="opus", CLAUDE_CODE_USE_BEDROCK="1", AWS_PROFILE="work",
+        CONTEXT_VIGIL_SESSION="stale-inherited", CLAUDE_CODE_ENTRYPOINT="sdk-cli",
+        CLAUDE_SESSION_ID="parent", UNRELATED_SECRET="no"))
+    assert f"-e PATH={stubs}" in line and "-e HOME=" in line
+    assert "-e ANTHROPIC_MODEL=opus" in line
+    assert "-e CLAUDE_CODE_USE_BEDROCK=1" in line and "-e AWS_PROFILE=work" in line
+    assert "CONTEXT_VIGIL_SESSION=cc-repo-1" in line and "stale-inherited" not in line
+    assert "ENTRYPOINT" not in line and "CLAUDE_SESSION_ID" not in line
+    assert "UNRELATED_SECRET" not in line
+
+
+@pytest.mark.parametrize("args", [
+    ("-p", "q"), ("--print", "q"), ("--output-format", "json"), ("--output-format=json",),
+    ("--input-format", "stream-json"), ("--input-format=stream-json",)])
+def test_non_interactive_flags_exec_plain_claude(stubs: Path, repo: Path, args: tuple) -> None:
+    log = _run(stubs, repo, *args)
+    assert f"claude {' '.join(args)}" in log and "new-session" not in log
+
+
+def test_no_tty_execs_plain_claude(stubs: Path, repo: Path) -> None:
+    log = _run(stubs, repo, "--model", "opus", tty=False)
+    assert "claude --model opus" in log and "new-session" not in log
+
+
+def test_old_tmux_says_why_and_falls_back(stubs: Path, repo: Path) -> None:
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
+        '[[ "$1" == "-V" ]] && echo "tmux 3.1c"\nexit 0\n')
+    full = dict(os.environ, PATH=str(stubs))
+    result = _pty_run(["bash", str(SCRIPT)], repo, full)
+    log = (stubs.parent / "calls.log").read_text()
+    assert "older than 3.2" in result.stderr and "3.1" in result.stderr
+    assert "new-session" not in log and "claude" in log
+
+
+def test_tmux_3_2_and_newer_start_a_session(stubs: Path, repo: Path) -> None:
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
+        '[[ "$1" == "-V" ]] && echo "tmux 3.5a"\n'
+        '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
+    assert "new-session" in _run(stubs, repo)

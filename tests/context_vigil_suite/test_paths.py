@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -46,11 +48,50 @@ def test_scope_dir_falls_back_to_tmux_pane(repo: Path, monkeypatch: pytest.Monke
     assert paths.scope_dir(repo).name == "tmux-default-7"
 
 
-def test_explicit_session_beats_pane(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_session_gets_the_pane_appended_inside_tmux(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")
+    assert paths.scope_dir(repo).name == "cc-repo-1"          # outside tmux: as named
     monkeypatch.setenv("TMUX", "/private/tmp/tmux-501/default,123,0")
     monkeypatch.setenv("TMUX_PANE", "%7")
+    assert paths.scope_dir(repo).name == "cc-repo-1-7"
+    monkeypatch.setenv("TMUX_PANE", "%8")                      # a split inherits the name
+    assert paths.scope_dir(repo).name == "cc-repo-1-8"
+
+
+def _git_init(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True, timeout=30)
+
+
+def test_worktree_key_is_the_git_toplevel_from_any_subdirectory(repo: Path) -> None:
+    _git_init(repo)
+    sub = repo / "a" / "b"
+    sub.mkdir(parents=True)
+    assert paths.worktree_key(sub) == os.path.realpath(str(repo))
+    assert paths.scope_dir(sub) == paths.scope_dir(repo)
+
+
+def test_worktree_key_outside_git_is_the_resolved_cwd(repo: Path) -> None:
+    sub = repo / "plain"
+    sub.mkdir()
+    assert paths.worktree_key(sub) == os.path.realpath(str(sub))
+    assert paths.worktree_key(repo / "missing") == os.path.realpath(str(repo / "missing"))
+
+
+def test_headless_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert paths.headless_from_env() is None
+    for value, expected in (("sdk-cli", True), ("sdk-ts", True), ("sdk-py", True),
+                            ("cli", False), ("claude-vscode", False), ("weird", None)):
+        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", value)
+        assert paths.headless_from_env() is expected
+
+
+def test_headless_scope_is_its_own_and_ignores_inherited_env(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")
-    assert paths.scope_dir(repo).name == "cc-repo-1"
+    scope = paths.headless_scope(repo, "child-1")
+    assert scope == paths.worktree_dir(repo) / "sessions" / "headless-child-1"
+    assert scope != paths.scope_dir(repo)
 
 
 def test_scope_dir_sanitises_session_name(repo: Path) -> None:

@@ -56,7 +56,7 @@ def _str(payload: Dict[str, object], key: str) -> Optional[str]:
 
 def nudge(payload: Dict[str, object]) -> Optional[str]:
     cwd = _cwd(payload)
-    scope = paths.scope_dir(cwd)
+    scope = session.scope(cwd, _str(payload, "session_id"))
     if state.is_paused(scope) or state.cooldown_active(scope) or state.clear_requested(scope):
         return None
     threshold = config.threshold(cwd)
@@ -102,7 +102,10 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
 
 
 def stop(payload: Dict[str, object]) -> Optional[str]:
-    scope = paths.scope_dir(_cwd(payload))
+    session_id = _str(payload, "session_id")
+    if session.is_headless(session_id):
+        return None   # a headless session never types into a pane, inherited or not
+    scope = session.scope(_cwd(payload), session_id)
     if not state.clear_requested(scope):
         return None
     target = tmux.pane()
@@ -118,7 +121,9 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
 
 
 def session_start(payload: Dict[str, object]) -> Optional[str]:
-    scope = paths.scope_dir(_cwd(payload))
+    session_id = _str(payload, "session_id")
+    headless = session.is_headless(session_id)
+    scope = session.scope(_cwd(payload), session_id)
     source = _str(payload, "source")
     out: Optional[str] = None
     if source == "clear":
@@ -128,7 +133,7 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
                 "hookEventName": "SessionStart",
                 "additionalContext": f"{handover.RESUME_PREAMBLE}\n\n{text}",
             }})
-            target = tmux.pane()
+            target = None if headless else tmux.pane()
             if target is not None and tmux.reachable():
                 delay = os.environ.get("CONTEXT_VIGIL_KICK_DELAY", "2")
                 tmux.send_detached(target, [["-l", KICK_PROMPT], ["Enter"]], delay)

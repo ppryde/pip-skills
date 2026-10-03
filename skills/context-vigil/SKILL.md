@@ -94,7 +94,8 @@ nothing with it unless the user asks: "resume the handover" → run
 - "Nudge me at 60%": `config set context.threshold 60` (all repos), or add
   `--worktree` for this repo only. 1–95.
 - `status` shows each setting and where it came from.
-- `pause` / `resume`: stop or restart nudges and auto-clear in this worktree.
+- `pause` / `resume`: stop or restart nudges and auto-clear for this session (this tmux pane; the whole
+  worktree outside tmux).
   Run them only when the user asks.
 - `launcher`: show or change how Claude launches (tmux). Run it without
   `--yes` first, show the diff, and apply (`--yes`) only on the user's say-so.

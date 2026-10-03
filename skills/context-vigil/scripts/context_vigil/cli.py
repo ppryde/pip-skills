@@ -18,6 +18,7 @@ from context_vigil import (
     install,
     launcher,
     paths,
+    session,
     state,
     tmux,
 )
@@ -62,9 +63,10 @@ def build_parser() -> argparse.ArgumentParser:
     ctxp = sub.add_parser("context", help="print ctx NN%% for this session")
     ctxp.add_argument("--session-id", default=None)
     ctxp.set_defaults(func=_cmd_context)
-    sub.add_parser("pause", help="stop nudges/auto-clear in this worktree").set_defaults(
+    sub.add_parser("pause", help="stop nudges/auto-clear for this session").set_defaults(
         func=_cmd_pause)
-    sub.add_parser("resume", help="re-enable this worktree").set_defaults(func=_cmd_resume)
+    sub.add_parser("resume", help="re-enable nudges/auto-clear for this session").set_defaults(
+        func=_cmd_resume)
     sub.add_parser("status", help="show install, mode and settings").set_defaults(
         func=_cmd_status)
     ip = sub.add_parser("install", help="wire hooks + status line (dry run without --yes)")
@@ -86,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _cmd_handover(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
-    scope = paths.scope_dir(cwd)
+    scope = _scope(cwd)
     if args.resume or args.discard:
         text = state.consume_handoff(scope)
         if text is None:
@@ -104,13 +106,13 @@ def _cmd_handover(args: argparse.Namespace) -> int:
             max_tokens=config.handover_max_tokens(cwd))
     except handover.HandoverError as exc:
         raise CliError(f"handover refused: {exc}") from exc
-    result = state.request_clear(paths.scope_dir(cwd), document)
+    result = state.request_clear(scope, document)
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
     if result == "cooldown":
         raise CliError("handover refused: a session just started — try again in a few "
                        "minutes (cooldown)")
-    if tmux.reachable():
+    if not session.is_headless(_env_session_id()) and tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
         print("handover saved — type /clear, then send any message (e.g. \"go\") "
@@ -143,6 +145,11 @@ def _env_session_id() -> Optional[str]:
     return os.environ.get("CLAUDE_SESSION_ID") or None
 
 
+def _scope(cwd: Path) -> Path:
+    """Same scope the hooks resolve for this session (headless children get their own)."""
+    return session.scope(cwd, _env_session_id())
+
+
 def _cmd_context(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
     reading = context.current_reading(
@@ -152,18 +159,20 @@ def _cmd_context(args: argparse.Namespace) -> int:
 
 
 def _cmd_pause(args: argparse.Namespace) -> int:
-    state.pause(paths.scope_dir(Path.cwd()))
+    state.pause(_scope(Path.cwd()))
     print("context-vigil paused here — no nudges or auto-clear until `resume`")
     return 0
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
-    state.resume(paths.scope_dir(Path.cwd()))
+    state.resume(_scope(Path.cwd()))
     print("context-vigil resumed here")
     return 0
 
 
 def _mode_line() -> str:
+    if session.is_headless(_env_session_id()):
+        return "mode: headless (no /clear is sent; the next session reads the handover)"
     if tmux.reachable():
         return "mode: auto (inside tmux — /clear is sent for you)"
     if tmux.installed():
@@ -173,7 +182,7 @@ def _mode_line() -> str:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
-    scope = paths.scope_dir(cwd)
+    scope = _scope(cwd)
     record = paths.install_record_path()
     resolved = config.resolve(cwd)
     threshold, layer = resolved["context.threshold"]

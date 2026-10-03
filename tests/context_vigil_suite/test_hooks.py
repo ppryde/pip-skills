@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -239,6 +240,64 @@ def test_session_scoping(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state.request_clear(paths.scope_dir(repo), "MINE")
     monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-2")
     assert hooks.session_start(_payload(repo, source="clear")) is None
+
+
+def test_hook_and_cli_share_a_scope_across_subdirectories(repo: Path, run_cli) -> None:
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=30)
+    sub = repo / "pkg" / "api"
+    sub.mkdir(parents=True)
+    notes = repo / "notes.md"
+    notes.write_text("## Failed Attempts\nNone\n\n## Next Step\ngo\n")
+    result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=sub)
+    assert result.returncode == 0, result.stderr
+    assert state.clear_requested(paths.scope_dir(repo))
+    out = hooks.stop({"cwd": str(repo), "session_id": "s1"})
+    assert out is not None and "handover saved" in out
+
+
+def test_two_panes_sharing_a_named_session_keep_separate_scopes(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")
+    monkeypatch.setenv("TMUX", "/tmp/tmux-501/claude,1,0")
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    state.request_clear(paths.scope_dir(repo), "PANE ONE")
+    monkeypatch.setenv("TMUX_PANE", "%2")
+    assert hooks.session_start(_payload(repo, source="clear")) is None
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    out = hooks.session_start(_payload(repo, source="clear"))
+    assert out is not None and "PANE ONE" in out
+
+
+def test_headless_child_never_touches_the_parent_scope_or_tmux(
+        repo: Path, fake_tmux: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")   # inherited from the parent
+    parent = paths.scope_dir(repo)
+    state.request_clear(parent, "PARENT HANDOFF")
+    state.set_gate(parent)
+    before = sorted(p.name for p in parent.iterdir())
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "sdk-cli")
+    child = {"cwd": str(repo), "session_id": "child"}
+    assert hooks.session_start({**child, "source": "startup"}) is None
+    assert hooks.session_start({**child, "source": "clear"}) is None
+    assert hooks.stop(child) is None
+    _over(repo)
+    census.ingest(json.dumps({"session_id": "child", "workspace": {"current_dir": str(repo)},
+                              "context_window": {"used_percentage": 80}}))
+    hooks.nudge({**child, "hook_event_name": "PostToolUse"})
+    assert sorted(p.name for p in parent.iterdir()) == before
+    assert state.read_handoff(parent) == "PARENT HANDOFF"
+    assert not fake_tmux.exists()
+    assert paths.headless_scope(repo, "child").is_dir()
+
+
+def test_headless_by_record_also_skips_tmux(repo: Path, fake_tmux: Path) -> None:
+    record = session.blank()
+    record["headless"] = True
+    session.save("child", record)
+    own = paths.headless_scope(repo, "child")
+    state.request_clear(own, "doc")
+    assert hooks.stop({"cwd": str(repo), "session_id": "child"}) is None
+    assert state.clear_requested(own) and not fake_tmux.exists()
 
 
 # --- run / launcher ----------------------------------------------------------
