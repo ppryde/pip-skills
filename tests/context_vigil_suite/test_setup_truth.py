@@ -407,6 +407,12 @@ def test_waiting_notice_caps_the_branch() -> None:
     assert "b" * 81 not in text and len(text) < 250
 
 
+def test_waiting_notice_caps_the_goal_line() -> None:
+    doc = "## Goal\n" + "g" * 500 + "\nsecond line\n"
+    text = handover.summary(doc, None)
+    assert "g" * 80 in text and "g" * 81 not in text and "second line" not in text
+
+
 # --- Docs: SKILL.md, README, spec ------------------------------------------------
 
 def _doc(name: str) -> str:

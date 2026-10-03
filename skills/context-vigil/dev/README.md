@@ -21,11 +21,13 @@ by default, `--model haiku`); run it only with the owner's approval.
   sandbox settings' `env`. The sandbox lives in `$TMPDIR`. Everything it echoes
   from the pane or a run (`peek`, timeout tails, `state` first lines, headless
   output) is passed through a redactor that masks known token formats
-  (`sk-…`, `AKIA…`, `ghp_…`/`github_pat_…`, `xox?-…`, `AIza…`, private-key
-  blocks, JWTs, credentials in URLs, `KEY=`-style assignments) plus any
+  (`sk-…`, `AKIA…`, `ghp_…`/`github_pat_…`, `xox?-…`, Slack webhooks, `AIza…`,
+  `npm_`/`hf_`/`SG.`/`dop_v1_`/`AGE-SECRET-KEY-` tokens, private-key blocks, JWTs,
+  credentials in URLs, `<name>_KEY=`/`PASS=`/`pwd=`/`passphrase:` assignments with a
+  literal value, `--token`/`--api-key` flags, `Authorization:` headers) plus any
   `token=`/`password:`/`api_key`/`Bearer …` in any case, as `[redacted]` —
   belt and braces, in case the model prints something it found. `state` prints
-  only allow-listed session-record fields, and masks a key-shaped value even
+  only allow-listed session-record fields, and masks a token-shaped value even
   there.
 - Permissions are narrow: `Bash(<this checkout>/scripts/context-vigil:*)`,
   `Bash(cp:*)`, Read, Write, Edit. `--yolo` skips permission prompts instead.

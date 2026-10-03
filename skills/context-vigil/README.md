@@ -274,6 +274,11 @@ $CLAUDE_CONFIG_DIR/context-vigil/
                            # else tmux-<socket>-<pane>; headless-<session_id> markers for a headless (sdk-*) session
 ```
 
+Writers never block a render: the status-line ingest waits at most ~0.5 s for
+`census.json`'s lock (a session record's lock, ~1 s). If it cannot take the lock in
+that time it drops that one reading, silently; the next status-line render writes a fresh one, so a missed reading is never stale
+for long, and a render is never held up waiting on a lock.
+
 ## Uninstall
 
 Ask Claude, or run `context-vigil uninstall` (dry run) and then

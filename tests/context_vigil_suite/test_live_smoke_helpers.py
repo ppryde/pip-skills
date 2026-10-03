@@ -5,6 +5,8 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
+import pytest
+
 from .conftest import SKILL
 
 
@@ -85,19 +87,38 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
-def test_redaction_covers_common_key_shapes() -> None:
-    samples = [
-        (f"ghp_{'A' * 36}", "AAAAAAAA"), (f"github_pat_{'B' * 30}", "BBBBBBBB"),
-        ("xoxb-1234567890-abcdefghij", "abcdefghij"), (f"AIza{'C' * 35}", "CCCCCCCC"),
-        ("-----BEGIN RSA PRIVATE KEY-----", "PRIVATE KEY"), ("my_token=abcdef123", "abcdef123"),
-        ("password: hunter2222", "hunter2222"), ("Authorization: Bearer abc.def.ghi", "abc.def"),
-        ('"api_key": "zzzzzzzzzz"', "zzzzzzzzzz"),
-        ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.x", "eyJhbG"),
-        ("https://user:hunter3hunter3@example.invalid/x", "hunter3")]
-    for text, fragment in samples:
-        out = ls.redact(f"before {text} after")
-        assert fragment not in out and "[redacted]" in out, text
-        assert out.startswith("before")
+REDACTION_SAMPLES = [
+    (f"ghp_{'A' * 36}", "AAAAAAAA"), (f"github_pat_{'B' * 30}", "BBBBBBBB"),
+    ("xoxb-1234567890-abcdefghij", "abcdefghij"), (f"AIza{'C' * 35}", "CCCCCCCC"),
+    ("-----BEGIN RSA PRIVATE KEY-----", "PRIVATE KEY"), ("my_token=abcdef123", "abcdef123"),
+    ("password: hunter2222", "hunter2222"), ("Authorization: Bearer abc.def.ghi", "abc.def"),
+    ('"api_key": "zzzzzzzzzz"', "zzzzzzzzzz"),
+    ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.x", "eyJhbG"),
+    ("https://user:hunter3hunter3@example.invalid/x", "hunter3"),
+    # formats the skill's own scanner used to mask (kept here after it was removed)
+    ("https://hooks.slack.com/services/T00000000/B00000000/" + "X" * 24, "XXXXXXXX"),
+    ("npm_" + "E" * 36, "EEEEEEEE"), ("hf_" + "G" * 34, "GGGGGGGG"),
+    ("SG." + "H" * 22 + "." + "I" * 43, "HHHHHHHH"), ("dop_v1_" + "a" * 64, "aaaaaaaa"),
+    ("AGE-SECRET-KEY-1" + "J" * 58, "JJJJJJJJ"),
+    ("SIGNING_KEY=" + "4f9a8b7c6d5e4f3a" * 2, "4f9a8b7c6d5e"),
+    ("PRIVATE_KEY=abcdEFGH1234ijklMNOP", "abcdEFGH1234"),
+    ("--token abcdef0123456789abcd", "abcdef0123456789"),
+    ("--api-key abcdef0123456789abcd", "abcdef0123456789"),
+    ("pwd=Hunter2Hunter2", "Hunter2Hunter2"), ("PASS=Tr0ub4dor&3x", "Tr0ub4dor"),
+    ("passphrase: Tr0ub4dor&3x", "Tr0ub4dor"),
+    ("Authorization: Basic dXNlcjpwYXNzd29yZDEyMzQ1Njc4", "dXNlcjpwYXNzd29yZDEyMzQ1Njc4"),
+    ("Authorization: Token abcdef0123456789abcd", "abcdef0123456789"),
+    ("sk-ant-FAKE-canary-123456789", "canary"), ("AKIA" + "Q" * 16, "QQQQQQQQ"),
+    ("rk_live_" + "Z" * 20, "ZZZZZZZZ"), ("glpat-" + "y" * 22, "yyyyyyyy"),
+    ("ya29." + "w" * 24, "wwwwwwww"),
+]
+
+
+@pytest.mark.parametrize("text, fragment", REDACTION_SAMPLES)
+def test_redaction_covers_common_key_shapes(text: str, fragment: str) -> None:
+    out = ls.redact(f"before {text} after")
+    assert fragment not in out and "[redacted]" in out
+    assert out.startswith("before") and out.endswith("after")
 
 
 def test_state_redacts_by_value_as_well_as_key_name() -> None:

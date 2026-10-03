@@ -336,6 +336,23 @@ def test_env_file_is_private_and_removed_when_tmux_fails(
     assert (iso / "mode").read_text().strip() == "600"
 
 
+def test_env_file_is_removed_when_the_launcher_dies_mid_launch(
+        stubs: Path, repo: Path, iso: Path) -> None:
+    """A launcher killed by a signal the HUP/INT/TERM trap does not cover (USR1 here)
+    after it wrote the env file still removes it, via the EXIT trap."""
+    _running_tmux(stubs)
+    tmpdir = iso / "tmp"
+    tmpdir.mkdir()
+    tmux = (stubs / "tmux").read_text().replace(
+        'if [[ " $* "', 'if [[ " $* " == *" new-session "* ]]; then kill -USR1 $PPID; read -t 2 -u 0 _; exit 0; fi\n'
+        'if [[ " $* "', 1)
+    (stubs / "tmux").write_text(tmux)
+    full = _env(stubs, TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
+    result = _pty_run(["bash", str(SCRIPT)], repo, full)
+    assert result.returncode != 0
+    assert list(tmpdir.iterdir()) == []
+
+
 def test_no_tty_execs_plain_claude(stubs: Path, repo: Path) -> None:
     log = _run(stubs, repo, "--model", "opus", tty=False)
     assert "claude --model opus" in log and "new-session" not in log
