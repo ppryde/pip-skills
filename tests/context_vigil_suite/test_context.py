@@ -6,12 +6,7 @@ from pathlib import Path
 
 from context_vigil import census, context, session
 
-
-def _ingest(repo: Path, sid: str, pct: float) -> None:
-    census.ingest(json.dumps({
-        "session_id": sid, "workspace": {"current_dir": str(repo)},
-        "context_window": {"used_percentage": pct},
-    }))
+from .test_context_window import _ingest
 
 
 def _transcript(tmp: Path, tokens: int) -> Path:
@@ -38,10 +33,7 @@ def test_transcript_fallback_when_no_census(repo: Path, iso: Path) -> None:
 
 
 def test_transcript_fallback_when_census_stale(repo: Path, iso: Path) -> None:
-    census.ingest(json.dumps({
-        "session_id": "a", "workspace": {"current_dir": str(repo)},
-        "context_window": {"used_percentage": 90},
-    }), now=time.time() - 3600)
+    _ingest(repo, "a", 90, now=time.time() - 3600)
     path = _transcript(iso, 20000)
     assert context.current_percent(repo, "a", str(path), 200000) == 10
 
@@ -77,8 +69,7 @@ def test_census_raising_falls_back_to_transcript(
 
     path = _transcript(iso, 50000)
     # a session census has heard from, so the census branch really runs
-    census.ingest(json.dumps({"session_id": "a", "workspace": {"current_dir": str(repo)},
-                              "context_window": {"used_percentage": 90}}))
+    _ingest(repo, "a", 90)
     assert session.load("a")["has_statusline"] is True
     monkeypatch.setattr(census, "for_session", boom)
     assert context.current_percent(repo, "a", str(path), 200000) == 25

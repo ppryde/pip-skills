@@ -6,15 +6,10 @@ from pathlib import Path
 import pytest
 from context_vigil import config, install, paths
 
+from .conftest import read_settings as _settings
+from .conftest import write_settings as _write
+
 FOREIGN_HOOK = {"hooks": [{"type": "command", "command": "echo mine"}]}
-
-
-def _settings(cfg: Path) -> dict:
-    return json.loads((cfg / "settings.json").read_text())
-
-
-def _write(cfg: Path, data: dict) -> None:
-    (cfg / "settings.json").write_text(json.dumps(data, indent=2) + "\n")
 
 
 def _ours(entries: list) -> list:
@@ -259,7 +254,7 @@ def test_dry_run_announces_threshold_write(run_cli, cfg: Path) -> None:
     assert "will set context.threshold = 50" in applied.stdout
 
 
-@pytest.mark.parametrize("hooks", ["oops", {"Stop": "oops"}])
+@pytest.mark.parametrize("hooks", ["oops", {"Stop": "oops"}, []])
 def test_malformed_hooks_shape_refuses(cfg: Path, hooks) -> None:
     _write(cfg, {"hooks": hooks})
     before = (cfg / "settings.json").read_text()
@@ -276,12 +271,17 @@ def _record_skill_dir(old: str) -> None:
     paths.install_record_path().write_text(json.dumps(record))
 
 
-def test_reinstall_repoints_capture_statusline_from_old_skill_dir(cfg: Path) -> None:
+def _capture_statusline_from_old_skill_dir(cfg: Path) -> None:
+    """Installed, then the recorded skill dir and the status-line command both moved."""
     install.apply(install.plan_install(threshold=None))
     _record_skill_dir("/old/skill")
     s = _settings(cfg)
     s["statusLine"]["command"] = 'bash "/old/skill/scripts/capture.sh"'
     _write(cfg, s)
+
+
+def test_reinstall_repoints_capture_statusline_from_old_skill_dir(cfg: Path) -> None:
+    _capture_statusline_from_old_skill_dir(cfg)
     plan = install.plan_install(threshold=None)
     assert plan.record["statusline"] == {"kind": "capture"}
     assert not plan.manual
@@ -291,11 +291,7 @@ def test_reinstall_repoints_capture_statusline_from_old_skill_dir(cfg: Path) -> 
 
 def test_uninstall_removes_capture_statusline_from_recorded_old_skill_dir(
         cfg: Path) -> None:
-    install.apply(install.plan_install(threshold=None))
-    _record_skill_dir("/old/skill")
-    s = _settings(cfg)
-    s["statusLine"]["command"] = 'bash "/old/skill/scripts/capture.sh"'
-    _write(cfg, s)
+    _capture_statusline_from_old_skill_dir(cfg)
     install.apply(install.plan_uninstall())
     assert not (cfg / "settings.json").exists()
 
@@ -385,14 +381,6 @@ def test_non_dict_entries_are_kept_and_never_crash(cfg: Path) -> None:
     assert kept[:3] == [3, "x", {"hooks": ["y", None]}] and len(kept) == 4
     install.apply(install.plan_uninstall())
     assert _settings(cfg)["hooks"]["Stop"] == [3, "x", {"hooks": ["y", None]}]
-
-
-def test_list_hooks_is_a_clean_refusal_not_a_crash(cfg: Path) -> None:
-    _write(cfg, {"hooks": []})
-    with pytest.raises(install.InstallError):
-        install.plan_install(threshold=None)
-    with pytest.raises(install.InstallError):
-        install.plan_uninstall()
 
 
 def test_reinstall_with_changed_matcher_replaces_our_entry(cfg: Path,

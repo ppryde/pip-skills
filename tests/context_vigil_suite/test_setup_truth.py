@@ -14,19 +14,12 @@ from pathlib import Path
 import pytest
 from context_vigil import census, handover, hooks, install, launcher, paths, state
 
-from .conftest import SKILL
+from .conftest import SKILL, statusline_payload
+from .conftest import read_settings as _settings
 
 SPEC = SKILL.parents[1] / "docs" / "superpowers" / "specs" / "2026-10-02-context-vigil-design.md"
 TMUX_ENV = {"TMUX": "/tmp/fake-tmux,1,0", "TMUX_PANE": "%9",
             "CONTEXT_VIGIL_SESSION": "cc-repo-1"}
-
-
-@pytest.fixture
-def zsh(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("SHELL", "/bin/zsh")
-    rc = home / ".zshrc"
-    rc.write_text("export FOO=1\n")
-    return rc
 
 
 @pytest.fixture
@@ -51,10 +44,6 @@ def _notes(iso: Path) -> Path:
     notes.write_text("## Goal\nMove the work.\n\n## Failed Attempts\nNone\n\n"
                      "## Next Step\ncarry on with step two\n")
     return notes
-
-
-def _settings(cfg: Path) -> dict:
-    return json.loads((cfg / "settings.json").read_text())
 
 
 # --- F1 / F6 / F10: install --yes says what is live now --------------------------
@@ -181,8 +170,7 @@ def test_status_last_reading_for_this_worktree(run_cli, repo: Path) -> None:
     sub = repo / "sub"
     sub.mkdir()
     (repo / ".git").mkdir()
-    run_cli("ingest", stdin=json.dumps({"session_id": "x", "workspace": {"current_dir": str(sub)},
-                                        "context_window": {"used_percentage": 10}}))
+    run_cli("ingest", stdin=statusline_payload(sub, "x", 10))
     out = run_cli("status", cwd=repo).stdout
     assert "last status-line reading for this worktree: " in out
     line = next(ln for ln in out.splitlines() if ln.startswith("last status-line reading"))
@@ -197,9 +185,7 @@ def test_status_flags_a_session_that_never_got_a_reading(run_cli, repo: Path) ->
     os.utime(started, (old, old))
     out = run_cli("status", cwd=repo).stdout
     assert "WARNING: status line not feeding context-vigil" in out
-    run_cli("ingest", stdin=json.dumps({"session_id": "s1",
-                                        "workspace": {"current_dir": str(repo)},
-                                        "context_window": {"used_percentage": 10}}))
+    run_cli("ingest", stdin=statusline_payload(repo, "s1", 10))
     assert "WARNING" not in run_cli("status", cwd=repo).stdout
 
 

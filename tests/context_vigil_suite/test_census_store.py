@@ -1,24 +1,11 @@
-import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 from context_vigil import census as st
 
-
-@pytest.fixture
-def store_file(iso):
-    from context_vigil import paths
-    return paths.census_path()
-
-
-def _payload(sid="s1", cwd="/wt/a", **extra):
-    base = {"session_id": sid, "cwd": cwd}
-    base.update(extra)
-    return json.dumps(base)
-
-
-def _read(store_file):
-    return json.loads(store_file.read_text())
+from .conftest import census_payload as _payload
+from .conftest import read_store as _read
 
 
 def _init_git_repo(path, branch=None):
@@ -99,37 +86,16 @@ class TestGitBranchFailSafe:
         monkeypatch.setattr(st.subprocess, "run", _hang)
         assert st._git_branch(str(tmp_path)) is None
 
-    def test_nonzero_returncode_returns_none(self, monkeypatch, tmp_path):
-        class _Result:
-            returncode = 128
-            stdout = ""
-
-        monkeypatch.setattr(st.subprocess, "run", lambda *a, **k: _Result())
-        assert st._git_branch(str(tmp_path)) is None
-
-    def test_detached_head_returns_none(self, monkeypatch, tmp_path):
-        class _Result:
-            returncode = 0
-            stdout = "HEAD\n"
-
-        monkeypatch.setattr(st.subprocess, "run", lambda *a, **k: _Result())
-        assert st._git_branch(str(tmp_path)) is None
-
-    def test_blank_output_returns_none(self, monkeypatch, tmp_path):
-        class _Result:
-            returncode = 0
-            stdout = "   \n"
-
-        monkeypatch.setattr(st.subprocess, "run", lambda *a, **k: _Result())
-        assert st._git_branch(str(tmp_path)) is None
-
-    def test_valid_output_is_stripped(self, monkeypatch, tmp_path):
-        class _Result:
-            returncode = 0
-            stdout = "main\n"
-
-        monkeypatch.setattr(st.subprocess, "run", lambda *a, **k: _Result())
-        assert st._git_branch(str(tmp_path)) == "main"
+    @pytest.mark.parametrize("returncode, stdout, expected", [
+        pytest.param(128, "", None, id="nonzero_returncode"),
+        pytest.param(0, "HEAD\n", None, id="detached_head"),
+        pytest.param(0, "   \n", None, id="blank_output"),
+        pytest.param(0, "main\n", "main", id="valid_output_is_stripped"),
+    ])
+    def test_git_output_is_interpreted(self, monkeypatch, tmp_path, returncode, stdout, expected):
+        result = SimpleNamespace(returncode=returncode, stdout=stdout)
+        monkeypatch.setattr(st.subprocess, "run", lambda *a, **k: result)
+        assert st._git_branch(str(tmp_path)) == expected
 
 
 class TestMergeBackwardCompatibility:

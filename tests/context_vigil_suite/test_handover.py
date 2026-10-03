@@ -19,6 +19,14 @@ Run the tests.
 """
 
 
+@pytest.fixture
+def notes_file(iso: Path) -> Path:
+    """Valid handover notes (``GOOD``) in a file outside the repository."""
+    notes = iso / "notes.md"
+    notes.write_text(GOOD)
+    return notes
+
+
 def test_template_parses_and_names_every_section() -> None:
     sections = handover.parse_sections(handover.template_path().read_text())
     assert set(handover.SECTIONS) <= set(sections)
@@ -116,10 +124,8 @@ def test_assemble_unreadable_inline(repo: Path, iso: Path) -> None:
         handover.assemble(GOOD, repo, [iso / "missing.md"], include_snapshot=False)
 
 
-def test_cli_handover_arms(run_cli, repo: Path, iso: Path) -> None:
-    notes = iso / "notes.md"
-    notes.write_text(GOOD)
-    result = run_cli("handover", "--file", str(notes), cwd=repo)
+def test_cli_handover_arms(run_cli, repo: Path, notes_file: Path) -> None:
+    result = run_cli("handover", "--file", str(notes_file), cwd=repo)
     assert result.returncode == 0, result.stderr
     assert "type /clear" in result.stdout  # no tmux in tests → manual
     from context_vigil import paths, state
@@ -160,25 +166,21 @@ def test_summary_survives_corrupt_mtime() -> None:
     assert "from earlier" in handover.summary("## Goal\nx\n", -1e30)
 
 
-def test_cli_handover_proceeds_during_cooldown(run_cli, repo: Path, iso: Path) -> None:
+def test_cli_handover_proceeds_during_cooldown(run_cli, repo: Path, notes_file: Path) -> None:
     from context_vigil import paths, state
     scope = paths.scope_dir(repo)
     state.begin_cycle(scope, cooldown=True)
-    notes = iso / "notes.md"
-    notes.write_text(GOOD)
-    result = run_cli("handover", "--file", str(notes), cwd=repo)
+    result = run_cli("handover", "--file", str(notes_file), cwd=repo)
     assert result.returncode == 0, result.stderr
     assert state.clear_requested(scope)
 
 
 def test_cli_handover_inside_reachable_tmux_says_clear_is_automatic(
-        run_cli, repo: Path, iso: Path) -> None:
+        run_cli, repo: Path, iso: Path, notes_file: Path) -> None:
     stub = iso / "tmux"
     stub.write_text("#!/usr/bin/env bash\nexit 0\n")
     stub.chmod(0o755)
-    notes = iso / "notes.md"
-    notes.write_text(GOOD)
-    result = run_cli("handover", "--file", str(notes), cwd=repo, env={
+    result = run_cli("handover", "--file", str(notes_file), cwd=repo, env={
         "CONTEXT_VIGIL_TMUX_BIN": str(stub), "TMUX": "/tmp/fake,1,0", "TMUX_PANE": "%7"})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "handover saved — /clear will be sent at the end of this turn"
@@ -203,8 +205,6 @@ def test_cli_handover_budget_is_configurable(run_cli, repo: Path, iso: Path) -> 
     assert result.returncode == 0, result.stderr
 
 
-def test_cli_no_tmux_message_says_send_a_message(run_cli, repo: Path, iso: Path) -> None:
-    notes = iso / "notes.md"
-    notes.write_text(GOOD)
-    result = run_cli("handover", "--file", str(notes), cwd=repo)
+def test_cli_no_tmux_message_says_send_a_message(run_cli, repo: Path, notes_file: Path) -> None:
+    result = run_cli("handover", "--file", str(notes_file), cwd=repo)
     assert "type /clear" in result.stdout and "go" in result.stdout

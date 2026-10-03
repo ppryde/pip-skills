@@ -3,21 +3,8 @@ import json
 import pytest
 from context_vigil import census as st
 
-
-@pytest.fixture
-def store_file(iso):
-    from context_vigil import paths
-    return paths.census_path()
-
-
-def _payload(sid="s1", cwd="/wt/a", **extra):
-    base = {"session_id": sid, "cwd": cwd}
-    base.update(extra)
-    return json.dumps(base)
-
-
-def _read(store_file):
-    return json.loads(store_file.read_text())
+from .conftest import census_payload as _payload
+from .conftest import read_store as _read
 
 
 class TestBasicIngest:
@@ -83,14 +70,16 @@ class TestTmuxPane:
         entry = _read(store_file)["sessions"]["abc"]
         assert entry["tmux_pane"] == "%42"
 
-    def test_omits_tmux_pane_key_when_env_absent(self, store_file, monkeypatch):
-        monkeypatch.delenv("TMUX_PANE", raising=False)
-        st.ingest(_payload(sid="abc"), now=1.0)
-        entry = _read(store_file)["sessions"]["abc"]
-        assert "tmux_pane" not in entry
-
-    def test_blank_env_var_treated_as_absent(self, store_file, monkeypatch):
-        monkeypatch.setenv("TMUX_PANE", "")
+    @pytest.mark.parametrize("env_value", [
+        pytest.param(None, id="env_absent"),
+        pytest.param("", id="blank_env_var_treated_as_absent"),
+    ])
+    def test_omits_tmux_pane_key_when_env_absent_or_blank(self, store_file, monkeypatch,
+                                                          env_value):
+        if env_value is None:
+            monkeypatch.delenv("TMUX_PANE", raising=False)
+        else:
+            monkeypatch.setenv("TMUX_PANE", env_value)
         st.ingest(_payload(sid="abc"), now=1.0)
         entry = _read(store_file)["sessions"]["abc"]
         assert "tmux_pane" not in entry
@@ -179,6 +168,17 @@ def _busy(**counters):
     return base
 
 
+def _seed_prior_entry(store_file, **entry):
+    """A store already holding session ``s1`` (``entry`` adds keys such as ``active_at``)."""
+    store_file.parent.mkdir(parents=True, exist_ok=True)
+    store_file.write_text(json.dumps({
+        "version": 1,
+        "limits": None,
+        "sessions": {"s1": {"worktree_cwd": "/wt/a", "updated_at": 5.0,
+                            "payload": _busy(), **entry}},
+    }))
+
+
 class TestActivityTracking:
     """``active_at`` moves only when the session did work; ``updated_at`` moves on every render."""
 
@@ -195,19 +195,20 @@ class TestActivityTracking:
         assert entry["updated_at"] == 70.0
         assert entry["active_at"] == 10.0
 
-    def test_cost_change_advances_active_at(self, store_file):
+    @pytest.mark.parametrize("change", [
+        pytest.param({"cost__total_cost_usd": 1.5}, id="cost_change"),
+        pytest.param({"prompt_id": "p2"}, id="new_prompt"),
+        pytest.param({"prompt_cache__requests": 5}, id="cache_requests_change"),
+        # `context_window.total_input_tokens` / `total_output_tokens` are real payload
+        # fields (they appear in captured status-line payloads); a turn that only
+        # moves them is still real activity.
+        pytest.param({"context_window__total_input_tokens": 99}, id="token_totals_moving"),
+        pytest.param({"context_window__total_output_tokens": 77}, id="output_tokens_moving"),
+        pytest.param({"cost__total_api_duration_ms": 250}, id="api_duration_moving"),
+    ])
+    def test_counter_change_advances_active_at(self, store_file, change):
         st.ingest(_payload(sid="s1", **_busy()), now=10.0)
-        st.ingest(_payload(sid="s1", **_busy(cost__total_cost_usd=1.5)), now=70.0)
-        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
-
-    def test_new_prompt_advances_active_at(self, store_file):
-        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
-        st.ingest(_payload(sid="s1", **_busy(prompt_id="p2")), now=70.0)
-        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
-
-    def test_cache_requests_change_advances_active_at(self, store_file):
-        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
-        st.ingest(_payload(sid="s1", **_busy(prompt_cache__requests=5)), now=70.0)
+        st.ingest(_payload(sid="s1", **_busy(**change)), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
 
     def test_cosmetic_change_does_not_advance_active_at(self, store_file):
@@ -216,78 +217,26 @@ class TestActivityTracking:
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
 
     def test_pre_upgrade_entry_without_active_at_starts_clock_now(self, store_file):
-        legacy = {
-            "version": 1,
-            "limits": None,
-            "sessions": {"s1": {"worktree_cwd": "/wt/a", "updated_at": 5.0, "payload": _busy()}},
-        }
-        store_file.parent.mkdir(parents=True, exist_ok=True)
-        store_file.write_text(json.dumps(legacy))
+        _seed_prior_entry(store_file)
         st.ingest(_payload(sid="s1", **_busy()), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
 
-    def test_token_totals_moving_advances_active_at(self, store_file):
-        """`context_window.total_input_tokens` / `total_output_tokens` are real
-        payload fields (they appear in captured status-line payloads); a turn
-        that only moves them is still real activity."""
-        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
-        moved = _busy(context_window__total_input_tokens=99)
-        st.ingest(_payload(sid="s1", **moved), now=70.0)
-        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
-
-    def test_output_tokens_moving_advances_active_at(self, store_file):
-        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
-        st.ingest(_payload(sid="s1", **_busy(context_window__total_output_tokens=77)), now=70.0)
-        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
-
-    def test_api_duration_moving_advances_active_at(self, store_file):
-        st.ingest(_payload(sid="s1", **_busy()), now=10.0)
-        st.ingest(_payload(sid="s1", **_busy(cost__total_api_duration_ms=250)), now=70.0)
-        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
-
-    def test_malformed_prior_active_at_restarts_the_clock(self, store_file):
+    @pytest.mark.parametrize("bad", [
+        pytest.param(True, id="bool"),
+        pytest.param(float("nan"), id="nan"),
+        pytest.param("700", id="numeric_string"),
+        pytest.param(None, id="none"),
+    ])
+    def test_malformed_prior_active_at_restarts_the_clock(self, store_file, bad):
         """A bool, a NaN or a numeric STRING is not a usable timestamp. NaN is
         the dangerous one: json round-trips it and every comparison is false."""
-        for bad in (True, float("nan"), "700", None):
-            store_file.parent.mkdir(parents=True, exist_ok=True)
-            store_file.write_text(
-                json.dumps(
-                    {
-                        "version": 1,
-                        "limits": None,
-                        "sessions": {
-                            "s1": {
-                                "worktree_cwd": "/wt/a",
-                                "updated_at": 5.0,
-                                "active_at": bad,
-                                "payload": _busy(),
-                            }
-                        },
-                    }
-                )
-            )
-            st.ingest(_payload(sid="s1", **_busy()), now=70.0)
-            assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0, bad
+        _seed_prior_entry(store_file, active_at=bad)
+        st.ingest(_payload(sid="s1", **_busy()), now=70.0)
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0, bad
 
     def test_future_prior_active_at_restarts_the_clock(self, store_file):
         """A clock step must not leave a session reporting non-idle for hours."""
-        store_file.parent.mkdir(parents=True, exist_ok=True)
-        store_file.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "limits": None,
-                    "sessions": {
-                        "s1": {
-                            "worktree_cwd": "/wt/a",
-                            "updated_at": 5.0,
-                            "active_at": 70.0 + 7200,
-                            "payload": _busy(),
-                        }
-                    },
-                }
-            )
-        )
+        _seed_prior_entry(store_file, active_at=70.0 + 7200)
         st.ingest(_payload(sid="s1", **_busy()), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 70.0
 

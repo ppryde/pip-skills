@@ -3,12 +3,7 @@ import os
 import time
 
 import pytest
-from context_vigil import census, paths
-
-
-@pytest.fixture
-def store_file(iso):
-    return paths.census_path()
+from context_vigil import census
 
 
 def _store(store_file, root, pct, *, updated=None, sid="s1"):
@@ -125,17 +120,13 @@ class TestContextPercentBySessionId:
         _store(store_file, tmp_path, 37)  # keyed "s1" by the _store helper
         assert census.context_percent(tmp_path, session_id="no-such-session") is None
 
-    def test_no_session_id_keeps_existing_worktree_scan_behaviour(self, tmp_path, store_file):
-        _store(store_file, tmp_path, 37)
-        assert census.context_percent(tmp_path) == 37
-
-    def test_malformed_updated_at_on_own_entry_is_none_not_raise(self, tmp_path, store_file):
+    @pytest.mark.parametrize("session_id", [
+        pytest.param("s-mine", id="own_entry_session_id_branch"),
+        pytest.param(None, id="worktree_scan_branch"),
+    ])
+    def test_malformed_updated_at_is_none_not_raise(self, tmp_path, store_file, session_id):
         # Quarantine contract: a non-numeric updated_at must never raise.
-        # Malformed timestamp -> treated as 0 -> stale -> None (session-id branch).
-        _store(store_file, tmp_path, 37, updated="bad", sid="s-mine")
-        assert census.context_percent(tmp_path, session_id="s-mine") is None
-
-    def test_malformed_updated_at_in_worktree_scan_is_none_not_raise(self, tmp_path, store_file):
-        # Same contract on the no-session-id worktree-scan branch.
-        _store(store_file, tmp_path, 37, updated="bad")
-        assert census.context_percent(tmp_path) is None
+        # Malformed timestamp -> treated as 0 -> stale -> None, on both the
+        # session-id branch and the no-session-id worktree-scan branch.
+        _store(store_file, tmp_path, 37, updated="bad", sid=session_id or "s1")
+        assert census.context_percent(tmp_path, session_id=session_id) is None

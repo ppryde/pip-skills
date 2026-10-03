@@ -7,14 +7,6 @@ import pytest
 from context_vigil import install, launcher, paths
 
 
-@pytest.fixture
-def zsh(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("SHELL", "/bin/zsh")
-    rc = home / ".zshrc"
-    rc.write_text("export FOO=1\n")
-    return rc
-
-
 def _change(choice: str) -> install.Change:
     change = launcher.plan_rc(choice)
     assert change is not None

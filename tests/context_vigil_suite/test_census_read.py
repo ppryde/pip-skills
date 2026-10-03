@@ -1,15 +1,8 @@
 import json
 from pathlib import Path
 
-import pytest
 from context_vigil import census as st
 from context_vigil.census import normalise
-
-
-@pytest.fixture
-def store_file(iso):
-    from context_vigil import paths
-    return paths.census_path()
 
 
 def _payload(sid, cwd, pct=None, **extra):

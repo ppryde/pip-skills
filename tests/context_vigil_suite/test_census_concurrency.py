@@ -3,8 +3,6 @@ import subprocess
 import sys
 import time
 
-import pytest
-
 from .conftest import SKILL, cli_env
 
 # Each child imports everything, announces "ready", then spins until the go file
@@ -16,12 +14,6 @@ _INGEST = (
     "while not os.path.exists(sys.argv[2]) and time.time() < deadline: pass\n"
     "st.ingest(payload)"
 )
-
-
-@pytest.fixture
-def store_file(iso):
-    from context_vigil import paths
-    return paths.census_path()
 
 
 def _spawn_ingest(sid, ready, go):

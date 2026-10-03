@@ -7,11 +7,7 @@ from pathlib import Path
 from context_vigil import paths, state
 
 from .conftest import SKILL, cli_env
-
-
-def _payload(repo: Path, sid: str = "s1", pct: float = 42) -> str:
-    return json.dumps({"session_id": sid, "workspace": {"current_dir": str(repo)},
-                       "context_window": {"used_percentage": pct}})
+from .conftest import statusline_payload as _payload
 
 
 def test_ingest_then_context(run_cli, repo: Path) -> None:
@@ -73,11 +69,8 @@ def test_install_yes_shows_summary_before_applying(
 
 
 def test_context_uses_claude_session_id_env(run_cli, repo: Path) -> None:
-    import json as _json
     for sid, pct in (("a", 20), ("b", 70)):
-        run_cli("ingest", stdin=_json.dumps({
-            "session_id": sid, "workspace": {"current_dir": str(repo)},
-            "context_window": {"used_percentage": pct}}))
+        run_cli("ingest", stdin=_payload(repo, sid, pct))
     out = run_cli("context", cwd=repo, env={"CLAUDE_SESSION_ID": "a"})
     assert "ctx 20%" in out.stdout
     status = run_cli("status", cwd=repo, env={"CLAUDE_SESSION_ID": "a"})

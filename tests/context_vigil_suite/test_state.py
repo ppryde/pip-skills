@@ -57,39 +57,28 @@ class TestConsumeHandoff:
         assert st.consume_handoff(scope) == "ONE SHOT"
         assert st.consume_handoff(scope) is None            # second launch: nothing
 
-    def test_returns_text_when_archive_rename_fails(self, scope, monkeypatch):
+    @pytest.mark.parametrize("failing, live_cleared", [
         # Archiving may fail (rename raises); the text is already in hand, so the
         # handoff must still be returned and the live file cleared (best-effort).
-        st.request_clear(scope, "SURVIVES RENAME")
-
-        def boom(*_a, **_k):
-            raise OSError("rename failed")
-
-        monkeypatch.setattr(Path, "rename", boom)
-        assert st.consume_handoff(scope) == "SURVIVES RENAME"   # no raise
-        assert not st.handoff_path(scope).exists()             # fallback unlink ran
-
-    def test_never_raises_when_rename_and_unlink_both_fail(self, scope, monkeypatch):
+        pytest.param(("rename",), True, id="archive_rename_fails"),
         # The residual the never-raise docstring must honour: BOTH the archive
         # rename and the fallback unlink raise a non-FileNotFound OSError.
-        st.request_clear(scope, "STILL FINE")
+        pytest.param(("rename", "unlink"), False, id="rename_and_unlink_both_fail"),
+        # mkdir of the archive dir can also fail; text already read -> still returned.
+        pytest.param(("mkdir",), False, id="archive_mkdir_fails"),
+    ])
+    def test_text_is_returned_and_never_raises_when_archiving_fails(
+            self, scope, monkeypatch, failing, live_cleared):
+        st.request_clear(scope, "SURVIVES FAILURE")
 
         def boom(*_a, **_k):
             raise OSError("io failed")
 
-        monkeypatch.setattr(Path, "rename", boom)
-        monkeypatch.setattr(Path, "unlink", boom)
-        assert st.consume_handoff(scope) == "STILL FINE"       # never raises
-
-    def test_never_raises_when_archive_mkdir_fails(self, scope, monkeypatch):
-        # mkdir of the archive dir can also fail; text already read → still returned.
-        st.request_clear(scope, "MKDIR BOOM")
-
-        def boom(*_a, **_k):
-            raise OSError("mkdir failed")
-
-        monkeypatch.setattr(Path, "mkdir", boom)
-        assert st.consume_handoff(scope) == "MKDIR BOOM"       # never raises
+        for name in failing:
+            monkeypatch.setattr(Path, name, boom)
+        assert st.consume_handoff(scope) == "SURVIVES FAILURE"   # no raise
+        if live_cleared:
+            assert not st.handoff_path(scope).exists()           # fallback unlink ran
 
 
 class TestHandoffWrittenAt:
@@ -188,20 +177,18 @@ class TestGate:
         st.clear_gate(scope)  # must not raise
         assert st.gate_active(scope) is False
 
-    def test_gate_ttl_expiry_self_heals(self, scope):
+    @pytest.mark.parametrize("age_margin, active", [
+        pytest.param(+1, False, id="ttl_expiry_self_heals"),
+        pytest.param(-1, True, id="within_ttl_stays_active"),
+    ])
+    def test_gate_ttl(self, scope, age_margin, active):
         st.set_gate(scope)
         marker = st.gate_marker(scope)
-        old = marker.stat().st_mtime - (st.GATE_TTL_SECONDS + 1)
-        os.utime(marker, (old, old))
-        assert st.gate_active(scope) is False
-        assert not marker.exists()  # expired gate was cleared, self-heal
-
-    def test_gate_within_ttl_stays_active(self, scope):
-        st.set_gate(scope)
-        marker = st.gate_marker(scope)
-        recent = marker.stat().st_mtime - (st.GATE_TTL_SECONDS - 1)
-        os.utime(marker, (recent, recent))
-        assert st.gate_active(scope) is True
+        aged = marker.stat().st_mtime - (st.GATE_TTL_SECONDS + age_margin)
+        os.utime(marker, (aged, aged))
+        assert st.gate_active(scope) is active
+        if not active:
+            assert not marker.exists()  # expired gate was cleared, self-heal
 
     def test_resume_clears_gate(self, scope):
         st.pause(scope)

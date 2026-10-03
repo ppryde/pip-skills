@@ -222,3 +222,56 @@ def run_cli():
                         pytrace=False)
         return result
     return _run
+
+
+# --- shared test data helpers --------------------------------------------------------
+# Hoisted from the test files that each redefined them. Nothing above this line (the
+# guards: iso, no_real_secret_recorded, real_rc_tripwire, run_cli) was changed.
+
+@pytest.fixture
+def store_file(iso: Path) -> Path:
+    """Where the census store lives (the data root is pinned into tmp_path by ``iso``)."""
+    from context_vigil import paths
+    return paths.census_path()
+
+
+def read_store(store_file: Path) -> dict:
+    """The census store as JSON."""
+    import json
+    return json.loads(store_file.read_text())
+
+
+def census_payload(sid: str = "s1", cwd: str = "/wt/a", **extra: object) -> str:
+    """A minimal status-line payload as the JSON ``census.ingest`` takes."""
+    import json
+    base: dict = {"session_id": sid, "cwd": cwd}
+    base.update(extra)
+    return json.dumps(base)
+
+
+def statusline_payload(repo: Path, sid: str = "s1", pct: float = 42) -> str:
+    """A status-line payload reporting ``pct`` for a session in ``repo``."""
+    import json
+    return json.dumps({"session_id": sid, "workspace": {"current_dir": str(repo)},
+                       "context_window": {"used_percentage": pct}})
+
+
+def read_settings(cfg: Path) -> dict:
+    """The pinned ``settings.json`` as JSON."""
+    import json
+    return json.loads((cfg / "settings.json").read_text())
+
+
+def write_settings(cfg: Path, data: dict) -> None:
+    """Write the pinned ``settings.json`` (2-space indent, trailing newline)."""
+    import json
+    (cfg / "settings.json").write_text(json.dumps(data, indent=2) + "\n")
+
+
+@pytest.fixture
+def zsh(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """SHELL=zsh with a one-line ``~/.zshrc`` inside the pinned HOME."""
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    rc = home / ".zshrc"
+    rc.write_text("export FOO=1\n")
+    return rc

@@ -100,6 +100,13 @@ def _running_tmux(stubs: Path, new_session_exit: int = 0) -> None:
         f'thr=${{CONTEXT_VIGIL_THRESHOLD-unset}}" >> "{log}"\n')
 
 
+def _logging_tmux(stubs: Path, *script_lines: str) -> None:
+    """A tmux stub that logs its argv to calls.log, then runs ``script_lines`` (bash)."""
+    log = stubs.parent / "calls.log"
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log}"\n' + "".join(script_lines))
+
+
 def test_new_session_on_dedicated_socket_with_env(
         stubs: Path, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAUDE_TMUX_SOCK")  # tmux is a stub here; test the default name
@@ -115,10 +122,9 @@ def test_new_session_on_dedicated_socket_with_env(
 
 
 def test_lowest_free_suffix(stubs: Path, repo: Path) -> None:
-    (stubs / "tmux").write_text(
-        f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
-        '[[ " $* " == *"=cc-repo-1"* ]] && exit 0\n'
-        '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
+    _logging_tmux(stubs,
+                  '[[ " $* " == *"=cc-repo-1"* ]] && exit 0\n',
+                  '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
     assert "-s cc-repo-2" in _run(stubs, repo)
 
 
@@ -157,10 +163,9 @@ def live(stubs: Path):
     """Make the tmux stub list the given sessions and log argv."""
     def _set(*names: str) -> None:
         (stubs.parent / "sessions").write_text("".join(f"{n}\n" for n in names))
-        (stubs / "tmux").write_text(
-            f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
-            f'[[ " $* " == *" list-sessions "* ]] && cat "{stubs.parent / "sessions"}"\n'
-            'exit 0\n')
+        _logging_tmux(stubs,
+                      f'[[ " $* " == *" list-sessions "* ]] && cat "{stubs.parent / "sessions"}"\n',
+                      'exit 0\n')
     return _set
 
 
@@ -197,9 +202,14 @@ def test_attach_multiple_sessions_lists_and_fails(stubs: Path, repo: Path, live,
     assert "attach-session" not in log
 
 
-def test_attach_by_number(stubs: Path, repo: Path, live) -> None:
+@pytest.mark.parametrize("selector", [
+    pytest.param("2", id="by_number"),
+    pytest.param("cc-repo-2", id="by_name"),
+])
+def test_attach_selects_the_named_or_numbered_session(stubs: Path, repo: Path, live,
+                                                      selector: str) -> None:
     live("cc-repo-1", "cc-repo-2")
-    result, log = _attach(stubs, repo, "2")
+    result, log = _attach(stubs, repo, selector)
     assert result.returncode == 0, result.stderr
     assert "attach-session -t =cc-repo-2" in log
 
@@ -244,23 +254,15 @@ def test_explicit_socket_overrides_tag(stubs: Path, repo: Path, iso: Path) -> No
 
 def test_failed_new_session_falls_back_to_plain_claude(stubs: Path, repo: Path) -> None:
     log_path = stubs.parent / "calls.log"
-    (stubs / "tmux").write_text(
-        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log_path}"\n'
-        '[[ " $* " == *" new-session "* ]] && exit 1\n'
-        '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
+    _logging_tmux(stubs,
+                  '[[ " $* " == *" new-session "* ]] && exit 1\n',
+                  '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
     full = _env(stubs)
     result = _pty_run(["bash", str(SCRIPT), "--model", "opus"], repo, full)
     log = log_path.read_text()
     assert result.returncode == 0
     assert "manual mode" in result.stderr
     assert "claude --model opus" in log
-
-
-def test_attach_by_name(stubs: Path, repo: Path, live) -> None:
-    live("cc-repo-1", "cc-repo-2")
-    result, log = _attach(stubs, repo, "cc-repo-2")
-    assert result.returncode == 0, result.stderr
-    assert "attach-session -t =cc-repo-2" in log
 
 
 def test_attach_inside_tmux_refuses(stubs: Path, repo: Path, live,
@@ -334,23 +336,13 @@ def test_env_file_is_private_and_removed_when_tmux_fails(
     assert (iso / "mode").read_text().strip() == "600"
 
 
-@pytest.mark.parametrize("args", [
-    ("-p", "q"), ("--print", "q"), ("--output-format", "json"), ("--output-format=json",),
-    ("--input-format", "stream-json"), ("--input-format=stream-json",)])
-def test_non_interactive_flags_exec_plain_claude(stubs: Path, repo: Path, args: tuple) -> None:
-    log = _run(stubs, repo, *args)
-    assert f"claude {' '.join(args)}" in log and "new-session" not in log
-
-
 def test_no_tty_execs_plain_claude(stubs: Path, repo: Path) -> None:
     log = _run(stubs, repo, "--model", "opus", tty=False)
     assert "claude --model opus" in log and "new-session" not in log
 
 
 def test_old_tmux_says_why_and_falls_back(stubs: Path, repo: Path) -> None:
-    (stubs / "tmux").write_text(
-        f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
-        '[[ "$1" == "-V" ]] && echo "tmux 3.1c"\nexit 0\n')
+    _logging_tmux(stubs, '[[ "$1" == "-V" ]] && echo "tmux 3.1c"\nexit 0\n')
     full = _env(stubs)
     result = _pty_run(["bash", str(SCRIPT)], repo, full)
     log = (stubs.parent / "calls.log").read_text()
@@ -359,20 +351,24 @@ def test_old_tmux_says_why_and_falls_back(stubs: Path, repo: Path) -> None:
 
 
 def test_tmux_3_2_and_newer_start_a_session(stubs: Path, repo: Path) -> None:
-    (stubs / "tmux").write_text(
-        f'#!/usr/bin/env bash\necho "tmux $*" >> "{stubs.parent / "calls.log"}"\n'
-        '[[ "$1" == "-V" ]] && echo "tmux 3.5a"\n'
-        '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
+    _logging_tmux(stubs,
+                  '[[ "$1" == "-V" ]] && echo "tmux 3.5a"\n',
+                  '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
     assert "new-session" in _run(stubs, repo)
 
 
 # --- round 3: subcommands, server-env unsets, trap, argv-shaped session command -----
 
 @pytest.mark.parametrize("args", [
+    # non-interactive flags
+    ("-p", "q"), ("--print", "q"), ("--output-format", "json"), ("--output-format=json",),
+    ("--input-format", "stream-json"), ("--input-format=stream-json",),
+    # subcommands and info flags
     ("mcp", "list"), ("doctor",), ("update",), ("auth", "login"), ("install",), ("plugin", "list"),
     ("setup-token",), ("config", "list"), ("migrate-installer",),
     ("--version",), ("-v",), ("--help",), ("-h",), ("--model", "opus", "--help")])
-def test_subcommands_and_info_flags_exec_plain_claude(stubs: Path, repo: Path, args: tuple) -> None:
+def test_non_interactive_flags_subcommands_and_info_flags_exec_plain_claude(
+        stubs: Path, repo: Path, args: tuple) -> None:
     log = _run(stubs, repo, *args)
     assert f"claude {' '.join(args)}" in log and "new-session" not in log
 

@@ -76,37 +76,36 @@ def test_cli_set_rejects_with_range(run_cli, repo: Path) -> None:  # type: ignor
     assert "1–95" in out.stderr
 
 
-def test_repeat_step_validated_and_env(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert config.repeat_step(repo) == 5
-    config.set_value(repo, "nudge.repeat_step", "10")
-    assert config.repeat_step(repo) == 10
-    for bad in ("0", "51", "x"):
+@pytest.mark.parametrize(
+    "key, getter, default, good_raw, good_value, bad_raws, env_name, env_raw, env_value,"
+    " fallback_env",
+    [
+        pytest.param(
+            "nudge.repeat_step", "repeat_step", 5, "10", 10, ("0", "51", "x"),
+            "CONTEXT_VIGIL_REPEAT_STEP", "7", 7,
+            # an invalid env value falls through to the stored (global) one
+            ("99", (10, "global")), id="repeat_step"),
+        pytest.param(
+            "handover.max_tokens", "handover_max_tokens", 8000, "12000", 12000,
+            ("0", "-5", "abc"), "CONTEXT_VIGIL_HANDOVER_MAX_TOKENS", "9000", 9000,
+            None, id="handover_max_tokens"),
+        pytest.param(
+            "handover.cooldown_seconds", "cooldown_seconds", 60, "0", 0, ("-1", "3601", "x"),
+            "CONTEXT_VIGIL_COOLDOWN_SECONDS", "120", 120,
+            None, id="handover_cooldown_seconds"),
+    ])
+def test_numeric_setting_validated_and_env(
+        repo: Path, monkeypatch: pytest.MonkeyPatch, key, getter, default, good_raw,
+        good_value, bad_raws, env_name, env_raw, env_value, fallback_env) -> None:
+    read = getattr(config, getter)
+    assert read(repo) == default
+    config.set_value(repo, key, good_raw)
+    assert read(repo) == good_value
+    for bad in bad_raws:
         with pytest.raises(config.ConfigError):
-            config.set_value(repo, "nudge.repeat_step", bad)
-    monkeypatch.setenv("CONTEXT_VIGIL_REPEAT_STEP", "7")
-    assert config.resolve(repo)["nudge.repeat_step"] == (7, "env")
-    monkeypatch.setenv("CONTEXT_VIGIL_REPEAT_STEP", "99")
-    assert config.resolve(repo)["nudge.repeat_step"] == (10, "global")
-
-
-def test_handover_max_tokens_validated_and_env(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert config.handover_max_tokens(repo) == 8000
-    config.set_value(repo, "handover.max_tokens", "12000")
-    assert config.handover_max_tokens(repo) == 12000
-    for bad in ("0", "-5", "abc"):
-        with pytest.raises(config.ConfigError):
-            config.set_value(repo, "handover.max_tokens", bad)
-    monkeypatch.setenv("CONTEXT_VIGIL_HANDOVER_MAX_TOKENS", "9000")
-    assert config.resolve(repo)["handover.max_tokens"] == (9000, "env")
-
-
-def test_handover_cooldown_seconds_validated_and_env(repo: Path,
-                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    assert config.cooldown_seconds(repo) == 60
-    config.set_value(repo, "handover.cooldown_seconds", "0")
-    assert config.cooldown_seconds(repo) == 0
-    for bad in ("-1", "3601", "x"):
-        with pytest.raises(config.ConfigError):
-            config.set_value(repo, "handover.cooldown_seconds", bad)
-    monkeypatch.setenv("CONTEXT_VIGIL_COOLDOWN_SECONDS", "120")
-    assert config.resolve(repo)["handover.cooldown_seconds"] == (120, "env")
+            config.set_value(repo, key, bad)
+    monkeypatch.setenv(env_name, env_raw)
+    assert config.resolve(repo)[key] == (env_value, "env")
+    if fallback_env is not None:
+        monkeypatch.setenv(env_name, fallback_env[0])
+        assert config.resolve(repo)[key] == fallback_env[1]

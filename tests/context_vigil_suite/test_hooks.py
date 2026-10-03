@@ -6,7 +6,9 @@ import time
 from pathlib import Path
 
 import pytest
-from context_vigil import census, config, hooks, paths, session, state
+from context_vigil import config, hooks, paths, session, state
+
+from .test_context_window import _ingest
 
 
 def _payload(repo: Path, **extra: object) -> dict:
@@ -14,10 +16,7 @@ def _payload(repo: Path, **extra: object) -> dict:
 
 
 def _over(repo: Path, pct: float = 80) -> None:
-    census.ingest(json.dumps({
-        "session_id": "s1", "workspace": {"current_dir": str(repo)},
-        "context_window": {"used_percentage": pct},
-    }))
+    _ingest(repo, "s1", pct)
 
 
 @pytest.fixture
@@ -88,13 +87,11 @@ def test_new_cycle_resets_the_repeat_sequence(repo: Path) -> None:
 
 def test_nudge_without_session_id_fires_once_per_cycle(repo: Path) -> None:
     _over(repo, 50)
-    census.ingest(json.dumps({"session_id": "x", "workspace": {"current_dir": str(repo)},
-                              "context_window": {"used_percentage": 50}}))
+    _ingest(repo, "x", 50)
     payload = {"cwd": str(repo)}
     assert hooks.nudge(payload) is not None
     _over(repo, 90)
-    census.ingest(json.dumps({"session_id": "x", "workspace": {"current_dir": str(repo)},
-                              "context_window": {"used_percentage": 90}}))
+    _ingest(repo, "x", 90)
     assert hooks.nudge(payload) is None
 
 
@@ -214,9 +211,15 @@ def test_resume_source_also_only_notifies(repo: Path) -> None:
     assert state.read_handoff(scope) == "doc"
 
 
-def test_pane_scoping_isolates_two_tmux_sessions(repo: Path,
-                                                  monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TMUX", "/tmp/tmux-501/default,1,0")
+@pytest.mark.parametrize("named_session, tmux_env", [
+    pytest.param(None, "/tmp/tmux-501/default,1,0", id="tmux_sessions"),
+    pytest.param("cc-repo-1", "/tmp/tmux-501/claude,1,0", id="named_session_two_panes"),
+])
+def test_two_panes_keep_separate_scopes(repo: Path, monkeypatch: pytest.MonkeyPatch,
+                                        named_session, tmux_env: str) -> None:
+    if named_session:
+        monkeypatch.setenv("CONTEXT_VIGIL_SESSION", named_session)
+    monkeypatch.setenv("TMUX", tmux_env)
     monkeypatch.setenv("TMUX_PANE", "%1")
     state.request_clear(paths.scope_dir(repo), "PANE ONE")
     monkeypatch.setenv("TMUX_PANE", "%2")
@@ -288,19 +291,6 @@ def test_hook_and_cli_share_a_scope_across_subdirectories(repo: Path, run_cli) -
     assert out is not None and "handover saved" in out
 
 
-def test_two_panes_sharing_a_named_session_keep_separate_scopes(
-        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")
-    monkeypatch.setenv("TMUX", "/tmp/tmux-501/claude,1,0")
-    monkeypatch.setenv("TMUX_PANE", "%1")
-    state.request_clear(paths.scope_dir(repo), "PANE ONE")
-    monkeypatch.setenv("TMUX_PANE", "%2")
-    assert hooks.session_start(_payload(repo, source="clear")) is None
-    monkeypatch.setenv("TMUX_PANE", "%1")
-    out = hooks.session_start(_payload(repo, source="clear"))
-    assert out is not None and "PANE ONE" in out
-
-
 def test_headless_child_never_touches_the_parent_scope_or_tmux(
         repo: Path, fake_tmux: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONTEXT_VIGIL_SESSION", "cc-repo-1")   # inherited from the parent
@@ -314,8 +304,7 @@ def test_headless_child_never_touches_the_parent_scope_or_tmux(
     assert hooks.session_start({**child, "source": "clear"}) is None
     assert hooks.stop(child) is None
     _over(repo)
-    census.ingest(json.dumps({"session_id": "child", "workspace": {"current_dir": str(repo)},
-                              "context_window": {"used_percentage": 80}}))
+    _ingest(repo, "child", 80)
     hooks.nudge({**child, "hook_event_name": "PostToolUse"})
     assert sorted(p.name for p in parent.iterdir()) == before
     assert state.read_handoff(parent) == "PARENT HANDOFF"

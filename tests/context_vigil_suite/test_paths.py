@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from context_vigil import paths
@@ -78,12 +79,17 @@ def test_worktree_key_outside_git_is_the_resolved_cwd(repo: Path) -> None:
     assert paths.worktree_key(repo / "missing") == os.path.realpath(str(repo / "missing"))
 
 
-def test_headless_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_headless_from_env_unset() -> None:
     assert paths.headless_from_env() is None
-    for value, expected in (("sdk-cli", True), ("sdk-ts", True), ("sdk-py", True),
-                            ("cli", False), ("claude-vscode", False), ("weird", None)):
-        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", value)
-        assert paths.headless_from_env() is expected
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("sdk-cli", True), ("sdk-ts", True), ("sdk-py", True),
+    ("cli", False), ("claude-vscode", False), ("weird", None)])
+def test_headless_from_env(monkeypatch: pytest.MonkeyPatch, value: str,
+                           expected: Optional[bool]) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", value)
+    assert paths.headless_from_env() is expected
 
 
 def test_headless_scope_is_its_own_and_ignores_inherited_env(

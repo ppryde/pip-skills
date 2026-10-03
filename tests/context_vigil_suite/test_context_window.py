@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+import pytest
 from context_vigil import census, context, session, transcript
 
 
@@ -151,28 +152,24 @@ def test_learned_table_matches_without_the_suffix(repo: Path, iso: Path) -> None
     assert context.current_percent(repo, "mine", str(path), 200_000) == 10
 
 
-def test_window_from_1m_suffix(repo: Path, iso: Path) -> None:
-    path = _write(iso / "t.jsonl", [_identity("claude-opus[1m]"), _usage(100_000)])
-    assert context.current_percent(repo, "s", str(path), 200_000) == 10
-    assert session.load("s")["window_source"] == "model-suffix"
-
-
-def test_window_from_usage_evidence(repo: Path, iso: Path) -> None:
-    path = _write(iso / "t.jsonl", [_usage(300_000)])
-    assert context.current_percent(repo, "s", str(path), 200_000) == 30
-    assert session.load("s")["window_source"] == "evidence"
+@pytest.mark.parametrize("lines, expected_pct, expected_source", [
+    pytest.param([_identity("claude-opus[1m]"), _usage(100_000)], 10, "model-suffix",
+                 id="1m_suffix"),
+    pytest.param([_usage(300_000)], 30, "evidence", id="usage_evidence"),
+    pytest.param([_usage(100_000)], 50, "config", id="falls_back_to_config"),
+])
+def test_window_source_from_the_transcript_alone(repo: Path, iso: Path, lines: List[str],
+                                                 expected_pct: int,
+                                                 expected_source: str) -> None:
+    path = _write(iso / "t.jsonl", lines)
+    assert context.current_percent(repo, "s", str(path), 200_000) == expected_pct
+    assert session.load("s")["window_source"] == expected_source
 
 
 def test_window_from_message_model_fallback(repo: Path, iso: Path) -> None:
     _ingest(repo, "other", 5, size=1_000_000, model="claude-y")
     path = _write(iso / "t.jsonl", [_usage(100_000, model="claude-y")])
     assert context.current_percent(repo, "mine", str(path), 200_000) == 10
-
-
-def test_window_falls_back_to_config(repo: Path, iso: Path) -> None:
-    path = _write(iso / "t.jsonl", [_usage(100_000)])
-    assert context.current_percent(repo, "s", str(path), 200_000) == 50
-    assert session.load("s")["window_source"] == "config"
 
 
 def test_census_window_wins_even_when_stale(repo: Path, iso: Path) -> None:
@@ -198,13 +195,14 @@ def test_ingest_learns_model_window(repo: Path) -> None:
 
 # --- headless / statusline -----------------------------------------------------
 
-def test_headless_detection(repo: Path, iso: Path) -> None:
-    for entrypoint, expected in (("sdk-cli", True), ("cli", False),
-                                 ("claude-desktop", False), ("mystery", None)):
-        sid = f"s-{entrypoint}"
-        path = _write(iso / f"{entrypoint}.jsonl", [_usage(1_000)], entrypoint)
-        context.current_percent(repo, sid, str(path), 200_000)
-        assert session.load(sid)["headless"] is expected, entrypoint
+@pytest.mark.parametrize("entrypoint, expected", [
+    ("sdk-cli", True), ("cli", False), ("claude-desktop", False), ("mystery", None)])
+def test_headless_detection(repo: Path, iso: Path, entrypoint: str,
+                            expected: Optional[bool]) -> None:
+    sid = f"s-{entrypoint}"
+    path = _write(iso / f"{entrypoint}.jsonl", [_usage(1_000)], entrypoint)
+    context.current_percent(repo, sid, str(path), 200_000)
+    assert session.load(sid)["headless"] is expected, entrypoint
 
 
 def test_headless_session_skips_census(repo: Path, iso: Path) -> None:
