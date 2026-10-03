@@ -144,8 +144,12 @@ $CLAUDE_CONFIG_DIR/context-vigil/
 ## Uninstall
 
 Ask Claude, or run `context-vigil uninstall` (dry run) and then
-`context-vigil uninstall --yes`. Only entries recorded in `install.json` and
-matching exactly are removed; anything you edited since is reported, not touched.
+`context-vigil uninstall --yes`. It removes our hook commands (matched by the
+`context-vigil hook` launcher call, wherever the skill lived at install time) and
+our capture status line, plus the marked block it spliced into your status-line
+script or shell rc. Your own commands, even in an entry that also held ours, are
+kept. `install.json` records which script and rc file were edited; a damaged
+marker block is reported, not touched.
 
 ## Credits
 

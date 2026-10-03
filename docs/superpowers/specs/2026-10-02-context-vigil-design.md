@@ -120,7 +120,7 @@ errors go to stderr with non-zero exit.
 | Command | Purpose |
 |---|---|
 | `install [--yes] [--threshold N] [--launcher CHOICE]` | Without `--yes`: dry run that prints the plan and questions. With `--yes`: apply, report auto/manual |
-| `uninstall` | Remove exactly what `install.json` records |
+| `uninstall` | Remove our hook commands and the status-line/rc edits `install.json` records; user commands are kept |
 | `launcher [always\|on-demand\|off]` | Re-run the launch-preference walkthrough (no arg) or set it directly |
 | `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
 | `context` | `ctx NN%` for this session (threshold appended when over) |
@@ -445,7 +445,7 @@ The rule from both originals: **a broken context-vigil never breaks Claude Code.
 | Handover written, `/clear` never happens | Stays pending; injects on next start/clear in the worktree; gate self-heals at 6h |
 | Malformed `settings.json` at install | Stop, report, change nothing |
 | Status-line script without a recognisable stdin slurp | Print manual line + placement; do not edit |
-| `uninstall` after the user edited entries | Remove only exact matches recorded in `install.json`; report anything not found |
+| `uninstall` after the user edited entries | Remove our hook commands (matched by the launcher `hook` call) and the recorded status-line/rc edits; keep the user's own commands, even inside a mixed entry; report anything not found or damaged |
 | Shell rc missing, unwritable, or unknown shell | Print the alias line to add by hand; record choice anyway |
 | `claude-tmux` can't start a session (tmux error) | Print the tmux error, then exec plain `claude` (manual mode) rather than fail the launch |
 

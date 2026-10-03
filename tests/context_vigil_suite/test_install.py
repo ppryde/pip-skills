@@ -25,11 +25,18 @@ def _ours(entries: list) -> list:
 def test_fresh_install_adds_hooks_and_capture_statusline(cfg: Path) -> None:
     install.apply(install.plan_install(threshold=None))
     s = _settings(cfg)
-    for event, matcher, name in install.HOOKS:
-        mine = [e for e in _ours(s["hooks"][event]) if install.hook_command(name)
-                in e["hooks"][0]["command"]]
-        assert len(mine) == 1
-        assert mine[0].get("matcher") == matcher
+    expected = {
+        "SessionStart": ("startup|clear|resume", "session-start"),
+        "Stop": (None, "stop"),
+        "UserPromptSubmit": (None, "nudge"),
+        "PostToolUse": ("TaskCreate|TaskUpdate", "nudge"),
+    }
+    assert set(s["hooks"]) == set(expected)
+    launcher = str(paths.launcher_path())
+    for event, (matcher, sub) in expected.items():
+        [entry] = s["hooks"][event]
+        assert entry.get("matcher") == matcher
+        assert entry["hooks"] == [{"type": "command", "command": f'"{launcher}" hook {sub}'}]
     assert "capture.sh" in s["statusLine"]["command"]
     assert s["statusLine"]["refreshInterval"] == 60
     assert paths.install_record_path().exists()
@@ -310,3 +317,39 @@ def test_non_ascii_settings_round_trip(cfg: Path) -> None:
 def test_session_start_matcher_includes_resume() -> None:
     matcher = dict((e, m) for e, m, _ in install.HOOKS)["SessionStart"]
     assert matcher == "startup|clear|resume"
+
+
+def test_null_hooks_is_treated_as_empty(cfg: Path) -> None:
+    _write(cfg, {"model": "opus", "hooks": None})
+    install.apply(install.plan_install(threshold=None))
+    assert set(_settings(cfg)["hooks"]) == {e for e, _, _ in install.HOOKS}
+    install.apply(install.plan_uninstall())
+    _write(cfg, {"hooks": None})
+    install.apply(install.plan_uninstall())
+
+
+def _mixed(name: str, matcher=None) -> dict:
+    entry = {"hooks": [{"type": "command", "command": "echo mine"},
+                       {"type": "command", "command": install.hook_command(name)}]}
+    return {"matcher": matcher, **entry} if matcher else entry
+
+
+def test_mixed_entry_keeps_user_command_on_install_and_uninstall(cfg: Path) -> None:
+    _write(cfg, {"hooks": {"Stop": [_mixed("stop")]}})
+    install.apply(install.plan_install(threshold=None))
+    stop = _settings(cfg)["hooks"]["Stop"]
+    commands = [h["command"] for e in stop for h in e["hooks"]]
+    assert commands.count("echo mine") == 1
+    assert commands.count(install.hook_command("stop")) == 1
+    install.apply(install.plan_install(threshold=None))
+    assert _settings(cfg)["hooks"]["Stop"] == stop
+    install.apply(install.plan_uninstall())
+    assert _settings(cfg)["hooks"] == {"Stop": [{"hooks": [
+        {"type": "command", "command": "echo mine"}]}]}
+
+
+def test_uninstall_strips_our_command_from_mixed_entry_keeping_matcher(cfg: Path) -> None:
+    _write(cfg, {"hooks": {"PostToolUse": [_mixed("nudge", "Bash")]}})
+    install.apply(install.plan_uninstall())
+    assert _settings(cfg)["hooks"]["PostToolUse"] == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]}]

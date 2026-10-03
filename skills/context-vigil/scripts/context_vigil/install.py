@@ -114,24 +114,43 @@ def _dump(data: Dict[str, Any]) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
+def _is_our_hook(hook: Any) -> bool:
+    return isinstance(hook, dict) and bool(_OUR_HOOK.search(str(hook.get("command", ""))))
+
+
 def _is_ours(entry: Any) -> bool:
     hooks = entry.get("hooks") if isinstance(entry, dict) else None
-    return isinstance(hooks, list) and any(
-        isinstance(h, dict) and _OUR_HOOK.search(str(h.get("command", ""))) for h in hooks)
+    return isinstance(hooks, list) and any(_is_our_hook(h) for h in hooks)
 
 
 def _commands(entry: Any) -> List[str]:
     return [str(h.get("command", "")) for h in entry.get("hooks", []) if isinstance(h, dict)]
 
 
+def _strip_ours(entry: Any) -> Optional[Dict[str, Any]]:
+    """The entry minus our commands; None when nothing of the user's remains."""
+    if not _is_ours(entry):
+        return entry
+    rest = [h for h in entry["hooks"] if not _is_our_hook(h)]
+    return {**entry, "hooks": rest} if rest else None
+
+
 def _with_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
-    hooks = data.setdefault("hooks", {})
+    hooks = data.get("hooks")
+    if hooks is None:
+        hooks = data["hooks"] = {}
     for event, matcher, name in HOOKS:
-        entries = [e for e in hooks.get(event, []) if not _is_ours(e)
-                   or _commands(e) == [hook_command(name)]]
         wanted: Dict[str, Any] = {"hooks": [{"type": "command", "command": hook_command(name)}]}
         if matcher:
             wanted = {"matcher": matcher, **wanted}
+        entries = []
+        for e in hooks.get(event, []):
+            if _is_ours(e) and _commands(e) == [hook_command(name)]:
+                entries.append(e)
+                continue
+            kept = _strip_ours(e)
+            if kept is not None:
+                entries.append(kept)
         if wanted not in entries:
             entries.append(wanted)
         hooks[event] = entries
@@ -143,7 +162,7 @@ def _without_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(hooks, dict):
         return data
     for event in list(hooks):
-        kept = [e for e in hooks[event] if not _is_ours(e)]
+        kept = [k for k in (_strip_ours(e) for e in hooks[event]) if k is not None]
         if kept:
             hooks[event] = kept
         else:
