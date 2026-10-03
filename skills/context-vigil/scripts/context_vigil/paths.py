@@ -7,6 +7,7 @@ id and the fresh session must still find its handover.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -42,7 +43,11 @@ def worktree_key(cwd: Path) -> str:
 
 
 def worktree_slug(cwd: Path) -> str:
-    return _UNSAFE.sub("-", worktree_key(cwd))
+    """Readable slug plus a hash of the full path: sanitising alone is lossy
+    (``/r/foo-bar`` and ``/r/foo/bar`` would otherwise share state)."""
+    key = worktree_key(cwd)
+    digest = hashlib.sha1(key.encode("utf-8", "surrogateescape")).hexdigest()[:8]
+    return f"{_UNSAFE.sub('-', key)}-{digest}"
 
 
 def worktree_dir(cwd: Path) -> Path:

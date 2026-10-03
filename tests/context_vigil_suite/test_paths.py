@@ -80,3 +80,11 @@ def test_launcher_hook_swallows_broken_interpreter(run_cli) -> None:
                      env={"CONTEXT_VIGIL_PYTHON": "/nonexistent/python"})
     assert result.returncode == 0
     assert result.stdout == ""
+
+
+def test_worktree_slug_distinguishes_lookalike_paths() -> None:
+    slugs = [paths.worktree_slug(Path(p)) for p in ("/r/foo-bar", "/r/foo/bar", "/r/foo.bar")]
+    assert len(set(slugs)) == 3
+    assert slugs == [paths.worktree_slug(Path(p))
+                     for p in ("/r/foo-bar", "/r/foo/bar", "/r/foo.bar")]
+    assert all("/" not in s and "." not in s for s in slugs)
