@@ -1,7 +1,12 @@
 <!-- context-vigil handover notes. Write for a cold reader with zero context.
      Bullets, paths and reasons — not prose. The tool adds cwd, branch, base,
      working-tree counts and the git commands for detail — it does NOT list
-     files, so Files in Flight below is where you name the ones that matter. -->
+     files, so Files in Flight below is where you name the ones that matter.
+     Write these notes in the private file `context-vigil notes-path` prints,
+     never inside the repository. Never paste a secret (keys, tokens,
+     passwords) and never inline a secret-bearing file (.env, keys,
+     credentials): the handover is printed back into the next session, and
+     notes or inlined files that look like they hold a secret are refused. -->
 
 ## Goal
 

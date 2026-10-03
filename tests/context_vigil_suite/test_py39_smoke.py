@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from .conftest import LAUNCHER
+from .conftest import LAUNCHER, cli_env
 
 PY39 = Path("/usr/bin/python3")
 
@@ -23,7 +22,7 @@ def _is_py39() -> bool:
 
 @pytest.mark.skipif(not _is_py39(), reason="/usr/bin/python3 is not a working 3.9")
 def test_full_flow_under_system_python(repo: Path, iso: Path) -> None:
-    env = dict(os.environ, CONTEXT_VIGIL_PYTHON=str(PY39))
+    env = cli_env({"CONTEXT_VIGIL_PYTHON": str(PY39)})
 
     def run(*args: str, stdin: str = "") -> subprocess.CompletedProcess[str]:
         return subprocess.run(["bash", str(LAUNCHER), *args], input=stdin, cwd=repo,

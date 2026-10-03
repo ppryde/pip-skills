@@ -7,12 +7,14 @@ rediscover) and a single Next Step (a list invites the next session to re-plan).
 """
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from context_vigil import paths, snapshot
+from context_vigil import paths, secretscan, snapshot
 
 SECTIONS = ("Goal", "Current State", "Files in Flight", "Failed Attempts", "Next Step")
 REQUIRED = ("Failed Attempts", "Next Step")
@@ -36,6 +38,57 @@ _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 class HandoverError(ValueError):
     """Notes that cannot become a handover; the message says exactly why."""
+
+
+# --inline never takes these, whatever the path given (it is resolved first, so a
+# harmless-looking symlink does not get past): names that hold credentials, the
+# user's shell rc files, and everything under a credential or Claude config dir.
+_SECRET_NAMES = (".env", ".env.*", ".envrc", "*.env", "*.pem", "*.key", "id_*",
+                 "*credential*", "*secret*", ".netrc", ".npmrc", ".pypirc", ".pgpass",
+                 ".git-credentials", ".dockercfg", "*.p12", "*.pfx", "*.jks", "*.keystore",
+                 "*.kdbx", "*.tfvars", "*.tfstate", ".zshrc", ".zshenv", ".zprofile",
+                 ".zlogin", ".bashrc", ".bash_profile", ".bash_login", ".profile")
+_SECRET_HOME_DIRS = (".ssh", ".aws", ".gnupg", ".config/gh", ".config/gcloud", ".azure",
+                     ".docker", ".kube")
+
+
+def _under(path: Path, root: Path) -> bool:
+    return any(path == r or r in path.parents
+               for r in {root, Path(os.path.realpath(str(root)))})
+
+
+def secret_bearing(path: Path) -> bool:
+    """True when ``path`` (as given or resolved through symlinks) is a file --inline
+    must never embed: see ``_SECRET_NAMES`` and ``_SECRET_HOME_DIRS``; also anything
+    under ``~/.claude*``, the Claude config dir or context-vigil's data root."""
+    given = Path(os.path.abspath(str(path)))
+    resolved = Path(os.path.realpath(str(path)))
+    for candidate in (given, resolved):
+        if any(fnmatch.fnmatchcase(candidate.name.lower(), pattern)
+               for pattern in _SECRET_NAMES):
+            return True
+    home = Path.home()
+    roots = [home / d for d in _SECRET_HOME_DIRS] + [paths.config_dir(), paths.data_root()]
+    for candidate in (given, resolved):
+        if any(_under(candidate, root) for root in roots):
+            return True
+        for base in {home, Path(os.path.realpath(str(home)))}:
+            try:
+                first = candidate.relative_to(base).parts[:1]
+            except ValueError:
+                continue
+            if first and first[0].startswith(".claude"):
+                return True
+    return False
+
+
+def secret_refusal(notes: str) -> Optional[str]:
+    """Why ``notes`` must not be saved (the line number only, never the match)."""
+    line = secretscan.first_secret_line(notes)
+    if line is None:
+        return None
+    return (f"notes contain what looks like a secret at line {line} — remove it (say "
+            "where it lives instead) and re-run")
 
 
 def template_path() -> Path:
@@ -91,9 +144,11 @@ def summary(document: str, written_at: Optional[float]) -> str:
     branch = re.search(r"- Branch: `([^`\n]+)`", document)
     goal = parse_sections(document).get("Goal", "").splitlines()
     text = f"a handover is waiting from {when}"
-    if branch:
+    # This line reaches the model and the screen before anyone asked to load the
+    # handover: a branch or goal that looks key-shaped is dropped, not shown.
+    if branch and not secretscan.looks_secret(branch.group(1)):
         text += f" on `{branch.group(1).strip()[:SUMMARY_FIELD_CHARS]}`"
-    if goal and goal[0].strip():
+    if goal and goal[0].strip() and not secretscan.looks_secret(goal[0]):
         text += f": \"{goal[0].strip()[:SUMMARY_FIELD_CHARS]}\""
     return text
 
@@ -133,14 +188,29 @@ def _cap_inline(body: str, path: Path) -> str:
 def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool,
              max_tokens: Optional[int] = None) -> str:
     validate(notes)
+    refusal = secret_refusal(notes)
+    if refusal:
+        raise HandoverError(refusal)
     parts = [f"# Handover — {datetime.now().strftime('%Y-%m-%d %H:%M')}", notes.strip()]
     if include_snapshot:
         parts.append(snapshot.session_snapshot(cwd.resolve()).strip())
     for path in inline:
+        if secret_bearing(path):
+            raise HandoverError(
+                f"--inline refused: {path} is a secret-bearing file (keys, credentials, env, "
+                "shell rc, Claude or context-vigil config) — never inline secrets; "
+                "reference it by path instead")
         try:
-            body = path.read_text().strip()
+            body = path.read_text(encoding="utf-8").strip()
+        except UnicodeError as exc:
+            raise HandoverError(f"--inline is not UTF-8 text: {path}") from exc
         except OSError as exc:
-            raise HandoverError(f"--inline unreadable: {path}: {exc}") from exc
+            raise HandoverError(f"--inline unreadable: {path} "
+                                f"({exc.strerror or type(exc).__name__})") from exc
+        if secretscan.looks_secret(body):
+            raise HandoverError(
+                f"--inline refused: {path} holds what looks like a secret (a key, token or "
+                "password) — not inlined; never inline secrets")
         parts.append(f"## Inlined: `{path}`\n\n```\n{_cap_inline(body, path)}\n```")
     document = "\n\n".join(parts) + "\n"
     if max_tokens is not None:

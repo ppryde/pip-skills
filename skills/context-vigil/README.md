@@ -70,13 +70,19 @@ nothing changed.
 If you hand-edit the marker comments context-vigil leaves in a file (the
 status-line script or your shell rc), `install` and `uninstall` leave that file
 untouched and print a "look damaged" note telling you to fix the block by hand.
+If the markers are intact but the status-line block holds anything other than
+our one line, `install` leaves the file untouched too and names the file and
+the block's line numbers (never its content).
 
 Commands, all via `scripts/context-vigil`: `install [--yes] [--threshold N]
 [--launcher on-demand|always|not-now] [--confirm-always]`, `uninstall [--yes]`,
 `launcher [choice] [--yes] [--confirm-always]`, `status`, `context`,
-`handover --file F | --resume | --discard` (plus `--inline`, `--no-snapshot`),
-`config get|set KEY [VALUE] [--worktree]`, `pause`, `resume`. `install` and
-`uninstall` are dry runs unless given `--yes`.
+`notes-path`, `handover --file F | --resume | --discard` (plus `--inline`,
+`--no-snapshot`), `config get|set KEY [VALUE] [--worktree]`, `pause`, `resume`.
+`install` and `uninstall` are dry runs unless given `--yes`. An unexpected
+failure prints one line naming the exception class only (its message could
+quote a file); `CONTEXT_VIGIL_DEBUG=1` adds the frames (file, line, function),
+never a message, source line, local or environment value.
 
 ## Auto vs manual
 
@@ -143,8 +149,12 @@ stdout is not a terminal, or the call is non-interactive (`-p`/`--print`, `--out
 `plugin`, `setup-token`, `config`, `migrate-installer`; or `--version`/`-v`/`--help`/`-h`). It forwards your
 `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and `CONTEXT_VIGIL_*` to the new session and unsets
 those names the tmux server holds but you do not, so a running server's stale environment does not apply.
-Values travel through a private (0600) temp file that deletes itself, never on a command line, and are not
-traced even under `bash -x`. A long-running tmux server keeps the environment it was started with (names
+Values travel through a private (0600) temp file that deletes itself, never on a command line. Tracing is
+off while the wrapper writes that file, the file's first line turns it off again in the pane's shell, and the
+tmux client is started without `SHELLOPTS`, `BASHOPTS`, `BASH_ENV`, `ENV` and `BASH_XTRACEFD`, so neither
+`bash -x claude-tmux` nor an exported `SHELLOPTS=xtrace` traces a value into the pane. A launch killed between
+writing the file and the session reading it (SIGKILL, power loss) can strand it, still 0600; each launch
+deletes your own stale `claude-tmux-env.*` files older than a minute. A long-running tmux server keeps the environment it was started with (names
 outside the forwarded set included — say an old `OPENAI_API_KEY`) and hands it to every new session until
 the server is restarted (`tmux -L <socket> kill-server`).
 
@@ -191,22 +201,52 @@ run that never uses the Task tools is nudged at the next prompt
 
 ## Where data lives
 
-Everything is under `$CONTEXT_VIGIL_HOME`, or `$CLAUDE_CONFIG_DIR/context-vigil/`
-(default `~/.claude/context-vigil/`). Nothing is written inside repositories.
+Everything is under `$CONTEXT_VIGIL_HOME` (it must be an absolute path; a
+relative one is refused), or `$CLAUDE_CONFIG_DIR/context-vigil/` (default
+`~/.claude/context-vigil/`). context-vigil writes nothing inside the repository
+you work in. The data root writes a `.gitignore` of `*` into itself, so even
+where it lands inside a git repository (a dotfiles-managed `~/.claude`, say)
+`git add -A` never picks up a handover; `status` and `install` warn, by path,
+when it does. The data root must be yours alone: owned by you and not writable
+by anyone else (one of yours left wider is tightened), or context-vigil refuses
+to read or write under it. Handovers and marker files are never read or written
+through a symlink.
+
 The data root and every directory under it are created 0700, and every file in
 it (handovers and their archive, session records, `census.json`,
 `windows.json`, config, `install.json`, locks and markers) is created 0600 from
 the first byte, temp files included; a file or data root left wider by an older
-version is tightened on its next write.
+version is tightened on its next write. Missing parents of an rc file are
+created 0700. Every atomic-write temp file is named `.cv-tmp.*`; a crash between
+creating one and the rename (SIGKILL, power loss) can strand it, still 0600, and
+the next write in that directory deletes such strays over a minute old.
+
+Handover notes go in the file `context-vigil notes-path` prints:
+`<scope>/notes.md` under the data root (0600), pre-filled from the template and
+removed once `handover --file` has saved it. Notes written anywhere else inside
+a git repository get a warning, by path, to delete them. Notes holding anything
+key-shaped (`sk-…`, `AKIA…`, `ghp_…`, `xox?-…`, a private-key block,
+`KEY=`/`TOKEN:`-style assignments, credentials in a URL) are refused with the
+line number only.
 
 A handover holds whatever the agent wrote into it, plus any `--inline` file
 verbatim. It is kept on disk (the newest `handover.archive_keep` per scope) and
 `handover --resume` and the post-`/clear` injection print it back into the next
-session's transcript by design, so never put a credential in one or inline a
-secret-bearing file (`.env`, keys, tokens).
+session's transcript by design, so never put a credential in one. `--inline`
+works in remote mode only and refuses, naming the file only: secret-bearing
+names (`.env*`, `*.pem`, `*.key`, `id_*`, `*credential*`, `*secret*`, `.netrc`,
+`.npmrc`, shell rc files, …) as given or where a symlink resolves; anything
+under `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude*`, the Claude
+config dir or the data root; and any file holding a key-shaped string.
+
+The waiting notice at a fresh launch shows the handover's branch and the first
+line of its Goal (each cut at 80 chars), and drops either one that looks
+key-shaped. Keep the Goal free of anything you would not want in the next
+session's transcript.
 
 ```
 $CLAUDE_CONFIG_DIR/context-vigil/
+  .gitignore               # `*`: the data root never ends up in a commit
   config.json              # global settings
   census.json              # latest status-line reading per session
   windows.json             # learned model id -> context window size, from every status-line payload
@@ -217,6 +257,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
     paused, cooldown, handover-gate, clear-requested, session-start  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
+    notes.md               # handover notes being written (`notes-path`); removed once saved
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists); newest `handover.archive_keep` kept
     headless/handoff.md    # a headless (sdk-*) run's handoff + archive/: shared by the worktree's headless runs (each run has a new session id), never seen by an interactive session
     sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
@@ -226,9 +267,10 @@ $CLAUDE_CONFIG_DIR/context-vigil/
 ## Uninstall
 
 Ask Claude, or run `context-vigil uninstall` (dry run) and then
-`context-vigil uninstall --yes`. It removes our hook commands (matched by the
-`context-vigil hook` launcher call, wherever the skill lived at install time) and
-our capture status line, plus the marked block it spliced into your status-line
+`context-vigil uninstall --yes`. It removes our hook commands (matched exactly:
+our launcher's path, for this skill dir or the one install recorded, plus
+` hook <name>`; a hook of yours that merely mentions context-vigil is never
+touched) and our capture status line, plus the marked block it spliced into your status-line
 script or shell rc. Your own commands, even in an entry that also held ours, are
 kept. `install.json` records which script and rc file were edited; a damaged
 marker block is reported, not touched.

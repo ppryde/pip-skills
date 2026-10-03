@@ -17,6 +17,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -30,16 +31,27 @@ CAPTURE = SKILL / "scripts" / "capture.sh"
 SOCKET = "cv-smoke"
 SESSION = "cv"
 DEFAULT_MODEL = "haiku"
-STATE_FILE = Path(tempfile.gettempdir()) / "cv-smoke-current.json"
 RESUME_PREAMBLE = "Resume from this handover."
 KICK_MARK = "handover received"
 TRUST_RE = r"(?i)do you trust|trust this folder|trust the files|yes, i trust"
 READY_RE = r"(?i)\? for shortcuts|esc to interrupt|shift\+tab"
 SECRET_KEY = re.compile(r"(?i)token|secret|key|password|env|auth|cookie")
+# Only these session-record fields are ever printed by `state` (an allow-list: a new
+# field stays hidden until someone decides it is safe), and string values that look
+# key-shaped are masked even then.
+SAFE_FIELDS = ("headless", "has_statusline", "window", "window_source", "window_confident",
+               "model_id", "message_model", "last_nudged_pct", "transcript_size")
 # Belt and braces for pane text: the sandbox never puts a secret there, but a model
 # can echo one it finds (an env dump, a tool output), and peek/wait output reaches
-# the transcript of whoever drives the harness.
-SECRET_SHAPE = re.compile(r"(sk-[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{16}|(KEY|TOKEN|SECRET)[A-Z_]*=\S+)")
+# the transcript of whoever drives the harness. The skill's own key-shape list, plus
+# any lower-case `token=…` / `password: …` / `Bearer …` (masking may over-match here).
+sys.path.insert(0, str(SKILL / "scripts"))
+from context_vigil import secretscan  # noqa: E402
+
+_LOOSE = re.compile(r"(?i:[\w-]*(?:token|secret|password|passwd|api[_-]?key|credential"
+                    r"|authorization|cookie)[\w-]*[\"']?\s*[:=]\s*[\"']?(?:bearer\s+)?\S+"
+                    r"|\bbearer\s+\S+)")
+SECRET_SHAPE = re.compile(f"(?:{secretscan.KEY_SHAPE.pattern})|(?:{_LOOSE.pattern})")
 
 # Mirrors install.HOOKS exactly: (event, matcher, hook name).
 HOOKS: List[Tuple[str, Optional[str], str]] = [
@@ -100,23 +112,32 @@ def tmux_new_session_cmd(repo: Path, claude_bin: str, args: List[str]) -> List[s
 
 
 def redact(text: str) -> str:
-    """Mask anything secret-shaped (API keys, AWS key ids, KEY/TOKEN/SECRET=value)."""
+    """Mask anything secret-shaped: the skill's key shapes plus loose assignments."""
     return SECRET_SHAPE.sub("[redacted]", text)
 
 
+def _masked(value: Any) -> Any:
+    """A scalar as printed by `state`: a key-shaped string becomes ``[redacted]``."""
+    if isinstance(value, str) and SECRET_SHAPE.search(value):
+        return "[redacted]"
+    return value
+
+
 def safe_fields(record: Dict[str, Any]) -> Dict[str, Any]:
-    """Scalar, non-secret-looking fields of a session record."""
-    return {k: v for k, v in record.items()
-            if not SECRET_KEY.search(k) and isinstance(v, (str, int, float, bool, type(None)))}
+    """The allow-listed scalar fields of a session record, filtered by key name AND
+    by value: a string that looks key-shaped is masked."""
+    return {k: _masked(v) for k, v in record.items()
+            if k in SAFE_FIELDS and not SECRET_KEY.search(k)
+            and isinstance(v, (str, int, float, bool, type(None)))}
 
 
 def find_window_dicts(node: Any) -> List[Dict[str, Any]]:
-    """Every `context_window` dict in a census document, numeric/scalar fields only."""
+    """Every `context_window` dict in a census document, scalar fields only (masked)."""
     found: List[Dict[str, Any]] = []
     if isinstance(node, dict):
         for key, value in node.items():
             if key == "context_window" and isinstance(value, dict):
-                found.append({k: v for k, v in value.items()
+                found.append({k: _masked(v) for k, v in value.items()
                               if isinstance(v, (int, float, str, bool, type(None)))})
             else:
                 found.extend(find_window_dicts(value))
@@ -133,11 +154,53 @@ def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:  # typ
                           check=check)
 
 
-def load_state() -> Dict[str, Any]:
+def _private_or_exit(path: Path, directory: bool) -> None:
+    """Refuse a path another user could have planted or can write (shared /tmp on
+    Linux): it must be ours, not a symlink, and closed to group and others."""
     try:
-        return json.loads(STATE_FILE.read_text())
+        st = os.lstat(str(path))
+    except FileNotFoundError:
+        return
+    kind_ok = stat.S_ISDIR(st.st_mode) if directory else stat.S_ISREG(st.st_mode)
+    if not kind_ok or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        sys.exit(f"refusing {path}: not a private {'directory' if directory else 'file'} "
+                 "of yours (owner, type or mode) — remove it and re-run")
+
+
+def private_dir() -> Path:
+    """This user's 0700 dir for harness state and sandboxes, under the temp dir."""
+    path = Path(tempfile.gettempdir()) / f"cv-smoke-{os.getuid()}"
+    _private_or_exit(path, directory=True)
+    try:
+        os.mkdir(str(path), 0o700)
+    except FileExistsError:
+        pass
+    _private_or_exit(path, directory=True)
+    return path
+
+
+def state_file() -> Path:
+    return private_dir() / "current.json"
+
+
+def save_state(info: Dict[str, Any]) -> None:
+    path = state_file()
+    _private_or_exit(path, directory=False)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(json.dumps(info))
+
+
+def load_state() -> Dict[str, Any]:
+    path = state_file()
+    _private_or_exit(path, directory=False)
+    try:
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         sys.exit("no sandbox recorded; run `live-smoke up` first")
+    if not isinstance(data, dict):
+        sys.exit("no sandbox recorded; run `live-smoke up` first")
+    return data
 
 
 def pane_text(lines: int = 60) -> str:
@@ -153,11 +216,13 @@ def server_alive() -> bool:
 def make_sandbox(path: Optional[str], threshold: int) -> Dict[str, Any]:
     if path:
         root = Path(path).resolve()
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
     else:
-        root = Path(tempfile.gettempdir()) / f"cv-smoke-{time.strftime('%Y%m%d-%H%M%S')}"
+        # unpredictable and private (mkdtemp: 0700, O_EXCL), inside our own 0700 dir
+        root = Path(tempfile.mkdtemp(prefix="cv-smoke-", dir=str(private_dir())))
     repo, data = root / "repo", root / "data"
     for d in (repo, data):
-        d.mkdir(parents=True, exist_ok=True)
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
     root, repo, data = root.resolve(), repo.resolve(), data.resolve()
     if not (repo / ".git").exists():
         files = {
@@ -167,7 +232,9 @@ def make_sandbox(path: Optional[str], threshold: int) -> Dict[str, Any]:
         }
         for name, text in files.items():
             (repo / name).write_text(text)
-        env = {**os.environ, "GIT_AUTHOR_NAME": "smoke", "GIT_AUTHOR_EMAIL": "s@example.invalid",
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""),
+               "GIT_CONFIG_NOSYSTEM": "1",
+               "GIT_AUTHOR_NAME": "smoke", "GIT_AUTHOR_EMAIL": "s@example.invalid",
                "GIT_COMMITTER_NAME": "smoke", "GIT_COMMITTER_EMAIL": "s@example.invalid"}
         for cmd in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "scratch"]):
             subprocess.run(["git", "-C", str(repo), *cmd], check=True, env=env,
@@ -186,7 +253,7 @@ def cmd_up(a: argparse.Namespace) -> int:
     cmd = tmux_new_session_cmd(Path(info["repo"]), claude_bin,
                                claude_args(Path(info["settings"]), a.model, a.yolo))
     info.update(model=a.model, started=False)
-    STATE_FILE.write_text(json.dumps(info))
+    save_state(info)
     print(f"sandbox: {info['sandbox']}")
     if a.dry_run:
         print("dry-run, not starting tmux. Would run:")
@@ -199,7 +266,7 @@ def cmd_up(a: argparse.Namespace) -> int:
     if r.returncode != 0:
         sys.exit(f"tmux failed: {r.stderr.strip()}")
     info["started"] = True
-    STATE_FILE.write_text(json.dumps(info))
+    save_state(info)
     print(f"started tmux -L {SOCKET} session {SESSION}; next: peek / send / wait-for")
     return 0
 
@@ -340,9 +407,14 @@ def cmd_down(a: argparse.Namespace) -> int:
     except SystemExit:
         return 0
     if a.purge:
-        shutil.rmtree(st["sandbox"], ignore_errors=True)
+        sandbox = Path(str(st.get("sandbox", ""))).resolve()
+        if private_dir().resolve() not in sandbox.parents:
+            print(f"sandbox {sandbox} is outside {private_dir()} — not purged; delete it "
+                  "by hand")
+            return 0
+        shutil.rmtree(str(sandbox), ignore_errors=True)
         try:
-            STATE_FILE.unlink()
+            state_file().unlink()
         except OSError:
             pass
         print("sandbox purged")
@@ -455,17 +527,22 @@ def run_claude_p(st: Dict[str, Any], prompt: str, model: str, timeout: int) -> T
     return r.returncode, redact((r.stdout or r.stderr).strip())[-400:]
 
 
+def headless_prompt() -> str:
+    """The `headless` scenario's task: notes go where `notes-path` says (private, under
+    the data root), never into the scratch repository."""
+    return ("Read README.md, app.py and notes.txt, then hand over: run "
+            f"'{LAUNCHER}' notes-path, fill in the file it prints (Failed Attempts: None; one "
+            f"Next Step: 'extend app.py with sub()'), and run '{LAUNCHER}' handover --file "
+            "<the path notes-path printed>")
+
+
 def cmd_headless(a: argparse.Namespace) -> int:
     rep = Report()
     cmd_up(argparse.Namespace(sandbox=a.sandbox, threshold=a.threshold, model=a.model,
                               yolo=False, dry_run=True))
     st = load_state()
     data = Path(st["data"])
-    rc, out = run_claude_p(st, (
-        "Read README.md, app.py and notes.txt, then hand over: copy the template at "
-        f"{SKILL}/templates/handover.md to ./notes.md, fill it in (Failed Attempts: None; one "
-        f"Next Step: 'extend app.py with sub()'), and run '{LAUNCHER}' handover --file notes.md"),
-        a.model, a.timeout)
+    rc, out = run_claude_p(st, headless_prompt(), a.model, a.timeout)
     rep.step(rc == 0, "headless run 1 exited 0", f"rc={rc} {out[-200:]}")
     rep.step(bool(handoffs(data)) or bool(archives(data)), "handoff written (headless location)",
              f"tree: {[str(h.relative_to(data)) for h in handoffs(data)]}")
@@ -487,7 +564,8 @@ def parser() -> argparse.ArgumentParser:
     def common(sp: argparse.ArgumentParser, auto: bool = False) -> None:
         sp.add_argument("--model", default=DEFAULT_MODEL, help=f"default {DEFAULT_MODEL}")
         sp.add_argument("--threshold", type=int, default=2, help="ctx %% threshold (default 2)")
-        sp.add_argument("--sandbox", help="sandbox dir (default $TMPDIR/cv-smoke-<ts>)")
+        sp.add_argument("--sandbox", help="sandbox dir (default: a private mkdtemp under "
+                        "$TMPDIR/cv-smoke-<uid>/)")
         if auto:
             sp.add_argument("--timeout", type=int, default=300, help="per-wait seconds")
 

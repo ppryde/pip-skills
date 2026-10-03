@@ -1,12 +1,11 @@
 import json
-import os
 import subprocess
 import sys
 import time
 
 import pytest
 
-from .conftest import SKILL
+from .conftest import SKILL, cli_env
 
 # Each child imports everything, announces "ready", then spins until the go file
 # exists, so all of them hit the read-modify-write in the same instant.
@@ -27,7 +26,7 @@ def store_file(iso):
 
 def _spawn_ingest(sid, ready, go):
     """Launch a real subprocess that ingests one payload once `go` appears."""
-    env = dict(os.environ, PYTHONPATH=str(SKILL / "scripts"))
+    env = cli_env({"PYTHONPATH": str(SKILL / "scripts")})
     payload = json.dumps({"session_id": sid, "cwd": f"/wt/{sid}"})
     proc = subprocess.Popen([sys.executable, "-c", _INGEST, str(ready), str(go)],
                             stdin=subprocess.PIPE, env=env, text=True)

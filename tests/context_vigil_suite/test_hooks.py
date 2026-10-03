@@ -279,7 +279,7 @@ def test_hook_and_cli_share_a_scope_across_subdirectories(repo: Path, run_cli) -
     subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=30)
     sub = repo / "pkg" / "api"
     sub.mkdir(parents=True)
-    notes = repo / "notes.md"
+    notes = repo.parent / "notes.md"   # never inside the repository
     notes.write_text("## Failed Attempts\nNone\n\n## Next Step\ngo\n")
     result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=sub)
     assert result.returncode == 0, result.stderr

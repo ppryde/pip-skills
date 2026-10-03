@@ -19,13 +19,18 @@ KICK_PROMPT = (
     "context-vigil: handover received — resume from the injected handover now, "
     "starting with its Next Step."
 )
+NOTES_STEP = (
+    "run `\"{launcher}\" notes-path`: it prints a private notes file outside the "
+    "repository, pre-filled from the template. Fill that file in (Failed Attempts and "
+    "exactly one Next Step are required; never write handover notes inside the "
+    "repository, never paste a secret into them), then run:\n"
+    "   `\"{launcher}\" handover --file <the path notes-path printed>`"
+)
 NUDGE_ATTENDED = (
     "**context-vigil: context at {pct}% — over the {threshold}% threshold.** "
     "A person just typed to you. Answer the user's message first. Then tell them "
     "context is at {pct}% and ASK whether to hand over now. Do not run `handover` "
-    "until they agree. If they do, write handover notes following `{template}` "
-    "(Failed Attempts and exactly one Next Step are required) and run:\n"
-    "   `\"{launcher}\" handover --file <your notes file>`"
+    "until they agree. If they do, " + NOTES_STEP
 )
 NUDGE_UNATTENDED = (
     "**context-vigil: context at {pct}% — over the {threshold}% threshold.** "
@@ -34,14 +39,14 @@ NUDGE_UNATTENDED = (
     "wait for it (or stop it) first — handing over abandons its result.\n"
     "2. If the user is mid-discussion with you, finish that exchange first; never "
     "clear a conversation out from under a live human.\n"
-    "3. Write handover notes following `{template}` — Failed Attempts and exactly "
-    "one Next Step are required — then run:\n"
-    "   `\"{launcher}\" handover --file <your notes file>`\n"
+    "3. Hand over: " + NOTES_STEP + "\n"
     "It will tell you whether /clear is automatic or the user must type it."
 )
 NUDGE_REMOTE = (
     "\n\nThis session is remote: the next session cannot open file paths. Embed "
-    "anything it must read with repeatable `--inline <path>`."
+    "anything it must read with repeatable `--inline <path>`. Never inline secrets or "
+    "env files (.env, keys, credentials, shell rc): they are refused, and a handover "
+    "is printed back into the next session's transcript."
 )
 
 
@@ -102,8 +107,7 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
             session.save(session_id, record)
     event = _str(payload, "hook_event_name")
     template = NUDGE_ATTENDED if event == "UserPromptSubmit" else NUDGE_UNATTENDED
-    text = template.format(pct=pct, threshold=threshold,
-                           template=handover.template_path(), launcher=paths.launcher_path())
+    text = template.format(pct=pct, threshold=threshold, launcher=paths.launcher_path())
     if config.mode(cwd) == "remote":
         text += NUDGE_REMOTE
     return json.dumps({"hookSpecificOutput": {

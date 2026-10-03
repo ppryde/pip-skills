@@ -15,7 +15,8 @@ SCRIPT = SKILL / "scripts" / "claude-tmux"
 
 # The only real programs the script needs. PATH is the stubs dir alone, so a real
 # tmux (Linux ships /usr/bin/tmux) can never be reached by a test.
-_COREUTILS = ("bash", "env", "basename", "grep", "cat", "dirname", "mktemp", "rm", "sh")
+_COREUTILS = ("bash", "env", "basename", "grep", "cat", "dirname", "mktemp", "rm", "sh",
+              "find")
 
 
 @pytest.fixture(autouse=True)
@@ -443,3 +444,60 @@ def test_xtrace_never_traces_forwarded_values(stubs: Path, repo: Path, iso: Path
     claude = [ln for ln in (stubs.parent / "calls.log").read_text().splitlines()
               if ln.startswith("claude ")][0]
     assert f"key={canary}" in claude                  # and the value still reached claude
+
+
+# --- round 3 (adversarial): a traced pane, the tmux client's env, SIGKILL residue -----
+
+def test_env_file_turns_tracing_off_before_any_export(stubs: Path, repo: Path, iso: Path) -> None:
+    """A server env (or BASH_ENV) that switches xtrace on in the pane's bash must not trace
+    the exports: the env file's first line turns tracing off."""
+    log = stubs.parent / "calls.log"
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log}"\n'
+        '[[ " $* " == *" has-session "* ]] && exit 1\n'
+        f'if [[ " $* " == *" new-session "* ]]; then head -n 1 "${{@: -1}}" > "{iso}/first"; '
+        'env -i PATH="$PATH" SHELLOPTS=xtrace "${@: -2:1}" "${@: -1}"; fi\nexit 0\n')
+    (stubs / "head").symlink_to(shutil.which("head"))
+    (stubs / "claude").write_text(
+        f'#!/usr/bin/env bash\necho "claude key=${{ANTHROPIC_API_KEY-unset}}" >> "{log}"\n')
+    canary = "sk-FAKE-canary-pane-xtrace"
+    log.touch()
+    result = _pty_run(["bash", str(SCRIPT)], repo, _env(stubs, ANTHROPIC_API_KEY=canary))
+    assert result.returncode == 0
+    assert canary not in result.stderr, "the pane's bash traced a forwarded value"
+    assert (iso / "first").read_text().startswith("set +o xtrace")
+    assert f"key={canary}" in log.read_text()        # the value still reached claude
+
+
+def test_tmux_client_never_inherits_shell_tracing_env(stubs: Path, repo: Path, iso: Path) -> None:
+    """A server this launch starts must not inherit SHELLOPTS/BASH_ENV and friends."""
+    (stubs / "tmux").write_text(
+        '#!/usr/bin/env bash\n[[ " $* " == *" has-session "* ]] && exit 1\n'
+        f'[[ " $* " == *" new-session "* ]] && env > "{iso}/client-env"\nexit 0\n')
+    (iso / "benv").write_text(":\n")
+    canary = "sk-FAKE-canary-client"
+    full = _env(stubs, SHELLOPTS="xtrace", BASHOPTS="extglob", BASH_ENV=str(iso / "benv"),
+                ENV=str(iso / "benv"), BASH_XTRACEFD="2", ANTHROPIC_API_KEY=canary)
+    result = _pty_run(["bash", str(SCRIPT)], repo, full)
+    assert result.returncode == 0
+    assert canary not in result.stderr
+    names = [ln.split("=", 1)[0] for ln in (iso / "client-env").read_text().splitlines()]
+    for name in ("SHELLOPTS", "BASHOPTS", "BASH_ENV", "ENV", "BASH_XTRACEFD"):
+        assert name not in names, name
+
+
+def test_stale_env_files_are_swept_at_launch(stubs: Path, repo: Path, iso: Path) -> None:
+    import time
+    tmpdir = iso / "tmp"
+    tmpdir.mkdir()
+    stale = tmpdir / "claude-tmux-env.OLD123"
+    fresh = tmpdir / "claude-tmux-env.NEW456"
+    other = tmpdir / "unrelated.OLD789"
+    for f in (stale, fresh, other):
+        f.write_text("export ANTHROPIC_API_KEY=sk-FAKE-canary-stale\n")
+    then = time.time() - 300
+    for f in (stale, other):
+        os.utime(f, (then, then))
+    _running_tmux(stubs)
+    _run(stubs, repo, TMPDIR=str(tmpdir))
+    assert not stale.exists() and fresh.exists() and other.exists()

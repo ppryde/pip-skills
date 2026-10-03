@@ -27,7 +27,6 @@ import json
 import math
 import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -101,17 +100,13 @@ def _load(path: Path) -> dict[str, Any]:
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    paths.ensure_dir(path.parent)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".status.", suffix=".tmp")
+    """0600 from the first byte via ``paths.write_private`` (which also sweeps a
+    crashed write's strays); a failure leaves the old store in place."""
     try:
-        with os.fdopen(fd, "w") as handle:
-            json.dump(data, handle)
-        os.replace(tmp, path)
+        paths.write_private(path, json.dumps(data))
+        paths.sweep_stale(path.parent, (".status.*.tmp",))   # an older version's strays
     except OSError:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        pass
 
 
 def _context_is_blank(payload: dict[str, Any]) -> bool:

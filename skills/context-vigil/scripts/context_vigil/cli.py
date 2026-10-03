@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import List, Optional
 
@@ -56,9 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     hmode.add_argument("--file", help="notes following templates/handover.md")
     hmode.add_argument("--resume", action="store_true", help="load a waiting handover")
     hmode.add_argument("--discard", action="store_true", help="archive a waiting handover unread")
-    hp.add_argument("--inline", action="append", default=[], help="embed a file (remote mode)")
+    hp.add_argument("--inline", action="append", default=[],
+                    help="embed a file (remote mode only; secret-bearing files are refused)")
     hp.add_argument("--no-snapshot", action="store_true")
     hp.set_defaults(func=_cmd_handover)
+    sub.add_parser("notes-path", help="print (creating it from the template) the private "
+                   "file to write handover notes in").set_defaults(func=_cmd_notes_path)
     sub.add_parser("ingest", help="record a status-line payload from stdin").set_defaults(
         func=_cmd_ingest)
     ctxp = sub.add_parser("context", help="print ctx NN%% for this session")
@@ -105,10 +109,17 @@ def _cmd_handover(args: argparse.Namespace) -> int:
               if args.resume
               else "handover discarded" + (" (kept in the archive)" if keep else ""))
         return 0
+    notes_file = Path(args.file)
     try:
-        notes = Path(args.file).read_text()
+        notes = notes_file.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise CliError(f"--file is not UTF-8 text: {notes_file}") from exc
     except OSError as exc:
-        raise CliError(f"--file unreadable: {exc}") from exc
+        raise CliError(f"--file unreadable: {notes_file} "
+                       f"({exc.strerror or type(exc).__name__})") from exc
+    if args.inline and config.mode(cwd) != "remote":
+        raise CliError("--inline is for remote mode only (context.mode is not `remote`): "
+                       "reference files by path in the notes instead")
     try:
         document = handover.assemble(
             notes, cwd, [Path(p) for p in args.inline], include_snapshot=not args.no_snapshot,
@@ -121,18 +132,66 @@ def _cmd_handover(args: argparse.Namespace) -> int:
         if state.is_paused(scope):
             raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
         state.write_handoff(kept, document, config.archive_keep(cwd))
+        _tidy_notes(notes_file)
         print(f"handover saved to {state.handoff_path(kept)} — the next headless run in this "
               "worktree can `handover --resume` it")
         return 0
     result = state.request_clear(scope, document, config.archive_keep(cwd))
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
+    _tidy_notes(notes_file)
     if tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
         print("handover saved — type /clear, then send any message (e.g. \"go\") "
               "to start the resumed turn")
     return 0
+
+
+def _tidy_notes(notes_file: Path) -> None:
+    """After a saved handover: delete notes that live under the data root (their job is
+    done, and they need not linger); warn, by path only, about notes inside a git
+    worktree — untracked and unignored, one `git add -A` from history."""
+    real = Path(os.path.realpath(str(notes_file)))
+    root = Path(os.path.realpath(str(paths.data_root())))
+    if root in real.parents:
+        try:
+            os.unlink(str(notes_file))
+        except OSError:
+            pass
+        return
+    repo = paths.enclosing_repo(real)
+    if repo is not None:
+        print(f"WARNING: the notes file {notes_file} is inside a git repository ({repo}) and "
+              "is not ignored — delete it. Next time write notes in the file "
+              "`context-vigil notes-path` prints (private, outside every repository).",
+              file=sys.stderr)
+
+
+def _cmd_notes_path(args: argparse.Namespace) -> int:
+    scope = _scope(Path.cwd())
+    try:
+        template = handover.template_path().read_text(encoding="utf-8")
+        path = state.ensure_notes(scope, template)
+    except paths.UnsafeDataRoot:
+        raise
+    except OSError as exc:
+        raise CliError(f"cannot prepare the notes file under {scope} "
+                       f"({exc.strerror or type(exc).__name__})") from exc
+    print(path)
+    return 0
+
+
+def _data_root_warning() -> Optional[str]:
+    """A data root inside a git worktree (a dotfiles-managed config dir, usually):
+    it ignores itself, but say so — paths only."""
+    root = paths.data_root()
+    repo = paths.enclosing_repo(root)
+    if repo is None:
+        return None
+    return (f"WARNING: the data root {root} is inside a git repository ({repo}). It ignores "
+            "itself (a .gitignore of `*`), but handovers belong outside repositories: set "
+            "CONTEXT_VIGIL_HOME to an absolute path outside it.")
 
 
 def _cmd_config(args: argparse.Namespace) -> int:
@@ -272,7 +331,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
     settings = install.settings_path()
     if live.hooks is None:
         installed = "unknown"
-        hooks_line = f"hooks: unreadable — {settings} is not valid JSON"
+        hooks_line = (f"hooks: unreadable — {settings} could not be parsed (invalid JSON, "
+                      "duplicate keys or not UTF-8)")
     else:
         installed = ("yes" if live.hooks == ALL_HOOKS
                      else "partial" if live.hooks else "no")
@@ -302,6 +362,9 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"data: {paths.data_root()}",
         _python_line(),
     ]
+    warning = _data_root_warning()
+    if warning:
+        lines.append(warning)
     print("\n".join(lines))
     return 0
 
@@ -319,6 +382,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
     except (install.InstallError, config.ConfigError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
     summaries = _summaries(plan)
+    warning = _data_root_warning()
+    if warning:
+        print(warning + "\n")
     if not args.yes:
         print("context-vigil install — DRY RUN, nothing changed yet.\n")
         print("\n".join(summaries) if summaries else "Hooks and status line already wired.")
@@ -448,6 +514,21 @@ def _cmd_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+DEBUG_ENV = "CONTEXT_VIGIL_DEBUG"
+
+
+def _unexpected(exc: BaseException) -> None:
+    """One line naming the exception CLASS only: its message could quote a file or an
+    environment value, and this output reaches the agent's transcript. With
+    CONTEXT_VIGIL_DEBUG=1, also the frames (file, line, function) — still never the
+    message, a source line, a local or the environment."""
+    print(f"error: unexpected {type(exc).__name__} (details withheld: they could quote a "
+          f"file) — re-run with {DEBUG_ENV}=1 for details", file=sys.stderr)
+    if os.environ.get(DEBUG_ENV):
+        for frame in traceback.extract_tb(exc.__traceback__):
+            print(f"  at {frame.filename}:{frame.lineno} in {frame.name}", file=sys.stderr)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -456,6 +537,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return result
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (paths.DataRootError, paths.UnsafeDataRoot) as exc:
+        print(f"error: {exc}", file=sys.stderr)   # our own words and a path
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:   # noqa: BLE001 — the last line of defence, by design
+        _unexpected(exc)
         return 1
 
 

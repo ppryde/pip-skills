@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 HOME_ENV = "CONTEXT_VIGIL_HOME"
 SESSION_ENV = "CONTEXT_VIGIL_SESSION"
@@ -26,59 +26,178 @@ def config_dir() -> Path:
     return Path(override) if override else Path.home() / ".claude"
 
 
+class DataRootError(ValueError):
+    """``CONTEXT_VIGIL_HOME`` is unusable (relative); nothing was written."""
+
+
+class UnsafeDataRoot(PermissionError):
+    """The data root is not ours alone (another owner, or group/world-writable and
+    impossible to tighten): refuse to read or write anything under it."""
+
+
 def data_root() -> Path:
+    """``$CONTEXT_VIGIL_HOME`` (must be absolute), else ``<config dir>/context-vigil``.
+
+    A relative override is refused rather than resolved: it would land under whatever
+    directory a hook or the CLI happens to run from (a repository, usually)."""
     override = os.environ.get(HOME_ENV)
-    return Path(override) if override else config_dir() / "context-vigil"
+    if override:
+        if not os.path.isabs(override):
+            raise DataRootError(f"{HOME_ENV} must be an absolute path; refusing to use a "
+                                "relative one (it would land inside whatever directory "
+                                "the command runs from)")
+        return Path(override)
+    return config_dir() / "context-vigil"
 
 
 PRIVATE_DIR_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
+TMP_PREFIX = ".cv-tmp."          # every atomic-write temp file starts with this
+STALE_TMP_SECONDS = 60           # a temp file older than this is a crash's leftover
+NOFOLLOW = os.O_NOFOLLOW     # POSIX; every platform context-vigil supports
+_IGNORE_ALL = "*\n"
 
 
-def ensure_dir(path: Path) -> Path:
-    """Create ``path`` and any missing parents as 0700, and tighten the data root.
-
-    Each missing component is made with ``os.mkdir(..., 0o700)``, so no directory
-    is ever wider than that, even for an instant. A data root left wider by an
-    older version is tightened here, on its next write."""
+def make_private_dirs(path: Path) -> None:
+    """Create ``path`` and any missing parents with ``os.mkdir(..., 0o700)``: no new
+    directory is ever wider than 0700, whatever the umask."""
     missing = []
     current = path
-    while not current.exists():
+    while not os.path.lexists(str(current)):
         missing.append(current)
         if current.parent == current:
             break
         current = current.parent
     for directory in reversed(missing):
         try:
-            os.mkdir(directory, PRIVATE_DIR_MODE)
+            os.mkdir(str(directory), PRIVATE_DIR_MODE)
         except FileExistsError:
             pass
-    root = data_root()
+
+
+def check_root(root: Path) -> None:
+    """Raise UnsafeDataRoot unless ``root`` (when it exists) is owned by this user and
+    not group/world-writable. A root of ours left wider by an older version is
+    tightened first; one that cannot be tightened, or that someone else owns, is
+    refused: its owner could plant a handover (prompt injection) or symlinks."""
     try:
-        if (path == root or root in path.parents) and root.is_dir() \
-                and root.stat().st_mode & 0o077:
-            os.chmod(root, PRIVATE_DIR_MODE)
+        st = os.stat(str(root))
+    except FileNotFoundError:
+        return
+    if st.st_uid != os.getuid():
+        raise UnsafeDataRoot(f"the data root {root} is owned by another user; refusing to "
+                             f"use it (set {HOME_ENV} to a directory of your own)")
+    if st.st_mode & 0o022:
+        try:
+            os.chmod(str(root), PRIVATE_DIR_MODE)
+        except OSError:
+            pass
+        try:
+            wide = os.stat(str(root)).st_mode & 0o022
+        except OSError:
+            wide = 1
+        if wide:
+            raise UnsafeDataRoot(f"the data root {root} is writable by other users and "
+                                 "could not be made private; refusing to use it")
+    elif st.st_mode & 0o077:
+        try:
+            os.chmod(str(root), PRIVATE_DIR_MODE)   # readable by others: tighten quietly
+        except OSError:
+            pass
+
+
+def _ignore_everything(root: Path) -> None:
+    """``<root>/.gitignore`` = ``*``: the data root ignores itself wherever it lands
+    (a dotfiles-managed config dir is a git repository), so ``git add -A`` never
+    picks up a handover. Created once, 0600, never through a symlink."""
+    marker = root / ".gitignore"
+    if os.path.lexists(str(marker)):
+        return
+    try:
+        fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+                     PRIVATE_FILE_MODE)
     except OSError:
-        pass
+        return
+    with os.fdopen(fd, "w") as handle:
+        handle.write(_IGNORE_ALL)
+
+
+def ensure_dir(path: Path) -> Path:
+    """Create ``path`` (and missing parents) 0700; under the data root, first check
+    the root is ours alone (``check_root``) and make it self-ignoring."""
+    root = data_root()
+    under_root = path == root or root in path.parents
+    if under_root:
+        check_root(root)
+    make_private_dirs(path)
+    if under_root:
+        check_root(root)          # it may have just been created: still ours, 0700
+        _ignore_everything(root)
     return path
 
 
+def guard_read(path: Path) -> None:
+    """Before reading state under the data root: refuse a root that is not ours."""
+    root = data_root()
+    if path == root or root in path.parents:
+        check_root(root)
+
+
+def read_private(path: Path) -> str:
+    """Read a state file without following a symlink (O_NOFOLLOW), after checking the
+    data root is ours. Raises OSError (ELOOP for a symlink) or UnicodeError."""
+    guard_read(path)
+    fd = os.open(str(path), os.O_RDONLY | NOFOLLOW)
+    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
 def open_private(path: Path, flags: int = os.O_WRONLY | os.O_CREAT | os.O_APPEND) -> int:
-    """An fd for ``path``, created 0600 (lock files and other sidecars)."""
+    """An fd for ``path``, created 0600 (lock files, markers and other sidecars).
+    Never follows a symlink: a planted link fails with ELOOP instead of redirecting."""
     ensure_dir(path.parent)
-    return os.open(str(path), flags, PRIVATE_FILE_MODE)
+    return os.open(str(path), flags | NOFOLLOW, PRIVATE_FILE_MODE)
+
+
+def sweep_stale(directory: Path, patterns: Iterable[str],
+                older_than: float = STALE_TMP_SECONDS) -> None:
+    """Unlink files in ``directory`` matching any glob in ``patterns`` that this user
+    owns and that are older than ``older_than`` seconds: the private leftovers of an
+    atomic write killed (SIGKILL, power loss) between creating its temp file and the
+    rename. Fresh ones may belong to a write in flight and are kept. Never raises."""
+    import fnmatch
+    import time
+    try:
+        names = os.listdir(str(directory))
+    except OSError:
+        return
+    cutoff = time.time() - older_than
+    uid = os.getuid()
+    for name in names:
+        if not any(fnmatch.fnmatchcase(name, p) for p in patterns):
+            continue
+        entry = directory / name
+        try:
+            st = os.lstat(str(entry))
+            if st.st_uid == uid and st.st_mtime < cutoff and not os.path.isdir(str(entry)):
+                os.unlink(str(entry))
+        except OSError:
+            pass
 
 
 def write_private(path: Path, text: str) -> None:
     """Atomically replace ``path`` with ``text``, as a 0600 file from the first byte.
 
-    The temp file comes from ``mkstemp`` (0600, O_EXCL, random name) in the same
-    directory, so a crash leaves at worst a private stray, never a readable copy;
-    ``os.replace`` gives the target the temp file's mode, so an existing file left
-    wider by an older version is tightened by this write."""
+    The temp file comes from ``mkstemp`` (0600, O_EXCL, random name, ``.cv-tmp.``
+    prefix) in the same directory, so a crash leaves at worst a private stray, never
+    a readable copy, and the next write there sweeps strays older than a minute.
+    ``os.replace`` gives the target the temp file's mode (an existing file left wider
+    by an older version is tightened) and replaces a planted symlink, never its target."""
     import tempfile
     ensure_dir(path.parent)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    sweep_stale(path.parent, (f"{TMP_PREFIX}*.tmp", f".{path.name}.*.tmp"))
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f"{TMP_PREFIX}{path.name}.",
+                               suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
@@ -158,6 +277,20 @@ def worktree_key(cwd: Path) -> str:
             pass
         if current.parent == current:
             return submodule or real
+        current = current.parent
+
+
+def enclosing_repo(path: Path) -> Optional[str]:
+    """The git worktree (or repository) holding ``path``, by a filesystem walk-up from
+    its nearest existing ancestor (no subprocess); None when it is in none."""
+    current = Path(os.path.realpath(str(path)))
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    while True:
+        if os.path.lexists(str(current / ".git")):
+            return str(current)
+        if current.parent == current:
+            return None
         current = current.parent
 
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -205,23 +207,22 @@ def test_atomic_temp_files_are_created_private(repo: Path, iso: Path,
     assert seen and all(m == 0o600 for _, m in seen), seen
 
 
-def test_user_file_temp_is_private_before_copymode(home: Path,
-                                                   monkeypatch: pytest.MonkeyPatch) -> None:
-    import shutil
+def test_user_file_temp_stays_private_until_the_rename(home: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     target = home / ".zshrc"
     target.write_text("export X=1\n")
     target.chmod(0o644)
     modes: list = []
-    real = shutil.copymode
+    real = os.replace
 
     def spy(src, dst):  # type: ignore[no-untyped-def]
-        modes.append(_mode(Path(dst)))
+        modes.append(_mode(Path(src)))
         return real(src, dst)
 
-    monkeypatch.setattr(shutil, "copymode", spy)
+    monkeypatch.setattr(os, "replace", spy)
     install.write_atomic(target, "export X=2\n")
-    assert modes == [0o600]
-    assert _mode(target) == 0o644  # the user's own mode is kept
+    assert modes == [0o600]          # a stranded temp copy is never readable by others
+    assert _mode(target) == 0o644    # the user's own mode is restored after the rename
 
 
 def test_archive_keeps_newest_twenty_by_default(repo: Path) -> None:
@@ -265,7 +266,7 @@ def test_error_messages_carry_no_canaries(run_cli, cfg: Path, repo: Path) -> Non
         result = run_cli(*args)
         assert result.returncode == 1
         _no_canary(result)
-    notes = repo / "notes.md"
+    notes = repo.parent / "notes.md"   # never inside the repository
     notes.write_text(f"## Goal\n{CANARY}-goal\n## Next Step\n- a {CANARY}\n- b\n")
     result = run_cli("handover", "--file", str(notes), cwd=repo)
     assert result.returncode == 1
@@ -362,3 +363,490 @@ def test_leak_guard_finds_a_planted_value_by_file_only(iso: Path) -> None:
     (iso / "clean").write_text("nothing here\n")
     assert leaked_files(iso, (f"{CANARY}-guard".encode(),)) == [iso / "log"]
     assert leaked_files(iso, ()) == []
+
+
+# --- Round 3 (adversarial): data root, notes home, --inline, hooks, tracebacks -------
+
+GOOD_NOTES = ("## Goal\nShip it.\n\n## Failed Attempts\nNone\n\n"
+              "## Next Step\nRun the tests.\n")
+
+
+def _git_init(path: Path) -> None:
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "init", "-q", str(path)], check=True, env=env,
+                   capture_output=True, timeout=30)
+
+
+def _old(path: Path, seconds: int = 120) -> None:
+    then = time.time() - seconds
+    os.utime(str(path), (then, then), follow_symlinks=False)
+
+
+def _one_clean_line(result) -> None:  # type: ignore[no-untyped-def]
+    assert result.returncode == 1, "expected a refusal"
+    assert "Traceback" not in result.stderr, "a traceback reached stderr"
+    assert len(result.stderr.strip().splitlines()) == 1, "expected one error line"
+
+
+# design I1: where the data root may land
+
+def test_relative_data_root_is_refused(run_cli, repo: Path) -> None:
+    env = {"CONTEXT_VIGIL_HOME": ".cv"}
+    for args in (("status",), ("pause",), ("handover", "--resume"), ("notes-path",)):
+        result = run_cli(*args, cwd=repo, env=env)
+        _one_clean_line(result)
+        assert "CONTEXT_VIGIL_HOME" in result.stderr and "absolute" in result.stderr, args
+    hook = run_cli("hook", "session-start", cwd=repo, env=env,
+                   stdin=json.dumps({"cwd": str(repo), "source": "startup"}))
+    assert hook.returncode == 0
+    assert not (repo / ".cv").exists()
+
+
+def test_data_root_is_self_ignoring_and_warned_inside_a_git_repo(run_cli, cfg: Path,
+                                                                 iso: Path) -> None:
+    _git_init(cfg)
+    root = cfg / "context-vigil"
+    env = {"CONTEXT_VIGIL_HOME": str(root)}
+    work = iso / "work"
+    work.mkdir()
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    assert run_cli("install", "--yes", "--launcher", "not-now", env=env,
+                   cwd=work).returncode == 0
+    assert run_cli("handover", "--file", str(notes), "--no-snapshot", env=env,
+                   cwd=work).returncode == 0
+    assert (root / ".gitignore").read_text() == "*\n"
+    porcelain = subprocess.run(
+        ["git", "-C", str(cfg), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True, text=True, timeout=30,
+        env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}).stdout
+    assert "context-vigil" not in porcelain
+    for args in (("status",), ("install",)):
+        result = run_cli(*args, env=env, cwd=work)
+        assert f"WARNING: the data root {root} is inside a git repository" in (
+            result.stdout + result.stderr), args
+
+
+def test_data_root_owned_by_another_user_is_refused(repo: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    from context_vigil import hooks
+    scope = paths.scope_dir(repo)
+    state.write_handoff(scope, f"# planted {CANARY}-planted\n")
+    uid = os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: uid + 1)
+    with pytest.raises(paths.UnsafeDataRoot):
+        state.write_handoff(scope, "x")
+    with pytest.raises(paths.UnsafeDataRoot):
+        state.pause(scope)
+    assert state.read_handoff(scope) is None
+    assert state.consume_handoff(scope) is None
+    assert hooks.run("session-start", json.dumps(
+        {"cwd": str(repo), "source": "startup"})) is None
+    assert hooks.run("session-start", json.dumps({"cwd": str(repo), "source": "clear"})) is None
+    monkeypatch.setattr(os, "getuid", lambda: uid)
+    assert state.read_handoff(scope) == f"# planted {CANARY}-planted\n"
+
+
+def test_open_data_root_that_cannot_be_tightened_is_refused(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = paths.data_root()
+    root.mkdir(mode=0o700)
+    root.chmod(0o770)
+
+    def no_chmod(*_a, **_k):  # type: ignore[no-untyped-def]
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "chmod", no_chmod)
+    with pytest.raises(paths.UnsafeDataRoot):
+        paths.ensure_dir(paths.scope_dir(repo))
+
+
+def test_handoff_and_marker_io_never_follow_symlinks(run_cli, repo: Path, iso: Path) -> None:
+    victim = iso / "victim.txt"
+    victim.write_text(f"{CANARY}-victim\n")
+    victim.chmod(0o644)
+    scope = paths.scope_dir(repo)
+    paths.ensure_dir(scope)
+    state.handoff_path(scope).symlink_to(victim)
+    assert state.read_handoff(scope) is None
+    assert state.consume_handoff(scope) is None
+    _no_canary(run_cli("handover", "--resume", cwd=repo))
+    _no_canary(run_cli("hook", "session-start", cwd=repo,
+                       stdin=json.dumps({"cwd": str(repo), "source": "clear"})))
+    for marker in (state.paused_flag(scope), state.gate_marker(scope),
+                   state.cooldown_marker(scope)):
+        marker.symlink_to(victim)
+    with pytest.raises(OSError):
+        state.pause(scope)
+    with pytest.raises(OSError):
+        state.set_gate(scope)
+    assert _mode(victim) == 0o644 and victim.read_text() == f"{CANARY}-victim\n"
+
+
+# design M1 / output M1: SIGKILL residue
+
+def test_temp_files_carry_a_recognisable_prefix(repo: Path, home: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list = []
+    real = os.replace
+
+    def spy(src, dst):  # type: ignore[no-untyped-def]
+        seen.append((Path(src).name, _mode(Path(src))))
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy)
+    state.write_handoff(paths.scope_dir(repo), "doc")
+    census.ingest(json.dumps({"session_id": "s1", "workspace": {"current_dir": str(repo)}}))
+    install.write_atomic(home / ".zshrc", "export X=1\n")
+    assert len(seen) >= 3
+    assert all(name.startswith(".cv-tmp.") and mode == 0o600 for name, mode in seen), seen
+
+
+def test_stale_private_temp_files_are_swept_on_the_next_write(repo: Path) -> None:
+    scope = paths.scope_dir(repo)
+    paths.ensure_dir(scope)
+    stale = scope / ".cv-tmp.handoff.md.abc123.tmp"
+    legacy = scope / ".handoff.md.zzz999.tmp"
+    fresh = scope / ".cv-tmp.handoff.md.new456.tmp"
+    for f in (stale, legacy, fresh):
+        f.write_text(f"{CANARY}-stray\n")
+    _old(stale)
+    _old(legacy)
+    state.write_handoff(scope, "doc")
+    assert not stale.exists() and not legacy.exists() and fresh.exists()
+
+
+def test_stale_user_file_temps_are_swept_and_parents_are_private(home: Path) -> None:
+    legacy = home / ".zshrc.abcd1234.context-vigil.tmp"
+    stale = home / ".cv-tmp..zshrc.x1.context-vigil.tmp"
+    fresh = home / ".cv-tmp..zshrc.y2.context-vigil.tmp"
+    for f in (legacy, stale, fresh):
+        f.write_text(f"export K={CANARY}-stray\n")
+    _old(legacy)
+    _old(stale)
+    install.write_atomic(home / ".zshrc", "export X=1\n")
+    assert not legacy.exists() and not stale.exists() and fresh.exists()
+    old_mask = os.umask(0)
+    try:
+        install.write_atomic(home / "zd" / "deep" / ".zshrc", "x\n")
+    finally:
+        os.umask(old_mask)
+    assert _mode(home / "zd") == 0o700 and _mode(home / "zd" / "deep") == 0o700
+
+
+# design M2 / output I1: handover notes live outside every repository
+
+def test_notes_path_is_private_and_outside_the_repo(run_cli, repo: Path) -> None:
+    _git_init(repo)
+    result = run_cli("notes-path", cwd=repo)
+    assert result.returncode == 0, result.stderr
+    notes = Path(result.stdout.strip())
+    assert notes.is_file() and _mode(notes) == 0o600
+    assert str(notes).startswith(str(paths.data_root()) + os.sep)
+    assert not str(notes).startswith(str(repo) + os.sep)
+    assert "## Next Step" in notes.read_text()
+    notes.write_text(GOOD_NOTES)
+    again = run_cli("notes-path", cwd=repo)
+    assert Path(again.stdout.strip()) == notes and notes.read_text() == GOOD_NOTES
+    done = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=repo)
+    assert done.returncode == 0, done.stderr
+    assert "inside a git repository" not in done.stderr
+    assert not notes.exists()   # used notes are not left lying around
+
+
+def test_notes_inside_a_repo_warn_by_path_only(run_cli, repo: Path) -> None:
+    _git_init(repo)
+    notes = repo / "handover-notes.md"
+    notes.write_text(GOOD_NOTES)
+    result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert str(notes) in result.stderr and "inside a git repository" in result.stderr
+    assert "notes-path" in result.stderr and "Ship it" not in result.stderr
+    assert notes.exists()   # the user's file: warned about, never deleted
+
+
+def test_agent_is_directed_to_the_private_notes_path() -> None:
+    from context_vigil import handover, hooks
+
+    from .conftest import SKILL
+    for text in (hooks.NUDGE_ATTENDED, hooks.NUDGE_UNATTENDED):
+        assert "notes-path" in text and "never" in text and "repositor" in text
+    remote = hooks.NUDGE_REMOTE.lower()
+    assert "never inline" in remote and ".env" in remote and "secret" in remote
+    skill = (SKILL / "SKILL.md").read_text()
+    assert "notes-path" in skill and "scratch file" not in skill
+    template = handover.template_path().read_text()
+    assert "notes-path" in template and "secret" in template
+
+
+# design I3: --inline
+
+def _remote(repo: Path) -> None:
+    config.set_value(repo, "context.mode", "remote")
+
+
+def _handoff_saved(repo: Path) -> bool:
+    return state.handoff_path(paths.scope_dir(repo)).exists()
+
+
+def test_inline_is_refused_in_local_mode(run_cli, repo: Path, iso: Path) -> None:
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    plain = iso / "plain.md"
+    plain.write_text("hello\n")
+    result = run_cli("handover", "--file", str(notes), "--inline", str(plain),
+                     "--no-snapshot", cwd=repo)
+    _one_clean_line(result)
+    assert "remote" in result.stderr and not _handoff_saved(repo)
+    _remote(repo)
+    ok = run_cli("handover", "--file", str(notes), "--inline", str(plain),
+                 "--no-snapshot", cwd=repo)
+    assert ok.returncode == 0, ok.stderr
+    assert "hello" in (state.read_handoff(paths.scope_dir(repo)) or "")
+
+
+@pytest.mark.parametrize("name", [".env", ".env.local", ".envrc", "server.pem", "tls.key",
+                                  "id_ed25519", "aws_credentials", "my-secret.txt", ".netrc",
+                                  ".npmrc", ".pypirc", "cert.p12", ".zshrc"])
+def test_inline_refuses_secret_bearing_names_even_through_a_symlink(
+        run_cli, repo: Path, iso: Path, name: str) -> None:
+    _remote(repo)
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    target = iso / "files" / name
+    target.parent.mkdir()
+    target.write_text("nothing key-shaped here\n")
+    link = iso / "innocuous.txt"
+    link.symlink_to(target)
+    for given in (target, link):
+        result = run_cli("handover", "--file", str(notes), "--inline", str(given),
+                         "--no-snapshot", cwd=repo)
+        _one_clean_line(result)
+        assert str(given) in result.stderr and "nothing key-shaped" not in result.stderr
+    assert not _handoff_saved(repo)
+
+
+@pytest.mark.parametrize("where", [".ssh/config", ".aws/config", ".gnupg/gpg.conf",
+                                   ".config/gh/hosts.yml", ".claude/CLAUDE.md",
+                                   ".claude-personal/notes.md"])
+def test_inline_refuses_files_under_credential_dirs(run_cli, repo: Path, home: Path,
+                                                    iso: Path, where: str) -> None:
+    _remote(repo)
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    target = home / where
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("plain words\n")
+    result = run_cli("handover", "--file", str(notes), "--inline", str(target),
+                     "--no-snapshot", cwd=repo)
+    _one_clean_line(result)
+    assert str(target) in result.stderr and not _handoff_saved(repo)
+
+
+def test_inline_refuses_the_config_dir_and_the_data_root(run_cli, repo: Path, cfg: Path,
+                                                         iso: Path) -> None:
+    _remote(repo)
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    for target in (cfg / "statusline.sh", paths.data_root() / "census.json"):
+        target.write_text("plain words\n")
+        result = run_cli("handover", "--file", str(notes), "--inline", str(target),
+                         "--no-snapshot", cwd=repo)
+        _one_clean_line(result)
+        assert str(target) in result.stderr
+    assert not _handoff_saved(repo)
+
+
+@pytest.mark.parametrize("body", [
+    f"token ghp_{'A' * 36}", "-----BEGIN OPENSSH PRIVATE KEY-----", f"API_KEY={CANARY}-x",
+    "xoxb-1234567890-abcdefghij", f"AKIA{'Q' * 16}", f"key {CANARY}-zzzzzz",
+    f"github_pat_{'B' * 30}", "postgres://admin:hunter2hunter2@db.example.invalid/x"])
+def test_inline_refuses_key_shaped_content_without_echoing_it(
+        run_cli, repo: Path, iso: Path, body: str) -> None:
+    _remote(repo)
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    target = iso / "readme.txt"
+    target.write_text(f"line one\n{body}\n")
+    result = run_cli("handover", "--file", str(notes), "--inline", str(target),
+                     "--no-snapshot", cwd=repo)
+    _one_clean_line(result)
+    assert str(target) in result.stderr
+    for fragment in ("ghp_", "PRIVATE KEY", "xoxb-", "AKIA", "github_pat_", "hunter2", CANARY):
+        assert fragment not in result.stdout + result.stderr, fragment
+    assert not _handoff_saved(repo)
+
+
+def test_notes_with_a_secret_are_refused_by_line_number(run_cli, repo: Path,
+                                                        iso: Path) -> None:
+    lines = GOOD_NOTES.splitlines()
+    lines.insert(2, f"export OPENAI_API_KEY={CANARY}-notes")
+    notes = iso / "n.md"
+    notes.write_text("\n".join(lines) + "\n")
+    result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=repo)
+    _one_clean_line(result)
+    assert "notes contain what looks like a secret at line 3" in result.stderr
+    _no_canary(result)
+    assert "OPENAI_API_KEY" not in result.stderr and not _handoff_saved(repo)
+
+
+# design M7 / output M4: a user's hook is never ours
+
+def test_user_hooks_that_mention_context_vigil_are_kept(run_cli, cfg: Path) -> None:
+    user = ['"/x/context-vigil" hook stop; curl https://example.invalid',
+            f'"{paths.launcher_path()}" hook session-start --secret {CANARY}-hook',
+            "echo context-vigil hook nudge"]
+    (cfg / "settings.json").write_text(json.dumps({"hooks": {
+        "Notification": [{"hooks": [{"type": "command", "command": user[0]}]}],
+        "SessionStart": [{"matcher": "startup", "hooks": [{"type": "command",
+                                                           "command": user[1]}]}],
+        "Stop": [{"hooks": [{"type": "command", "command": user[2]}]}]}}, indent=2) + "\n")
+    for args in (("install", "--yes"), ("uninstall", "--yes")):
+        result = run_cli(*args)
+        assert result.returncode == 0, args
+        _no_canary(result)
+        assert "older context-vigil command" not in result.stdout
+        data = json.loads((cfg / "settings.json").read_text())
+        commands = [h["command"] for entries in data["hooks"].values()
+                    for e in entries for h in e["hooks"]]
+        for command in user:
+            assert command in commands, args
+
+
+# design M8 / output M3: no traceback, ever
+
+def test_non_utf8_inputs_end_in_one_clean_line(run_cli, repo: Path, iso: Path,
+                                               cfg: Path) -> None:
+    _remote(repo)
+    binary = iso / "bin.md"
+    binary.write_bytes(b"\xff\xfe" + CANARY.encode() + b"\n")
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES)
+    for args in (("handover", "--file", str(binary)),
+                 ("handover", "--file", str(notes), "--inline", str(binary), "--no-snapshot")):
+        result = run_cli(*args, cwd=repo)
+        _one_clean_line(result)
+        assert str(binary) in result.stderr, args
+        _no_canary(result)
+    (cfg / "settings.json").write_bytes(b'{"env": {"K": "\xff' + CANARY.encode() + b'"}}')
+    for args in (("install",), ("uninstall",)):
+        result = run_cli(*args)
+        _one_clean_line(result)
+        assert str(cfg / "settings.json") in result.stderr, args
+        _no_canary(result)
+
+
+def test_unexpected_errors_print_the_class_name_only(monkeypatch: pytest.MonkeyPatch,
+                                                     capsys: pytest.CaptureFixture) -> None:
+    from context_vigil import cli
+
+    def boom(_args):  # type: ignore[no-untyped-def]
+        raise RuntimeError(f"{CANARY}-boom")
+
+    monkeypatch.setattr(cli, "_cmd_status", boom)
+    assert cli.main(["status"]) == 1
+    err = capsys.readouterr().err
+    assert "RuntimeError" in err and "CONTEXT_VIGIL_DEBUG=1" in err
+    assert CANARY not in err and "Traceback" not in err
+    monkeypatch.setenv("CONTEXT_VIGIL_DEBUG", "1")
+    assert cli.main(["status"]) == 1
+    err = capsys.readouterr().err
+    assert "RuntimeError" in err and "boom" in err   # frames, by name
+    assert CANARY not in err and "raise RuntimeError" not in err   # no message, no source
+
+
+# output M5: the waiting notice
+
+def test_waiting_notice_drops_a_secret_shaped_branch_or_goal() -> None:
+    from context_vigil import handover
+    doc = f"## Goal\nRotate {CANARY}-goal now\n\n- Branch: `feat/ghp_{'A' * 36}`\n"
+    line = handover.summary(doc, None)
+    assert "a handover is waiting" in line
+    assert CANARY not in line and "ghp_" not in line
+    clean = handover.summary("## Goal\nShip it\n\n- Branch: `feat/x`\n", None)
+    assert "feat/x" in clean and "Ship it" in clean
+
+
+# output M2: a hand-edited status-line block is never repointed
+
+def test_hand_edited_statusline_block_is_left_alone(run_cli, cfg: Path) -> None:
+    script = cfg / "sl.sh"
+    script.write_text("#!/bin/bash\ninput=$(cat)\necho hi\n")
+    script.chmod(0o755)
+    (cfg / "settings.json").write_text(json.dumps(
+        {"statusLine": {"type": "command", "command": str(script)}}))
+    assert run_cli("install", "--yes").returncode == 0
+    edited = script.read_text().replace(
+        install.SL_START + "\n",
+        install.SL_START + f'\nexport Z="$LEAKY_NAME_1"  # {CANARY}\n')
+    script.write_text(edited)
+    for args in (("install",), ("install", "--yes")):
+        result = run_cli(*args)
+        assert result.returncode == 0, args
+        _no_canary(result)
+        assert "LEAKY_NAME_1" not in result.stdout + result.stderr
+        assert f"{script}: lines 3-6" in result.stdout, args
+    assert script.read_text() == edited
+
+
+# design M5 / output M8: the suite's own hygiene
+
+def test_scrub_covers_common_secret_names() -> None:
+    from .conftest import is_secret_name
+    for name in ("GITHUB_TOKEN", "GH_TOKEN", "GH_PAT", "GITHUB_PAT", "OPENAI_API_KEY",
+                 "OPENAI_ORG_ID", "NPM_TOKEN", "DATABASE_URL", "REDIS_URL", "MYSQL_PWD",
+                 "PGPASSWORD", "PGPASS", "SENTRY_DSN", "SLACK_WEBHOOK_URL", "DOCKER_PASS",
+                 "PRIVATE_SSH", "CERT_PASSPHRASE", "HF_TOKEN", "ANTHROPIC_MODEL",
+                 "AWS_REGION", "SSH_AUTH_SOCK"):
+        assert is_secret_name(name), name
+    for name in ("PATH", "HOME", "PWD", "OLDPWD", "LANG", "TERM", "SHELL", "USER", "TMPDIR"):
+        assert not is_secret_name(name), name
+
+
+def test_run_cli_gets_an_explicit_minimal_env(monkeypatch: pytest.MonkeyPatch,
+                                              iso: Path) -> None:
+    from .conftest import cli_env
+    monkeypatch.setenv("SOME_UNRELATED_VAR", "x")
+    env = cli_env({"EXTRA": "1"})
+    assert "SOME_UNRELATED_VAR" not in env and env["EXTRA"] == "1"
+    assert env["HOME"] == os.environ["HOME"] and "PATH" in env
+    assert env["CONTEXT_VIGIL_HOME"] == os.environ["CONTEXT_VIGIL_HOME"]
+    assert os.environ["TMPDIR"].startswith(str(iso))   # iso pins TMPDIR too
+
+
+def test_guard_checks_output_and_never_reprs_secrets() -> None:
+    from .conftest import Secrets, check_showlocals, leaked_text
+    held = Secrets((b"sk-FAKE-canary-out",))
+    assert repr(held) == "<redacted>" and str(held) == "<redacted>"
+    assert leaked_text("x sk-FAKE-canary-out y", held)
+    assert not leaked_text("clean", held)
+    with pytest.raises(pytest.UsageError):
+        check_showlocals(True, held)
+    check_showlocals(False, held)
+    check_showlocals(True, Secrets(()))
+
+
+def test_archiving_never_chmods_through_a_planted_handoff_link(repo: Path, iso: Path) -> None:
+    victim = iso / "victim.txt"
+    victim.write_text(f"{CANARY}-victim\n")
+    victim.chmod(0o644)
+    scope = paths.scope_dir(repo)
+    paths.ensure_dir(scope)
+    state.handoff_path(scope).symlink_to(victim)
+    state.write_handoff(scope, "new doc")
+    assert _mode(victim) == 0o644 and victim.read_text() == f"{CANARY}-victim\n"
+    assert not any(f.is_symlink() for f in state.handoff_archive_dir(scope).glob("*"))
+    assert state.read_handoff(scope) == "new doc"
+
+
+def test_settings_with_duplicate_keys_are_refused_not_collapsed(run_cli, cfg: Path) -> None:
+    text = ('{"env": {"K": "%s-dup-1"}, "model": "a", "env": {"K": "%s-dup-2"}}\n'
+            % (CANARY, CANARY))
+    (cfg / "settings.json").write_text(text)
+    for args in (("install",), ("install", "--yes"), ("uninstall", "--yes")):
+        result = run_cli(*args)
+        _one_clean_line(result)
+        assert "duplicate" in result.stderr and str(cfg / "settings.json") in result.stderr
+        _no_canary(result)
+        assert '"env"' not in result.stderr
+    assert (cfg / "settings.json").read_text() == text

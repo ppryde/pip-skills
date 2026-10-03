@@ -19,7 +19,7 @@ To exercise the rc edit itself, point it at a scratch home, never your own:
 - [ ] The `install` / `launcher` / `uninstall` output is a summary — file paths, our own lines and command strings — with no line of the rc file, no settings `env` and no other hook's command.
 - [ ] `ls -ld "$CLAUDE_CONFIG_DIR/context-vigil"` is `drwx------`, and the files under it are `-rw-------`.
 - [ ] `claude-tmux` in a scratch repo; work until the nudge appears (about 5%).
-- [ ] The agent writes notes and runs `handover --file`.
+- [ ] The agent runs `notes-path`, writes its notes in the file it prints (never in the repo) and runs `handover --file <that path>`; the notes file is gone afterwards.
 - [ ] `/clear` is sent automatically.
 - [ ] The fresh session resumes with the handover's Next Step.
 - [ ] Plain `claude` (no tmux): nudge, then handover, then "handover saved — type /clear, then send any message".

@@ -71,6 +71,30 @@ def handoff_archive_dir(scope: Path) -> Path:
     return scope / "archive"
 
 
+def notes_path(scope: Path) -> Path:
+    """Where the agent writes its handover notes: private (0600, under the 0700,
+    self-ignoring data root) and outside every repository, so notes that mention a
+    secret by accident can never be swept into a commit. Removed after a handover."""
+    return scope / "notes.md"
+
+
+def ensure_notes(scope: Path, template: str) -> Path:
+    """Create the notes file from ``template`` if it is not there (0600, never
+    through a symlink); an existing one is left as the agent wrote it."""
+    path = notes_path(scope)
+    paths.ensure_dir(scope)
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | paths.NOFOLLOW,
+                     paths.PRIVATE_FILE_MODE)
+    except FileExistsError:
+        if path.is_symlink() or not path.is_file():
+            raise IsADirectoryError(f"{path} is not a regular file — remove it and re-run")
+        return path
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(template)
+    return path
+
+
 def is_paused(scope: Path) -> bool:
     return paused_flag(scope).exists()
 
@@ -139,13 +163,19 @@ def clear_requested(scope: Path) -> bool:
 
 
 def _touch(marker: Path) -> None:
-    """Create (0600) or refresh a marker; its mtime is what the TTL checks read."""
+    """Create (0600) or refresh a marker; its mtime is what the TTL checks read.
+
+    Never through a symlink: ``open_private`` opens with O_NOFOLLOW (a planted link
+    fails with ELOOP), and the fchmod and utime act on that fd, not on a path."""
     fd = paths.open_private(marker, os.O_WRONLY | os.O_CREAT)
     try:
         os.fchmod(fd, paths.PRIVATE_FILE_MODE)   # tighten one left wider by an older version
+        if os.utime in os.supports_fd:
+            os.utime(fd, None)
+        else:   # pragma: no cover - every supported platform has futimes
+            os.utime(str(marker), None, follow_symlinks=False)
     finally:
         os.close(fd)
-    os.utime(str(marker), None)
 
 
 def _archived(archive: Path) -> List[Path]:
@@ -175,7 +205,12 @@ def prune_archive(scope: Path, keep: int = ARCHIVE_KEEP) -> None:
 def _archive(scope: Path, path: Path, keep: int) -> None:
     """Move a handoff into the archive (0600), or drop it when ``keep`` is 0; then prune.
 
-    Raises OSError on failure; callers decide whether that matters."""
+    Raises OSError on failure; callers decide whether that matters. A handoff that is
+    a symlink was never written by us: it is unlinked, never archived or chmodded
+    (that would tighten, or later print, whatever file it points at)."""
+    if path.is_symlink():
+        path.unlink()
+        return
     if keep <= 0:
         path.unlink(missing_ok=True)
         prune_archive(scope, 0)
@@ -263,14 +298,18 @@ def drop_orphan_clear(scope: Path, older_than: float | None = None) -> bool:
         return False
 
 
-def read_handoff(scope: Path) -> str | None:
-    path = handoff_path(scope)
-    if not path.exists():
-        return None
+def _read_no_follow(path: Path) -> str | None:
+    """The file's text, or None: missing, a symlink (never followed — a planted link
+    must not turn ``--resume`` into a reader of some other file), unreadable, not
+    UTF-8, or under a data root that is not ours alone."""
     try:
-        return path.read_text()
-    except OSError:
+        return paths.read_private(path)
+    except (OSError, UnicodeError):
         return None
+
+
+def read_handoff(scope: Path) -> str | None:
+    return _read_no_follow(handoff_path(scope))
 
 
 def handoff_written_at(scope: Path) -> float | None:
@@ -292,11 +331,8 @@ def consume_handoff(scope: Path, keep: int = ARCHIVE_KEEP) -> str | None:
     raises.
     """
     path = handoff_path(scope)
-    if not path.exists():
-        return None
-    try:
-        text = path.read_text()
-    except OSError:
+    text = _read_no_follow(path)
+    if text is None:
         return None
     # The text is now in hand — from here we MUST return it, never raise
     # (the docstring's contract). Archiving is best-effort; if it fails we

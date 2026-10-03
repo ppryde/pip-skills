@@ -6,8 +6,10 @@ by default, `--model haiku`); run it only with the owner's approval.
 
 ## What it touches
 
-- Creates `${TMPDIR}/cv-smoke-<ts>/` holding a scratch git repo (`repo/`), the
-  context-vigil data root (`data/`, as `CONTEXT_VIGIL_HOME`) and `settings.json`.
+- Creates a private sandbox with `mkdtemp` (0700, unpredictable name) inside
+  `${TMPDIR}/cv-smoke-<uid>/` (0700, must be yours: a planted or open one is
+  refused), holding a scratch git repo (`repo/`), the context-vigil data root
+  (`data/`, as `CONTEXT_VIGIL_HOME`) and `settings.json`.
 - Hooks and the status line are injected with `claude --settings <that file>`,
   using the same events, matchers and commands as `install`. Threshold defaults
   to 2%, cooldown to 0.
@@ -18,12 +20,20 @@ by default, `--model haiku`); run it only with the owner's approval.
   files or `~/.claude*` config, and never prints environment values or the
   sandbox settings' `env`. The sandbox lives in `$TMPDIR`. Everything it echoes
   from the pane or a run (`peek`, timeout tails, `state` first lines, headless
-  output) is passed through a redactor that masks `sk-…` keys, `AKIA…` key ids
-  and `…KEY/TOKEN/SECRET…=value` as `[redacted]` — belt and braces, in case the
-  model prints something it found.
+  output) is passed through a redactor that masks the skill's key shapes
+  (`sk-…`, `AKIA…`, `ghp_…`/`github_pat_…`, `xox?-…`, `AIza…`, private-key
+  blocks, JWTs, credentials in URLs, `KEY=`-style assignments) plus any
+  `token=`/`password:`/`api_key`/`Bearer …` in any case, as `[redacted]` —
+  belt and braces, in case the model prints something it found. `state` prints
+  only allow-listed session-record fields, and masks a key-shaped value even
+  there.
 - Permissions are narrow: `Bash(<this checkout>/scripts/context-vigil:*)`,
   `Bash(cp:*)`, Read, Write, Edit. `--yolo` skips permission prompts instead.
-- Pointer file `${TMPDIR}/cv-smoke-current.json` records the active sandbox.
+- Pointer file `${TMPDIR}/cv-smoke-<uid>/current.json` (0600, refused unless
+  yours and private) records the active sandbox; `down --purge` deletes only a
+  sandbox inside that private dir.
+- The `headless` scenario has the model write its notes in the file
+  `context-vigil notes-path` prints, never in the scratch repository.
 
 ## Commands
 

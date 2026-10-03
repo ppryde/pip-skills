@@ -26,16 +26,62 @@ _REAL_RCS += [_REAL_HOME / ".claude" / "settings.json",
 
 # Secret-shaped names: scrubbed from every test's environment by ``iso``, and the
 # real values (captured once, at import, held only in memory and never printed) are
-# what ``no_real_secret_recorded`` hunts for in everything a test leaves on disk.
-SECRET_NAME = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)", re.IGNORECASE)
-_SCRUB_PREFIXES = ("ANTHROPIC_", "AWS_")
+# what ``no_real_secret_recorded`` hunts for in everything a test leaves on disk and
+# everything it prints. Generic patterns plus the common names they miss.
+#
+# Never run this suite with `pytest -l` / `--showlocals` while real keys are exported:
+# a failure would print frame locals. ``pytest_configure`` refuses the flag outright
+# whenever a secret-shaped variable is set. (`-p no:cacheprovider` is safe either way:
+# the cache holds test ids, which carry only the FAKE canaries.)
+SECRET_NAME = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSW|PASSPHRASE|CREDENTIAL|AUTH|COOKIE|PRIVATE|CERT|DSN|WEBHOOK"
+    r"|_PAT$|^PAT$|_PWD$|^PGPASS|DATABASE_URL|REDIS_URL|MONGO.*URL|AMQP_URL|_URI$)",
+    re.IGNORECASE)
+_SCRUB_PREFIXES = ("ANTHROPIC_", "AWS_", "OPENAI_", "GITHUB_", "GH_", "NPM_", "AZURE_",
+                   "GOOGLE_", "GCP_", "GCLOUD_", "SLACK_", "STRIPE_", "HF_", "HUGGING",
+                   "SENTRY_", "TWILIO_", "DOCKER_", "VAULT_", "DATADOG_", "DD_")
 _MIN_SECRET_LEN = 8   # shorter values ("1", "true") are not secrets and would false-positive
-_REAL_SECRETS: tuple[bytes, ...] = tuple(
+
+
+def is_secret_name(name: str) -> bool:
+    """A variable ``iso`` removes from every test's environment."""
+    return name.upper().startswith(_SCRUB_PREFIXES) or bool(SECRET_NAME.search(name))
+
+
+class Secrets(tuple):  # type: ignore[type-arg]
+    """Real secret values, held as bytes. Its repr is ``<redacted>`` so that no
+    failure report, ``-l`` frame dump or assertion rewrite can print one."""
+
+    def __repr__(self) -> str:
+        return "<redacted>"
+
+    __str__ = __repr__
+
+
+_REAL_SECRETS = Secrets(
     value.encode("utf-8", "surrogateescape") for name, value in os.environ.items()
     if SECRET_NAME.search(name) and len(value) >= _MIN_SECRET_LEN)
 
 
-def leaked_files(root: Path, secrets: tuple[bytes, ...]) -> list[Path]:
+def check_showlocals(showlocals: bool, secrets: Secrets) -> None:
+    """Refuse `-l`/`--showlocals` while real secret values are in the environment."""
+    if showlocals and secrets:
+        raise pytest.UsageError(
+            "--showlocals is refused here: secret-shaped environment variables are set "
+            "and a failure would print frame locals. Unset them or drop -l.")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    check_showlocals(bool(config.getoption("showlocals", False)), _REAL_SECRETS)
+
+
+def leaked_text(text: str, secrets: Secrets) -> bool:
+    """True when ``text`` holds any of ``secrets`` (compared in-process, never shown)."""
+    data = text.encode("utf-8", "surrogateescape")
+    return any(s in data for s in secrets)
+
+
+def leaked_files(root: Path, secrets: Secrets) -> list[Path]:
     """Files under ``root`` that contain any of ``secrets`` (compared in-process)."""
     if not secrets:
         return []
@@ -56,12 +102,32 @@ def leaked_files(root: Path, secrets: tuple[bytes, ...]) -> list[Path]:
 def no_real_secret_recorded(tmp_path: Path):
     """Fail if any file a test (or a stub it ran) wrote holds a real secret env value.
 
-    Names the file only: the value itself is never printed."""
+    Names the file only: the value itself is never printed. Any error inside the
+    guard is reported as a bare "guard error" (its traceback could hold a value)."""
     yield
-    hits = leaked_files(tmp_path, _REAL_SECRETS)
+    try:
+        hits = leaked_files(tmp_path, _REAL_SECRETS)
+    except BaseException:
+        pytest.fail("secret guard error while scanning tmp_path", pytrace=False)
     if hits:
         pytest.fail("a real secret env value was recorded in: "
                     + ", ".join(str(p.relative_to(tmp_path)) for p in hits), pytrace=False)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # type: ignore[type-arg]
+    """The same guard over what the test printed (captured stdout/stderr)."""
+    outcome = yield
+    report = outcome.get_result()
+    try:
+        leaked = bool(_REAL_SECRETS) and leaked_text(
+            report.capstdout + report.capstderr, _REAL_SECRETS)
+    except BaseException:
+        leaked = True
+    if leaked:
+        report.outcome = "failed"
+        report.longrepr = "a real secret env value reached the captured stdout/stderr"
+        report.sections = [(k, "<withheld>") for k, _ in report.sections]
 
 
 def _snapshot() -> dict[Path, tuple[bool, int, int]]:
@@ -98,11 +164,12 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     subprocess or stub a test runs can ever see, log or echo a real credential.
     """
     for var in list(os.environ):
-        if (var.startswith("CONTEXT_VIGIL_") or var in _STRIP
-                or var.startswith(_SCRUB_PREFIXES) or SECRET_NAME.search(var)):
+        if var.startswith("CONTEXT_VIGIL_") or var in _STRIP or is_secret_name(var):
             monkeypatch.delenv(var, raising=False)
     (tmp_path / "home").mkdir()
     (tmp_path / "claude").mkdir()
+    (tmp_path / "tmpdir").mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))   # subprocess temp files too
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("CONTEXT_VIGIL_HOME", str(tmp_path / "data"))
@@ -127,15 +194,31 @@ def repo(iso: Path) -> Path:
     return path
 
 
+# ``iso`` strips the ones in _STRIP, so only a value a test set itself gets through.
+_CLI_ENV_ALLOW = ("PATH", "HOME", "SHELL", "TMPDIR", "LANG", "USER", "LOGNAME", "TERM",
+                  "CLAUDE_CONFIG_DIR", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", *_STRIP)
+
+
+def cli_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """An explicit, minimal environment for a CLI subprocess: the allow-listed names
+    (all pinned into tmp_path by ``iso`` where they matter), CONTEXT_VIGIL_*, LC_*,
+    plus whatever the test sets — never the developer's ambient environment."""
+    env = {k: v for k, v in os.environ.items()
+           if k in _CLI_ENV_ALLOW or k.startswith(("CONTEXT_VIGIL_", "LC_"))}
+    env.update(extra or {})
+    return env
+
+
 @pytest.fixture
 def run_cli():
     def _run(*args: str, stdin: str = "", env: dict[str, str] | None = None,
              cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        full_env = dict(os.environ)
-        if env:
-            full_env.update(env)
-        return subprocess.run(
+        result = subprocess.run(
             ["bash", str(LAUNCHER), *args], input=stdin, capture_output=True,
-            text=True, env=full_env, cwd=cwd, timeout=30,
+            text=True, env=cli_env(env), cwd=cwd, timeout=30,
         )
+        if _REAL_SECRETS and leaked_text(result.stdout + result.stderr, _REAL_SECRETS):
+            pytest.fail("a real secret env value reached the CLI's stdout/stderr",
+                        pytrace=False)
+        return result
     return _run

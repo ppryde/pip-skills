@@ -20,11 +20,11 @@ import json
 import os
 import re
 import shlex
-import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from context_vigil import config, paths
 
@@ -37,8 +37,8 @@ HOOKS: List[Tuple[str, Optional[str], str]] = [
 SL_START = "# --- context-vigil: record status-line payload (managed; do not edit) ---"
 SL_END = "# --- end context-vigil ---"
 _SLURP = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\$\(cat\)\s*$")
-_OUR_HOOK = re.compile(r"context-vigil\"?\s+hook\s+")
 _SHELLS = ("bash", "sh", "zsh")
+USER_TMP_SUFFIX = ".context-vigil.tmp"
 
 
 class InstallError(Exception):
@@ -124,8 +124,18 @@ def hook_command(name: str) -> str:
     return f'"{paths.launcher_path()}" hook {name}'
 
 
-def ingest_command(var: str) -> str:
-    return f"printf '%s' \"${var}\" | \"{paths.launcher_path()}\" ingest 2>/dev/null || true"
+def ingest_command(var: str, skill: Optional[str] = None) -> str:
+    launcher = paths.launcher_path() if skill is None else Path(skill) / "scripts" / "context-vigil"
+    return f"printf '%s' \"${var}\" | \"{launcher}\" ingest 2>/dev/null || true"
+
+
+def read_user_text(path: Path) -> str:
+    """A user file's text; a file that is not UTF-8 is an InstallError naming the path
+    only (a decode error would otherwise surface as a byte offset with no file name)."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise InstallError(f"{path} is not UTF-8 text; fix or move it and re-run") from exc
 
 
 def capture_command() -> str:
@@ -141,17 +151,41 @@ def _skill_dirs(record: Dict[str, Any]) -> List[str]:
     return dirs
 
 
+def _our_commands(record: Dict[str, Any]) -> Set[str]:
+    """Exactly the hook commands context-vigil writes, for this skill dir and the one
+    the last install recorded. Nothing else is ever ours: a user's hook that merely
+    mentions context-vigil (a wrapper, extra arguments, another event) is theirs."""
+    names = {name for _, _, name in HOOKS}
+    return {f'"{Path(d) / "scripts" / "context-vigil"}" hook {name}'
+            for d in _skill_dirs(record) for name in names}
+
+
 def _is_capture(command: str, record: Dict[str, Any]) -> bool:
     return "capture.sh" in command and any(d in command for d in _skill_dirs(record))
+
+
+class _DuplicateKey(ValueError):
+    """settings.json repeats a key inside one object (the key itself is never shown)."""
+
+
+def _no_duplicate_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise _DuplicateKey("duplicate key")
+    return dict(pairs)
 
 
 def _read_settings() -> Tuple[str, Dict[str, Any]]:
     path = settings_path()
     if not path.exists():
         return "", {}
-    text = path.read_text(encoding="utf-8")
+    text = read_user_text(path)
     try:
-        data = json.loads(text) if text.strip() else {}
+        data = json.loads(text, object_pairs_hook=_no_duplicate_keys) if text.strip() else {}
+    except _DuplicateKey as exc:
+        # rewriting would silently keep only the last of each duplicate: refuse instead
+        raise InstallError(f"{path} has duplicate keys in one object; fix it and "
+                           "re-run (nothing was changed)") from exc
     except ValueError as exc:
         raise InstallError(f"{path} is not valid JSON ({exc}); fix it and re-run") from exc
     if not isinstance(data, dict):
@@ -168,28 +202,28 @@ def _dump(data: Dict[str, Any]) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def _is_our_hook(hook: Any) -> bool:
-    return isinstance(hook, dict) and bool(_OUR_HOOK.search(str(hook.get("command", ""))))
+def _is_our_hook(hook: Any, ours: Set[str]) -> bool:
+    return isinstance(hook, dict) and hook.get("command") in ours
 
 
-def _is_ours(entry: Any) -> bool:
+def _is_ours(entry: Any, ours: Set[str]) -> bool:
     hooks = entry.get("hooks") if isinstance(entry, dict) else None
-    return isinstance(hooks, list) and any(_is_our_hook(h) for h in hooks)
+    return isinstance(hooks, list) and any(_is_our_hook(h, ours) for h in hooks)
 
 
 def _commands(entry: Any) -> List[str]:
     return [str(h.get("command", "")) for h in entry.get("hooks", []) if isinstance(h, dict)]
 
 
-def _strip_ours(entry: Any) -> Optional[Dict[str, Any]]:
+def _strip_ours(entry: Any, ours: Set[str]) -> Optional[Dict[str, Any]]:
     """The entry minus our commands; None when nothing of the user's remains."""
-    if not _is_ours(entry):
+    if not _is_ours(entry, ours):
         return entry
-    rest = [h for h in entry["hooks"] if not _is_our_hook(h)]
+    rest = [h for h in entry["hooks"] if not _is_our_hook(h, ours)]
     return {**entry, "hooks": rest} if rest else None
 
 
-def _with_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
+def _with_hooks(data: Dict[str, Any], ours: Set[str]) -> Dict[str, Any]:
     hooks = data.get("hooks")
     if hooks is None:
         hooks = data["hooks"] = {}
@@ -199,11 +233,11 @@ def _with_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
             wanted = {"matcher": matcher, **wanted}
         entries = []
         for e in hooks.get(event) or []:
-            if (_is_ours(e) and _commands(e) == [hook_command(name)]
+            if (_is_ours(e, ours) and _commands(e) == [hook_command(name)]
                     and e.get("matcher") == matcher):
                 entries.append(e)
                 continue
-            kept = _strip_ours(e)
+            kept = _strip_ours(e, ours)
             if kept is not None:
                 entries.append(kept)
         if wanted not in entries:
@@ -212,14 +246,14 @@ def _with_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
-def _without_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
+def _without_hooks(data: Dict[str, Any], ours: Set[str]) -> Dict[str, Any]:
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return data
     for event in list(hooks):
         if hooks[event] is None:
             continue
-        kept = [k for k in (_strip_ours(e) for e in hooks[event]) if k is not None]
+        kept = [k for k in (_strip_ours(e, ours) for e in hooks[event]) if k is not None]
         if kept:
             hooks[event] = kept
         else:
@@ -232,7 +266,8 @@ def _without_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
 _OUR_MATCHERS = {m for _, m, _ in HOOKS if m}
 
 
-def _our_hook_set(data: Dict[str, Any]) -> List[Tuple[str, Optional[str], str]]:
+def _our_hook_set(data: Dict[str, Any],
+                  ours: Set[str]) -> List[Tuple[str, Optional[str], str]]:
     """(event, matcher, command) for every hook of ours in ``data``, in file order."""
     found: List[Tuple[str, Optional[str], str]] = []
     hooks = data.get("hooks")
@@ -244,7 +279,7 @@ def _our_hook_set(data: Dict[str, Any]) -> List[Tuple[str, Optional[str], str]]:
                 continue
             matcher = entry.get("matcher")
             for hook in entry["hooks"]:
-                if _is_our_hook(hook):
+                if _is_our_hook(hook, ours):
                     found.append((str(event), matcher if isinstance(matcher, str) else None,
                                   str(hook.get("command", ""))))
     return found
@@ -264,7 +299,8 @@ def _our_command_shown(command: str) -> str:
 
 
 def settings_summary(path: Path, before_text: str, before: Dict[str, Any],
-                     after: Dict[str, Any], deleting: bool = False) -> List[str]:
+                     after: Dict[str, Any], ours: Set[str],
+                     deleting: bool = False) -> List[str]:
     """Structural summary of OUR changes to settings.json — never a user value.
 
     ``env``, ``apiKeyHelper``, other hooks' commands and every other user key are
@@ -273,7 +309,7 @@ def settings_summary(path: Path, before_text: str, before: Dict[str, Any],
     if deleting:
         return [f"{path}: deletes the file (context-vigil created it; nothing else is in it)"]
     lines = [f"{path}:" if before_text else f"{path}: creates the file"]
-    old, new = _our_hook_set(before), _our_hook_set(after)
+    old, new = _our_hook_set(before, ours), _our_hook_set(after, ours)
     for event, matcher, command in new:
         if (event, matcher, command) not in old:
             lines.append(f"  + {_hook_label(event, matcher)}: {_our_command_shown(command)}")
@@ -353,25 +389,40 @@ def remove_marked_block(text: str, start: str, end: str,
 _INGEST_VAR = re.compile(r"\"\$([A-Za-z_][A-Za-z0-9_]*)\"")
 
 
-def _refresh_block(text: str) -> str:
-    """Point an intact spliced block's ingest line at the current launcher."""
+def _refresh_block(text: str, skill_dirs: List[str]) -> Optional[str]:
+    """Point an intact spliced block's ingest line at the current launcher.
+
+    Only a block that is byte for byte one of ours is touched: exactly one line,
+    ``ingest_command(<var>)`` for the variable the script slurps stdin into, and
+    the current or a recorded earlier skill dir. Anything else (a hand-edited block,
+    another variable) is not ours to rewrite: None, and the caller leaves the file."""
     lines = text.splitlines(keepends=True)
     first = next(i for i, line in enumerate(lines) if _is_marker(line, SL_START))
     last = next(i for i, line in enumerate(lines) if _is_marker(line, SL_END))
-    found = _INGEST_VAR.search("".join(lines[first + 1:last]))
-    if found is None:
-        return text
-    body = f"{ingest_command(found.group(1))}\n"
-    if "".join(lines[first + 1:last]) == body:
-        return text
-    return "".join(lines[:first + 1] + [body] + lines[last:])
+    body = "".join(lines[first + 1:last])
+    slurped = {m.group(1) for m in (_SLURP.match(line) for line in lines) if m}
+    for var in sorted(slurped):
+        if body == f"{ingest_command(var)}\n":
+            return text
+        if any(body == f"{ingest_command(var, d)}\n" for d in skill_dirs):
+            return "".join(lines[:first + 1] + [f"{ingest_command(var)}\n"] + lines[last:])
+    return None
 
 
-def splice_statusline(text: str) -> Optional[str]:
+def foreign_block_note(path: Path, text: str) -> str:
+    """Our markers are intact but the block holds something we did not write: name the
+    file and the block's line numbers, never its content."""
+    span = marked_span(text, SL_START, SL_END)
+    where = f"lines {span[0] + 1}-{span[1] + 1}" if span else "a marked block"
+    return (f"{path}: {where} (context-vigil's marked block) hold lines context-vigil "
+            "did not write — left untouched. Remove the block by hand and re-run install.")
+
+
+def splice_statusline(text: str, skill_dirs: Optional[List[str]] = None) -> Optional[str]:
     if has_marker(text, SL_START, SL_END):
         if remove_marked_block(text, SL_START, SL_END) is None:
             return None
-        return _refresh_block(text)
+        return _refresh_block(text, skill_dirs or [str(paths.skill_dir())])
     out: List[str] = []
     done = False
     for line in text.splitlines(keepends=True):
@@ -460,8 +511,9 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
     if threshold is not None:
         plan.notes.append(f"will set context.threshold = {threshold} "
                           f"(global config: {paths.global_config_path()})")
+    ours = _our_commands(prior)
     original = copy.deepcopy(data)
-    data = _with_hooks(data)
+    data = _with_hooks(data, ours)
     status = data.get("statusLine")
     command = status.get("command") if isinstance(status, dict) else None
     if not isinstance(command, str) or not command:
@@ -474,11 +526,13 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
             data["statusLine"] = {**status, "command": capture_command()}
     else:
         script = statusline_script(command)
-        script_text = script.read_text() if script else ""
-        spliced = splice_statusline(script_text) if script else None
+        script_text = read_user_text(script) if script else ""
+        spliced = splice_statusline(script_text, _skill_dirs(prior)) if script else None
         if script is not None and has_marker(script_text, SL_START, SL_END) \
                 and spliced is None:
-            plan.manual.append(damaged_note(script))
+            damaged = remove_marked_block(script_text, SL_START, SL_END) is None
+            plan.manual.append(damaged_note(script) if damaged
+                               else foreign_block_note(script, script_text))
         elif script is not None and spliced is not None:
             plan.changes.append(Change(script, script_text, spliced,
                                        splice_summary(script, script_text, spliced)))
@@ -502,7 +556,8 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
     # Semantically unchanged settings are left byte for byte: no reformatting churn.
     after = before if data == original else _dump(data)
     plan.changes.insert(0, Change(settings_path(), before, after,
-                                  settings_summary(settings_path(), before, original, data)))
+                                  settings_summary(settings_path(), before, original, data,
+                                                   ours)))
     plan.record = record
     return plan
 
@@ -510,23 +565,31 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
 def write_atomic(path: Path, text: str) -> None:
     """Atomically rewrite a USER file (rc, settings.json, status-line script).
 
-    The temp file is created 0600 by ``mkstemp`` (O_EXCL, random name) and only then
-    given the target's own mode, so a key-bearing 0600 rc is never readable, even
-    for an instant, and a crash leaves at worst a private stray. Symlinks are
-    followed so a dotfiles-managed file stays a link."""
+    The temp file (``.cv-tmp.<name>.<random>.context-vigil.tmp``) is created 0600 by
+    ``mkstemp`` (O_EXCL) and stays 0600 until the rename; only then does the target
+    get its own mode back. So a key-bearing file is never readable through the temp
+    copy, even if a SIGKILL or power loss strands it, and the next write beside it
+    sweeps such strays once they are a minute old. Missing parents are made 0700
+    whatever the umask. Symlinks are followed so a dotfiles-managed file stays a link."""
     target = path.resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(dir=str(target.parent), prefix=f"{target.name}.",
-                                suffix=".context-vigil.tmp")
+    paths.make_private_dirs(target.parent)
+    paths.sweep_stale(target.parent, (f"*{USER_TMP_SUFFIX}",))
+    try:
+        mode: Optional[int] = stat.S_IMODE(os.stat(str(target)).st_mode)
+    except FileNotFoundError:
+        mode = None
+    fd, name = tempfile.mkstemp(dir=str(target.parent),
+                                prefix=f"{paths.TMP_PREFIX}{target.name}.",
+                                suffix=USER_TMP_SUFFIX)
     tmp = Path(name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
-        if target.exists():
-            shutil.copymode(str(target), str(tmp))
         os.replace(str(tmp), str(target))
+        if mode is not None:
+            os.chmod(str(target), mode)
     finally:
-        if tmp.exists():
+        if os.path.lexists(str(tmp)):
             tmp.unlink()
 
 
@@ -557,8 +620,9 @@ def plan_uninstall() -> Plan:
     if not record:
         plan.manual.append("no install record found; removing only entries recognisably "
                            "ours (hooks and capture status line)")
+    ours = _our_commands(record)
     original = copy.deepcopy(data)
-    data = _without_hooks(data)
+    data = _without_hooks(data, ours)
     status = data.get("statusLine")
     if isinstance(status, dict) and _is_capture(str(status.get("command", "")), record):
         del data["statusLine"]
@@ -566,7 +630,7 @@ def plan_uninstall() -> Plan:
     if isinstance(sl, dict) and sl.get("kind") == "spliced":
         script = Path(str(sl.get("path", "")))
         if script.is_file():
-            text = script.read_text()
+            text = read_user_text(script)
             stripped = remove_marked_block(text, SL_START, SL_END)
             if stripped is None:
                 plan.manual.append(damaged_note(script))
@@ -588,14 +652,15 @@ def plan_uninstall() -> Plan:
     # still strip an intact block from the shell's rc, notes if damaged.
     rc = Path(str(record["rc_path"])) if record.get("rc_path") else launch.rc_path()
     if rc is not None and rc.is_file():
-        text = rc.read_text()
+        text = read_user_text(rc)
         stripped_rc = launch.strip_rc(text)
         if stripped_rc is None:
             plan.manual.append(damaged_note(rc))
         elif stripped_rc != text:
             plan.changes.append(Change(rc, text, stripped_rc, launch.removal_summary(rc, text)))
     plan.changes.insert(0, Change(settings_path(), before, after, settings_summary(
-        settings_path(), before, original, data, deleting=bool(before) and after == "")))
+        settings_path(), before, original, data, ours,
+        deleting=bool(before) and after == "")))
     return plan
 
 

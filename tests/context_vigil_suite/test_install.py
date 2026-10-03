@@ -64,6 +64,8 @@ def test_reinstall_from_moved_skill_replaces_old_entries(cfg: Path) -> None:
     stale = {"hooks": [{"type": "command",
                         "command": '"/old/skill/scripts/context-vigil" hook stop'}]}
     _write(cfg, {"hooks": {"Stop": [stale]}})
+    # the old dir is ours only because the install record says so (never by a pattern)
+    paths.write_private(paths.install_record_path(), json.dumps({"skill_dir": "/old/skill"}))
     install.apply(install.plan_install(threshold=None))
     commands = [h["command"] for e in _settings(cfg)["hooks"]["Stop"] for h in e["hooks"]]
     assert commands == [install.hook_command("stop")]

@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from context_vigil import census, context, hooks, paths, session, state, transcript
 
-from .conftest import SKILL
+from .conftest import SKILL, cli_env
 from .test_context_window import _identity, _ingest, _usage, _write
 
 
@@ -81,7 +81,7 @@ def test_parallel_nudges_emit_exactly_once_and_keep_last_nudged(repo: Path, iso:
     transcript_path = _write(iso / "t.jsonl", [_identity("claude-x[1m]"), _usage(750_000)])
     payload = json.dumps({"session_id": "s", "cwd": str(repo), "transcript_path": str(transcript_path),
                           "hook_event_name": "PostToolUse"})
-    env = dict(os.environ, PYTHONPATH=str(SKILL / "scripts"), CONTEXT_VIGIL_THRESHOLD="40")
+    env = cli_env({"PYTHONPATH": str(SKILL / "scripts"), "CONTEXT_VIGIL_THRESHOLD": "40"})
     go = iso / "go"
     readies = [iso / f"ready-{i}" for i in range(8)]
     procs: List[subprocess.Popen] = []

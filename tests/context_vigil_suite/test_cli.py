@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 from context_vigil import paths, state
 
-from .conftest import SKILL
+from .conftest import SKILL, cli_env
 
 
 def _payload(repo: Path, sid: str = "s1", pct: float = 42) -> str:
@@ -45,7 +44,7 @@ def test_status_reports_layers_and_mode(run_cli, repo: Path) -> None:
 def test_capture_sh_prints_nothing_and_records(repo: Path, iso: Path) -> None:
     result = subprocess.run(["bash", str(SKILL / "scripts" / "capture.sh")],
                             input=_payload(repo, pct=61), capture_output=True,
-                            text=True, env=dict(os.environ))
+                            text=True, env=cli_env())
     assert result.returncode == 0 and result.stdout == ""
     store = json.loads(paths.census_path().read_text())
     assert store["sessions"]["s1"]["payload"]["context_window"]["used_percentage"] == 61

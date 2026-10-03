@@ -77,15 +77,23 @@ name="${base}-${n}"
 # Secrets (API keys, AWS secrets) must never ride on a command line: `ps` shows every
 # argv to any local user. The environment goes through a private (0600) file instead;
 # the session command sources it by running it, and it deletes itself first thing.
+# A launch killed (SIGKILL, power loss) between writing that file and the session
+# reading it strands it: sweep this user's own stale ones (over a minute old) first.
+find "${TMPDIR:-/tmp}/" -maxdepth 1 -type f -name 'claude-tmux-env.*' -user "$UID" -mmin +1 \
+  -delete 2>/dev/null || true
 envfile="$(umask 077; mktemp "${TMPDIR:-/tmp}/claude-tmux-env.XXXXXX")" \
   || { echo "claude-tmux: cannot create a private env file — launching plain claude (manual mode)" >&2; exec "$bin" "$@"; }
 trap 'rm -f -- "$envfile"' EXIT
 trap 'rm -f -- "$envfile"; exit 1' HUP INT TERM
 fwd='PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+'
 # `bash -x claude-tmux` (or SHELLOPTS=xtrace) would trace every `printf … "${!var}"`
-# below, secret values included, to stderr: tracing is off while the file is written.
+# below, secret values included, to stderr: tracing is off while the file is written
+# (`set +x` here is enough for this shell; the env file turns it off for the pane's).
 case "$-" in *x*) cv_xtrace=1; set +x ;; *) cv_xtrace=0 ;; esac
 {
+  # First line: tracing off. The pane's bash may start traced (a server environment or
+  # BASH_ENV carrying SHELLOPTS=xtrace) and would otherwise print every export below.
+  echo 'set +o xtrace +o verbose'
   echo 'rm -f -- "$0"'
   # A new session inherits the tmux SERVER's environment: a forwarded name the server holds
   # but the caller lacks (or must not pass on) would otherwise leak in, so unset it.
@@ -112,8 +120,10 @@ case "$-" in *x*) cv_xtrace=1; set +x ;; *) cv_xtrace=0 ;; esac
 [ "$cv_xtrace" = 1 ] && set -x
 
 # The session command is separate argv words (tmux >= 3.0 execs them directly), so the
-# server's default-shell (fish, csh, ...) never parses a quoted string.
-if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" \
+# server's default-shell (fish, csh, ...) never parses a quoted string. The client runs
+# without the shell-tracing variables: a server it starts inherits its environment, and
+# a pane bash importing SHELLOPTS=xtrace would trace the env file into the pane.
+if ! env -u SHELLOPTS -u BASHOPTS -u BASH_ENV -u ENV -u BASH_XTRACEFD tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" \
     "$(type -P bash)" "$envfile"; then
   rm -f -- "$envfile"
   echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2

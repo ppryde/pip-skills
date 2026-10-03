@@ -87,18 +87,29 @@ stopping points. A nudge repeats every `nudge.repeat_step`
    them context is at N% and ASK whether to hand over now; do not run
    `handover` until they agree. Only an unattended run (nudge from a tool
    call, nobody typing) hands over on its own at a sensible stopping point.
-3. Copy `templates/handover.md` to a scratch file and fill it in for a cold
-   reader. **Failed Attempts** (write `None` if nothing failed) and exactly
-   **one Next Step** are required. Don't list changed files — the snapshot gives only counts and the git
-   commands to list them. Keep the whole handover under `handover.max_tokens`
-   (default 8000, ~4 chars per token); it refuses, naming the excess, if not.
+3. Run `notes-path`. It prints a private notes file (0600, under the data
+   root, outside every repository), pre-filled from the template. Write the
+   notes THERE — never inside the repository, where an untracked notes file is
+   one `git add -A` away from history. Fill it in for a cold reader.
+   **Failed Attempts** (write `None` if nothing failed) and exactly **one Next
+   Step** are required. Don't list changed files — the snapshot gives only
+   counts and the git commands to list them. Keep the whole handover under
+   `handover.max_tokens` (default 8000, ~4 chars per token); it refuses,
+   naming the excess, if not.
 4. Only if `config get context.mode` is `remote` (a remote session cannot open
    paths), add `--inline <path>` for every file the next session must read;
-   each is cut at about 2000 tokens with a truncation marker. In local mode,
-   reference files by path instead. Never inline or paste a secret — `.env`
-   files, credentials, keys, tokens: a handover is stored on disk and printed
-   back into the next session's transcript verbatim.
-5. Run `handover --file <notes>`. It prints what happens next:
+   each is cut at about 2000 tokens with a truncation marker. `--inline` is
+   refused in local mode: reference files by path instead. Never inline or
+   paste a secret — `.env` files, credentials, keys, tokens, shell rc files: a
+   handover is stored on disk and printed back into the next session's
+   transcript verbatim. Secret-bearing files (by name, wherever a symlink
+   points, or under `~/.ssh`, `~/.aws`, `~/.claude*`, …) and anything holding
+   a key-shaped string are refused, naming the file only; notes holding one are
+   refused with its line number — remove it and say where the secret lives
+   instead.
+5. Run `handover --file <the path notes-path printed>`. On success the notes
+   file is removed (a notes file elsewhere inside a repository gets a warning:
+   delete it). It prints what happens next:
    - auto: end your turn; /clear is sent for you when the turn ends and the
      session resumes itself.
    - manual: tell the user "Handover saved — type `/clear`, then send any
@@ -118,7 +129,9 @@ Next Step; don't redo anything marked done or retry its Failed Attempts.
 If a fresh launch says a handover is waiting, it has NOT been loaded. Do
 nothing with it unless the user asks: "resume the handover" → run
 `handover --resume` and follow what it prints; "discard the handover" → run
-`handover --discard`.
+`handover --discard`. The notice shows the handover's branch and the first
+line of its Goal (dropped if either looks key-shaped), so keep the Goal free of
+anything that should not appear in the next session's transcript.
 
 ## Moving this work into a tmux session
 
@@ -126,7 +139,7 @@ Auto mode needs Claude running inside tmux, and nothing can move a running
 session into tmux. When the user wants auto mode and this session is not in
 tmux (status says `mode: manual (not inside tmux …)`), offer to carry the work:
 
-1. Hand over as above (`handover --file <notes>`).
+1. Hand over as above (`notes-path`, fill it in, `handover --file <that path>`).
 2. Tell the user: "Exit this session, open a new terminal, run `claude-tmux`,
    then say 'resume the handover'."
 3. The new session sees the handover waiting (a plain session's handover is

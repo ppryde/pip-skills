@@ -19,6 +19,7 @@ from context_vigil.install import (
     added_lines,
     damaged_note,
     marked_span,
+    read_user_text,
     remove_marked_block,
     removed_block,
 )
@@ -161,7 +162,7 @@ def plan_rc(choice: str) -> Optional[Change]:
     path = rc_path()
     if path is None:
         return None
-    before = path.read_text() if path.exists() else ""
+    before = read_user_text(path) if path.exists() else ""
     after = strip_rc(before)
     if after is None:
         raise DamagedMarkers(damaged_note(path))

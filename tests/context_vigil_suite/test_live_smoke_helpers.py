@@ -71,7 +71,76 @@ def test_wait_timeout_tail_is_redacted(monkeypatch) -> None:  # type: ignore[no-
 
 
 def test_state_helpers_hide_secrets() -> None:
-    rec = {"headless": False, "api_token": "x", "env": "y", "nested": {"a": 1}, "n": 3}
-    assert ls.safe_fields(rec) == {"headless": False, "n": 3}
+    rec = {"headless": False, "api_token": "x", "env": "y", "nested": {"a": 1},
+           "transcript_size": 3}
+    assert ls.safe_fields(rec) == {"headless": False, "transcript_size": 3}
     doc = {"w": [{"context_window": {"used_percentage": 4, "x": {"y": 1}}}]}
     assert ls.find_window_dicts(doc) == [{"used_percentage": 4}]
+
+
+# --- round 3 (adversarial): private, unpredictable paths; wider redaction ----------
+
+def _mode(path: Path) -> int:
+    import stat
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_redaction_covers_common_key_shapes() -> None:
+    samples = [
+        (f"ghp_{'A' * 36}", "AAAAAAAA"), (f"github_pat_{'B' * 30}", "BBBBBBBB"),
+        ("xoxb-1234567890-abcdefghij", "abcdefghij"), (f"AIza{'C' * 35}", "CCCCCCCC"),
+        ("-----BEGIN RSA PRIVATE KEY-----", "PRIVATE KEY"), ("my_token=abcdef123", "abcdef123"),
+        ("password: hunter2222", "hunter2222"), ("Authorization: Bearer abc.def.ghi", "abc.def"),
+        ('"api_key": "zzzzzzzzzz"', "zzzzzzzzzz"),
+        ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.x", "eyJhbG"),
+        ("https://user:hunter3hunter3@example.invalid/x", "hunter3")]
+    for text, fragment in samples:
+        out = ls.redact(f"before {text} after")
+        assert fragment not in out and "[redacted]" in out, text
+        assert out.startswith("before")
+
+
+def test_state_redacts_by_value_as_well_as_key_name() -> None:
+    rec = {"model_id": "sk-ant-FAKE-canary-123456789", "headless": True, "api_token": "x",
+           "transcript_size": 5, "unknown_field": "kept out"}
+    out = ls.safe_fields(rec)
+    assert "sk-ant-FAKE" not in str(out) and out["headless"] is True
+    assert "api_token" not in out and "unknown_field" not in out
+    assert out["model_id"] == "[redacted]"
+    doc = {"context_window": {"label": "ghp_" + "Z" * 36, "used_percentage": 3}}
+    assert ls.find_window_dicts(doc) == [{"label": "[redacted]", "used_percentage": 3}]
+
+
+def test_sandbox_and_state_are_private_and_unpredictable(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(ls.tempfile, "gettempdir", lambda: str(tmp_path))
+    first, second = ls.make_sandbox(None, 2), ls.make_sandbox(None, 2)
+    assert first["sandbox"] != second["sandbox"]
+    private = ls.private_dir()
+    assert _mode(private) == 0o700 and private.stat().st_uid == __import__("os").getuid()
+    for info in (first, second):
+        root = Path(info["sandbox"])
+        assert root.parent == private.resolve() and _mode(root) == 0o700
+        assert not root.name.endswith(__import__("time").strftime("%Y%m%d"))
+    assert ls.state_file().parent == private
+
+
+def test_state_file_must_be_private_and_ours(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import pytest
+    monkeypatch.setattr(ls.tempfile, "gettempdir", lambda: str(tmp_path))
+    ls.save_state({"sandbox": "/nowhere"})
+    assert _mode(ls.state_file()) == 0o600
+    assert ls.load_state()["sandbox"] == "/nowhere"
+    ls.state_file().chmod(0o644)
+    with pytest.raises(SystemExit):
+        ls.load_state()
+    private = ls.private_dir()
+    ls.state_file().chmod(0o600)
+    private.chmod(0o777)
+    with pytest.raises(SystemExit):
+        ls.load_state()
+    private.chmod(0o700)
+
+
+def test_headless_prompt_keeps_notes_out_of_the_repo() -> None:
+    prompt = ls.headless_prompt()
+    assert "notes-path" in prompt and "./notes.md" not in prompt
