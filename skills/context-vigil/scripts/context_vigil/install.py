@@ -104,7 +104,7 @@ def _read_settings() -> Tuple[str, Dict[str, Any]]:
         raise InstallError(f"{path} is not a JSON object; fix it and re-run")
     hooks = data.get("hooks")
     if hooks is not None and (not isinstance(hooks, dict) or any(
-            not isinstance(v, list) for v in hooks.values())):
+            v is not None and not isinstance(v, list) for v in hooks.values())):
         raise InstallError(f"{path}: unexpected shape for \"hooks\" (want an object of "
                            "lists); fix it and re-run")
     return text, data
@@ -144,7 +144,7 @@ def _with_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
         if matcher:
             wanted = {"matcher": matcher, **wanted}
         entries = []
-        for e in hooks.get(event, []):
+        for e in hooks.get(event) or []:
             if _is_ours(e) and _commands(e) == [hook_command(name)]:
                 entries.append(e)
                 continue
@@ -162,6 +162,8 @@ def _without_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(hooks, dict):
         return data
     for event in list(hooks):
+        if hooks[event] is None:
+            continue
         kept = [k for k in (_strip_ours(e) for e in hooks[event]) if k is not None]
         if kept:
             hooks[event] = kept

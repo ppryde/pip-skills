@@ -316,7 +316,7 @@ Every render, the status line feeds census. On every `UserPromptSubmit` and
    (truncated or rotated) restarts from the tail;
 4. else no reading → no nudge this turn.
 
-**Window lookup.** A session's window, once resolved, is fixed: the stored one is reused and the chain never re-runs, except that a stored 200,000 becomes 1,000,000 (source `evidence`) once observed usage exceeds 200,000. The first resolution walks this chain (first hit wins; the source is recorded): (a) census
+**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000). While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. The chain (first hit wins; the source is recorded): (a) census
 `context_window_size` for this session id, even when stale; (b) the learned
 `windows.json` entry for the census entry's `model.id`; (c) the transcript's
 model id (last `attachment.identity.modelId` record, else `message.model`) in the
@@ -327,9 +327,9 @@ payload. `identity.modelId` is undocumented: absent or renamed falls through.
 
 **Per-session record** (`sessions/<session_id>.json`, written only by scripts,
 nothing model-visible): `headless` (bool|null), `has_statusline` (true once census
-has ingested the id), `window` + `window_source`, `transcript_offset`,
+has ingested the id; until then census is not consulted for the session), `window` + `window_source` + `window_confident`, `transcript_ino`/`transcript_dev` (a replaced file resets offset and usage peaks), `transcript_offset`,
 `transcript_path`, `last_usage_tokens`, `max_usage_tokens`, `model_id`,
-`message_model`, `head_checked`, `last_nudged_pct`.
+`message_model`, `head_checked`, `last_nudged_pct`. Read-modify-write of a record, and the nudge gate's check-and-set, run under an flock on `sessions/<id>.lock` (bounded wait; on failure the update is skipped, the nudge stays quiet). The handover size estimate is chars/4 and approximate (it undercounts non-ASCII text).
 
 ### 3. Nudge — repeated every `nudge.repeat_step` %
 

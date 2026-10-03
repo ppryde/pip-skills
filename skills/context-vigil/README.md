@@ -95,7 +95,7 @@ tmux is missing, you are already inside tmux, or `CLAUDE_NO_TMUX=1`.
 Census (the status line) is trusted while the session's transcript has not
 changed since census last wrote; otherwise the transcript's tail is read
 incrementally (cost is the new bytes, never the whole file) against a window
-(fixed once resolved; it only ever widens from 200k to 1M when usage exceeds 200k) found from census, a table learned from every status-line payload, the model id
+(fixed once a confident source answers; the configured fallback is not confident and is re-checked each call; a fixed 200k only ever widens to 1M when usage exceeds 200k) found from census, a table learned from every status-line payload, the model id
 (`[1m]`), or observed usage. Headless runs (`claude -p`, the SDK) have no status
 line and use the transcript only. Per-session bookkeeping lives under
 `sessions/` in the data root; none of it is shown to the model.
@@ -107,7 +107,7 @@ line and use the transcript only. Per-session bookkeeping lives under
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
 | `context.window` | 200000 | last-resort window for the transcript estimate (census, a learned model table, `[1m]` model ids and observed usage over 200k all take precedence) |
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
-| `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4; integer ≥ 1) |
+| `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4, which is approximate and undercounts non-ASCII text; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | re-nudge each time ctx % has grown this many points past the last nudge (integer 1–50) |
 
 Resolution order, first match wins, re-read on every hook call:

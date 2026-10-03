@@ -6,6 +6,7 @@ Every function returns the hook's stdout text (or None) and never raises —
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -67,16 +68,22 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
     # Re-nudge every repeat_step % past the last nudge. The gate marks "nudged
     # this cycle" (SessionStart / resume clear it, which resets the sequence);
     # the last nudged % lives in the session record. Without a session id there
-    # is nowhere to keep it, so the gate alone holds: one nudge per cycle.
-    record = session.load(session_id) if session_id else None
-    if state.gate_active(scope):
-        last = record["last_nudged_pct"] if record is not None else None
-        if not isinstance(last, int) or pct < last + config.repeat_step(cwd):
+    # is nowhere to keep it, so the gate alone holds: one nudge per cycle. The
+    # check-and-set runs under the record's lock so parallel hooks cannot both
+    # nudge; a lock that cannot be had means a quiet turn.
+    key = session_id or "scope-" + hashlib.sha1(str(scope).encode()).hexdigest()[:16]
+    with session.locked(key) as got:
+        if not got:
             return None
-    state.set_gate(scope)
-    if session_id and record is not None:
-        record["last_nudged_pct"] = pct
-        session.save(session_id, record)
+        record = session.load(session_id) if session_id else None
+        if state.gate_active(scope):
+            last = record["last_nudged_pct"] if record is not None else None
+            if not isinstance(last, int) or pct < last + config.repeat_step(cwd):
+                return None
+        state.set_gate(scope)
+        if session_id and record is not None:
+            record["last_nudged_pct"] = pct
+            session.save(session_id, record)
     event = _str(payload, "hook_event_name")
     template = NUDGE_ATTENDED if event == "UserPromptSubmit" else NUDGE_UNATTENDED
     text = template.format(pct=pct, threshold=threshold,

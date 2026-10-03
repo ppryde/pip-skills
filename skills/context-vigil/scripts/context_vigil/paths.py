@@ -95,6 +95,10 @@ def session_record_path(session_id: str) -> Path:
     return sessions_dir() / f"{_UNSAFE.sub('-', session_id)}.json"
 
 
+def session_lock_path(key: str) -> Path:
+    return sessions_dir() / f"{_UNSAFE.sub('-', key)}.lock"
+
+
 def windows_path() -> Path:
     return data_root() / "windows.json"
 

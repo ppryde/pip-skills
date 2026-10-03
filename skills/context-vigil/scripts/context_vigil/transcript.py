@@ -1,7 +1,8 @@
 """Incremental, tail-only transcript reading: cost is O(new bytes), never O(file).
 
 First read walks backwards from EOF in 64 KB chunks until a usage record turns
-up; later reads seek to the stored offset and read forward to EOF. A partial
+up (giving up after ``MAX_BACK``, with the offset set to EOF so the next read
+starts there); later reads seek to the stored offset and read forward to EOF. A partial
 trailing line is left for next time (unless it already parses), a file shorter
 than the stored offset was truncated or rotated so reading restarts from the
 tail, and invalid UTF-8 is replaced per line, never raised.
@@ -15,6 +16,8 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 
 CHUNK = 64 * 1024
 MAX_FORWARD = 8 * 1024 * 1024   # a bigger gap than this is read from the tail instead
+MAX_BACK = 8 * 1024 * 1024      # the most a backward scan reads per call
+HEAD_CAP = 1024 * 1024          # the most of the head read to find the first record
 _MODEL_LOOKAHEAD_CHUNKS = 4     # past the usage record, look this far for an identity record
 _USAGE_FIELDS = (
     "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -100,6 +103,8 @@ def _scan_back(f: Any, size: int) -> Tail:
             extra_chunks -= len(line) / CHUNK
         if tail.has_usage and (tail.model_id is not None or extra_chunks <= 0):
             break
+        if tail.bytes_read >= MAX_BACK:   # no usage in reach: stop, and don't rescan next hook
+            break
     return tail
 
 
@@ -146,14 +151,28 @@ def read_tail(path: str, offset: Optional[int] = None) -> Optional[Tail]:
 
 
 def read_entrypoint(path: str) -> Tuple[bool, Optional[bool]]:
-    """(head was readable, headless?) from the first records' ``entrypoint``."""
+    """(settled, headless?) from the first records' ``entrypoint``.
+
+    The head is read in doubling steps (64 KB up to ``HEAD_CAP``) until a complete
+    line is in hand. ``settled`` is False only while the head is still being
+    written; a head with no complete line within the cap is settled as unknown.
+    """
     try:
         with open(path, "rb") as f:
-            head = f.read(CHUNK)
+            size = CHUNK
+            while True:
+                f.seek(0)
+                head = f.read(size)
+                if len(head) < size or b"\n" in head or size >= HEAD_CAP:
+                    break
+                size *= 2
     except (OSError, ValueError):
         return False, None
+    at_eof = len(head) < size
+    lines = head.split(b"\n")
+    complete = lines if at_eof else lines[:-1]
     readable = False
-    for line in head.split(b"\n")[:-1] if len(head) == CHUNK else head.split(b"\n"):
+    for line in complete:
         record = _parse(line) if line else None
         if record is None:
             continue
@@ -161,4 +180,4 @@ def read_entrypoint(path: str) -> Tuple[bool, Optional[bool]]:
         entrypoint = record.get("entrypoint")
         if isinstance(entrypoint, str):
             return True, _ENTRYPOINTS.get(entrypoint)
-    return readable, None
+    return readable or (not at_eof and size >= HEAD_CAP and b"\n" not in head), None

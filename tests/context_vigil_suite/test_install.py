@@ -353,3 +353,29 @@ def test_uninstall_strips_our_command_from_mixed_entry_keeping_matcher(cfg: Path
     install.apply(install.plan_uninstall())
     assert _settings(cfg)["hooks"]["PostToolUse"] == [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]}]
+
+
+def test_null_event_value_is_tolerated_both_ways(cfg: Path) -> None:
+    _write(cfg, {"hooks": {"Stop": None, "PreToolUse": [FOREIGN_HOOK]}})
+    install.apply(install.plan_install(threshold=None))
+    s = _settings(cfg)
+    assert s["hooks"]["PreToolUse"] == [FOREIGN_HOOK] and len(s["hooks"]["Stop"]) == 1
+    _write(cfg, {"hooks": {"Stop": None}})
+    install.apply(install.plan_uninstall())
+
+
+def test_non_dict_entries_are_kept_and_never_crash(cfg: Path) -> None:
+    _write(cfg, {"hooks": {"Stop": [3, "x", {"hooks": ["y", None]}]}})
+    install.apply(install.plan_install(threshold=None))
+    kept = _settings(cfg)["hooks"]["Stop"]
+    assert kept[:3] == [3, "x", {"hooks": ["y", None]}] and len(kept) == 4
+    install.apply(install.plan_uninstall())
+    assert _settings(cfg)["hooks"]["Stop"] == [3, "x", {"hooks": ["y", None]}]
+
+
+def test_list_hooks_is_a_clean_refusal_not_a_crash(cfg: Path) -> None:
+    _write(cfg, {"hooks": []})
+    with pytest.raises(install.InstallError):
+        install.plan_install(threshold=None)
+    with pytest.raises(install.InstallError):
+        install.plan_uninstall()

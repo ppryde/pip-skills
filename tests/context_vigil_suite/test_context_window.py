@@ -247,9 +247,10 @@ def paths_record(sid: str) -> Path:
 
 # --- a resolved window is fixed -------------------------------------------------
 
-def _seed_window(sid: str, window: int, source: str) -> None:
+def _seed_window(sid: str, window: int, source: str, confident: bool = True) -> None:
     record = session.load(sid)
     record["window"], record["window_source"] = window, source
+    record["window_confident"] = confident
     session.save(sid, record)
 
 
@@ -262,16 +263,17 @@ def test_stored_1m_stays_1m_whatever_later_evidence_says(repo: Path, iso: Path) 
     assert (record["window"], record["window_source"]) == (1_000_000, "census")
 
 
-def test_stored_200k_stays_200k_when_census_later_says_1m(repo: Path, iso: Path) -> None:
+def test_confident_200k_stays_200k_when_census_later_says_1m(repo: Path, iso: Path) -> None:
+    _seed_window("s", 200_000, "census")
     path = _write(iso / "t.jsonl", [_usage(100_000)])
-    assert context.current_percent(repo, "s", str(path), 200_000) == 50
-    _ingest(repo, "s", 1, size=1_000_000, now=time.time() - 3600)
+    _ingest(repo, "s", 1, size=1_000_000, now=time.time() - 60)
     assert context.current_percent(repo, "s", str(path), 200_000) == 50
     record = session.load("s")
-    assert (record["window"], record["window_source"]) == (200_000, "config")
+    assert (record["window"], record["window_source"]) == (200_000, "census")
 
 
 def test_stored_200k_becomes_1m_once_usage_exceeds_it(repo: Path, iso: Path) -> None:
+    _seed_window("s", 200_000, "census")
     path = _write(iso / "t.jsonl", [_usage(100_000)])
     context.current_percent(repo, "s", str(path), 200_000)
     with path.open("a") as fh:

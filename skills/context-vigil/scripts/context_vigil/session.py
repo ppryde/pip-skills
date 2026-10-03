@@ -6,35 +6,48 @@ reaches the model. A record lives at ``sessions/<session_id>.json`` and holds:
 - ``headless`` (bool|null): true for ``entrypoint == "sdk-cli"``, false for
   ``cli`` / ``claude-desktop``, null while unknown. Never inferred from "no
   status line seen yet" — an interactive session's first turn has no census entry;
-- ``has_statusline`` (bool): census has ingested this session id;
-- ``window`` / ``window_source``: the context window last used and where it came from;
-- ``transcript_offset`` / ``transcript_path``: how far the transcript has been read;
+- ``has_statusline`` (bool): census has ingested this session id; until it has,
+  census is not consulted for the session at all;
+- ``window`` / ``window_source`` / ``window_confident``: the context window used,
+  where it came from, and whether that source is authoritative (census, learned
+  table, ``[1m]`` suffix, evidence) rather than the configured fallback;
+- ``transcript_offset`` / ``transcript_path`` / ``transcript_ino`` / ``transcript_dev``:
+  how far the transcript has been read, and which file that offset belongs to;
 - ``last_usage_tokens`` / ``max_usage_tokens``: the latest and largest usage total seen;
 - ``model_id`` / ``message_model``: the latest model ids seen in the transcript;
 - ``head_checked``: the transcript head was read once for ``headless``;
 - ``last_nudged_pct``: the ctx % of the most recent nudge in this cycle.
 
-Quarantine-safe: loads degrade to defaults, saves swallow ``OSError``.
+Read-modify-write of a record happens under ``locked`` (an flock on a sidecar
+``<id>.lock``, bounded wait). Quarantine-safe: loads degrade to defaults, saves
+swallow ``OSError``, and a lock that cannot be had means the update is skipped.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 from context_vigil import paths
 
 RECORD_TTL_SECONDS = 7 * 24 * 3600
+_LOCK_ATTEMPTS = 300             # 300 x 10ms = 3s bounded wait for a record lock
+_LOCK_DELAY_SECONDS = 0.01
 
 _DEFAULTS: Dict[str, Any] = {
     "headless": None,
     "has_statusline": False,
     "window": None,
     "window_source": None,
+    "window_confident": False,
     "transcript_offset": None,
     "transcript_path": None,
+    "transcript_ino": None,
+    "transcript_dev": None,
     "last_usage_tokens": None,
     "max_usage_tokens": None,
     "model_id": None,
@@ -42,6 +55,40 @@ _DEFAULTS: Dict[str, Any] = {
     "head_checked": False,
     "last_nudged_pct": None,
 }
+
+
+def _acquire(lock: Any) -> bool:
+    for _ in range(_LOCK_ATTEMPTS):
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            time.sleep(_LOCK_DELAY_SECONDS)
+    return False
+
+
+@contextmanager
+def locked(key: str) -> Iterator[bool]:
+    """Hold the sidecar lock for ``key`` (a session id or scope key); yields whether
+    it was got. On False the caller skips its update. Never raises on lock trouble."""
+    try:
+        path = paths.session_lock_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a")
+    except OSError:
+        yield False
+        return
+    got = False
+    try:
+        got = _acquire(handle)
+        yield got
+    finally:
+        if got:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        handle.close()
 
 
 def blank() -> Dict[str, Any]:
@@ -97,10 +144,11 @@ def prune(now: Optional[float] = None) -> None:
 
 def mark_statusline(session_id: str) -> None:
     """Census ingested this session: it has a status line. Writes only on change."""
-    record = load(session_id)
-    if not record["has_statusline"]:
-        record["has_statusline"] = True
-        save(session_id, record)
+    with locked(session_id) as got:
+        record = load(session_id)
+        if got and not record["has_statusline"]:
+            record["has_statusline"] = True
+            save(session_id, record)
 
 
 # --- learned model → window table ---------------------------------------------
@@ -118,14 +166,17 @@ def windows() -> Dict[str, int]:
 
 
 def learn_window(model_id: str, size: int) -> None:
-    table = windows()
-    if table.get(model_id) == size:
+    if windows().get(model_id) == size:
         return
-    table[model_id] = size
-    try:
-        _atomic_write(paths.windows_path(), json.dumps(table, indent=2, sort_keys=True) + "\n")
-    except OSError:
-        return
+    with locked("_windows") as got:
+        table = windows()
+        if not got or table.get(model_id) == size:
+            return
+        table[model_id] = size
+        try:
+            _atomic_write(paths.windows_path(), json.dumps(table, indent=2, sort_keys=True) + "\n")
+        except OSError:
+            return
 
 
 def learn_from_payload(payload: Dict[str, Any]) -> None:
