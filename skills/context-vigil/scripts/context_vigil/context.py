@@ -40,9 +40,24 @@ def _entry_model(entry: Optional[Dict[str, Any]]) -> Optional[str]:
     return model_id if isinstance(model_id, str) and model_id else None
 
 
+def _usage_exceeds_standard(record: Dict[str, Any]) -> bool:
+    return any(isinstance(v, int) and v > _STANDARD_WINDOW
+               for v in (record.get("max_usage_tokens"), record.get("last_usage_tokens")))
+
+
 def resolve_window(entry: Optional[Dict[str, Any]], record: Dict[str, Any],
                    configured: int) -> Tuple[int, str]:
-    """The session's window and where it came from; first hit wins."""
+    """The session's window and where it came from.
+
+    A resolved window is fixed: the stored one is reused, never re-derived. The one
+    exception is 200k -> 1M when observed usage proves more than 200k fits. A first
+    resolution walks the chain below; first hit wins.
+    """
+    stored = _positive_int(record.get("window"))
+    if stored:
+        if stored == _STANDARD_WINDOW and _usage_exceeds_standard(record):
+            return EXTENDED_WINDOW, "evidence"
+        return stored, str(record.get("window_source") or "config")
     size = _entry_window(entry)                       # a. census, even if the reading is stale
     if size:
         return size, "census"
@@ -55,8 +70,7 @@ def resolve_window(entry: Optional[Dict[str, Any]], record: Dict[str, Any],
         return size, "learned"
     if isinstance(model_id, str) and "[1m]" in model_id:
         return EXTENDED_WINDOW, "model-suffix"
-    peak = record.get("max_usage_tokens")              # d. evidence: more than 200k cannot fit
-    if isinstance(peak, int) and peak > _STANDARD_WINDOW:
+    if _usage_exceeds_standard(record):                # d. evidence: more than 200k cannot fit
         return EXTENDED_WINDOW, "evidence"
     return configured, "config"                        # e. configured
 

@@ -316,7 +316,7 @@ Every render, the status line feeds census. On every `UserPromptSubmit` and
    (truncated or rotated) restarts from the tail;
 4. else no reading → no nudge this turn.
 
-**Window lookup** (first hit wins; the source is recorded): (a) census
+**Window lookup.** A session's window, once resolved, is fixed: the stored one is reused and the chain never re-runs, except that a stored 200,000 becomes 1,000,000 (source `evidence`) once observed usage exceeds 200,000. The first resolution walks this chain (first hit wins; the source is recorded): (a) census
 `context_window_size` for this session id, even when stale; (b) the learned
 `windows.json` entry for the census entry's `model.id`; (c) the transcript's
 model id (last `attachment.identity.modelId` record, else `message.model`) in the

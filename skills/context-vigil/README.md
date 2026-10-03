@@ -95,7 +95,7 @@ tmux is missing, you are already inside tmux, or `CLAUDE_NO_TMUX=1`.
 Census (the status line) is trusted while the session's transcript has not
 changed since census last wrote; otherwise the transcript's tail is read
 incrementally (cost is the new bytes, never the whole file) against a window
-found from census, a table learned from every status-line payload, the model id
+(fixed once resolved; it only ever widens from 200k to 1M when usage exceeds 200k) found from census, a table learned from every status-line payload, the model id
 (`[1m]`), or observed usage. Headless runs (`claude -p`, the SDK) have no status
 line and use the transcript only. Per-session bookkeeping lives under
 `sessions/` in the data root; none of it is shown to the model.
