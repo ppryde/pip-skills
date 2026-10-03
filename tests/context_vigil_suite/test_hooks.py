@@ -83,7 +83,6 @@ def test_new_cycle_resets_the_repeat_sequence(repo: Path) -> None:
     _over(repo, 50)
     assert hooks.nudge(_payload(repo)) is not None
     state.begin_cycle(paths.scope_dir(repo))
-    (paths.scope_dir(repo) / "cooldown").unlink()
     assert hooks.nudge(_payload(repo)) is not None   # same %, fresh cycle
 
 
@@ -118,7 +117,7 @@ def test_nudge_silent_when_paused_or_cooling(repo: Path) -> None:
     state.pause(scope)
     assert hooks.nudge(_payload(repo)) is None
     state.resume(scope)
-    state.begin_cycle(scope)  # touches cooldown
+    state.begin_cycle(scope, cooldown=True)
     assert hooks.nudge(_payload(repo)) is None
 
 
@@ -232,7 +231,41 @@ def test_session_start_opens_a_new_cycle(repo: Path) -> None:
     state.set_gate(scope)
     hooks.session_start(_payload(repo, source="clear"))
     assert not state.gate_active(scope)
-    assert state.cooldown_active(scope)
+
+
+@pytest.mark.parametrize("source", ["startup", "resume", "compact"])
+def test_cooldown_does_not_start_on_startup_or_resume(repo: Path, source: str) -> None:
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "WAITING")
+    hooks.session_start(_payload(repo, source=source))
+    assert not state.cooldown_active(scope, 60)
+    _over(repo)
+    assert hooks.nudge(_payload(repo)) is not None
+
+
+def test_bare_clear_with_no_handover_starts_no_cooldown(repo: Path) -> None:
+    scope = paths.scope_dir(repo)
+    hooks.session_start(_payload(repo, source="clear"))
+    assert not state.cooldown_active(scope, 60)
+
+
+def test_cooldown_starts_when_a_clear_loaded_a_handover(repo: Path) -> None:
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "DOC")
+    assert hooks.session_start(_payload(repo, source="clear")) is not None
+    assert state.cooldown_active(scope, 60)
+    _over(repo)
+    assert hooks.nudge(_payload(repo)) is None          # nudges suppressed ...
+    assert state.request_clear(scope, "NEXT") == "armed"  # ... an explicit handover is not
+
+
+def test_cooldown_length_follows_config(repo: Path) -> None:
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "DOC")
+    hooks.session_start(_payload(repo, source="clear"))
+    config.set_value(repo, "handover.cooldown_seconds", "0")
+    _over(repo)
+    assert hooks.nudge(_payload(repo)) is not None
 
 
 def test_session_scoping(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

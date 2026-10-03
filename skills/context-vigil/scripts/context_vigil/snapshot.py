@@ -9,12 +9,14 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+_GIT_TIMEOUT = 5  # seconds per git call; a hung repo degrades to the cwd line
+
 
 def _git(cwd: Path, *args: str, strip: bool = True) -> str | None:
     try:
         result = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True
-        )
+            ["git", *args], cwd=cwd, capture_output=True, text=True,
+            timeout=_GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:

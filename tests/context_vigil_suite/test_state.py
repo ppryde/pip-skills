@@ -25,11 +25,10 @@ class TestRequestClear:
 
 
 class TestConsume:
-    def test_consume_removes_flag_and_sets_cooldown(self, scope):
+    def test_consume_removes_flag(self, scope):
         st.request_clear(scope, "H")
         assert st.consume_clear_flag(scope) is True
         assert not st.clear_flag(scope).exists()
-        assert st.cooldown_marker(scope).exists()
 
     def test_consume_noop_without_flag(self, scope):
         assert st.consume_clear_flag(scope) is False
@@ -102,46 +101,72 @@ class TestHandoffWrittenAt:
 
 
 class TestCooldown:
-    def test_request_clear_refuses_during_cooldown(self, scope):
-        st.request_clear(scope, "H")
-        st.consume_clear_flag(scope)  # sets cooldown
-        assert st.request_clear(scope, "H2") == "cooldown"
+    def test_request_clear_never_refuses_for_cooldown(self, scope):
+        st.begin_cycle(scope, cooldown=True)
+        assert st.cooldown_active(scope, 60) is True
+        assert st.request_clear(scope, "H2") == "armed"   # an explicit handover proceeds
 
-    def test_expired_cooldown_allows_rearm(self, scope):
+    def test_consuming_the_clear_flag_does_not_start_a_cooldown(self, scope):
         st.request_clear(scope, "H")
-        st.consume_clear_flag(scope)  # sets cooldown
+        assert st.consume_clear_flag(scope) is True
+        assert not st.cooldown_marker(scope).exists()
+
+    def test_expired_cooldown_is_cleared(self, scope):
+        st.begin_cycle(scope, cooldown=True)
         marker = st.cooldown_marker(scope)
-        old = marker.stat().st_mtime - (st.COOLDOWN_TTL_SECONDS + 1)
+        old = marker.stat().st_mtime - 61
         os.utime(marker, (old, old))
-        assert st.request_clear(scope, "H2") == "armed"
+        assert st.cooldown_active(scope, 60) is False
         assert not marker.exists()  # expired cooldown was cleared
 
-    def test_cooldown_active_public_alias_matches_private(self, scope):
-        assert st.cooldown_active(scope) is False
-        st.request_clear(scope, "H")
-        st.consume_clear_flag(scope)  # sets cooldown
-        assert st.cooldown_active(scope) is True
+    def test_cooldown_seconds_is_the_window(self, scope):
+        st.begin_cycle(scope, cooldown=True)
+        marker = st.cooldown_marker(scope)
+        old = marker.stat().st_mtime - 30
+        os.utime(marker, (old, old))
+        assert st.cooldown_active(scope, 60) is True
+        assert st.cooldown_active(scope, 20) is False
+
+    def test_zero_seconds_means_no_cooldown(self, scope):
+        st.begin_cycle(scope, cooldown=True)
+        assert st.cooldown_active(scope, 0) is False
 
 
 class TestBeginCycle:
-    def test_begin_cycle_clears_gate_flag_and_touches_cooldown(self, scope):
+    def test_begin_cycle_clears_gate_and_flag(self, scope):
         st.request_clear(scope, "H")
         st.set_gate(scope)
         st.begin_cycle(scope)
         assert not st.clear_flag(scope).exists()   # queued clear unlinked
         assert st.gate_active(scope) is False       # gate cleared → re-armed
-        assert st.cooldown_active(scope) is True    # fresh cooldown grace
 
-    def test_begin_cycle_cooldown_suppresses_immediate_rearm(self, scope):
-        # The storm guard: census lag can re-present a high ctx%, but the fresh
-        # cooldown makes request_clear refuse during the grace window.
+    def test_begin_cycle_without_cooldown_starts_none(self, scope):
         st.begin_cycle(scope)
-        assert st.request_clear(scope, "H2") == "cooldown"
+        assert st.cooldown_active(scope, 60) is False
 
-    def test_begin_cycle_touches_cooldown_with_no_gate_or_flag(self, scope):
-        st.begin_cycle(scope)
-        assert st.cooldown_active(scope) is True
+    def test_begin_cycle_with_cooldown_suppresses_automatic_rearm_only(self, scope):
+        st.begin_cycle(scope, cooldown=True)
+        assert st.cooldown_active(scope, 60) is True
         assert st.gate_active(scope) is False
+
+
+class TestRequestClearAtomicArchive:
+    def test_replaced_unconsumed_handoff_is_archived_not_destroyed(self, scope):
+        st.request_clear(scope, "FIRST")
+        st.request_clear(scope, "SECOND")
+        assert st.read_handoff(scope) == "SECOND"
+        archived = sorted(st.handoff_archive_dir(scope).glob("handoff*.md"))
+        assert [p.read_text() for p in archived] == ["FIRST"]
+
+    def test_handoff_is_written_by_atomic_replace(self, scope, monkeypatch):
+        calls = []
+        real = os.replace
+        monkeypatch.setattr(os, "replace", lambda a, b: (calls.append((str(a), str(b))), real(a, b))[1])
+        st.request_clear(scope, "BODY")
+        assert calls and calls[-1][1] == str(st.handoff_path(scope))
+        assert calls[-1][0] != calls[-1][1]
+        assert st.read_handoff(scope) == "BODY"
+        assert list(scope.glob("*.tmp")) == []
 
 
 class TestGate:

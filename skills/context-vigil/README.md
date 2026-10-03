@@ -113,10 +113,11 @@ line and use the transcript only. Per-session bookkeeping lives under
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
 | `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4, which is approximate and undercounts non-ASCII text; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | re-nudge each time ctx % has grown this many points past the last nudge (integer 1–50) |
+| `handover.cooldown_seconds` | 60 | after a `/clear` that loaded a handover, nudges are suppressed this long (census can lag a `/clear`); startup/resume start none and an explicit `handover` is never refused (integer 0–3600) |
 
 Resolution order, first match wins, re-read on every hook call:
 
-1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`
+1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`, `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`, `CONTEXT_VIGIL_COOLDOWN_SECONDS`
 2. Worktree: `config set KEY VALUE --worktree`
 3. Global: `config set KEY VALUE`
 4. Built-in default
@@ -128,8 +129,10 @@ the agent runs them only when you ask.
 
 When a nudge fires right after you typed a message, the agent answers you first
 and asks whether to hand over; it does not hand over until you agree. In
-unattended runs (nudges from `PostToolUse`) it hands over at a sensible stopping
-point on its own. With tmux, the automatic `/clear` fires when the turn ends.
+unattended runs it hands over at a sensible stopping point on its own. The
+mid-turn nudge (`PostToolUse`) only fires after `TaskCreate`/`TaskUpdate`, so a
+run that never uses the Task tools is nudged at the next prompt
+(`UserPromptSubmit`), not mid-turn. With tmux, the automatic `/clear` fires when the turn ends.
 
 ## Where data lives
 

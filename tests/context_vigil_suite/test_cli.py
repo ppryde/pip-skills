@@ -83,3 +83,9 @@ def test_context_uses_claude_session_id_env(run_cli, repo: Path) -> None:
     assert "ctx 20%" in out.stdout
     status = run_cli("status", cwd=repo, env={"CLAUDE_SESSION_ID": "a"})
     assert "ctx 20%" in status.stdout and "nudge.repeat_step: 5%" in status.stdout
+
+
+def test_status_shows_cooldown_seconds(run_cli, repo: Path) -> None:
+    assert "handover.cooldown_seconds: 60 (default)" in run_cli("status", cwd=repo).stdout
+    run_cli("config", "set", "handover.cooldown_seconds", "10", cwd=repo)
+    assert "handover.cooldown_seconds: 10 (global)" in run_cli("status", cwd=repo).stdout

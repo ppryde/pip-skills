@@ -11,6 +11,7 @@ def test_defaults(repo: Path) -> None:
     assert config.load(repo) == {
         "context.threshold": 35, "context.window": 200000, "context.mode": "local",
         "nudge.repeat_step": 5, "handover.max_tokens": 8000,
+        "handover.cooldown_seconds": 60,
     }
     assert config.resolve(repo)["context.threshold"] == (35, "default")
 
@@ -97,3 +98,15 @@ def test_handover_max_tokens_validated_and_env(repo: Path, monkeypatch: pytest.M
             config.set_value(repo, "handover.max_tokens", bad)
     monkeypatch.setenv("CONTEXT_VIGIL_HANDOVER_MAX_TOKENS", "9000")
     assert config.resolve(repo)["handover.max_tokens"] == (9000, "env")
+
+
+def test_handover_cooldown_seconds_validated_and_env(repo: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    assert config.cooldown_seconds(repo) == 60
+    config.set_value(repo, "handover.cooldown_seconds", "0")
+    assert config.cooldown_seconds(repo) == 0
+    for bad in ("-1", "3601", "x"):
+        with pytest.raises(config.ConfigError):
+            config.set_value(repo, "handover.cooldown_seconds", bad)
+    monkeypatch.setenv("CONTEXT_VIGIL_COOLDOWN_SECONDS", "120")
+    assert config.resolve(repo)["handover.cooldown_seconds"] == (120, "env")

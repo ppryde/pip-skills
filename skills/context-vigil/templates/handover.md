@@ -1,6 +1,7 @@
 <!-- context-vigil handover notes. Write for a cold reader with zero context.
-     Bullets, paths and reasons — not prose. The tool adds cwd, branch,
-     git status and recently modified files itself, so don't list them. -->
+     Bullets, paths and reasons — not prose. The tool adds cwd, branch, base,
+     working-tree counts and the git commands for detail — it does NOT list
+     files, so Files in Flight below is where you name the ones that matter. -->
 
 ## Goal
 
@@ -14,7 +15,7 @@
 
 ## Files in Flight
 
-- `path/to/file` — <why it matters right now; the snapshot already lists changed files>
+- `path/to/file` — <why it matters right now; name the files the next session must open, not every changed file>
 
 ## Failed Attempts
 

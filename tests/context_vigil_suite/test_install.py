@@ -379,3 +379,20 @@ def test_list_hooks_is_a_clean_refusal_not_a_crash(cfg: Path) -> None:
         install.plan_install(threshold=None)
     with pytest.raises(install.InstallError):
         install.plan_uninstall()
+
+
+def test_reinstall_with_changed_matcher_replaces_our_entry(cfg: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    install.apply(install.plan_install(threshold=None))
+    monkeypatch.setattr(install, "HOOKS", [
+        (e, "Task.*|Bash" if e == "PostToolUse" else m, n) for e, m, n in install.HOOKS])
+    install.apply(install.plan_install(threshold=None))
+    entries = _settings(cfg)["hooks"]["PostToolUse"]
+    assert len(entries) == 1 and entries[0]["matcher"] == "Task.*|Bash"
+
+
+def test_dry_run_shows_the_threshold_that_will_be_set(run_cli, cfg: Path) -> None:
+    result = run_cli("install", "--threshold", "50")
+    assert "nudge at 50% context" in result.stdout
+    assert "nudge at 35% context" not in result.stdout
+    assert "nudge at 35% context" in run_cli("install").stdout

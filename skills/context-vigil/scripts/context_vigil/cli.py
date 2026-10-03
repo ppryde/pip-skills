@@ -109,9 +109,6 @@ def _cmd_handover(args: argparse.Namespace) -> int:
     result = state.request_clear(scope, document)
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
-    if result == "cooldown":
-        raise CliError("handover refused: a session just started — try again in a few "
-                       "minutes (cooldown)")
     if not session.is_headless(_env_session_id()) and tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
@@ -198,6 +195,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"({resolved['nudge.repeat_step'][1]})",
         f"handover.max_tokens: {resolved['handover.max_tokens'][0]} "
         f"({resolved['handover.max_tokens'][1]})",
+        f"handover.cooldown_seconds: {resolved['handover.cooldown_seconds'][0]} "
+        f"({resolved['handover.cooldown_seconds'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
         f"pending handover: {'yes' if state.read_handoff(scope) else 'no'}",
@@ -220,8 +219,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
             print(f"\nMANUAL STEP: {line}")
         for line in plan.notes:
             print(f"\n{line}")
-        current = config.threshold(Path.cwd())
-        print(f"\nThreshold: nudge at {current}% context (default 35). Lower hands over "
+        current = args.threshold if args.threshold is not None else config.threshold(Path.cwd())
+        verb = "will be set" if args.threshold is not None else "current"
+        print(f"\nThreshold ({verb}): nudge at {current}% context (default 35). Lower hands over "
               "sooner with a leaner context; higher means fewer handovers but more "
               "degradation before each.")
         print("\n" + launcher.walkthrough_text())

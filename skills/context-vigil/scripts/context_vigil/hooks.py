@@ -57,7 +57,8 @@ def _str(payload: Dict[str, object], key: str) -> Optional[str]:
 def nudge(payload: Dict[str, object]) -> Optional[str]:
     cwd = _cwd(payload)
     scope = session.scope(cwd, _str(payload, "session_id"))
-    if state.is_paused(scope) or state.cooldown_active(scope) or state.clear_requested(scope):
+    if (state.is_paused(scope) or state.clear_requested(scope)
+            or state.cooldown_active(scope, config.cooldown_seconds(cwd))):
         return None
     threshold = config.threshold(cwd)
     session_id = _str(payload, "session_id")
@@ -126,9 +127,11 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
     scope = session.scope(_cwd(payload), session_id)
     source = _str(payload, "source")
     out: Optional[str] = None
+    loaded = False
     if source == "clear":
         text = state.consume_handoff(scope)
         if text:
+            loaded = True
             out = json.dumps({"hookSpecificOutput": {
                 "hookEventName": "SessionStart",
                 "additionalContext": f"{handover.RESUME_PREAMBLE}\n\n{text}",
@@ -152,7 +155,7 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
                         "or `handover --discard` (drop)."),
                 },
             })
-    state.begin_cycle(scope)
+    state.begin_cycle(scope, cooldown=loaded)
     return out
 
 

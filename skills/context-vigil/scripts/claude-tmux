@@ -6,9 +6,10 @@
 #  * a fresh session per launch, lowest free cc-<repo>-<N>, never a silent attach;
 #  * CONTEXT_VIGIL_SESSION=<name> so two sessions in one worktree keep separate
 #    handovers;
-#  * env passthrough with -e: a new session on a running server inherits the
-#    SERVER's env, not yours, so PATH, HOME, CLAUDE_*, ANTHROPIC_*, AWS_* and
-#    CONTEXT_VIGIL_* are passed explicitly (needs tmux >= 3.2 for new-session -e).
+#  * env passthrough: a new session on a running server inherits the SERVER's env,
+#    not yours, so PATH, HOME, CLAUDE_*, ANTHROPIC_*, AWS_* and CONTEXT_VIGIL_* are
+#    passed explicitly — through a private temp file, never on a command line where
+#    `ps` would show API keys (needs tmux >= 3.2 for new-session -e).
 # Falls through to plain `claude` when already in tmux, tmux is missing or older
 # than 3.2, CLAUDE_NO_TMUX=1, stdin/stdout is not a terminal, or the call is
 # non-interactive (-p/--print, --output-format, --input-format). Usage: claude-tmux [claude args…] | claude-tmux attach [N|name]
@@ -67,20 +68,31 @@ n=1
 while tmux -L "$sock" has-session -t "=${base}-${n}" 2>/dev/null; do n=$((n + 1)); done
 name="${base}-${n}"
 
-cmd="$(printf '%q' "$bin")"
-for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done
+# Secrets (API keys, AWS secrets) must never ride on a command line: `ps` shows every
+# argv to any local user. The environment goes through a private (0600) file instead;
+# the session command sources it by running it, and it deletes itself first thing.
+envfile="$(umask 077; mktemp "${TMPDIR:-/tmp}/claude-tmux-env.XXXXXX")" \
+  || { echo "claude-tmux: cannot create a private env file — launching plain claude (manual mode)" >&2; exec "$bin" "$@"; }
+{
+  echo 'rm -f -- "$0"'
+  # Names only (compgen -e), values by indirection: a value may hold a newline. The
+  # session and entrypoint of an enclosing Claude must not leak into a fresh one.
+  while IFS= read -r var; do
+    case "$var" in
+      CONTEXT_VIGIL_SESSION|CLAUDE_SESSION_ID|CLAUDE_CODE_ENTRYPOINT) continue ;;
+    esac
+    printf 'export %s=%q\n' "$var" "${!var}"
+  done < <(compgen -e | grep -E '^(PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+)$')
+  printf 'export CONTEXT_VIGIL_SESSION=%q\n' "$name"
+  printf 'exec %q' "$bin"
+  for a in "$@"; do printf ' %q' "$a"; done
+  echo
+} > "$envfile"
 
-envargs=(-e "CONTEXT_VIGIL_SESSION=$name")
-# Names only (compgen -e), values by indirection: a value may hold a newline. The
-# session and entrypoint of an enclosing Claude must not leak into a fresh one.
-while IFS= read -r var; do
-  case "$var" in
-    CONTEXT_VIGIL_SESSION|CLAUDE_SESSION_ID|CLAUDE_CODE_ENTRYPOINT) continue ;;
-  esac
-  envargs+=(-e "$var=${!var}")
-done < <(compgen -e | grep -E '^(PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+)$')
-
-if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" "${envargs[@]}" "$cmd"; then
+cmd="$(printf '%q %q' "$(type -P bash)" "$envfile")"
+if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" "$cmd"; then
+  rm -f -- "$envfile"
   echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2
   exec "$bin" "$@"
 fi
+rm -f -- "$envfile"

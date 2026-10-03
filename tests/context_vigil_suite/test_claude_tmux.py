@@ -15,7 +15,7 @@ SCRIPT = SKILL / "scripts" / "claude-tmux"
 
 # The only real programs the script needs. PATH is the stubs dir alone, so a real
 # tmux (Linux ships /usr/bin/tmux) can never be reached by a test.
-_COREUTILS = ("bash", "env", "basename", "grep", "cat", "dirname")
+_COREUTILS = ("bash", "env", "basename", "grep", "cat", "dirname", "mktemp", "rm", "sh")
 
 
 @pytest.fixture(autouse=True)
@@ -67,16 +67,34 @@ def _run(stubs: Path, cwd: Path, *args: str, tty: bool = True, **env: str) -> st
     return (stubs.parent / "calls.log").read_text()
 
 
+def _running_tmux(stubs: Path, new_session_exit: int = 0) -> None:
+    """A tmux stub that, like the real one, runs the session command (the last argv word)."""
+    log = stubs.parent / "calls.log"
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log}"\n'
+        '[[ " $* " == *" has-session "* ]] && exit 1\n'
+        f'if [[ " $* " == *" new-session "* ]]; then [ {new_session_exit} -ne 0 ] && exit '
+        f'{new_session_exit}; env -i "$(command -v sh)" -c "${{@: -1}}"; fi\nexit 0\n')
+    (stubs / "claude").write_text(
+        f'#!/usr/bin/env bash\necho "claude $* key=${{ANTHROPIC_API_KEY-unset}} '
+        f'model=${{ANTHROPIC_MODEL-unset}} entry=${{CLAUDE_CODE_ENTRYPOINT-unset}} '
+        f'cvs=${{CONTEXT_VIGIL_SESSION-unset}} sid=${{CLAUDE_SESSION_ID-unset}} '
+        f'other=${{UNRELATED_SECRET-unset}} cfg=${{CLAUDE_CONFIG_DIR-unset}} '
+        f'thr=${{CONTEXT_VIGIL_THRESHOLD-unset}}" >> "{log}"\n')
+
+
 def test_new_session_on_dedicated_socket_with_env(
         stubs: Path, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAUDE_TMUX_SOCK")  # tmux is a stub here; test the default name
+    _running_tmux(stubs)
     log = _run(stubs, repo, "--model", "opus")
     line = [ln for ln in log.splitlines() if "new-session" in ln][0]
     assert "-L claude " in line
     assert "-s cc-repo-1" in line
     assert "CONTEXT_VIGIL_SESSION=cc-repo-1" in line
-    assert f"CLAUDE_CONFIG_DIR={os.environ['CLAUDE_CONFIG_DIR']}" in line
-    assert "--model opus" in line
+    claude = [ln for ln in log.splitlines() if ln.startswith("claude ")][0]
+    assert f"cfg={os.environ['CLAUDE_CONFIG_DIR']}" in claude
+    assert "--model opus" in claude
 
 
 def test_lowest_free_suffix(stubs: Path, repo: Path) -> None:
@@ -88,8 +106,9 @@ def test_lowest_free_suffix(stubs: Path, repo: Path) -> None:
 
 
 def test_passes_context_vigil_env(stubs: Path, repo: Path) -> None:
+    _running_tmux(stubs)
     log = _run(stubs, repo, CONTEXT_VIGIL_THRESHOLD="60")
-    assert "CONTEXT_VIGIL_THRESHOLD=60" in log
+    assert "thr=60" in log
 
 
 @pytest.mark.parametrize("env", [{"CLAUDE_NO_TMUX": "1"}, {"TMUX": "/tmp/x,1,0"}])
@@ -105,8 +124,9 @@ def test_falls_through_without_tmux(stubs: Path, repo: Path) -> None:
 
 
 def test_quotes_arguments(stubs: Path, repo: Path) -> None:
+    _running_tmux(stubs)
     log = _run(stubs, repo, "--model", "it's a test")
-    assert "it\\'s\\ a\\ test" in log or "'it'\"'\"'s a test'" in log
+    assert "claude --model it's a test " in log
 
 
 def test_runs_under_macos_bash32(stubs: Path, repo: Path) -> None:
@@ -256,17 +276,45 @@ def _new_session(log: str) -> str:
     return [ln for ln in log.splitlines() if "new-session" in ln][0]
 
 
-def test_forwards_the_callers_environment_explicitly(stubs: Path, repo: Path) -> None:
-    line = _new_session(_run(
-        stubs, repo, ANTHROPIC_MODEL="opus", CLAUDE_CODE_USE_BEDROCK="1", AWS_PROFILE="work",
+def test_forwards_the_callers_environment_without_putting_values_on_argv(
+        stubs: Path, repo: Path, iso: Path) -> None:
+    _running_tmux(stubs)
+    tmpdir = iso / "tmp"
+    tmpdir.mkdir()
+    secret = "sk-ant-SECRET-VALUE; echo $(x) 'q'"
+    log = _run(
+        stubs, repo, "--model", "opus", TMPDIR=str(tmpdir), ANTHROPIC_API_KEY=secret,
+        ANTHROPIC_MODEL="opus", AWS_SECRET_ACCESS_KEY="aws-SECRET",
         CONTEXT_VIGIL_SESSION="stale-inherited", CLAUDE_CODE_ENTRYPOINT="sdk-cli",
-        CLAUDE_SESSION_ID="parent", UNRELATED_SECRET="no"))
-    assert f"-e PATH={stubs}" in line and "-e HOME=" in line
-    assert "-e ANTHROPIC_MODEL=opus" in line
-    assert "-e CLAUDE_CODE_USE_BEDROCK=1" in line and "-e AWS_PROFILE=work" in line
-    assert "CONTEXT_VIGIL_SESSION=cc-repo-1" in line and "stale-inherited" not in line
-    assert "ENTRYPOINT" not in line and "CLAUDE_SESSION_ID" not in line
-    assert "UNRELATED_SECRET" not in line
+        CLAUDE_SESSION_ID="parent", UNRELATED_SECRET="no")
+    tmux_lines = [ln for ln in log.splitlines() if ln.startswith("tmux ")]
+    for value in (secret, "sk-ant-SECRET", "aws-SECRET", "ANTHROPIC_API_KEY", "AWS_SECRET"):
+        assert not any(value in ln for ln in tmux_lines), value
+    line = _new_session(log)
+    assert "-e CONTEXT_VIGIL_SESSION=cc-repo-1" in line and "stale-inherited" not in line
+    claude = [ln for ln in log.splitlines() if ln.startswith("claude ")][0]
+    assert f"key={secret}" in claude and "model=opus" in claude
+    assert "cvs=cc-repo-1" in claude and "entry=unset" in claude and "sid=unset" in claude
+    assert "other=unset" in claude and "--model opus" in claude
+    assert list(tmpdir.iterdir()) == []  # the env file deleted itself
+
+
+def test_env_file_is_private_and_removed_when_tmux_fails(
+        stubs: Path, repo: Path, iso: Path) -> None:
+    _running_tmux(stubs, new_session_exit=1)
+    tmpdir = iso / "tmp"
+    tmpdir.mkdir()
+    tmux = (stubs / "tmux").read_text().replace(
+        'if [[ " $* "', 'if [[ " $* " == *" new-session "* ]]; then f="${@: -1}"; f="${f#* }"; '
+        f'stat -f %Lp "$f" > "{iso}/mode" 2>/dev/null || stat -c %a "$f" > "{iso}/mode"; fi\n'
+        'if [[ " $* "', 1)
+    (stubs / "tmux").write_text(tmux)
+    (stubs / "stat").symlink_to(shutil.which("stat"))
+    full = dict(os.environ, PATH=str(stubs), TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
+    result = _pty_run(["bash", str(SCRIPT)], repo, full)
+    assert result.returncode == 0 and "manual mode" in result.stderr
+    assert list(tmpdir.iterdir()) == []
+    assert (iso / "mode").read_text().strip() == "600"
 
 
 @pytest.mark.parametrize("args", [

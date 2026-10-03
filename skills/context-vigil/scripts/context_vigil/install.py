@@ -145,7 +145,8 @@ def _with_hooks(data: Dict[str, Any]) -> Dict[str, Any]:
             wanted = {"matcher": matcher, **wanted}
         entries = []
         for e in hooks.get(event) or []:
-            if _is_ours(e) and _commands(e) == [hook_command(name)]:
+            if (_is_ours(e) and _commands(e) == [hook_command(name)]
+                    and e.get("matcher") == matcher):
                 entries.append(e)
                 continue
             kept = _strip_ours(e)

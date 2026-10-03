@@ -49,7 +49,10 @@ natural stopping points in long work. Headless runs (`claude -p`, the SDK) have
 no status line: the percentage comes from the transcript against a window the
 script works out itself. Set `CONTEXT_VIGIL_WINDOW` there only if the model has
 never been seen in an interactive session (otherwise the learned table and
-`[1m]` model ids already cover it). A nudge repeats every `nudge.repeat_step`
+`[1m]` model ids already cover it). A nudge arrives at your next prompt, or
+mid-turn only after a `TaskCreate`/`TaskUpdate` call, so a long run that never
+uses the Task tools is checked at its next prompt; run `context` yourself at
+stopping points. A nudge repeats every `nudge.repeat_step`
 (default 5) points until you hand over.
 
 ## When nudged, or asked to hand over

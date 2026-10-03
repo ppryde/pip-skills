@@ -108,3 +108,19 @@ class TestSnapshot:
         _init(tmp_path)
         snap = session_snapshot(tmp_path)
         assert str(tmp_path) in snap
+
+
+class TestGitTimeout:
+    def test_hung_git_degrades_to_the_working_directory_line(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        from context_vigil import snapshot
+        seen = []
+
+        def hung(*args, **kwargs):
+            seen.append(kwargs.get("timeout"))
+            raise sp.TimeoutExpired(args[0], kwargs.get("timeout"))
+
+        monkeypatch.setattr(snapshot.subprocess, "run", hung)
+        snap = session_snapshot(tmp_path)
+        assert str(tmp_path) in snap and "## Git" not in snap
+        assert seen and all(isinstance(t, (int, float)) and 0 < t <= 10 for t in seen)

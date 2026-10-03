@@ -7,17 +7,18 @@ marker files and never raises on a missing path.
 The markers (`paused`, `cooldown`, `clear-requested`, `handover-gate`,
 `handoff.md`) carry no session identity. If two live sessions share a single
 scope they share — and race on — the same markers: one session's nudge gates the
-other, one session's `/clear` cooldown silences the other. Sharing one scope
+other, one session's post-`/clear` cooldown silences the other. Sharing one scope
 across concurrent sessions is therefore unsupported without
 `CONTEXT_VIGIL_SESSION`.
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
-COOLDOWN_TTL_SECONDS = 300
-GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal: mirrors COOLDOWN_TTL_SECONDS's pattern
+COOLDOWN_SECONDS = 60  # default; the live value is config `handover.cooldown_seconds`
+GATE_TTL_SECONDS = 6 * 60 * 60  # 6h self-heal for a stranded gate
 
 
 def _uniquify(target: Path) -> Path:
@@ -85,13 +86,15 @@ def _marker_active(marker: Path, ttl_seconds: float) -> bool:
     return True
 
 
-def _cooldown_active(scope: Path) -> bool:
-    return _marker_active(cooldown_marker(scope), COOLDOWN_TTL_SECONDS)
+def cooldown_active(scope: Path, seconds: int = COOLDOWN_SECONDS) -> bool:
+    """Read-only (self-healing) check: is a post-/clear grace window still running?
 
-
-def cooldown_active(scope: Path) -> bool:
-    """Public, read-only cooldown check for callers outside this module."""
-    return _cooldown_active(scope)
+    ``seconds`` is the window length (config `handover.cooldown_seconds`); 0 means
+    no cooldown at all. The window suppresses nudges only — never an explicit handover.
+    """
+    if seconds <= 0:
+        return False
+    return _marker_active(cooldown_marker(scope), seconds)
 
 
 def set_gate(scope: Path) -> None:
@@ -122,12 +125,25 @@ def clear_requested(scope: Path) -> bool:
 
 
 def request_clear(scope: Path, handoff_text: str) -> str:
+    """Save the handoff and arm /clear. An explicit handover is never refused for a cooldown.
+
+    The write is atomic, and an unconsumed older handoff it replaces is archived
+    (uniquified), never destroyed.
+    """
     if is_paused(scope):
         return "paused"
-    if _cooldown_active(scope):
-        return "cooldown"
     scope.mkdir(parents=True, exist_ok=True)
-    handoff_path(scope).write_text(handoff_text)
+    target = handoff_path(scope)
+    if target.exists():
+        try:
+            archive = handoff_archive_dir(scope)
+            archive.mkdir(parents=True, exist_ok=True)
+            target.rename(_uniquify(archive / "handoff.md"))
+        except OSError:
+            pass  # replacing below still keeps the new handoff; the old one is best-effort
+    tmp = scope / "handoff.md.tmp"
+    tmp.write_text(handoff_text)
+    os.replace(tmp, target)
     clear_flag(scope).touch()
     return "armed"
 
@@ -138,32 +154,30 @@ def consume_clear_flag(scope: Path) -> bool:
     if not clear_flag(scope).exists():
         return False
     clear_flag(scope).unlink(missing_ok=True)  # remove FIRST: cannot re-fire
-    scope.mkdir(parents=True, exist_ok=True)
-    cooldown_marker(scope).touch()
     return True
 
 
-def begin_cycle(scope: Path) -> None:
+def begin_cycle(scope: Path, cooldown: bool = False) -> None:
     """Start a fresh handover cycle: any session start in this scope.
 
-    Every SessionStart in a scope — whether a handover just landed, a bare
-    `/clear` with nothing armed, or a plain relaunch — opens a new cycle:
+    Every SessionStart in a scope opens a new cycle:
 
     - unlink any queued ``clear-requested`` (its dispatch is done or moot);
-    - clear the ``handover-gate`` so the trigger can re-arm this session;
-    - TOUCH a fresh ``cooldown`` marker.
+    - clear the ``handover-gate`` so the trigger can re-arm this session.
 
-    The cooldown touch is the storm guard. Census's stale-horizon (~90s) means
-    a fresh session can still read the OLD session's high ctx% on its first
-    UserPromptSubmit; with the gate cleared and no cooldown, that would nudge →
-    an obedient agent re-hands-over → handover storm. The 5-minute cooldown
-    outlives census's lag window and suppresses both the nudge and
-    ``request_clear`` through the grace period.
+    ``cooldown=True`` — passed only for a ``/clear`` that actually loaded a
+    handover — also touches the ``cooldown`` marker, the storm guard: census can
+    lag a /clear and re-present the OLD session's high ctx% on the first prompt,
+    and with the gate cleared that would nudge an obedient agent into
+    re-handing-over. The cooldown suppresses nudges for ``handover.cooldown_seconds``
+    only; an explicit ``handover --file`` always proceeds. A plain startup,
+    resume or bare /clear starts none.
     """
     scope.mkdir(parents=True, exist_ok=True)
     clear_flag(scope).unlink(missing_ok=True)
     clear_gate(scope)
-    cooldown_marker(scope).touch()
+    if cooldown:
+        cooldown_marker(scope).touch()
 
 
 def read_handoff(scope: Path) -> str | None:

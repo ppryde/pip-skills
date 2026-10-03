@@ -24,6 +24,13 @@ def test_template_parses_and_names_every_section() -> None:
     assert set(handover.SECTIONS) <= set(sections)
 
 
+def test_template_does_not_promise_a_file_list() -> None:
+    text = handover.template_path().read_text().lower()
+    assert "lists changed files" not in text and "recently modified files" not in text
+    assert "snapshot already lists" not in text
+    assert "branch" in text and "git" in text   # tells the agent what the snapshot does give
+
+
 def test_emoji_and_case_insensitive_headings() -> None:
     sections = handover.parse_sections("## 🎯 goal\nx\n## NEXT STEP\ny\n")
     assert sections == {"Goal": "x", "Next Step": "y"}
@@ -153,17 +160,29 @@ def test_summary_survives_corrupt_mtime() -> None:
     assert "from earlier" in handover.summary("## Goal\nx\n", -1e30)
 
 
-def test_cli_handover_cooldown_message(run_cli, repo: Path, iso: Path) -> None:
+def test_cli_handover_proceeds_during_cooldown(run_cli, repo: Path, iso: Path) -> None:
     from context_vigil import paths, state
     scope = paths.scope_dir(repo)
-    state.request_clear(scope, "H")
-    state.consume_clear_flag(scope)  # sets cooldown
+    state.begin_cycle(scope, cooldown=True)
     notes = iso / "notes.md"
     notes.write_text(GOOD)
     result = run_cli("handover", "--file", str(notes), cwd=repo)
-    assert result.returncode == 1
-    assert "a session just started" in result.stderr and "cooldown" in result.stderr
-    assert "/clear just happened" not in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert state.clear_requested(scope)
+
+
+def test_cli_handover_inside_reachable_tmux_says_clear_is_automatic(
+        run_cli, repo: Path, iso: Path) -> None:
+    stub = iso / "tmux"
+    stub.write_text("#!/usr/bin/env bash\nexit 0\n")
+    stub.chmod(0o755)
+    notes = iso / "notes.md"
+    notes.write_text(GOOD)
+    result = run_cli("handover", "--file", str(notes), cwd=repo, env={
+        "CONTEXT_VIGIL_TMUX_BIN": str(stub), "TMUX": "/tmp/fake,1,0", "TMUX_PANE": "%7"})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "handover saved — /clear will be sent at the end of this turn"
+    assert "type /clear" not in result.stdout
 
 
 def test_cli_handover_refuses_over_budget(run_cli, repo: Path, iso: Path) -> None:

@@ -19,6 +19,7 @@ DEFAULTS: Dict[str, object] = {
     "context.mode": "local",
     "nudge.repeat_step": 5,
     "handover.max_tokens": 8000,
+    "handover.cooldown_seconds": 60,
 }
 KEYS = tuple(DEFAULTS)
 ENV_VARS: Dict[str, str] = {
@@ -27,6 +28,7 @@ ENV_VARS: Dict[str, str] = {
     "context.mode": "CONTEXT_VIGIL_MODE",
     "nudge.repeat_step": "CONTEXT_VIGIL_REPEAT_STEP",
     "handover.max_tokens": "CONTEXT_VIGIL_HANDOVER_MAX_TOKENS",
+    "handover.cooldown_seconds": "CONTEXT_VIGIL_COOLDOWN_SECONDS",
 }
 _MODES = ("local", "remote")
 
@@ -54,6 +56,8 @@ def coerce(key: str, raw: object) -> object:
         raise ConfigError("nudge.repeat_step must be a whole number 1–50")
     if key == "handover.max_tokens" and number <= 0:
         raise ConfigError("handover.max_tokens must be a positive whole number")
+    if key == "handover.cooldown_seconds" and not 0 <= number <= 3600:
+        raise ConfigError("handover.cooldown_seconds must be a whole number 0–3600")
     return number
 
 
@@ -129,3 +133,7 @@ def repeat_step(cwd: Path) -> int:
 
 def handover_max_tokens(cwd: Path) -> int:
     return int(str(load(cwd)["handover.max_tokens"]))
+
+
+def cooldown_seconds(cwd: Path) -> int:
+    return int(str(load(cwd)["handover.cooldown_seconds"]))

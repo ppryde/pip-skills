@@ -152,6 +152,7 @@ or SKILL.md. The threshold in particular is the knob users will reach for.
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
 | `context.window` | 200000 | Last-resort window for the transcript estimate (see the window lookup under Measure) |
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
+| `handover.cooldown_seconds` | 60 | after a `/clear` that loaded a handover, nudges are suppressed this long; startup/resume start none; an explicit `handover` is never refused (integer 0–3600) |
 | `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4; integer ≥ 1) |
 | `nudge.repeat_step` | 5 | After the first nudge, re-nudge each time ctx % has grown by this many points (integer 1–50) |
 
@@ -159,7 +160,7 @@ or SKILL.md. The threshold in particular is the knob users will reach for.
 take effect on the next turn with no restart:
 
 1. Environment: `CONTEXT_VIGIL_THRESHOLD`, `CONTEXT_VIGIL_WINDOW`,
-   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS` (per-session override, e.g. one long unattended run;
+   `CONTEXT_VIGIL_MODE`, `CONTEXT_VIGIL_REPEAT_STEP`, `CONTEXT_VIGIL_HANDOVER_MAX_TOKENS`, `CONTEXT_VIGIL_COOLDOWN_SECONDS` (per-session override, e.g. one long unattended run;
    settable in `settings.json` `env`).
 2. Worktree: `worktrees/<slug>/config.json`, written by
    `config set KEY VAL --worktree` (e.g. a heavy monorepo wants an earlier nudge).
@@ -242,7 +243,7 @@ wrapper. A bare `tmux claude` hits problems the wrapper already solved:
 
 Environment: a new session on a running server inherits the server's env, so the
 caller's `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and `CONTEXT_VIGIL_*`
-are passed with `-e` (needs tmux >= 3.2; the enclosing session's
+are passed through a private (0600) temp file the session command runs and which deletes itself first, never as `-e KEY=VAL` argv where `ps` would show API keys (only `CONTEXT_VIGIL_SESSION` rides on `-e`; needs tmux >= 3.2; the enclosing session's
 `CLAUDE_SESSION_ID`/`CLAUDE_CODE_ENTRYPOINT` are not forwarded).
 
 Fall-through: already inside tmux, tmux missing, tmux older than 3.2 (one-line
@@ -314,7 +315,7 @@ reachable via tmux, else **manual**.
 ### 2. Measure
 
 Every render, the status line feeds census. On every `UserPromptSubmit` and
-`PostToolUse` (`TaskCreate|TaskUpdate`) the `nudge` hook reads this session's ctx %:
+`PostToolUse` (`TaskCreate|TaskUpdate` only: a run that never uses the Task tools is nudged at its next prompt, not mid-turn) the `nudge` hook reads this session's ctx %:
 
 1. **Headless sessions** (hook env `CLAUDE_CODE_ENTRYPOINT`, else the transcript
    `entrypoint`: `sdk-cli`, `sdk-ts`, `sdk-py` ⇒ headless; `cli`, `claude-vscode`,
@@ -355,10 +356,11 @@ has ingested the id; until then census is not consulted for the session), `windo
 When ctx % ≥ threshold, not paused, not in cooldown, no clear already armed, and
 either nothing has been nudged this cycle (the gate is clear) or ctx % ≥ the last
 nudged % + `nudge.repeat_step`: emit one `additionalContext` instruction and arm the gate (`handover-gate`
-marker, 6h TTL from its mtime). The nudge is suppressed for 5 minutes after any
-session start (the `cooldown` marker — census can lag ≤ 90s behind a `/clear`,
-so a fresh session could otherwise read the old session's high ctx % and
-re-nudge instantly).
+marker, 6h TTL from its mtime). The nudge is suppressed for `handover.cooldown_seconds`
+(default 60) after a `/clear` that loaded a handover (the `cooldown` marker —
+census can lag ≤ 90s behind a `/clear`, so a fresh session could otherwise read
+the old session's high ctx % and re-nudge instantly). Startup, resume and a bare
+`/clear` start no cooldown, and an explicit `handover --file` is never refused for one.
 The instruction tells the agent to:
 
 - finish or park in-flight work (subagents, running commands) first;
@@ -424,7 +426,7 @@ and arms the reset (writes the `clear-requested` marker).
    > Resume from this handover. Don't re-investigate anything marked complete,
    > don't retry anything under Failed Attempts — start with the Next Step.
 2. Move `handoff.md` to `archive/`, remove `clear-requested`, clear the gate,
-   and start the 5-minute `cooldown`.
+   and start the `cooldown` (`handover.cooldown_seconds`) — only because a handover was loaded.
 3. **Auto only** (pane reachable): after `CONTEXT_VIGIL_KICK_DELAY` (default
    2s) type a short resume prompt into the pane, since injected context alone
    never starts a turn.
