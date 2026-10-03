@@ -393,6 +393,28 @@ def for_session(sid: str) -> dict[str, Any] | None:
     return dict(entry) if isinstance(entry, dict) else None
 
 
+def last_seen(cwd: Path, session_id: str | None = None) -> float | None:
+    """When the status line last reported for ``session_id``, or (without one) for
+    any session in ``cwd``'s worktree (same repository root); None if never.
+    For ``status`` only: no staleness horizon, just the newest ``updated_at``."""
+    sessions = _load(store_path()).get("sessions")
+    if not isinstance(sessions, dict):
+        return None
+    if session_id is not None:
+        own = sessions.get(session_id)
+        return (_entry_ts(own) or None) if isinstance(own, dict) else None
+    key = paths.worktree_key(cwd)
+    newest: float | None = None
+    for entry in sessions.values():
+        where = entry.get("worktree_cwd") if isinstance(entry, dict) else None
+        if not isinstance(where, str) or not where:
+            continue
+        ts = _entry_ts(entry)
+        if ts and (newest is None or ts > newest) and paths.worktree_key(Path(where)) == key:
+            newest = ts
+    return newest
+
+
 def _entry_ts(entry: dict) -> float:
     """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0
     (i.e. beyond any staleness horizon) — quarantine-safe, never raises."""

@@ -76,6 +76,8 @@ context-vigil/
       hooks.py             # session-start / stop / nudge entrypoints
       tmux.py              # detect, send /clear, send resume prompt
       install.py           # settings.json + status-line wiring, uninstall
+  SMOKE.md                 # manual pre-merge smoke checklist (dev-only, not shipped)
+  dev/                     # live-smoke harness, tmux-driven, sandboxed (dev-only, not shipped)
   tests/                   # pytest; stays in pip-skills, not copied to agents.md
 ```
 
@@ -98,7 +100,7 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   sessions/<session_id>.json  # per-session record, script-written, pruned after ~7 days (see Measure)
   install.json             # record of every entry install added (for uninstall)
   worktrees/<slug>/        # slug = sanitised repository root (filesystem walk-up; realpath(cwd) outside a repo) + hash
-    paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
+    paused, cooldown, handover-gate, clear-requested, session-start  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists); the newest `handover.archive_keep` (default 20, 0 = none) are kept, older ones deleted
@@ -147,10 +149,10 @@ errors go to stderr with non-zero exit.
 
 | Command | Purpose |
 |---|---|
-| `install [--yes] [--threshold N] [--launcher CHOICE]` | Without `--yes`: dry run that prints the plan and questions. With `--yes`: apply, report auto/manual |
-| `uninstall` | Remove our hook commands and the status-line/rc edits `install.json` records; user commands are kept |
-| `launcher [always\|on-demand\|off]` | Re-run the launch-preference walkthrough (no arg) or set it directly |
-| `status` | Installed? mode (auto/manual + why), ctx %, threshold, gate, pending handoff |
+| `install [--yes] [--threshold N] [--launcher CHOICE] [--confirm-always]` | Without `--yes`: dry run that prints the summary and questions. With `--yes`: apply, then report what is live now (hooks, status line), what needs a new shell (the alias) or a new session (auto mode), and the interpreter. `always` also needs `--confirm-always` |
+| `uninstall [--yes]` | Remove our hook commands and the status-line/rc edits `install.json` records; user commands are kept |
+| `launcher [on-demand\|always\|not-now] [--yes] [--confirm-always]` | Re-run the launch-preference walkthrough (no arg) or set it directly (dry run without `--yes`) |
+| `status` | Live state from the real files: `installed` (yes/partial/no from settings.json), `hooks: N/4 in <settings>` (MISSING → re-run install), `status line: capture\|spliced\|manual\|missing`, last status-line reading for this worktree, a "not feeding" warning, mode (auto only when the hooks are present, and then conditionally), ctx %, settings, gate, pending handoff (own or worktree-level), interpreter path |
 | `context` | `ctx NN%` for this session (threshold appended when over); `ctx ~NN% (window unconfirmed)` while the window is only the configured fallback |
 | `handover --file F [--inline P]… [--no-snapshot]` | Validate + assemble handover, arm reset |
 | `handover --resume` / `--discard` | Load a handover waiting from an earlier session / archive it unread |
@@ -285,10 +287,13 @@ EXIT/HUP/INT/TERM until tmux has it.
 
 ### 0. Install (once)
 
-`context-vigil install` is a dry run without `--yes`: it prints the plan and the
-questions (threshold, launch choice) and changes nothing. The agent relays the
-plan and questions to the user, then runs
-`install --yes --threshold N --launcher CHOICE` with their answers. The steps:
+`context-vigil install` is a dry run without `--yes`: it prints the summary and
+the questions (threshold, launch choice) and changes nothing. The agent relays
+the questions, then runs `install --threshold N --launcher CHOICE` — still
+without `--yes` — and shows the user that summary of exactly what will change
+(the rc edit included). Only on the user's explicit yes does it run the same
+command with `--yes` (plus `--confirm-always` for Always, only after the user
+confirmed it). The steps:
 
 1. Resolve config dir (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and `settings.json`.
    If `settings.json` is malformed JSON: stop, say so, change nothing.
@@ -330,17 +335,35 @@ plan and questions to the user, then runs
    - **tmux installed** (inside it now or not): offer the three launch choices —
      *on-demand* (recommended, default on Enter), *always*, *not now* — with one line each on what changes,
      apply the chosen one (shell-rc edit shown as a summary of our lines, on consent), and say
-     how to change it later (`context-vigil launcher`). If the user is already
-     inside tmux, also say that auto mode works for this session right now.
+     how to change it later (`context-vigil launcher`). The walkthrough never
+     claims auto mode works (nothing is installed when it is shown); only the
+     `--yes` report says so, and only conditionally: "auto mode works in this
+     session once `/hooks` lists context-vigil".
+     Before writing an alias, the rc is scanned for the user's own `claude` /
+     `claude-tmux` definition (alias, `name()`, `function name`); only the rc
+     path and line number are reported. Always is refused over their `claude`;
+     On demand is refused over their `claude-tmux`, and over their `claude` it
+     adds a MANUAL STEP to export `CLAUDE_CONFIG_DIR` from the shell (`claude-tmux`
+     runs the binary from PATH, never a function). bash on macOS gets a one-line
+     caveat that login shells read `~/.bash_profile`.
    - **tmux not installed:** say auto-clear is off and why, give the install
      command for the OS (`brew install tmux`, `apt install tmux`, …), confirm
      manual mode works today:
      > You'll get a nudge, I'll write the handover, and you type `/clear` and
      > then send any message (e.g. "go") — the handover is injected after
      > `/clear`, but the resumed turn starts when you send something.
-     and point at `context-vigil launcher` once tmux is installed.
-8. Remind: hooks, the status line and any shell-rc change take effect in new
-   sessions / new shells.
+     and point at `context-vigil launcher` once tmux is installed; this session
+     stays manual either way (start the next with `claude-tmux`); a tmux that is
+     installed but not detected is outside the PATH Claude started with —
+     restart Claude from a new terminal.
+8. Report what is live (current Claude Code watches settings files): hooks and
+   the status line are live in this session — `/hooks` should list the four
+   context-vigil entries; if not, restart Claude (older builds load hooks only at
+   startup). The alias needs a new shell, and the agent cannot run it (its shell
+   read the rc at session start). Auto mode needs a new `claude-tmux` session;
+   the work moves there by handover (see Resume). An inline-command status line's
+   MANUAL STEP is required: without it interactive sessions are never nudged.
+   The report ends with the interpreter path.
 
 Install is idempotent: re-running detects its own entries (by command path /
 sentinel) and changes nothing.
@@ -485,6 +508,19 @@ and tells the agent the same in one line (not loaded; run `handover --resume`
 or `handover --discard` only if asked). The handover stays in place until one
 of those runs or the next `/clear` injects it.
 
+A per-session scope (tmux pane / `CONTEXT_VIGIL_SESSION`) with no handover of its
+own also looks at the worktree-level one a plain `claude` left (offer only, on
+`startup`/`resume`; `/clear` never loads it), and `handover --resume`/`--discard`
+fall back the same way, removing that handover's `clear-requested` with it. A
+worktree-level `clear-requested` whose handover is gone is dropped at such a
+session's start, and a `Stop` hook ignores (and drops) any `clear-requested`
+without a handover. This is how work moves from a plain session into a new
+`claude-tmux` one: hand over, exit, `claude-tmux`, "resume the handover".
+
+The injected handover (and `--resume`'s print) is capped at 2×
+`handover.max_tokens` with a truncation marker; the notice's branch and goal at
+80 chars each.
+
 ## SKILL.md content
 
 Frontmatter `name: context-vigil` and a description triggering on: context
@@ -495,11 +531,17 @@ uninstall the context watch.
 Body sections, terse and imperative:
 
 1. **First run** — if `status` says not installed: explain what install
-   changes, run `install`, relay its auto/manual report verbatim.
+   changes, run the `install` dry run, show its summary, apply with `--yes` only on
+   the user's yes, relay MANUAL STEP lines (an inline status line's is required)
+   and the live-now report; the user checks `/hooks`; `status` confirms.
 2. **Measure** — `context` at natural stop points.
 3. **On the nudge / when asked to hand over** — finish or park work; never
    clear out from under a live discussion; fill the template; run `handover`;
-   then per mode (auto: end the turn; manual: tell the user to type `/clear`).
+   then per mode (auto: end the turn; manual: tell the user to type `/clear`;
+   headless: no /clear comes, the next run resumes).
+   **Moving this work into a tmux session** — hand over, then the user exits,
+   opens a new terminal, runs `claude-tmux` and says "resume the handover";
+   suggested whenever auto mode needs a new session.
 4. **Pause / resume** — when a human joins an unattended run, or on request.
 5. **Config** — the three keys and defaults.
 6. **Uninstall.**

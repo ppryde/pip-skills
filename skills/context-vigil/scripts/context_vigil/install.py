@@ -57,6 +57,9 @@ class Change:
     before: str
     after: str
     summary: List[str] = field(default_factory=list)
+    # MANUAL STEP lines this edit needs from the user (our own strings, paths and
+    # line numbers only — never a line of the file)
+    notes: List[str] = field(default_factory=list)
 
     def describe(self) -> str:
         return "\n".join(self.summary) if self.summary else (
@@ -419,7 +422,10 @@ def damaged_note(path: Path) -> str:
 
 def _manual_line() -> str:
     return (f"Add this line to your status-line script, right after the line that "
-            f"reads stdin (e.g. input=$(cat)):\n  {ingest_command('input')}")
+            f"reads stdin (e.g. input=$(cat)):\n  {ingest_command('input')}\n"
+            "Required: until it is in place, interactive sessions are never nudged "
+            "(context-vigil cannot confirm the context window without it). It takes "
+            "effect on the next status-line render — no restart.")
 
 
 def _read_record() -> Dict[str, Any]:
@@ -491,6 +497,7 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
                 plan.manual.append(f"Add to your shell rc: {launch.alias_line(launcher)}")
         if rc is not None:
             plan.changes.append(rc)
+            plan.manual.extend(rc.notes)
             record["rc_path"] = str(rc.path)
     # Semantically unchanged settings are left byte for byte: no reformatting churn.
     after = before if data == original else _dump(data)
@@ -590,3 +597,67 @@ def plan_uninstall() -> Plan:
     plan.changes.insert(0, Change(settings_path(), before, after, settings_summary(
         settings_path(), before, original, data, deleting=bool(before) and after == "")))
     return plan
+
+
+# --- live state, for `status` ------------------------------------------------------
+# Read from the real files, never the install record. Every result is a count or one
+# of our own words: nothing from settings.json or a status-line script is returned.
+
+
+class LiveState:
+    """What is actually wired right now. ``hooks`` is None when settings.json
+    cannot be read; ``statusline`` is capture | spliced | manual | missing | unknown."""
+
+    def __init__(self, hooks: Optional[int], statusline: str) -> None:
+        self.hooks = hooks
+        self.statusline = statusline
+
+
+def _hooks_present(data: Dict[str, Any]) -> int:
+    """How many of our four hooks are in ``data`` with our matcher, pointing at this
+    skill's launcher (a moved skill's stale entries do not count: they never run)."""
+    present = 0
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return 0
+    for event, matcher, name in HOOKS:
+        wanted = hook_command(name)
+        for entry in hooks.get(event) or []:
+            if (isinstance(entry, dict) and entry.get("matcher") == matcher
+                    and wanted in _commands(entry)):
+                present += 1
+                break
+    return present
+
+
+def _feeds_us(text: str) -> bool:
+    return str(paths.launcher_path()) in text and " ingest" in text
+
+
+def _statusline_kind(data: Dict[str, Any]) -> str:
+    status = data.get("statusLine")
+    command = status.get("command") if isinstance(status, dict) else None
+    if not isinstance(command, str) or not command:
+        return "missing"
+    if _is_capture(command, _read_record()):
+        return "capture"
+    if _feeds_us(command):
+        return "manual"
+    script = statusline_script(command)
+    if script is None:
+        return "missing"
+    try:
+        text = script.read_text()
+    except (OSError, UnicodeError):
+        return "unknown"
+    if has_marker(text, SL_START, SL_END) and _feeds_us(text):
+        return "spliced"
+    return "manual" if _feeds_us(text) else "missing"
+
+
+def live_state() -> LiveState:
+    try:
+        _text, data = _read_settings()
+    except (InstallError, OSError, UnicodeError):
+        return LiveState(None, "unknown")
+    return LiveState(_hooks_present(data), _statusline_kind(data))

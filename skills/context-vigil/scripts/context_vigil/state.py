@@ -5,7 +5,7 @@ function takes that scope dir and is quarantine-safe — it only touches its own
 marker files and never raises on a missing path.
 
 The markers (`paused`, `cooldown`, `clear-requested`, `handover-gate`,
-`handoff.md`) carry no session identity. If two live sessions share a single
+`session-start`, `handoff.md`) carry no session identity. If two live sessions share a single
 scope they share — and race on — the same markers: one session's nudge gates the
 other, one session's post-`/clear` cooldown silences the other. Sharing one scope
 across concurrent sessions is therefore unsupported without
@@ -49,6 +49,18 @@ def paused_flag(scope: Path) -> Path:
 
 def cooldown_marker(scope: Path) -> Path:
     return scope / "cooldown"
+
+
+def started_marker(scope: Path) -> Path:
+    """Touched at every SessionStart in the scope: when the current cycle began."""
+    return scope / "session-start"
+
+
+def started_at(scope: Path) -> float | None:
+    try:
+        return started_marker(scope).stat().st_mtime
+    except OSError:
+        return None
 
 
 def handoff_path(scope: Path) -> Path:
@@ -215,7 +227,9 @@ def begin_cycle(scope: Path, cooldown: bool = False) -> None:
     Every SessionStart in a scope opens a new cycle:
 
     - unlink any queued ``clear-requested`` (its dispatch is done or moot);
-    - clear the ``handover-gate`` so the trigger can re-arm this session.
+    - clear the ``handover-gate`` so the trigger can re-arm this session;
+    - touch ``session-start`` (``status`` uses it to spot a status line that never
+      reports in).
 
     ``cooldown=True`` — passed only for a ``/clear`` that actually loaded a
     handover — also touches the ``cooldown`` marker, the storm guard: census can
@@ -228,8 +242,25 @@ def begin_cycle(scope: Path, cooldown: bool = False) -> None:
     paths.ensure_dir(scope)
     clear_flag(scope).unlink(missing_ok=True)
     clear_gate(scope)
+    _touch(started_marker(scope))
     if cooldown:
         _touch(cooldown_marker(scope))
+
+
+def drop_orphan_clear(scope: Path, older_than: float | None = None) -> bool:
+    """Unlink a ``clear-requested`` whose handoff is gone (resumed or discarded from
+    another scope): a /clear for it would load nothing. With ``older_than``, only a
+    flag older than that instant. Returns whether one was dropped; never raises."""
+    flag = clear_flag(scope)
+    try:
+        if not flag.exists() or handoff_path(scope).exists():
+            return False
+        if older_than is not None and flag.stat().st_mtime >= older_than:
+            return False
+        flag.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
 
 
 def read_handoff(scope: Path) -> str | None:

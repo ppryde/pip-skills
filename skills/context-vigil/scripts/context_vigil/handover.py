@@ -19,6 +19,8 @@ REQUIRED = ("Failed Attempts", "Next Step")
 # Rough token estimate: chars / 4. Cheap, dependency-free, good enough to bound size.
 CHARS_PER_TOKEN = 4
 INLINE_MAX_TOKENS = 2000
+INJECT_CAP_FACTOR = 2        # injection / --resume hard cap, in multiples of max_tokens
+SUMMARY_FIELD_CHARS = 80     # branch and goal in the waiting notice
 RESUME_PREAMBLE = (
     "Resume from this handover. Don't re-investigate anything marked complete, "
     "don't retry anything under Failed Attempts — start with the Next Step."
@@ -86,14 +88,30 @@ def summary(document: str, written_at: Optional[float]) -> str:
             when = datetime.fromtimestamp(written_at).strftime("%a %H:%M")
         except (OverflowError, OSError, ValueError):
             pass
-    branch = re.search(r"- Branch: `([^`]+)`", document)
+    branch = re.search(r"- Branch: `([^`\n]+)`", document)
     goal = parse_sections(document).get("Goal", "").splitlines()
     text = f"a handover is waiting from {when}"
     if branch:
-        text += f" on `{branch.group(1)}`"
+        text += f" on `{branch.group(1).strip()[:SUMMARY_FIELD_CHARS]}`"
     if goal and goal[0].strip():
-        text += f": \"{goal[0].strip()[:80]}\""
+        text += f": \"{goal[0].strip()[:SUMMARY_FIELD_CHARS]}\""
     return text
+
+
+def cap_for_injection(document: str, max_tokens: int) -> str:
+    """The handover as injected at SessionStart or printed by ``--resume``: whole
+    when within 2x ``handover.max_tokens`` (``handover`` itself refuses above 1x, so
+    only a hand-edited file or one written under a larger budget is cut), else cut at
+    a line boundary with a marker saying so."""
+    limit = INJECT_CAP_FACTOR * max(max_tokens, 1) * CHARS_PER_TOKEN
+    if len(document) <= limit:
+        return document
+    kept = document[:limit]
+    if "\n" in kept:
+        kept = kept[:kept.rindex("\n")]
+    return (f"{kept}\n… [truncated by context-vigil: the handover was ~"
+            f"{estimate_tokens(document)} tokens, over {INJECT_CAP_FACTOR}x "
+            f"handover.max_tokens ({max_tokens})]")
 
 
 def estimate_tokens(text: str) -> int:

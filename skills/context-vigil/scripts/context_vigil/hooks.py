@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -117,6 +118,8 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
     if session.is_headless(session_id, transcript_path):
         return None   # a headless session never types into a pane, inherited or not
     scope = session.scope(_cwd(payload), session_id, transcript_path)
+    if state.drop_orphan_clear(scope):
+        return None   # its handover was resumed or discarded elsewhere: nothing to /clear for
     if not state.clear_requested(scope):
         return None
     target = tmux.pane()
@@ -145,6 +148,7 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
         text = state.consume_handoff(kept, config.archive_keep(cwd))
         if text:
             loaded = True
+            text = handover.cap_for_injection(text, config.handover_max_tokens(cwd))
             out = json.dumps({"hookSpecificOutput": {
                 "hookEventName": "SessionStart",
                 "additionalContext": f"{handover.RESUME_PREAMBLE}\n\n{text}",
@@ -154,9 +158,15 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
                 delay = os.environ.get("CONTEXT_VIGIL_KICK_DELAY", "2")
                 tmux.send_detached(target, [["-l", KICK_PROMPT], ["Enter"]], delay)
     else:
-        waiting = state.read_handoff(kept)
-        if waiting:
-            summary = handover.summary(waiting, state.handoff_written_at(kept))
+        # A per-session (tmux) scope with nothing of its own also offers the
+        # worktree-level handover a plain `claude` left here — never loads it.
+        fallback = session.fallback_handoff_scope(cwd, session_id, transcript_path)
+        if fallback is not None:
+            state.drop_orphan_clear(fallback, older_than=time.time())
+        where = session.waiting_handoff_scope(cwd, session_id, transcript_path)
+        waiting = state.read_handoff(where) if where is not None else None
+        if where is not None and waiting:
+            summary = handover.summary(waiting, state.handoff_written_at(where))
             out = json.dumps({
                 "systemMessage": f"context-vigil: {summary}. Say \"resume the handover\" "
                                  "to load it, or \"discard the handover\" to drop it.",

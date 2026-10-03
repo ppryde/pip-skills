@@ -21,8 +21,35 @@ With tmux the `/clear` and the resume are hands-free; without it you type
 Then ask Claude to "set up context-vigil". The agent runs `install` as a dry
 run, asks you the threshold and launch questions, then re-runs it with your
 answers but still without `--yes` so you see exactly what it will add (the
-shell-rc edit included), and applies it with `install --yes` only after you agree. Hooks, the status
-line and any shell-rc change take effect in new sessions and new shells.
+shell-rc edit included), and applies it with `install --yes` only after you agree.
+
+What is live when:
+
+- **Hooks and the status line** are live in the running session on current
+  Claude Code (it reloads `settings.json` when it changes). Run `/hooks`: the
+  four context-vigil entries should be listed. If they are missing (older
+  Claude Code builds load hooks only at startup), restart Claude.
+- **The `claude-tmux` alias** (or `claude`, for Always) needs a new shell:
+  open a new terminal, or `source` your rc there.
+- **Auto mode** needs a session running inside tmux. Nothing moves a running
+  session into tmux: hand over, exit, run `claude-tmux` in a new terminal and
+  say "resume the handover" — a plain session's handover is offered to a tmux
+  session in the same worktree.
+- **An inline-command status line**: install prints a MANUAL STEP line to add.
+  It is required — until it is in place, interactive sessions are never nudged
+  (context-vigil cannot confirm the context window). It takes effect on the
+  next status-line render.
+
+`status` reports the live state, read from the real files: `hooks: N/4 in
+<settings.json>` (MISSING → re-run install), `status line:
+capture|spliced|manual|missing`, the last status-line reading for this
+worktree, the interpreter it ran under, and a `WARNING: status line not
+feeding context-vigil` when an installed context-vigil is not being fed.
+
+Troubleshooting: in a fresh or newly cloned folder, Claude Code holds back hooks
+and the status line until you accept the workspace trust dialog — no status
+line, no nudge, and `status` shows no reading. Restart Claude there and accept
+it.
 
 `install` always shows a summary first, never a diff. Your rc file,
 `settings.json` and status-line script are where API keys tend to live, and the
@@ -94,7 +121,19 @@ Choosing **Always** asks one extra confirmation, and `install` / `launcher`
 require `--confirm-always` for it. The edit goes into `~/.zshrc` or `~/.bashrc`
 per `$SHELL` (other shells are given the alias line to add by hand), is shown as
 the lines added (never your own rc lines), and is removed by `uninstall`. Change your mind any time with
-`context-vigil launcher`.
+`context-vigil launcher`. On macOS, bash login shells read `~/.bash_profile`, not
+`~/.bashrc`; install says so, and `~/.bash_profile` must source `~/.bashrc` for the
+alias to exist.
+
+`claude-tmux` runs the `claude` binary from PATH, never a shell function or alias
+of yours. Install scans your rc for your own `claude` / `claude-tmux` definition
+(alias, `claude()`, `function claude`) and reports only its file and line number:
+Always is refused over your own `claude` (the alias would bypass it, and anything
+it sets, such as `CLAUDE_CONFIG_DIR` for a second account); On demand is refused
+over your own `claude-tmux`, and over your own `claude` it adds a MANUAL STEP —
+export `CLAUDE_CONFIG_DIR` in your shell so `claude-tmux` starts the same
+account. Reattach to a running session with `claude-tmux attach [N|name]`
+(`N` is the number in `cc-<repo>-<N>`; with one live session, no argument needed).
 
 `claude-tmux` uses a dedicated tmux socket (`CLAUDE_TMUX_SOCK`; by default
 `claude`, suffixed per config dir for a second account), names sessions `cc-<repo>-<N>`, and falls back to plain `claude` if
@@ -126,7 +165,7 @@ line and use the transcript only. Per-session bookkeeping lives under
 | `context.threshold` | 35 | ctx % at which the nudge fires (integer 1–95) |
 | `context.window` | 200000 | last-resort window for the transcript estimate (census, a learned model table, `[1m]` model ids and observed usage over 200k all take precedence) |
 | `context.mode` | `local` | `local` references files by path; `remote` inlines them (`--inline`; remote mode only, each file capped at about 2000 tokens) |
-| `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4, which is approximate and undercounts non-ASCII text; integer ≥ 1) |
+| `handover.max_tokens` | 8000 | `handover` refuses, with the amount to trim, when the assembled handover exceeds this (estimated as chars/4, which is approximate and undercounts non-ASCII text; integer ≥ 1). A handover injected after `/clear` or printed by `--resume` is cut at 2× this with a truncation marker (only a hand-edited one, or one written under a larger budget, is ever that big); the waiting notice's branch and goal are cut at 80 chars |
 | `nudge.repeat_step` | 5 | re-nudge each time ctx % has grown this many points past the last nudge (integer 1–50) |
 | `handover.archive_keep` | 20 | used handovers kept per scope in `archive/`, newest first; older ones are deleted (integer 0–1000; 0 keeps none) |
 | `handover.cooldown_seconds` | 60 | after a `/clear` that loaded a handover, nudges are suppressed this long (census can lag a `/clear`); startup/resume start none and an explicit `handover` is never refused (integer 0–3600) |
@@ -170,9 +209,12 @@ secret-bearing file (`.env`, keys, tokens).
 $CLAUDE_CONFIG_DIR/context-vigil/
   config.json              # global settings
   census.json              # latest status-line reading per session
+  windows.json             # learned model id -> context window size, from every status-line payload
+  sessions/<session_id>.json  # per-session record (script-written, pruned after ~7 days)
+  sessions/<session_id>.lock  # its lock sidecar
   install.json             # record of every entry install added (for uninstall)
   worktrees/<slug>/        # slug = sanitised repository root (a filesystem walk-up to the first `.git`, no git subprocess; a submodule resolves to its superproject, a linked worktree is its own root; realpath(cwd) outside a repo) + hash
-    paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
+    paused, cooldown, handover-gate, clear-requested, session-start  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists); newest `handover.archive_keep` kept

@@ -37,7 +37,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
-from context_vigil import paths
+from context_vigil import paths, state
 
 RECORD_TTL_SECONDS = 7 * 24 * 3600
 _LOCK_ATTEMPTS = 100             # 100 x 10ms = 1s bounded wait (hooks are latency-bound)
@@ -278,3 +278,29 @@ def handoff_scope(cwd: Path, session_id: Optional[str],
     if is_headless(session_id, transcript_path):
         return paths.headless_handoff_dir(cwd)
     return paths.scope_dir(cwd)
+
+
+def fallback_handoff_scope(cwd: Path, session_id: Optional[str],
+                           transcript_path: Optional[str] = None) -> Optional[Path]:
+    """The worktree-level scope a per-session (tmux / ``CONTEXT_VIGIL_SESSION``)
+    interactive session also looks in for a waiting handoff: one written by a
+    plain ``claude`` in this worktree, so work handed over there can be carried into
+    a new ``claude-tmux`` session. Only offered or loaded on request, never
+    injected. None for headless sessions and for sessions already at that level."""
+    if is_headless(session_id, transcript_path):
+        return None
+    own, plain = paths.scope_dir(cwd), paths.worktree_dir(cwd)
+    return plain if own != plain else None
+
+
+def waiting_handoff_scope(cwd: Path, session_id: Optional[str],
+                          transcript_path: Optional[str] = None) -> Optional[Path]:
+    """Where a waiting handoff for this session is: its own scope first, then the
+    worktree-level fallback; None when nothing is waiting."""
+    own = handoff_scope(cwd, session_id, transcript_path)
+    if state.handoff_path(own).exists():
+        return own
+    fallback = fallback_handoff_scope(cwd, session_id, transcript_path)
+    if fallback is not None and state.handoff_path(fallback).exists():
+        return fallback
+    return None

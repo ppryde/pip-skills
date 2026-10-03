@@ -283,6 +283,70 @@ def test_error_messages_carry_no_canaries(run_cli, cfg: Path, repo: Path) -> Non
         _no_canary(run_cli(*args, cwd=repo))
 
 
+# --- Setup wave: every new output path prints only our strings, paths, line numbers --
+
+def test_status_prints_no_user_content(run_cli, seeded: dict, repo: Path) -> None:
+    for args in (("status",), ("install", "--yes", "--launcher", "on-demand"), ("status",)):
+        result = run_cli(*args, env=seeded["env"], cwd=repo)
+        assert result.returncode == 0, f"{args} failed"
+        _no_canary(result)
+    settings_path = seeded["script"].parent / "settings.json"
+    data = json.loads(settings_path.read_text())
+    data["statusLine"]["command"] = f"echo {CANARY}-inline"   # not feeding: the warning path
+    settings_path.write_text(json.dumps(data))
+    result = run_cli("status", env=seeded["env"], cwd=repo)
+    assert "WARNING" in result.stdout
+    _no_canary(result)
+    settings_path.write_text('{"env": {"K": "' + CANARY + '-bad"}, nope')   # unreadable path
+    _no_canary(run_cli("status", env=seeded["env"], cwd=repo))
+
+
+def test_status_prints_no_env_value(run_cli, repo: Path) -> None:
+    env = {"CLAUDE_CONFIG_DIR_EXTRA": f"{CANARY}-env", "PATH_CANARY": f"{CANARY}-path",
+           "PATH": os.environ["PATH"] + f":/nonexistent/{CANARY}-path"}
+    result = run_cli("status", cwd=repo, env=env)
+    _no_canary(result)
+    result = run_cli("install", cwd=repo, env=env)   # NO_TMUX text, walkthrough
+    _no_canary(result)
+
+
+@pytest.mark.parametrize("definition", [
+    f'claude() {{ CLAUDE_CONFIG_DIR={CANARY}-wrap command claude "$@"; }}',
+    f"alias claude='ANTHROPIC_API_KEY={CANARY}-alias claude'",
+    f"alias claude-tmux='TOKEN={CANARY}-ct tmux'",
+])
+def test_wrapper_scan_reports_line_numbers_only(run_cli, seeded: dict, definition: str) -> None:
+    rc: Path = seeded["rc"]
+    rc.write_text(rc.read_text() + definition + "\n")
+    for args in (("install", "--launcher", "on-demand"), ("install", "--launcher", "always"),
+                 ("install", "--yes", "--launcher", "always", "--confirm-always"),
+                 ("launcher", "always"), ("launcher", "on-demand"),
+                 ("launcher", "always", "--yes", "--confirm-always")):
+        result = run_cli(*args, env=seeded["env"])
+        _no_canary(result)
+        if "claude-tmux=" not in definition or "on-demand" in args:
+            assert f"{rc}:4" in result.stdout + result.stderr, args
+
+
+def test_bash_caveat_and_closing_lines_print_no_user_content(run_cli, home: Path) -> None:
+    rc = home / ".bashrc"
+    rc.write_text(f"export A_TOKEN={CANARY}-bash\n")
+    (home / ".bash_profile").write_text(f"export B_TOKEN={CANARY}-profile\n")
+    env = {"SHELL": "/bin/bash"}
+    for args in (("install", "--launcher", "on-demand"),
+                 ("install", "--yes", "--launcher", "on-demand"), ("launcher", "on-demand")):
+        _no_canary(run_cli(*args, env=env))
+
+
+def test_resume_fallback_and_cap_print_no_other_content(run_cli, repo: Path) -> None:
+    # the handover itself is printed by design; nothing else (paths' neighbours) is
+    state.request_clear(paths.worktree_dir(repo), "PLAIN DOC")
+    env = {"TMUX": "/tmp/fake,1,0", "TMUX_PANE": "%3", "CONTEXT_VIGIL_SESSION": "cc-r-1"}
+    (paths.data_root() / "stray.txt").write_text(f"{CANARY}-stray\n")
+    for args in (("status",), ("handover", "--resume")):
+        _no_canary(run_cli(*args, cwd=repo, env=env))
+
+
 # --- I3: the suite never hands the real environment to anything that records it ----
 
 def test_iso_scrubs_secret_shaped_env() -> None:

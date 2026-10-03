@@ -19,7 +19,8 @@ Run everything through the launcher in this skill's directory:
 
 ## First run — install
 
-If `status` says `installed: no`, or the user asks to set it up:
+If `status` says `installed: no` or `partial` (hooks MISSING), or the user asks
+to set it up:
 
 1. Run `install` (a dry run — changes nothing) to show the questions. Explain
    in one line each: hooks are added to settings.json; the status line is fed
@@ -42,8 +43,25 @@ If `status` says `installed: no`, or the user asks to set it up:
 4. Only then run the same command with `--yes`. Choosing Always needs
    `--confirm-always` as well — add it only after the user has confirmed
    Always, never otherwise.
-5. Relay any MANUAL STEP lines verbatim, and the closing mode line. Tell them
-   it takes effect in new sessions (and a new shell for the launcher).
+5. Relay any MANUAL STEP lines verbatim, and the closing report. A MANUAL STEP
+   that gives a line to add to the status line (an inline-command status line)
+   is **required**: without it interactive sessions are never nudged. Ask the
+   user to add it, and confirm they have (`status` then shows
+   `status line: manual`) before calling setup done. Then tell them: hooks and
+   the status line are live in this session on current Claude Code — ask them
+   to run `/hooks` and check the context-vigil entries are listed; if they are
+   missing, restart Claude. The launcher alias needs a new shell (a new
+   terminal). You cannot run `claude-tmux` yourself — your shell read the rc
+   when this session started — so tell the user and do not test it.
+6. Run `status`. It reads the real settings.json (`hooks: 4/4`), says what
+   feeds the status line and when it last reported. A `WARNING: status line
+   not feeding context-vigil` means no nudges: fix what it names. If the
+   status line stays silent in a fresh or newly cloned folder, the workspace
+   trust dialog was not accepted — hooks and the status line wait for it;
+   restart Claude there and accept it.
+7. This session is not in tmux but they want auto mode now? See "Moving this
+   work into a tmux session" — suggest it whenever auto mode needs a new
+   session.
 
 Never run any `--yes` command (`install`, `launcher`, `uninstall`) until the
 user has seen its dry-run summary and agreed.
@@ -86,6 +104,8 @@ stopping points. A nudge repeats every `nudge.repeat_step`
    - manual: tell the user "Handover saved — type `/clear`, then send any
      message (e.g. "go") to start the resumed turn." Without tmux the handover
      is injected after `/clear`, but nothing types for the user.
+   - headless (`claude -p`, the SDK): no /clear will come — end the run; the
+     next headless run in this worktree resumes it with `handover --resume`.
 6. If it refuses, fix exactly what the message says and re-run.
 
 ## After /clear
@@ -99,6 +119,19 @@ If a fresh launch says a handover is waiting, it has NOT been loaded. Do
 nothing with it unless the user asks: "resume the handover" → run
 `handover --resume` and follow what it prints; "discard the handover" → run
 `handover --discard`.
+
+## Moving this work into a tmux session
+
+Auto mode needs Claude running inside tmux, and nothing can move a running
+session into tmux. When the user wants auto mode and this session is not in
+tmux (status says `mode: manual (not inside tmux …)`), offer to carry the work:
+
+1. Hand over as above (`handover --file <notes>`).
+2. Tell the user: "Exit this session, open a new terminal, run `claude-tmux`,
+   then say 'resume the handover'."
+3. The new session sees the handover waiting (a plain session's handover is
+   offered to a tmux session in the same worktree) and loads it on
+   `handover --resume`.
 
 ## Settings
 

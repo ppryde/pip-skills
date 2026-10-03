@@ -151,7 +151,7 @@ def test_cli_apply(run_cli, cfg: Path) -> None:
     result = run_cli("install", "--yes", "--threshold", "50")
     assert result.returncode == 0, result.stderr
     assert (cfg / "settings.json").exists()
-    assert "new sessions" in result.stdout
+    assert "live in this session" in result.stdout and "/hooks" in result.stdout
 
 
 def test_apply_records_before_touching_user_files(cfg: Path, monkeypatch) -> None:
