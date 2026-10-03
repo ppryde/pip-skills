@@ -35,8 +35,13 @@ class TestLatestForWorktree:
         assert st.latest_for_worktree("/wt/other", now=100.0) is None
 
     def test_matches_across_trailing_slash_and_symlink_variants(self, store_file, tmp_path):
-        st.ingest(_payload("s1", str(tmp_path)), now=1.0)
-        assert st.latest_for_worktree(str(tmp_path) + "/", now=1.0) is not None
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        st.ingest(_payload("s1", str(real)), now=1.0)
+        assert st.latest_for_worktree(str(real) + "/", now=1.0) is not None
+        assert st.latest_for_worktree(str(link), now=1.0) is not None
 
     def test_includes_top_level_limits(self, store_file):
         rate = {"five_hour": {"used_percentage": 30, "resets_at": 1000}}  # future vs now=1.0

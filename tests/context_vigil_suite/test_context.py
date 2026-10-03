@@ -61,7 +61,7 @@ def test_transcript_invalid_utf8_does_not_raise(iso: Path) -> None:
     path = iso / "bad.jsonl"
     path.write_bytes(b'\xff\xfe\n' + json.dumps(
         {"message": {"usage": {"input_tokens": 1000}}}).encode() + b"\n")
-    assert context.transcript_percent(str(path), 200000) in (None, 0, 1)
+    assert context.transcript_percent(str(path), 200000) == 0
 
 
 def test_transcript_infinity_tokens_is_none(iso: Path) -> None:

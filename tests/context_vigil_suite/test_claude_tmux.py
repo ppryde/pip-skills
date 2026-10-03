@@ -166,3 +166,74 @@ def test_session_starts_in_current_directory_not_repo_root(stubs: Path, repo: Pa
 def test_path_is_stub_only_so_no_real_tmux_is_reachable(stubs: Path) -> None:
     for entry in os.listdir(stubs):
         assert entry in {"tmux", "claude", "git", *_COREUTILS}
+
+
+@pytest.mark.parametrize("dirname, sock", [
+    (".claude-personal", "claude-personal"),
+    (".claude-work", "claude-work"),
+    (".claude", "claude"),
+    ("weird dir!", "claude-weird-dir-"),
+])
+def test_socket_tag_comes_from_config_dir(stubs: Path, repo: Path, iso: Path,
+                                          monkeypatch: pytest.MonkeyPatch,
+                                          dirname: str, sock: str) -> None:
+    monkeypatch.delenv("CLAUDE_TMUX_SOCK")
+    log = _run(stubs, repo, CLAUDE_CONFIG_DIR=str(iso / dirname))
+    line = [ln for ln in log.splitlines() if "new-session" in ln][0]
+    assert f"-L {sock} " in line
+    # has-session probes use the same per-account socket
+    assert all(f"-L {sock} " in ln for ln in log.splitlines() if "has-session" in ln)
+
+
+def test_explicit_socket_overrides_tag(stubs: Path, repo: Path, iso: Path) -> None:
+    log = _run(stubs, repo, CLAUDE_CONFIG_DIR=str(iso / ".claude-personal"),
+               CLAUDE_TMUX_SOCK="custom")
+    assert "-L custom " in [ln for ln in log.splitlines() if "new-session" in ln][0]
+
+
+def test_failed_new_session_falls_back_to_plain_claude(stubs: Path, repo: Path) -> None:
+    log_path = stubs.parent / "calls.log"
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log_path}"\n'
+        '[[ " $* " == *" new-session "* ]] && exit 1\n'
+        '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
+    full = dict(os.environ, PATH=str(stubs))
+    result = subprocess.run(["bash", str(SCRIPT), "--model", "opus"], cwd=repo, env=full,
+                            capture_output=True, text=True, timeout=10)
+    log = log_path.read_text()
+    assert result.returncode == 0
+    assert "manual mode" in result.stderr
+    assert "claude --model opus" in log
+
+
+def test_attach_by_name(stubs: Path, repo: Path, live) -> None:
+    live("cc-repo-1", "cc-repo-2")
+    result, log = _attach(stubs, repo, "cc-repo-2")
+    assert result.returncode == 0, result.stderr
+    assert "attach-session -t =cc-repo-2" in log
+
+
+def test_attach_inside_tmux_refuses(stubs: Path, repo: Path, live,
+                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    live("cc-repo-1")
+    monkeypatch.setenv("TMUX", "/tmp/x,1,0")
+    result, log = _attach(stubs, repo)
+    assert result.returncode == 1
+    assert "already inside tmux" in result.stderr
+    assert "attach-session" not in log
+
+
+def test_attach_without_tmux_is_127(stubs: Path, repo: Path) -> None:
+    (stubs / "tmux").unlink()
+    result, _ = _attach(stubs, repo)
+    assert result.returncode == 127
+    assert "tmux not found" in result.stderr
+
+
+def test_missing_claude_is_127(stubs: Path, repo: Path) -> None:
+    (stubs / "claude").unlink()
+    full = dict(os.environ, PATH=str(stubs))
+    result = subprocess.run(["bash", str(SCRIPT)], cwd=repo, env=full,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 127
+    assert "claude not found" in result.stderr
