@@ -1,0 +1,521 @@
+#!/usr/bin/env python3
+"""Dev-only live smoke harness for context-vigil (never shipped; spends real tokens).
+
+Drives a real `claude` inside a detached tmux session on a dedicated socket, with the
+context-vigil hooks and status line injected via `claude --settings <sandbox file>`, so
+no real settings.json, rc file or ~/.claude* state is ever written. The real
+CLAUDE_CONFIG_DIR is left alone (auth); context-vigil state goes to <sandbox>/data.
+
+Subcommands: up send peek wait-for state transcripts down auto headless.
+Output is deliberately short. Environment values and settings `env` are never printed.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+SKILL = Path(__file__).resolve().parents[1]
+LAUNCHER = SKILL / "scripts" / "context-vigil"
+CAPTURE = SKILL / "scripts" / "capture.sh"
+SOCKET = "cv-smoke"
+SESSION = "cv"
+DEFAULT_MODEL = "haiku"
+STATE_FILE = Path(tempfile.gettempdir()) / "cv-smoke-current.json"
+RESUME_PREAMBLE = "Resume from this handover."
+KICK_MARK = "handover received"
+TRUST_RE = r"(?i)do you trust|trust this folder|trust the files|yes, i trust"
+READY_RE = r"(?i)\? for shortcuts|esc to interrupt|shift\+tab"
+SECRET_KEY = re.compile(r"(?i)token|secret|key|password|env|auth|cookie")
+
+# Mirrors install.HOOKS exactly: (event, matcher, hook name).
+HOOKS: List[Tuple[str, Optional[str], str]] = [
+    ("SessionStart", "startup|clear|resume", "session-start"),
+    ("Stop", None, "stop"),
+    ("UserPromptSubmit", None, "nudge"),
+    ("PostToolUse", "TaskCreate|TaskUpdate", "nudge"),
+]
+
+
+# ---------------------------------------------------------------- pure helpers
+
+def project_slug(path: str) -> str:
+    """Claude Code's projects/<slug> directory name for a cwd."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
+def hook_command(name: str, launcher: Path = LAUNCHER) -> str:
+    return f'"{launcher}" hook {name}'
+
+
+def build_settings(threshold: int, data_dir: Path, launcher: Path = LAUNCHER,
+                   capture: Path = CAPTURE) -> Dict[str, Any]:
+    hooks: Dict[str, Any] = {}
+    for event, matcher, name in HOOKS:
+        entry: Dict[str, Any] = {"hooks": [{"type": "command",
+                                            "command": hook_command(name, launcher)}]}
+        if matcher:
+            entry = {"matcher": matcher, **entry}
+        hooks.setdefault(event, []).append(entry)
+    return {
+        "hooks": hooks,
+        "statusLine": {"type": "command", "command": f'bash "{capture}"',
+                       "refreshInterval": 60},
+        "env": {"CONTEXT_VIGIL_HOME": str(data_dir),
+                "CONTEXT_VIGIL_THRESHOLD": str(threshold),
+                "CONTEXT_VIGIL_COOLDOWN_SECONDS": "0"},
+    }
+
+
+def allowed_tools(launcher: Path = LAUNCHER) -> List[str]:
+    return [f"Bash({launcher}:*)", "Bash(cp:*)", "Read", "Write", "Edit"]
+
+
+def claude_args(settings: Path, model: str, yolo: bool, skill: Path = SKILL) -> List[str]:
+    args = ["--settings", str(settings), "--model", model, "--add-dir", str(skill)]
+    if yolo:
+        args.append("--dangerously-skip-permissions")
+    else:
+        args += ["--allowedTools", *allowed_tools(skill / "scripts" / "context-vigil")]
+    return args
+
+
+def tmux_new_session_cmd(repo: Path, claude_bin: str, args: List[str]) -> List[str]:
+    inner = " ".join(shlex.quote(a) for a in [claude_bin, *args])
+    return ["tmux", "-L", SOCKET, "-f", "/dev/null", "new-session", "-d", "-s", SESSION,
+            "-x", "200", "-y", "50", "-c", str(repo), inner]
+
+
+def safe_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Scalar, non-secret-looking fields of a session record."""
+    return {k: v for k, v in record.items()
+            if not SECRET_KEY.search(k) and isinstance(v, (str, int, float, bool, type(None)))}
+
+
+def find_window_dicts(node: Any) -> List[Dict[str, Any]]:
+    """Every `context_window` dict in a census document, numeric/scalar fields only."""
+    found: List[Dict[str, Any]] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "context_window" and isinstance(value, dict):
+                found.append({k: v for k, v in value.items()
+                              if isinstance(v, (int, float, str, bool, type(None)))})
+            else:
+                found.extend(find_window_dicts(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(find_window_dicts(item))
+    return found
+
+
+# ---------------------------------------------------------------- plumbing
+
+def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:  # type: ignore[type-arg]
+    return subprocess.run(["tmux", "-L", SOCKET, *args], capture_output=True, text=True,
+                          check=check)
+
+
+def load_state() -> Dict[str, Any]:
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError):
+        sys.exit("no sandbox recorded; run `live-smoke up` first")
+
+
+def pane_text(lines: int = 60) -> str:
+    out = tmux("capture-pane", "-p", "-t", SESSION, "-S", f"-{lines}")
+    return out.stdout if out.returncode == 0 else ""
+
+
+def server_alive() -> bool:
+    return tmux("has-session", "-t", SESSION).returncode == 0
+
+
+def make_sandbox(path: Optional[str], threshold: int) -> Dict[str, Any]:
+    if path:
+        root = Path(path).resolve()
+    else:
+        root = Path(tempfile.gettempdir()) / f"cv-smoke-{time.strftime('%Y%m%d-%H%M%S')}"
+    repo, data = root / "repo", root / "data"
+    for d in (repo, data):
+        d.mkdir(parents=True, exist_ok=True)
+    root, repo, data = root.resolve(), repo.resolve(), data.resolve()
+    if not (repo / ".git").exists():
+        files = {
+            "README.md": "# scratch\n\nA tiny repo for the context-vigil live smoke.\n",
+            "app.py": "def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return a * b\n",
+            "notes.txt": "alpha\nbeta\ngamma\n" * 20,
+        }
+        for name, text in files.items():
+            (repo / name).write_text(text)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "smoke", "GIT_AUTHOR_EMAIL": "s@example.invalid",
+               "GIT_COMMITTER_NAME": "smoke", "GIT_COMMITTER_EMAIL": "s@example.invalid"}
+        for cmd in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "scratch"]):
+            subprocess.run(["git", "-C", str(repo), *cmd], check=True, env=env,
+                           capture_output=True)
+    settings = root / "settings.json"
+    settings.write_text(json.dumps(build_settings(threshold, data), indent=2) + "\n")
+    return {"sandbox": str(root), "repo": str(repo), "data": str(data),
+            "settings": str(settings)}
+
+
+# ---------------------------------------------------------------- subcommands
+
+def cmd_up(a: argparse.Namespace) -> int:
+    info = make_sandbox(a.sandbox, a.threshold)
+    claude_bin = shutil.which("claude") or "claude"
+    cmd = tmux_new_session_cmd(Path(info["repo"]), claude_bin,
+                               claude_args(Path(info["settings"]), a.model, a.yolo))
+    info.update(model=a.model, started=False)
+    STATE_FILE.write_text(json.dumps(info))
+    print(f"sandbox: {info['sandbox']}")
+    if a.dry_run:
+        print("dry-run, not starting tmux. Would run:")
+        print("  " + " ".join(shlex.quote(c) for c in cmd))
+        return 0
+    if not shutil.which("tmux") or not shutil.which("claude"):
+        sys.exit("tmux and claude must both be on PATH")
+    tmux("kill-server")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"tmux failed: {r.stderr.strip()}")
+    info["started"] = True
+    STATE_FILE.write_text(json.dumps(info))
+    print(f"started tmux -L {SOCKET} session {SESSION}; next: peek / send / wait-for")
+    return 0
+
+
+def cmd_send(a: argparse.Namespace) -> int:
+    tmux("send-keys", "-t", SESSION, "-l", a.text)
+    time.sleep(0.3)
+    tmux("send-keys", "-t", SESSION, "Enter")
+    print("sent")
+    return 0
+
+
+def cmd_peek(a: argparse.Namespace) -> int:
+    text = pane_text(max(a.n * 3, 60))
+    rows = [r.rstrip() for r in text.splitlines()]
+    while rows and not rows[-1]:
+        rows.pop()
+    print("\n".join(rows[-a.n:]) if rows else "(pane empty or no session)")
+    return 0
+
+
+def wait_until(check: Callable[[], bool], timeout: float, what: str,
+               interval: float = 2.0) -> Tuple[bool, str]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if check():
+            return True, ""
+        time.sleep(interval)
+    tail = [r.strip() for r in pane_text(15).splitlines() if r.strip()][-4:]
+    return False, f"timeout waiting for {what}; last seen: {' | '.join(tail)[:300]}"
+
+
+def cmd_wait_for(a: argparse.Namespace) -> int:
+    ok, why = wait_until(lambda: re.search(a.regex, pane_text(80)) is not None,
+                         a.timeout, f"/{a.regex}/")
+    print("matched" if ok else why)
+    return 0 if ok else 1
+
+
+def worktree_scopes(data: Path) -> List[Path]:
+    wt = data / "worktrees"
+    if not wt.is_dir():
+        return []
+    scopes: List[Path] = []
+    for slug in wt.iterdir():
+        scopes.append(slug)
+        for sub in ("sessions", "headless"):
+            d = slug / sub
+            if d.name == "headless" and d.is_dir():
+                scopes.append(d)
+            elif d.is_dir():
+                scopes.extend(p for p in d.iterdir() if p.is_dir())
+    return scopes
+
+
+def archives(data: Path) -> List[Path]:
+    return sorted(f for s in worktree_scopes(data) for f in (s / "archive").glob("*")
+                  if f.is_file()) if data.is_dir() else []
+
+
+def handoffs(data: Path) -> List[Path]:
+    return [s / "handoff.md" for s in worktree_scopes(data) if (s / "handoff.md").is_file()]
+
+
+def session_records(data: Path) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for f in sorted((data / "sessions").glob("*.json")):
+        try:
+            rec = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(rec, dict):
+            out[f.stem] = rec
+    return out
+
+
+def first_line(path: Path) -> str:
+    try:
+        for line in path.read_text(errors="replace").splitlines():
+            if line.strip():
+                return line.strip()[:100]
+    except OSError:
+        pass
+    return ""
+
+
+def cmd_state(_: argparse.Namespace) -> int:
+    st = load_state()
+    data = Path(st["data"])
+    print(f"data root: {data}  (tmux alive: {server_alive()})")
+    if not data.is_dir():
+        print("(no data yet)")
+        return 0
+    for rec_id, rec in session_records(data).items():
+        print(f"session {rec_id}: {json.dumps(safe_fields(rec), sort_keys=True)[:260]}")
+    cen = data / "census.json"
+    if cen.is_file():
+        try:
+            for w in find_window_dicts(json.loads(cen.read_text())):
+                print(f"census context_window: {json.dumps(w, sort_keys=True)[:200]}")
+        except ValueError:
+            print("census.json unreadable")
+    for scope in worktree_scopes(data):
+        names = sorted(p.name for p in scope.iterdir() if not p.is_dir() or p.name == "archive")
+        rel = scope.relative_to(data)
+        marks = [n for n in names if n in ("handover-gate", "cooldown", "clear-requested",
+                                           "paused", "handoff.md", "archive")]
+        if marks:
+            print(f"scope {str(rel)[-70:]}: markers {marks}")
+    for f in handoffs(data) + archives(data):
+        print(f"{f.parent.name}/{f.name}: {first_line(f)}")
+    return 0
+
+
+def transcript_files(st: Dict[str, Any]) -> List[Path]:
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    base = Path(cfg) if cfg else Path.home() / ".claude"
+    d = base / "projects" / project_slug(st["repo"])
+    return sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime) if d.is_dir() else []
+
+
+def cmd_transcripts(_: argparse.Namespace) -> int:
+    files = transcript_files(load_state())
+    if not files:
+        print("(no transcripts yet)")
+    for f in files:
+        with f.open(errors="replace") as fh:
+            n = sum(1 for _ in fh)
+        print(f"{f.stem}  lines={n}")
+    return 0
+
+
+def cmd_down(a: argparse.Namespace) -> int:
+    tmux("kill-server")
+    print(f"tmux -L {SOCKET} server killed")
+    try:
+        st = load_state()
+    except SystemExit:
+        return 0
+    if a.purge:
+        shutil.rmtree(st["sandbox"], ignore_errors=True)
+        try:
+            STATE_FILE.unlink()
+        except OSError:
+            pass
+        print("sandbox purged")
+    else:
+        print(f"sandbox kept: {st['sandbox']}")
+    return 0
+
+
+# ---------------------------------------------------------------- scenarios
+
+class Report:
+    def __init__(self) -> None:
+        self.rows: List[Tuple[bool, str]] = []
+
+    def step(self, ok: bool, name: str, detail: str = "") -> bool:
+        self.rows.append((ok, name))
+        extra = f"  -- {detail}" if detail and not ok else ""
+        print(f"{'PASS' if ok else 'FAIL'}  {name}{extra}")
+        return ok
+
+    def finish(self) -> int:
+        bad = [n for ok, n in self.rows if not ok]
+        print(f"\nsummary: {len(self.rows) - len(bad)}/{len(self.rows)} passed"
+              + (f"; failed: {', '.join(bad)}" if bad else ""))
+        return 1 if bad else 0
+
+
+def accept_trust_and_wait_ready(timeout: float = 90.0) -> Tuple[bool, str]:
+    deadline = time.time() + timeout
+    trusted = False
+    while time.time() < deadline:
+        text = pane_text(60)
+        if not trusted and re.search(TRUST_RE, text):
+            tmux("send-keys", "-t", SESSION, "Enter")
+            trusted = True
+            time.sleep(3)
+            continue
+        if re.search(READY_RE, text):
+            return True, ""
+        time.sleep(2)
+    tail = [r.strip() for r in pane_text(15).splitlines() if r.strip()][-4:]
+    return False, "not ready; last seen: " + " | ".join(tail)[:300]
+
+
+def cmd_auto(a: argparse.Namespace) -> int:
+    rep = Report()
+    ns = argparse.Namespace(sandbox=a.sandbox, threshold=a.threshold, model=a.model,
+                            yolo=a.yolo, dry_run=False)
+    cmd_up(ns)
+    st = load_state()
+    data = Path(st["data"])
+    try:
+        ok, why = accept_trust_and_wait_ready()
+        if not rep.step(ok, "claude ready (trust accepted)", why):
+            return rep.finish()
+        before_ids = set(session_records(data))
+        cmd_send(argparse.Namespace(text=(
+            "Read every file in this repo (README.md, app.py, notes.txt) with the Read tool, "
+            "then write a thorough multi-paragraph summary of each. Do not hand over yet.")))
+
+        def nudged() -> bool:
+            if any(isinstance(r.get("last_nudged_pct"), int)
+                   for r in session_records(data).values()):
+                return True
+            return re.search(r"(?i)context (is )?(at|is now at) \d+%|hand ?over now",
+                             pane_text(120)) is not None
+        ok, why = wait_until(nudged, a.timeout, "nudge (record last_nudged_pct or pane text)")
+        if not rep.step(ok, "nudge delivered", why):
+            return rep.finish()
+        orig_ids = set(session_records(data)) | before_ids
+        wait_until(lambda: "esc to interrupt" not in pane_text(8), 180, "turn to finish", 3)
+        time.sleep(2)
+        cmd_send(argparse.Namespace(
+            text="yes, hand over now - follow the template"))
+        ok, why = wait_until(lambda: bool(archives(data)), a.timeout, "handover archive")
+        if not rep.step(ok, "handover consumed into archive", why):
+            print("  handoff present:", [str(h) for h in handoffs(data)][:2])
+            return rep.finish()
+        arch = archives(data)[-1]
+        body = arch.read_text(errors="replace")
+        rep.step("Next Step" in body, "archive holds a Next Step",
+                 f"{arch.name}: {first_line(arch)}")
+        ok, why = wait_until(lambda: bool(set(session_records(data)) - orig_ids),
+                             a.timeout, "new session id after /clear")
+        rep.step(ok, "new session id (SessionStart clear)", why)
+
+        def kicked() -> bool:
+            fs = transcript_files(st)
+            return bool(fs) and KICK_MARK in fs[-1].read_text(errors="replace")
+        ok, why = wait_until(kicked, a.timeout, "kick prompt in newest transcript")
+        rep.step(ok, "kick prompt typed in new transcript", why)
+        fs = transcript_files(st)
+        text = fs[-1].read_text(errors="replace") if fs else ""
+        rep.step(RESUME_PREAMBLE in text, "new transcript has resume preamble")
+        rep.step("Next Step" in text, "new transcript has Next Step")
+    finally:
+        cmd_down(argparse.Namespace(purge=False))
+    return rep.finish()
+
+
+def run_claude_p(st: Dict[str, Any], prompt: str, model: str, timeout: int) -> Tuple[int, str]:
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        return 127, "claude not on PATH"
+    cmd = [claude_bin, "-p", prompt, *claude_args(Path(st["settings"]), model, False)]
+    try:
+        r = subprocess.run(cmd, cwd=st["repo"], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, "timed out"
+    return r.returncode, (r.stdout or r.stderr).strip()[-400:]
+
+
+def cmd_headless(a: argparse.Namespace) -> int:
+    rep = Report()
+    cmd_up(argparse.Namespace(sandbox=a.sandbox, threshold=a.threshold, model=a.model,
+                              yolo=False, dry_run=True))
+    st = load_state()
+    data = Path(st["data"])
+    rc, out = run_claude_p(st, (
+        "Read README.md, app.py and notes.txt, then hand over: copy the template at "
+        f"{SKILL}/templates/handover.md to ./notes.md, fill it in (Failed Attempts: None; one "
+        f"Next Step: 'extend app.py with sub()'), and run '{LAUNCHER}' handover --file notes.md"),
+        a.model, a.timeout)
+    rep.step(rc == 0, "headless run 1 exited 0", f"rc={rc} {out[-200:]}")
+    rep.step(bool(handoffs(data)) or bool(archives(data)), "handoff written (headless location)",
+             f"tree: {[str(h.relative_to(data)) for h in handoffs(data)]}")
+    r = subprocess.run([str(LAUNCHER), "handover", "--resume"], cwd=st["repo"],
+                       capture_output=True, text=True,
+                       env={**os.environ, "CONTEXT_VIGIL_HOME": str(data),
+                            "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"})
+    rep.step(r.returncode == 0 and "Next Step" in r.stdout,
+             "second run's `handover --resume` finds it", (r.stdout or r.stderr)[:200])
+    return rep.finish()
+
+
+# ---------------------------------------------------------------- cli
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="live-smoke", description=__doc__.split("\n\n")[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def common(sp: argparse.ArgumentParser, auto: bool = False) -> None:
+        sp.add_argument("--model", default=DEFAULT_MODEL, help=f"default {DEFAULT_MODEL}")
+        sp.add_argument("--threshold", type=int, default=2, help="ctx %% threshold (default 2)")
+        sp.add_argument("--sandbox", help="sandbox dir (default $TMPDIR/cv-smoke-<ts>)")
+        if auto:
+            sp.add_argument("--timeout", type=int, default=300, help="per-wait seconds")
+
+    up = sub.add_parser("up", help="create sandbox, start claude in tmux")
+    common(up)
+    up.add_argument("--yolo", action="store_true", help="skip permission prompts (dangerous)")
+    up.add_argument("--dry-run", action="store_true", help="write sandbox, print command only")
+    up.set_defaults(func=cmd_up)
+    s = sub.add_parser("send", help="type TEXT + Enter into the pane")
+    s.add_argument("text")
+    s.set_defaults(func=cmd_send)
+    pk = sub.add_parser("peek", help="print the last pane lines")
+    pk.add_argument("-n", type=int, default=30)
+    pk.set_defaults(func=cmd_peek)
+    w = sub.add_parser("wait-for", help="poll the pane until REGEX matches")
+    w.add_argument("regex")
+    w.add_argument("--timeout", type=int, default=120)
+    w.set_defaults(func=cmd_wait_for)
+    sub.add_parser("state", help="show data-root state (no secrets)").set_defaults(func=cmd_state)
+    sub.add_parser("transcripts", help="list scratch-project transcripts").set_defaults(
+        func=cmd_transcripts)
+    d = sub.add_parser("down", help="kill the tmux server")
+    d.add_argument("--purge", action="store_true", help="also delete the sandbox")
+    d.set_defaults(func=cmd_down)
+    au = sub.add_parser("auto", help="scripted attended scenario (spends tokens)")
+    common(au, auto=True)
+    au.add_argument("--yolo", action="store_true")
+    au.set_defaults(func=cmd_auto)
+    hl = sub.add_parser("headless", help="claude -p handover then --resume (spends tokens)")
+    common(hl, auto=True)
+    hl.set_defaults(func=cmd_headless)
+    return p
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parser().parse_args(argv)
+    return int(args.func(args) or 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

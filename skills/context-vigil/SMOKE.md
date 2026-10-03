@@ -18,3 +18,11 @@ skills/context-vigil/scripts/context-vigil install --yes --threshold 5 --launche
 - [ ] The handover's git section is a few pointer lines (branch, base, counts, commands), with no file list.
 - [ ] Close the terminal after a handover but before `/clear`; a fresh launch shows the "handover is waiting" notice and does not load it.
 - [ ] `context-vigil uninstall --yes` leaves `settings.json` and the rc file semantically equal (same keys and values) to their pre-install contents; formatting may differ.
+
+## Live harness
+
+`dev/live-smoke` automates much of this checklist against a real claude in a
+dedicated tmux socket with sandboxed hooks (`auto`, `headless`, or step by step
+with `up`/`send`/`peek`/`state`). It spends real tokens, never touches real
+settings or rc files, and is dev-only, so `dev/` and `SMOKE.md` are excluded
+from the agents.md copy. See `dev/README.md`.
