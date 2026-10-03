@@ -160,10 +160,15 @@ def _transcript_percent(path: str, record: Dict[str, Any], entry: Optional[Dict[
     if tail is None:
         return None
     record["transcript_offset"] = tail.offset
+    if tail.message_model:
+        if (record.get("message_model") not in (None, tail.message_model)
+                and not tail.model_id):
+            # /model switched: the one-off identity record (not re-emitted) names the
+            # OLD model, so drop it and let the chain re-run from the new message.model
+            record["model_id"] = None
+        record["message_model"] = tail.message_model
     if tail.model_id:
         record["model_id"] = tail.model_id
-    if tail.message_model:
-        record["message_model"] = tail.message_model
     if tail.has_usage and tail.tokens is not None:
         record["last_usage_tokens"] = tail.tokens
         peak = record.get("max_usage_tokens")

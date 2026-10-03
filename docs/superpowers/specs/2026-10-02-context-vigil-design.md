@@ -65,7 +65,7 @@ context-vigil/
       __init__.py
       cli.py               # argparse dispatch for every subcommand
       paths.py             # data root + worktree slug resolution
-      census.py            # census store, ported verbatim (ingest/merge/prune/limits/read)
+      census.py            # census store: ingest/merge/prune and the by-session / by-worktree readers (no rate-limit surface)
       context.py           # ctx % for this session: census when unchanged, else transcript tail
       transcript.py        # incremental tail-only transcript reader (offset, partial lines, rotation)
       session.py           # per-session records + the learned model -> window table
@@ -91,20 +91,25 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   windows.json             # learned model id -> context window size, from every status-line payload
   sessions/<session_id>.json  # per-session record, script-written, pruned after ~7 days (see Measure)
   install.json             # record of every entry install added (for uninstall)
-  worktrees/<slug>/        # slug = sanitised git top level (realpath(cwd) outside git) + hash
+  worktrees/<slug>/        # slug = sanitised repository root (filesystem walk-up; realpath(cwd) outside a repo) + hash
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
+    headless/handoff.md    # headless handoff + archive/, per worktree (see Headless sessions)
     sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
-                           # else tmux-<socket>-<pane>; headless-<session_id> for a headless (sdk-*) session
+                           # else tmux-<socket>-<pane>; headless-<session_id> markers for a headless (sdk-*) session
 ```
 
 - **Keyed by worktree, not session id.** `/clear` mints a new session id; the
   fresh session finds its handover by worktree, which is stable. The worktree is
-  the git top level (`git rev-parse --show-toplevel`, 2s timeout, realpath; the
-  realpath of the cwd outside git), so hooks (payload cwd) and the CLI (process
-  cwd) agree from any sub-directory.
+  the repository root, found by a pure filesystem walk-up from realpath(cwd) (no
+  subprocess on the hook path): the first ancestor holding `.git`. A `.git`
+  directory marks the root; a `.git` file's `gitdir:` under `.git/worktrees/` is a
+  linked worktree (its own root), under `.git/modules/` a submodule (the walk
+  continues to the superproject). Outside a repo it is the realpath of the cwd.
+  Hooks (payload cwd) and the CLI (process cwd) agree from any sub-directory,
+  submodules included.
 - Session scoping (vigil's `VIGIL_SESSION`, renamed `CONTEXT_VIGIL_SESSION`) is
   kept for two sessions sharing one worktree; `claude-tmux` sets it. Inside
   tmux the pane id is appended (`<name>-<pane>`): a new window or split inherits
@@ -114,10 +119,16 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   is isolated too. Outside tmux all sessions in a worktree share one scope;
   that is harmless because `/clear` is then typed by hand, in one place at a time.
 - **Headless sessions** (hook env `CLAUDE_CODE_ENTRYPOINT` = `sdk-cli`/`sdk-ts`/`sdk-py`, else the
-  session record's `headless`) get their own scope `sessions/headless-<session_id>` and never touch
+  session record's `headless`) get their own marker scope `sessions/headless-<session_id>` and never touch
   tmux: a child `claude -p` inherits `TMUX`, `TMUX_PANE` and `CONTEXT_VIGIL_SESSION` from its parent
   and must not reset or act on the parent's cycle, gate, cooldown, clear flag or handoff. The CLI
-  resolves the same scope from `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_SESSION_ID`.
+  resolves the same scope from `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_SESSION_ID`. A child whose
+  environment lacks the entrypoint is told apart at SessionStart (and before any nudge scope is
+  chosen) by reading its transcript head. The headless **handoff** is the exception to per-id
+  scoping: `handover --file` in a headless session writes it (and its archive) to
+  `worktrees/<slug>/headless/`, prints where, and exits (no `/clear` is armed); the next headless run's
+  SessionStart raises the waiting-handover notice and `handover --resume`/`--discard` read it there.
+  Interactive sessions never see it, nor headless runs an interactive handoff.
 - `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups).
 - census path: `census.json` here, not `$CLAUDE_CONFIG_DIR/census/status.json`.
   The existing census plugin honours `CENSUS_STORE`, so a machine running both
@@ -249,8 +260,13 @@ are passed through a private (0600) temp file the session command runs and which
 Fall-through: already inside tmux, tmux missing, tmux older than 3.2 (one-line
 reason on stderr), `CLAUDE_NO_TMUX=1`, stdin or stdout not a terminal, or a
 non-interactive call (`-p`/`--print`, `--output-format`, `--input-format`) → exec
-plain `claude "$@"` unchanged. Arguments are quoted individually for tmux's
-`/bin/sh`.
+plain `claude "$@"` unchanged. The same fall-through covers a subcommand (`mcp`,
+`doctor`, `update`, `auth`, `install`, `plugin`, `setup-token`, `config`, `migrate-installer`) or
+`--version`/`-v`/`--help`/`-h`: their output would vanish with the exiting pane. The session command is
+passed to tmux as separate argv words (`bash <envfile>`), which tmux execs directly, so the server's
+`default-shell` never parses it. Names matching the forwarded patterns that the tmux server's global
+environment holds but the caller lacks are `unset` in the env file. The env file is removed on
+EXIT/HUP/INT/TERM until tmux has it.
 
 ## Lifecycle
 
@@ -336,7 +352,7 @@ Every render, the status line feeds census. On every `UserPromptSubmit` and
    (truncated or rotated) restarts from the tail;
 4. else no reading → no nudge this turn.
 
-**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000), unless the session's latest model (census `model.id`, else the transcript's) differs from `window_model`, the model the window was resolved for: then it is un-fixed and the chain re-runs. While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. A reading on the unconfident fallback is shown as `ctx ~NN% (window unconfirmed)` and never nudges an interactive session (`headless` not true): a quiet turn, no gate, no `last_nudged_pct`, until a confident source answers (its status line will report in). Headless sessions have no status line and keep the config fallback. The chain (first hit wins; the source is recorded): (a) census
+**Window lookup.** Sources (a)-(d) below are confident; the configured fallback (e) is not. A confident window is fixed (stored with `window_confident: true` and reused; the only change is 200,000 → 1,000,000, source `evidence`, once observed usage exceeds 200,000), unless the session's latest model (census `model.id`, else the transcript's) differs from `window_model`, the model the window was resolved for: then it is un-fixed and the chain re-runs. A change of the transcript's `message.model` counts as a switch even though the one-off identity record (`model_id`) is not re-emitted: the stale `model_id` is dropped and the chain re-runs from the new id. While the stored window is not confident the chain re-runs on every call until a confident source answers, so a configured fallback never freezes. A reading on the unconfident fallback is shown as `ctx ~NN% (window unconfirmed)` and never nudges an interactive session (`headless` not true): a quiet turn, no gate, no `last_nudged_pct`, until a confident source answers (its status line will report in). Headless sessions have no status line and keep the config fallback. The chain (first hit wins; the source is recorded): (a) census
 `context_window_size` for this session id, even when stale; (b) the learned
 `windows.json` entry for the census entry's `model.id`; (c) the transcript's
 model id (last `attachment.identity.modelId` record, else `message.model`) in the
@@ -396,7 +412,9 @@ message otherwise. It then writes `handoff.md`:
    cwd; branch @ short HEAD; base (merge-base with the default remote branch,
    else `origin/main`/`origin/master`/`main`/`master`) @ short sha;
    modified / staged / untracked counts; and the commands for detail
-   (`git status --short`, `git diff --stat <base>...HEAD`, `git diff`).
+   (`git status --short`, `git diff --stat <base>...HEAD`, `git diff`). All of a
+   snapshot's git calls share one time budget: after the first timeout git is not
+   called again and the snapshot degrades to what it has (the cwd line at worst).
 4. Inlined files (`--inline`, repeatable) — for `context.mode=remote` only,
    since a remote session cannot open paths. Each file is cut at about 2000
    tokens with `… [truncated: N more lines — <path>]`.
@@ -490,8 +508,8 @@ pytest, following the repo's isolation rule: an autouse fixture pins
 `CLAUDE_CONFIG_DIR` and `CONTEXT_VIGIL_HOME` to `tmp_path`; nothing touches the
 real `~/.claude*`.
 
-- **census** — port census's existing tests (merge, prune, limits latch,
-  blank-window keep, worktree/session lookup).
+- **census** — merge, prune, blank-window keep, worktree/session lookup (the
+  rate-limit latch and the dashboard reader surface were dropped: nothing here reads them).
 - **context** — census-by-session, census-by-worktree, stale fallback,
   transcript fallback, no reading.
 - **config** — resolution order (env > worktree > global > default), validation rejects, `status` reports the source layer, change takes effect next hook call.

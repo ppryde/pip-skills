@@ -68,13 +68,14 @@ def _run(stubs: Path, cwd: Path, *args: str, tty: bool = True, **env: str) -> st
 
 
 def _running_tmux(stubs: Path, new_session_exit: int = 0) -> None:
-    """A tmux stub that, like the real one, runs the session command (the last argv word)."""
+    """A tmux stub that, like the real one, execs the session command given as argv words
+    (the last two: bash and the env file) with an empty environment."""
     log = stubs.parent / "calls.log"
     (stubs / "tmux").write_text(
         f'#!/usr/bin/env bash\necho "tmux $*" >> "{log}"\n'
         '[[ " $* " == *" has-session "* ]] && exit 1\n'
         f'if [[ " $* " == *" new-session "* ]]; then [ {new_session_exit} -ne 0 ] && exit '
-        f'{new_session_exit}; env -i "$(command -v sh)" -c "${{@: -1}}"; fi\nexit 0\n')
+        f'{new_session_exit}; env -i "${{@: -2:1}}" "${{@: -1}}"; fi\nexit 0\n')
     (stubs / "claude").write_text(
         f'#!/usr/bin/env bash\necho "claude $* key=${{ANTHROPIC_API_KEY-unset}} '
         f'model=${{ANTHROPIC_MODEL-unset}} entry=${{CLAUDE_CODE_ENTRYPOINT-unset}} '
@@ -305,7 +306,7 @@ def test_env_file_is_private_and_removed_when_tmux_fails(
     tmpdir = iso / "tmp"
     tmpdir.mkdir()
     tmux = (stubs / "tmux").read_text().replace(
-        'if [[ " $* "', 'if [[ " $* " == *" new-session "* ]]; then f="${@: -1}"; f="${f#* }"; '
+        'if [[ " $* "', 'if [[ " $* " == *" new-session "* ]]; then f="${@: -1}"; '
         f'stat -f %Lp "$f" > "{iso}/mode" 2>/dev/null || stat -c %a "$f" > "{iso}/mode"; fi\n'
         'if [[ " $* "', 1)
     (stubs / "tmux").write_text(tmux)
@@ -347,3 +348,68 @@ def test_tmux_3_2_and_newer_start_a_session(stubs: Path, repo: Path) -> None:
         '[[ "$1" == "-V" ]] && echo "tmux 3.5a"\n'
         '[[ " $* " == *" has-session "* ]] && exit 1\nexit 0\n')
     assert "new-session" in _run(stubs, repo)
+
+
+# --- round 3: subcommands, server-env unsets, trap, argv-shaped session command -----
+
+@pytest.mark.parametrize("args", [
+    ("mcp", "list"), ("doctor",), ("update",), ("auth", "login"), ("install",), ("plugin", "list"),
+    ("setup-token",), ("config", "list"), ("migrate-installer",),
+    ("--version",), ("-v",), ("--help",), ("-h",), ("--model", "opus", "--help")])
+def test_subcommands_and_info_flags_exec_plain_claude(stubs: Path, repo: Path, args: tuple) -> None:
+    log = _run(stubs, repo, *args)
+    assert f"claude {' '.join(args)}" in log and "new-session" not in log
+
+
+def test_session_command_is_argv_words_not_a_shell_string(stubs: Path, repo: Path) -> None:
+    """tmux execs several words directly, so the server's default-shell (fish, csh) never parses them."""
+    _running_tmux(stubs)
+    log = _run(stubs, repo, "--model", "it's a $test")
+    words = _new_session(log).split()
+    assert words[-2].endswith("/bash") and "claude-tmux-env." in words[-1]
+    assert "'" not in words[-2] and "\\" not in words[-2]
+    assert "claude --model it's a $test " in log
+
+
+def _server_env_tmux(stubs: Path, server_env: str) -> None:
+    """A tmux whose server env holds ``server_env`` (NAME=value lines), inherited by sessions."""
+    log = stubs.parent / "calls.log"
+    (stubs.parent / "server-env").write_text(server_env)
+    (stubs / "tmux").write_text(
+        f'#!/usr/bin/env bash\necho "tmux $*" >> "{log}"\n'
+        '[[ " $* " == *" has-session "* ]] && exit 1\n'
+        f'[[ " $* " == *" show-environment "* ]] && {{ cat "{stubs.parent / "server-env"}"; exit 0; }}\n'
+        f'if [[ " $* " == *" new-session "* ]]; then env $(grep -v "^-" "{stubs.parent / "server-env"}") '
+        '"${@: -2:1}" "${@: -1}"; fi\nexit 0\n')
+    (stubs / "claude").write_text(
+        f'#!/usr/bin/env bash\necho "claude model=${{ANTHROPIC_MODEL-unset}} '
+        f'cfg=${{CLAUDE_CONFIG_DIR-unset}} other=${{UNRELATED_SECRET-unset}}" >> "{log}"\n')
+
+
+def test_names_the_caller_lacks_are_unset_in_the_session(stubs: Path, repo: Path,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    _server_env_tmux(stubs, "ANTHROPIC_MODEL=opus\nUNRELATED_SECRET=keep\n-CLAUDE_FOO\n")
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    log = _run(stubs, repo)
+    claude = [ln for ln in log.splitlines() if ln.startswith("claude ")][0]
+    assert "model=unset" in claude          # the caller has none: the server's must not leak in
+    assert "other=keep" in claude           # names outside the forwarded patterns are left alone
+
+
+def test_names_the_caller_has_still_win_over_the_server(stubs: Path, repo: Path) -> None:
+    _server_env_tmux(stubs, "ANTHROPIC_MODEL=opus\n")
+    log = _run(stubs, repo, ANTHROPIC_MODEL="sonnet")
+    assert "model=sonnet" in log
+
+
+def test_env_file_is_removed_when_claude_tmux_is_terminated(stubs: Path, repo: Path,
+                                                            iso: Path) -> None:
+    tmpdir = iso / "tmp"
+    tmpdir.mkdir()
+    (stubs / "tmux").write_text(
+        '#!/usr/bin/env bash\n[[ " $* " == *" has-session "* ]] && exit 1\n'
+        '[[ " $* " == *" new-session "* ]] && { kill -TERM $PPID; sleep 0.3; }\nexit 0\n')
+    full = dict(os.environ, PATH=str(stubs), TMPDIR=str(tmpdir), ANTHROPIC_API_KEY="k-secret")
+    result = _pty_run(["bash", str(SCRIPT)], repo, full)
+    assert result.returncode != 0
+    assert list(tmpdir.iterdir()) == []

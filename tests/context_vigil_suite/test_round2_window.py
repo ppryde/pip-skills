@@ -40,14 +40,15 @@ def test_suffixed_exact_entry_still_used() -> None:
 # --- owner decision 3: a model switch re-resolves the window -------------------
 
 def test_model_switch_re_resolves_a_fixed_window(repo: Path, iso: Path) -> None:
-    session.learn_window("big[1m]", 1_000_000)
+    """Real transcripts switch via ``message.model`` alone: no second identity record."""
+    session.learn_window("big", 1_000_000)
     session.learn_window("small", 200_000)
-    path = _write(iso / "t.jsonl", [_identity("big[1m]"), _usage(100_000)])
+    path = _write(iso / "t.jsonl", [_identity("big[1m]"), _usage(100_000, "big")])
     assert context.current_percent(repo, "S", str(path), 500_000) == 10
     record = session.load("S")
     assert record["window"] == 1_000_000 and record["window_model"] == "big[1m]"
     with open(path, "a") as f:
-        f.write(_identity("small") + "\n" + _usage(100_000) + "\n")
+        f.write(_usage(100_000, "small") + "\n")
     assert context.current_percent(repo, "S", str(path), 500_000) == 50
     record = session.load("S")
     assert record["window"] == 200_000 and record["window_model"] == "small"

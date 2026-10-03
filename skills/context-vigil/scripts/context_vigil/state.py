@@ -124,14 +124,9 @@ def clear_requested(scope: Path) -> bool:
     return clear_flag(scope).exists()
 
 
-def request_clear(scope: Path, handoff_text: str) -> str:
-    """Save the handoff and arm /clear. An explicit handover is never refused for a cooldown.
-
-    The write is atomic, and an unconsumed older handoff it replaces is archived
-    (uniquified), never destroyed.
-    """
-    if is_paused(scope):
-        return "paused"
+def write_handoff(scope: Path, handoff_text: str) -> None:
+    """Save the handoff atomically; an unconsumed older one is archived (uniquified),
+    never destroyed."""
     scope.mkdir(parents=True, exist_ok=True)
     target = handoff_path(scope)
     if target.exists():
@@ -144,6 +139,13 @@ def request_clear(scope: Path, handoff_text: str) -> str:
     tmp = scope / "handoff.md.tmp"
     tmp.write_text(handoff_text)
     os.replace(tmp, target)
+
+
+def request_clear(scope: Path, handoff_text: str) -> str:
+    """Save the handoff and arm /clear. An explicit handover is never refused for a cooldown."""
+    if is_paused(scope):
+        return "paused"
+    write_handoff(scope, handoff_text)
     clear_flag(scope).touch()
     return "armed"
 

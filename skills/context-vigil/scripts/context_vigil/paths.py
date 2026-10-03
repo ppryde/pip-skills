@@ -1,8 +1,8 @@
 """Every filesystem location context-vigil uses, in one place.
 
 All state lives under one data root (``$CONTEXT_VIGIL_HOME`` or
-``$CLAUDE_CONFIG_DIR/context-vigil``). Per-worktree state is keyed by the git
-top level (the resolved cwd outside git), so a hook in the repo root and the CLI
+``$CLAUDE_CONFIG_DIR/context-vigil``). Per-worktree state is keyed by the repository
+root (a filesystem walk-up; the resolved cwd outside a repo), so a hook in the repo root and the CLI
 in a sub-directory share one scope; never by the session id: ``/clear`` mints a
 new session id and the fresh session must still find its handover.
 """
@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,8 +42,6 @@ def launcher_path() -> Path:
 ENTRYPOINT_ENV = "CLAUDE_CODE_ENTRYPOINT"
 _HEADLESS_ENTRYPOINTS = ("sdk-cli", "sdk-ts", "sdk-py")
 _INTERACTIVE_ENTRYPOINTS = ("cli", "claude-vscode", "claude-desktop")
-_GIT_TIMEOUT_SECONDS = 2
-_toplevels: dict = {}  # per-process only: realpath(cwd) -> worktree key
 
 
 def headless_from_entrypoint(entrypoint: Any) -> Optional[bool]:
@@ -62,22 +59,46 @@ def headless_from_env() -> Optional[bool]:
     return headless_from_entrypoint(os.environ.get(ENTRYPOINT_ENV))
 
 
+def _gitdir_of(marker: Path) -> Optional[str]:
+    """The ``gitdir:`` target of a ``.git`` file, resolved against its directory."""
+    try:
+        first = marker.read_text().splitlines()[0]
+    except (OSError, IndexError, UnicodeError):
+        return None
+    if not first.startswith("gitdir:"):
+        return None
+    target = first[len("gitdir:"):].strip()
+    return os.path.normpath(os.path.join(str(marker.parent), target))
+
+
 def worktree_key(cwd: Path) -> str:
-    """The git top level of ``cwd`` (realpath), else realpath(cwd) outside git."""
+    """The repository root of ``cwd`` (realpath), else realpath(cwd) outside a repo.
+
+    A pure filesystem walk-up, no subprocess (this runs on every hook): the first
+    ancestor holding ``.git``. A ``.git`` directory marks the root. A ``.git`` file
+    points at its git dir: under ``.git/worktrees/`` it is a linked worktree (its own
+    root); under ``.git/modules/`` it is a submodule, so the walk continues up to the
+    superproject, and hook and CLI scope alike whether run from the submodule or above.
+    """
     real = os.path.realpath(str(cwd))
-    if real not in _toplevels:
-        top = real
+    submodule: Optional[str] = None
+    current = Path(real)
+    while True:
+        marker = current / ".git"
         try:
-            result = subprocess.run(
-                ["git", "-C", real, "rev-parse", "--show-toplevel"],
-                timeout=_GIT_TIMEOUT_SECONDS, stdin=subprocess.DEVNULL,
-                capture_output=True, text=True)
-            if result.returncode == 0 and result.stdout.strip():
-                top = os.path.realpath(result.stdout.strip())
-        except Exception:
+            if marker.is_dir():
+                return str(current)
+            if marker.is_file():
+                gitdir = _gitdir_of(marker)
+                if gitdir is not None and "/.git/modules/" in gitdir + "/":
+                    submodule = submodule or str(current)
+                else:
+                    return str(current)
+        except OSError:
             pass
-        _toplevels[real] = top
-    return _toplevels[real]
+        if current.parent == current:
+            return submodule or real
+        current = current.parent
 
 
 def worktree_slug(cwd: Path) -> str:
@@ -127,6 +148,13 @@ def headless_scope(cwd: Path, session_id: Optional[str]) -> Path:
     """A headless session's own scope: it never shares a parent's cycle, gate,
     cooldown, clear flag or handoff, whatever tmux/session env it inherited."""
     return scope_dir(cwd, session="headless-" + (session_id or "unknown"))
+
+
+def headless_handoff_dir(cwd: Path) -> Path:
+    """Where headless sessions of one worktree keep their handoff (and its archive):
+    shared across session ids, because the next ``claude -p`` mints a new one and must
+    still find it. Never read by an interactive session."""
+    return worktree_dir(cwd) / "headless"
 
 
 def census_path() -> Path:

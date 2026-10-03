@@ -56,15 +56,24 @@ def _str(payload: Dict[str, object], key: str) -> Optional[str]:
 
 def nudge(payload: Dict[str, object]) -> Optional[str]:
     cwd = _cwd(payload)
-    scope = session.scope(cwd, _str(payload, "session_id"))
-    if (state.is_paused(scope) or state.clear_requested(scope)
-            or state.cooldown_active(scope, config.cooldown_seconds(cwd))):
+    session_id = _str(payload, "session_id")
+    transcript_path = _str(payload, "transcript_path")
+
+    def quiet(where: Path) -> bool:
+        return (state.is_paused(where) or state.clear_requested(where)
+                or state.cooldown_active(where, config.cooldown_seconds(cwd)))
+
+    scope = session.scope(cwd, session_id, transcript_path)   # headless known before choosing
+    if quiet(scope):
         return None
     threshold = config.threshold(cwd)
-    session_id = _str(payload, "session_id")
-    reading = context.current_reading(
-        cwd, session_id, _str(payload, "transcript_path"), config.window(cwd))
+    reading = context.current_reading(cwd, session_id, transcript_path, config.window(cwd))
     pct = reading.pct
+    after = session.scope(cwd, session_id, transcript_path)   # the measurement may have learnt more
+    if after != scope:
+        scope = after
+        if quiet(scope):
+            return None
     if pct is None or pct < threshold:
         return None
     if not reading.confident and reading.headless is not True:
@@ -104,9 +113,10 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
 
 def stop(payload: Dict[str, object]) -> Optional[str]:
     session_id = _str(payload, "session_id")
-    if session.is_headless(session_id):
+    transcript_path = _str(payload, "transcript_path")
+    if session.is_headless(session_id, transcript_path):
         return None   # a headless session never types into a pane, inherited or not
-    scope = session.scope(_cwd(payload), session_id)
+    scope = session.scope(_cwd(payload), session_id, transcript_path)
     if not state.clear_requested(scope):
         return None
     target = tmux.pane()
@@ -123,13 +133,16 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
 
 def session_start(payload: Dict[str, object]) -> Optional[str]:
     session_id = _str(payload, "session_id")
-    headless = session.is_headless(session_id)
-    scope = session.scope(_cwd(payload), session_id)
+    cwd = _cwd(payload)
+    transcript_path = _str(payload, "transcript_path")
+    headless = session.is_headless(session_id, transcript_path)   # before choosing a scope
+    scope = session.scope(cwd, session_id, transcript_path)
+    kept = session.handoff_scope(cwd, session_id, transcript_path)
     source = _str(payload, "source")
     out: Optional[str] = None
     loaded = False
     if source == "clear":
-        text = state.consume_handoff(scope)
+        text = state.consume_handoff(kept)
         if text:
             loaded = True
             out = json.dumps({"hookSpecificOutput": {
@@ -141,9 +154,9 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
                 delay = os.environ.get("CONTEXT_VIGIL_KICK_DELAY", "2")
                 tmux.send_detached(target, [["-l", KICK_PROMPT], ["Enter"]], delay)
     else:
-        waiting = state.read_handoff(scope)
+        waiting = state.read_handoff(kept)
         if waiting:
-            summary = handover.summary(waiting, state.handoff_written_at(scope))
+            summary = handover.summary(waiting, state.handoff_written_at(kept))
             out = json.dumps({
                 "systemMessage": f"context-vigil: {summary}. Say \"resume the handover\" "
                                  "to load it, or \"discard the handover\" to drop it.",

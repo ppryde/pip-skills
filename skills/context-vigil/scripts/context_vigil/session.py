@@ -137,15 +137,20 @@ def save(session_id: str, record: Dict[str, Any]) -> None:
         return
 
 
-def _lock_free(lock: Path) -> bool:
-    """Can ``lock`` be flock'd right now? (non-blocking; released again at once)"""
+def _unlink_lock_if_free(lock: Path) -> None:
+    """Unlink ``lock`` only while holding its flock: taking it proves nobody else
+    holds it, and no one can lock the old inode after we unlink it (a waiter that
+    already opened it just gets a lock on a dead inode, which ``locked`` tolerates
+    only because the record it guarded is gone too)."""
     try:
         with open(lock, "a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            fcntl.flock(handle, fcntl.LOCK_UN)
-        return True
+            try:
+                lock.unlink(missing_ok=True)
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
     except OSError:
-        return False
+        return
 
 
 def prune(now: Optional[float] = None) -> None:
@@ -165,9 +170,7 @@ def prune(now: Optional[float] = None) -> None:
                     continue
                 entry.unlink(missing_ok=True)
                 if entry.suffix == ".json":
-                    lock = paths.session_lock_path(entry.stem)
-                    if lock.exists() and _lock_free(lock):
-                        lock.unlink(missing_ok=True)
+                    _unlink_lock_if_free(paths.session_lock_path(entry.stem))
             except OSError:
                 continue
     except OSError:
@@ -235,17 +238,51 @@ def lookup_window(model_id: Optional[str]) -> Optional[int]:
     return table.get(model_id.split("[", 1)[0])
 
 
-def is_headless(session_id: Optional[str]) -> bool:
-    """Headless by the environment's entrypoint when present, else by the record."""
+def resolve_headless(session_id: Optional[str], transcript_path: Optional[str] = None) -> bool:
+    """Headless by the environment's entrypoint when present, else by the record, else
+    (a hook with a transcript) by reading the transcript head now and remembering it.
+
+    A child whose environment lacks the entrypoint is still told apart before any
+    scope is chosen, so it never touches its parent's markers."""
     from_env = paths.headless_from_env()
     if from_env is not None:
         return from_env
-    return bool(session_id) and load(session_id or "").get("headless") is True
+    if not session_id:
+        return False
+    known = load(session_id).get("headless")
+    if known is not None:
+        return known is True
+    if not transcript_path:
+        return False
+    from context_vigil import transcript
+    _settled, headless = transcript.read_entrypoint(transcript_path)
+    if headless is None:
+        return False
+    with locked(session_id) as got:
+        record = load(session_id)
+        if got:
+            record["headless"] = headless
+            record["head_checked"] = True
+            save(session_id, record)
+    return headless
 
 
-def scope(cwd: Path, session_id: Optional[str]) -> Path:
-    """The scope a hook or the CLI acts on: the headless session's own, else the
-    worktree/session/pane scope."""
-    if is_headless(session_id):
+def is_headless(session_id: Optional[str], transcript_path: Optional[str] = None) -> bool:
+    return resolve_headless(session_id, transcript_path)
+
+
+def scope(cwd: Path, session_id: Optional[str], transcript_path: Optional[str] = None) -> Path:
+    """The scope hooks and the CLI keep markers in: the headless session's own (per
+    session id), else the worktree/session/pane scope."""
+    if is_headless(session_id, transcript_path):
         return paths.headless_scope(cwd, session_id)
+    return paths.scope_dir(cwd)
+
+
+def handoff_scope(cwd: Path, session_id: Optional[str],
+                  transcript_path: Optional[str] = None) -> Path:
+    """Where the handoff lives: headless sessions share one per-worktree location
+    (each run has a new id), interactive ones use their scope."""
+    if is_headless(session_id, transcript_path):
+        return paths.headless_handoff_dir(cwd)
     return paths.scope_dir(cwd)

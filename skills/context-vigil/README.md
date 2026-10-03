@@ -91,8 +91,10 @@ a diff, and is removed by `uninstall`. Change your mind any time with
 `claude`, suffixed per config dir for a second account), names sessions `cc-<repo>-<N>`, and falls back to plain `claude` if
 tmux is missing or older than 3.2, you are already inside tmux, `CLAUDE_NO_TMUX=1`, stdin or
 stdout is not a terminal, or the call is non-interactive (`-p`/`--print`, `--output-format`,
-`--input-format`). It forwards your `PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and
-`CONTEXT_VIGIL_*` to the new session, so a running tmux server's stale environment does not apply.
+`--input-format`) or not a session at all (a subcommand: `mcp`, `doctor`, `update`, `auth`, `install`,
+`plugin`, `setup-token`, `config`, `migrate-installer`; or `--version`/`-v`/`--help`/`-h`). It forwards your
+`PATH`, `HOME`, `CLAUDE_*`, `ANTHROPIC_*`, `AWS_*` and `CONTEXT_VIGIL_*` to the new session and unsets
+those names the tmux server holds but you do not, so a running server's stale environment does not apply.
 
 ## How the percentage is measured
 
@@ -144,13 +146,14 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   config.json              # global settings
   census.json              # latest status-line reading per session
   install.json             # record of every entry install added (for uninstall)
-  worktrees/<slug>/        # slug = sanitised git top level (realpath(cwd) outside git) + hash
+  worktrees/<slug>/        # slug = sanitised repository root (a filesystem walk-up to the first `.git`, no git subprocess; a submodule resolves to its superproject, a linked worktree is its own root; realpath(cwd) outside a repo) + hash
     paused, cooldown, handover-gate, clear-requested  # marker files (mtime = TTL clock)
     config.json            # optional per-worktree overrides
     handoff.md             # pending handover (at most one)
     archive/handoff.md     # injected handovers (handoff.1.md, handoff.2.md, … when it exists)
+    headless/handoff.md    # a headless (sdk-*) run's handoff + archive/: shared by the worktree's headless runs (each run has a new session id), never seen by an interactive session
     sessions/<name>/       # same files, per session: <CONTEXT_VIGIL_SESSION>-<pane> in tmux (<CONTEXT_VIGIL_SESSION> outside),
-                           # else tmux-<socket>-<pane>; headless-<session_id> for a headless (sdk-*) session
+                           # else tmux-<socket>-<pane>; headless-<session_id> markers for a headless (sdk-*) session
 ```
 
 ## Uninstall

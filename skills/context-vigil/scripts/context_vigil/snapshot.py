@@ -12,37 +12,48 @@ from pathlib import Path
 _GIT_TIMEOUT = 5  # seconds per git call; a hung repo degrades to the cwd line
 
 
-def _git(cwd: Path, *args: str, strip: bool = True) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True,
-            timeout=_GIT_TIMEOUT)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip() if strip else result.stdout
+class _Git:
+    """One snapshot's git calls. The first timeout or missing binary ends them all,
+    so a repo that hangs costs one timeout, not one per call."""
+
+    def __init__(self, cwd: Path) -> None:
+        self.cwd = cwd
+        self.dead = False
+
+    def __call__(self, *args: str, strip: bool = True) -> str | None:
+        if self.dead:
+            return None
+        try:
+            result = subprocess.run(
+                ["git", *args], cwd=self.cwd, capture_output=True, text=True,
+                timeout=_GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            self.dead = True
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() if strip else result.stdout
 
 
-def _short(cwd: Path, ref: str) -> str | None:
-    return _git(cwd, "rev-parse", "--short", ref)
+def _short(git: _Git, ref: str) -> str | None:
+    return git("rev-parse", "--short", ref)
 
 
-def _default_base(cwd: Path) -> str | None:
+def _default_base(git: _Git) -> str | None:
     """The default remote branch (origin/HEAD), else the first common name that exists."""
-    head = _git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    head = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     candidates = ([head] if head else []) + [
         "origin/main", "origin/master", "main", "master"]
     for ref in candidates:
-        if _git(cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is not None:
+        if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is not None:
             return ref
     return None
 
 
-def _counts(cwd: Path) -> tuple[int, int, int]:
+def _counts(git: _Git) -> tuple[int, int, int]:
     """(modified, staged, untracked) from porcelain status; a file can be two of them."""
     modified = staged = untracked = 0
-    for line in (_git(cwd, "status", "--porcelain", strip=False) or "").splitlines():
+    for line in (git("status", "--porcelain", strip=False) or "").splitlines():
         if line.startswith("??"):
             untracked += 1
             continue
@@ -58,18 +69,21 @@ def session_snapshot(cwd: Path) -> str:
 
     Never lists files — the commands at the end do that on demand.
     """
+    git = _Git(cwd)
     lines = ["## Session snapshot", "", f"- Working directory: `{cwd}`"]
-    if _git(cwd, "rev-parse", "--is-inside-work-tree") != "true":
+    if git("rev-parse", "--is-inside-work-tree") != "true":
         return "\n".join(lines) + "\n"
-    branch = _git(cwd, "symbolic-ref", "--short", "HEAD") or "(detached)"
-    head = _short(cwd, "HEAD")
+    branch = git("symbolic-ref", "--short", "HEAD") or "(detached)"
+    if git.dead:                  # git hung: degrade to the cwd line
+        return "\n".join(lines) + "\n"
+    head = _short(git, "HEAD")
     lines += ["", "## Git", "",
               f"- Branch: `{branch}`" + (f" @ {head}" if head else " (no commits yet)")]
-    base = _default_base(cwd) if head else None
-    base_sha = _git(cwd, "merge-base", "HEAD", base) if base else None
+    base = _default_base(git) if head else None
+    base_sha = git("merge-base", "HEAD", base) if base else None
     if base and base_sha:
-        lines.append(f"- Base: `{base}` @ {_short(cwd, base_sha) or base_sha[:7]}")
-    modified, staged, untracked = _counts(cwd)
+        lines.append(f"- Base: `{base}` @ {_short(git, base_sha) or base_sha[:7]}")
+    modified, staged, untracked = _counts(git)
     lines.append(f"- Working tree: {modified} modified, {staged} staged, "
                  f"{untracked} untracked")
     diffstat = f"git diff --stat {base}...HEAD" if base and base_sha else None

@@ -89,8 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
 def _cmd_handover(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
     scope = _scope(cwd)
+    kept = session.handoff_scope(cwd, _env_session_id())
     if args.resume or args.discard:
-        text = state.consume_handoff(scope)
+        text = state.consume_handoff(kept)
         if text is None:
             raise CliError("no handover is waiting here")
         print(f"{handover.RESUME_PREAMBLE}\n\n{text}" if args.resume
@@ -106,10 +107,19 @@ def _cmd_handover(args: argparse.Namespace) -> int:
             max_tokens=config.handover_max_tokens(cwd))
     except handover.HandoverError as exc:
         raise CliError(f"handover refused: {exc}") from exc
+    headless = session.is_headless(_env_session_id())
+    if headless:
+        # no /clear is sent to a headless run: leave the handoff where the next run looks
+        if state.is_paused(scope):
+            raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
+        state.write_handoff(kept, document)
+        print(f"handover saved to {state.handoff_path(kept)} — the next headless run in this "
+              "worktree can `handover --resume` it")
+        return 0
     result = state.request_clear(scope, document)
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
-    if not session.is_headless(_env_session_id()) and tmux.reachable():
+    if tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
         print("handover saved — type /clear, then send any message (e.g. \"go\") "
@@ -169,7 +179,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 def _mode_line() -> str:
     if session.is_headless(_env_session_id()):
-        return "mode: headless (no /clear is sent; the next session reads the handover)"
+        return ("mode: headless (no /clear is sent; `handover --file` saves it "
+                "for the next run to `--resume`)")
     if tmux.reachable():
         return "mode: auto (inside tmux — /clear is sent for you)"
     if tmux.installed():
@@ -184,6 +195,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     resolved = config.resolve(cwd)
     threshold, layer = resolved["context.threshold"]
     reading = context.current_reading(cwd, _env_session_id(), None, config.window(cwd))
+    pending = state.read_handoff(session.handoff_scope(cwd, _env_session_id()))
     lines = [
         f"installed: {'yes' if record.exists() else 'no'}",
         _mode_line(),
@@ -199,7 +211,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"({resolved['handover.cooldown_seconds'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
-        f"pending handover: {'yes' if state.read_handoff(scope) else 'no'}",
+        f"pending handover: {'yes' if pending else 'no'}",
         f"data: {paths.data_root()}",
     ]
     print("\n".join(lines))

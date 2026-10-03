@@ -8,7 +8,6 @@ Layout of ``<data root>/census.json`` (see ``paths.census_path``)::
 
     {
       "version": 1,
-      "limits": { "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> },
       "sessions": {
         "<session_id>": {
           "worktree_cwd": "<abs path>",
@@ -38,25 +37,7 @@ from context_vigil import paths, session
 SCHEMA_VERSION = 1
 
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
-STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
-IDLE_HORIZON_SECONDS = 10 * 60       # readers flag sessions with no API activity this long as idle
-# Two readings whose reset boundaries are this close describe the SAME window.
-# Observed boundaries are quantised to exactly 10 minutes and are bit-identical
-# across concurrent sessions, and the closest two DISTINCT boundaries seen are
-# 4h50m apart, so a minute of tolerance cannot merge two real windows.
-_SAME_WINDOW_TOLERANCE_SECONDS = 60
-# A reset further out than this is not a rate-limit window we know: the longest
-# is seven days, so anything well beyond that is a corrupt or wrong-unit value
-# (a millisecond epoch, say) and must not be served or allowed to win.
-#
-# Ten days rather than eight, to leave slack for a clock running BEHIND. The
-# ceiling is measured against our own ``now``, so a machine two days slow would
-# see a genuine seven-day window as nine days out and drop it, showing nothing
-# where it could have shown something. The values this ceiling exists to reject
-# are wrong by orders of magnitude, not by days, so the extra slack costs
-# nothing: no real window falls in the eight-to-ten-day band, and no plausible
-# corruption does either.
-_MAX_WINDOW_HORIZON_SECONDS = 10 * 24 * 3600
+STALE_HORIZON_SECONDS = 90           # readers ignore entries older than this
 _LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
 _LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
@@ -102,7 +83,7 @@ def worktree_cwd(payload: dict[str, Any]) -> str | None:
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"version": SCHEMA_VERSION, "limits": None, "sessions": {}}
+    return {"version": SCHEMA_VERSION, "sessions": {}}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -116,8 +97,6 @@ def _load(path: Path) -> dict[str, Any]:
     data.setdefault("version", SCHEMA_VERSION)
     if not isinstance(data.get("sessions"), dict):
         data["sessions"] = {}
-    if "limits" not in data:
-        data["limits"] = None
     return data
 
 
@@ -235,132 +214,6 @@ def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
     return prior_active
 
 
-_LIMIT_WINDOWS = ("five_hour", "seven_day")
-
-
-def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
-    """Keep only rate-limit windows whose reset time is still in the FUTURE.
-
-    A window whose ``resets_at`` is in the past belongs to an EXPIRED window — a
-    stale reading. The status line only refreshes ``rate_limits`` after an API
-    response, so a dormant session (open TUI, no recent API call) keeps writing
-    a fresh store entry whose ``rate_limits`` is frozen against a long-dead
-    window. Hoisting or serving that reading makes the account-global figure
-    flip-flop to whichever session wrote the file last. Gating on a future
-    ``resets_at`` keeps only genuinely-current windows; an expired one is dropped.
-
-    An implausibly distant ``resets_at`` is dropped too. Without that ceiling a
-    single wrong-unit or corrupt value (a millisecond epoch reads as a reset
-    tens of thousands of years out) would stay "live" forever and, being the
-    latest window, would out-rank every honest reading indefinitely.
-    """
-    if not isinstance(limits, dict):
-        return None
-    live: dict[str, Any] = {}
-    for key in _LIMIT_WINDOWS:
-        window = limits.get(key)
-        if not isinstance(window, dict):
-            continue
-        resets = _number(window.get("resets_at"))
-        if resets is None:
-            continue
-        if now < resets <= now + _MAX_WINDOW_HORIZON_SECONDS:
-            live[key] = window
-    return live or None
-
-
-def _window_is_fresher(incoming: dict[str, Any], stored: dict[str, Any]) -> bool:
-    """Whether ``incoming`` supersedes ``stored`` for the same rate-limit window.
-
-    Rate-limit usage is reported per window and only ever RISES until that
-    window resets, so the two readings can be ordered without trusting any
-    clock or any write order:
-
-    - A meaningfully later ``resets_at`` is a NEWER window; its counter has
-      restarted, so it wins outright however low its percentage.
-    - A meaningfully earlier one belongs to a window already superseded, so it
-      loses however high its percentage.
-    - Boundaries within ``_SAME_WINDOW_TOLERANCE_SECONDS`` describe the same
-      window and fall through to the usage comparison. Without that, two
-      readings of one window differing by a second would invert the rule and
-      let the lower percentage win.
-    - Within the SAME window the higher percentage is the more recent reading.
-      This is what stops a dormant session's frozen figure from winning: its
-      percentage cannot exceed the one a working session has since reported.
-
-    A reading with no usable percentage cannot be ordered, so it never displaces
-    one that has a number, but it is taken when there is nothing to compare to.
-    """
-    incoming_resets = _number(incoming.get("resets_at"))
-    stored_resets = _number(stored.get("resets_at"))
-    if incoming_resets is None:
-        return False
-    if stored_resets is None:
-        return True
-    if incoming_resets > stored_resets + _SAME_WINDOW_TOLERANCE_SECONDS:
-        return True
-    if incoming_resets < stored_resets - _SAME_WINDOW_TOLERANCE_SECONDS:
-        return False
-
-    incoming_pct = _number(incoming.get("used_percentage"))
-    stored_pct = _number(stored.get("used_percentage"))
-    if incoming_pct is None:
-        return False
-    if stored_pct is None:
-        return True
-    return incoming_pct > stored_pct
-
-
-def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -> None:
-    """Fold live rate-limit windows into top-level ``limits``, highest-usage-wins.
-
-    ``resets_at`` gating alone is not enough. A dormant session's 5h window can
-    still reset in the future while its ``used_percentage`` is frozen at
-    whatever it was when that session last hit the API. Because the status line
-    reruns on a timer, that session keeps rewriting the store, and a plain
-    last-write-wins hoist lets its fossil percentage clobber a working
-    session's current one — the account figure then flip-flops on every tick.
-
-    So a window is only replaced by a reading that ``_window_is_fresher``
-    orders above it. That ordering reads the readings themselves rather than
-    any timestamp we assign, which makes it independent of write order AND of
-    the system clock — a session whose clock has stepped cannot wedge a window,
-    and no reading can become permanently unbeatable.
-    """
-    stored = store.get("limits")
-    stored = stored if isinstance(stored, dict) else {}
-    live = _live_limits(stored, now) or {}
-    merged = dict(live)
-
-    changed = False
-    for key, window in incoming.items():
-        current = merged.get(key)
-        if not isinstance(current, dict) or _window_is_fresher(window, current):
-            merged[key] = window
-            changed = True
-
-    # A window ``_live_limits`` just dropped (expired, or implausibly distant)
-    # is a change to the account figure too.
-    dropped = any(
-        isinstance(stored.get(key), dict) and key not in live for key in _LIMIT_WINDOWS
-    )
-
-    # ``updated_at`` means "when the account figure last MOVED", not "when a
-    # status line last rendered". A reading that loses the ordering leaves it
-    # alone, so a latched figure cannot masquerade as a fresh observation.
-    #
-    # No reader is served this today: both ``_live_limits`` here and the
-    # dashboard's own limits section whitelist the two window keys. The field
-    # is written either way — it predates this ordering rule — so the choice is
-    # not whether to have it but whether it tells the truth. Kept honest rather
-    # than exposed: an API field nothing consumes would be dead surface.
-    previous_updated = _number(stored.get("updated_at"))
-    store["limits"] = {
-        **merged,
-        "updated_at": now if (changed or dropped or previous_updated is None) else previous_updated,
-    }
-
-
 def _entry_activity(entry: dict[str, Any]) -> float:
     """When this entry last showed real activity, for RANKING entries.
 
@@ -432,10 +285,6 @@ def merge(
     - Preserves the prior context window when the incoming one is blank.
     - Stamps ``active_at`` only when the activity fingerprint moved, so a
       timer-driven rerun of the status line refreshes ``updated_at`` alone.
-    - Hoists ``rate_limits`` to top-level ``limits``, but only LIVE windows
-      (``resets_at`` in the future), and only when the incoming reading orders
-      above the stored one — a frozen reading from a dormant session must not
-      clobber the current account figure.
     - Prunes stale sessions.
 
     ``branch`` is the already-looked-up branch name (a subprocess, so ``ingest``
@@ -475,10 +324,6 @@ def merge(
     # without TMUX_PANE drops any pane recorded by a prior ingest.
     if tmux_pane is not None:
         sessions[sid]["tmux_pane"] = tmux_pane
-
-    incoming = _live_limits(payload.get("rate_limits"), now)
-    if incoming:
-        _hoist_limits(store, incoming, now)
 
     _prune(sessions, now)
     return store
@@ -543,79 +388,10 @@ def _acquire(lock: Any) -> bool:
 # --- Readers -------------------------------------------------------------------
 
 
-def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]:
-    """Decorate an entry with reader-side flags.
-
-    ``stale``: the status line has not run for this session recently (dead or
-    closed session). ``idle``: it is still rendering but its activity counters
-    have not moved for ``IDLE_HORIZON_SECONDS`` (open TUI, nobody working).
-    An entry from a pre-``active_at`` store falls back to ``updated_at``.
-    """
-    updated = _number(entry.get("updated_at")) or 0.0
-    active = _entry_activity(entry)
-    result = dict(entry)
-    result["stale"] = (now - updated) > STALE_HORIZON_SECONDS
-    result["idle"] = (now - active) > IDLE_HORIZON_SECONDS
-    result["limits"] = limits
-    return result
-
-
-def read_all() -> dict[str, Any]:
-    """The whole store, healed to a valid shape."""
-    return _load(store_path())
-
-
-def limits(now: float | None = None) -> dict[str, Any] | None:
-    """The account rate-limit windows that are still live (future ``resets_at``).
-
-    A window whose reset time has passed since it was written is dropped, so a
-    reader never sees a fossil reading even if no fresh write has replaced it yet.
-    """
-    if now is None:
-        now = time.time()
-    return _live_limits(_load(store_path()).get("limits"), now)
-
-
-def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | None:
-    """The most recently ACTIVE session entry indexed to ``cwd``, plus limits.
-
-    Freshest means last active, not last rendered. Ranking on ``updated_at``
-    would hand a worktree's answer to whichever of its sessions rendered most
-    recently, and since the status line reruns on a timer that is routinely a
-    dormant TUI rather than the session doing the work. Ties (equal activity,
-    or entries predating ``active_at``) fall back to ``updated_at``.
-
-    Returns None when no session matches. The result carries ``stale`` and
-    ``idle`` flags so a consumer can distinguish a live reading from one frozen
-    by a dead session, and a working session from a dozing one.
-    """
-    if now is None:
-        now = time.time()
-    key = normalise(cwd)
-    store = _load(store_path())
-
-    best: dict[str, Any] | None = None
-    best_rank = (-1.0, -1.0)
-    for entry in store.get("sessions", {}).values():
-        if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
-            continue
-        rank = (_entry_activity(entry), _number(entry.get("updated_at")) or 0.0)
-        if rank > best_rank:
-            best_rank, best = rank, entry
-
-    if best is None:
-        return None
-    return _with_meta(best, _live_limits(store.get("limits"), now), now)
-
-
-def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
-    if now is None:
-        now = time.time()
-    store = _load(store_path())
-    entry = store.get("sessions", {}).get(sid)
-    if not isinstance(entry, dict):
-        return None
-    return _with_meta(entry, _live_limits(store.get("limits"), now), now)
+def for_session(sid: str) -> dict[str, Any] | None:
+    """The stored entry for one session id, or None."""
+    entry = _load(store_path()).get("sessions", {}).get(sid)
+    return dict(entry) if isinstance(entry, dict) else None
 
 
 def _entry_ts(entry: dict) -> float:
@@ -652,12 +428,12 @@ def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict 
     for entry in sessions.values():
         if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
             continue
+        if now - _entry_ts(entry) > STALE_HORIZON_SECONDS:
+            continue    # horizon BEFORE ranking: a dormant sibling must not hide a live one
         # rank on activity (see _entry_activity), not on timer-driven updated_at
         rank = (_entry_activity(entry), _entry_ts(entry))
         if rank > best_rank:
             best_rank, best = rank, entry
-    if best is None or now - _entry_ts(best) > STALE_HORIZON_SECONDS:
-        return None
     return best
 
 

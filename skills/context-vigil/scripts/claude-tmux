@@ -12,7 +12,9 @@
 #    `ps` would show API keys (needs tmux >= 3.2 for new-session -e).
 # Falls through to plain `claude` when already in tmux, tmux is missing or older
 # than 3.2, CLAUDE_NO_TMUX=1, stdin/stdout is not a terminal, or the call is
-# non-interactive (-p/--print, --output-format, --input-format). Usage: claude-tmux [claude args…] | claude-tmux attach [N|name]
+# non-interactive (-p/--print, --output-format, --input-format), or not a session at all
+# (a subcommand such as mcp/doctor/update, or --version/--help: their output would vanish
+# with the pane). Usage: claude-tmux [claude args…] | claude-tmux attach [N|name]
 set -u
 
 bin="$(type -P claude)" || { echo "claude-tmux: claude not found on PATH" >&2; exit 127; }
@@ -46,9 +48,13 @@ if [ "${1:-}" = "attach" ]; then
 fi
 
 noninteractive=0
+case "${1:-}" in
+  mcp|doctor|update|auth|install|plugin|setup-token|config|migrate-installer) noninteractive=1 ;;
+esac
 for a in "$@"; do
   case "$a" in
     -p|--print|--output-format|--output-format=*|--input-format|--input-format=*) noninteractive=1 ;;
+    --version|-v|--help|-h) noninteractive=1 ;;
   esac
 done
 if [ -n "${TMUX:-}" ] || [ -n "${CLAUDE_NO_TMUX:-}" ] || ! command -v tmux >/dev/null \
@@ -73,8 +79,20 @@ name="${base}-${n}"
 # the session command sources it by running it, and it deletes itself first thing.
 envfile="$(umask 077; mktemp "${TMPDIR:-/tmp}/claude-tmux-env.XXXXXX")" \
   || { echo "claude-tmux: cannot create a private env file — launching plain claude (manual mode)" >&2; exec "$bin" "$@"; }
+trap 'rm -f -- "$envfile"' EXIT
+trap 'rm -f -- "$envfile"; exit 1' HUP INT TERM
+fwd='PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+'
 {
   echo 'rm -f -- "$0"'
+  # A new session inherits the tmux SERVER's environment: a forwarded name the server holds
+  # but the caller lacks (or must not pass on) would otherwise leak in, so unset it.
+  while IFS= read -r var; do
+    var="${var%=}"
+    case "$var" in
+      CONTEXT_VIGIL_SESSION|CLAUDE_SESSION_ID|CLAUDE_CODE_ENTRYPOINT) printf 'unset %s\n' "$var" ;;
+      *) [ -z "${!var+x}" ] && printf 'unset %s\n' "$var" ;;
+    esac
+  done < <(tmux -L "$sock" show-environment -g 2>/dev/null | grep -oE "^($fwd)=")
   # Names only (compgen -e), values by indirection: a value may hold a newline. The
   # session and entrypoint of an enclosing Claude must not leak into a fresh one.
   while IFS= read -r var; do
@@ -82,15 +100,17 @@ envfile="$(umask 077; mktemp "${TMPDIR:-/tmp}/claude-tmux-env.XXXXXX")" \
       CONTEXT_VIGIL_SESSION|CLAUDE_SESSION_ID|CLAUDE_CODE_ENTRYPOINT) continue ;;
     esac
     printf 'export %s=%q\n' "$var" "${!var}"
-  done < <(compgen -e | grep -E '^(PATH|HOME|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|AWS_[A-Z0-9_]+|CONTEXT_VIGIL_[A-Z0-9_]+)$')
+  done < <(compgen -e | grep -E "^($fwd)\$")
   printf 'export CONTEXT_VIGIL_SESSION=%q\n' "$name"
   printf 'exec %q' "$bin"
   for a in "$@"; do printf ' %q' "$a"; done
   echo
 } > "$envfile"
 
-cmd="$(printf '%q %q' "$(type -P bash)" "$envfile")"
-if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" "$cmd"; then
+# The session command is separate argv words (tmux >= 3.0 execs them directly), so the
+# server's default-shell (fish, csh, ...) never parses a quoted string.
+if ! tmux -L "$sock" new-session -s "$name" -c "$PWD" -e "CONTEXT_VIGIL_SESSION=$name" \
+    "$(type -P bash)" "$envfile"; then
   rm -f -- "$envfile"
   echo "claude-tmux: tmux could not start a session — launching plain claude (manual mode)" >&2
   exec "$bin" "$@"

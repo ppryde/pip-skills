@@ -53,21 +53,6 @@ class TestBasicIngest:
         assert sessions["abc"]["updated_at"] == 2.0
 
 
-class TestLimitsHoist:
-    RATE = {"five_hour": {"used_percentage": 20, "resets_at": 111}}
-
-    def test_hoists_rate_limits_to_top_level(self, store_file):
-        st.ingest(_payload(rate_limits=self.RATE), now=5.0)
-        limits = _read(store_file)["limits"]
-        assert limits["five_hour"] == {"used_percentage": 20, "resets_at": 111}
-        assert limits["updated_at"] == 5.0
-
-    def test_absent_rate_limits_leaves_existing_untouched(self, store_file):
-        st.ingest(_payload(sid="s1", rate_limits=self.RATE), now=5.0)
-        st.ingest(_payload(sid="s2"), now=6.0)  # no rate_limits
-        assert _read(store_file)["limits"]["five_hour"]["used_percentage"] == 20
-
-
 class TestContextPreservationGuard:
     def test_blank_context_keeps_prior_reading(self, store_file):
         good = {"context_window": {"used_percentage": 42, "current_usage": {"input_tokens": 9}}}
@@ -315,26 +300,25 @@ class TestActivityTracking:
         st.ingest(_payload(sid="s1", rate_limits=moved, **_busy()), now=70.0)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
 
-    def test_a_session_that_never_prompts_still_goes_idle(self, store_file):
+    def test_a_session_that_never_prompts_keeps_its_first_activity_stamp(self, store_file):
         """A TUI opened and never prompted carries none of the fingerprint
-        fields, and is the archetypal idle session. Treating "no evidence" as
-        activity on every tick would make it permanently non-idle — the feature
-        failing silently in exactly the case it exists for."""
-        later = 10.0 + st.IDLE_HORIZON_SECONDS + 60
+        fields. Treating "no evidence" as activity on every tick would pin it
+        as the most active session of its worktree forever."""
+        later = 10.0 + 10 * 60 + 60
         st.ingest(_payload(sid="s1"), now=10.0)
         st.ingest(_payload(sid="s1"), now=later)
-        assert st.for_session("s1", now=later)["idle"] is True
+        assert _read(store_file)["sessions"]["s1"]["active_at"] == 10.0
 
     def test_evidence_appearing_counts_as_activity(self, store_file):
         """Its first real turn must wake it, not be read as another blank tick."""
-        later = 10.0 + st.IDLE_HORIZON_SECONDS + 60
+        later = 10.0 + 10 * 60 + 60
         st.ingest(_payload(sid="s1"), now=10.0)
         st.ingest(_payload(sid="s1", **_busy()), now=later)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == later
 
     def test_evidence_vanishing_counts_as_activity(self, store_file):
         """An unrecognised payload shape must not be read as dormancy."""
-        later = 10.0 + st.IDLE_HORIZON_SECONDS + 60
+        later = 10.0 + 10 * 60 + 60
         st.ingest(_payload(sid="s1", **_busy()), now=10.0)
         st.ingest(_payload(sid="s1"), now=later)
         assert _read(store_file)["sessions"]["s1"]["active_at"] == later
