@@ -103,10 +103,9 @@ stopping points. A nudge repeats every `nudge.repeat_step`
    paste a secret — `.env` files, credentials, keys, tokens, shell rc files: a
    handover is stored on disk and printed back into the next session's
    transcript verbatim. Secret-bearing files (by name, wherever a symlink
-   points, or under `~/.ssh`, `~/.aws`, `~/.claude*`, …) and anything holding
-   a key-shaped string are refused, naming the file only; notes holding one are
-   refused with its line number — remove it and say where the secret lives
-   instead.
+   points, or under `~/.ssh`, `~/.aws`, `~/.claude*`, …) are refused, naming
+   the file only. The notes themselves are not scanned: never put secrets,
+   tokens or env values in them — say where a secret lives instead.
 5. Run `handover --file <the path notes-path printed>`. On success the notes
    file is removed (a notes file elsewhere inside a repository gets a warning:
    delete it). It prints what happens next:
@@ -130,7 +129,7 @@ If a fresh launch says a handover is waiting, it has NOT been loaded. Do
 nothing with it unless the user asks: "resume the handover" → run
 `handover --resume` and follow what it prints; "discard the handover" → run
 `handover --discard`. The notice shows the handover's branch and the first
-line of its Goal (dropped if either looks key-shaped), so keep the Goal free of
+line of its Goal (each length-capped), so keep the Goal free of
 anything that should not appear in the next session's transcript.
 
 ## Moving this work into a tmux session

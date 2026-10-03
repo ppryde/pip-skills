@@ -658,39 +658,6 @@ def test_inline_refuses_the_config_dir_and_the_data_root(run_cli, repo: Path, cf
     assert not _handoff_saved(repo)
 
 
-@pytest.mark.parametrize("body", [
-    f"token ghp_{'A' * 36}", "-----BEGIN OPENSSH PRIVATE KEY-----", f"API_KEY={CANARY}-x",
-    "xoxb-1234567890-abcdefghij", f"AKIA{'Q' * 16}", f"key {CANARY}-zzzzzz",
-    f"github_pat_{'B' * 30}", "postgres://admin:hunter2hunter2@db.example.invalid/x"])
-def test_inline_refuses_key_shaped_content_without_echoing_it(
-        run_cli, repo: Path, iso: Path, body: str) -> None:
-    _remote(repo)
-    notes = iso / "n.md"
-    notes.write_text(GOOD_NOTES)
-    target = iso / "readme.txt"
-    target.write_text(f"line one\n{body}\n")
-    result = run_cli("handover", "--file", str(notes), "--inline", str(target),
-                     "--no-snapshot", cwd=repo)
-    _one_clean_line(result)
-    assert str(target) in result.stderr
-    for fragment in ("ghp_", "PRIVATE KEY", "xoxb-", "AKIA", "github_pat_", "hunter2", CANARY):
-        assert fragment not in result.stdout + result.stderr, fragment
-    assert not _handoff_saved(repo)
-
-
-def test_notes_with_a_secret_are_refused_by_line_number(run_cli, repo: Path,
-                                                        iso: Path) -> None:
-    lines = GOOD_NOTES.splitlines()
-    lines.insert(2, f"export OPENAI_API_KEY={CANARY}-notes")
-    notes = iso / "n.md"
-    notes.write_text("\n".join(lines) + "\n")
-    result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=repo)
-    _one_clean_line(result)
-    assert "notes contain what looks like a secret at line 3" in result.stderr
-    _no_canary(result)
-    assert "OPENAI_API_KEY" not in result.stderr and not _handoff_saved(repo)
-
-
 # design M7 / output M4: a user's hook is never ours
 
 def test_user_hooks_that_mention_context_vigil_are_kept(run_cli, cfg: Path) -> None:
@@ -754,18 +721,6 @@ def test_unexpected_errors_print_the_class_name_only(monkeypatch: pytest.MonkeyP
     err = capsys.readouterr().err
     assert "RuntimeError" in err and "boom" in err   # frames, by name
     assert CANARY not in err and "raise RuntimeError" not in err   # no message, no source
-
-
-# output M5: the waiting notice
-
-def test_waiting_notice_drops_a_secret_shaped_branch_or_goal() -> None:
-    from context_vigil import handover
-    doc = f"## Goal\nRotate {CANARY}-goal now\n\n- Branch: `feat/ghp_{'A' * 36}`\n"
-    line = handover.summary(doc, None)
-    assert "a handover is waiting" in line
-    assert CANARY not in line and "ghp_" not in line
-    clean = handover.summary("## Goal\nShip it\n\n- Branch: `feat/x`\n", None)
-    assert "feat/x" in clean and "Ship it" in clean
 
 
 # output M2: a hand-edited status-line block is never repointed
@@ -1089,116 +1044,3 @@ def test_foreign_block_note_mentions_a_renamed_stdin_variable() -> None:
 def test_more_credential_file_names_are_secret_bearing(iso: Path, name: str) -> None:
     from context_vigil import handover
     assert handover.secret_bearing(iso / name)
-
-
-# --- N-1 / N-8: the scanner refuses real key shapes, not ordinary notes ------------
-# Every string is assembled at run time (f-strings, repetition): no complete key
-# shape appears in this file's source, so no secret scanner flags the repository.
-
-SHOULD_PASS = [
-    "ANTHROPIC_API_KEY: set in the shell rc, not here",
-    "GITHUB_TOKEN: missing in CI",
-    "export API_KEY=$VAULT_KEY",
-    "export API_KEY=${API_KEY}",
-    "API_KEY=<redacted>",
-    "TOKEN=<your token>",
-    "API_KEY=...",
-    "TOKEN=***",
-    "SECRET_KEY = os.environ['SECRET_KEY']",
-    "password=os.getenv('DB_PASSWORD')",
-    "run `KEY=1 make test`",
-    "TOKEN_PATH=/run/secrets/token",
-    "PUBLIC_KEY=/path/to/key.pub",
-    "TOKEN_TTL=3600",
-    "TOKEN_COUNT=128000",
-    "max_tokens: 4096",
-    "SECRET_SETTINGS=settings.prod",
-    "KEY_ID=see the vault",
-    "api_key: missing",
-    "api_key: str = Field(...)",
-    "password: rotated",
-    "client_secret: <from 1Password>",
-    "MONKEY: yes",
-    "HOTKEY: ctrl-k",
-    "TURKEY=done",
-    "fix KEYERROR: foo",
-    "Authorization: Bearer $TOKEN",
-    "pass `--token $GH_TOKEN` to the CLI",
-    "The tokenizer splits on whitespace; secrets and passwords are never logged.",
-    "Rotate the API key in Vault, then update the password manager entry.",
-    "Set OPENAI_API_KEY and ANTHROPIC_API_KEY in the environment before running.",
-    "ghp_ prefixed tokens are GitHub personal access tokens",
-    "-----BEGIN PUBLIC KEY-----",
-    f"Commit {'3f2a9c1d8e' * 4} fixed the race",
-    "request id 550e8400-e29b-41d4-a716-446655440000",
-    f"sha256: {'e3b0c44298fc1c14' * 4}",
-    f"digest = hashlib.sha256(data).hexdigest()  # {'9f86d081' * 8}",
-    "the fixture holds base64 dGhpcyBpcyBub3QgYSBzZWNyZXQgYXQgYWxs== for the test",
-    "PWD=/Users/me/build123",
-    "postgres://user:${DB_PASSWORD}@localhost:5432/app",
-    "postgres://postgres:postgres@localhost/test",
-    "uses scikit-learn and sk-learn style pipelines",
-    "branch fix/secret-scanner-false-positives",
-]
-
-SHOULD_REFUSE = [
-    f"export OPENAI_API_KEY={CANARY}-notes",
-    "key " + "sk-" + "ant-api03-" + "A1b2" * 10,
-    "AKIA" + "Q" * 16,
-    "gh" + "p_" + "A" * 36,
-    "github" + "_pat_" + "B" * 30,
-    "xox" + "b-1234567890-abcdefghij",
-    "AI" + "za" + "C" * 35,
-    "gl" + "pat-" + "D" * 20,
-    "npm" + "_" + "E" * 36,
-    "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
-    "-----BEGIN RSA " + "PRIVATE KEY-----",
-    "ey" + "J" + "a" * 10 + ".eyJ" + "b" * 10 + "." + "c" * 10,
-    "postgres://admin:" + "hunter2" * 2 + "@db.example.invalid/x",
-    "GITHUB_TOKEN=" + "0123456789abcdef" * 2 + "01234567",
-    "token=" + "a1b2c3d4e5f6g7h8i9j0k1l2",
-    "secret: " + "9f8e7d6c5b4a39281706f5e4",
-    "pwd=" + "Hunter2" * 2,
-    "DB_PASSWORD=" + "Tr0ub4dor&3",
-    "SECRET_KEY_BASE=" + "4f9a8b7c6d5e4f3a" * 2,
-    '"apiKey": "' + "Zx9Qw8Er7Ty6Ui5Op4" + '"',
-    "AWS_SECRET_ACCESS_KEY=" + "wJa1rXUtnF/" * 4,
-    "Authorization: Bearer " + "abcdef0123456789" * 2,
-    "sk" + "_live_" + "F1" * 12,
-    "rk" + "_live_" + "F2" * 12,
-    "hf" + "_" + "G" * 34,
-    "S" + "G." + "H" * 22 + "." + "I" * 43,
-    "AGE-SECRET-" + "KEY-1" + "J" * 58,
-    "ya" + "29." + "K1" * 15,
-    "do" + "p_v1_" + "a" * 64,
-    "https://hooks.slack.com/" + "services/T" + "0" * 8 + "/B" + "0" * 8 + "/" + "X" * 24,
-]
-
-
-def test_the_scanner_corpus_is_big_enough() -> None:
-    assert len(SHOULD_PASS) >= 30 and len(SHOULD_REFUSE) >= 20
-
-
-@pytest.mark.parametrize("index", range(len(SHOULD_PASS)))
-def test_ordinary_handover_lines_pass_the_scanner(index: int) -> None:
-    from context_vigil import secretscan
-    line = SHOULD_PASS[index]
-    assert not secretscan.looks_secret(line), f"false positive: SHOULD_PASS[{index}]"
-
-
-@pytest.mark.parametrize("index", range(len(SHOULD_REFUSE)))
-def test_key_shaped_lines_are_refused_by_line_number(index: int) -> None:
-    from context_vigil import handover, secretscan
-    line = SHOULD_REFUSE[index]
-    assert secretscan.looks_secret(line), f"false negative: SHOULD_REFUSE[{index}]"
-    refusal = handover.secret_refusal(f"## Goal\nShip it.\n{line}\n") or ""
-    assert "at line 3" in refusal and line not in refusal
-    assert secretscan.redact(line) != line
-
-
-def test_ordinary_notes_are_saved(run_cli, repo: Path, iso: Path) -> None:
-    notes = iso / "n.md"
-    notes.write_text(GOOD_NOTES + "\n## Context\n" + "\n".join(f"- {s}" for s in SHOULD_PASS)
-                     + "\n")
-    result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=repo)
-    assert result.returncode == 0, result.stderr

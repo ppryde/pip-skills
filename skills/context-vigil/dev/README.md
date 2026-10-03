@@ -20,7 +20,7 @@ by default, `--model haiku`); run it only with the owner's approval.
   files or `~/.claude*` config, and never prints environment values or the
   sandbox settings' `env`. The sandbox lives in `$TMPDIR`. Everything it echoes
   from the pane or a run (`peek`, timeout tails, `state` first lines, headless
-  output) is passed through a redactor that masks the skill's key shapes
+  output) is passed through a redactor that masks known token formats
   (`sk-…`, `AKIA…`, `ghp_…`/`github_pat_…`, `xox?-…`, `AIza…`, private-key
   blocks, JWTs, credentials in URLs, `KEY=`-style assignments) plus any
   `token=`/`password:`/`api_key`/`Bearer …` in any case, as `[redacted]` —

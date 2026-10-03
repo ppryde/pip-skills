@@ -234,16 +234,9 @@ Handover notes go in the file `context-vigil notes-path` prints:
 `<scope>/notes.md` under the data root (0600), pre-filled from the template and
 removed once `handover --file` has saved it (no other file is ever deleted).
 Notes written anywhere else inside a git repository get a warning, by path, to
-delete them. Notes holding anything key-shaped are refused with the line number
-only: known token formats (`sk-…`, `sk_live_…`, `AKIA…`, `ghp_…`, `github_pat_…`,
-`xox?-…`, Slack webhooks, `AIza…`, `ya29.…`, `glpat-…`, `npm_…`, `hf_…`, `SG.…`,
-`dop_v1_…`, `AGE-SECRET-KEY-1…`, JWTs, a private-key block, a password in a URL)
-and a credential name (`API_KEY`, `db_password`, `apiKey`, …) assigned a long
-literal of letters and digits. Talking about keys is fine: names, placeholders
-(`<your token>`, `...`, `***`), `$VAR`/`${VAR}`, `TOKEN_PATH=`-style names,
-commit SHAs, UUIDs and digests all pass. Accepted residual risk: a bare 40-hex
-token with no name beside it (it reads as a commit SHA), and a short or
-letters-only password, are not caught — never paste credentials into notes.
+delete them. Handover notes are not scanned for secrets: the template and SKILL.md tell the
+agent never to put secrets, tokens or env values in them (anything in the notes
+was already in the conversation).
 
 A handover holds whatever the agent wrote into it, plus any `--inline` file
 verbatim. It is kept on disk (the newest `handover.archive_keep` per scope) and
@@ -254,11 +247,10 @@ names (`.env*`, `*.pem`, `*.key`, `*.ppk`, `id_*`, `*credential*`, `*secret*`,
 `*token*`, `.netrc`, `.npmrc`, `.htpasswd`, `.s3cfg`, `.boto`, `.my.cnf`, shell rc
 files, …) as given or where a symlink resolves; anything
 under `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude*`, the Claude
-config dir or the data root; and any file holding a key-shaped string.
+config dir or the data root.
 
 The waiting notice at a fresh launch shows the handover's branch and the first
-line of its Goal (each cut at 80 chars), and drops either one that looks
-key-shaped. Keep the Goal free of anything you would not want in the next
+line of its Goal (each cut at 80 chars). Keep the Goal free of anything you would not want in the next
 session's transcript.
 
 ```

@@ -43,15 +43,28 @@ SAFE_FIELDS = ("headless", "has_statusline", "window", "window_source", "window_
                "model_id", "message_model", "last_nudged_pct", "transcript_size")
 # Belt and braces for pane text: the sandbox never puts a secret there, but a model
 # can echo one it finds (an env dump, a tool output), and peek/wait output reaches
-# the transcript of whoever drives the harness. The skill's own key-shape list, plus
-# any lower-case `token=…` / `password: …` / `Bearer …` (masking may over-match here).
-sys.path.insert(0, str(SKILL / "scripts"))
-from context_vigil import secretscan  # noqa: E402
+# the transcript of whoever drives the harness. Known token formats, plus any
+# `token=…` / `password: …` / `Bearer …` in any case (masking may over-match here).
+_TOKEN_FORMATS = (
+    r"(?<![A-Za-z0-9])sk-(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]{8,}",   # Anthropic / OpenAI
+    r"\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}",                       # Stripe
+    r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",                                # AWS access key ids
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}",                                 # GitHub tokens
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
+    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",                               # Slack tokens
+    r"\bAIza[0-9A-Za-z_-]{30,}",                                     # Google API keys
+    r"\bya29\.[A-Za-z0-9_-]{20,}",                                   # Google OAuth
+    r"\bglpat-[A-Za-z0-9_-]{20,}",                                   # GitLab tokens
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----",               # PEM / PGP private keys
+    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.",                  # JWTs
+    r"\b[a-z][a-z0-9+.-]*://[^/\s:@]+:(?![$<{*%])[^/\s@]{6,}@",       # password in a URL
+)
+KEY_SHAPE = re.compile("|".join(f"(?:{s})" for s in _TOKEN_FORMATS))
 
 _LOOSE = re.compile(r"(?i:[\w-]*(?:token|secret|password|passwd|api[_-]?key|credential"
                     r"|authorization|cookie)[\w-]*[\"']?\s*[:=]\s*[\"']?(?:bearer\s+)?\S+"
                     r"|\bbearer\s+\S+)")
-SECRET_SHAPE = re.compile(f"(?:{secretscan.KEY_SHAPE.pattern})|(?:{_LOOSE.pattern})")
+SECRET_SHAPE = re.compile(f"(?:{KEY_SHAPE.pattern})|(?:{_LOOSE.pattern})")
 
 # Mirrors install.HOOKS exactly: (event, matcher, hook name).
 HOOKS: List[Tuple[str, Optional[str], str]] = [

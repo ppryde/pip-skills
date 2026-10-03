@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from context_vigil import paths, secretscan, snapshot
+from context_vigil import paths, snapshot
 
 SECTIONS = ("Goal", "Current State", "Files in Flight", "Failed Attempts", "Next Step")
 REQUIRED = ("Failed Attempts", "Next Step")
@@ -83,15 +83,6 @@ def secret_bearing(path: Path) -> bool:
     return False
 
 
-def secret_refusal(notes: str) -> Optional[str]:
-    """Why ``notes`` must not be saved (the line number only, never the match)."""
-    line = secretscan.first_secret_line(notes)
-    if line is None:
-        return None
-    return (f"notes contain what looks like a secret at line {line} — remove it (say "
-            "where it lives instead) and re-run")
-
-
 def template_path() -> Path:
     return paths.skill_dir() / "templates" / "handover.md"
 
@@ -145,11 +136,9 @@ def summary(document: str, written_at: Optional[float]) -> str:
     branch = re.search(r"- Branch: `([^`\n]+)`", document)
     goal = parse_sections(document).get("Goal", "").splitlines()
     text = f"a handover is waiting from {when}"
-    # This line reaches the model and the screen before anyone asked to load the
-    # handover: a branch or goal that looks key-shaped is dropped, not shown.
-    if branch and not secretscan.looks_secret(branch.group(1)):
+    if branch:
         text += f" on `{branch.group(1).strip()[:SUMMARY_FIELD_CHARS]}`"
-    if goal and goal[0].strip() and not secretscan.looks_secret(goal[0]):
+    if goal and goal[0].strip():
         text += f": \"{goal[0].strip()[:SUMMARY_FIELD_CHARS]}\""
     return text
 
@@ -189,9 +178,6 @@ def _cap_inline(body: str, path: Path) -> str:
 def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool,
              max_tokens: Optional[int] = None) -> str:
     validate(notes)
-    refusal = secret_refusal(notes)
-    if refusal:
-        raise HandoverError(refusal)
     parts = [f"# Handover — {datetime.now().strftime('%Y-%m-%d %H:%M')}", notes.strip()]
     if include_snapshot:
         parts.append(snapshot.session_snapshot(cwd.resolve()).strip())
@@ -208,10 +194,6 @@ def assemble(notes: str, cwd: Path, inline: List[Path], include_snapshot: bool,
         except OSError as exc:
             raise HandoverError(f"--inline unreadable: {path} "
                                 f"({exc.strerror or type(exc).__name__})") from exc
-        if secretscan.looks_secret(body):
-            raise HandoverError(
-                f"--inline refused: {path} holds what looks like a secret (a key, token or "
-                "password) — not inlined; never inline secrets")
         parts.append(f"## Inlined: `{path}`\n\n```\n{_cap_inline(body, path)}\n```")
     document = "\n\n".join(parts) + "\n"
     if max_tokens is not None:
