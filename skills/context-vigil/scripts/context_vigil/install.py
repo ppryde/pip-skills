@@ -285,6 +285,31 @@ def _our_hook_set(data: Dict[str, Any],
     return found
 
 
+_OTHER_INSTALL = re.compile(r'^"?(/\S+)/scripts/context-vigil"? hook (?:session-start|stop|nudge)$')
+
+
+def other_install_hooks(data: Dict[str, Any], ours: Set[str]) -> List[str]:
+    """MANUAL STEP lines for hook commands that are exactly what ANOTHER context-vigil
+    install (a skill dir no install recorded) would write: Claude Code would run a dead
+    hook on every event. Named by event and skill path only; never deleted — exact
+    matching keeps a user's own hooks safe, so an unrecorded one is theirs to remove."""
+    lines: List[str] = []
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return lines
+    for event, entries in hooks.items():
+        for entry in entries or []:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for command in _commands(entry):
+                match = _OTHER_INSTALL.match(command)
+                if match and command not in ours:
+                    lines.append(f"{_hook_label(str(event), None)}: a context-vigil hook from "
+                                 f"another install at {match.group(1)} — remove it by hand "
+                                 "(context-vigil leaves hooks it did not record alone)")
+    return lines
+
+
 def _hook_label(event: str, matcher: Optional[str]) -> str:
     """``hooks.<Event>[matcher=…]`` — only our own event names and matchers are shown."""
     name = event if event in {e for e, _, _ in HOOKS} else "<event>"
@@ -415,7 +440,8 @@ def foreign_block_note(path: Path, text: str) -> str:
     span = marked_span(text, SL_START, SL_END)
     where = f"lines {span[0] + 1}-{span[1] + 1}" if span else "a marked block"
     return (f"{path}: {where} (context-vigil's marked block) hold lines context-vigil "
-            "did not write — left untouched. Remove the block by hand and re-run install.")
+            "did not write, or no longer matches the line that reads stdin — left "
+            "untouched. Remove the block by hand and re-run install.")
 
 
 def splice_statusline(text: str, skill_dirs: Optional[List[str]] = None) -> Optional[str]:
@@ -481,7 +507,7 @@ def _manual_line() -> str:
 
 def _read_record() -> Dict[str, Any]:
     try:
-        record = json.loads(paths.install_record_path().read_text())
+        record = json.loads(paths.read_private(paths.install_record_path()))
     except (OSError, ValueError):
         return {}
     return record if isinstance(record, dict) else {}
@@ -512,6 +538,7 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
         plan.notes.append(f"will set context.threshold = {threshold} "
                           f"(global config: {paths.global_config_path()})")
     ours = _our_commands(prior)
+    plan.manual.extend(other_install_hooks(data, ours))
     original = copy.deepcopy(data)
     data = _with_hooks(data, ours)
     status = data.get("statusLine")
@@ -573,7 +600,9 @@ def write_atomic(path: Path, text: str) -> None:
     whatever the umask. Symlinks are followed so a dotfiles-managed file stays a link."""
     target = path.resolve()
     paths.make_private_dirs(target.parent)
-    paths.sweep_stale(target.parent, (f"*{USER_TMP_SUFFIX}",))
+    # a user's directory: sweep only the strays of writes to THIS file, by our names
+    paths.sweep_stale(target.parent, (f"{paths.TMP_PREFIX}{target.name}.*{USER_TMP_SUFFIX}",
+                                      f"{target.name}.*{USER_TMP_SUFFIX}"))
     try:
         mode: Optional[int] = stat.S_IMODE(os.stat(str(target)).st_mode)
     except FileNotFoundError:

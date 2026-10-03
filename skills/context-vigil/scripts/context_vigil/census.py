@@ -88,7 +88,7 @@ def _empty_store() -> dict[str, Any]:
 def _load(path: Path) -> dict[str, Any]:
     """Load the store, healing any missing/corrupt shape into a valid skeleton."""
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(paths.read_private(path))
     except (OSError, ValueError):
         return _empty_store()
     if not isinstance(data, dict):

@@ -176,6 +176,7 @@ def test_wider_existing_files_are_tightened_on_next_write(repo: Path) -> None:
     root = paths.data_root()
     root.mkdir(mode=0o755)
     root.chmod(0o755)
+    (root / paths.ROOT_MARKER).write_text("")   # ours, left wider by an older version
     cfg = paths.global_config_path()
     cfg.write_text("{}\n")
     cfg.chmod(0o644)
@@ -850,3 +851,354 @@ def test_settings_with_duplicate_keys_are_refused_not_collapsed(run_cli, cfg: Pa
         _no_canary(result)
         assert '"env"' not in result.stderr
     assert (cfg / "settings.json").read_text() == text
+
+
+# --- Round 4 (verification): never damage a user's directory -----------------------
+# N-2 / N-7: the skill chmods, writes `.gitignore`, sweeps or deletes only inside a
+# directory it owns: one it created itself, recorded by ``.context-vigil-root``.
+
+def _dir_state(path: Path) -> tuple:
+    return (_mode(path), sorted(os.listdir(str(path))))
+
+
+@pytest.mark.parametrize("which", ["home", "config", "worktree-root", "filesystem-root"])
+def test_data_root_refuses_home_config_dir_repo_root_and_slash(
+        run_cli, iso: Path, home: Path, cfg: Path, repo: Path, which: str) -> None:
+    target = {"home": home, "config": cfg, "worktree-root": iso / "wt",
+              "filesystem-root": Path("/")}[which]
+    if which == "worktree-root":
+        target.mkdir()
+        _git_init(target)
+    if which != "filesystem-root":
+        (target / "mine.txt").write_text("mine\n")
+        target.chmod(0o755)
+    before = _dir_state(target)
+    env = {"CONTEXT_VIGIL_HOME": str(target)}
+    for args in (("notes-path",), ("status",), ("pause",),
+                 ("install", "--yes", "--launcher", "not-now")):
+        result = run_cli(*args, cwd=repo, env=env)
+        _one_clean_line(result)
+        assert "refusing" in result.stderr and str(target) in result.stderr, args
+    hook = run_cli("hook", "session-start", cwd=repo, env=env,
+                   stdin=json.dumps({"cwd": str(repo), "source": "startup"}))
+    assert hook.returncode == 0 and hook.stdout == ""
+    assert _dir_state(target) == before
+    if which == "config":
+        assert not (cfg / "settings.json").exists()
+
+
+def test_data_root_refusal_is_raised_in_process_too(home: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    for target in (home, Path("/")):
+        monkeypatch.setenv("CONTEXT_VIGIL_HOME", str(target))
+        with pytest.raises(paths.DataRootError):
+            paths.data_root()
+
+
+def test_a_nonempty_foreign_dir_gets_a_subdirectory_of_ours(run_cli, iso: Path,
+                                                            repo: Path) -> None:
+    shared = iso / "shared"
+    shared.mkdir()
+    (shared / "README.md").write_text("mine\n")
+    shared.chmod(0o755)
+    env = {"CONTEXT_VIGIL_HOME": str(shared)}
+    result = run_cli("notes-path", cwd=repo, env=env)
+    assert result.returncode == 0, result.stderr
+    ours = shared / "context-vigil"
+    assert result.stdout.strip().startswith(str(ours) + os.sep)
+    assert _dir_state(shared) == (0o755, ["README.md", "context-vigil"])
+    assert (shared / "README.md").read_text() == "mine\n"
+    assert (ours / paths.ROOT_MARKER).is_file() and _mode(ours) == 0o700
+    assert (ours / ".gitignore").read_text() == "*\n"
+    assert "data: " + str(ours) in run_cli("status", cwd=repo, env=env).stdout
+
+
+def test_a_foreign_dir_with_a_foreign_subdirectory_is_refused(run_cli, iso: Path,
+                                                              repo: Path) -> None:
+    shared = iso / "shared"
+    (shared / "context-vigil").mkdir(parents=True)
+    (shared / "context-vigil" / "notes.txt").write_text("mine\n")
+    before = (_dir_state(shared), _dir_state(shared / "context-vigil"))
+    result = run_cli("notes-path", cwd=repo, env={"CONTEXT_VIGIL_HOME": str(shared)})
+    _one_clean_line(result)
+    assert str(shared) in result.stderr and "refusing" in result.stderr
+    assert (_dir_state(shared), _dir_state(shared / "context-vigil")) == before
+
+
+def test_an_empty_dir_and_an_older_versions_root_are_adopted(iso: Path, repo: Path,
+                                                             monkeypatch) -> None:
+    empty = iso / "empty"
+    empty.mkdir(mode=0o755)
+    monkeypatch.setenv("CONTEXT_VIGIL_HOME", str(empty))
+    assert paths.data_root() == empty
+    state.pause(paths.scope_dir(repo))
+    assert (empty / paths.ROOT_MARKER).is_file() and _mode(empty) == 0o700
+    legacy = iso / "legacy"
+    (legacy / "worktrees" / "x").mkdir(parents=True)
+    (legacy / "census.json").write_text("{}\n")
+    (legacy / ".gitignore").write_text("*\n")
+    monkeypatch.setenv("CONTEXT_VIGIL_HOME", str(legacy))
+    assert paths.data_root() == legacy
+    state.pause(paths.scope_dir(repo))
+    assert (legacy / paths.ROOT_MARKER).is_file() and (legacy / "worktrees" / "x").is_dir()
+
+
+def test_an_unmarked_dir_writable_by_others_is_refused_not_chmodded(iso: Path,
+                                                                    repo: Path,
+                                                                    monkeypatch) -> None:
+    open_dir = iso / "open"
+    open_dir.mkdir()
+    open_dir.chmod(0o777)
+    monkeypatch.setenv("CONTEXT_VIGIL_HOME", str(open_dir))
+    with pytest.raises(paths.UnsafeDataRoot):
+        state.pause(paths.scope_dir(repo))
+    assert _dir_state(open_dir) == (0o777, [])
+
+
+def test_a_root_of_ours_left_open_is_tightened_by_status(run_cli, repo: Path) -> None:
+    state.pause(paths.scope_dir(repo))
+    root = paths.data_root()
+    root.chmod(0o777)
+    assert run_cli("status", cwd=repo).returncode == 0
+    assert _mode(root) == 0o700
+
+
+def test_sweeps_touch_only_our_own_named_regular_files(home: Path, iso: Path,
+                                                       repo: Path) -> None:
+    # beside a user file: only the temps of THAT file's own writes
+    other = home / ".cv-tmp.other.x1.context-vigil.tmp"
+    other.write_text("not this write's\n")
+    _old(other)
+    install.write_atomic(home / ".zshrc", "export X=1\n")
+    assert other.exists()
+    # a planted symlink with our name is never unlinked, whatever its age
+    scope = paths.scope_dir(repo)
+    paths.ensure_dir(scope)
+    target = iso / "target.txt"
+    target.write_text("t\n")
+    link = scope / ".cv-tmp.handoff.md.lnk.tmp"
+    link.symlink_to(target)
+    _old(link)
+    state.write_handoff(scope, "doc")
+    assert link.is_symlink() and target.exists()
+    # write_private outside the data root sweeps nothing
+    outside = iso / "outside"
+    outside.mkdir()
+    stray = outside / ".cv-tmp.f.zz.tmp"
+    stray.write_text("x\n")
+    _old(stray)
+    paths.write_private(outside / "f", "y\n")
+    assert stray.exists()
+
+
+# N-3: every read of a state file goes through the guarded, no-follow reader
+
+def test_state_reads_never_follow_a_symlink(repo: Path, iso: Path) -> None:
+    root = paths.data_root()
+    paths.ensure_dir(root)
+    planted = iso / "planted.json"
+    planted.write_text(json.dumps({"context.threshold": 90}))
+    paths.global_config_path().symlink_to(planted)
+    assert config.threshold(repo) == config.DEFAULTS["context.threshold"]
+    install_json = iso / "install.json"
+    install_json.write_text(json.dumps({"skill_dir": "/elsewhere"}))
+    paths.install_record_path().symlink_to(install_json)
+    assert install._read_record() == {}
+    paths.windows_path().symlink_to(planted)
+    assert session.windows() == {}
+    census_json = iso / "census.json"
+    census_json.write_text(json.dumps({"version": 1, "sessions": {"s": {"pct": 99}}}))
+    paths.census_path().symlink_to(census_json)
+    assert census._load(paths.census_path())["sessions"] == {}
+
+
+def test_status_reports_a_foreign_owned_root(run_cli, repo: Path,
+                                             monkeypatch: pytest.MonkeyPatch,
+                                             capsys: pytest.CaptureFixture) -> None:
+    from context_vigil import cli
+    state.pause(paths.scope_dir(repo))
+    uid = os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: uid + 1)
+    monkeypatch.chdir(repo)
+    assert cli.main(["status"]) == 1
+    err = capsys.readouterr().err
+    assert "owned by another user" in err and len(err.strip().splitlines()) == 1
+
+
+# N-4: an unrecorded older install's hook is named, never deleted
+
+def test_an_unrecorded_old_install_hook_is_flagged_not_removed(run_cli, cfg: Path) -> None:
+    old = '"/old/skill/scripts/context-vigil" hook session-start'
+    (cfg / "settings.json").write_text(json.dumps({"hooks": {"SessionStart": [
+        {"matcher": "startup", "hooks": [{"type": "command", "command": old}]}]}}))
+    for args in (("install",), ("install", "--yes", "--launcher", "not-now")):
+        result = run_cli(*args)
+        assert result.returncode == 0, args
+        assert ("MANUAL STEP: hooks.SessionStart: a context-vigil hook from another "
+                "install at /old/skill") in result.stdout, args
+    commands = [h["command"] for e in json.loads((cfg / "settings.json").read_text())[
+        "hooks"]["SessionStart"] for h in e["hooks"]]
+    assert old in commands and len(commands) == 2
+
+
+# N-5: tidying deletes the notes file and nothing else
+
+def test_handover_never_deletes_another_file_under_the_data_root(run_cli, repo: Path,
+                                                                 iso: Path) -> None:
+    other = paths.worktree_dir(iso / "elsewhere") / "handoff.md"
+    paths.ensure_dir(other.parent)
+    other.write_text(GOOD_NOTES)
+    result = run_cli("handover", "--file", str(other), "--no-snapshot", cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert other.read_text() == GOOD_NOTES
+    notes = Path(run_cli("notes-path", cwd=repo).stdout.strip())
+    notes.write_text(GOOD_NOTES)
+    run_cli("handover", "--discard", cwd=repo)
+    assert run_cli("handover", "--file", str(notes), "--no-snapshot",
+                   cwd=repo).returncode == 0
+    assert not notes.exists()
+
+
+# N-6: an OSError names its path and reason, never its message
+
+def test_unexpected_oserror_names_the_path_and_reason(monkeypatch: pytest.MonkeyPatch,
+                                                      capsys: pytest.CaptureFixture) -> None:
+    from context_vigil import cli
+
+    def boom(_args):  # type: ignore[no-untyped-def]
+        raise PermissionError(13, "Permission denied", "/data/root/handoff.md")
+
+    monkeypatch.setattr(cli, "_cmd_status", boom)
+    assert cli.main(["status"]) == 1
+    err = capsys.readouterr().err
+    assert "PermissionError" in err and "Permission denied" in err
+    assert "/data/root/handoff.md" in err and len(err.strip().splitlines()) == 1
+
+
+# N-9: wording, and more credential file names for --inline
+
+def test_foreign_block_note_mentions_a_renamed_stdin_variable() -> None:
+    script = Path("/x/sl.sh")
+    text = f"input=$(cat)\n{install.SL_START}\nfoo\n{install.SL_END}\n"
+    assert "no longer matches the line that reads stdin" in install.foreign_block_note(
+        script, text)
+
+
+@pytest.mark.parametrize("name", ["gh_token", "api-token.txt", ".htpasswd", "site.htpasswd",
+                                  ".s3cfg", ".boto", ".my.cnf", "server.ppk"])
+def test_more_credential_file_names_are_secret_bearing(iso: Path, name: str) -> None:
+    from context_vigil import handover
+    assert handover.secret_bearing(iso / name)
+
+
+# --- N-1 / N-8: the scanner refuses real key shapes, not ordinary notes ------------
+# Every string is assembled at run time (f-strings, repetition): no complete key
+# shape appears in this file's source, so no secret scanner flags the repository.
+
+SHOULD_PASS = [
+    "ANTHROPIC_API_KEY: set in the shell rc, not here",
+    "GITHUB_TOKEN: missing in CI",
+    "export API_KEY=$VAULT_KEY",
+    "export API_KEY=${API_KEY}",
+    "API_KEY=<redacted>",
+    "TOKEN=<your token>",
+    "API_KEY=...",
+    "TOKEN=***",
+    "SECRET_KEY = os.environ['SECRET_KEY']",
+    "password=os.getenv('DB_PASSWORD')",
+    "run `KEY=1 make test`",
+    "TOKEN_PATH=/run/secrets/token",
+    "PUBLIC_KEY=/path/to/key.pub",
+    "TOKEN_TTL=3600",
+    "TOKEN_COUNT=128000",
+    "max_tokens: 4096",
+    "SECRET_SETTINGS=settings.prod",
+    "KEY_ID=see the vault",
+    "api_key: missing",
+    "api_key: str = Field(...)",
+    "password: rotated",
+    "client_secret: <from 1Password>",
+    "MONKEY: yes",
+    "HOTKEY: ctrl-k",
+    "TURKEY=done",
+    "fix KEYERROR: foo",
+    "Authorization: Bearer $TOKEN",
+    "pass `--token $GH_TOKEN` to the CLI",
+    "The tokenizer splits on whitespace; secrets and passwords are never logged.",
+    "Rotate the API key in Vault, then update the password manager entry.",
+    "Set OPENAI_API_KEY and ANTHROPIC_API_KEY in the environment before running.",
+    "ghp_ prefixed tokens are GitHub personal access tokens",
+    "-----BEGIN PUBLIC KEY-----",
+    f"Commit {'3f2a9c1d8e' * 4} fixed the race",
+    "request id 550e8400-e29b-41d4-a716-446655440000",
+    f"sha256: {'e3b0c44298fc1c14' * 4}",
+    f"digest = hashlib.sha256(data).hexdigest()  # {'9f86d081' * 8}",
+    "the fixture holds base64 dGhpcyBpcyBub3QgYSBzZWNyZXQgYXQgYWxs== for the test",
+    "PWD=/Users/me/build123",
+    "postgres://user:${DB_PASSWORD}@localhost:5432/app",
+    "postgres://postgres:postgres@localhost/test",
+    "uses scikit-learn and sk-learn style pipelines",
+    "branch fix/secret-scanner-false-positives",
+]
+
+SHOULD_REFUSE = [
+    f"export OPENAI_API_KEY={CANARY}-notes",
+    "key " + "sk-" + "ant-api03-" + "A1b2" * 10,
+    "AKIA" + "Q" * 16,
+    "gh" + "p_" + "A" * 36,
+    "github" + "_pat_" + "B" * 30,
+    "xox" + "b-1234567890-abcdefghij",
+    "AI" + "za" + "C" * 35,
+    "gl" + "pat-" + "D" * 20,
+    "npm" + "_" + "E" * 36,
+    "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
+    "-----BEGIN RSA " + "PRIVATE KEY-----",
+    "ey" + "J" + "a" * 10 + ".eyJ" + "b" * 10 + "." + "c" * 10,
+    "postgres://admin:" + "hunter2" * 2 + "@db.example.invalid/x",
+    "GITHUB_TOKEN=" + "0123456789abcdef" * 2 + "01234567",
+    "token=" + "a1b2c3d4e5f6g7h8i9j0k1l2",
+    "secret: " + "9f8e7d6c5b4a39281706f5e4",
+    "pwd=" + "Hunter2" * 2,
+    "DB_PASSWORD=" + "Tr0ub4dor&3",
+    "SECRET_KEY_BASE=" + "4f9a8b7c6d5e4f3a" * 2,
+    '"apiKey": "' + "Zx9Qw8Er7Ty6Ui5Op4" + '"',
+    "AWS_SECRET_ACCESS_KEY=" + "wJa1rXUtnF/" * 4,
+    "Authorization: Bearer " + "abcdef0123456789" * 2,
+    "sk" + "_live_" + "F1" * 12,
+    "rk" + "_live_" + "F2" * 12,
+    "hf" + "_" + "G" * 34,
+    "S" + "G." + "H" * 22 + "." + "I" * 43,
+    "AGE-SECRET-" + "KEY-1" + "J" * 58,
+    "ya" + "29." + "K1" * 15,
+    "do" + "p_v1_" + "a" * 64,
+    "https://hooks.slack.com/" + "services/T" + "0" * 8 + "/B" + "0" * 8 + "/" + "X" * 24,
+]
+
+
+def test_the_scanner_corpus_is_big_enough() -> None:
+    assert len(SHOULD_PASS) >= 30 and len(SHOULD_REFUSE) >= 20
+
+
+@pytest.mark.parametrize("index", range(len(SHOULD_PASS)))
+def test_ordinary_handover_lines_pass_the_scanner(index: int) -> None:
+    from context_vigil import secretscan
+    line = SHOULD_PASS[index]
+    assert not secretscan.looks_secret(line), f"false positive: SHOULD_PASS[{index}]"
+
+
+@pytest.mark.parametrize("index", range(len(SHOULD_REFUSE)))
+def test_key_shaped_lines_are_refused_by_line_number(index: int) -> None:
+    from context_vigil import handover, secretscan
+    line = SHOULD_REFUSE[index]
+    assert secretscan.looks_secret(line), f"false negative: SHOULD_REFUSE[{index}]"
+    refusal = handover.secret_refusal(f"## Goal\nShip it.\n{line}\n") or ""
+    assert "at line 3" in refusal and line not in refusal
+    assert secretscan.redact(line) != line
+
+
+def test_ordinary_notes_are_saved(run_cli, repo: Path, iso: Path) -> None:
+    notes = iso / "n.md"
+    notes.write_text(GOOD_NOTES + "\n## Context\n" + "\n".join(f"- {s}" for s in SHOULD_PASS)
+                     + "\n")
+    result = run_cli("handover", "--file", str(notes), "--no-snapshot", cwd=repo)
+    assert result.returncode == 0, result.stderr

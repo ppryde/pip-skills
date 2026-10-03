@@ -137,7 +137,10 @@ $CLAUDE_CONFIG_DIR/context-vigil/
   `worktrees/<slug>/headless/`, prints where, and exits (no `/clear` is armed); the next headless run's
   SessionStart raises the waiting-handover notice and `handover --resume`/`--discard` read it there.
   Interactive sessions never see it, nor headless runs an interactive handoff.
-- `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups).
+- `CONTEXT_VIGIL_HOME` overrides the root (tests, unusual setups). It must be absolute,
+  and is never `$HOME`, `/`, the config dir or a repository root. The skill changes only
+  a directory it owns (marked `.context-vigil-root` when created or adopted empty); a
+  non-empty directory of the user's gets a `context-vigil/` subdirectory instead.
 - census path: `census.json` here, not `$CLAUDE_CONFIG_DIR/census/status.json`.
   The existing census plugin honours `CENSUS_STORE`, so a machine running both
   can point census at this file; otherwise they are two independent writers.

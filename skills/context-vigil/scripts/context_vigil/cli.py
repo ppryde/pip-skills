@@ -132,14 +132,14 @@ def _cmd_handover(args: argparse.Namespace) -> int:
         if state.is_paused(scope):
             raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
         state.write_handoff(kept, document, config.archive_keep(cwd))
-        _tidy_notes(notes_file)
+        _tidy_notes(notes_file, [scope, kept])
         print(f"handover saved to {state.handoff_path(kept)} — the next headless run in this "
               "worktree can `handover --resume` it")
         return 0
     result = state.request_clear(scope, document, config.archive_keep(cwd))
     if result == "paused":
         raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
-    _tidy_notes(notes_file)
+    _tidy_notes(notes_file, [scope, kept])
     if tmux.reachable():
         print("handover saved — /clear will be sent at the end of this turn")
     else:
@@ -148,19 +148,23 @@ def _cmd_handover(args: argparse.Namespace) -> int:
     return 0
 
 
-def _tidy_notes(notes_file: Path) -> None:
-    """After a saved handover: delete notes that live under the data root (their job is
-    done, and they need not linger); warn, by path only, about notes inside a git
+def _tidy_notes(notes_file: Path, scopes: List[Path]) -> None:
+    """After a saved handover: delete the notes file ``notes-path`` handed out (its job
+    is done, and it need not linger) and nothing else — any other file, under the data
+    root or not, is left where it is; warn, by path only, about notes inside a git
     worktree — untracked and unignored, one `git add -A` from history."""
-    real = Path(os.path.realpath(str(notes_file)))
-    root = Path(os.path.realpath(str(paths.data_root())))
-    if root in real.parents:
-        try:
-            os.unlink(str(notes_file))
-        except OSError:
-            pass
+    real = os.path.realpath(str(notes_file))
+    if any(real == os.path.realpath(str(state.notes_path(s))) for s in scopes):
+        if paths.owned(Path(real).parent):
+            try:
+                os.unlink(str(notes_file))
+            except OSError:
+                pass
         return
-    repo = paths.enclosing_repo(real)
+    root = Path(os.path.realpath(str(paths.data_root())))
+    if root in Path(real).parents:
+        return
+    repo = paths.enclosing_repo(Path(real))
     if repo is not None:
         print(f"WARNING: the notes file {notes_file} is inside a git repository ({repo}) and "
               "is not ignored — delete it. Next time write notes in the file "
@@ -253,7 +257,7 @@ LIVE_NOW = ("Hooks and the status line are live in this session on current Claud
 
 def _record_launcher_choice() -> Optional[str]:
     try:
-        record = json.loads(paths.install_record_path().read_text())
+        record = json.loads(paths.read_private(paths.install_record_path()))
     except (OSError, ValueError):
         return None
     choice = record.get("launcher") if isinstance(record, dict) else None
@@ -318,6 +322,7 @@ def _feed_lines(cwd: Path, scope: Path, live: install.LiveState) -> List[str]:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
+    paths.guard_read(paths.data_root())   # a root that is not ours: say so, not "no hooks"
     scope = _scope(cwd)
     record = paths.install_record_path()
     resolved = config.resolve(cwd)
@@ -446,7 +451,7 @@ def _record_launcher(choice: str, rc: Path) -> None:
     """Keep an existing install.json in step; never create one from `launcher` alone."""
     record_path = paths.install_record_path()
     try:
-        record = json.loads(record_path.read_text())
+        record = json.loads(paths.read_private(record_path))
     except (OSError, ValueError):
         return
     if not isinstance(record, dict):
@@ -519,11 +524,19 @@ DEBUG_ENV = "CONTEXT_VIGIL_DEBUG"
 
 def _unexpected(exc: BaseException) -> None:
     """One line naming the exception CLASS only: its message could quote a file or an
-    environment value, and this output reaches the agent's transcript. With
-    CONTEXT_VIGIL_DEBUG=1, also the frames (file, line, function) — still never the
-    message, a source line, a local or the environment."""
-    print(f"error: unexpected {type(exc).__name__} (details withheld: they could quote a "
-          f"file) — re-run with {DEBUG_ENV}=1 for details", file=sys.stderr)
+    environment value, and this output reaches the agent's transcript. An OSError also
+    names its reason (``strerror``) and path(s) — the detail a user needs to fix it,
+    never its free-form message. With CONTEXT_VIGIL_DEBUG=1, also the frames (file,
+    line, function) — still never the message, a source line, a local or the
+    environment."""
+    if isinstance(exc, OSError) and (exc.strerror or exc.filename):
+        where = " -> ".join(str(f) for f in (exc.filename, exc.filename2) if f is not None)
+        print(f"error: unexpected {type(exc).__name__}: {exc.strerror or 'failed'}"
+              + (f": {where}" if where else "")
+              + f" — re-run with {DEBUG_ENV}=1 for details", file=sys.stderr)
+    else:
+        print(f"error: unexpected {type(exc).__name__} (details withheld: they could quote "
+              f"a file) — re-run with {DEBUG_ENV}=1 for details", file=sys.stderr)
     if os.environ.get(DEBUG_ENV):
         for frame in traceback.extract_tb(exc.__traceback__):
             print(f"  at {frame.filename}:{frame.lineno} in {frame.name}", file=sys.stderr)

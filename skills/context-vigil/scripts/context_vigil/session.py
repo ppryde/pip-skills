@@ -106,7 +106,7 @@ def blank() -> Dict[str, Any]:
 def load(session_id: str) -> Dict[str, Any]:
     record = blank()
     try:
-        data = json.loads(paths.session_record_path(session_id).read_text())
+        data = json.loads(paths.read_private(paths.session_record_path(session_id)))
     except (OSError, ValueError):
         return record
     if isinstance(data, dict):
@@ -183,7 +183,7 @@ def mark_statusline(session_id: str) -> None:
 
 def windows() -> Dict[str, int]:
     try:
-        data = json.loads(paths.windows_path().read_text())
+        data = json.loads(paths.read_private(paths.windows_path()))
     except (OSError, ValueError):
         return {}
     if not isinstance(data, dict):

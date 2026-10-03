@@ -67,7 +67,7 @@ def coerce(key: str, raw: object) -> object:
 
 def _read(path: Path) -> Dict[str, object]:
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(paths.read_private(path))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}

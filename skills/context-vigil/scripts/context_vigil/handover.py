@@ -44,7 +44,8 @@ class HandoverError(ValueError):
 # harmless-looking symlink does not get past): names that hold credentials, the
 # user's shell rc files, and everything under a credential or Claude config dir.
 _SECRET_NAMES = (".env", ".env.*", ".envrc", "*.env", "*.pem", "*.key", "id_*",
-                 "*credential*", "*secret*", ".netrc", ".npmrc", ".pypirc", ".pgpass",
+                 "*credential*", "*secret*", "*token*", "*.htpasswd", ".htpasswd", ".s3cfg",
+                 ".boto", ".my.cnf", "*.ppk", ".netrc", ".npmrc", ".pypirc", ".pgpass",
                  ".git-credentials", ".dockercfg", "*.p12", "*.pfx", "*.jks", "*.keystore",
                  "*.kdbx", "*.tfvars", "*.tfstate", ".zshrc", ".zshenv", ".zprofile",
                  ".zlogin", ".bashrc", ".bash_profile", ".bash_login", ".profile")

@@ -81,7 +81,8 @@ Commands, all via `scripts/context-vigil`: `install [--yes] [--threshold N]
 `--no-snapshot`), `config get|set KEY [VALUE] [--worktree]`, `pause`, `resume`.
 `install` and `uninstall` are dry runs unless given `--yes`. An unexpected
 failure prints one line naming the exception class only (its message could
-quote a file); `CONTEXT_VIGIL_DEBUG=1` adds the frames (file, line, function),
+quote a file) — for a filesystem error, also its reason and path, which is what
+you need to fix it; `CONTEXT_VIGIL_DEBUG=1` adds the frames (file, line, function),
 never a message, source line, local or environment value.
 
 ## Auto vs manual
@@ -204,13 +205,19 @@ run that never uses the Task tools is nudged at the next prompt
 Everything is under `$CONTEXT_VIGIL_HOME` (it must be an absolute path; a
 relative one is refused), or `$CLAUDE_CONFIG_DIR/context-vigil/` (default
 `~/.claude/context-vigil/`). context-vigil writes nothing inside the repository
-you work in. The data root writes a `.gitignore` of `*` into itself, so even
+you work in. context-vigil changes only a directory it owns: one it created
+(or found empty) and marked with a `.context-vigil-root` file. Point
+`CONTEXT_VIGIL_HOME` at a directory that already holds your files and it never
+chmods it or writes into it: it uses (and marks) a `context-vigil/` subdirectory
+inside it instead, and refuses, with one line naming the path, when that is
+taken too. `$HOME`, `/`, the Claude config dir itself and a repository root are
+refused outright. The data root writes a `.gitignore` of `*` into itself, so even
 where it lands inside a git repository (a dotfiles-managed `~/.claude`, say)
 `git add -A` never picks up a handover; `status` and `install` warn, by path,
 when it does. The data root must be yours alone: owned by you and not writable
-by anyone else (one of yours left wider is tightened), or context-vigil refuses
-to read or write under it. Handovers and marker files are never read or written
-through a symlink.
+by anyone else (one of ours left wider is tightened), or context-vigil refuses
+to read or write under it, and `status` says so. Every state file is read and
+written without following a symlink.
 
 The data root and every directory under it are created 0700, and every file in
 it (handovers and their archive, session records, `census.json`,
@@ -219,23 +226,33 @@ the first byte, temp files included; a file or data root left wider by an older
 version is tightened on its next write. Missing parents of an rc file are
 created 0700. Every atomic-write temp file is named `.cv-tmp.*`; a crash between
 creating one and the rename (SIGKILL, power loss) can strand it, still 0600, and
-the next write in that directory deletes such strays over a minute old.
+the next write deletes such strays over a minute old: under the data root, its
+own; beside an rc or settings file, only that file's own (`.cv-tmp.<name>.*`) —
+your regular files, never a symlink or a directory, never another name.
 
 Handover notes go in the file `context-vigil notes-path` prints:
 `<scope>/notes.md` under the data root (0600), pre-filled from the template and
-removed once `handover --file` has saved it. Notes written anywhere else inside
-a git repository get a warning, by path, to delete them. Notes holding anything
-key-shaped (`sk-…`, `AKIA…`, `ghp_…`, `xox?-…`, a private-key block,
-`KEY=`/`TOKEN:`-style assignments, credentials in a URL) are refused with the
-line number only.
+removed once `handover --file` has saved it (no other file is ever deleted).
+Notes written anywhere else inside a git repository get a warning, by path, to
+delete them. Notes holding anything key-shaped are refused with the line number
+only: known token formats (`sk-…`, `sk_live_…`, `AKIA…`, `ghp_…`, `github_pat_…`,
+`xox?-…`, Slack webhooks, `AIza…`, `ya29.…`, `glpat-…`, `npm_…`, `hf_…`, `SG.…`,
+`dop_v1_…`, `AGE-SECRET-KEY-1…`, JWTs, a private-key block, a password in a URL)
+and a credential name (`API_KEY`, `db_password`, `apiKey`, …) assigned a long
+literal of letters and digits. Talking about keys is fine: names, placeholders
+(`<your token>`, `...`, `***`), `$VAR`/`${VAR}`, `TOKEN_PATH=`-style names,
+commit SHAs, UUIDs and digests all pass. Accepted residual risk: a bare 40-hex
+token with no name beside it (it reads as a commit SHA), and a short or
+letters-only password, are not caught — never paste credentials into notes.
 
 A handover holds whatever the agent wrote into it, plus any `--inline` file
 verbatim. It is kept on disk (the newest `handover.archive_keep` per scope) and
 `handover --resume` and the post-`/clear` injection print it back into the next
 session's transcript by design, so never put a credential in one. `--inline`
 works in remote mode only and refuses, naming the file only: secret-bearing
-names (`.env*`, `*.pem`, `*.key`, `id_*`, `*credential*`, `*secret*`, `.netrc`,
-`.npmrc`, shell rc files, …) as given or where a symlink resolves; anything
+names (`.env*`, `*.pem`, `*.key`, `*.ppk`, `id_*`, `*credential*`, `*secret*`,
+`*token*`, `.netrc`, `.npmrc`, `.htpasswd`, `.s3cfg`, `.boto`, `.my.cnf`, shell rc
+files, …) as given or where a symlink resolves; anything
 under `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.claude*`, the Claude
 config dir or the data root; and any file holding a key-shaped string.
 
@@ -246,6 +263,7 @@ session's transcript.
 
 ```
 $CLAUDE_CONFIG_DIR/context-vigil/
+  .context-vigil-root      # marks the directory as context-vigil's own
   .gitignore               # `*`: the data root never ends up in a commit
   config.json              # global settings
   census.json              # latest status-line reading per session
