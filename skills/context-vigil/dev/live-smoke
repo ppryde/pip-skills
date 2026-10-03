@@ -33,7 +33,8 @@ SESSION = "cv"
 DEFAULT_MODEL = "haiku"
 RESUME_PREAMBLE = "Resume from this handover."
 KICK_MARK = "handover received"
-TRUST_RE = r"(?i)do you trust|trust this folder|trust the files|yes, i trust"
+TRUST_RE = (r"(?i)do you trust|trust this folder|trust the files|yes, i trust"
+            r"|quick safety check|one you trust")
 READY_RE = r"(?i)\? for shortcuts|esc to interrupt|shift\+tab"
 SECRET_KEY = re.compile(r"(?i)token|secret|key|password|env|auth|cookie")
 # Only these session-record fields are ever printed by `state` (an allow-list: a new
@@ -160,7 +161,8 @@ def tmux_new_session_cmd(repo: Path, claude_bin: str, args: List[str]) -> List[s
 
 
 def redact(text: str) -> str:
-    """Mask anything secret-shaped: known token formats, credential-name assignments, plus loose assignments."""
+    """Mask anything secret-shaped: known token formats, credential-name assignments,
+    plus loose assignments."""
     return SECRET_SHAPE.sub("[redacted]", text)
 
 
@@ -490,15 +492,36 @@ class Report:
         return 1 if bad else 0
 
 
+def trust_cursor_line(text: str) -> Optional[str]:
+    """The trust-menu option the ``❯`` cursor sits on, or None if there is none.
+
+    The dialog's default is "No, exit" — a bare Enter quits claude — so the
+    choice is only ever confirmed once the cursor is on a "Yes" line.
+    """
+    for row in text.splitlines():
+        if "❯" in row:
+            return row.split("❯", 1)[1].strip()
+    return None
+
+
 def accept_trust_and_wait_ready(timeout: float = 90.0) -> Tuple[bool, str]:
     deadline = time.time() + timeout
-    trusted = False
+    moves = 0
     while time.time() < deadline:
+        if not server_alive():
+            return False, "tmux session gone (claude exited)"
         text = pane_text(60)
-        if not trusted and re.search(TRUST_RE, text):
-            tmux("send-keys", "-t", SESSION, "Enter")
-            trusted = True
-            time.sleep(3)
+        if re.search(TRUST_RE, text):
+            choice = trust_cursor_line(text) or ""
+            if re.match(r"(?i)(\d+\.\s*)?yes\b", choice):
+                tmux("send-keys", "-t", SESSION, "Enter")
+                time.sleep(3)
+                continue
+            if moves >= 4:
+                return False, "trust prompt: could not put the cursor on 'Yes'"
+            tmux("send-keys", "-t", SESSION, "Down")
+            moves += 1
+            time.sleep(1)
             continue
         if re.search(READY_RE, text):
             return True, ""

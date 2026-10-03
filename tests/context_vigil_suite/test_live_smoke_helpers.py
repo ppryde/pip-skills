@@ -1,6 +1,7 @@
 """Pure helpers of the dev-only live smoke harness (no tmux, no claude)."""
 from __future__ import annotations
 
+import re
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
@@ -165,3 +166,14 @@ def test_state_file_must_be_private_and_ours(monkeypatch, tmp_path) -> None:  # 
 def test_headless_prompt_keeps_notes_out_of_the_repo() -> None:
     prompt = ls.headless_prompt()
     assert "notes-path" in prompt and "./notes.md" not in prompt
+
+
+@pytest.mark.parametrize(("screen", "choice"), [
+    ("Quick safety check\n ❯ 1. No, exit\n   2. Yes, I trust this folder\n", "1. No, exit"),
+    ("Quick safety check\n   1. No, exit\n ❯ 2. Yes, I trust this folder\n",
+     "2. Yes, I trust this folder"),
+    ("no menu here\n", None),
+])
+def test_trust_cursor_line_reads_the_selected_option(screen: str, choice: object) -> None:
+    assert ls.trust_cursor_line(screen) == choice
+    assert (re.search(ls.TRUST_RE, screen) is not None) == (choice is not None)
