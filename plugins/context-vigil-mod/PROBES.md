@@ -8,6 +8,9 @@ terminal half driven by a script, phone half by the owner. Phone results marked
 Observed: toast → terminal not captured (transient), phone **pending**; ui.log line → terminal yes (`⏺ cvm-probe: 🧪 probe log line …` in the transcript), phone **pending**.
 Decision: notify() uses both `ui.toast` and `ui.log` until the phone result narrows it.
 
+Phone result (owner on the Claude Android app, 2026-10-04, CC 2.1.289): **neither reaches the phone** — not from a command handler, not from an idle `$.clock` timer. Also not: `$.session.append` `system` (stored as an `informational` row) or `user` (stored `isMeta`). Reaches the phone: a plugin prompt (`$.prompt.submit`, shown as "The <plugin> plugin sent a message: …", starts a model turn), a slash command's reply `{ text }` (grey `<plugin>: …` line), model output / tools / the model's AskUserQuestion. A `ui.render` observer saw only `terminal` asks — never `mobile`, no `session.attach` — so mod UI (panes, bars) does not draw on the phone today. Live consequence: the RC countdown notice was never seen on the phone (smoke #4, two runs).
+Decision (pending owner approval): in phone sessions, also send phone-relevant notices as a plugin prompt; start the countdown after it lands.
+
 ## 2. Registered tool offered next turn
 Observed: probe_echo called yes — registered by a command, then called by the model on the very next (plugin-submitted) prompt; result shape accepted: `{ result: string }` yes (`echo: pelican` rendered).
 Decision: vigil_handover served by a `tool.call` hook on TOOL_FULL returning `{ result: string }`. The hook's `e` carries the tool's input fields flat beside `tool` and `tool_use_id` (`{ word, tool, tool_use_id }`).
