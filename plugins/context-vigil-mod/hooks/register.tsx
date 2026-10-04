@@ -64,14 +64,21 @@ async function notify($: EngineInterface, text: string) {
 }
 
 // Every plugin prompt goes through here: from a timer, never awaited by the hook the turn waits on.
-function submitSoon($: EngineInterface, text: string, delayMs = 0, onSent?: () => void) {
-  $.clock.after(delayMs, () => { void $.prompt.submit({ text }).then(() => onSent?.()) })
+function submitSoon($: EngineInterface, text: string, delayMs = 0, onSent?: () => void, onFailed?: () => void) {
+  $.clock.after(delayMs, () => { void $.prompt.submit({ text }).then(() => onSent?.(), () => onFailed?.()) })
 }
 
 // PROBES.md §7: a mod never sees its own submit in prompt.submit, so `started` is marked here.
 function submitInstruction($: EngineInterface, reason: PendingReason) {
   submitSoon($, instructionText(reason), 0, () => {
     void update($, awaitingA, a => (a ? { ...a, started: true } : a))
+  }, () => {
+    // A rejected submit must not leave the handover waiting for a turn that never comes.
+    void (async () => {
+      await update($, awaitingA, () => null)
+      await notify($, V.handoverFailed)
+      await log($, 'guard.wait', { reason: 'submit-rejected' })
+    })()
   })
 }
 
@@ -104,10 +111,9 @@ function scheduleGit($: EngineInterface) {
   gitTimer = $.clock.after(COALESCE_MS, () => { void refreshGit($) })
 }
 
-// Resets every module cache and timer (pre-flight F3): a hot reload or a reused module
-// must start clean. Tasks 12–15 add their own module variables to the RESET block.
-async function bindSession($: EngineInterface) {
-  // RESET (Task 11)
+// RESET: every module cache and timer (pre-flight F3), in one place — a hot reload, a reused
+// module or a /clear must start clean. Tasks 13–15 add their own module variables here.
+function resetCaches() {
   gitTimer?.cancel()
   gitTimer = null
   git = { branch: null, dirty: [] }
@@ -118,7 +124,10 @@ async function bindSession($: EngineInterface) {
   clearParked = false
   unattendedClear = false
   lastWait = null
-  // RESET (Tasks 13–15 add lines here)
+}
+
+async function bindSession($: EngineInterface) {
+  resetCaches()
   root = configRoot({ CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), HOME: await $.env.get('HOME') })
   session = await $.session.id()
   cwd = await $.session.cwd()
@@ -269,12 +278,10 @@ export const register: Register = on => {
     const pending = await read($, pendingA)
     if (pending) await savePending($, null)         // deletes pending:<old session>
     session = await $.session.id()
-    edited.clear()
-    dayText = {}
-    retryTimer?.cancel()
-    retryTimer = null
-    clearParked = false
-    lastWait = null
+    resetCaches()
+    scheduleGit($)
+    await update($, awaitingA, () => null)
+    await update($, deferredA, () => null)
     await update($, lastNudgedA, () => null)
     await update($, barShownA, () => false)
     await update($, barDismissedA, () => false)

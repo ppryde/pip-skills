@@ -184,3 +184,48 @@ test('a stored handover with no name resumes without any rename', async ($, on) 
   expect(w.notices.some(n => n.includes('couldn'))).toBe(false)
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
 })
+
+test('a clear that lands while a handover is awaited abandons it: the next turn submits nothing', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.state.get('context-vigil-mod.awaiting')).toMatchObject({ started: true })
+  const before = w.submits.length
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.state.get('context-vigil-mod.awaiting')).toBeNull()
+  await $.turn.complete(turn('fresh'))
+  await w.clock.settle()
+  expect(w.submits.length).toBe(before)
+  expect(w.notices).not.toContain("📜 Couldn't write a handover — nothing was cleared")
+})
+
+test('a rejected instruction submit fails visibly instead of stalling', async ($, on) => {
+  const w = world(on)
+  w.submitRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
+  expect(w.state.get('context-vigil-mod.awaiting')).toBeNull()
+  expect([...w.files.values()].join('')).toContain('submit-rejected')
+})
+
+test('a clear forgets the day-log cache and the edited files', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'e', file_path: '/repo/old.ts' } as never)
+  await $.session.measure(measure(36))
+  const day = [...w.files.keys()].find(k => k.includes('/events/'))
+  expect(day).toBeDefined()
+  w.files.delete(day ?? '')
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.session.measure(measure(36))
+  expect((w.files.get(day ?? '') ?? '').split('\n').filter(l => l.includes('"threshold"')).length).toBe(1)   // a stale cache would rewrite the old line too
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).not.toContain('/repo/old.ts')
+})

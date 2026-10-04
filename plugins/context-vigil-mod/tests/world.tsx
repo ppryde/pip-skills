@@ -19,6 +19,7 @@ export type World = {
   askAnswer: { value: string | null }  // answers $.ui.ask and AskUserQuestion; null = dismissed
   toastRefused: { value: boolean }     // makes ui.toast answer { deny }
   clearRefused: { value: boolean }     // makes $.command.run({ command: 'clear' }) reject
+  submitRefused: { value: boolean }    // makes $.prompt.submit reject
   renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
   renames: string[]                    // args of every rename command run
 }
@@ -31,7 +32,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     registered: { tools: [], commands: [] },
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
-    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, renames: [],
+    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
   }
   mock.store(on, opts.store ?? {})
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
@@ -64,7 +65,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('session.repo', () => ({ value: { root: '/repo', remote: null, internal: false, name: 'repo', id: 'r' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: w.contextPct.value }, rateLimits: w.rateLimits.value } }))
   on('prompt.read', () => ({ value: { text: w.draft.value, cursor: w.draft.value.length } }))
-  on('prompt.submit', (_$, e) => { w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
+  on('prompt.submit', (_$, e) => { if (w.submitRefused.value) throw new Error('submit refused'); w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
   on('command.run', (_$, e) => {
     if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
