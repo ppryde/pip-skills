@@ -175,9 +175,16 @@ the deciding origin.
   handover or `/clear`.
   **Consequence:** while the bar is up, a leading bare digit is captured by
   it. So the bar is never always-on: it shows **only from the threshold
-  crossing until 1, 2 or 0 is chosen or a handover happens**, and it yields
-  while `e.props.hasSurvey`. (Verified live in a demo mod: the band renders
-  in the terminal, `e.surface` `"terminal"`.)
+  crossing until 1, 2 or 0 is chosen or a handover happens**.
+  **Survey.** The bar yields whenever `e.props.hasSurvey` is true: Claude
+  Code's feedback survey holds the band, and its digits belong to the survey
+  because our Buttons are not mounted. The bar's state (pending / shown)
+  lives in `$.state`, so when the survey closes the bar re-appears by itself;
+  a threshold crossing during a survey shows the bar after it.
+  (Option noted, not required: the band's `isWorking` prop could limit the
+  bar to between turns; the owner did not ask for it.)
+  (Verified live in a demo mod: the band renders in the terminal, `e.surface`
+  `"terminal"`.)
   It is not raised when the last human origin is `bridge`; the phone gets an
   end-of-turn notice instead. Nothing is cleared unless the person asks.
 - **Auto armed** — the handover runs by itself.
@@ -346,7 +353,10 @@ question with the explanation in the question text.
   "Tell me more".
 - **Shell:** driven with the mock engine and mock clock from the typings —
   event in, intents carried out, `$` calls asserted; `$.clock` advanced
-  instead of waiting.
+  instead of waiting. Includes the bar: shown only from crossing to choice,
+  hotkeys 1/2/0, and **"yields to survey, returns after"** (`hasSurvey` true
+  → `next(e)`; false again → the bar draws from `$.state` with no new
+  crossing needed; a crossing during the survey shows after it).
 - **Gates:** `claude plugin validate`, `tsc -p plugins/context-vigil-mod`,
   `claude plugin test`.
 - **Live smokes** (owner-run where the auto-mode classifier forbids driving a
