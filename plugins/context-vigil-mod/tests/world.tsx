@@ -27,6 +27,8 @@ export type World = {
   greps: string[][]                    // argv of every grep run
   store: Map<string, unknown>          // $.store by key — per account, NOT wiped by a clear
   handoverWriteRefused: { value: boolean }               // makes fs.write under /handovers/ deny
+  cacheWrites: { value: { h1: number; m5: number } | 'none' | 'fail' }   // what the transcript tail says the latest response wrote
+  tails: string[][]                    // argv of every transcript-tail run
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
@@ -40,7 +42,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, onStoreSet: { value: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], onStoreSet: { value: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
@@ -64,6 +66,13 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
       w.greps.push([...e.argv])
       const exitCode = w.grepFails.value ? 2 : w.titled.has(e.argv[e.argv.length - 1] ?? '') ? 0 : 1
       return { value: { exitCode, stdout: exitCode === 0 ? '1\n' : exitCode === 1 ? '0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (e.argv[0] === 'sh' && e.argv[2]?.includes('cache_creation')) {
+      w.tails.push([...e.argv])
+      const cw = w.cacheWrites.value
+      if (cw === 'fail') return { value: { exitCode: 1, stdout: '', stderr: 'tail: no such file', isStdoutTruncated: false, isStderrTruncated: false } }
+      const stdout = cw === 'none' ? '' : `"cache_creation":{"ephemeral_5m_input_tokens":${cw.m5},"ephemeral_1h_input_tokens":${cw.h1}}\n`
+      return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     const a = e.argv.join(' ')
     const out = a.includes('symbolic-ref') ? w.git.branch : w.git.status
@@ -114,6 +123,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('classic.FileChanged', () => ({}))
   on('classic.StopFailure', () => ({}))
   on('classic.PostModelSwitch', () => ({}))
+  on('classic.PreModelSwitch', () => ({}))
   // AskUserQuestion — and $.ui.ask, which is not an op event but runs as this tool call.
   // Result shape { questions, answers: { [question]: label } } per the claude-code-tools typings.
   // A test that passes `answers` on the input gets them echoed; otherwise every question
@@ -132,5 +142,9 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
 }
 
 export const START = { cwd: '/repo', surface: 'terminal' as const, isInteractive: true }
-export const turn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const })
+const usage = (cacheCreation: number) => ({ input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 50, cache_creation_input_tokens: cacheCreation, model: 'm' })
+// A turn whose response wrote to the cache (usage.cache_creation_input_tokens > 0), as the engine reports it.
+export const turn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const, usage: usage(5) })
+// A pure cache read: nothing written, so nothing to learn about the lifetime.
+export const readTurn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const, usage: usage(0) })
 export const human = (text: string, kind: 'composer' | 'bridge' = 'composer') => ({ text, wait: false, origin: { kind } as never })

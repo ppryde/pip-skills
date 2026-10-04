@@ -62,7 +62,7 @@ Terminal only. Shown from the threshold crossing until you choose or a handover 
 
 ## Last light
 
-`/vsetup last-light`. When you and the agent are both idle, shortly before the 1 h prompt cache lapses (5 min lead) and context is at or past the last-light threshold, the mod **writes the handover only; it never clears**. It fires at most once until a human prompt re-arms it. When you return after the cache has expired, your next prompt is held and the mod asks: resume from the handover (cheap) or carry on (pays the cold cache). Your message is re-sent either way.
+`/vsetup last-light`. When you and the agent are both idle, shortly before the 1 h prompt cache lapses (5 min lead; it only works with a 1-hour cache -- the mod reads each response's cache write from the transcript and stays off for a 5-minute cache, or until it knows, so it never warms a cold one; a model switch or running out of plan usage can change the lifetime mid-session and is followed) and context is at or past the last-light threshold, the mod **writes the handover only; it never clears**. It fires at most once until a human prompt re-arms it. When you return after the cache has expired, your next prompt is held and the mod asks: resume from the handover (cheap) or carry on (pays the cold cache). Your message is re-sent either way.
 
 ## Limits
 

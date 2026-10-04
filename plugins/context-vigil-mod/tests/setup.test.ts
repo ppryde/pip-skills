@@ -24,6 +24,11 @@ describe('cards fit AskUserQuestion', () => {
     expect(stepForQuestion(STEPS.bar.question)).toBe('bar')
     expect(stepForQuestion('something else?')).toBe(undefined)
   })
+  test('last light says it needs a 1-hour cache and stays off for a 5-minute one', () => {
+    const t = STEPS.last_light.explain
+    expect(t).toContain('1-hour prompt cache')
+    expect(t).toContain('5-minute')
+  })
   test('windows is multi-select', () => expect(questionFor('limit_windows').multiSelect).toBe(true))
 })
 

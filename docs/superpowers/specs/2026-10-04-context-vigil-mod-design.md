@@ -276,7 +276,14 @@ returning cold costs ≈ 800k input-equivalents; last light's warm write
 
 **Timer.** One `$.clock.after` per idle period, reset on every
 `turn.complete`: fire at *last API activity + TTL − lead* (TTL 1 h; lead
-300 s). If the TTL in effect is 5 min, last light is inactive.
+300 s). The TTL is never assumed: it is learnt per session from the transcript's
+`cache_creation` split on every response that wrote to the cache (any 5m tokens
+means 5m; a pure read keeps the previous value) and from a model switch's
+`cache_ttl` (`classic.PreModelSwitch` and `PostModelSwitch`, confirmed by the
+next response). It starts `unknown` and a /clear resets it. Last light fires only
+while it is `1h`; for `5m` or `unknown` it stays off and logs `last_light.skip`
+(`ttl-5m` / `ttl-unknown`) once per state. A returning human is held only against
+a known expiry (PROBES §11).
 
 **Fire conditions (all):** last light is on (§6); the session is in
 last-light territory (you idle, agent idle — §2); context ≥ the last-light

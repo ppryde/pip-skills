@@ -1,15 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { LEAD_MS, TTL_1H, TTL_5M, fireAt, holdOnReturn, rearm, shouldFire, ttlFromLabel } from '../core/last-light'
+import { LEAD_MS, TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 
-test('ttl labels', () => {
-  expect(ttlFromLabel('1h')).toBe(TTL_1H)
-  expect(ttlFromLabel('5m')).toBe(TTL_5M)
-  expect(ttlFromLabel('junk')).toBe(TTL_1H)
-})
-
-test('fireAt is last API activity + TTL − lead; inactive on a 5-minute cache', () => {
-  expect(fireAt(1000, TTL_1H)).toBe(1000 + TTL_1H - LEAD_MS)
-  expect(fireAt(1000, TTL_5M)).toBe(null)
+test('fireAt is last API activity + 1h − lead; only a known 1-hour cache fires', () => {
+  expect(fireAt(1000, '1h')).toBe(1000 + TTL_1H - LEAD_MS)
+  expect(fireAt(1000, '5m')).toBe(null)
+  expect(fireAt(1000, 'unknown')).toBe(null)
 })
 
 describe('shouldFire', () => {

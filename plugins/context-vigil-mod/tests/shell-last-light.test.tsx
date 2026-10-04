@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, human, turn, world } from './world'
+import { START, human, readTurn, turn, world, type World } from './world'
 import { V } from '../core/voice'
 
 const MIN = 60_000
@@ -9,6 +9,9 @@ const write = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 
 const LL = { store: { settings: { lastLight: true, nudgeAt: 90 } } }
 const asks = (w: { submits: { text: string }[] }) => w.submits.filter(s => s.text.includes(TOOL)).length
 const PENDING = 'context-vigil-mod.pending'
+const eventLog = (w: World) => [...w.files.entries()].find(([k]) => k.includes('/events/'))?.[1] ?? ''
+const count = (text: string, needle: string) => text.split(needle).length - 1
+const TTL = 'context-vigil-mod.cacheTtl'
 
 test('fires at TTL − lead with both idle and context ≥ threshold; writes only, no clear', async ($, on) => {
   const w = world(on, LL)
@@ -140,6 +143,7 @@ test('a 1-hour cache fires; a switch to a 5-minute cache cancels the scheduled f
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(30))
   await $.turn.complete(turn())                                  // schedules the 1 h fire
+  await w.clock.settle()
   await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)  // must cancel it
   await w.clock.advance(120 * MIN)
   expect(asks(w)).toBe(0)
@@ -150,6 +154,147 @@ test('a 1-hour cache fires; a switch to a 5-minute cache cancels the scheduled f
   await $.turn.complete(turn('2'))
   await w.clock.advance(55 * MIN)
   expect(asks(w)).toBe(1)
+  expect(eventLog(w)).toContain('"source":"post-switch"')
+})
+
+test('a 5-minute cache never fires, and says why once', async ($, on) => {
+  const w = world(on, LL)
+  w.cacheWrites.value = { h1: 0, m5: 100 }
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  await $.prompt.submit(human('more'))
+  await $.turn.complete(turn('2'))
+  await w.clock.advance(120 * MIN)
+  expect(asks(w)).toBe(0)
+  expect(w.state.get(TTL)).toBe('5m')
+  expect(count(eventLog(w), '"reason":"ttl-5m"')).toBe(1)
+  expect(count(eventLog(w), '"kind":"cache.ttl"')).toBe(1)
+})
+
+test('an unknown cache never fires: nothing assumes 1 hour', async ($, on) => {
+  const w = world(on, LL)
+  w.cacheWrites.value = 'fail'
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(120 * MIN)
+  expect(asks(w)).toBe(0)
+  expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
+  expect(eventLog(w)).toContain('"reason":"ttl-unknown"')
+})
+
+test('the lifetime can drop mid-session with no model switch (usage credits): the pending fire is cancelled', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  expect(w.state.get(TTL)).toBe('1h')
+  await w.clock.advance(10 * MIN)
+  w.cacheWrites.value = { h1: 0, m5: 300 }
+  await $.prompt.submit(human('more'))
+  await $.turn.complete(turn('2'))
+  await w.clock.advance(120 * MIN)
+  expect(asks(w)).toBe(0)
+  expect(eventLog(w)).toContain('"from":"1h"')
+  expect(eventLog(w)).toContain('"source":"response"')
+})
+
+test('a pure cache read costs no transcript read and keeps the lifetime', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  const tails = w.tails.length
+  await $.turn.complete(readTurn('2'))
+  await w.clock.settle()
+  expect(w.tails.length).toBe(tails)
+  expect(w.state.get(TTL)).toBe('1h')
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(1)
+})
+
+test('a subagent turn says nothing about the main conversation\'s cache', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.turn.complete({ ...turn(), agentId: 'sub' } as never)
+  await w.clock.settle()
+  expect(w.tails.length).toBe(0)
+})
+
+test('a /clear starts the new session unknown until its first response says otherwise', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  expect(w.state.get(TTL)).toBe('1h')
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
+})
+
+test('the transcript is read from the path the session reported', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'startup', transcript_path: '/t/s1.jsonl' } as never)
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  expect(w.tails.at(-1)?.at(-1)).toBe('/t/s1.jsonl')
+})
+
+test('without a reported path the transcript is found by the project folder convention', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  expect(w.tails.at(-1)?.at(-1)).toBe('/cfg/projects/-repo/s1.jsonl')
+})
+
+test('a model switch is read before it happens too (PreModelSwitch)', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.classic.PreModelSwitch({ cache_ttl: '5m' } as never)
+  expect(w.state.get(TTL)).toBe('5m')
+  expect(eventLog(w)).toContain('"source":"pre-switch"')
+})
+
+test('an unknown lifetime claims no cold-cache cost: the returning human is not held', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(55 * MIN)
+  await $.tool.call(write)
+  w.state.set(TTL, 'unknown')
+  await w.clock.advance(70 * MIN)
+  const held = await $.prompt.submit(human('back'))
+  expect(held).not.toEqual({ drop: V.heldForLastLight })
+})
+
+test('a returning human is held against the real expiry: a 5-minute cache expires in 5 minutes', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(55 * MIN)
+  await $.tool.call(write)                        // last-light handover pending, written under a 1 h cache
+  await $.turn.complete(turn('ll'))
+  w.cacheWrites.value = { h1: 0, m5: 10 }         // credits ran out: the latest response wrote 5m
+  await $.turn.complete(turn('ll2'))
+  await w.clock.advance(6 * MIN)
+  w.askAnswer.value = null
+  const held = await $.prompt.submit(human('back'))
+  await w.clock.settle()
+  expect(held).toEqual({ drop: V.heldForLastLight })   // 6 min on a 5-minute cache is cold; on an unknown one it would not be claimed
+  expect(w.submits.at(-1)?.text).toBe('back')          // asked, dismissed → carried on
 })
 
 test('a hot reload re-arms last light from the last turn', async ($, on) => {

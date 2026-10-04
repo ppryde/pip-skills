@@ -53,7 +53,7 @@ export const STEPS: Record<StepId, Step> = {
   },
   last_light: {
     header: '🌅Last light', question: 'Write a handover before an idle 1-hour cache goes cold?',
-    explain: 'When you and the agent are both idle, a few minutes before the prompt cache expires I write a handover — nothing is cleared. When you come back I ask: resume from it cheaply, or carry on and pay the cold cache. Default Off.',
+    explain: 'Works only with a 1-hour prompt cache: I read which one your session writes, and stay off for a 5-minute cache (or until I know) rather than warm a cold one. When you and the agent are both idle, a few minutes before that cache expires I write a handover — nothing is cleared. When you come back I ask: resume from it cheaply, or carry on and pay the cold cache. Default Off.',
     options: onOff('lastLight', false, false), askIf: always,
   },
   last_light_at: {

@@ -1,17 +1,15 @@
 import type { Mode } from '../types'
 import { classifyOrigin } from './arming'
+import type { CacheTtl } from './cache-ttl'
 
 export const LEAD_MS = 300_000
 export const TTL_1H = 3_600_000
-export const TTL_5M = 300_000
 
-export function ttlFromLabel(label: string): number {
-  return label === '5m' ? TTL_5M : TTL_1H
-}
-
-export function fireAt(lastApiAt: number, ttlMs: number): number | null {
-  if (ttlMs < TTL_1H) return null
-  return lastApiAt + ttlMs - LEAD_MS
+// Only a cache known to live an hour is worth a handover before it goes cold; a 5-minute or
+// unknown one would be warmed long after it expired.
+export function fireAt(lastApiAt: number, ttl: CacheTtl): number | null {
+  if (ttl !== '1h') return null
+  return lastApiAt + TTL_1H - LEAD_MS
 }
 
 export type FireFacts = {
