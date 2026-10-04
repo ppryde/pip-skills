@@ -445,3 +445,72 @@ tuned in review; these are the starting strings:
 - A firing cap/fuse for last light (considered and dropped: it could block
   genuine use).
 - Mid-turn nudges on every tool (assessed above and dropped).
+
+---
+
+## 5. Addendum (2026-10-04, owner decisions) — retiring the old vigil and census
+
+Owner decisions taken while the plan was running. Implemented as plan tasks
+13–16, after task 12.
+
+### 5.1 Census parity
+
+context-vigil's status-line store becomes a superset of the census plugin's, so
+census can later be retired by repointing its readers (overseer dashboard,
+chronicle) — that repointing is a follow-up card, not this branch.
+
+- The store gains census's top-level **`limits`**: account rate-limit windows
+  (`five_hour`, `seven_day`, …) hoisted out of each payload with census's exact
+  rules — only a fresher window replaces a stored one ("higher % wins" within a
+  window), windows whose `resets_at` has passed are dropped on read.
+- New command **`context-vigil census read [--worktree CWD | --session ID |
+  --limits]`** prints JSON in the census plugin's `read` shapes (same keys, same
+  `{}` for nothing), so a reader can switch commands without code changes.
+- Entry shape stays census's (`worktree_cwd, updated_at, active_at, branch,
+  tmux_pane, payload`); context-vigil's extra keys are kept and ignored by readers.
+
+### 5.2 Activation: everywhere by default, opt-out per repo
+
+- Global **`activation`**: `everywhere` (default) | `opt-in`. Global only.
+- Per-worktree **`watch`**: `on` | `off`, set by **`context-vigil on`** /
+  **`context-vigil off`** in a repo (stored in the worktree config under the
+  data root — nothing is written inside the repository).
+- Watched = the worktree's `watch` if set, else `activation == everywhere`.
+- Unwatched: no nudge, no end-of-turn notice, no last light, no auto `/clear`
+  dispatch for a nudge-less session. Explicit requests still work: the user can
+  always say "hand over" (`handover`, `/ho`), and a pending handover is still
+  loaded on `/clear`.
+- `status` shows `watching: yes|no (why)`.
+
+### 5.3 Free-form handovers: fill the blanks, never refuse
+
+`handover --file` accepts any notes. Before assembling:
+
+- text before the first recognised heading is kept under `## Notes`;
+- a missing or empty `## Failed Attempts` becomes `None recorded.`;
+- a missing or empty `## Next Step` becomes `Not stated — ask the user what to
+  do next before acting.`;
+- a `## Next Step` holding several actions is kept, prefixed with
+  `(Several steps were listed — confirm with the user which comes first.)`;
+- the command prints one extra line naming what it filled (e.g.
+  `filled: Failed Attempts, Next Step`) so the agent can improve the notes.
+
+`handover --file -` reads the notes from stdin (overseer's piped rollup).
+
+### 5.4 Short commands: `/ho` and `/handoff`
+
+Install writes two user commands, `$CLAUDE_CONFIG_DIR/commands/ho.md` and
+`handoff.md`, each a short prompt telling the agent to hand over now via
+context-vigil (finish or hold in-flight work first; `notes-path`; fill it;
+`handover --file`), with `$ARGUMENTS` folded into the notes. Each file carries a
+managed marker; install refuses (leaves alone, reports by path) a file of that
+name it did not write; uninstall removes only its own. The dry run lists both.
+
+### 5.5 Not in this branch
+
+- Repointing overseer (orchestrate skill + dashboard gauge/threshold, which
+  shell the old vigil CLI) and census readers — follow-up card.
+- Removing `five-hour-guard.py` (registered in the work account's
+  `~/.claude/settings.json`, reading the personal census store): Claude Code's
+  built-in "Continue automatically at usage limit" replaces it; removal awaits
+  the owner's go-ahead.
