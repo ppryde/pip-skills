@@ -22,20 +22,24 @@
 - Defaults (spec §6): nudge 35% (+5% steps), vigil bar On, auto mode Off, idle window 30 min, last light Off (threshold 25%), limits On (trigger 95%, windows `seven_day` + `spend_limit`), RC auto-clear unanswered (treated as No).
 - Working window: agent activity within the last **2 min**. RC countdown **30 s**; no RC clear within **2 min** of the last `bridge` prompt. Last-light lead **300 s**, TTL 1 h.
 - Setup-card headers ≤ 12 UTF-16 code units; 2–4 options per question including "Tell me more".
-- Every user-facing string comes from `core/voice.ts`, emoji-led.
+- Every user-facing string comes from `core/voice.ts`, emoji-led. Exempt from the emoji rule: option labels a person picks (`On`, `35%`, `Resume from handover`, …) and prompt texts addressed to the model.
+- `$.state` atom refs must spell `plugin` and `key` as string literals (the validator requires literals), so the atoms repeat `'context-vigil-mod'`; T11's test pins that literal to `NAME`.
+- Plugin prompts carry no origin argument: `PromptSubmitArgs` omits `origin`, and the engine stamps every `$.prompt.submit` as `{ kind: 'plugin', name: 'context-vigil-mod' }`. Hooks read `e.origin.kind`.
+- `$.ui.ask` is not an op event: it runs as a `tool.call` of `AskUserQuestion` whose result is `{ questions, answers: { [question]: label } }` (claude-code-tools typings). The test world answers it there.
+- Stage only your own files: `git add <exact paths>`, never `git add -A` / `.`; tasks run one at a time in one worktree.
 - Tests never touch a real config dir: shell tests use the in-memory world in `tests/world.tsx` (`CLAUDE_CONFIG_DIR=/cfg`); the install-script test uses pytest `tmp_path`.
 - Gates for every task: `claude plugin validate plugins/context-vigil-mod`, `claude plugin test plugins/context-vigil-mod`, `bash plugins/context-vigil-mod/scripts/typecheck.sh` — all clean.
-- Every commit message ends with these two lines:
+- Every commit message ends with these two lines (every commit step below already carries them):
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
   `Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf`
 - Work in the worktree `/Users/philip.pryde/repos/pip-skills/.claude/worktrees/context-vigil-mod` on branch `feat/context-vigil-mod`. Never push.
 
 ## Review Focus
 
-1. **Two sessions on one account at once** (two tmux windows) — each must keep its own event log and handovers; a shared day file rewritten whole by two writers would lose lines. → Task 3 pins per-session event files; Task 5 pins per-session handover paths.
+1. **Two sessions on one account at once** (two tmux windows) — each must keep its own event log, handovers, pending handover and early-stop marks; a shared day file rewritten whole by two writers would lose lines. → Task 1 (`name.ts` tests) pins per-session paths; Task 11 test "events go to a per-session day file"; Task 12 test "a pending handover is keyed by its session".
 2. **The threshold after a `/clear`** — context falls back near 0%, and the next crossing of 35% must nudge again, not be swallowed by the old `lastNudged`. → Task 5 test `nextThreshold after reset`; Task 12 test "clear resets lastNudged".
 3. **The model never calls `vigil_handover`, or calls it with missing fields** — a person would expect a retry, then a visible failure, and nothing cleared. → Task 5 tests `parseFields` rejections; Task 12 tests retry-once-then-notice.
-4. **A hot reload or restart mid-flow** (pending handover, running countdown) — module variables reset, so the pending handover must come back from `$.state`/`$.store`, never be silently dropped. → Task 12 test "pending restored from store at session start".
+4. **A hot reload or restart mid-flow** (pending handover, running countdown) — module variables reset, so the pending handover must come back from `$.state`/`$.store`, never be silently dropped. → Task 12 test "a pending handover is keyed by its session" (restored from `$.store` at session start); Task 11 test "a fresh session start resets module caches".
 5. **A corrupted or hand-edited settings blob in `$.store`** — must fall back field-by-field to defaults, never crash the mod. → Task 1 tests `loadSettings`.
 
 ## Spec ambiguities resolved in this plan
@@ -45,8 +49,16 @@
 - **Classic detection:** the spec's `.vigil/sessions/` is wrong for current classic. Classic writes session records to `$CLAUDE_CONFIG_DIR/context-vigil/sessions/<session_id>.json` and its hook commands contain `/scripts/context-vigil" hook `. The interlock checks those.
 - **Last-light return question:** asking through the model would itself pay the cold cache last light exists to avoid. Resolved: `$.ui.ask` (the engine's AskUserQuestion dialog, no model turn). Setup cards still go through the model's AskUserQuestion as the spec says.
 - **Cache TTL:** the mod API exposes no live cache TTL. Default 1 h; updated from `classic.PostModelSwitch` input `cache_ttl` (`'5m' | '1h'`) when it fires.
+- **`register.tsx`, not `register.ts`:** the shell draws the vigil bar in JSX, so the hooks module is `.tsx` (`hooks/hooks.json` names `./register.tsx`).
+- **Install refuses while classic is installed** (stricter than spec §7's "stands down"): installing into an account that still has classic's hooks would do nothing but stand down, so `install.sh` stops and says to uninstall classic first. The runtime stand-down stays for the case the script cannot see (a classic session record).
+- **Per-session keys (pre-flight F4/F5):** the pending handover lives in `$.store` under `pending:<session>`, so it survives a restart only for that session (`claude --resume` keeps the id); early-stop "fired" marks live in `$.state` per session (a restarted process may re-fire once).
+- **Countdown Cancel and the RC question (F24):** the bar shows the RC countdown with a Cancel button (hotkey `0`); any prompt cancels too. The RC question is asked when auto mode would first arm in a session whose last human prompt came over `bridge` (spec §2), not at the first clear.
+- **`ahead` dropped (F30):** git runs two commands (branch, status); nothing consumes ahead while the status-line band is parked.
+- **Early `prompt.edit` band for last light (spec §4 "may"):** not built in v1; listed under Deferred.
 
 ## Parallel waves
+
+Execution runs one task at a time (shared worktree and index); the waves give the order and the dependencies. Within wave 1: T6 after T3 (imports `WaitReason` from `voice.ts`), T7 after T4 (imports `classifyOrigin` from `arming.ts`). Every task's gate runs the whole suite, so each task leaves it green.
 
 ```
 Wave 0 (serial):   T1 scaffold + contract + settings + name + typecheck
@@ -101,9 +113,9 @@ tests/context_vigil_mod/test_install.py   pytest for scripts/install.sh
 
 **Interfaces:**
 - Produces (every later task relies on these exact names):
-  - `types/index.d.ts`: `Window`, `RcAnswer`, `Settings`, `Who`, `Mode`, `Activity`, `Fields`, `Snapshot`, `Git`, `RateLimit`, `Latch`, `PendingReason`, `Pending`, `StepId`, `EventKind`, `EventRecord`, and the `PluginState['context-vigil-mod']` contract.
+  - `types/index.d.ts`: `Window`, `RcAnswer`, `Settings`, `Who`, `Mode`, `Activity`, `Fields`, `Snapshot`, `Git` (`{ branch, dirty }`), `RateLimit`, `Latch`, `PendingReason`, `Pending` (with `session`), `Awaiting`, `StepId`, `EventKind`, `EventRecord`, and the `PluginState['context-vigil-mod']` contract (17 keys).
   - `core/name.ts`: `NAME`, `TOOL`, `TOOL_FULL`, `COMMANDS`, `configRoot(env)`, `handoverPath(root, session, n)`, `eventsPath(root, day, session)`, `classicSessionPath(root, session)`.
-  - `core/settings.ts`: `DEFAULTS: Settings`, `STORE_KEY = 'settings'`, `loadSettings(raw: unknown): Settings`.
+  - `core/settings.ts`: `DEFAULTS: Settings`, `STORE_KEY = 'settings'`, `pendingKey(session): string` (`'pending:<session>'`), `loadSettings(raw: unknown): Settings`.
 
 - [ ] **Step 0: Load the mod-authoring skill** — invoke the `plugin-authoring` skill once (it lays this build's typings at `/private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts`, which `scripts/typecheck.sh` uses). Skim `reference.md` beside it.
 
@@ -180,13 +192,14 @@ export type Snapshot = {
   contextPct: number | null
 }
 
-export type Git = { branch: string | null; dirty: string[]; ahead: number | null }
+export type Git = { branch: string | null; dirty: string[] }
 
 export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string }
 export type Latch = { kind: string; resetsAtMs: number } | null
 
 export type PendingReason = 'threshold' | 'request' | 'last_light' | 'limit'
 export type Pending = {
+  session: string
   path: string
   reason: PendingReason
   markdown: string
@@ -194,6 +207,11 @@ export type Pending = {
   followUp: string | null
   createdAt: number
 }
+
+// A handover the model has been asked to write and has not written yet. `started` turns
+// true when the instruction prompt itself passes prompt.submit, so only ITS turn's
+// turn.complete counts as a missed attempt.
+export type Awaiting = { reason: PendingReason; resume: boolean; attempts: number; started: boolean }
 
 export type StepId =
   | 'nudge' | 'bar' | 'auto' | 'idle' | 'last_light' | 'last_light_at'
@@ -217,11 +235,16 @@ declare module 'claude-code' {
       barShown: boolean
       barDismissed: boolean
       pending: Pending | null
+      awaiting: Awaiting | null
+      deferred: Awaiting | null
+      handoverCount: number
+      firedEarlyStops: string[]
       latch: Latch
       countdownEndsAt: number | null
       lastLightArmed: boolean
       lastApiAt: number | null
       standDown: boolean
+      rcAsked: boolean
     }
   }
 }
@@ -232,7 +255,12 @@ declare module 'claude-code' {
 `plugins/context-vigil-mod/tests/settings.test.ts`:
 ```ts
 import { describe, expect, test } from 'claude-code/testing'
-import { DEFAULTS, loadSettings } from '../core/settings'
+import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
+
+test('store keys', () => {
+  expect(STORE_KEY).toBe('settings')
+  expect(pendingKey('s1')).toBe('pending:s1')
+})
 
 describe('loadSettings', () => {
   test('nothing stored gives the defaults', () => {
@@ -329,6 +357,11 @@ import type { Settings, Window } from '../types'
 
 export const STORE_KEY = 'settings'
 
+// Per session: a second session on the account must never see or wipe this one's handover.
+export function pendingKey(session: string): string {
+  return `pending:${session}`
+}
+
 export const DEFAULTS: Settings = {
   nudgeAt: 35, step: 5, bar: true, auto: false, idleMin: 30,
   lastLight: false, lastLightAt: 25, limits: true, limitPct: 95,
@@ -398,10 +431,33 @@ Then `chmod +x plugins/context-vigil-mod/scripts/typecheck.sh`.
 Run: `claude plugin validate plugins/context-vigil-mod && claude plugin test plugins/context-vigil-mod && bash plugins/context-vigil-mod/scripts/typecheck.sh`
 Expected: validation passes (an `author` warning is fine); all tests pass; tsc prints nothing and exits 0.
 
+- [ ] **Step 6b: Prove the toolchain on the constructs later tasks use** (F21). Temporarily replace `hooks/register.tsx` with this stub (it uses JSX through the global `h`, imported `atom/read/update` given `$`, and a `readonly` argv to `$.process.run`), run validate + typecheck, then restore the empty shell from Step 5:
+```tsx
+import { atom, read, update } from 'claude-code'
+import type { Register } from 'claude-code'
+const shownA = atom({ plugin: 'context-vigil-mod', key: 'barShown' } as const, false)
+const ARGV = ['git', 'status', '--porcelain'] as const
+export const register: Register = on => {
+  on('turn.complete', async ($, e, next) => {
+    await update($, shownA, () => true)
+    await $.process.run(ARGV)
+    return next(e)
+  })
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await read($, shownA))) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    return <Box><Text>stub</Text></Box>
+  })
+}
+```
+Run: `claude plugin validate plugins/context-vigil-mod && bash plugins/context-vigil-mod/scripts/typecheck.sh`
+Expected: both clean (this combination passed in a scratch plugin while planning). If either refuses, stop and report the message — Tasks 11–15 depend on these constructs. Then restore the empty shell and re-run the Step 6 gates.
+
 - [ ] **Step 7: Commit**
 ```bash
-git add plugins/context-vigil-mod
-git commit -m "feat(context-vigil-mod): scaffold, state contract, settings and names"
+git add plugins/context-vigil-mod/.claude-plugin/plugin.json plugins/context-vigil-mod/.gitignore plugins/context-vigil-mod/tsconfig.json plugins/context-vigil-mod/hooks plugins/context-vigil-mod/types plugins/context-vigil-mod/core/name.ts plugins/context-vigil-mod/core/settings.ts plugins/context-vigil-mod/scripts/typecheck.sh plugins/context-vigil-mod/tests/settings.test.ts plugins/context-vigil-mod/tests/name.test.ts
+git commit -m "feat(context-vigil-mod): scaffold, state contract, settings and names" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -415,7 +471,7 @@ Answers spec §9 before wave 2 depends on it. The probe mod is throwaway and liv
 - Create (committed): `plugins/context-vigil-mod/PROBES.md`
 
 **Interfaces:**
-- Produces: `PROBES.md` with a verdict per question. Task 11's `notify()` and Task 15's answer capture follow it.
+- Produces: `PROBES.md` with a verdict per question (sections 1–7). Task 11's `notify()`, Task 12's clear/inject path, Task 13's `$.ui.ask` and Task 15's answer capture and follow-up cards follow it.
 
 - [ ] **Step 1: Write the probe mod** `hooks/register.ts`:
 ```ts
@@ -472,8 +528,52 @@ export const register: Register = on => {
     await note($, 'classic.Stop', e)
     return next(e)
   })
+  // F20: $.ui.ask, a mod-run /clear, default plugin prompt origin, { drop }, tool.call context.
+  on('session.start', async ($, e, next) => {
+    const r = await next(e)
+    await $.command.register({ name: 'cvm-probe-uiask', description: 'PROBE: $.ui.ask dialog' })
+    await $.command.register({ name: 'cvm-probe-clear', description: 'PROBE: mod-run /clear from a timer' })
+    await $.command.register({ name: 'cvm-probe-drop', description: 'PROBE: drop your next prompt, then re-submit it' })
+    return r
+  })
+  on('command.run', { command: 'cvm-probe-uiask' }, async $ => {
+    $.clock.after(0, () => {
+      void $.ui.ask('🧪 Probe: pick one?', ['Resume from handover', 'Carry on'])
+        .then(answer => note($, 'ui.ask resolved', answer))
+        .catch(err => note($, 'ui.ask rejected', String(err)))
+    })
+    return { text: 'probe: ui.ask scheduled' }
+  })
+  on('command.run', { command: 'cvm-probe-clear' }, async $ => {
+    await note($, 'mod clear scheduled', { session: await $.session.id() })
+    $.clock.after(1000, () => {
+      void $.command.run({ command: 'clear' }).then(r => note($, 'mod clear resolved', r)).catch(err => note($, 'mod clear rejected', String(err)))
+    })
+    return { text: 'probe: /clear in 1 s' }
+  })
+  let dropNext = false
+  on('command.run', { command: 'cvm-probe-drop' }, async () => {
+    dropNext = true
+    return { text: 'probe: your next message will be held, then re-sent' }
+  })
+  on('prompt.submit', async ($, e, next) => {
+    await note($, 'prompt.submit origin', e.origin)
+    if (dropNext && e.origin.kind !== 'plugin') {
+      dropNext = false
+      const held = e.text
+      $.clock.after(1500, () => { void $.prompt.submit({ text: held }).then(() => note($, 'held prompt re-sent', held)) })
+      return { drop: 'probe: held' }
+    }
+    return next(e)
+  })
+  on('classic.SessionStart', async ($, e, next) => {
+    await note($, 'classic.SessionStart', { source: e.source, session: await $.session.id() })
+    const r = await next(e)
+    return e.source === 'clear' ? { ...r, additionalContext: [...(r.additionalContext ?? []), 'PROBE: the secret word is HERON.'] } : r
+  })
 }
 ```
+In the `probe_echo` branch of the `tool.call` hook, return `{ result: \`echo: ${String(input.word)}\`, context: ['PROBE CONTEXT: the codeword is OSPREY.'] } as never` (tests whether a tool result's `context` reaches the model).
 Write `.claude-plugin/plugin.json` `{ "name": "cvm-probe", "version": "0.0.1", "description": "THROWAWAY probe" }` and `hooks/hooks.json` `{ "modules": ["./register.ts"] }`. Run `claude plugin validate <probe folder>` — must pass.
 
 - [ ] **Step 2: Owner runs the probe** (the auto-mode classifier forbids an agent driving another session — hand these steps to the owner verbatim):
@@ -481,7 +581,10 @@ Write `.claude-plugin/plugin.json` `{ "name": "cvm-probe", "version": "0.0.1", "
   2. Run `/cvm-probe-notice` from the terminal, then again from the phone. Note: did the toast and/or the log line appear on the phone? In the terminal?
   3. Run `/cvm-probe-tool`. Note: did the model call `probe_echo` in the same session (the tool should be offered from the next prompt on)?
   4. Run `/cvm-probe-ask`, answer "B" (once in the terminal, once from the phone). The probe records the `AskUserQuestion` input and result.
-  5. Run `/clear` once; then send `hi`.
+  5. After step 3, ask the model: "What codeword did the probe tool give you?" — OSPREY means a tool result's `context` reaches the model.
+  6. Run `/cvm-probe-uiask`; pick "Resume from handover" in the terminal; repeat from the phone.
+  7. Run `/cvm-probe-drop`, then send `hello there` — it should vanish, then re-appear about 1.5 s later as a plugin prompt.
+  8. Run `/cvm-probe-clear` and keep the prompt box empty — after 1 s the session clears; then ask "What is the secret word?" (HERON means the mod-run clear fired `classic.SessionStart` with source `clear` and the injection landed).
 
 - [ ] **Step 3: Read `probe-log.json` and write `plugins/context-vigil-mod/PROBES.md`** with exactly these sections, each with the observed answer and the decision:
 ```markdown
@@ -496,17 +599,29 @@ Observed: probe_echo called <yes/no>; result shape accepted: `{ result: string }
 Decision: vigil_handover served by a `tool.call` hook on TOOL_FULL returning `{ result: string }` (or the observed shape).
 
 ## 3. AskUserQuestion answers visible to a tool.call hook
-Observed: answers found at <`e.answers` | `r.result.answers` | elsewhere: path>; keyed by <question text | header>; multi-select joined by <", " | ",">.
-Decision: setup answer capture reads <path>.
+Observed: answers found at <`e.answers` | `r.result.answers` | both>; keyed by <question text | header>; multi-select joined by <", " | ",">.
+Decision: `extractAnswers` (Task 9) reads input first, then result — keep, or narrow to the observed path.
 
-## 4. classic.SessionStart source 'clear' after /clear
-Observed (from earlier spike + this run): <yes/no>.
+## 4. classic.SessionStart source 'clear' after a MOD-RUN /clear
+Observed: source <clear/other>; injected context reached the model (HERON) <yes/no>; `command.run` <resolved/rejected: message>.
+
+## 5. tool.call result `context` reaches the model
+Observed: OSPREY <yes/no>.
+Decision: setup follow-up cards ride `context` on the AskUserQuestion result (Task 15) <keep | switch to $.prompt.submit of the next card>.
+
+## 6. $.ui.ask
+Observed: terminal → resolved to <label>; phone → <resolved label | rejected | not shown>.
+Decision: last-light return question (Task 13) <keep $.ui.ask | fall back to the model's AskUserQuestion>.
+
+## 7. Plugin prompt origin and { drop }
+Observed: a plugin's `$.prompt.submit` reaches hooks with origin <`{ kind: 'plugin', name }` | other>; `{ drop }` held the prompt <yes/no>; re-submit arrived <yes/no>.
 ```
 
 - [ ] **Step 4: Commit**
 ```bash
 git add plugins/context-vigil-mod/PROBES.md
-git commit -m "docs(context-vigil-mod): record spec §9 probe results"
+git commit -m "docs(context-vigil-mod): record spec §9 probe results" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -519,7 +634,7 @@ git commit -m "docs(context-vigil-mod): record spec §9 probe results"
 
 **Interfaces:**
 - Consumes: `EventKind`, `EventRecord` from `../types`.
-- Produces: `V` (object of strings/functions below — exact keys); `dayKey(ms): string`, `makeRecord(ms, session, kind, fields): EventRecord`, `appendLine(existing, rec): string`.
+- Produces: `V` (object of strings/functions below — exact keys); `type WaitReason` (imported by Task 6); `dayKey(ms): string`, `makeRecord(ms, session, kind, fields): EventRecord`, `appendLine(existing, rec): string`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -565,11 +680,13 @@ test('bar strings', () => {
   expect(V.barHandover).toBe('📜 Hand over now')
   expect(V.barLater(45)).toBe('⏰ Remind me at 45%')
   expect(V.barDismiss).toBe('✖ Dismiss')
+  expect(V.countdownLine(12)).toBe('🧹 Handing over in 12 s — 0 or send anything to cancel')
+  expect(V.cancel).toBe('✖ Cancel')
 })
 test('every user-facing string is emoji-led', () => {
   const samples = [
-    V.nudge(41), V.handoverSaved('/x.md'), V.handoverFailed, V.clearRejected, V.countdown(30),
-    V.countdownCancelled, V.rcOffer, V.pendingOffer('/x.md'), V.waiting('draft'), V.lastLightReady,
+    V.nudge(41), V.handoverSaved('/x.md'), V.handoverFailed, V.clearRejected, V.countdownLine(30),
+    V.countdownCancelled, V.setupUsage, V.rcAsk, V.pendingOffer('/x.md'), V.waiting('draft'), V.lastLightReady,
     V.lastLightAsk, V.limitLatched('14:05'), V.limitCleared, V.earlyStop('seven_day', 95, '14:05'),
     V.classicActive, V.setupSaved, V.handingOver, V.settingUp, V.cmdHandover, V.cmdSetup,
   ]
@@ -631,9 +748,11 @@ export const V = {
   handoverSaved: (path: string) => `📜 Handover saved — ${path}`,
   handoverFailed: '📜 Couldn\'t write a handover — nothing was cleared',
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
-  countdown: (s: number) => `🧹 Handing over in ${s} s — send anything to cancel`,
+  countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,
+  cancel: '✖ Cancel',
+  rcAsk: '📱 First Remote Control session with auto mode — one quick question about auto-clear',
+  setupUsage: '⚙️ /vsetup [nudge|bar|auto|last-light|limits|rc] — that step name is not one of these',
   countdownCancelled: '🧹 Handover countdown cancelled — the handover is saved; /clear to resume from it',
-  rcOffer: '📜 Handover saved — /clear to pick it back up ✨',
   pendingOffer: (path: string) => `📜 A handover is waiting (${path}) — /clear to resume from it`,
   waiting: (r: WaitReason) => WAIT[r],
   lastLightReady: '🌅 Last light: a handover is ready 📜 — carry on as normal, or /clear to resume from it ✨',
@@ -658,7 +777,8 @@ export const V = {
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/voice.ts plugins/context-vigil-mod/core/eventlog.ts plugins/context-vigil-mod/tests/voice.test.ts plugins/context-vigil-mod/tests/eventlog.test.ts
-git commit -m "feat(context-vigil-mod): voice strings and per-session event log lines"
+git commit -m "feat(context-vigil-mod): voice strings and per-session event log lines" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -828,7 +948,8 @@ export function onPhone(a: Activity): boolean {
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/arming.ts plugins/context-vigil-mod/tests/arming.test.ts
-git commit -m "feat(context-vigil-mod): arming — origin classes, activity, attended/auto/idle"
+git commit -m "feat(context-vigil-mod): arming — origin classes, activity, attended/auto/idle" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -841,12 +962,12 @@ git commit -m "feat(context-vigil-mod): arming — origin classes, activity, att
 
 **Interfaces:**
 - Consumes: `Fields`, `Snapshot`, `Settings`, `PendingReason` from `../types`; `TOOL_FULL` from `../core/name`.
-- Produces: `nextThreshold(pct: number, s: Pick<Settings,'nudgeAt'|'step'>, lastNudged: number | null): number | null`; `FIELD_NAMES`; `INPUT_SCHEMA`; `TOOL_DESCRIPTION`; `parseFields(input: Record<string, unknown>): { ok: true; fields: Fields } | { ok: false; error: string }`; `renderHandover(f: Fields, s: Snapshot): string`; `instructionText(reason: PendingReason): string`; `resumeText(path: string): string`; `injectText(markdown: string): string`.
+- Produces: `nextThreshold(pct: number, s: Pick<Settings,'nudgeAt'|'step'>, lastNudged: number | null): number | null`; `FIELD_NAMES`; `INPUT_SCHEMA`; `TOOL_DESCRIPTION`; `parseFields(input: Record<string, unknown>): { ok: true; fields: Fields } | { ok: false; error: string }`; `renderHandover(f: Fields, s: Snapshot): string`; `instructionText(reason: PendingReason): string`; `resumeText(path: string): string`; `injectText(markdown: string): string`; `limitResumeText(path: string): string`.
 
 - [ ] **Step 1: Write the failing test** `tests/handover.test.ts`:
 ```ts
 import { describe, expect, test } from 'claude-code/testing'
-import { INPUT_SCHEMA, injectText, instructionText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { INPUT_SCHEMA, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -914,6 +1035,10 @@ test('texts name the tool and the file', () => {
   expect(instructionText('last_light')).toContain('Do not clear')
   expect(resumeText('/cfg/x.md')).toContain('/cfg/x.md')
   expect(injectText('# H')).toContain('# H')
+  const after = limitResumeText('/cfg/x.md')
+  expect(after).toContain('/cfg/x.md')
+  expect(after).toContain('limit has reset')
+  expect(after).not.toContain('injected above')
 })
 ```
 
@@ -1005,6 +1130,11 @@ export function resumeText(path: string): string {
 export function injectText(markdown: string): string {
   return `[context-vigil-mod] Handover from before the clear:\n\n${markdown}`
 }
+
+// After a limit early stop there was no clear: the conversation is still here.
+export function limitResumeText(path: string): string {
+  return `[context-vigil-mod] The usage limit has reset. Continue the work; the handover you wrote is saved at ${path} if you need it.`
+}
 ```
 
 - [ ] **Step 4: Gates** — clean.
@@ -1012,7 +1142,8 @@ export function injectText(markdown: string): string {
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/handover.ts plugins/context-vigil-mod/tests/handover.test.ts
-git commit -m "feat(context-vigil-mod): handover core — thresholds, tool schema, render, texts"
+git commit -m "feat(context-vigil-mod): handover core — thresholds, tool schema, render, texts" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -1025,7 +1156,7 @@ git commit -m "feat(context-vigil-mod): handover core — thresholds, tool schem
 
 **Interfaces:**
 - Consumes: `RcAnswer` from `../types`; `WaitReason` from `../core/voice` (type only).
-- Produces: `COUNTDOWN_MS = 30_000`, `HOLDBACK_MS = 120_000`, `RECHECK_MS = 2_000`; `type GateFacts`; `type Gate = { go: true } | { go: false; reason: WaitReason; recheckMs: number | null }`; `clearGate(f: GateFacts): Gate`; `needsRcQuestion(onPhone: boolean, rc: RcAnswer, unattended: boolean): boolean`.
+- Produces: `COUNTDOWN_MS = 30_000`, `HOLDBACK_MS = 120_000`, `RECHECK_MS = 2_000`; `type GateFacts`; `type Gate = { go: true } | { go: false; reason: WaitReason; recheckMs: number | null }`; `clearGate(f: GateFacts): Gate`; `needsRcQuestion(onPhone: boolean, rc: RcAnswer, wouldArm: boolean): boolean`.
 
 - [ ] **Step 1: Write the failing test** `tests/surfaces.test.ts`:
 ```ts
@@ -1068,7 +1199,7 @@ describe('clearGate', () => {
   })
 })
 
-test('needsRcQuestion only for an unattended clear on the phone with no answer yet', () => {
+test('needsRcQuestion only when auto mode would arm on the phone with no answer yet', () => {
   expect(needsRcQuestion(true, 'unanswered', true)).toBe(true)
   expect(needsRcQuestion(true, 'no', true)).toBe(false)
   expect(needsRcQuestion(false, 'unanswered', true)).toBe(false)
@@ -1117,8 +1248,9 @@ export function clearGate(f: GateFacts): Gate {
   return { go: true }
 }
 
-export function needsRcQuestion(onPhone: boolean, rc: RcAnswer, unattended: boolean): boolean {
-  return onPhone && unattended && rc === 'unanswered'
+// Asked when auto mode would first arm in a bridge session (spec §2), not at the first clear.
+export function needsRcQuestion(onPhone: boolean, rc: RcAnswer, wouldArm: boolean): boolean {
+  return onPhone && wouldArm && rc === 'unanswered'
 }
 ```
 
@@ -1127,7 +1259,8 @@ export function needsRcQuestion(onPhone: boolean, rc: RcAnswer, unattended: bool
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/surfaces.ts plugins/context-vigil-mod/tests/surfaces.test.ts
-git commit -m "feat(context-vigil-mod): clear gate with Remote Control countdown and holdback"
+git commit -m "feat(context-vigil-mod): clear gate with Remote Control countdown and holdback" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -1248,7 +1381,8 @@ export function holdOnReturn(f: { pendingIsLastLight: boolean; origin: string; n
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/last-light.ts plugins/context-vigil-mod/tests/last-light.test.ts
-git commit -m "feat(context-vigil-mod): last-light core — timer, fire conditions, loop guard, return hold"
+git commit -m "feat(context-vigil-mod): last-light core — timer, fire conditions, loop guard, return hold" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -1398,7 +1532,8 @@ export function formatHHMM(ms: number): string {
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/limits.ts plugins/context-vigil-mod/tests/limits.test.ts
-git commit -m "feat(context-vigil-mod): limits core — latch, configurable early stop, resume hops"
+git commit -m "feat(context-vigil-mod): limits core — latch, configurable early stop, resume hops" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -1411,13 +1546,13 @@ git commit -m "feat(context-vigil-mod): limits core — latch, configurable earl
 
 **Interfaces:**
 - Consumes: `Settings`, `StepId`, `Window` from `../types`.
-- Produces: `TELL = 'Tell me more'`; `type Question = { header: string; question: string; multiSelect: boolean; options: { label: string; description: string }[] }`; `STEPS: Record<StepId, Step>`; `FLOW: StepId[]`; `ALIASES: Record<string, StepId[]>`; `questionFor(id: StepId, explain?: boolean): Question`; `nextCard(s: Settings, asked: StepId[], only?: string): StepId[]`; `stepForQuestion(text: string): StepId | undefined`; `applyAnswers(s: Settings, pairs: { step: StepId; answer: string }[]): { settings: Settings; retell: StepId[] }`.
+- Produces: `TELL = 'Tell me more'`; `type Question = { header: string; question: string; multiSelect: boolean; options: { label: string; description: string }[] }`; `STEPS: Record<StepId, Step>`; `FLOW: StepId[]`; `ALIASES: Record<string, StepId[]>`; `questionFor(id: StepId, explain?: boolean): Question`; `nextCard(s: Settings, asked: StepId[], only?: string): StepId[]` (never a dependant beside its parent; ≤ 4); `isStep(alias: string): boolean`; `extractAnswers(input: unknown, result: unknown): Record<string, string>`; `stepForQuestion(text: string): StepId | undefined`; `applyAnswers(s: Settings, pairs: { step: StepId; answer: string }[]): { settings: Settings; retell: StepId[] }`.
 
 - [ ] **Step 1: Write the failing test** `tests/setup.test.ts`:
 ```ts
 import { describe, expect, test } from 'claude-code/testing'
 import { DEFAULTS } from '../core/settings'
-import { ALIASES, FLOW, STEPS, TELL, applyAnswers, nextCard, questionFor, stepForQuestion } from '../core/setup'
+import { ALIASES, FLOW, STEPS, TELL, applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
 import type { StepId } from '../types'
 
 const ALL = Object.keys(STEPS) as StepId[]
@@ -1448,19 +1583,44 @@ describe('nextCard', () => {
   test('defaults: card 1 skips steps whose parent is off', () => {
     expect(nextCard(DEFAULTS, [])).toEqual(['nudge', 'bar', 'auto', 'last_light'])
   })
-  test('card 2 picks up follow-ups the answers switched on', () => {
+  test('card 2 picks up follow-ups the answers switched on, never a dependant beside its parent', () => {
     const s = { ...DEFAULTS, auto: true, lastLight: true }
-    expect(nextCard(s, ['nudge', 'bar', 'auto', 'last_light'])).toEqual(['idle', 'last_light_at', 'limits', 'limit_pct'])
+    expect(nextCard(s, ['nudge', 'bar', 'auto', 'last_light'])).toEqual(['idle', 'last_light_at', 'limits'])
+  })
+  test('card 3 asks the limits follow-ups only after limits was answered On', () => {
+    const asked = ['nudge', 'bar', 'auto', 'last_light', 'idle', 'last_light_at', 'limits'] as StepId[]
+    expect(nextCard(DEFAULTS, asked)).toEqual(['limit_pct', 'limit_windows'])
+    expect(nextCard({ ...DEFAULTS, limits: false }, asked)).toEqual([])
   })
   test('done when nothing is left', () => {
     expect(nextCard(DEFAULTS, [...FLOW])).toEqual([])
   })
-  test('one step by alias', () => {
+  test('one step by alias; dependants follow in the next card', () => {
     expect(nextCard(DEFAULTS, [], 'bar')).toEqual(['bar'])
-    expect(nextCard(DEFAULTS, [], 'limits')).toEqual(['limits', 'limit_pct', 'limit_windows'])
+    expect(nextCard(DEFAULTS, [], 'limits')).toEqual(['limits'])
+    expect(nextCard(DEFAULTS, ['limits'], 'limits')).toEqual(['limit_pct', 'limit_windows'])
+    expect(nextCard({ ...DEFAULTS, auto: false }, [], 'auto')).toEqual(['auto'])
+    expect(nextCard({ ...DEFAULTS, auto: false }, ['auto'], 'auto')).toEqual([])
     expect(nextCard(DEFAULTS, [], 'rc')).toEqual(['rc'])
     expect(nextCard(DEFAULTS, [], 'bogus')).toEqual([])
     expect(ALIASES['last-light']).toEqual(['last_light', 'last_light_at'])
+  })
+  test('isStep tells a known alias from a typo', () => {
+    expect(isStep('limits')).toBe(true)
+    expect(isStep('bogus')).toBe(false)
+  })
+})
+
+describe('extractAnswers', () => {
+  test('answers on the tool input win', () => {
+    expect(extractAnswers({ answers: { 'Q?': 'A' } }, { result: { answers: { 'Q?': 'B' } } })).toEqual({ 'Q?': 'A' })
+  })
+  test('else answers on the tool result', () => {
+    expect(extractAnswers({}, { result: { questions: [], answers: { 'Q?': 'B' } } })).toEqual({ 'Q?': 'B' })
+  })
+  test('non-string answers are dropped; nothing found is empty', () => {
+    expect(extractAnswers({ answers: { 'Q?': 3, 'R?': 'x' } }, undefined)).toEqual({ 'R?': 'x' })
+    expect(extractAnswers(null, { deny: 'dismissed' })).toEqual({})
   })
 })
 
@@ -1612,10 +1772,43 @@ export function questionFor(id: StepId, explain = false): Question {
   }
 }
 
+// A dependant is never asked in the same card as its parent: the parent's answer decides it.
+const PARENT: Partial<Record<StepId, StepId>> = {
+  idle: 'auto', last_light_at: 'last_light', limit_pct: 'limits', limit_windows: 'limits',
+}
+
+export function isStep(alias: string): boolean {
+  return alias in ALIASES
+}
+
 export function nextCard(s: Settings, asked: StepId[], only?: string): StepId[] {
   const pool = only === undefined ? FLOW : (ALIASES[only] ?? [])
   const explicit = only !== undefined
-  return pool.filter(id => !asked.includes(id) && (STEPS[id].askIf(s) || (explicit && (id === 'rc' || pool[0] === id)))).slice(0, 4)
+  const card: StepId[] = []
+  for (const id of pool) {
+    if (card.length === 4) break
+    if (asked.includes(id)) continue
+    if (!(STEPS[id].askIf(s) || (explicit && (id === 'rc' || pool[0] === id)))) continue
+    const parent = PARENT[id]
+    if (parent !== undefined && card.includes(parent)) continue
+    card.push(id)
+  }
+  return card
+}
+
+// AskUserQuestion answers: on the tool input (answers collected by the permission
+// component) or on the result ({ questions, answers }). PROBES.md §3 says which.
+export function extractAnswers(input: unknown, result: unknown): Record<string, string> {
+  const pick = (v: unknown): Record<string, string> | null => {
+    if (!v || typeof v !== 'object') return null
+    const out: Record<string, string> = {}
+    for (const [k, a] of Object.entries(v as Record<string, unknown>)) if (typeof a === 'string') out[k] = a
+    return Object.keys(out).length ? out : null
+  }
+  const fromInput = pick((input as { answers?: unknown } | null)?.answers)
+  if (fromInput) return fromInput
+  const res = (result as { result?: { answers?: unknown } } | null | undefined)?.result
+  return pick(res?.answers) ?? {}
 }
 
 export function stepForQuestion(text: string): StepId | undefined {
@@ -1645,12 +1838,13 @@ export function applyAnswers(s: Settings, pairs: { step: StepId; answer: string 
 }
 ```
 
-- [ ] **Step 4: Gates** — clean. (If the `nextCard` "card 2" test disagrees with the pool rule, the rule is: unasked steps in FLOW order whose `askIf` holds, at most 4; with an alias, the alias's first step and `rc` are always asked.)
+- [ ] **Step 4: Gates** — clean.
 
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/setup.ts plugins/context-vigil-mod/tests/setup.test.ts
-git commit -m "feat(context-vigil-mod): setup steps — options plus Tell me more, cards, answers"
+git commit -m "feat(context-vigil-mod): setup steps — options plus Tell me more, cards, answers" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -1663,7 +1857,7 @@ git commit -m "feat(context-vigil-mod): setup steps — options plus Tell me mor
 
 **Interfaces:**
 - Consumes: `Git` from `../types`.
-- Produces: `GIT_ARGV = { branch, status, ahead }`; `COALESCE_MS = 1500`; `type RunOut = { exitCode: number; stdout: string }`; `parseGit(branch: RunOut, status: RunOut, ahead: RunOut): Git`; `touchesGit(tool: string): boolean`; `watchPaths(root: string): string[]`; `classicHooksInstalled(settingsText: string | null): boolean`.
+- Produces: `GIT_ARGV = { branch, status }`; `COALESCE_MS = 1500`; `type RunOut = { exitCode: number; stdout: string }`; `parseGit(branch: RunOut, status: RunOut): Git`; `touchesGit(tool: string): boolean`; `watchPaths(root: string): string[]`; `classicHooksInstalled(settingsText: string | null): boolean`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1675,17 +1869,17 @@ import { GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 const ok = (stdout: string) => ({ exitCode: 0, stdout })
 const fail = { exitCode: 128, stdout: '' }
 
-test('argv', () => {
+test('argv: two git questions, branch and status', () => {
+  expect(Object.keys(GIT_ARGV)).toEqual(['branch', 'status'])
   expect(GIT_ARGV.branch).toEqual(['git', 'symbolic-ref', '--short', 'HEAD'])
   expect(GIT_ARGV.status).toEqual(['git', 'status', '--porcelain'])
-  expect(GIT_ARGV.ahead).toEqual(['git', 'rev-list', '--count', '@{u}..HEAD'])
 })
-test('parse: branch, tracked changes only, ahead count', () => {
-  expect(parseGit(ok('main\n'), ok(' M a.ts\nA  b.ts\n?? new.ts\n'), ok('3\n'))).toEqual({ branch: 'main', dirty: ['a.ts', 'b.ts'], ahead: 3 })
+test('parse: branch and tracked changes only', () => {
+  expect(parseGit(ok('main\n'), ok(' M a.ts\nA  b.ts\n?? new.ts\n'))).toEqual({ branch: 'main', dirty: ['a.ts', 'b.ts'] })
 })
 test('parse: failures are unknowns, not crashes', () => {
-  expect(parseGit(fail, fail, fail)).toEqual({ branch: null, dirty: [], ahead: null })
-  expect(parseGit(ok('main'), ok(''), ok('x'))).toEqual({ branch: 'main', dirty: [], ahead: null })
+  expect(parseGit(fail, fail)).toEqual({ branch: null, dirty: [] })
+  expect(parseGit(ok('main'), ok(''))).toEqual({ branch: 'main', dirty: [] })
 })
 test('tools that can change git', () => {
   for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash']) expect(touchesGit(t)).toBe(true)
@@ -1699,13 +1893,16 @@ import { expect, test } from 'claude-code/testing'
 import { classicHooksInstalled } from '../core/interlock'
 
 const settings = (cmd: string) => JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: cmd }] }] } })
+// The same fixture string is used by tests/context_vigil_mod/test_install.py (Task 16).
+const CLASSIC_CMD = '"/s/context-vigil/scripts/context-vigil" hook stop'
 
 test('classic hook commands are detected', () => {
-  expect(classicHooksInstalled(settings('"/u/skills/context-vigil/scripts/context-vigil" hook stop'))).toBe(true)
+  expect(classicHooksInstalled(settings(CLASSIC_CMD))).toBe(true)
+  expect(classicHooksInstalled(settings('"/u/skills/context-vigil/scripts/context-vigil" hook user-prompt-submit'))).toBe(true)
 })
 test('other hooks, our own name, no file and junk are not classic', () => {
   expect(classicHooksInstalled(settings('python3 ~/.claude-personal/census/five-hour-guard.py'))).toBe(false)
-  expect(classicHooksInstalled(settings('"/x/context-vigil-mod/scripts/thing" hook stop'))).toBe(false)
+  expect(classicHooksInstalled(settings('"/x/plugins/context-vigil-mod/scripts/context-vigil-mod" hook stop'))).toBe(false)
   expect(classicHooksInstalled(null)).toBe(false)
   expect(classicHooksInstalled('{not json')).toBe(false)
   expect(classicHooksInstalled(JSON.stringify({ hooks: 'odd' }))).toBe(false)
@@ -1720,23 +1917,22 @@ test('other hooks, our own name, no file and junk are not classic', () => {
 ```ts
 import type { Git } from '../types'
 
+// Two questions only: `ahead` was dropped while the status-line band is parked (pre-flight F30).
 export const GIT_ARGV = {
   branch: ['git', 'symbolic-ref', '--short', 'HEAD'],
   status: ['git', 'status', '--porcelain'],
-  ahead: ['git', 'rev-list', '--count', '@{u}..HEAD'],
 } as const
 
 export const COALESCE_MS = 1500
 
 export type RunOut = { exitCode: number; stdout: string }
 
-export function parseGit(branch: RunOut, status: RunOut, ahead: RunOut): Git {
+export function parseGit(branch: RunOut, status: RunOut): Git {
   const b = branch.exitCode === 0 ? branch.stdout.trim() || null : null
   const dirty = status.exitCode === 0
     ? status.stdout.split('\n').filter(l => l.length > 3 && !l.startsWith('??')).map(l => l.slice(3))
     : []
-  const n = ahead.exitCode === 0 ? Number.parseInt(ahead.stdout.trim(), 10) : Number.NaN
-  return { branch: b, dirty, ahead: Number.isFinite(n) ? n : null }
+  return { branch: b, dirty }
 }
 
 const TOUCH = new Set(['Edit', 'Write', 'NotebookEdit', 'Bash'])
@@ -1752,6 +1948,7 @@ export function watchPaths(root: string): string[] {
 ```ts
 // TEMPORARY: exists only for the side-by-side run with classic context-vigil.
 // Removed (with classicSessionPath in name.ts) when classic retires — spec §7.
+// Keep in step with the grep -E pattern in scripts/install.sh (same match, bash form).
 const CLASSIC = /\/scripts\/context-vigil"\s+hook\s/
 
 export function classicHooksInstalled(settingsText: string | null): boolean {
@@ -1780,7 +1977,8 @@ export function classicHooksInstalled(settingsText: string | null): boolean {
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/core/git.ts plugins/context-vigil-mod/core/interlock.ts plugins/context-vigil-mod/tests/git.test.ts plugins/context-vigil-mod/tests/interlock.test.ts
-git commit -m "feat(context-vigil-mod): git parse and staleness; temporary classic interlock"
+git commit -m "feat(context-vigil-mod): git parse and staleness; temporary classic interlock" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -1796,7 +1994,7 @@ Serial from here: Tasks 11–15 all edit `hooks/register.tsx`. Read `PROBES.md` 
 
 **Interfaces:**
 - Consumes: everything from Tasks 1, 3, 4, 10, and `INPUT_SCHEMA`, `TOOL_DESCRIPTION` from Task 5.
-- Produces (top-level functions in `register.tsx`, used by Tasks 12–15): `log($, kind, fields)`, `notify($, text)`, `observe($, signal)`, `scheduleGit($)`, `nowMs($)`; atoms `activityA`, `modeA`, `contextA`, `lastNudgedA`, `barShownA`, `barDismissedA`, `pendingA`, `latchA`, `countdownA`, `lastLightArmedA`, `lastApiA`, `standDownA`; module variables `root`, `session`, `settings`, `git`, `edited`, `cwd`. `tests/world.tsx` exports `world(on, opts)` returning the `World` below.
+- Produces (top-level functions in `register.tsx`, used by Tasks 12–15): `log($, kind, fields)`, `notify($, text)`, `submitSoon($, text, delayMs?)`, `observe($, signal)` (also treats a non-empty terminal draft as engagement), `scheduleGit($)`, `nowMs($)`, `bindSession($)` with its `// RESET` block; atoms `activityA`, `modeA`, `contextA`, `lastNudgedA`, `barShownA`, `barDismissedA`, `pendingA`, `latchA`, `countdownA`, `lastLightArmedA`, `lastApiA`, `standDownA`; module variables `root`, `session`, `settings`, `git`, `edited`, `cwd`. `tests/world.tsx` exports `world(on, opts)` returning the `World` below.
 
 - [ ] **Step 1: Write the test world** `tests/world.tsx` (in-memory engine beneath the plugin; every `$` call the shell makes has an answer here):
 ```tsx
@@ -1808,24 +2006,27 @@ export type World = {
   files: Map<string, string>
   submits: { text: string; origin: string }[]
   commands: string[]
-  notices: string[]
+  notices: string[]   // ui.toast lines — one per notify()
+  logs: string[]      // ui.log lines — kept apart so counts on `notices` stay exact
   registered: { tools: string[]; commands: string[] }
   draft: { value: string }
   sessionId: { value: string }
   contextPct: { value: number | undefined }
   rateLimits: { value: { kind: string; percentUsed: number; resetsAt?: string }[] }
-  git: { branch: string; status: string; ahead: string }
-  askAnswer: { value: string | null }
+  git: { branch: string; status: string }
+  askAnswer: { value: string | null }  // answers $.ui.ask and AskUserQuestion; null = dismissed
+  clearRefused: { value: boolean }     // makes $.command.run({ command: 'clear' }) reject
 }
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string> } = {}): World {
   const w: World = {
     clock: mock.clock(on, { now: opts.now ?? 1_000_000 }),
     files: new Map(Object.entries(opts.files ?? {})),
-    submits: [], commands: [], notices: [],
+    submits: [], commands: [], notices: [], logs: [],
     registered: { tools: [], commands: [] },
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
-    rateLimits: { value: [] }, git: { branch: 'main\n', status: '', ahead: '0\n' }, askAnswer: { value: null },
+    rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, askAnswer: { value: null },
+    clearRefused: { value: false },
   }
   mock.store(on, opts.store ?? {})
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
@@ -1837,7 +2038,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
   on('process.run', (_$, e) => {
     const a = e.argv.join(' ')
-    const out = a.includes('symbolic-ref') ? w.git.branch : a.includes('status') ? w.git.status : w.git.ahead
+    const out = a.includes('symbolic-ref') ? w.git.branch : w.git.status
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('session.id', () => ({ value: w.sessionId.value }))
@@ -1847,11 +2048,15 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('prompt.read', () => ({ value: { text: w.draft.value, cursor: w.draft.value.length } }))
   on('prompt.submit', (_$, e) => { w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
-  on('command.run', (_$, e) => { w.commands.push(e.command); return {} })
+  on('command.run', (_$, e) => {
+    if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
+    w.commands.push(e.command)
+    return {}
+  })
   on('command.register', (_$, e) => { w.registered.commands.push(e.name); return { value: { command: e.name } } })
   on('tool.register', (_$, e) => { w.registered.tools.push(e.name); return { value: { tool: `mcp__context-vigil-mod__${e.name}` } } })
   on('ui.toast', (_$, e) => { w.notices.push(e.text); return { value: undefined } })
-  on('ui.log', (_$, e) => { w.notices.push(e.text); return { value: undefined } })
+  on('ui.log', (_$, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.status', () => ({ value: undefined }))
   on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box /> })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
@@ -1862,12 +2067,17 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('classic.FileChanged', () => ({}))
   on('classic.StopFailure', () => ({}))
   on('classic.PostModelSwitch', () => ({}))
+  // AskUserQuestion — and $.ui.ask, which is not an op event but runs as this tool call.
+  // Result shape { questions, answers: { [question]: label } } per the claude-code-tools typings.
+  // A test that passes `answers` on the input gets them echoed; otherwise every question
+  // gets w.askAnswer; null means the person dismissed the dialog.
   on('tool.call', (_$, e) => {
-    const input = e as unknown as { tool: string; questions?: { question: string }[] }
+    const input = e as unknown as { tool: string; questions?: { question: string }[]; answers?: Record<string, string> }
     if (input.tool === 'AskUserQuestion') {
-      const q = input.questions?.[0]?.question ?? ''
+      if (input.answers) return { result: { questions: input.questions, answers: input.answers } } as never
       if (w.askAnswer.value === null) return { deny: 'dismissed' }
-      return { result: { questions: input.questions, answers: { [q]: w.askAnswer.value } } } as never
+      const answer = w.askAnswer.value
+      return { result: { questions: input.questions, answers: Object.fromEntries((input.questions ?? []).map(q => [q.question, answer])) } } as never
     }
     return { result: 'ok' } as never
   })
@@ -1878,11 +2088,12 @@ export const START = { cwd: '/repo', surface: 'terminal' as const, isInteractive
 export const turn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const })
 export const human = (text: string, kind: 'composer' | 'bridge' = 'composer') => ({ text, wait: false, origin: { kind } as never })
 ```
-Note for the implementer: `turn.start`'s bottom answer must match `TurnStartResult`; if `e as never` is refused, read `export type TurnStartResult` in the typings and return that shape. The `AskUserQuestion` result shape follows `PROBES.md` §3 — adjust the stub to the observed shape.
+Note for the implementer: `turn.start`'s bottom answer must match `TurnStartResult`; if `e as never` is refused, read `export type TurnStartResult` in the typings and return that shape. If `PROBES.md` §3/§6 observed a different AskUserQuestion / `$.ui.ask` shape, change this stub and `extractAnswers` (Task 9) together. A hook that throws in `command.run` makes the caller's `$.command.run` reject (that is how `clearRefused` works); if the harness reports it differently, return `{ deny: 'clear refused' }` instead.
 
 - [ ] **Step 2: Write the failing shell test** `tests/shell-foundation.test.tsx`:
 ```tsx
 import { expect, test } from 'claude-code/testing'
+import { NAME } from '../core/name'
 import { START, human, turn, world } from './world'
 
 const MIN = 60_000
@@ -1907,33 +2118,64 @@ test('arm and disarm are logged to a per-session day file when auto mode is on',
   expect(w.files.get(day ?? '')).toContain('"kind":"disarm"')
 })
 
-test('nothing is logged for arming while auto mode is off', async ($, on) => {
+test('auto mode off: the mode still moves to auto, but no arm line is logged', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await $.prompt.submit(human('go'))
   await w.clock.advance(31 * MIN)
   await $.turn.complete(turn())
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'mode' })).value).toBe('auto')
   const text = [...w.files.values()].join('')
   expect(text).not.toContain('"kind":"arm"')
 })
 
-test('git refresh coalesces bursts and runs off a timer', async ($, on) => {
-  const w = world(on)
+test('a draft sitting in the terminal box counts as you being here', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  w.draft.value = 'half a thought'
+  await $.turn.complete(turn())
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'mode' })).value).toBe('attended')
+  w.draft.value = ''
+  await w.clock.advance(31 * MIN)
+  await $.turn.complete(turn('2'))
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'mode' })).value).toBe('auto')
+})
+
+test('git refresh: tool calls schedule one coalesced refresh of two commands, off a timer', async ($, on) => {
   let runs = 0
   on('process.run', (_$, e) => { runs++; return { value: { exitCode: 0, stdout: e.argv.includes('status') ? '' : 'main', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
+  const w = world(on)
   await $.session.start(START)
+  await w.clock.advance(1500)          // let the session-start refresh run first
   runs = 0
   await $.tool.call({ tool: 'Edit', tool_use_id: 'u1', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } as never)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'ls' } as never)
   expect(runs).toBe(0)
   await w.clock.advance(1500)
-  expect(runs).toBe(3)
+  expect(runs).toBe(2)
+  await $.tool.call({ tool: 'Read', tool_use_id: 'u3', file_path: '/repo/a.ts' } as never)
+  await w.clock.advance(1500)
+  expect(runs).toBe(2)
 })
 
-test('classic installed: stands down with one notice', async ($, on) => {
+test('classic installed: stands down with one notice; the state literal is NAME', async ($, on) => {
   const w = world(on, { files: { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) } })
   await $.session.start(START)
   expect(w.notices.filter(n => n.includes('standing down')).length).toBe(1)
+  expect((await $.state.get({ plugin: NAME, key: 'standDown' } as never)).value).toBe(true)
+})
+
+test('a fresh session start resets module caches: a stale git timer neither blocks nor doubles the refresh', async ($, on) => {
+  let runs = 0
+  on('process.run', (_$, e) => { runs++; return { value: { exitCode: 0, stdout: e.argv.includes('status') ? '' : 'main', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
+  const w = world(on)
+  await $.session.start(START)          // schedules a refresh at +1500
+  w.sessionId.value = 's9'
+  await $.session.start(START)          // bindSession cancels it and schedules its own
+  await w.clock.advance(1500)
+  expect(runs).toBe(2)
 })
 
 test('classic.SessionStart returns watch paths for .git', async ($, on) => {
@@ -1943,7 +2185,7 @@ test('classic.SessionStart returns watch paths for .git', async ($, on) => {
   expect(r.watchPaths).toEqual(['/repo/.git/HEAD', '/repo/.git/index'])
 })
 ```
-(The second `process.run` hook registered after `world()` sits above the world's own — the test's later `on` wins for counting; if the harness orders them the other way, register the counting hook before calling `world()`.)
+(The counting `process.run` hook is registered before `world()`. If the harness lets the world's own `process.run` answer first, move the counting hook after `world()`; either way exactly one of them must answer.)
 
 - [ ] **Step 3: Run to see it fail** — `claude plugin test plugins/context-vigil-mod` → FAIL (no commands registered).
 
@@ -1982,10 +2224,10 @@ let root = '/nonexistent'
 let session = 'unknown'
 let cwd = ''
 let settings: Settings = DEFAULTS
-let git: Git = { branch: null, dirty: [], ahead: null }
+let git: Git = { branch: null, dirty: [] }
 let gitTimer: { cancel: () => void } | null = null
 const edited = new Set<string>()
-const dayText: Record<string, string> = {}
+let dayText: Record<string, string> = {}
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -2005,10 +2247,17 @@ async function notify($: EngineInterface, text: string) {
   $.ui.log(text)
 }
 
+// Every plugin prompt goes through here: from a timer, never awaited by the hook the turn waits on.
+function submitSoon($: EngineInterface, text: string, delayMs = 0) {
+  $.clock.after(delayMs, () => { void $.prompt.submit({ text }) })
+}
+
 async function observe($: EngineInterface, signal: Signal) {
   const now = await nowMs($)
   const prev = await read($, modeA)
-  const act = record(await read($, activityA), signal)
+  let act = record(await read($, activityA), signal)
+  // Spec §2: a non-empty draft in the terminal box is you being here.
+  if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) act = record(act, { kind: 'edit', at: now })
   await update($, activityA, () => act)
   const next = mode(act, now, settings)
   if (next === prev) return
@@ -2023,8 +2272,8 @@ async function refreshGit($: EngineInterface) {
   gitTimer = null
   const run = (argv: readonly string[]) =>
     $.process.run(argv, { cwd }).then(r => ({ exitCode: r.exitCode, stdout: r.stdout })).catch(() => ({ exitCode: 1, stdout: '' }))
-  const [b, s, a] = await Promise.all([run(GIT_ARGV.branch), run(GIT_ARGV.status), run(GIT_ARGV.ahead)])
-  git = parseGit(b, s, a)
+  const [b, s] = await Promise.all([run(GIT_ARGV.branch), run(GIT_ARGV.status)])
+  git = parseGit(b, s)
 }
 
 function scheduleGit($: EngineInterface) {
@@ -2032,7 +2281,16 @@ function scheduleGit($: EngineInterface) {
   gitTimer = $.clock.after(COALESCE_MS, () => { void refreshGit($) })
 }
 
+// Resets every module cache and timer (pre-flight F3): a hot reload or a reused module
+// must start clean. Tasks 12–15 add their own module variables to the RESET block.
 async function bindSession($: EngineInterface) {
+  // RESET (Task 11)
+  gitTimer?.cancel()
+  gitTimer = null
+  git = { branch: null, dirty: [] }
+  edited.clear()
+  dayText = {}
+  // RESET (Tasks 12–15 add lines here)
   root = configRoot({ CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), HOME: await $.env.get('HOME') })
   session = await $.session.id()
   cwd = await $.session.cwd()
@@ -2120,7 +2378,8 @@ If `claude plugin validate` refuses an atom key not used yet, it is fine to leav
 - [ ] **Step 6: Commit**
 ```bash
 git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/tests/world.tsx plugins/context-vigil-mod/tests/shell-foundation.test.tsx
-git commit -m "feat(context-vigil-mod): shell foundation — event log, notices, arming, git, interlock"
+git commit -m "feat(context-vigil-mod): shell foundation — event log, notices, arming, git, interlock" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -2132,8 +2391,8 @@ git commit -m "feat(context-vigil-mod): shell foundation — event log, notices,
 - Test: `tests/shell-handover.test.tsx`, `tests/shell-bar.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 5 (`nextThreshold`, `parseFields`, `renderHandover`, `instructionText`, `resumeText`, `injectText`), Task 6 (`clearGate`, `needsRcQuestion`), Task 4 (`armed`, `onPhone`), Task 8 (`formatHHMM`), Task 11 helpers/atoms.
-- Produces (top-level functions later tasks call): `startHandover($, reason: PendingReason, resume: boolean)`, `scheduleClear($, unattended: boolean)`, `savePending($, p: Pending | null)`; module variable `awaiting: { reason: PendingReason; resume: boolean; turns: number; attempts: number } | null`; module variable `clearParked: boolean`; module variable `askRc: ((reason: string) => void) | null` hook point that Task 15 fills.
+- Consumes: Task 1 (`pendingKey`, `Pending`, `Awaiting`), Task 5 (`nextThreshold`, `parseFields`, `renderHandover`, `instructionText`, `resumeText`, `injectText`), Task 6 (`clearGate`), Task 4 (`armed`, `onPhone`), Task 8 (`formatHHMM`), Task 11 helpers/atoms (`submitSoon`, `bindSession` RESET block).
+- Produces (top-level functions later tasks call): `startHandover($, reason: PendingReason, resume: boolean)` (defers while latched), `scheduleClear($, unattended: boolean)`, `savePending($, p: Pending | null)`, `cancelCountdown($)`; atoms `awaitingA`, `deferredA`, `handoverCountA`; module variables `clearParked: boolean`, `unattendedClear: boolean`.
 
 - [ ] **Step 1: Write the failing tests** `tests/shell-handover.test.tsx`:
 ```tsx
@@ -2144,14 +2403,16 @@ const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
 const call = (extra: Record<string, unknown> = {}) => ({ tool: TOOL, tool_use_id: 'h1', goal: 'G', state: 'S', next_step: 'N', ...extra })
 const measure = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
+const vho = { command: 'vho', args: '', origin: { kind: 'composer' } as never } as never
 
 test('a requested handover: instruction → tool → file → clear → inject → resume', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await $.command.run(vho)
   await w.clock.settle()
   expect(w.submits.at(-1)?.text).toContain(TOOL)
+  expect(w.submits.at(-1)?.origin).toBe('plugin')
   const r = await $.tool.call(call() as never)
   expect(String((r as { result?: unknown }).result)).toContain('/cfg/context-vigil-mod/handovers/s1-1.md')
   expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).toContain('## Goal')
@@ -2164,10 +2425,18 @@ test('a requested handover: instruction → tool → file → clear → inject �
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
 })
 
+test('/vhandoff does the same as /vho', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run({ command: 'vhandoff', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toContain(TOOL)
+})
+
 test('bad tool input is denied so the model can retry', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await $.command.run(vho)
   await w.clock.settle()
   const r = await $.tool.call(call({ state: '' }) as never)
   expect((r as { deny?: string }).deny).toContain('state')
@@ -2176,30 +2445,54 @@ test('bad tool input is denied so the model can retry', async ($, on) => {
 test('no tool call: one retry, then a visible failure and no clear', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await $.command.run(vho)
   await w.clock.settle()
   await $.turn.complete(turn('a'))
   await w.clock.settle()
   expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(2)
   await $.turn.complete(turn('b'))
   await w.clock.settle()
-  expect(w.notices.some(n => n.includes("Couldn't write a handover"))).toBe(true)
+  expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
   expect(w.commands).not.toContain('clear')
+})
+
+test('a turn that ends before the instruction prompt was sent is not a missed attempt', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(36))      // arms the handover; the submit is still on its timer
+  await $.turn.complete(turn('running'))    // the turn that was already running ends
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(1)
 })
 
 test('a draft in the box waits, then clears once it is gone', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await $.command.run(vho)
   await w.clock.settle()
   w.draft.value = 'half a sen'
   await $.tool.call(call() as never)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
-  expect(w.notices.some(n => n.includes('draft'))).toBe(true)
+  expect(w.notices).toContain('✍️ Handover waiting — there is a draft in your prompt box')
   w.draft.value = ''
   await w.clock.advance(2000)
   expect(w.commands).toContain('clear')
+})
+
+test('a refused /clear says so and keeps the handover pending', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.notices).toContain('🧹 /clear was refused — the handover is still pending; /clear to resume from it')
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'pending' })).value).toMatchObject({ path: '/cfg/context-vigil-mod/handovers/s1-1.md' })
 })
 
 test('auto mode at the threshold hands over by itself', async ($, on) => {
@@ -2225,24 +2518,33 @@ test('clear resets lastNudged so the next crossing nudges again', async ($, on) 
   expect(w.notices.filter(n => n.includes('Context at')).length).toBe(2)
 })
 
-test('pending restored from store at session start, and offered', async ($, on) => {
-  const pending = { path: '/cfg/context-vigil-mod/handovers/old-1.md', reason: 'request', markdown: '# H', resume: true, followUp: null, createdAt: 1 }
-  const w = world(on, { store: { pending } })
+test('a pending handover is keyed by its session: offered to its own session only', async ($, on) => {
+  const mine = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# MINE', resume: true, followUp: null, createdAt: 1 }
+  const theirs = { ...mine, session: 'other', path: '/cfg/context-vigil-mod/handovers/other-1.md', markdown: '# THEIRS' }
+  const w = world(on, { store: { 'pending:s1': mine, 'pending:other': theirs } })
   await $.session.start(START)
-  expect(w.notices.some(n => n.includes('old-1.md'))).toBe(true)
+  expect(w.notices.some(n => n.includes('s1-1.md'))).toBe(true)
+  expect(w.notices.some(n => n.includes('other-1.md'))).toBe(false)
   const ss = await $.classic.SessionStart({ source: 'clear' } as never)
-  expect(ss.additionalContext?.join('\n')).toContain('# H')
+  expect(ss.additionalContext?.join('\n')).toContain('# MINE')
+  expect(ss.additionalContext?.join('\n')).not.toContain('# THEIRS')
+  expect(await $.store.get('pending:other')).toMatchObject({ markdown: '# THEIRS' })
+  expect(await $.store.get('pending:s1')).toBeUndefined()
 })
 ```
+(If `$.store` is not callable from a test body, assert the same through a second `session.start` with `w.sessionId.value = 'other'` and check its offer notice.)
+
 `tests/shell-bar.test.tsx`:
 ```tsx
 import { expect, test } from 'claude-code/testing'
 import { START, human, world } from './world'
 
+const MIN = 60_000
+const TOOL = 'mcp__context-vigil-mod__vigil_handover'
 const BAND = (hasSurvey = false) => ({ plugin: 'context-vigil-mod', surface: 'terminal' as const, component: 'AbovePrompt' as const, props: { hasSurvey, isWorking: false } as never })
 const measure = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
 
-test('no bar before the threshold; bar from the crossing until a choice', async ($, on) => {
+test('no bar before the threshold; from the crossing it shows live % and the configured threshold', async ($, on) => {
   world(on)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
@@ -2251,19 +2553,32 @@ test('no bar before the threshold; bar from the crossing until a choice', async 
   await ui.unmount()
   await $.session.measure(measure(41))
   ui = await $.ui.mount(BAND())
-  expect((await ui.find({ type: 'Text', text: /context 41% · threshold 40%/ }))).toBeDefined()
-  await ui.press({ key: 'later' })
+  expect(await ui.find({ type: 'Text', text: /context 41% · threshold 35%/ })).toBeDefined()
+  expect(await ui.find({ key: 'handover' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('1 starts the handover and hides the bar', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(36))
+  const ui = await $.ui.mount(BAND())
+  await ui.press({ key: 'handover' })
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toContain(TOOL)
   expect(await ui.find({ key: 'handover' })).toBeUndefined()
   await ui.unmount()
 })
 
-test('2 brings the bar back at the next step; 0 keeps it away until a clear', async ($, on) => {
-  world(on)
+test('2 brings the bar back at the next step; 0 hides it silently until a clear', async ($, on) => {
+  const w = world(on)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(36))
   let ui = await $.ui.mount(BAND())
   await ui.press({ key: 'later' })
+  expect(await ui.find({ key: 'handover' })).toBeUndefined()
   await ui.unmount()
   await $.session.measure(measure(41))
   ui = await $.ui.mount(BAND())
@@ -2274,6 +2589,8 @@ test('2 brings the bar back at the next step; 0 keeps it away until a clear', as
   ui = await $.ui.mount(BAND())
   expect(await ui.find({ key: 'handover' })).toBeUndefined()
   await ui.unmount()
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'lastNudged' })).value).toBe(45)
+  expect(w.notices.some(n => n.includes('Context at'))).toBe(false)
 })
 
 test('yields to survey, returns after', async ($, on) => {
@@ -2300,7 +2617,7 @@ test('hotkeys are 1 / 2 / 0', async ($, on) => {
   await ui.unmount()
 })
 
-test('on the phone, or with the bar off: a notice instead of the bar', async ($, on) => {
+test('on the phone: a notice instead of the bar', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await $.prompt.submit(human('hi', 'bridge'))
@@ -2308,47 +2625,127 @@ test('on the phone, or with the bar off: a notice instead of the bar', async ($,
   const ui = await $.ui.mount(BAND())
   expect(await ui.find({ key: 'handover' })).toBeUndefined()
   await ui.unmount()
-  expect(w.notices.some(n => n.includes('Context at 36%'))).toBe(true)
+  expect(w.notices).toContain('🕯️ Context at 36% — say "hand over" (or /vho) when you\'re ready 📜')
+})
+
+test('with the bar switched off: a notice instead of the bar, in the terminal too', async ($, on) => {
+  const w = world(on, { store: { settings: { bar: false } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(36))
+  const ui = await $.ui.mount(BAND())
+  expect(await ui.find({ key: 'handover' })).toBeUndefined()
+  await ui.unmount()
+  expect(w.notices).toContain('🕯️ Context at 36% — say "hand over" (or /vho) when you\'re ready 📜')
+})
+
+// The Remote Control countdown: auto mode on, RC auto-clear allowed, last prompt from the phone.
+async function countdownSession($: never, w: ReturnType<typeof world>) {
+  const e = $ as unknown as { session: { start: (x: unknown) => Promise<unknown>; measure: (x: unknown) => Promise<unknown> }; prompt: { submit: (x: unknown) => Promise<unknown> }; tool: { call: (x: unknown) => Promise<unknown> } }
+  await e.session.start(START)
+  await e.prompt.submit(human('go', 'bridge'))
+  await w.clock.advance(31 * MIN)
+  await e.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' })
+  await e.session.measure(measure(36))
+  await w.clock.settle()
+  await e.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' })
+  await w.clock.settle()
+}
+
+test('RC countdown: shown on the bar with Cancel on 0; runs out into the clear', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($ as never, w)
+  expect(w.notices).toContain('🧹 Handing over in 30 s — send anything to cancel')
+  const ui = await $.ui.mount(BAND())
+  expect(await ui.find({ type: 'Text', text: /Handing over in \d+ s/ })).toBeDefined()
+  const cancel = await ui.find({ key: 'cancel' })
+  expect((cancel as { props?: { hotkey?: string } } | undefined)?.props?.hotkey).toBe('0')
+  await ui.unmount()
+  expect(w.commands).not.toContain('clear')
+  await w.clock.advance(30_000)
+  expect(w.commands).toContain('clear')
+})
+
+test('RC countdown: Cancel stops the clear and keeps the handover', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($ as never, w)
+  const ui = await $.ui.mount(BAND())
+  await ui.press({ key: 'cancel' })
+  await ui.unmount()
+  await w.clock.advance(60_000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices).toContain('🧹 Handover countdown cancelled — the handover is saved; /clear to resume from it')
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'pending' })).value).toMatchObject({ reason: 'threshold' })
+})
+
+test('RC countdown: sending anything cancels it', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($ as never, w)
+  await $.prompt.submit(human('wait!', 'bridge'))
+  await w.clock.advance(60_000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices).toContain('🧹 Handover countdown cancelled — the handover is saved; /clear to resume from it')
 })
 ```
-(`FoundElement`'s shape is in `claude-code/testing` — if `props.hotkey` is not where the found element carries it, read `export type FoundElement` and adjust only that accessor.)
+(`FoundElement`'s shape is in `claude-code/testing` — if `props.hotkey` is not where the found element carries it, read `export type FoundElement` and adjust only that accessor. If typing `countdownSession`'s `$` as `Engine` from `claude-code/testing` works, use that instead of the cast.)
 
 - [ ] **Step 2: Run to see them fail** — FAIL.
 
 - [ ] **Step 3: Implement** — add to `register.tsx`. Imports to add at the top (merge names into the existing import line from the same module where one exists):
 ```tsx
-import type { Pending, PendingReason } from '../types'
-import { handoverPath } from '../core/name'
+import type { Awaiting, Pending, PendingReason } from '../types'
+import { TOOL_FULL, handoverPath } from '../core/name'
+import { pendingKey } from '../core/settings'
 import { armed, onPhone } from '../core/arming'
 import { injectText, instructionText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
-import { clearGate, needsRcQuestion } from '../core/surfaces'
+import { clearGate } from '../core/surfaces'
 import type { WaitReason } from '../core/voice'
-import { TOOL_FULL } from '../core/name'
+import { formatHHMM } from '../core/limits'
+```
+Atoms (beside the Task 11 atoms):
+```tsx
+const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
+const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
+const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 ```
 Module variables (beside the others):
 ```tsx
-let awaiting: { reason: PendingReason; resume: boolean; turns: number; attempts: number } | null = null
-let handoverCount = 0
 let clearParked = false
 let unattendedClear = false
 let lastWait: WaitReason | null = null
-let askRc: ((why: string) => void) | null = null
 let retryTimer: { cancel: () => void } | null = null
+```
+Add to the `// RESET (Tasks 12–15 add lines here)` block in `bindSession`:
+```tsx
+  retryTimer?.cancel()
+  retryTimer = null
+  clearParked = false
+  unattendedClear = false
+  lastWait = null
 ```
 Top-level functions:
 ```tsx
 async function savePending($: EngineInterface, p: Pending | null) {
+  const prev = await read($, pendingA)
   await update($, pendingA, () => p)
-  await $.store.set('pending', p)
+  if (p) await $.store.set(pendingKey(p.session), p)
+  else await $.store.delete(pendingKey(prev?.session ?? session))
 }
 
 async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean) {
   if (await read($, standDownA)) return
+  if (await read($, latchA)) {
+    // Spec §5: while latched the mod never submits; Task 14's checkLatch starts it later.
+    await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false }))
+    await notify($, V.waiting('latched'))
+    await log($, 'guard.wait', { reason: 'latched', deferred: reason })
+    return
+  }
   const pending = await read($, pendingA)
-  if (pending && reason !== 'last_light' && reason !== 'limit') { scheduleClear($, reason === 'threshold'); return }
-  awaiting = { reason, resume, turns: 0, attempts: 1 }
+  if (pending && (reason === 'threshold' || reason === 'request')) { scheduleClear($, reason === 'threshold'); return }
+  await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false }))
   await log($, 'handover.requested', { reason, resume })
-  $.clock.after(0, () => { void $.prompt.submit({ text: instructionText(reason) }) })
+  submitSoon($, instructionText(reason))
 }
 
 function scheduleClear($: EngineInterface, unattended: boolean) {
@@ -2373,31 +2770,45 @@ async function tryClear($: EngineInterface) {
     lastWait = null
     await update($, countdownA, () => null)
     await log($, 'clear', { unattended: unattendedClear })
-    await $.command.run({ command: 'clear' }).catch(async () => {
+    try {
+      await $.command.run({ command: 'clear' })
+    } catch {
+      clearParked = true
       await notify($, V.clearRejected)
       await log($, 'guard.wait', { reason: 'clear-rejected' })
-    })
+    }
     return
   }
   if (gate.reason !== lastWait) {
     lastWait = gate.reason
-    await notify($, gate.reason === 'rc-unanswered' || gate.reason === 'rc-declined' ? V.rcOffer : V.waiting(gate.reason))
+    await notify($, V.waiting(gate.reason))
     await log($, 'guard.wait', { reason: gate.reason, recheckMs: gate.recheckMs })
   }
   if (gate.reason === 'countdown-start') await update($, countdownA, () => now + (gate.recheckMs ?? 0))
-  if (gate.reason === 'rc-unanswered' && needsRcQuestion(true, settings.rcAutoClear, unattendedClear)) askRc?.('first-rc')
   if (gate.recheckMs === null) { clearParked = true; return }
   retryTimer = $.clock.after(gate.recheckMs, () => { void tryClear($) })
 }
 
+async function cancelCountdown($: EngineInterface) {
+  if ((await read($, countdownA)) === null) return
+  await update($, countdownA, () => null)
+  retryTimer?.cancel()
+  retryTimer = null
+  clearParked = true
+  lastWait = null
+  await notify($, V.countdownCancelled)
+  await log($, 'guard.wait', { reason: 'countdown-cancelled' })
+}
+
 async function showNudge($: EngineInterface, pct: number) {
   const act = await read($, activityA)
-  if (settings.bar && !onPhone(act) && !(await read($, barDismissedA))) {
+  if (settings.bar && !onPhone(act)) {
+    if (await read($, barDismissedA)) return          // 0 hid it for this cycle: silent
     await update($, barShownA, () => true)
     await log($, 'bar', { action: 'shown', pct })
-  } else {
-    await notify($, V.nudge(pct))
+    return
   }
+  await notify($, V.nudge(pct))
 }
 ```
 Hooks to add inside `register`:
@@ -2419,30 +2830,31 @@ Hooks to add inside `register`:
     return next(e)
   })
 
-  on('command.run', { command: COMMANDS.handover }, async $ => {
-    await startHandover($, 'request', true)
-    return { text: V.handingOver }
-  })
-  on('command.run', { command: COMMANDS.handoff }, async $ => {
-    await startHandover($, 'request', true)
-    return { text: V.handingOver }
-  })
+  for (const command of [COMMANDS.handover, COMMANDS.handoff]) {
+    on('command.run', { command }, async $ => {
+      await startHandover($, 'request', true)
+      return { text: V.handingOver }
+    })
+  }
 
   on('tool.call', { tool: TOOL_FULL } as never, async ($, e) => {
     const input = e as unknown as Record<string, unknown>
     const parsed = parseFields(input)
     if (!parsed.ok) return { deny: `${parsed.error} — call ${TOOL_FULL} again with every required field` }
+    const awaiting = await read($, awaitingA)
     const reason = awaiting?.reason ?? 'request'
     const resume = awaiting?.resume ?? true
-    awaiting = null
-    handoverCount += 1
-    const path = handoverPath(root, session, handoverCount)
+    await update($, awaitingA, () => null)
+    const n = (await read($, handoverCountA)) + 1
+    await update($, handoverCountA, () => n)
+    const path = handoverPath(root, session, n)
+    const now = await nowMs($)
     const markdown = renderHandover(parsed.fields, {
-      session, at: new Date(await nowMs($)).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
+      session, at: new Date(now).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
       edited: [...edited], contextPct: await read($, contextA),
     })
     await $.fs.write(path, markdown)
-    await savePending($, { path, reason, markdown, resume, followUp: null, createdAt: await nowMs($) })
+    await savePending($, { session, path, reason, markdown, resume, followUp: null, createdAt: now })
     await log($, 'handover.written', { reason, bytes: markdown.length, path })
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
     if (reason === 'threshold' || reason === 'request') scheduleClear($, reason === 'threshold')
@@ -2451,28 +2863,44 @@ Hooks to add inside `register`:
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    if (!settings.bar || (await read($, standDownA)) || !(await read($, barShownA))) return next(e)
+    if (await read($, standDownA)) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const countdown = await read($, countdownA)
+    if (countdown !== null) {
+      // The RC countdown is a safety control: drawn whenever it runs, bar setting or not.
+      const left = Math.max(0, Math.ceil((countdown - (await nowMs($))) / 1000))
+      return (
+        <Box>
+          <Text>{V.countdownLine(left)}   </Text>
+          <Button key="cancel" hotkey="0" plain label={V.cancel} onPress={() => cancelCountdown($)} />
+        </Box>
+      )
+    }
+    if (!settings.bar || !(await read($, barShownA))) return next(e)
     const pct = (await read($, contextA)) ?? 0
     const step = (await read($, lastNudgedA)) ?? settings.nudgeAt
     const latch = await read($, latchA)
-    const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box>
-        <Text>{V.barLine(pct, step, latch ? formatHHMM(latch.resetsAtMs) : null)}   </Text>
-        <Button key="handover" hotkey="1" plain label={V.barHandover}
-          onPress={async () => { await update($, barShownA, () => false); await log($, 'bar', { action: 'handover' }); await startHandover($, 'request', true) }} />
+        <Text>{V.barLine(pct, settings.nudgeAt, latch ? formatHHMM(latch.resetsAtMs) : null)}   </Text>
+        <Button key="handover" hotkey="1" plain label={V.barHandover} onPress={() => barChoice($, 'handover')} />
         <Text>   </Text>
-        <Button key="later" hotkey="2" plain label={V.barLater(step + settings.step)}
-          onPress={async () => { await update($, barShownA, () => false); await log($, 'bar', { action: 'later' }) }} />
+        <Button key="later" hotkey="2" plain label={V.barLater(step + settings.step)} onPress={() => barChoice($, 'later')} />
         <Text>   </Text>
-        <Button key="dismiss" hotkey="0" plain label={V.barDismiss}
-          onPress={async () => { await update($, barShownA, () => false); await update($, barDismissedA, () => true); await log($, 'bar', { action: 'dismiss' }) }} />
+        <Button key="dismiss" hotkey="0" plain label={V.barDismiss} onPress={() => barChoice($, 'dismiss')} />
       </Box>
     )
   })
 ```
-Add the import `import { formatHHMM } from '../core/limits'`.
-
+and the bar's one press handler (top-level):
+```tsx
+async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dismiss') {
+  await update($, barShownA, () => false)
+  if (action === 'dismiss') await update($, barDismissedA, () => true)
+  await log($, 'bar', { action })
+  if (action === 'handover') await startHandover($, 'request', true)
+}
+```
 Extend the existing `classic.SessionStart` hook so a clear injects and resets (replace its body):
 ```tsx
   on('classic.SessionStart', async ($, e, next) => {
@@ -2480,67 +2908,61 @@ Extend the existing `classic.SessionStart` hook so a clear injects and resets (r
     const repo = await $.session.repo().catch(() => null)
     const watch = repo ? watchPaths(repo.root) : []
     if (e.source !== 'clear') return watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
+    const pending = await read($, pendingA)
+    if (pending) await savePending($, null)         // deletes pending:<old session>
     session = await $.session.id()
     edited.clear()
     await update($, lastNudgedA, () => null)
     await update($, barShownA, () => false)
     await update($, barDismissedA, () => false)
     await update($, countdownA, () => null)
-    const pending = await read($, pendingA)
+    await update($, handoverCountA, () => 0)
     if (!pending) return r
-    await savePending($, null)
     const follow = pending.followUp
-    if (pending.resume || follow) {
-      $.clock.after(500, () => { void $.prompt.submit({ text: follow ?? resumeText(pending.path) }) })
-    }
+    if (pending.resume || follow) submitSoon($, follow ?? resumeText(pending.path), 500)
     await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null })
     return { ...r, additionalContext: [...(r.additionalContext ?? []), injectText(pending.markdown)] }
   })
 ```
-Extend `session.start` (after `checkInterlock`): restore a pending handover:
+Extend `session.start` (after `checkInterlock`): restore this session's pending handover:
 ```tsx
-    const stored = (await $.store.get('pending')) as Pending | null | undefined
+    const stored = (await $.store.get(pendingKey(session))) as Pending | null | undefined
     if (stored && !(await read($, pendingA))) {
       await update($, pendingA, () => stored)
       await notify($, V.pendingOffer(stored.path))
     }
 ```
-Extend `prompt.submit` (before `return next(e)`): any prompt cancels a running countdown:
+Extend `prompt.submit` (before `return next(e)`): mark our own instruction prompt as started, and let any other prompt cancel a running countdown:
 ```tsx
-    if ((await read($, countdownA)) !== null && e.origin.kind !== 'plugin') {
-      await update($, countdownA, () => null)
-      retryTimer?.cancel()
-      retryTimer = null
-      clearParked = true
-      await notify($, V.countdownCancelled)
+    const awaitingNow = await read($, awaitingA)
+    if (awaitingNow && !awaitingNow.started && e.origin.kind === 'plugin' && e.text.includes(TOOL_FULL)) {
+      await update($, awaitingA, () => ({ ...awaitingNow, started: true }))
     }
+    if (e.origin.kind !== 'plugin') await cancelCountdown($)
 ```
-Extend `turn.complete` (before `return next(e)`): the no-tool-call retry:
+Extend `turn.complete` (before `return next(e)`): the missed-call retry — only for the instruction prompt's own turn:
 ```tsx
-    if (awaiting) {
-      awaiting.turns += 1
-      if (awaiting.turns >= 1) {
-        if (awaiting.attempts < 2) {
-          awaiting.attempts += 1
-          awaiting.turns = 0
-          const reason = awaiting.reason
-          $.clock.after(0, () => { void $.prompt.submit({ text: instructionText(reason) }) })
-        } else {
-          awaiting = null
-          await notify($, V.handoverFailed)
-          await log($, 'guard.wait', { reason: 'tool-not-called' })
-        }
+    const awaitingNow = await read($, awaitingA)
+    if (awaitingNow?.started) {
+      if (awaitingNow.attempts < 2) {
+        await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false }))
+        submitSoon($, instructionText(awaitingNow.reason))
+      } else {
+        await update($, awaitingA, () => null)
+        await notify($, V.handoverFailed)
+        await log($, 'guard.wait', { reason: 'tool-not-called' })
       }
     }
 ```
-Note: the instruction prompt's own turn is the one whose `turn.complete` is counted; a turn that called the tool has already set `awaiting = null` in the tool hook, so it is not counted.
+(A turn that called the tool has already cleared `awaitingA` in the tool hook, so it is never counted.)
 
 - [ ] **Step 4: Run the gates** — validate, test (all files), typecheck: clean.
 
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/tests/shell-handover.test.tsx plugins/context-vigil-mod/tests/shell-bar.test.tsx
-git commit -m "feat(context-vigil-mod): handover flow, clear gate and the vigil bar"
+git commit -m "feat(context-vigil-mod): handover flow, clear gate, vigil bar and RC countdown" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -2550,10 +2972,11 @@ git commit -m "feat(context-vigil-mod): handover flow, clear gate and the vigil 
 **Files:**
 - Modify: `plugins/context-vigil-mod/hooks/register.tsx`
 - Test: `tests/shell-last-light.test.tsx`
+- Uses (no change expected): `tests/world.tsx` — its `AskUserQuestion` stub answers `$.ui.ask` from `w.askAnswer` (null = dismissed). If `PROBES.md` §6 observed a different `$.ui.ask` path, adjust the stub here.
 
 **Interfaces:**
-- Consumes: Task 7 (`fireAt`, `shouldFire`, `rearm`, `holdOnReturn`, `ttlFromLabel`, `TTL_1H`), Task 12 (`startHandover`, `scheduleClear`, `savePending`).
-- Produces: module variable `ttlMs`, `lastLightTimer`.
+- Consumes: Task 7 (`fireAt`, `shouldFire`, `rearm`, `holdOnReturn`, `ttlFromLabel`, `TTL_1H`), Task 12 (`startHandover`, `scheduleClear`, `savePending`), Task 11 (`submitSoon`, `bindSession` RESET block).
+- Produces: module variables `ttlMs`, `lastLightTimer`.
 
 - [ ] **Step 1: Write the failing test** `tests/shell-last-light.test.tsx`:
 ```tsx
@@ -2563,43 +2986,80 @@ import { START, human, turn, world } from './world'
 const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
 const measure = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
+const write = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never
+const LL = { store: { settings: { lastLight: true, nudgeAt: 90 } } }
+const asks = (w: { submits: { text: string }[] }) => w.submits.filter(s => s.text.includes(TOOL)).length
 
-test('fires once at TTL − lead with both idle and context ≥ threshold; writes only', async ($, on) => {
-  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90 } } })
+test('fires at TTL − lead with both idle and context ≥ threshold; writes only, no clear', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(54 * MIN)
+  expect(asks(w)).toBe(0)
+  await w.clock.advance(1 * MIN)
+  expect(asks(w)).toBe(1)
+  expect(w.submits.at(-1)?.text).toContain('Do not clear')
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.notices).toContain('🌅 Last light: a handover is ready 📜 — carry on as normal, or /clear to resume from it ✨')
+  expect(w.commands).not.toContain('clear')
+})
+
+test('loop guard: without a human prompt it never fires again; a human prompt re-arms it', async ($, on) => {
+  const w = world(on, LL)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(30))
   await $.turn.complete(turn())
   await w.clock.advance(55 * MIN)
-  expect(w.submits.at(-1)?.text).toContain(TOOL)
-  expect(w.submits.at(-1)?.text).toContain('Do not clear')
-  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
-  await w.clock.settle()
-  expect(w.commands).not.toContain('clear')
-  // its own turn refreshes the cache; without a human prompt it must not fire again
-  await $.turn.complete(turn('ll'))
+  await $.tool.call(write)
+  await $.classic.SessionStart({ source: 'clear' } as never)   // pending consumed, still no human prompt
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn('ll'))                              // its own turn refreshed the cache
   await w.clock.advance(60 * MIN)
-  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(1)
+  expect(asks(w)).toBe(1)                                        // disarmed — not blocked by pending
+  await $.prompt.submit(human('back'))
+  await $.turn.complete(turn('after'))
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(2)
 })
 
-test('does not fire below the threshold, or when off', async ($, on) => {
-  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90 } } })
+test('below the threshold it does not fire; at the threshold it does', async ($, on) => {
+  const w = world(on, LL)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
-  await $.session.measure(measure(10))
+  await $.session.measure(measure(24))
   await $.turn.complete(turn())
   await w.clock.advance(56 * MIN)
-  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
+  expect(asks(w)).toBe(0)
+  await $.prompt.submit(human('more'))
+  await $.session.measure(measure(25))
+  await $.turn.complete(turn('2'))
+  await w.clock.advance(56 * MIN)
+  expect(asks(w)).toBe(1)
+})
+
+test('switched off it never fires', async ($, on) => {
+  const w = world(on, { store: { settings: { lastLight: false, nudgeAt: 90 } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(56 * MIN)
+  expect(asks(w)).toBe(0)
+  expect(w.submits.map(s => s.text)).toEqual(['hi'])
 })
 
 test('on return after expiry the prompt is held and the choice asked; resume carries it over', async ($, on) => {
-  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90 } } })
+  const w = world(on, LL)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(30))
   await $.turn.complete(turn())
   await w.clock.advance(55 * MIN)
-  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
+  await $.tool.call(write)
   await $.turn.complete(turn('ll'))
   await w.clock.advance(70 * MIN)
   w.askAnswer.value = 'Resume from handover'
@@ -2610,34 +3070,59 @@ test('on return after expiry the prompt is held and the choice asked; resume car
   await $.classic.SessionStart({ source: 'clear' } as never)
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).toBe('morning!')
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'lastLightArmed' })).value).toBe(true)
 })
 
 test('carry on submits the held prompt unchanged into the same conversation', async ($, on) => {
-  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90 } } })
+  const w = world(on, LL)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(30))
   await $.turn.complete(turn())
   await w.clock.advance(55 * MIN)
-  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
+  await $.tool.call(write)
   await $.turn.complete(turn('ll'))
   await w.clock.advance(70 * MIN)
   w.askAnswer.value = 'Carry on'
   await $.prompt.submit(human('morning!'))
   await w.clock.settle()
-  expect(w.commands).not.toContain('clear')
   expect(w.submits.at(-1)?.text).toBe('morning!')
+  expect(w.commands).not.toContain('clear')
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'pending' })).value).toBe(null)
 })
 
-test('a 5-minute cache switches last light off', async ($, on) => {
-  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90 } } })
+test('a dismissed question carries on, so the held prompt is never lost', async ($, on) => {
+  const w = world(on, LL)
   await $.session.start(START)
-  await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)
   await $.prompt.submit(human('hi'))
   await $.session.measure(measure(30))
   await $.turn.complete(turn())
+  await w.clock.advance(55 * MIN)
+  await $.tool.call(write)
+  await $.turn.complete(turn('ll'))
+  await w.clock.advance(70 * MIN)
+  w.askAnswer.value = null
+  await $.prompt.submit(human('morning!'))
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toBe('morning!')
+})
+
+test('a 1-hour cache fires; a switch to a 5-minute cache cancels the scheduled fire', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())                                  // schedules the 1 h fire
+  await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)  // must cancel it
   await w.clock.advance(120 * MIN)
-  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
+  expect(asks(w)).toBe(0)
+  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)  // that cache is long cold: no catch-up fire
+  await w.clock.settle()
+  expect(asks(w)).toBe(0)
+  await $.prompt.submit(human('again'))
+  await $.turn.complete(turn('2'))
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(1)
 })
 ```
 - [ ] **Step 2: Run to see it fail** — FAIL.
@@ -2651,6 +3136,12 @@ Module variables:
 let ttlMs = TTL_1H
 let lastLightTimer: { cancel: () => void } | null = null
 ```
+Add to the `// RESET` block in `bindSession`:
+```tsx
+  lastLightTimer?.cancel()
+  lastLightTimer = null
+  ttlMs = TTL_1H
+```
 Top-level functions:
 ```tsx
 function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
@@ -2658,13 +3149,14 @@ function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
   lastLightTimer = null
   if (!settings.lastLight) return
   const at = fireAt(lastApiAt, ttlMs)
-  if (at === null) return
+  if (at === null || now >= lastApiAt + ttlMs) return   // no fire for a cache that is already cold
   lastLightTimer = $.clock.after(Math.max(0, at - now), () => { void maybeFireLastLight($) })
 }
 
 async function maybeFireLastLight($: EngineInterface) {
   lastLightTimer = null
   const now = await nowMs($)
+  await observe($, { kind: 'agent-step', at: (await read($, activityA)).lastAgentAt ?? 0 })  // picks up a draft (spec §2)
   const verdict = shouldFire({
     enabled: settings.lastLight, mode: mode(await read($, activityA), now, settings),
     contextPct: await read($, contextA), threshold: settings.lastLightAt,
@@ -2688,12 +3180,15 @@ async function askReturn($: EngineInterface, held: string) {
     return
   }
   await savePending($, null)
-  await $.prompt.submit({ text: held })
+  await $.prompt.submit({ text: held, asUser: true })
 }
 ```
-In the `prompt.submit` hook, BEFORE `observe(...)`, add the hold and the re-arm:
+(The `observe` call in `maybeFireLastLight` passes the existing `lastAgentAt` so it records no new agent activity — it only lets Task 11's draft check run.)
+
+In the `prompt.submit` hook, BEFORE `observe(...)`, add the hold and the re-arm (the held branch re-arms too: it is a real human prompt):
 ```tsx
     const now = await nowMs($)
+    if (rearm(await read($, lastLightArmedA), e.origin.kind)) await update($, lastLightArmedA, () => true)
     const pending = await read($, pendingA)
     const lastApi = await read($, lastApiA)
     if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null ? null : lastApi + ttlMs })) {
@@ -2702,14 +3197,24 @@ In the `prompt.submit` hook, BEFORE `observe(...)`, add the hold and the re-arm:
       $.clock.after(0, () => { void askReturn($, held) })
       return { drop: 'held by context-vigil-mod: last light asks first' }
     }
-    if (rearm(await read($, lastLightArmedA), e.origin.kind)) await update($, lastLightArmedA, () => true)
 ```
 In the `turn.complete` hook, after `update($, lastApiA, …)`: `scheduleLastLight($, now, now)`.
-Add a hook for the TTL:
+
+The held text resubmitted after a clear is the person's own words: in Task 12's `classic.SessionStart` clear branch, replace `submitSoon($, follow ?? resumeText(pending.path), 500)` with
+```tsx
+    if (follow) $.clock.after(500, () => { void $.prompt.submit({ text: follow, asUser: true }) })
+    else if (pending.resume) submitSoon($, resumeText(pending.path), 500)
+```
+Add a hook for the TTL — a switch also re-plans (or cancels) an already scheduled fire:
 ```tsx
   on('classic.PostModelSwitch', async ($, e, next) => {
     const ttl = (e as unknown as { cache_ttl?: string }).cache_ttl
-    if (ttl) ttlMs = ttlFromLabel(ttl)
+    if (ttl) {
+      ttlMs = ttlFromLabel(ttl)
+      const lastApi = await read($, lastApiA)
+      if (lastApi === null) { lastLightTimer?.cancel(); lastLightTimer = null }
+      else scheduleLastLight($, lastApi, await nowMs($))
+    }
     return next(e)
   })
 ```
@@ -2719,7 +3224,8 @@ Add a hook for the TTL:
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/tests/shell-last-light.test.tsx
-git commit -m "feat(context-vigil-mod): last light — write-only before the cache goes cold, ask on return"
+git commit -m "feat(context-vigil-mod): last light — write-only before the cache goes cold, ask on return" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -2731,8 +3237,8 @@ git commit -m "feat(context-vigil-mod): last light — write-only before the cac
 - Test: `tests/shell-limits.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 8 (`latchFromStopFailure`, `latchFromMeasure`, `latchCleared`, `earlyStopDue`, `nextHop`, `RESUME_DELAY_MS`, `formatHHMM`), Task 12 (`startHandover`, `scheduleClear`, `clearParked`).
-- Produces: `scheduleResume($, at)`.
+- Consumes: Task 8 (`latchFromStopFailure`, `latchFromMeasure`, `latchCleared`, `earlyStopDue`, `nextHop`, `RESUME_DELAY_MS`, `formatHHMM`), Task 5 (`limitResumeText`), Task 12 (`startHandover` — which already defers while latched — `deferredA`, `scheduleClear`, `savePending`, `clearParked`, `unattendedClear`).
+- Produces: `setLatch($, l)`, `checkLatch($, limits)`, `scheduleResume($, at)`; atom `firedA` (`$.state` key `firedEarlyStops`, per session).
 
 - [ ] **Step 1: Write the failing test** `tests/shell-limits.test.tsx`:
 ```tsx
@@ -2744,59 +3250,88 @@ const HOUR = 3_600_000
 const iso = (ms: number) => new Date(ms).toISOString()
 const measure = (rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[], percent = 10) =>
   ({ context: { window: 1_000_000, percent }, rateLimits, changed: ['rateLimits'] as never })
+const asks = (w: { submits: { text: string }[] }) => w.submits.filter(s => s.text.includes(TOOL)).length
+const write = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never
 
-test('a rate_limit StopFailure latches, blocks clears, and lifts at reset', async ($, on) => {
+test('while latched nothing is submitted or cleared; at the lift the deferred handover runs', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   await $.classic.StopFailure({ error: 'rate_limit' } as never)
-  expect(w.notices.some(n => n.includes('Usage limit reached'))).toBe(true)
+  expect(w.notices.some(n => n.startsWith('⏳ Usage limit reached — resumes'))).toBe(true)
   await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
-  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
-  await w.clock.settle()
-  expect(w.commands).not.toContain('clear')
+  expect(asks(w)).toBe(0)
+  expect(w.notices).toContain('⏳ Handover waiting — the usage limit is in force')
   await w.clock.advance(HOUR + 1000)
   await $.session.measure(measure([{ kind: 'five_hour', percentUsed: 1, resetsAt: iso(1_000_000 + 6 * HOUR) }]))
   await w.clock.settle()
-  expect(w.notices.some(n => n.includes('lifted'))).toBe(true)
+  expect(w.notices).toContain('⏳ Usage limit lifted — back to normal')
+  expect(asks(w)).toBe(1)
+  await $.tool.call(write)
+  await w.clock.settle()
   expect(w.commands).toContain('clear')
 })
 
-test('seven_day at the trigger: handover once per window, resume after reset in hops', async ($, on) => {
+test('a clear parked by the latch goes ahead when it lifts', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
+  await $.classic.StopFailure({ error: 'rate_limit' } as never)   // latched between instruction and write
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  await w.clock.advance(HOUR + 2000)                             // the latch's own timer lifts it at resetsAt
+  expect(w.commands).toContain('clear')
+})
+
+test('seven_day at the trigger: handover once per window, then one resume after the reset', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
   const resetsAt = iso(1_000_000 + 3 * HOUR)
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt }]))
   await w.clock.settle()
-  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(1)
+  expect(asks(w)).toBe(1)
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 97, resetsAt }]))
   await w.clock.settle()
-  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(1)
-  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
+  expect(asks(w)).toBe(1)
+  await $.tool.call(write)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
   await w.clock.advance(3 * HOUR + 300_000)
-  expect(w.submits.at(-1)?.text).toContain('Resume')
+  expect(w.submits.at(-1)?.text).toContain('limit has reset')
+  expect(w.submits.filter(s => s.text.includes('limit has reset')).length).toBe(1)
+  expect((await $.state.get({ plugin: 'context-vigil-mod', key: 'pending' })).value).toBe(null)
 })
 
-test('configured trigger and windows are respected', async ($, on) => {
+test('configured trigger and windows: below or unwatched does nothing; the watched window at its trigger fires', async ($, on) => {
   const w = world(on, { store: { settings: { limitPct: 98, limitWindows: ['spend_limit'] } } })
   await $.session.start(START)
   await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 99, resetsAt: iso(5 * HOUR) }, { kind: 'spend_limit', percentUsed: 97, resetsAt: iso(5 * HOUR) }]))
   await w.clock.settle()
-  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
+  expect(asks(w)).toBe(0)
+  await $.session.measure(measure([{ kind: 'spend_limit', percentUsed: 98, resetsAt: iso(5 * HOUR) }]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
 })
 ```
 
 - [ ] **Step 2: Run to see it fail** — FAIL.
 
-- [ ] **Step 3: Implement** — add imports:
+- [ ] **Step 3: Implement** — add imports (merge into existing lines where the module is already imported):
 ```tsx
 import { RESUME_DELAY_MS, earlyStopDue, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
+import { limitResumeText } from '../core/handover'
 import type { Latch, RateLimit } from '../types'
+```
+Atom (beside the others):
+```tsx
+const firedA = atom({ plugin: 'context-vigil-mod', key: 'firedEarlyStops' } as const, [] as string[])
 ```
 Top-level functions:
 ```tsx
@@ -2815,15 +3350,25 @@ async function checkLatch($: EngineInterface, limits: RateLimit[]) {
   await update($, latchA, () => null)
   await log($, 'limit.cleared', { kind: l?.kind })
   await notify($, V.limitCleared)
+  const deferred = await read($, deferredA)
+  if (deferred) {
+    await update($, deferredA, () => null)
+    await startHandover($, deferred.reason, deferred.resume)
+    return
+  }
   if (clearParked && (await read($, pendingA))) scheduleClear($, unattendedClear)
 }
 
+// Waits in ≤ 1 h hops; never submits while latched (spec §5); clears the
+// limit handover once the resume is sent so a later /clear does not re-inject it.
 function scheduleResume($: EngineInterface, at: number) {
   $.clock.after(0, async () => {
     const wait = nextHop(await nowMs($), at)
     if (wait > 0) { $.clock.after(wait, () => { scheduleResume($, at) }); return }
+    if (await read($, latchA)) { $.clock.after(60_000, () => { scheduleResume($, at) }); return }
     const pending = await read($, pendingA)
-    await $.prompt.submit({ text: pending ? resumeText(pending.path) : '[context-vigil-mod] Resume the work from where it stopped.' })
+    await $.prompt.submit({ text: limitResumeText(pending?.path ?? '(no file)') })
+    if (pending?.reason === 'limit') await savePending($, null)
   })
 }
 ```
@@ -2841,24 +3386,25 @@ In the `session.measure` hook, before the threshold logic:
     const limits = e.rateLimits as RateLimit[]
     await setLatch($, latchFromMeasure(limits))
     await checkLatch($, limits)
-    const fired = ((await $.store.get('firedEarlyStops')) as string[] | undefined) ?? []
+    const fired = await read($, firedA)
     const due = earlyStopDue(limits, settings, fired)
     if (due && !(await read($, standDownA))) {
-      await $.store.set('firedEarlyStops', [...fired, due.key].slice(-20))
+      await update($, firedA, () => [...fired, due.key].slice(-20))
       await log($, 'limit.early_stop', { kind: due.kind, pct: due.pct, resetsAtMs: due.resetsAtMs })
       await notify($, V.earlyStop(due.kind, due.pct, formatHHMM(due.resetsAtMs + RESUME_DELAY_MS)))
       await startHandover($, 'limit', false)
       scheduleResume($, due.resetsAtMs + RESUME_DELAY_MS)
     }
 ```
-(`scheduleResume` is a plain function holding `$` — it is declared at the top level of `register.tsx`, which is what the validator requires.)
+(`scheduleResume` is a plain top-level function holding `$`, which is what the validator requires. `firedA` lives in `$.state`, so each session keeps its own marks; a restarted process may re-fire once — accepted in the ledger.)
 
 - [ ] **Step 4: Run the gates** — clean.
 
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/tests/shell-limits.test.tsx
-git commit -m "feat(context-vigil-mod): limit latch and configurable 7-day/spend early stop"
+git commit -m "feat(context-vigil-mod): limit latch and configurable 7-day/spend early stop" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -2870,108 +3416,171 @@ git commit -m "feat(context-vigil-mod): limit latch and configurable 7-day/spend
 - Test: `tests/shell-setup.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 9 (`questionFor`, `nextCard`, `stepForQuestion`, `applyAnswers`), Task 12 (`askRc`, `scheduleClear`, `clearParked`), `PROBES.md` §3 (where answers live).
-- Produces: `startSetup($, only?: string)`.
+- Consumes: Task 9 (`questionFor`, `nextCard`, `isStep`, `stepForQuestion`, `applyAnswers`, `extractAnswers`), Task 6 (`needsRcQuestion`), Task 4 (`onPhone`), Task 11 (`observe`, `submitSoon`, `bindSession` RESET block), Task 12 (`scheduleClear`, `clearParked`), `PROBES.md` §3 (answers location) and §5 (result `context` reaches the model).
+- Produces: `startSetup($, only?: string)`, `cardPrompt(questions)`; atom `rcAskedA`.
 
 - [ ] **Step 1: Write the failing test** `tests/shell-setup.test.tsx`:
 ```tsx
 import { expect, test } from 'claude-code/testing'
 import { START, human, world } from './world'
 
+const MIN = 60_000
+const TOOL = 'mcp__context-vigil-mod__vigil_handover'
 const ask = (questions: { question: string }[], answers: Record<string, string>) =>
   ({ tool: 'AskUserQuestion', tool_use_id: 'q', questions, answers })
+const cardOf = (text: string) => JSON.parse(text.slice(text.indexOf('[{'), text.lastIndexOf('}]') + 2)) as { header: string; question: string }[]
+const setup = (args = '') => ({ command: 'vsetup', args, origin: { kind: 'composer' } as never } as never)
 
-test('/vsetup asks card 1 through the model and saves the answers', async ($, on) => {
+test('/vsetup asks card 1 through the model, saves the answers, follows with card 2', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.command.run({ command: 'vsetup', args: '', origin: { kind: 'composer' } as never } as never)
+  await $.command.run(setup())
   await w.clock.settle()
   const prompt = w.submits.at(-1)?.text ?? ''
   expect(prompt).toContain('AskUserQuestion')
-  const card = JSON.parse(prompt.slice(prompt.indexOf('['), prompt.lastIndexOf(']') + 1)) as { header: string; question: string }[]
+  const card = cardOf(prompt)
   expect(card.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️Vigil bar', '🤖 Auto mode', '🌅Last light'])
   const answers = Object.fromEntries(card.map(q => [q.question, q.header.includes('Auto') ? 'On' : q.header.includes('Nudge') ? '50%' : 'Off']))
-  w.askAnswer.value = 'answered'
   const r = await $.tool.call(ask(card, answers) as never)
-  expect(JSON.stringify((r as { context?: string[] }).context ?? [])).toContain('⏱️Idle time')
+  const next = JSON.stringify((r as { context?: string[] }).context ?? [])
+  expect(next).toContain('⏱️Idle time')
+  expect(next).toContain('⏳ Limits')
+  expect(next).not.toContain('⏳ Trigger %')
+  expect(await $.store.get('settings')).toMatchObject({ nudgeAt: 50, bar: false, auto: true, lastLight: false })
 })
 
 test('Tell me more re-asks that question with the explanation', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  await $.command.run({ command: 'vsetup', args: 'bar', origin: { kind: 'composer' } as never } as never)
+  await $.command.run(setup('bar'))
   await w.clock.settle()
-  const prompt = w.submits.at(-1)?.text ?? ''
-  const card = JSON.parse(prompt.slice(prompt.indexOf('['), prompt.lastIndexOf(']') + 1)) as { question: string }[]
-  w.askAnswer.value = 'answered'
+  const card = cardOf(w.submits.at(-1)?.text ?? '')
   const r = await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'Tell me more' }) as never)
   expect(JSON.stringify((r as { context?: string[] }).context ?? [])).toContain('A one-line bar')
 })
 
-test('answers other than ours are left alone', async ($, on) => {
+test('answers to questions that are not ours are left alone', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
+  await $.command.run(setup('bar'))
+  await w.clock.settle()
   const r = await $.tool.call(ask([{ question: 'Unrelated?' }], { 'Unrelated?': 'A' }) as never)
   expect((r as { context?: string[] }).context).toBeUndefined()
-  expect(w.notices.some(n => n.includes('settings saved'))).toBe(false)
+  expect(w.notices).not.toContain('⚙️ context-vigil-mod settings saved')
+  expect(await $.store.get('settings')).toBeUndefined()
 })
 
-test('first unattended clear on the phone asks the RC question once', async ($, on) => {
-  const w = world(on, { store: { settings: { auto: true } } })
+test('/vsetup with an unknown step shows the usage, asks nothing, saves nothing', async ($, on) => {
+  const w = world(on)
   await $.session.start(START)
-  await $.prompt.submit(human('go', 'bridge'))
-  await w.clock.advance(31 * 60_000)
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.command.run(setup('bogus'))
+  await w.clock.settle()
+  expect(w.notices).toContain('⚙️ /vsetup [nudge|bar|auto|last-light|limits|rc] — that step name is not one of these')
+  expect(w.notices).not.toContain('⚙️ context-vigil-mod settings saved')
+  expect(w.submits.some(s => s.text.includes('AskUserQuestion'))).toBe(false)
+})
+
+// Auto mode arming in a session whose last human prompt came from the phone.
+async function armOnPhone($: never, w: ReturnType<typeof world>) {
+  const e = $ as unknown as { session: { start: (x: unknown) => Promise<unknown> }; prompt: { submit: (x: unknown) => Promise<unknown> }; tool: { call: (x: unknown) => Promise<unknown> } }
+  await e.session.start(START)
+  await e.prompt.submit(human('go', 'bridge'))
+  await w.clock.advance(31 * MIN)
+  await e.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' })   // auto mode would arm now
+  await w.clock.settle()
+}
+
+test('the RC question is asked once, when auto mode would first arm on the phone', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await armOnPhone($ as never, w)
+  expect(w.notices).toContain('📱 First Remote Control session with auto mode — one quick question about auto-clear')
+  expect(w.submits.filter(s => s.text.includes('📱 RC clear')).length).toBe(1)
+  await $.prompt.submit(human('back', 'bridge'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'ls' } as never)
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text.includes('📱 RC clear')).length).toBe(1)
+})
+
+test('RC answered Yes: saved, and the unattended clear on the phone goes through the countdown', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await armOnPhone($ as never, w)
+  const card = cardOf(w.submits.at(-1)?.text ?? '')
+  await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'Yes' }) as never)
+  expect(await $.store.get('settings')).toMatchObject({ rcAutoClear: 'yes' })
   await $.session.measure({ context: { window: 1_000_000, percent: 36 }, rateLimits: [], changed: ['context'] as never })
   await w.clock.settle()
-  await $.tool.call({ tool: 'mcp__context-vigil-mod__vigil_handover', tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
+  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
   await w.clock.settle()
+  expect(w.notices).toContain('🧹 Handing over in 30 s — send anything to cancel')
+  await w.clock.advance(30_000)
+  expect(w.commands).toContain('clear')
+})
+
+test('RC answered No: saved, and the unattended clear on the phone never runs', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await armOnPhone($ as never, w)
+  const card = cardOf(w.submits.at(-1)?.text ?? '')
+  await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'No' }) as never)
+  expect(await $.store.get('settings')).toMatchObject({ rcAutoClear: 'no' })
+  await $.session.measure({ context: { window: 1_000_000, percent: 36 }, rateLimits: [], changed: ['context'] as never })
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N' } as never)
+  await w.clock.advance(60_000)
+  expect(w.notices).toContain('📱 Handover saved — auto-clear is off for Remote Control sessions')
   expect(w.commands).not.toContain('clear')
-  expect(w.submits.some(s => s.text.includes('📱 RC clear'))).toBe(true)
 })
 ```
-(If `PROBES.md` §3 found the answers somewhere other than `e.answers`, change the `ask()` helper and the capture code identically.)
+(If `PROBES.md` §3 found the answers somewhere other than input/result, change `extractAnswers` and the world stub together. If §5 found that a tool result's `context` does not reach the model, change the follow-up path to `submitSoon($, cardPrompt(...))` and these tests to read the next card from `w.submits` instead of `r.context`. If `$.store` is not callable from a test body, read the saved settings back through a fresh `session.start` and a `/vsetup` card instead.)
 
 - [ ] **Step 2: Run to see it fail** — FAIL.
 
-- [ ] **Step 3: Implement** — add imports:
+- [ ] **Step 3: Implement** — add imports (merge into existing lines where the module is already imported):
 ```tsx
-import { applyAnswers, nextCard, questionFor, stepForQuestion } from '../core/setup'
+import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
+import { needsRcQuestion } from '../core/surfaces'
 import type { StepId } from '../types'
 ```
-Module variable:
+Atom and module variable:
 ```tsx
+const rcAskedA = atom({ plugin: 'context-vigil-mod', key: 'rcAsked' } as const, false)
 let setupRun: { only: string | undefined; asked: StepId[] } | null = null
+```
+Add to the `// RESET` block in `bindSession`:
+```tsx
+  setupRun = null
 ```
 Top-level functions:
 ```tsx
 function cardPrompt(questions: unknown[]): string {
-  return '[context-vigil-mod] Call the AskUserQuestion tool now with exactly these questions (JSON, use as-is): ' +
+  return 'context-vigil-mod setup: call the AskUserQuestion tool now with exactly these questions (JSON, use as-is): ' +
     `${JSON.stringify(questions)} — then stop; do nothing else this turn.`
 }
 
 async function startSetup($: EngineInterface, only?: string) {
+  if (only !== undefined && !isStep(only)) { await notify($, V.setupUsage); return }
   setupRun = { only, asked: [] }
   const ids = nextCard(settings, [], only)
   if (!ids.length) { setupRun = null; await notify($, V.setupSaved); return }
   setupRun.asked.push(...ids)
-  const text = cardPrompt(ids.map(id => questionFor(id)))
-  $.clock.after(0, () => { void $.prompt.submit({ text }) })
+  submitSoon($, cardPrompt(ids.map(id => questionFor(id))))
 }
-```
-Add this top-level function:
-```tsx
-async function startSetupRc($: EngineInterface, why: string) {
-  if (setupRun || settings.rcAutoClear !== 'unanswered') return
-  await log($, 'rc.answer', { asked: true, why })
+
+// Spec §2 / pre-flight F24: asked when auto mode would first arm on the phone.
+async function maybeAskRc($: EngineInterface) {
+  const act = await read($, activityA)
+  if (!needsRcQuestion(onPhone(act), settings.rcAutoClear, settings.auto)) return
+  if (setupRun || (await read($, rcAskedA))) return
+  await update($, rcAskedA, () => true)
+  await notify($, V.rcAsk)
+  await log($, 'rc.answer', { asked: true })
   await startSetup($, 'rc')
 }
 ```
-and bind Task 12's `askRc` hook point in the `session.start` hook, right after `bindSession($)`:
+In Task 11's `observe`, right after the `if (t && settings.auto) { await log(...) }` block, add:
 ```tsx
-    askRc = why => { void startSetupRc($, why) }
+  if (t === 'arm') await maybeAskRc($)
 ```
-
 Hooks:
 ```tsx
   on('command.run', { command: COMMANDS.setup }, async ($, e) => {
@@ -2982,8 +3591,7 @@ Hooks:
   on('tool.call', { tool: 'AskUserQuestion' } as never, async ($, e, next) => {
     const r = await next(e)
     if (!setupRun) return r
-    const input = e as unknown as { answers?: Record<string, string> }
-    const pairs = Object.entries(input.answers ?? {})
+    const pairs = Object.entries(extractAnswers(e, r))
       .map(([q, answer]) => ({ step: stepForQuestion(q), answer }))
       .filter((p): p is { step: StepId; answer: string } => p.step !== undefined)
     if (!pairs.length) return r
@@ -3006,13 +3614,15 @@ Hooks:
     return r
   })
 ```
+(The prompt deliberately does not start with `[context-vigil-mod]`, so the card's JSON is the first `[{` in it.)
 
 - [ ] **Step 4: Run the gates** — clean.
 
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/tests/shell-setup.test.tsx
-git commit -m "feat(context-vigil-mod): setup cards with Tell me more, first-RC question"
+git commit -m "feat(context-vigil-mod): setup cards with Tell me more, RC question at first arm" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -3073,9 +3683,13 @@ def test_uninstall_removes_only_ours(tmp_path):
     assert settings(tmp_path)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/a:/b"
 
 
+# Same fixture string as CLASSIC_CMD in plugins/context-vigil-mod/tests/interlock.test.ts (Task 10).
+CLASSIC_CMD = '"/s/context-vigil/scripts/context-vigil" hook stop'
+
+
 def test_refuses_while_classic_hooks_are_installed(tmp_path):
     (tmp_path / "cfg").mkdir()
-    classic = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": '"/s/context-vigil/scripts/context-vigil" hook stop'}]}]}}
+    classic = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": CLASSIC_CMD}]}]}}
     (tmp_path / "cfg" / "settings.json").write_text(json.dumps(classic))
     r = run(tmp_path, "install")
     assert r.returncode == 3
@@ -3086,7 +3700,19 @@ def test_refuses_while_classic_hooks_are_installed(tmp_path):
 def test_status(tmp_path):
     assert "not installed" in run(tmp_path, "status").stdout
     run(tmp_path, "install")
-    assert "installed" in run(tmp_path, "status").stdout
+    out = run(tmp_path, "status").stdout
+    assert "context-vigil-mod: installed" in out
+    assert "not installed" not in out
+
+
+def test_other_hooks_do_not_block_install(tmp_path):
+    (tmp_path / "cfg").mkdir()
+    other = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "python3 ~/.claude-personal/census/five-hour-guard.py"}]}]}}
+    (tmp_path / "cfg" / "settings.json").write_text(json.dumps(other))
+    assert run(tmp_path, "install").returncode == 0
+    s = settings(tmp_path)
+    assert s["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == PLUGIN
+    assert s["hooks"] == other["hooks"]
 ```
 
 - [ ] **Step 2: Run to see it fail**
@@ -3110,7 +3736,8 @@ mkdir -p "$cfg"
 command -v jq >/dev/null || { echo "install.sh needs jq" >&2; exit 2; }
 
 current=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // ""' "$file")
-has_ours() { printf '%s' "$current" | tr ':' '\n' | grep -Fxq "$plugin"; }
+# grep without -q: under pipefail, -q exiting early can SIGPIPE the writer.
+has_ours() { printf '%s' "$current" | tr ':' '\n' | grep -Fx "$plugin" >/dev/null; }
 
 write() {
   local tmp
@@ -3121,7 +3748,8 @@ write() {
 
 case "$cmd" in
   install)
-    if jq -r '[.hooks // {} | .[]? | .[]? | .hooks[]? | .command? // ""] | .[]' "$file" | grep -Eq '/scripts/context-vigil"[[:space:]]+hook[[:space:]]'; then
+    # Keep in step with CLASSIC in core/interlock.ts (same match, TS form). TEMPORARY: removed when classic retires.
+    if jq -r '[.hooks // {} | .[]? | .[]? | .hooks[]? | .command? // ""] | .[]' "$file" | grep -E '/scripts/context-vigil"[[:space:]]+hook[[:space:]]' >/dev/null; then
       echo "classic context-vigil hooks are installed in $file — uninstall classic first, then re-run (spec §7)" >&2
       exit 3
     fi
@@ -3147,7 +3775,8 @@ Then `chmod +x plugins/context-vigil-mod/scripts/install.sh`. Add `tests/context
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/scripts/install.sh tests/context_vigil_mod
-git commit -m "feat(context-vigil-mod): user-level install script that refuses while classic is installed"
+git commit -m "feat(context-vigil-mod): user-level install script that refuses while classic is installed" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -3166,8 +3795,8 @@ git commit -m "feat(context-vigil-mod): user-level install script that refuses w
 - [ ] **Step 2: Write `SMOKES.md`** — an owner-run checklist (the auto-mode classifier forbids an agent driving another session), each item with expected result and a blank result line:
   1. Terminal: `/vho` → instruction turn → `vigil_handover` called → file under `handovers/` → `/clear` runs by itself → handover injected → resume prompt.
   2. Terminal: type a draft, then `/vho` → waits with the ✍️ notice; delete the draft → clears within 2 s.
-  3. Bar: push context past 35% → bar shows; `2` hides until 40%; `0` hides until a clear; feedback survey appearing hides the bar and it returns after.
-  4. Phone (RC): auto mode on, idle window shortened via `/vsetup auto` → first unattended clear asks `📱 RC clear`; with Yes: 30 s countdown notice reaches the phone; sending a message cancels it.
+  3. Bar: push context past 35% → bar shows `context NN% · threshold 35%`; `1` starts a handover; `2` hides until the next step; `0` hides it silently until a clear (no notice); feedback survey appearing hides the bar and it returns after.
+  4. Phone (RC): auto mode on, idle window 15 min via `/vsetup auto`, work from the phone → when auto mode first arms, the `📱 RC clear` question is asked (once). With Yes: at the threshold the 30 s countdown notice reaches the phone, the terminal bar shows the countdown with `0: ✖ Cancel`; pressing 0 or sending a message cancels it. With No: the handover is saved and nothing clears.
   5. Last light: `/vsetup last-light` On; leave idle ~55 min at ≥ 25% → handover written, nothing cleared; come back after the hour → the resume/carry-on dialog, held message re-sent either way.
   6. Limits: force a `rate_limit` (or wait for one) → `⏳ resumes HH:MM` notice, no clear until lifted.
   7. Coexistence: with classic installed in the account → one "standing down" notice, nothing else happens.
@@ -3183,7 +3812,8 @@ git commit -m "feat(context-vigil-mod): user-level install script that refuses w
 - [ ] **Step 5: Commit**
 ```bash
 git add plugins/context-vigil-mod/README.md plugins/context-vigil-mod/SMOKES.md CLAUDE.md
-git commit -m "docs(context-vigil-mod): README, owner smoke checklist, plugin list entry"
+git commit -m "docs(context-vigil-mod): README, owner smoke checklist, plugin list entry" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
 
 ---
@@ -3201,6 +3831,7 @@ git commit -m "docs(context-vigil-mod): README, owner smoke checklist, plugin li
 
 ## Deferred (not in this plan)
 
-- **Interlock removal (cleanup when classic retires):** delete `core/interlock.ts`, `classicSessionPath` in `core/name.ts`, `checkInterlock` and `standDownA` use in `register.tsx`, the classic refusal in `install.sh`, their tests, and the README section. Then retire classic. Trigger: side-by-side run done and the owner picks the mod.
-- **Status-line band** (replacing `statusline-command.sh` with a mod band): parked by the owner.
+- **Interlock removal (cleanup when classic retires):** delete `core/interlock.ts`, `classicSessionPath` in `core/name.ts`, `checkInterlock` and `standDownA` use in `register.tsx`, the classic refusal in `install.sh` (and its `CLASSIC_CMD` fixture test), the interlock tests, and the README section. Then retire classic. Trigger: side-by-side run done and the owner picks the mod.
+- **Status-line band** (replacing `statusline-command.sh` with a mod band): parked by the owner. When it returns, re-add git `ahead` (dropped in pre-flight F30).
+- **Last light's early band on `prompt.edit`** (spec §4 "may"): raising the resume/carry-on choice as a band while the person is still typing, before they send.
 - **Removing the TEMP vigil-probe block** in `~/.claude/statusline-command.sh` and the throwaway dev mods (`vigil-probe`, `vigil-bar-demo`, `handover-spike`, `cvm-probe`): owner housekeeping, outside the repo.
