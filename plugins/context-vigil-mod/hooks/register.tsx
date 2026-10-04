@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PendingReason, RateLimit, Settings } from '../types'
+import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PendingReason, RateLimit, Settings, StepId } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
@@ -9,7 +9,8 @@ import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire, ttlFromLabel } from '../core/last-light'
-import { clearGate } from '../core/surfaces'
+import { clearGate, needsRcQuestion } from '../core/surfaces'
+import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
 import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
 import { V } from '../core/voice'
@@ -45,6 +46,9 @@ let standDown = false
 let firedEarlyStops: string[] = []
 // The limit resume waiting on its handover file; the tool call fills `path` when it is written.
 let limitResume: { path: string | null } | null = null
+// The first-RC question is asked once per process: a clear wipes $.state, so it cannot live there.
+// A new session (bindSession) starts it fresh; resetCaches leaves it alone.
+let rcAsked = false
 
 // Module caches: rebuilt at session.start / after a hot reload.
 let root = '/nonexistent'
@@ -60,6 +64,7 @@ let unattendedClear = false
 let lastWait: WaitReason | null = null
 let retryTimer: { cancel: () => void } | null = null
 let ttlMs = TTL_1H
+let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
 
 async function nowMs($: EngineInterface): Promise<number> {
@@ -113,6 +118,31 @@ async function observe($: EngineInterface, signal: Signal) {
   if (t && settings.auto) {
     await log($, t, { from: prev, to: next, idleMs: act.lastHumanAt === null ? null : now - act.lastHumanAt, origin: act.lastHumanOrigin })
   }
+  if (t === 'arm') await maybeAskRc($)
+}
+
+function cardPrompt(questions: unknown[]): string {
+  return 'context-vigil-mod setup: call the AskUserQuestion tool now with exactly these questions (JSON, use as-is): ' +
+    `${JSON.stringify(questions)} — then stop; do nothing else this turn.`
+}
+
+async function startSetup($: EngineInterface, only?: string) {
+  if (only !== undefined && !isStep(only)) { await notify($, V.setupUsage); return }
+  setupRun = { only, asked: [] }
+  const ids = nextCard(settings, [], only)
+  if (!ids.length) { setupRun = null; await notify($, V.setupSaved); return }
+  setupRun.asked.push(...ids)
+  submitSoon($, cardPrompt(ids.map(id => questionFor(id))))
+}
+
+// Spec §2 / pre-flight F24: asked when auto mode would first arm on the phone.
+async function maybeAskRc($: EngineInterface) {
+  if (!needsRcQuestion(onPhone(activity), settings.rcAutoClear, settings.auto)) return
+  if (setupRun || rcAsked) return
+  rcAsked = true
+  await notify($, V.rcAsk)
+  await log($, 'rc.answer', { asked: true })
+  await startSetup($, 'rc')
 }
 
 async function refreshGit($: EngineInterface) {
@@ -144,6 +174,7 @@ function resetCaches() {
   lastLightTimer?.cancel()
   lastLightTimer = null
   ttlMs = TTL_1H
+  setupRun = null
 }
 
 async function bindSession($: EngineInterface) {
@@ -151,6 +182,7 @@ async function bindSession($: EngineInterface) {
   activity = EMPTY_ACTIVITY
   lastLightArmed = false
   standDown = false
+  rcAsked = false
   root = configRoot({ CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), HOME: await $.env.get('HOME') })
   session = await $.session.id()
   cwd = await $.session.cwd()
@@ -539,6 +571,36 @@ export const register: Register = on => {
       }
     }
     return next(e)
+  })
+
+  on('command.run', { command: COMMANDS.setup }, async ($, e) => {
+    await startSetup($, ((e as unknown as { args?: string }).args ?? '').trim() || undefined)
+    return { text: V.settingUp }
+  })
+
+  on('tool.call', { tool: 'AskUserQuestion' } as never, async ($, e, next) => {
+    const r = await next(e) as { context?: string[] }
+    if (!setupRun) return r as never
+    const pairs = Object.entries(extractAnswers(e, r))
+      .map(([q, answer]) => ({ step: stepForQuestion(q), answer }))
+      .filter((p): p is { step: StepId; answer: string } => p.step !== undefined)
+    if (!pairs.length) return r as never
+    const applied = applyAnswers(settings, pairs)
+    settings = applied.settings
+    await $.store.set(STORE_KEY, settings)
+    await log($, 'setup', { steps: pairs.map(p => p.step), retell: applied.retell })
+    if (pairs.some(p => p.step === 'rc')) await log($, 'rc.answer', { answer: settings.rcAutoClear })
+    const more = (prompt: string) => ({ ...r, context: [...(r.context ?? []), prompt] }) as never
+    if (applied.retell.length) return more(cardPrompt(applied.retell.map(id => questionFor(id, true))))
+    const ids = nextCard(settings, setupRun.asked, setupRun.only)
+    if (ids.length) {
+      setupRun.asked.push(...ids)
+      return more(cardPrompt(ids.map(id => questionFor(id))))
+    }
+    setupRun = null
+    await notify($, V.setupSaved)
+    if (settings.rcAutoClear === 'yes' && clearParked && (await read($, pendingA))) scheduleClear($, true)
+    return r as never
   })
 
   for (const command of [COMMANDS.handover, COMMANDS.handoff]) {
