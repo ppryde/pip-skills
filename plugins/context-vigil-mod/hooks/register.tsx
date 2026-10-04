@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { EventKind, Git, Settings } from '../types'
+import type { EventKind, Git, Mode, Settings } from '../types'
 import { COMMANDS, TOOL, classicSessionPath, configRoot, eventsPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings } from '../core/settings'
 import { EMPTY_ACTIVITY, classifyOrigin, mode, record, transition } from '../core/arming'
@@ -50,8 +50,7 @@ async function log($: EngineInterface, kind: EventKind, fields: Record<string, u
 
 // PROBES.md §1 decides the channel; both are sent until it says otherwise.
 async function notify($: EngineInterface, text: string) {
-  $.ui.toast(text)
-  $.ui.log(text)
+  await Promise.all([$.ui.toast(text), $.ui.log(text)]).catch(() => {})
 }
 
 // Every plugin prompt goes through here: from a timer, never awaited by the hook the turn waits on.
@@ -61,15 +60,15 @@ function submitSoon($: EngineInterface, text: string, delayMs = 0) {
 
 async function observe($: EngineInterface, signal: Signal) {
   const now = await nowMs($)
-  const prev = await read($, modeA)
-  let act = record(await read($, activityA), signal)
+  // Every change is computed from the value it replaces, so overlapping observers cannot erase each other.
+  let act = await update($, activityA, a => record(a, signal))
   // Spec §2: a non-empty draft in the terminal box is you being here.
-  if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) act = record(act, { kind: 'edit', at: now })
-  await update($, activityA, () => act)
+  if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) act = await update($, activityA, a => record(a, { kind: 'edit', at: now }))
   const next = mode(act, now, settings)
-  if (next === prev) return
-  await update($, modeA, () => next)
-  const t = transition(prev, next)
+  let prev: string | undefined
+  await update($, modeA, p => { prev = p; return next })
+  if (prev === undefined || prev === next) return
+  const t = transition(prev as Mode, next)
   if (t && settings.auto) {
     await log($, t, { from: prev, to: next, idleMs: act.lastHumanAt === null ? null : now - act.lastHumanAt, origin: act.lastHumanOrigin })
   }

@@ -17,6 +17,7 @@ export type World = {
   runs: { count: number }              // process.run calls answered
   state: Map<string, unknown>          // $.state values by `plugin.key` — the engine's session state, in memory
   askAnswer: { value: string | null }  // answers $.ui.ask and AskUserQuestion; null = dismissed
+  toastRefused: { value: boolean }     // makes ui.toast answer { deny }
   clearRefused: { value: boolean }     // makes $.command.run({ command: 'clear' }) reject
 }
 
@@ -28,7 +29,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     registered: { tools: [], commands: [] },
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
-    clearRefused: { value: false },
+    toastRefused: { value: false }, clearRefused: { value: false },
   }
   mock.store(on, opts.store ?? {})
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
@@ -49,6 +50,8 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('state.get', (_$, e) => { const k = stateKey(e as never); return { value: { value: w.state.get(k) as never, version: versions.get(k) ?? 0 } } })
   on('state.set', (_$, e) => {
     const k = stateKey(e as never)
+    const { ifVersion } = e as { ifVersion?: number }
+    if (ifVersion !== undefined && ifVersion !== (versions.get(k) ?? 0)) return { value: { isSet: false as const, version: versions.get(k) ?? 0 } }
     const version = (versions.get(k) ?? 0) + 1
     versions.set(k, version)
     w.state.set(k, (e as { value: unknown }).value)
@@ -68,7 +71,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   })
   on('command.register', (_$, e) => { w.registered.commands.push(e.name); return { value: { command: e.name } } })
   on('tool.register', (_$, e) => { w.registered.tools.push(e.name); return { value: { tool: `mcp__context-vigil-mod__${e.name}` } } })
-  on('ui.toast', (_$, e) => { w.notices.push(e.text); return { value: undefined } })
+  on('ui.toast', (_$, e) => { if (w.toastRefused.value) return { deny: 'no toast surface' }; w.notices.push(e.text); return { value: undefined } })
   on('ui.log', (_$, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.status', () => ({ value: undefined }))
   on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box /> })

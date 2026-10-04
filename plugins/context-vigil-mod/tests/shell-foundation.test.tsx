@@ -86,3 +86,24 @@ test('classic.SessionStart returns watch paths for .git', async ($, on) => {
   const r = await $.classic.SessionStart({ source: 'startup' } as never)
   expect(r.watchPaths).toEqual(['/repo/.git/HEAD', '/repo/.git/index'])
 })
+
+test('a human prompt racing an agent step is not erased: lastHumanAt survives and the mode ends attended', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  const humanAt = w.clock.now()
+  await Promise.all([$.turn.complete(turn()), $.prompt.submit(human('here I am'))])
+  expect((w.state.get('context-vigil-mod.activity') as { lastHumanAt: number }).lastHumanAt).toBe(humanAt)
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+  // The agent step may land first and arm; the human then disarms it. What must never happen is arm without that disarm.
+  const lines = [...w.files.values()].join('').split('\n').filter(Boolean).map(l => JSON.parse(l).kind as string)
+  expect(lines.filter(k => k === 'arm').length).toBe(lines.filter(k => k === 'disarm').length)
+})
+
+test('a refused toast is not an unhandled rejection: the log line still goes out', async ($, on) => {
+  const w = world(on, { files: { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) } })
+  w.toastRefused.value = true
+  await $.session.start(START)
+  expect(w.logs.filter(n => n.includes('standing down')).length).toBe(1)
+})
