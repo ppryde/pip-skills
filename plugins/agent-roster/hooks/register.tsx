@@ -97,26 +97,14 @@ export function ago(then: number, now: number): string {
   return `${Math.round(s / 86400)}d`
 }
 
-export const KEYWORD = /^\s*agents\s*$/i
 const COMMAND = 'roster'
 const SUMMARY_ROWS = 15
 
-/** One line, for a drop's notice: the notice draws no line breaks. */
 export function headline(rows: SessionRow[]): string {
   const waiting = rows.filter(r => r.status === 'waiting').length
   const busy = rows.filter(r => r.status === 'busy').length
 
   return `${rows.length} sessions · ${waiting} waiting · ${busy} busy`
-}
-
-/** What the model reads beside a Remote Control `agents`, so its reply carries the roster. */
-export function relayContext(roster: string): string {
-  return [
-    'agent-roster: the user typed `agents` over Remote Control, asking for their session roster.',
-    'Reply with exactly the roster below inside one code block, and nothing else. Use no tools.',
-    '',
-    roster,
-  ].join('\n')
 }
 
 /** The roster as plain text, one line a session (two with its last prompt). */
@@ -240,27 +228,18 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: COMMAND }, async $ => {
+  // The Claude app over Remote Control relays commands but attaches no drawing
+  // surface (it never asks to draw the pane), so from there the reply is the
+  // roster itself. That text is a transcript row the model reads too.
+  on('command.run', { command: COMMAND }, async ($, e) => {
     await refresh($)
+    if (e.origin.kind === 'bridge') {
+      const { rows, checkedAt } = await read($, sessions)
+      return { text: summary(rows, checkedAt) }
+    }
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
 
     return { text: 'Agents pane opened.' }
-  })
-
-  // Remote Control refuses plugin slash commands, so the bare word `agents`
-  // answers too. At the terminal it costs nothing: dropped before the model,
-  // the pane opened. Over Remote Control a drop's notice never reaches the
-  // phone, so the roster rides to the model as context and the reply carries it.
-  on('prompt.submit', async ($, e, next) => {
-    if (!KEYWORD.test(e.text)) return next(e)
-    await refresh($)
-    const { rows, checkedAt } = await read($, sessions)
-    if (e.origin?.kind === 'bridge') {
-      return next({ ...e, context: [...(e.context ?? []), relayContext(summary(rows, checkedAt))] })
-    }
-    void $.ui.open({ id: PANE, title: TITLE, focus: true })
-
-    return { drop: headline(rows) }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
