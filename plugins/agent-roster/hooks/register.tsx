@@ -34,6 +34,8 @@ const RANK: Record<string, number> = { waiting: 0, busy: 1 }
 const transcriptPaths = new Map<string, string | null>()
 const facts = new Map<string, { mtimeMs: number; facts: TranscriptFacts }>()
 const branches = new Map<string, { at: number; branch?: string }>()
+// A folder's repo never changes: resolved once.
+const gitRepos = new Map<string, { repo: string; worktree?: string }>()
 
 export type TranscriptFacts = { title?: string; prompt?: string; promptAt?: number }
 
@@ -264,6 +266,28 @@ async function factsOf($: EngineInterface, configDir: string, row: SessionRow): 
   return found
 }
 
+/** The repo a folder's git says it is (a sibling worktree under its main checkout); else by path. */
+export function repoFromGit(cwd: string, top: string, commonDir: string): { repo: string; worktree?: string } {
+  if (!commonDir.endsWith('/.git')) return repoOf(cwd)
+  const main = commonDir.slice(0, -'/.git'.length)
+  const name = (path: string) => path.split('/').filter(Boolean).pop() ?? path
+
+  return top && top !== main ? { repo: name(main), worktree: name(top) } : { repo: name(main) }
+}
+
+async function gitRepoOf($: EngineInterface, cwd: string) {
+  const known = gitRepos.get(cwd)
+  if (known) return known
+  const git = await $.process
+    .run(['git', '-C', cwd, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'])
+    .catch(() => undefined)
+  const [top = '', common = ''] = git?.exitCode === 0 ? git.stdout.trim().split('\n') : []
+  const found = repoFromGit(cwd, top, common)
+  gitRepos.set(cwd, found)
+
+  return found
+}
+
 async function branchOf($: EngineInterface, cwd: string) {
   const cached = branches.get(cwd)
   if (cached && Date.now() - cached.at < BRANCH_TTL_MS) return cached.branch
@@ -305,6 +329,7 @@ async function scan($: EngineInterface): Promise<SessionRow[]> {
       .filter(f => alive.has(f.row.pid))
       .map(async ({ row, configDir }) => ({
         ...row,
+        ...(await gitRepoOf($, row.cwd)),
         branch: await branchOf($, row.cwd),
         ...(await factsOf($, configDir, row)),
       })),
@@ -377,24 +402,76 @@ export function attachCommand(socket: string, name: string): string | undefined 
   return `tmux -L ${socket} attach -t '=${name}'`
 }
 
+/** The link the VS Code helper (`vscode/`) answers with a terminal tab attached to the session. */
+export function vscodeUri(socket: string, name: string): string | undefined {
+  if (!SAFE_NAME.test(socket) || !SAFE_NAME.test(name)) return undefined
+
+  return `vscode://pip.agent-roster-vscode/attach?socket=${socket}&name=${name}`
+}
+
+// `code` and the helper's install dir, wherever Homebrew or the app put them.
+const CODE_CLIS = ['/opt/homebrew/bin/code', '/usr/local/bin/code']
+
+async function helperInstalled($: EngineInterface): Promise<boolean> {
+  const home = await $.env.get('HOME')
+  const installed = await $.fs.list(`${home}/.vscode/extensions`).catch(() => [])
+
+  return installed.some(e => e.name.startsWith('pip.agent-roster-vscode-'))
+}
+
+/** The main checkout's root for a cwd (a worktree's included): where its VS Code window is. */
+async function repoRoot($: EngineInterface, cwd: string): Promise<string> {
+  const git = await $.process
+    .run(['git', '-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'])
+    .catch(() => undefined)
+  const common = git?.exitCode === 0 ? git.stdout.trim() : ''
+
+  return common.endsWith('/.git') ? common.slice(0, -'/.git'.length) : cwd
+}
+
 /**
- * Opens a session in a new Terminal.app window, attached to its tmux
- * session: never this session's own terminal. tmux mirrors every client of a
- * session, so a window already showing it (a VS Code tab, which no outside
- * program can bring forward) keeps working; the reply names where.
+ * A session of the repo this roster runs in opens in a new terminal tab of
+ * that repo's VS Code window (through the helper); any other, or with no
+ * helper, in a new Terminal.app window. Never this session's own terminal.
+ * tmux mirrors every client of a session, so a view already showing it keeps
+ * working; the reply names the ttys it is also attached on.
  */
 async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
   const name = nameOf(r)
-  if (r.sessionId === (await $.session.id())) return `${name} is this session.`
+  const selfId = await $.session.id()
+  if (r.sessionId === selfId) return `${name} is this session.`
   if (!r.tmux) return `${name} runs outside tmux: there is nothing to attach to.`
   const socket = await socketOf($, r)
   if (!socket) return `Could not find ${name}'s tmux server.`
   const attach = attachCommand(socket, r.tmux)
-  if (!attach) return `Refused: ${name} has a name the opener will not quote.`
+  const uri = vscodeUri(socket, r.tmux)
+  if (!attach || !uri) return `Refused: ${name} has a name the opener will not quote.`
   const clients = await $.process
     .run(['tmux', '-L', socket, 'list-clients', '-t', `=${r.tmux}`, '-F', '#{client_tty}'])
     .catch(() => undefined)
   const ttys = (clients?.stdout ?? '').split('\n').filter(Boolean).map(t => t.replace('/dev/', ''))
+  const also = ttys.length ? ` (also attached on ${ttys.join(', ')})` : ''
+
+  const self = (await read($, sessions)).rows.find(s => s.sessionId === selfId)
+  if (self && self.repo === r.repo && (await helperInstalled($))) {
+    const root = await repoRoot($, self.cwd)
+    // Bring that repo's window forward first (`code <folder>` reuses an open
+    // one), so the link lands there rather than in whichever window was last.
+    let isRaised = false
+    for (const cli of CODE_CLIS) {
+      const raised = await $.process.run([cli, root]).catch(() => undefined)
+      if (raised?.exitCode === 0) {
+        isRaised = true
+        break
+      }
+    }
+    if (isRaised) {
+      await $.clock.sleep(800)
+      const sent = await $.process.run(['open', uri])
+      if (sent.exitCode === 0) return `Opened ${name} in a new VS Code terminal in ${root}${also}.`
+    }
+  }
+
   const run = await $.process.run([
     'osascript',
     '-e',
@@ -407,7 +484,6 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
     'end tell',
   ])
   if (run.exitCode !== 0) return `Could not open ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
-  const also = ttys.length ? ` (also attached on ${ttys.join(', ')})` : ''
 
   return `Opened ${name} in a new Terminal window${also}.`
 }

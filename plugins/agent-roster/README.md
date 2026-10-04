@@ -31,12 +31,21 @@ draw the pane. So when the command arrives over the bridge
 ## Opening a session
 
 Each tmux session's row has an **open** button (from the phone,
-`/roster open <tmux-name|pid>`). It opens a **new Terminal.app window**
-attached to that session, on the socket found by pid as for kill; the
+`/roster open <tmux-name|pid>`). A session of the **same repo** as the one
+running the roster opens in a **new terminal tab of that repo's VS Code
+window**, through the small helper extension in `vscode/` (install it with
+`sh plugins/agent-roster/vscode/build.sh install`): the mod raises the
+window with `code <repo root>`, then sends
+`vscode://pip.agent-roster-vscode/attach?socket=…&name=…`, which the helper
+answers with a terminal running `tmux attach` (TMUX cleared). Any other
+session, or any session without the helper, opens in a **new Terminal.app
+window** attached to it, on the socket found by pid as for kill; the
 session you are in is never touched. tmux mirrors every client of a session,
 so a window already showing it keeps working, and the reply names the ttys
 it is also attached on. An existing VS Code terminal tab cannot be brought
-forward instead: VS Code offers no outside way to select one. The first open
+forward instead: VS Code offers no outside way to select one. Repos are
+told apart by git (a sibling worktree counts under its main checkout), so
+tabs and "same repo" agree. The first open
 asks macOS once to let Claude Code control Terminal.
 
 ## Killing a session

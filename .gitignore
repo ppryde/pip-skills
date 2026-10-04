@@ -43,3 +43,6 @@ plugins/overseer/dashboard/frontend/src/board/almoner/fixture.local.ts
 
 # Engine-written API types a mod gets laid beside it on every load.
 plugins/*/.claude-plugin/types/
+
+# The agent-roster VS Code helper, built by plugins/agent-roster/vscode/build.sh.
+*.vsix

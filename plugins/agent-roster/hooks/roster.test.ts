@@ -7,6 +7,7 @@ import {
   headline,
   matchTarget,
   projectSlug,
+  repoFromGit,
   repoOf,
   repoTabs,
   sorted,
@@ -14,6 +15,7 @@ import {
   tabMarks,
   toRow,
   transcriptFacts,
+  vscodeUri,
 } from './register'
 
 const DAY = 86_400_000
@@ -189,4 +191,24 @@ test('the opener attaches by exact name on the found socket, and refuses unquota
   )
   expect(attachCommand('claude', "x'; rm -rf ~")).toBe(undefined)
   expect(attachCommand('claude', 'a"b')).toBe(undefined)
+})
+
+test('the VS Code link carries socket and exact name, and refuses what it cannot pass', async () => {
+  expect(vscodeUri('claude-personal', 'cc-pip-skills-9')).toBe(
+    'vscode://pip.agent-roster-vscode/attach?socket=claude-personal&name=cc-pip-skills-9',
+  )
+  expect(vscodeUri('claude', 'a&b=c')).toBe(undefined)
+})
+
+test("a sibling worktree belongs to its main checkout's repo, by what git says", async () => {
+  const common = '/Users/me/repos/pip-skills/.git'
+  expect(repoFromGit('/Users/me/repos/pip-skills-agent-roster', '/Users/me/repos/pip-skills-agent-roster', common)).toEqual({
+    repo: 'pip-skills',
+    worktree: 'pip-skills-agent-roster',
+  })
+  expect(repoFromGit('/Users/me/repos/pip-skills/src', '/Users/me/repos/pip-skills', common)).toEqual({
+    repo: 'pip-skills',
+  })
+  // Not a git folder: fall back to the path.
+  expect(repoFromGit('/tmp/scratch-1', '', '')).toEqual({ repo: 'scratch-1' })
 })
