@@ -8,6 +8,13 @@ export function nextThreshold(pct: number, s: Pick<Settings, 'nudgeAt' | 'step'>
   return crossed
 }
 
+// An unattended (auto-mode) handover waits until context has grown at least one step above the
+// session's baseline (its first reading), so a session that starts just under the threshold
+// cannot hand over, clear and hand over again within a turn. Attended nudges ignore this.
+export function grownEnough(pct: number, baseline: number | null, step: number): boolean {
+  return baseline !== null && pct - baseline >= step
+}
+
 // The turn that wrote a handover ends just after the tool call; a turn ending later than this
 // means the conversation moved on and the handover is stale.
 export const REUSE_SLACK_MS = 60_000

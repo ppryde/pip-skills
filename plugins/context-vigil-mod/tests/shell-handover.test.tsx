@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 import { START, human, turn, world, type World } from './world'
 
 const MIN = 60_000
@@ -98,6 +99,7 @@ test('a turn that ends before the instruction prompt was sent is not a missed at
   await $.prompt.submit(human('go'))
   await w.clock.advance(31 * MIN)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
   await $.session.measure(measure(36))      // arms the handover; the submit is still on its timer
   await $.turn.complete(turn('running'))    // the turn that was already running ends
   await w.clock.settle()
@@ -137,9 +139,80 @@ test('auto mode at the threshold hands over by itself', async ($, on) => {
   await $.prompt.submit(human('go'))
   await w.clock.advance(31 * MIN)
   await $.turn.complete(turn())
+  await $.session.measure(measure(20))
   await $.session.measure(measure(36))
   await w.clock.settle()
   expect(w.submits.at(-1)?.text).toContain(TOOL)
+})
+
+const eventLog = (w: World) => [...w.files.entries()].find(([k]) => k.includes('/events/'))?.[1] ?? ''
+
+// Auto mode, baseline read, then the threshold crosses and the instruction goes out.
+async function autoHandoverInFlight($: Engine, w: World) {
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toContain(TOOL)
+}
+
+test('a human prompt during an auto handover: the handover is kept, nothing clears, the person is told', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await autoHandoverInFlight($, w)
+  await $.prompt.submit(human('hold on'))
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get(PENDING)).toMatchObject({ reason: 'threshold' })
+  expect(w.notices).toContain('📜 Handover saved — you came back, so nothing was cleared; /vho or /clear when you are ready')
+  expect(eventLog(w)).toContain('"clear.skipped"')
+  expect(eventLog(w)).toContain('"attended"')
+})
+
+test('a requested handover is attended by definition: a prompt does not stop its clear', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.prompt.submit(human('carry on'))
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.commands).toContain('clear')
+})
+
+test('auto mode holds back a handover until context has grown a step above the baseline', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, nudgeAt: 25 } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(24))
+  await $.session.measure(measure(26))
+  await w.clock.settle()
+  expect(w.submits.map(s => s.text).join('\n')).not.toContain(TOOL)
+  expect(eventLog(w)).toContain('"guard.baseline"')
+  await $.session.measure(measure(29))
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toContain(TOOL)
+})
+
+test('a clear gives the new session its own baseline', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, nudgeAt: 25 } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(10))
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.session.measure(measure(24))
+  await $.session.measure(measure(26))
+  await w.clock.settle()
+  expect(w.submits.map(s => s.text).join('\n')).not.toContain(TOOL)
 })
 
 test('clear resets lastNudged so the next crossing nudges again', async ($, on) => {

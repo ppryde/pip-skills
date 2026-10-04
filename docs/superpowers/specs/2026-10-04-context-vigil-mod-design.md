@@ -153,6 +153,16 @@ prototype showed it reports only `[terminal]` with a phone attached, and no
 Every arm, disarm and RC answer is logged with its reason, the idle time and
 the deciding origin.
 
+Two guards on an unattended (auto) handover, both learned from a live smoke run:
+- **Attended at clear time.** Mode is re-checked at the moment of clearing, not
+  only when the handover began. If the session became attended meanwhile, the
+  clear is skipped (`clear.skipped`, reason `attended`), the handover is kept
+  and the person is told. Requested handovers are attended by definition.
+- **Baseline growth.** An auto threshold handover fires only once context has
+  grown at least one `step` above the session's baseline (its first context
+  reading; a `/clear` starts a new one). Otherwise `guard.baseline` is logged.
+  Attended nudges are unchanged.
+
 ---
 
 ## 3. The handover

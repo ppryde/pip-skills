@@ -56,6 +56,8 @@ Terminal only. Shown from the threshold crossing until you choose or a handover 
 - Draft guard: a clear waits while the terminal prompt box holds a draft, rechecked every 2 s, with a notice.
 - If the model does not call `vigil_handover`, it is asked once more; then a "couldn't write a handover" notice appears and nothing clears.
 - A handover asked for while the limit latch is set is deferred and starts when the latch lifts.
+- Attended guard: an auto-mode (unattended) handover never clears once you are back. The mode is re-checked at the moment of clearing; if you have prompted since it began, the handover is kept, the log says `clear.skipped`, and a notice says to `/vho` or `/clear` when ready. `/vho` and the bar's `1` are attended and unaffected.
+- Baseline guard: an auto-mode threshold handover fires only once context has grown at least one `step` (default 5) above the session's baseline, its first context reading (a /clear starts a new baseline). This stops a session that resumes just under the threshold from handing over again within a turn; the log says `guard.baseline` when it holds one back. Attended nudges are unaffected.
 - A handover still pending when a session restarts is offered at session start with a `/clear` notice.
 
 ## Last light

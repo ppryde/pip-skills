@@ -22,6 +22,7 @@ export const V = {
   barDismiss: '✖ Dismiss',
   nudge: (pct: number) => `🕯️ Context at ${pct}% — say "hand over" (or /vho) when you're ready 📜`,
   handoverSaved: (path: string) => `📜 Handover saved — ${path}`,
+  clearSkippedAttended: '📜 Handover saved — you came back, so nothing was cleared; /vho or /clear when you are ready',
   handoverFailed: '📜 Couldn\'t write a handover — nothing was cleared',
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,

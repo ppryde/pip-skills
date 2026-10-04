@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { FIELD_NAMES, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { FIELD_NAMES, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -12,6 +12,17 @@ describe('nextThreshold', () => {
   test('after reset (a /clear) the first crossing is due again', () => {
     expect(nextThreshold(12, S, null)).toBe(null)
     expect(nextThreshold(36, S, null)).toBe(35)
+  })
+})
+
+describe('grownEnough', () => {
+  test('no baseline yet: this reading is the baseline, so no', () => expect(grownEnough(30, null, 5)).toBe(false))
+  test('less than one step above the baseline holds back', () => expect(grownEnough(28, 24, 5)).toBe(false))
+  test('exactly one step above the baseline is enough', () => expect(grownEnough(29, 24, 5)).toBe(true))
+  test('well above the baseline is enough', () => expect(grownEnough(60, 24, 5)).toBe(true))
+  test('the step setting is the margin', () => {
+    expect(grownEnough(32, 24, 10)).toBe(false)
+    expect(grownEnough(34, 24, 10)).toBe(true)
   })
 })
 

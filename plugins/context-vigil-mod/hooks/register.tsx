@@ -7,7 +7,7 @@ import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transitio
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, TOOL_DESCRIPTION, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire, ttlFromLabel } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
@@ -22,6 +22,7 @@ import type { WaitReason } from '../core/voice'
 // fresh session may forget.
 const modeA = atom({ plugin: 'context-vigil-mod', key: 'mode' } as const, 'idle')
 const contextA = atom({ plugin: 'context-vigil-mod', key: 'contextPct' } as const, null)
+const baselineA = atom({ plugin: 'context-vigil-mod', key: 'baselinePct' } as const, null as number | null)
 const lastNudgedA = atom({ plugin: 'context-vigil-mod', key: 'lastNudged' } as const, null)
 const barShownA = atom({ plugin: 'context-vigil-mod', key: 'barShown' } as const, false)
 const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } as const, false)
@@ -281,6 +282,15 @@ async function tryClear($: EngineInterface) {
   if (!(await read($, pendingA))) return
   await checkInterlock($)   // spec §7: at session start AND before every clear (TEMPORARY)
   const now = await nowMs($)
+  // An unattended clear is only for an unattended session: re-checked here, not just when it began.
+  if (unattendedClear && mode(activity, now, settings) === 'attended') {
+    await setCountdown($, null)
+    lastWait = null
+    clearParked = true
+    await notify($, V.clearSkippedAttended)
+    await log($, 'clear.skipped', { reason: 'attended' })
+    return
+  }
   const gate = clearGate({
     now, draft: (await $.prompt.read()).text, onPhone: onPhone(activity), lastBridgeAt: activity.lastBridgeAt,
     rcAutoClear: settings.rcAutoClear, latched: (await readLatch($)) !== null,
@@ -504,6 +514,7 @@ export const register: Register = on => {
     await update($, awaitingA, () => null)
     await update($, deferredA, () => null)
     await update($, lastNudgedA, () => null)
+    await update($, baselineA, () => null)
     await update($, barShownA, () => false)
     await update($, barDismissedA, () => false)
     await update($, countdownA, () => null)
@@ -605,7 +616,9 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     const pct = e.context.percent ?? null
+    const prevPct = await read($, contextA)
     await update($, contextA, () => pct)
+    if (pct !== null && (await read($, baselineA)) === null) await update($, baselineA, () => pct)
     const limits = e.rateLimits as RateLimit[]
     await setLatch($, latchFromMeasure(limits))
     await checkLatch($, limits)
@@ -620,11 +633,18 @@ export const register: Register = on => {
     if (pct !== null && !standDown) {
       const due = nextThreshold(pct, settings, await read($, lastNudgedA))
       if (due !== null) {
-        await update($, lastNudgedA, () => due)
         const now = await nowMs($)
-        await log($, 'threshold', { pct, step: due, mode: await read($, modeA) })
-        if (armed(activity, now, settings)) await startHandover($, 'threshold', true)
-        else await showNudge($, pct)
+        const unattended = armed(activity, now, settings)
+        const baseline = await read($, baselineA)
+        if (unattended && !grownEnough(pct, baseline, settings.step)) {
+          // Held back, not spent: the step stays due until the growth is there.
+          if (pct !== prevPct) await log($, 'guard.baseline', { pct, baseline })
+        } else {
+          await update($, lastNudgedA, () => due)
+          await log($, 'threshold', { pct, step: due, mode: await read($, modeA) })
+          if (unattended) await startHandover($, 'threshold', true)
+          else await showNudge($, pct)
+        }
       }
     }
     return next(e)

@@ -77,7 +77,7 @@ export type StepId =
 
 export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
-  | 'guard.wait' | 'clear' | 'resume' | 'last_light.fired' | 'last_light.choice'
+  | 'guard.wait' | 'guard.baseline' | 'clear.skipped' | 'clear' | 'resume' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
   | 'standdown' | 'rename'
 
@@ -91,6 +91,7 @@ declare module 'claude-code' {
       mode: Mode
       contextPct: number | null
       lastNudged: number | null
+      baselinePct: number | null
       barShown: boolean
       barDismissed: boolean
       pending: Pending | null

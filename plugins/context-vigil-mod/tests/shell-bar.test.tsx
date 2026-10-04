@@ -114,6 +114,7 @@ async function countdownSession($: Engine, w: World) {
   await $.prompt.submit(human('go', 'bridge'))
   await w.clock.advance(31 * MIN)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
   await $.session.measure(measure(36))
   await w.clock.settle()
   await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)
@@ -195,6 +196,7 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
 async function autoHandoverAfter($: Engine, w: World) {
   await w.clock.advance(31 * MIN)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
   await $.session.measure(measure(36))
   await w.clock.settle()
   await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)
@@ -218,6 +220,7 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     await $.prompt.submit(human('go', 'bridge'))
     await w.clock.advance(31 * MIN)
     await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+    await $.session.measure(measure(20))
     await $.session.measure(measure(36))          // armed while latched: deferred
     await w.clock.settle()
     expect(w.state.get('context-vigil-mod.deferred')).toMatchObject({ reason: 'threshold' })
