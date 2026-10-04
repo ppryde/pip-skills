@@ -98,13 +98,30 @@ export function ago(then: number, now: number): string {
 }
 
 export const KEYWORD = /^\s*agents\s*$/i
+const COMMAND = 'roster'
 const SUMMARY_ROWS = 15
+
+/** One line, for a drop's notice: the notice draws no line breaks. */
+export function headline(rows: SessionRow[]): string {
+  const waiting = rows.filter(r => r.status === 'waiting').length
+  const busy = rows.filter(r => r.status === 'busy').length
+
+  return `${rows.length} sessions · ${waiting} waiting · ${busy} busy`
+}
+
+/** What the model reads beside a Remote Control `agents`, so its reply carries the roster. */
+export function relayContext(roster: string): string {
+  return [
+    'agent-roster: the user typed `agents` over Remote Control, asking for their session roster.',
+    'Reply with exactly the roster below inside one code block, and nothing else. Use no tools.',
+    '',
+    roster,
+  ].join('\n')
+}
 
 /** The roster as plain text, one line a session (two with its last prompt). */
 export function summary(rows: SessionRow[], now: number): string {
-  const waiting = rows.filter(r => r.status === 'waiting').length
-  const busy = rows.filter(r => r.status === 'busy').length
-  const lines = [`${rows.length} sessions · ${waiting} waiting · ${busy} busy`]
+  const lines = [headline(rows)]
   for (const r of rows.slice(0, SUMMARY_ROWS)) {
     const where = r.worktree ? `${r.repo}/${r.worktree}` : r.repo
     const status = r.status === 'waiting' && r.waitingFor ? `waiting: ${r.waitingFor}` : r.status
@@ -209,17 +226,21 @@ async function refresh($: EngineInterface) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'agents',
-      description: 'Every Claude session on this machine: tmux name, repo, status, last active',
-    })
+    // Polling first: a refused command must not take the roster down with it.
     $.clock.every(POLL_MS, () => void refresh($).catch(() => undefined))
     void refresh($).catch(() => undefined)
+    // `/agents` is a built-in, so the command is `/roster`.
+    await $.command
+      .register({
+        name: COMMAND,
+        description: 'Every Claude session on this machine: tmux name, repo, status, last active',
+      })
+      .catch(() => undefined)
 
     return next(e)
   })
 
-  on('command.run', { command: 'agents' }, async $ => {
+  on('command.run', { command: COMMAND }, async $ => {
     await refresh($)
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
 
@@ -227,14 +248,19 @@ export const register: Register = on => {
   })
 
   // Remote Control refuses plugin slash commands, so the bare word `agents`
-  // answers too: dropped before the model, the roster shown as the reason.
+  // answers too. At the terminal it costs nothing: dropped before the model,
+  // the pane opened. Over Remote Control a drop's notice never reaches the
+  // phone, so the roster rides to the model as context and the reply carries it.
   on('prompt.submit', async ($, e, next) => {
     if (!KEYWORD.test(e.text)) return next(e)
     await refresh($)
-    void $.ui.open({ id: PANE, title: TITLE })
     const { rows, checkedAt } = await read($, sessions)
+    if (e.origin?.kind === 'bridge') {
+      return next({ ...e, context: [...(e.context ?? []), relayContext(summary(rows, checkedAt))] })
+    }
+    void $.ui.open({ id: PANE, title: TITLE, focus: true })
 
-    return { drop: summary(rows, checkedAt) }
+    return { drop: headline(rows) }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

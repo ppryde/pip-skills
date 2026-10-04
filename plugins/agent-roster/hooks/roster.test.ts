@@ -1,6 +1,24 @@
 import { expect, test } from 'claude-code/testing'
 
-import { KEYWORD, ago, lastPromptOf, projectSlug, repoOf, sorted, summary, toRow } from './register'
+import {
+  KEYWORD,
+  ago,
+  headline,
+  lastPromptOf,
+  projectSlug,
+  relayContext,
+  repoOf,
+  sorted,
+  summary,
+  toRow,
+} from './register'
+
+test('the terminal headline is one line; the remote relay carries the roster whole', async () => {
+  const roster = 'line one\nline two'
+
+  expect(headline([])).toBe('0 sessions · 0 waiting · 0 busy')
+  expect(relayContext(roster).endsWith(`\n${roster}`)).toBe(true)
+})
 
 test('the bare word agents is the keyword, nothing longer', async () => {
   expect(KEYWORD.test('agents')).toBe(true)

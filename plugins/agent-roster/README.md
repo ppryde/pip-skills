@@ -1,6 +1,6 @@
 # agent-roster
 
-`/agents` opens a pane listing every Claude Code session running on this
+`/roster` (or the bare word `agents`) opens a pane listing every Claude Code session running on this
 machine, across both accounts:
 
 ```
@@ -19,11 +19,16 @@ takes a stacked block instead of a line.
 
 ## Over Remote Control
 
-Remote Control refuses plugin slash commands (`/agents isn't available over
-Remote Control`). Type the bare word **`agents`** instead: a `prompt.submit`
-hook drops it before the model (no turn, no tokens), opens the pane, and
-shows the roster as plain text — the top 15 sessions, each with its last
-prompt — as the drop's reason.
+Remote Control refuses plugin slash commands, and `/agents` is Claude Code's
+own subagent manager anyway, hence `/roster`. Type the bare word **`agents`**
+instead; a `prompt.submit` hook takes it either way:
+
+- **At the terminal** it is dropped before the model (no turn, no tokens) and
+  the pane opens, the drop's notice a one-line count.
+- **Over Remote Control** (`origin.kind === 'bridge'`) a drop's notice never
+  reaches the phone, so the prompt goes on to the model with the roster
+  attached as context — the top 15 sessions, each with its last prompt — and
+  the reply carries it. That one costs a short turn.
 
 ## Where the data comes from
 
@@ -41,7 +46,8 @@ file's mtime changes. The branch is `git branch --show-current` per cwd,
 cached for a minute.
 
 None of it reaches the model: the pane, the polling and the status line cost
-no context. The one model-visible line is `/agents`' own reply.
+no context. The model sees only `/roster`'s one-line reply, and the roster itself when
+`agents` is typed over Remote Control.
 
 ## Loading it
 
