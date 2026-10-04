@@ -53,6 +53,12 @@ NUDGE_UNATTENDED = (
     "3. Hand over: " + NOTES_STEP + "\n"
     "It will tell you whether /clear is automatic or the user must type it."
 )
+NUDGE_NOTICED = (
+    "**context-vigil: context at {pct}% — over the {threshold}% threshold.** "
+    "The user has already been shown this on screen. If their message asks you to "
+    "hand over, do it now: " + NOTES_STEP + "\nOtherwise answer their message normally "
+    "and do not bring the handover up."
+)
 NUDGE_REMOTE = (
     "\n\nThis session is remote: the next session cannot open file paths. Embed "
     "anything it must read with repeatable `--inline <path>`. Never inline secrets or "
@@ -135,6 +141,7 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
     # is nowhere to keep it, so the gate alone holds: one nudge per cycle. The
     # check-and-set runs under the record's lock so parallel hooks cannot both
     # nudge; a lock that cannot be had means a quiet turn.
+    record = None
     key = session_id or "scope-" + hashlib.sha1(str(scope).encode()).hexdigest()[:16]
     with session.locked(key) as got:
         if not got:
@@ -148,8 +155,12 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
         if session_id and record is not None:
             record["last_nudged_pct"] = pct
             session.save(session_id, record)
-    template = (NUDGE_ATTENDED if event == "UserPromptSubmit" and kind == "human"
-                else NUDGE_UNATTENDED)
+    noticed = (session_id is not None and record is not None
+               and isinstance(record.get("last_noticed_pct"), int))
+    if event == "UserPromptSubmit" and kind == "human":
+        template = NUDGE_NOTICED if noticed else NUDGE_ATTENDED
+    else:
+        template = NUDGE_UNATTENDED
     text = template.format(pct=pct, threshold=threshold, launcher=paths.launcher_path())
     if config.mode(cwd) == "remote":
         text += NUDGE_REMOTE
@@ -159,7 +170,36 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
     }})
 
 
+def _notice(payload: Dict[str, object], scope: Path) -> Optional[str]:
+    """The end-of-turn notice (spec section 2): shown to the user, never to the model;
+    first crossing, then every repeat step. One JSON object or nothing."""
+    session_id = _str(payload, "session_id")
+    if not session_id or state.is_paused(scope):
+        return None
+    cwd = _cwd(payload)
+    reading = context.current_reading(cwd, session_id, _str(payload, "transcript_path"),
+                                      config.window(cwd))
+    if reading.pct is None or not reading.confident:
+        return None
+    pct, threshold, step = int(reading.pct), config.threshold(cwd), config.repeat_step(cwd)
+    if pct < threshold:
+        return None
+    with session.locked(session_id) as got:
+        if not got:
+            return None
+        record = session.load(session_id)
+        last = record["last_noticed_pct"]
+        if isinstance(last, int) and pct < last + step:
+            return None
+        record["last_noticed_pct"] = pct
+        session.save(session_id, record)
+    template = messages.NOTICE_FIRST if not isinstance(last, int) else messages.NOTICE_REPEAT
+    return messages.system_message(template.format(pct=pct, threshold=threshold))
+
+
 def stop(payload: Dict[str, object]) -> Optional[str]:
+    if payload.get("stop_hook_active") is True:
+        return None
     session_id = _str(payload, "session_id")
     transcript_path = _str(payload, "transcript_path")
     if session.is_headless(session_id, transcript_path):
@@ -168,7 +208,7 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
     if state.drop_orphan_clear(scope):
         return None   # its handover was resumed or discarded elsewhere: nothing to /clear for
     if not state.clear_requested(scope):
-        return None
+        return _notice(payload, scope)
     target = tmux.pane()
     if not tmux.reachable() or target is None:
         return messages.system_message(messages.SAVED_TYPE_CLEAR)
