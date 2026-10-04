@@ -18,6 +18,7 @@ from context_vigil import (
     handover,
     hooks,
     install,
+    last_light,
     launcher,
     messages,
     paths,
@@ -229,7 +230,14 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
-    census.ingest(sys.stdin.read())
+    raw = sys.stdin.read()
+    census.ingest(raw)
+    try:   # the status line must never fail: last light is best-effort
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            last_light.tick(payload)
+    except Exception:
+        pass
     return 0
 
 
