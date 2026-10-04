@@ -4,9 +4,9 @@ import { expect, test } from 'claude-code/testing'
 // one account's session registry, `ps` reporting every pid alive, no git, no
 // transcripts.
 const REGISTRY: Record<string, object> = {
-  '1.json': { pid: 1, sessionId: 'a', cwd: '/r/pip-skills', tmux: 'cc-a-1:@0.%0', status: 'waiting', updatedAt: 0 },
-  '2.json': { pid: 2, sessionId: 'b', cwd: '/r/warehouse', tmux: 'cc-b-1:@1.%1', status: 'busy', updatedAt: 0 },
-  '3.json': { pid: 3, sessionId: 'c', cwd: '/r/pip-skills', tmux: 'cc-a-2:@2.%2', status: 'idle', updatedAt: 0 },
+  '101.json': { pid: 101, sessionId: 'a', cwd: '/r/pip-skills', tmux: 'cc-a-1:@0.%0', status: 'waiting', updatedAt: 0 },
+  '102.json': { pid: 102, sessionId: 'b', cwd: '/r/warehouse', tmux: 'cc-b-1:@1.%1', status: 'busy', updatedAt: 0 },
+  '103.json': { pid: 103, sessionId: 'c', cwd: '/r/pip-skills', tmux: 'cc-a-2:@2.%2', status: 'idle', updatedAt: 0 },
 }
 const SESSIONS_DIR = '/home/.claude-personal/sessions'
 
@@ -37,7 +37,7 @@ test('the pane draws repo tabs with their marks, and a tab narrows the list', as
   on('process.run', ($, e) => ({
     value: {
       exitCode: e.argv[0] === 'git' ? 1 : 0,
-      stdout: e.argv[0] === 'ps' ? '1\n2\n3\n' : '',
+      stdout: e.argv[0] === 'ps' ? '101 /bin/claude\n102 /bin/claude\n103 /bin/claude\n' : '',
       stderr: '',
     } as never,
   }))
@@ -73,5 +73,9 @@ test('the pane draws repo tabs with their marks, and a tab narrows the list', as
   expect(await session(/cc-a-2/)).toBeUndefined()
   await ui.press({ key: 'older' })
   expect(await session(/cc-a-2/)).toBeDefined()
+  // A manual refresh rescans and keeps the tab in view.
+  await ui.press({ key: 'refresh' })
+  expect(await session(/cc-a-1/)).toBeDefined()
+  expect(await session(/cc-b-1/)).toBeUndefined()
   await ui.unmount()
 })

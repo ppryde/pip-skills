@@ -28,7 +28,8 @@ export type SessionRow = {
 declare module 'claude-code' {
   interface PluginState {
     'agent-roster': {
-      sessions: { rows: SessionRow[]; checkedAt: number; selfId?: string }
+      /** `error`: why the last scan failed, while the rows are the last good ones. */
+      sessions: { rows: SessionRow[]; checkedAt: number; selfId?: string; error?: string }
       /** The pid whose kill button was pressed and awaits confirmation. */
       pendingKill: number | null
       /** Whether idle sessions quiet for over a day are unfolded. */

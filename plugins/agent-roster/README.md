@@ -18,7 +18,8 @@ working, grey `○3` idle (zeros left out); repos that need you first. Click one
 number (1 = All, then 2–9) while the pane holds the keyboard. The header
 counts stay global, so nothing waiting in another repo hides behind a tab.
 
-The status line reads `agents: N waiting` while any session waits on you.
+The pane rescans every 5 s; **refresh** (hotkey `r`) rescans now and re-reads
+git branches, and the header says how long ago it last looked. The status line reads `agents: N waiting` while any session waits on you.
 
 ## Over Remote Control
 
@@ -31,27 +32,42 @@ draw the pane. So when the command arrives over the bridge
 ## Opening a session
 
 Each tmux session's row has an **open** button (from the phone,
-`/roster open <tmux-name|pid>`). A session of the **same repo** as the one
-running the roster opens in a **new terminal tab of that repo's VS Code
-window**, through the small helper extension in `vscode/` (install it with
-`sh plugins/agent-roster/vscode/build.sh install [profile…]`, naming every VS Code
-profile your windows use: a window loads only its own profile's extensions,
-and a missing helper shows as "cannot be installed because it was not found"): the mod raises the
-window with `code <repo root>`, then sends
-`vscode://pip.agent-roster-vscode/attach?socket=…&name=…`, which the helper
-answers by focusing a tab of that window already showing the session (one
-whose shell is an ancestor of one of the session's tmux clients), else with
-a new tab running `tmux attach` (TMUX cleared). A tab in a *different* VS Code
-window is not seen: the link lands in the repo's own window. Any other
-session, or any session without the helper, opens in a **new Terminal.app
-window** attached to it, on the socket found by pid as for kill; the
-session you are in is never touched. tmux mirrors every client of a session,
-so a window already showing it keeps working, and the reply names the ttys
-it is also attached on. An existing VS Code terminal tab cannot be brought
-forward instead: VS Code offers no outside way to select one. Repos are
-told apart by git (a sibling worktree counts under its main checkout), so
-tabs and "same repo" agree. The first open
-asks macOS once to let Claude Code control Terminal.
+`/roster open <tmux-name|pid>`). Where it opens depends on whether the
+session's repo is open in VS Code:
+
+- **A VS Code window shows the repo** (any window, a worktree or subfolder of
+  it counting): that window is raised (`code <its folder>`), then sent
+  `vscode://pip.agent-roster-vscode/attach?socket=…&name=…&nonce=…`; the helper there
+  focuses the tab already showing the session (one whose shell is an ancestor
+  of the session's tmux client), else opens a new tab running `tmux attach`
+  (TMUX cleared).
+- **No window shows it**: a new **Terminal.app window** attached to it; no new
+  VS Code window is opened.
+
+The helper extension (`vscode/`) is how the roster knows: it starts with every
+window and writes `~/.cache/agent-roster/vscode-windows/<pid>.json` naming the
+window's folders, removed when the window closes; files whose extension host
+pid has died are ignored. The first time the mod loads
+with VS Code present and no helper, it asks once — **Install**, **Not now**
+(asks again next session) or **Never** — and remembers the answer per account
+in `$.store`. **Install** builds the helper and installs it into Default and
+every profile VS Code's storage lists: a window loads only its own profile's
+extensions, and one without the helper is invisible to the roster (and
+answers the link with "cannot be installed because it was not found").
+`/roster setup-vscode` runs the same install any time (after a new profile, or
+after "Never"); by hand it is `sh plugins/agent-roster/vscode/build.sh install
+[profile…]`.
+
+The link carries a one-time token the roster writes to
+`~/.cache/agent-roster/attach-nonce` just before sending it; the helper spends
+the token and ignores any link without it, so a web page opening a
+`vscode://` link can attach nothing. Kill re-checks that the pid is still a
+Claude process at the moment it acts, refuses the session it runs in by pid
+as well as id, and signals only the process when the target's tmux session
+also holds this one. The session you are in is never touched. tmux mirrors every client of a
+session, so a view already showing it keeps working; the window may resize to
+the latest client. The first Terminal open asks macOS once to let Claude Code
+control Terminal.
 
 ## Killing a session
 
@@ -74,7 +90,11 @@ Nothing is scraped from tmux. Every live Claude process keeps a registry file,
 status (`busy`, `idle`, `waiting` + `waitingFor`, `shell`) and the time of its
 last status change. The mod reads both config dirs (`~/.claude-personal` as
 `personal`, `~/.claude` as `work`) every 5 s and drops entries whose pid is no
-longer running (the registry outlives crashed processes).
+longer running (the registry outlives crashed processes). A session held at a startup
+prompt (trusting a folder, logging in) has not registered yet, so the roster
+also lists the panes on the wrapper's tmux sockets: one running Claude with no
+registry entry shows under *Needs you* as "at a startup prompt". If a scan
+fails, the header says why in red and the last good roster stays on screen.
 
 Title and prompt come from the session's transcript,
 `<config dir>/projects/<cwd slug>/<sessionId>.jsonl` (a `find` under

@@ -7,7 +7,24 @@ const vscode = require('vscode')
 const fs = require('fs')
 const { execFile } = require('child_process')
 
-const SAFE = /^[\w.-]+$/
+// No quotes or spaces, no leading dash, not `.` or `..`: as the roster checks.
+const SAFE = /^(?!-)(?!\.+$)[\w.-]+$/
+// The roster writes a one-time token here just before it sends a link; a
+// link without it (one any web page could open) does nothing.
+const NONCE_FILE = require('path').join(require('os').homedir(), '.cache', 'agent-roster', 'attach-nonce')
+
+/** Whether the link carries the token the roster left, which is spent either way. */
+function spendNonce(given) {
+  let expected = ''
+  try {
+    expected = fs.readFileSync(NONCE_FILE, 'utf8').trim()
+    fs.unlinkSync(NONCE_FILE)
+  } catch {
+    return false
+  }
+
+  return expected.length >= 16 && given === expected
+}
 // A Dock-launched VS Code may not have Homebrew on PATH: find tmux itself.
 const TMUX = ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'].find(p => fs.existsSync(p))
 // A client started from a tab's shell sits a level or two below it (zsh, a
@@ -48,7 +65,36 @@ async function tabShowing(socket, name) {
   return undefined
 }
 
+// Each window says which folders it shows, so the roster can tell whether a
+// repo is open somewhere and raise that window, rather than open a new one.
+// One file per window, named for its extension host's pid; gone when the
+// window closes (and ignored by the roster once that pid is dead).
+const WINDOWS_DIR = require('path').join(require('os').homedir(), '.cache', 'agent-roster', 'vscode-windows')
+const windowFile = require('path').join(WINDOWS_DIR, `${process.pid}.json`)
+
+function announceWindow() {
+  const folders = (vscode.workspace.workspaceFolders ?? [])
+    .filter(f => f.uri.scheme === 'file')
+    .map(f => f.uri.fsPath)
+  try {
+    fs.mkdirSync(WINDOWS_DIR, { recursive: true })
+    fs.writeFileSync(windowFile, JSON.stringify({ pid: process.pid, folders }))
+  } catch {
+    // The roster then falls back to a Terminal window; nothing else depends on it.
+  }
+}
+
+function retractWindow() {
+  try {
+    fs.unlinkSync(windowFile)
+  } catch {
+    // Already gone.
+  }
+}
+
 exports.activate = context => {
+  announceWindow()
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(announceWindow))
   context.subscriptions.push(
     vscode.window.registerUriHandler({
       async handleUri(uri) {
@@ -56,6 +102,7 @@ exports.activate = context => {
         const socket = query.get('socket') ?? ''
         const name = query.get('name') ?? ''
         if (uri.path !== '/attach' || !SAFE.test(socket) || !SAFE.test(name)) return
+        if (!spendNonce(query.get('nonce') ?? '')) return
         if (!TMUX) {
           void vscode.window.showErrorMessage('agent-roster: tmux not found')
           return
@@ -78,4 +125,4 @@ exports.activate = context => {
   )
 }
 
-exports.deactivate = () => {}
+exports.deactivate = retractWindow

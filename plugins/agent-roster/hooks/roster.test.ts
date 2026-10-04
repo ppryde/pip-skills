@@ -3,19 +3,24 @@ import { expect, test } from 'claude-code/testing'
 import {
   ago,
   attachCommand,
+  claudePidsIn,
   grouped,
   headline,
   matchTarget,
+  mayKillTmuxSession,
+  profileNames,
   projectSlug,
   repoFromGit,
   repoOf,
   repoTabs,
   sorted,
+  strayRows,
   summary,
   tabMarks,
   toRow,
   transcriptFacts,
   vscodeUri,
+  windowFolderFor,
 } from './register'
 
 const DAY = 86_400_000
@@ -193,11 +198,15 @@ test('the opener attaches by exact name on the found socket, and refuses unquota
   expect(attachCommand('claude', 'a"b')).toBe(undefined)
 })
 
-test('the VS Code link carries socket and exact name, and refuses what it cannot pass', async () => {
-  expect(vscodeUri('claude-personal', 'cc-pip-skills-9')).toBe(
-    'vscode://pip.agent-roster-vscode/attach?socket=claude-personal&name=cc-pip-skills-9',
+test('the VS Code link carries socket, exact name and the one-time token, and refuses what it cannot pass', async () => {
+  const nonce = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
+  expect(vscodeUri('claude-personal', 'cc-pip-skills-9', nonce)).toBe(
+    `vscode://pip.agent-roster-vscode/attach?socket=claude-personal&name=cc-pip-skills-9&nonce=${nonce}`,
   )
-  expect(vscodeUri('claude', 'a&b=c')).toBe(undefined)
+  expect(vscodeUri('claude', 'a&b=c', nonce)).toBe(undefined)
+  expect(vscodeUri('claude', 'ok', 'short')).toBe(undefined)
+  expect(vscodeUri('claude', '..', nonce)).toBe(undefined)
+  expect(attachCommand('claude', '-x')).toBe(undefined)
 })
 
 test("a sibling worktree belongs to its main checkout's repo, by what git says", async () => {
@@ -211,4 +220,86 @@ test("a sibling worktree belongs to its main checkout's repo, by what git says",
   })
   // Not a git folder: fall back to the path.
   expect(repoFromGit('/tmp/scratch-1', '', '')).toEqual({ repo: 'scratch-1' })
+})
+
+test('open goes to a live VS Code window showing the repo, a worktree or subfolder counting as the repo', async () => {
+  const windows = [
+    { pid: 10, folders: ['/r/pip-skills'] },
+    { pid: 20, folders: ['/r/pip-skills-agent-roster'] },
+    { pid: 30, folders: ['/r/warehouse'] },
+  ]
+  const rootOf = new Map([
+    ['/r/pip-skills', '/r/pip-skills'],
+    ['/r/pip-skills-agent-roster', '/r/pip-skills'],
+    ['/r/warehouse', '/r/warehouse'],
+  ])
+
+  expect(windowFolderFor(windows, new Set([10, 20, 30]), rootOf, '/r/pip-skills')).toBe('/r/pip-skills')
+  // The main checkout's window is dead (a crash left its file): the worktree's window serves.
+  expect(windowFolderFor(windows, new Set([20, 30]), rootOf, '/r/pip-skills')).toBe('/r/pip-skills-agent-roster')
+  // No window shows the repo: undefined, and the caller opens Terminal instead.
+  expect(windowFolderFor(windows, new Set([10, 20, 30]), rootOf, '/r/ledger-poc')).toBe(undefined)
+})
+
+test("the helper installs into every VS Code profile VS Code's storage names", async () => {
+  expect(
+    profileNames({ userDataProfiles: [{ name: 'Personal', location: '-292c' }, { name: 'Agents' }, { location: 'x' }] }),
+  ).toEqual(['Personal', 'Agents'])
+  expect(profileNames({})).toEqual([])
+  expect(profileNames(null)).toEqual([])
+})
+
+test('a pane running Claude with no registry entry shows as waiting at a startup prompt', async () => {
+  const panes = [
+    'cc-home-1\t50166\t2.1.289\t/Users/me\t1791148516',
+    'cc-pip-skills-9\t48701\t2.1.287\t/Users/me/repos/pip-skills\t1791148000',
+    '11\t90605\tzsh\t/Users/me/repos/pip-skills\t1791148000',
+  ].join('\n')
+  const rows = strayRows(panes, 'claude-personal', { pids: new Set([48701]), tmuxNames: new Set() })
+
+  expect(rows.map(r => [r.tmux, r.pid, r.status, r.account, r.repo, r.lastActive])).toEqual([
+    ['cc-home-1', 50166, 'waiting', 'personal', 'me', 1791148516000],
+  ])
+  expect(rows[0]?.waitingFor).toContain('startup prompt')
+})
+
+test('a registry pid counts only while it is still Claude, and never 0 or 1', async () => {
+  const ps = [
+    '    1 /sbin/launchd',
+    '52936 /Users/me/.local/bin/claude',
+    '48701 /Users/me/.local/share/claude/versions/2.1.289',
+    '61234 /usr/bin/vim',
+    '',
+  ].join('\n')
+
+  expect([...claudePidsIn(ps)].sort()).toEqual([48701, 52936])
+  expect(toRow({ pid: 0, cwd: '/r' }, 'personal')).toBe(undefined)
+  expect(toRow({ pid: 1.5, cwd: '/r' }, 'personal')).toBe(undefined)
+})
+
+test('kill ends a whole tmux session only when it cannot hold this one', async () => {
+  const target = { tmux: 'cc-a-1', account: 'personal' }
+  const self = { pid: 333, tmux: 'cc-me-1', account: 'personal' }
+
+  expect(mayKillTmuxSession(target, [111, 222], self)).toBe(true)
+  // This session's Claude sits in one of the target's panes.
+  expect(mayKillTmuxSession(target, [111, 333], self)).toBe(false)
+  // A shell above Claude hides the pid, but the tmux name still matches.
+  expect(mayKillTmuxSession(target, [999], { ...self, tmux: 'cc-a-1' })).toBe(false)
+  // The same name on the other account's socket is a different session.
+  expect(mayKillTmuxSession(target, [999], { ...self, tmux: 'cc-a-1', account: 'work' })).toBe(true)
+  // This session unknown: never a whole tmux session.
+  expect(mayKillTmuxSession(target, [111], undefined)).toBe(false)
+})
+
+test('a registered session is not listed again as a stray, by pid or by tmux name', async () => {
+  const panes = 'cc-pip-skills-9\t90001\t2.1.289\t/Users/me/repos/pip-skills\t1791148000'
+  expect(strayRows(panes, 'claude-personal', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toEqual([])
+  expect(strayRows(panes, 'claude', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toHaveLength(1)
+  // On a socket that maps to no account, a registered session of that name on any account counts.
+  expect(strayRows(panes, 'default', { pids: new Set(), tmuxNames: new Set(['work:cc-pip-skills-9']) })).toEqual([])
+})
+
+test('profile names that would read as flags are left out', async () => {
+  expect(profileNames({ userDataProfiles: [{ name: '--help' }, { name: 'Work' }] })).toEqual(['Work'])
 })
