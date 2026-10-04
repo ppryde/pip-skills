@@ -48,12 +48,25 @@ def test_never_blocks(repo: Path) -> None:
     assert set(out) == {"systemMessage"}
 
 
-@pytest.mark.parametrize("hostile", ['"; rm -rf ~ #', "line\nbreak", "back\\slash",
-                                     "nul\x00byte", "🕯️" * 50, "x" * 10_000])
+HOSTILE = ['"; rm -rf ~ #', "line\nbreak", "back\\slash", "nul\x00byte", "🕯️" * 50, "x" * 10_000]
+
+
+@pytest.mark.parametrize("hostile", HOSTILE)
 def test_stop_output_is_one_json_object_for_hostile_payloads(repo: Path, hostile: str) -> None:
     _confident(repo, 70)
-    payload = _stop(repo, transcript_path=hostile, extra_field=hostile)
+    payload = _stop(repo, extra_field=hostile, prompt=hostile, last_assistant_message=hostile)
     out = hooks.run("stop", json.dumps(payload))
+    assert out is not None
+    data = json.loads(out)
+    assert set(data) == {"systemMessage"}
+    assert len(data["systemMessage"]) <= messages.MAX_LEN
+
+
+@pytest.mark.parametrize("hostile", HOSTILE)
+def test_stop_with_hostile_transcript_path_is_none_or_one_json_object(
+        repo: Path, hostile: str) -> None:
+    _confident(repo, 70)
+    out = hooks.run("stop", json.dumps(_stop(repo, transcript_path=hostile)))
     if out is not None:
         data = json.loads(out)
         assert set(data) == {"systemMessage"}
@@ -73,3 +86,14 @@ def test_next_prompt_gets_the_noticed_context(repo: Path) -> None:
                        "hook_event_name": "UserPromptSubmit", "prompt": "hand over"})
     context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "already been shown" in context
+
+
+def test_background_prompt_after_notice_still_gets_unattended_context(repo: Path) -> None:
+    _confident(repo, 41)
+    hooks.stop(_stop(repo))
+    out = hooks.nudge({"cwd": str(repo), "session_id": "s1",
+                       "hook_event_name": "UserPromptSubmit",
+                       "prompt": "<task-notification>done</task-notification>"})
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "already been shown" not in context
+    assert "next sensible stopping point" in context
