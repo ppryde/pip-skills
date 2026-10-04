@@ -352,7 +352,11 @@ question with the explanation in the question text.
   classic's hooks from that account first (classic's own uninstall), then
   install the mod. The interlock below makes the mod stand down while classic
   is installed, so installing it alongside does nothing but say so.
-- **Interlock (one-sided in v1, since classic is not changed).** At
+- **Interlock — TEMPORARY.** It exists only for the side-by-side run. Once
+  the mod variant is proven (side-by-side run done, owner picks the mod), a
+  cleanup step removes the interlock and all classic-detection code, and
+  classic is retired.
+  **How it works (one-sided in v1, since classic is not changed).** At
   `session.start` and before every clear, the mod checks whether classic is
   active for this session — classic's hooks registered in the account's
   `settings.json`, or a classic session record for this session id under
