@@ -82,8 +82,9 @@ export type EventRecord = { ts: string; session: string; kind: EventKind } & Rec
 
 declare module 'claude-code' {
   interface PluginState {
+    // Per session, wiped by every /clear (PROBES §9). The latch and fired early stops live in
+    // $.store; activity, lastLightArmed and standDown in module variables.
     'context-vigil-mod': {
-      activity: Activity
       mode: Mode
       contextPct: number | null
       lastNudged: number | null
@@ -93,12 +94,8 @@ declare module 'claude-code' {
       awaiting: Awaiting | null
       deferred: Awaiting | null
       handoverCount: number
-      firedEarlyStops: string[]
-      latch: Latch
       countdownEndsAt: number | null
-      lastLightArmed: boolean
       lastApiAt: number | null
-      standDown: boolean
       rcAsked: boolean
     }
   }

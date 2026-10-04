@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Awaiting, EventKind, Git, Latch, Mode, Pending, PendingReason, RateLimit, Settings } from '../types'
+import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PendingReason, RateLimit, Settings } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
@@ -17,22 +17,29 @@ import type { WaitReason } from '../core/voice'
 
 // The effectful shell: the ONLY file that touches `$`. Decisions live in ../core.
 
-const activityA = atom({ plugin: 'context-vigil-mod', key: 'activity' } as const, EMPTY_ACTIVITY)
+// $.state is per session and every /clear wipes it (PROBES §9): these atoms hold only what a
+// fresh session may forget.
 const modeA = atom({ plugin: 'context-vigil-mod', key: 'mode' } as const, 'idle')
 const contextA = atom({ plugin: 'context-vigil-mod', key: 'contextPct' } as const, null)
 const lastNudgedA = atom({ plugin: 'context-vigil-mod', key: 'lastNudged' } as const, null)
 const barShownA = atom({ plugin: 'context-vigil-mod', key: 'barShown' } as const, false)
 const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } as const, false)
 const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, null)
-const latchA = atom({ plugin: 'context-vigil-mod', key: 'latch' } as const, null)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
-const lastLightArmedA = atom({ plugin: 'context-vigil-mod', key: 'lastLightArmed' } as const, false)
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
-const standDownA = atom({ plugin: 'context-vigil-mod', key: 'standDown' } as const, false)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
-const firedA = atom({ plugin: 'context-vigil-mod', key: 'firedEarlyStops' } as const, [] as string[])
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
+
+// Account facts in $.store: the limit latch and the early stops already fired (capped at 20).
+const LATCH_KEY = 'latch'
+const FIRED_KEY = 'fired'
+
+// Facts about the person and the install that a /clear must not forget: module variables
+// survive it (same process). A new session (bindSession) starts them fresh.
+let activity: Activity = EMPTY_ACTIVITY
+let lastLightArmed = false
+let standDown = false
 
 // Module caches: rebuilt at session.start / after a hot reload.
 let root = '/nonexistent'
@@ -89,9 +96,10 @@ function submitInstruction($: EngineInterface, reason: PendingReason) {
 async function observe($: EngineInterface, signal: Signal) {
   const now = await nowMs($)
   // Every change is computed from the value it replaces, so overlapping observers cannot erase each other.
-  let act = await update($, activityA, a => record(a, signal))
+  activity = record(activity, signal)
   // Spec §2: a non-empty draft in the terminal box is you being here.
-  if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) act = await update($, activityA, a => record(a, { kind: 'edit', at: now }))
+  if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) activity = record(activity, { kind: 'edit', at: now })
+  const act = activity   // this observation's view: later awaits may move `activity` on
   const next = mode(act, now, settings)
   let prev: string | undefined
   await update($, modeA, p => { prev = p; return next })
@@ -135,6 +143,9 @@ function resetCaches() {
 
 async function bindSession($: EngineInterface) {
   resetCaches()
+  activity = EMPTY_ACTIVITY
+  lastLightArmed = false
+  standDown = false
   root = configRoot({ CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), HOME: await $.env.get('HOME') })
   session = await $.session.id()
   cwd = await $.session.cwd()
@@ -145,12 +156,16 @@ async function checkInterlock($: EngineInterface) {
   const text = await $.fs.read(`${root}/settings.json`).then(t => String(t)).catch(() => null)
   const record = await $.fs.exists(classicSessionPath(root, session)).catch(() => false)
   const classic = classicHooksInstalled(text) || record
-  const was = await read($, standDownA)
-  await update($, standDownA, () => classic)
+  const was = standDown
+  standDown = classic
   if (classic && !was) {
     await notify($, V.classicActive)
     await log($, 'standdown', { settingsHooks: classicHooksInstalled(text), sessionRecord: record })
   }
+}
+
+async function readLatch($: EngineInterface): Promise<Latch> {
+  return ((await $.store.get(LATCH_KEY)) as Latch | undefined) ?? null
 }
 
 async function savePending($: EngineInterface, p: Pending | null) {
@@ -161,8 +176,8 @@ async function savePending($: EngineInterface, p: Pending | null) {
 }
 
 async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean) {
-  if (await read($, standDownA)) return
-  if (await read($, latchA)) {
+  if (standDown) return
+  if (await readLatch($)) {
     // Spec §5: while latched the mod never submits; Task 14's checkLatch starts it later.
     await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false }))
     await notify($, V.waiting('latched'))
@@ -188,11 +203,10 @@ async function tryClear($: EngineInterface) {
   if (!(await read($, pendingA))) return
   await checkInterlock($)   // spec §7: at session start AND before every clear (TEMPORARY)
   const now = await nowMs($)
-  const act = await read($, activityA)
   const gate = clearGate({
-    now, draft: (await $.prompt.read()).text, onPhone: onPhone(act), lastBridgeAt: act.lastBridgeAt,
-    rcAutoClear: settings.rcAutoClear, latched: (await read($, latchA)) !== null,
-    countdownEndsAt: await read($, countdownA), classicActive: await read($, standDownA), unattended: unattendedClear,
+    now, draft: (await $.prompt.read()).text, onPhone: onPhone(activity), lastBridgeAt: activity.lastBridgeAt,
+    rcAutoClear: settings.rcAutoClear, latched: (await readLatch($)) !== null,
+    countdownEndsAt: await read($, countdownA), classicActive: standDown, unattended: unattendedClear,
   })
   if (gate.go) {
     lastWait = null
@@ -218,8 +232,8 @@ async function tryClear($: EngineInterface) {
 }
 
 async function setLatch($: EngineInterface, l: Latch) {
-  if (!l || (await read($, latchA))) return
-  await update($, latchA, () => l)
+  if (!l || (await readLatch($))) return
+  await $.store.set(LATCH_KEY, l)
   await log($, 'limit.latched', { kind: l.kind, resetsAtMs: l.resetsAtMs })
   await notify($, V.limitLatched(formatHHMM(l.resetsAtMs)))
   const now = await nowMs($)
@@ -227,9 +241,9 @@ async function setLatch($: EngineInterface, l: Latch) {
 }
 
 async function checkLatch($: EngineInterface, limits: RateLimit[]) {
-  const l = await read($, latchA)
+  const l = await readLatch($)
   if (!latchCleared(l, await nowMs($), limits)) return
-  await update($, latchA, () => null)
+  await $.store.delete(LATCH_KEY)
   await log($, 'limit.cleared', { kind: l?.kind })
   await notify($, V.limitCleared)
   const deferred = await read($, deferredA)
@@ -247,7 +261,7 @@ function scheduleResume($: EngineInterface, at: number) {
   $.clock.after(0, async () => {
     const wait = nextHop(await nowMs($), at)
     if (wait > 0) { $.clock.after(wait, () => { scheduleResume($, at) }); return }
-    if (await read($, latchA)) { $.clock.after(60_000, () => { scheduleResume($, at) }); return }
+    if (await readLatch($)) { $.clock.after(60_000, () => { scheduleResume($, at) }); return }
     const pending = await read($, pendingA)
     try {
       await $.prompt.submit({ text: limitResumeText(pending?.path ?? '(no file)') })
@@ -272,8 +286,7 @@ async function cancelCountdown($: EngineInterface) {
 }
 
 async function showNudge($: EngineInterface, pct: number) {
-  const act = await read($, activityA)
-  if (settings.bar && !onPhone(act)) {
+  if (settings.bar && !onPhone(activity)) {
     if (await read($, barDismissedA)) return          // 0 hid it for this cycle: silent
     await update($, barShownA, () => true)
     await log($, 'bar', { action: 'shown', pct })
@@ -328,15 +341,15 @@ function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
 async function maybeFireLastLight($: EngineInterface) {
   lastLightTimer = null
   const now = await nowMs($)
-  await observe($, { kind: 'agent-step', at: (await read($, activityA)).lastAgentAt ?? 0 })  // picks up a draft (spec §2)
+  await observe($, { kind: 'agent-step', at: activity.lastAgentAt ?? 0 })  // picks up a draft (spec §2)
   const verdict = shouldFire({
-    enabled: settings.lastLight, mode: mode(await read($, activityA), now, settings),
+    enabled: settings.lastLight, mode: mode(activity, now, settings),
     contextPct: await read($, contextA), threshold: settings.lastLightAt,
-    pending: (await read($, pendingA)) !== null, latched: (await read($, latchA)) !== null,
-    armed: await read($, lastLightArmedA),
+    pending: (await read($, pendingA)) !== null, latched: (await readLatch($)) !== null,
+    armed: lastLightArmed,
   })
   if (!verdict.fire) return
-  await update($, lastLightArmedA, () => false)
+  lastLightArmed = false
   await log($, 'last_light.fired', { contextPct: await read($, contextA) })
   await startHandover($, 'last_light', false)
 }
@@ -379,11 +392,14 @@ export const register: Register = on => {
     const watch = repo ? watchPaths(repo.root) : []
     const out = watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
     if (e.source !== 'clear') return out
-    const pending = await read($, pendingA)
-    if (pending) await savePending($, null)         // deletes pending:<old session>
+    // PROBES §9: $.state is already wiped here, so the handover comes from $.store, keyed by
+    // `session` — still the pre-clear id until it is rebound below.
+    const pending = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
+    if (pending) await $.store.delete(pendingKey(session))
     session = await $.session.id()
     resetCaches()
     scheduleGit($)
+    // The wipe already empties these; reset anyway so the clear never leans on it.
     await update($, awaitingA, () => null)
     await update($, deferredA, () => null)
     await update($, lastNudgedA, () => null)
@@ -417,7 +433,7 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     const now = await nowMs($)
-    if (rearm(await read($, lastLightArmedA), e.origin.kind)) await update($, lastLightArmedA, () => true)
+    if (rearm(lastLightArmed, e.origin.kind)) lastLightArmed = true
     const pending = await read($, pendingA)
     const lastApi = await read($, lastApiA)
     if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null ? null : lastApi + ttlMs })) {
@@ -491,23 +507,22 @@ export const register: Register = on => {
     const limits = e.rateLimits as RateLimit[]
     await setLatch($, latchFromMeasure(limits))
     await checkLatch($, limits)
-    const fired = await read($, firedA)
+    const fired = ((await $.store.get(FIRED_KEY)) as string[] | undefined) ?? []
     const limitDue = earlyStopDue(limits, settings, fired)
-    if (limitDue && !(await read($, standDownA))) {
-      await update($, firedA, () => [...fired, limitDue.key].slice(-20))
+    if (limitDue && !standDown) {
+      await $.store.set(FIRED_KEY, [...fired, limitDue.key].slice(-20))
       await log($, 'limit.early_stop', { kind: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
       await notify($, V.earlyStop(limitDue.kind, limitDue.pct, formatHHMM(limitDue.resetsAtMs + RESUME_DELAY_MS)))
       await startHandover($, 'limit', false)
       scheduleResume($, limitDue.resetsAtMs + RESUME_DELAY_MS)
     }
-    if (pct !== null && !(await read($, standDownA))) {
+    if (pct !== null && !standDown) {
       const due = nextThreshold(pct, settings, await read($, lastNudgedA))
       if (due !== null) {
         await update($, lastNudgedA, () => due)
         const now = await nowMs($)
-        const act = await read($, activityA)
         await log($, 'threshold', { pct, step: due, mode: await read($, modeA) })
-        if (armed(act, now, settings)) await startHandover($, 'threshold', true)
+        if (armed(activity, now, settings)) await startHandover($, 'threshold', true)
         else await showNudge($, pct)
       }
     }
@@ -547,7 +562,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    if (await read($, standDownA)) return next(e)
+    if (standDown) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const countdown = await read($, countdownA)
     if (countdown !== null) {
@@ -563,7 +578,7 @@ export const register: Register = on => {
     if (!settings.bar || !(await read($, barShownA))) return next(e)
     const pct = (await read($, contextA)) ?? 0
     const step = (await read($, lastNudgedA)) ?? settings.nudgeAt
-    const latch = await read($, latchA)
+    const latch = await readLatch($)
     return (
       <Box>
         <Text>{V.barLine(pct, settings.nudgeAt, latch ? formatHHMM(latch.resetsAtMs) : null)}   </Text>

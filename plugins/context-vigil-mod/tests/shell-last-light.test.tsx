@@ -7,7 +7,6 @@ const measure = (percent: number) => ({ context: { window: 1_000_000, percent },
 const write = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never
 const LL = { store: { settings: { lastLight: true, nudgeAt: 90 } } }
 const asks = (w: { submits: { text: string }[] }) => w.submits.filter(s => s.text.includes(TOOL)).length
-const ARMED = 'context-vigil-mod.lastLightArmed'
 const PENDING = 'context-vigil-mod.pending'
 
 test('fires at TTL − lead with both idle and context ≥ threshold; writes only, no clear', async ($, on) => {
@@ -87,10 +86,17 @@ test('on return after expiry the prompt is held and the choice asked; resume car
   expect((r as { drop?: string }).drop).toBeDefined()
   await w.clock.settle()
   expect(w.commands).toContain('clear')
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.state.get(PENDING)).toBeUndefined()                   // $.state wiped by the clear
+  expect(ss.additionalContext?.join('\n')).toContain('## Goal')  // the handover still crossed it
   await w.clock.advance(500)
   expect(w.submits.at(-1)?.text).toBe('morning!')
-  expect(w.state.get(ARMED)).toBe(true)
+  // The held prompt was the person's return: last light stays armed across the wipe.
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn('morning'))
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(2)
 })
 
 test('carry on submits the held prompt unchanged into the same conversation', async ($, on) => {

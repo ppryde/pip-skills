@@ -15,7 +15,7 @@ export type World = {
   rateLimits: { value: { kind: string; percentUsed: number; resetsAt?: string }[] }
   git: { branch: string; status: string }
   runs: { count: number }              // process.run calls answered
-  state: Map<string, unknown>          // $.state values by `plugin.key` — the engine's session state, in memory
+  state: Map<string, unknown>          // $.state values by `plugin.key` — the engine's session state, wiped by a clear
   askAnswer: { value: string | null }  // answers $.ui.ask and AskUserQuestion; null = dismissed
   toastRefused: { value: boolean }     // makes ui.toast answer { deny }
   clearRefused: { value: boolean }     // makes $.command.run({ command: 'clear' }) reject
@@ -93,7 +93,12 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('turn.start', (_$, e) => e as never)
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  on('classic.SessionStart', () => ({}))
+  // PROBES §9: a /clear wipes $.state (every key back to version 0) before any hook sees the new
+  // session. The world sits beneath the mod, which calls next() before it reads, so this lands first.
+  on('classic.SessionStart', (_$, e) => {
+    if ((e as { source?: string }).source === 'clear') { w.state.clear(); versions.clear() }
+    return {}
+  })
   on('classic.FileChanged', () => ({}))
   on('classic.StopFailure', () => ({}))
   on('classic.PostModelSwitch', () => ({}))

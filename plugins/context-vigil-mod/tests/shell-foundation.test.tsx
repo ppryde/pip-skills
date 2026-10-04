@@ -68,7 +68,20 @@ test('classic installed: stands down with one notice; the state literal is NAME'
   const w = world(on, { files: { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) } })
   await $.session.start(START)
   expect(w.notices.filter(n => n.includes('standing down')).length).toBe(1)
-  expect(w.state.get(`${NAME}.standDown`)).toBe(true)
+  await $.prompt.submit(human('hi'))
+  expect(w.state.get(`${NAME}.mode`)).toBe('attended')
+  await $.session.measure({ context: { window: 1_000_000, percent: 40 }, rateLimits: [], changed: ['context'] as never })
+  expect(w.notices.some(n => n.includes('Context at'))).toBe(false)   // stood down: no nudge
+})
+
+test('standing down survives a clear: no second notice, still no nudge', async ($, on) => {
+  const w = world(on, { store: { settings: { bar: false } }, files: { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) } })
+  await $.session.start(START)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.session.measure({ context: { window: 1_000_000, percent: 40 }, rateLimits: [], changed: ['context'] as never })
+  expect(w.notices.filter(n => n.includes('standing down')).length).toBe(1)
+  expect(w.notices.some(n => n.includes('Context at'))).toBe(false)
 })
 
 test('a fresh session start resets module caches: a stale git timer neither blocks nor doubles the refresh', async ($, on) => {
@@ -92,10 +105,8 @@ test('a human prompt racing an agent step is not erased: lastHumanAt survives an
   await $.session.start(START)
   await $.prompt.submit(human('go'))
   await w.clock.advance(31 * MIN)
-  const humanAt = w.clock.now()
   await Promise.all([$.turn.complete(turn()), $.prompt.submit(human('here I am'))])
-  expect((w.state.get('context-vigil-mod.activity') as { lastHumanAt: number }).lastHumanAt).toBe(humanAt)
-  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')   // 'go' is 31 min old: only 'here I am' can make it attended
   // The agent step may land first and arm; the human then disarms it. What must never happen is arm without that disarm.
   const lines = [...w.files.values()].join('').split('\n').filter(Boolean).map(l => JSON.parse(l).kind as string)
   expect(lines.filter(k => k === 'arm').length).toBe(lines.filter(k => k === 'disarm').length)

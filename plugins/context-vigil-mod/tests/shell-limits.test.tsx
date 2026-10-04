@@ -65,6 +65,41 @@ test('seven_day at the trigger: handover once per window, then one resume after 
   expect(w.state.get('context-vigil-mod.pending')).toBe(null)
 })
 
+test('a latch set before a clear still holds after it: no handover, no limit resume', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+  await $.tool.call(write)
+  w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + 10 * HOUR) }]
+  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+  expect(w.notices).toContain('⏳ Handover waiting — the usage limit is in force')
+  await w.clock.advance(HOUR + 600_000)                          // past the seven_day resume time
+  expect(w.submits.some(s => s.text.includes('limit has reset'))).toBe(false)
+})
+
+test('an early stop fired before a clear does not fire again after it for the same window', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  const resetsAt = iso(1_000_000 + 3 * HOUR)
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt }]))
+  await w.clock.settle()
+  await $.tool.call(write)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 97, resetsAt }]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+})
+
 test('a rejected limit resume is announced and logged, not swallowed', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)

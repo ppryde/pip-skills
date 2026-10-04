@@ -28,6 +28,26 @@ test('a requested handover: instruction → tool → file → clear → inject �
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
 })
 
+test('the handover crosses the $.state wipe: inject, rename, resume — and is spent', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call({ session_name: 'Fix the bar' }) as never)
+  await w.clock.settle()
+  expect(w.commands).toContain('clear')
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
+  expect(w.state.get(PENDING)).toBeUndefined()
+  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  await w.clock.advance(500)
+  expect(w.renames).toEqual(['Fix the bar'])
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+  w.sessionId.value = 's3'
+  const again = await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(again.additionalContext ?? []).toEqual([])           // the stored copy was deleted
+})
+
 test('/vhandoff does the same as /vho', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
