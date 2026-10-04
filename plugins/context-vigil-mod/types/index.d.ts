@@ -76,7 +76,7 @@ export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
   | 'guard.wait' | 'clear' | 'resume' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
-  | 'standdown'
+  | 'standdown' | 'rename'
 
 export type EventRecord = { ts: string; session: string; kind: EventKind } & Record<string, unknown>
 

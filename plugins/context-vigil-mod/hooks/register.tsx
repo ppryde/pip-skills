@@ -1,15 +1,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { EventKind, Git, Mode, Settings } from '../types'
-import { COMMANDS, TOOL, classicSessionPath, configRoot, eventsPath } from '../core/name'
-import { DEFAULTS, STORE_KEY, loadSettings } from '../core/settings'
-import { EMPTY_ACTIVITY, classifyOrigin, mode, record, transition } from '../core/arming'
+import type { Awaiting, EventKind, Git, Mode, Pending, PendingReason, Settings } from '../types'
+import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
+import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
+import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION } from '../core/handover'
+import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { clearGate } from '../core/surfaces'
+import { formatHHMM } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
 import { V } from '../core/voice'
+import type { WaitReason } from '../core/voice'
 
 // The effectful shell: the ONLY file that touches `$`. Decisions live in ../core.
 
@@ -25,6 +28,9 @@ const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } 
 const lastLightArmedA = atom({ plugin: 'context-vigil-mod', key: 'lastLightArmed' } as const, false)
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const standDownA = atom({ plugin: 'context-vigil-mod', key: 'standDown' } as const, false)
+const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
+const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
+const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 
 // Module caches: rebuilt at session.start / after a hot reload.
 let root = '/nonexistent'
@@ -35,6 +41,10 @@ let git: Git = { branch: null, dirty: [] }
 let gitTimer: { cancel: () => void } | null = null
 const edited = new Set<string>()
 let dayText: Record<string, string> = {}
+let clearParked = false
+let unattendedClear = false
+let lastWait: WaitReason | null = null
+let retryTimer: { cancel: () => void } | null = null
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -54,8 +64,15 @@ async function notify($: EngineInterface, text: string) {
 }
 
 // Every plugin prompt goes through here: from a timer, never awaited by the hook the turn waits on.
-function submitSoon($: EngineInterface, text: string, delayMs = 0) {
-  $.clock.after(delayMs, () => { void $.prompt.submit({ text }) })
+function submitSoon($: EngineInterface, text: string, delayMs = 0, onSent?: () => void) {
+  $.clock.after(delayMs, () => { void $.prompt.submit({ text }).then(() => onSent?.()) })
+}
+
+// PROBES.md §7: a mod never sees its own submit in prompt.submit, so `started` is marked here.
+function submitInstruction($: EngineInterface, reason: PendingReason) {
+  submitSoon($, instructionText(reason), 0, () => {
+    void update($, awaitingA, a => (a ? { ...a, started: true } : a))
+  })
 }
 
 async function observe($: EngineInterface, signal: Signal) {
@@ -96,7 +113,12 @@ async function bindSession($: EngineInterface) {
   git = { branch: null, dirty: [] }
   edited.clear()
   dayText = {}
-  // RESET (Tasks 12–15 add lines here)
+  retryTimer?.cancel()
+  retryTimer = null
+  clearParked = false
+  unattendedClear = false
+  lastWait = null
+  // RESET (Tasks 13–15 add lines here)
   root = configRoot({ CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), HOME: await $.env.get('HOME') })
   session = await $.session.id()
   cwd = await $.session.cwd()
@@ -115,6 +137,110 @@ async function checkInterlock($: EngineInterface) {
   }
 }
 
+async function savePending($: EngineInterface, p: Pending | null) {
+  const prev = await read($, pendingA)
+  await update($, pendingA, () => p)
+  if (p) await $.store.set(pendingKey(p.session), p)
+  else await $.store.delete(pendingKey(prev?.session ?? session))
+}
+
+async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean) {
+  if (await read($, standDownA)) return
+  if (await read($, latchA)) {
+    // Spec §5: while latched the mod never submits; Task 14's checkLatch starts it later.
+    await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false }))
+    await notify($, V.waiting('latched'))
+    await log($, 'guard.wait', { reason: 'latched', deferred: reason })
+    return
+  }
+  const pending = await read($, pendingA)
+  if (pending && (reason === 'threshold' || reason === 'request')) { scheduleClear($, reason === 'threshold'); return }
+  await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false }))
+  await log($, 'handover.requested', { reason, resume })
+  submitInstruction($, reason)
+}
+
+function scheduleClear($: EngineInterface, unattended: boolean) {
+  unattendedClear = unattended
+  clearParked = false
+  retryTimer?.cancel()
+  retryTimer = $.clock.after(0, () => { void tryClear($) })
+}
+
+async function tryClear($: EngineInterface) {
+  retryTimer = null
+  if (!(await read($, pendingA))) return
+  await checkInterlock($)   // spec §7: at session start AND before every clear (TEMPORARY)
+  const now = await nowMs($)
+  const act = await read($, activityA)
+  const gate = clearGate({
+    now, draft: (await $.prompt.read()).text, onPhone: onPhone(act), lastBridgeAt: act.lastBridgeAt,
+    rcAutoClear: settings.rcAutoClear, latched: (await read($, latchA)) !== null,
+    countdownEndsAt: await read($, countdownA), classicActive: await read($, standDownA), unattended: unattendedClear,
+  })
+  if (gate.go) {
+    lastWait = null
+    await update($, countdownA, () => null)
+    await log($, 'clear', { unattended: unattendedClear })
+    try {
+      await $.command.run({ command: 'clear' })
+    } catch {
+      clearParked = true
+      await notify($, V.clearRejected)
+      await log($, 'guard.wait', { reason: 'clear-rejected' })
+    }
+    return
+  }
+  if (gate.reason !== lastWait) {
+    lastWait = gate.reason
+    await notify($, V.waiting(gate.reason))
+    await log($, 'guard.wait', { reason: gate.reason, recheckMs: gate.recheckMs })
+  }
+  if (gate.reason === 'countdown-start') await update($, countdownA, () => now + (gate.recheckMs ?? 0))
+  if (gate.recheckMs === null) { clearParked = true; return }
+  retryTimer = $.clock.after(gate.recheckMs, () => { void tryClear($) })
+}
+
+async function cancelCountdown($: EngineInterface) {
+  if ((await read($, countdownA)) === null) return
+  await update($, countdownA, () => null)
+  retryTimer?.cancel()
+  retryTimer = null
+  clearParked = true
+  lastWait = null
+  await notify($, V.countdownCancelled)
+  await log($, 'guard.wait', { reason: 'countdown-cancelled' })
+}
+
+async function showNudge($: EngineInterface, pct: number) {
+  const act = await read($, activityA)
+  if (settings.bar && !onPhone(act)) {
+    if (await read($, barDismissedA)) return          // 0 hid it for this cycle: silent
+    await update($, barShownA, () => true)
+    await log($, 'bar', { action: 'shown', pct })
+    return
+  }
+  await notify($, V.nudge(pct))
+}
+
+async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dismiss') {
+  await update($, barShownA, () => false)
+  if (action === 'dismiss') await update($, barDismissedA, () => true)
+  await log($, 'bar', { action })
+  if (action === 'handover') await startHandover($, 'request', true)
+}
+
+// Never blocks the resume: a failed rename is a notice, not an error.
+async function renameSession($: EngineInterface, name: string) {
+  await log($, 'rename', { name })
+  try {
+    await $.command.run({ command: 'rename', args: name })
+  } catch {
+    await notify($, V.renameFailed)
+    await log($, 'guard.wait', { reason: 'rename-rejected' })
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
@@ -124,6 +250,11 @@ export const register: Register = on => {
     await $.command.register({ name: COMMANDS.setup, description: V.cmdSetup })
     await $.tool.register({ name: TOOL, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> })
     await checkInterlock($)
+    const stored = (await $.store.get(pendingKey(session))) as Pending | null | undefined
+    if (stored && !(await read($, pendingA))) {
+      await update($, pendingA, () => stored)
+      await notify($, V.pendingOffer(stored.path))
+    }
     scheduleGit($)
     return r
   })
@@ -131,8 +262,30 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     const r = await next(e)
     const repo = await $.session.repo().catch(() => null)
-    if (!repo) return r
-    return { ...r, watchPaths: [...(r.watchPaths ?? []), ...watchPaths(repo.root)] }
+    const watch = repo ? watchPaths(repo.root) : []
+    const out = watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
+    if (e.source !== 'clear') return out
+    const pending = await read($, pendingA)
+    if (pending) await savePending($, null)         // deletes pending:<old session>
+    session = await $.session.id()
+    edited.clear()
+    dayText = {}
+    retryTimer?.cancel()
+    retryTimer = null
+    clearParked = false
+    lastWait = null
+    await update($, lastNudgedA, () => null)
+    await update($, barShownA, () => false)
+    await update($, barDismissedA, () => false)
+    await update($, countdownA, () => null)
+    await update($, handoverCountA, () => 0)
+    if (!pending) return out
+    const follow = pending.followUp
+    // /rename starts from its own timer, before the resume submit, and never blocks it.
+    $.clock.after(0, () => { void renameSession($, pending.name) })
+    if (pending.resume || follow) submitSoon($, follow ?? resumeText(pending.path), 500)
+    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null })
+    return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
   })
 
   on('classic.FileChanged', async ($, e, next) => {
@@ -142,6 +295,7 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })
+    if (e.origin.kind !== 'plugin') await cancelCountdown($)
     return next(e)
   })
 
@@ -173,6 +327,96 @@ export const register: Register = on => {
     const now = await nowMs($)
     await observe($, { kind: 'agent-step', at: now })
     await update($, lastApiA, () => now)
+    const awaitingNow = await read($, awaitingA)
+    if (awaitingNow?.started) {
+      if (awaitingNow.attempts < 2) {
+        await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false }))
+        submitInstruction($, awaitingNow.reason)
+      } else {
+        await update($, awaitingA, () => null)
+        await notify($, V.handoverFailed)
+        await log($, 'guard.wait', { reason: 'tool-not-called' })
+      }
+    }
     return next(e)
+  })
+
+  on('session.measure', async ($, e, next) => {
+    const pct = e.context.percent ?? null
+    await update($, contextA, () => pct)
+    if (pct !== null && !(await read($, standDownA))) {
+      const due = nextThreshold(pct, settings, await read($, lastNudgedA))
+      if (due !== null) {
+        await update($, lastNudgedA, () => due)
+        const now = await nowMs($)
+        const act = await read($, activityA)
+        await log($, 'threshold', { pct, step: due, mode: await read($, modeA) })
+        if (armed(act, now, settings)) await startHandover($, 'threshold', true)
+        else await showNudge($, pct)
+      }
+    }
+    return next(e)
+  })
+
+  for (const command of [COMMANDS.handover, COMMANDS.handoff]) {
+    on('command.run', { command }, async $ => {
+      await startHandover($, 'request', true)
+      return { text: V.handingOver }
+    })
+  }
+
+  on('tool.call', { tool: TOOL_FULL } as never, async ($, e) => {
+    const input = e as unknown as Record<string, unknown>
+    const parsed = parseFields(input)
+    if (!parsed.ok) return { deny: `${parsed.error} — call ${TOOL_FULL} again with every required field` }
+    const awaiting = await read($, awaitingA)
+    const reason = awaiting?.reason ?? 'request'
+    const resume = awaiting?.resume ?? true
+    await update($, awaitingA, () => null)
+    const n = (await read($, handoverCountA)) + 1
+    await update($, handoverCountA, () => n)
+    const path = handoverPath(root, session, n)
+    const now = await nowMs($)
+    const markdown = renderHandover(parsed.fields, {
+      session, at: new Date(now).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
+      edited: [...edited], contextPct: await read($, contextA),
+    })
+    await $.fs.write(path, markdown)
+    await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
+    await log($, 'handover.written', { reason, bytes: markdown.length, path })
+    await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
+    if (reason === 'threshold' || reason === 'request') scheduleClear($, reason === 'threshold')
+    return { result: `Saved handover to ${path}` } as never
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    if (await read($, standDownA)) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const countdown = await read($, countdownA)
+    if (countdown !== null) {
+      // The RC countdown is a safety control: drawn whenever it runs, bar setting or not.
+      const left = Math.max(0, Math.ceil((countdown - (await nowMs($))) / 1000))
+      return (
+        <Box>
+          <Text>{V.countdownLine(left)}   </Text>
+          <Button key="cancel" hotkey="0" plain label={V.cancel} onPress={() => cancelCountdown($)} />
+        </Box>
+      )
+    }
+    if (!settings.bar || !(await read($, barShownA))) return next(e)
+    const pct = (await read($, contextA)) ?? 0
+    const step = (await read($, lastNudgedA)) ?? settings.nudgeAt
+    const latch = await read($, latchA)
+    return (
+      <Box>
+        <Text>{V.barLine(pct, settings.nudgeAt, latch ? formatHHMM(latch.resetsAtMs) : null)}   </Text>
+        <Button key="handover" hotkey="1" plain label={V.barHandover} onPress={() => barChoice($, 'handover')} />
+        <Text>   </Text>
+        <Button key="later" hotkey="2" plain label={V.barLater(step + settings.step)} onPress={() => barChoice($, 'later')} />
+        <Text>   </Text>
+        <Button key="dismiss" hotkey="0" plain label={V.barDismiss} onPress={() => barChoice($, 'dismiss')} />
+      </Box>
+    )
   })
 }

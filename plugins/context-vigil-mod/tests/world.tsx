@@ -19,6 +19,8 @@ export type World = {
   askAnswer: { value: string | null }  // answers $.ui.ask and AskUserQuestion; null = dismissed
   toastRefused: { value: boolean }     // makes ui.toast answer { deny }
   clearRefused: { value: boolean }     // makes $.command.run({ command: 'clear' }) reject
+  renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
+  renames: string[]                    // args of every rename command run
 }
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string> } = {}): World {
@@ -29,7 +31,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     registered: { tools: [], commands: [] },
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
-    toastRefused: { value: false }, clearRefused: { value: false },
+    toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, renames: [],
   }
   mock.store(on, opts.store ?? {})
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
@@ -66,7 +68,9 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
   on('command.run', (_$, e) => {
     if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
+    if (e.command === 'rename' && w.renameRefused.value) throw new Error('rename refused')
     w.commands.push(e.command)
+    if (e.command === 'rename') w.renames.push(String((e as { args?: string }).args ?? ''))
     return {}
   })
   on('command.register', (_$, e) => { w.registered.commands.push(e.name); return { value: { command: e.name } } })
