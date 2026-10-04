@@ -288,7 +288,9 @@ submits (built-in auto-continue owns the retry); the bar and notices show
 
 **Early stop for seven_day and spend_limit** (folding in the behaviour of
 `~/.claude-personal/census/five-hour-guard.py`, which itself stays untouched):
-when a `seven_day` or `spend_limit` window reaches **≥ 95%**, once per window
+when limits are on (§6) and a **watched** window (configured; default both
+`seven_day` and `spend_limit`) reaches the **configured trigger %** (default
+95%; 90 / 95 / 98 or any value via Other), once per window
 (keyed on its `resetsAt`): write a handover (§3 steps 1–2), show a notice, and
 arrange the resume for after the reset (a `$.clock.after` to `resetsAt` + 5
 min, re-armed in ≤ 1 h hops, which submits the resume prompt if the session
@@ -311,14 +313,17 @@ re-presents the same options.
 | ⏱️ Idle window (asked if auto mode on) | 15 · 30 · 60 min · Tell me more | 30 min |
 | 🌅 Last light | Off · On · Tell me more | Off |
 | 🌅 Threshold (asked if last light on) | 25% · 35% · 50% · Tell me more | 25% |
-| ⏳ Limits | Off · On · Tell me more | On |
+| ⏳ Limits | On · Off · Tell me more | On |
+| ⏳ Trigger % (asked if limits on) | 90% · 95% (Recommended) · 98% · Other · Tell me more | 95% |
+| ⏳ Windows (asked if limits on; multiSelect) | seven_day · spend_limit · Tell me more | both |
 | 📱 RC auto-clear (asked at the first RC session, §2) | No · Yes · Tell me more | No |
 
 Settings live in `$.store` — per account. Headers fit AskUserQuestion's
 12-UTF-16-unit limit.
 
 **Changing a setting later:** `/vsetup` re-runs the whole flow; `/vsetup
-<step>` (e.g. `/vsetup bar`) re-asks one step. There is no separate config
+<step>` (e.g. `/vsetup bar`, `/vsetup limits` — on/off, trigger % and
+windows together) re-asks one step. There is no separate config
 command.
 
 **Vigil bar off:** no band is ever drawn; the end-of-turn notice still fires
@@ -343,6 +348,10 @@ question with the explanation in the question text.
   `env.CLAUDE_CODE_PLUGIN_DIRS` in the account's own `settings.json` (under
   `$CLAUDE_CONFIG_DIR`), preserving existing entries. Never a repo's
   `.claude/settings.json`, which both accounts would read.
+- **Switching an account to the mod is a deliberate install step:** uninstall
+  classic's hooks from that account first (classic's own uninstall), then
+  install the mod. The interlock below makes the mod stand down while classic
+  is installed, so installing it alongside does nothing but say so.
 - **Interlock (one-sided in v1, since classic is not changed).** At
   `session.start` and before every clear, the mod checks whether classic is
   active for this session — classic's hooks registered in the account's
