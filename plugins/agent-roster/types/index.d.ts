@@ -17,8 +17,12 @@ export type SessionRow = {
   kind: string
   /** Epoch ms of its last status change. */
   lastActive: number
-  /** The last prompt its transcript recorded, whitespace collapsed. */
-  lastPrompt?: string
+  /** Its `/rename` title, else the AI-written one. */
+  title?: string
+  /** The last prompt the person typed (never a teammate's or a task's), whitespace collapsed. */
+  prompt?: string
+  /** Epoch ms of that prompt. */
+  promptAt?: number
 }
 
 declare module 'claude-code' {
@@ -27,6 +31,8 @@ declare module 'claude-code' {
       sessions: { rows: SessionRow[]; checkedAt: number; selfId?: string }
       /** The pid whose kill button was pressed and awaits confirmation. */
       pendingKill: number | null
+      /** Whether idle sessions quiet for over a day are unfolded. */
+      showOlder: boolean
     }
   }
 }

@@ -2,45 +2,98 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   ago,
+  grouped,
   headline,
-  lastPromptOf,
   matchTarget,
   projectSlug,
   repoOf,
   sorted,
   summary,
   toRow,
+  transcriptFacts,
 } from './register'
 
-test('the headline counts sessions, waiting and busy', async () => {
-  expect(headline([])).toBe('0 sessions · 0 waiting · 0 busy')
+const DAY = 86_400_000
+const base = { sessionId: '', account: 'personal', cwd: '/r', repo: 'r', kind: 'interactive' }
+
+test('the headline counts who needs you, who works and who idles', async () => {
+  const rows = [
+    { ...base, pid: 1, status: 'waiting', lastActive: 0 },
+    { ...base, pid: 2, status: 'busy', lastActive: 0 },
+    { ...base, pid: 3, status: 'shell', lastActive: 0 },
+  ]
+
+  expect(headline(rows)).toBe('1 need you · 1 working · 1 idle')
 })
 
-test('summarises the roster as text, the last prompt under its session', async () => {
-  const base = { sessionId: '', account: 'personal', kind: 'interactive', lastActive: 0 }
+test('a /rename title beats the AI one; the prompt is the last one a person typed', async () => {
+  const lines = [
+    '{"type":"ai-title","aiTitle":"Old title"}',
+    '{"type":"user","origin":{"kind":"human"},"timestamp":"2026-10-04T10:00:00.000Z","message":{"content":"fix the\\n  flaky   test"}}',
+    '{"type":"ai-title","aiTitle":"Flaky test hunt"}',
+    '{"type":"custom-title","customTitle":"My rename"}',
+    '{"type":"user","origin":{"kind":"human"},"message":{"content":"<command-name>/roster</command-name>"}}',
+    '{"type":"queue-operation","origin":{"kind":"human"}}',
+    'not json',
+  ].join('\n')
+
+  expect(transcriptFacts(lines)).toEqual({
+    title: 'My rename',
+    prompt: 'fix the flaky test',
+    promptAt: Date.parse('2026-10-04T10:00:00.000Z'),
+  })
+  expect(transcriptFacts('{"type":"ai-title","aiTitle":"Only AI"}').title).toBe('Only AI')
+  expect(transcriptFacts('')).toEqual({ title: undefined, prompt: undefined, promptAt: undefined })
+})
+
+test('idle sessions split at a day; waiting and busy never fold', async () => {
+  const now = 10 * DAY
+  const groups = grouped(
+    [
+      { ...base, pid: 1, status: 'waiting', lastActive: 0 },
+      { ...base, pid: 2, status: 'idle', lastActive: now - 3600_000 },
+      { ...base, pid: 3, status: 'idle', lastActive: now - 2 * DAY },
+      { ...base, pid: 4, status: 'busy', lastActive: 0 },
+    ],
+    now,
+  )
+
+  expect(groups.waiting.map(r => r.pid)).toEqual([1])
+  expect(groups.busy.map(r => r.pid)).toEqual([4])
+  expect(groups.recent.map(r => r.pid)).toEqual([2])
+  expect(groups.older.map(r => r.pid)).toEqual([3])
+})
+
+test('summarises the roster for the phone in sections, your prompt with its age', async () => {
+  const now = 10 * DAY
   const text = summary(
     [
       {
         ...base,
         pid: 1,
         tmux: 'cc-ledger-poc-2',
-        cwd: '/r/ledger-poc',
         repo: 'ledger-poc',
         status: 'waiting',
         waitingFor: 'input needed',
-        lastPrompt: 'add demo cards',
+        lastActive: now - 120_000,
+        title: 'Demo cards',
+        prompt: 'add demo cards',
+        promptAt: now - 2 * DAY,
       },
-      { ...base, pid: 2, account: 'work', cwd: '/r/warehouse', repo: 'warehouse', status: 'idle' },
+      { ...base, pid: 2, account: 'work', repo: 'warehouse', status: 'idle', lastActive: now - 3 * DAY },
     ],
-    120_000,
+    now,
   )
 
   expect(text).toBe(
     [
-      '2 sessions · 1 waiting · 0 busy',
-      '◆ cc-ledger-poc-2 · ledger-poc · waiting: input needed · 2m',
-      '   › add demo cards',
-      '○ pid 2 · warehouse · idle · 2m · work',
+      '1 need you · 0 working · 1 idle',
+      '',
+      'NEEDS YOU',
+      '• Demo cards — cc-ledger-poc-2 · ledger-poc · 2m · input needed',
+      '   you 2d: add demo cards',
+      '',
+      '+ 1 idle for over a day',
     ].join('\n'),
   )
 })
@@ -83,19 +136,7 @@ test('files transcripts under the cwd with every non-alphanumeric as a dash', as
   )
 })
 
-test('takes the last last-prompt row, whitespace collapsed', async () => {
-  const lines = [
-    '{"type":"last-prompt","lastPrompt":"first"}',
-    '{"type":"last-prompt","lastPrompt":"fix the\\n  flaky   test"}',
-    'not json',
-  ].join('\n')
-
-  expect(lastPromptOf(lines)).toBe('fix the flaky test')
-  expect(lastPromptOf('')).toBe(undefined)
-})
-
 test('waiting sessions first, then busy, then the rest by last active', async () => {
-  const base = { sessionId: '', account: 'personal', cwd: '/r', repo: 'r', kind: 'interactive' }
   const rows = sorted([
     { ...base, pid: 1, status: 'idle', lastActive: 50 },
     { ...base, pid: 2, status: 'busy', lastActive: 10 },
@@ -105,15 +146,14 @@ test('waiting sessions first, then busy, then the rest by last active', async ()
 
   expect(rows.map(r => r.pid)).toEqual([4, 2, 3, 1])
   expect(ago(0, 90_000)).toBe('2m')
-  expect(ago(0, 3 * 86_400_000)).toBe('3d')
+  expect(ago(0, 3 * DAY)).toBe('3d')
 })
 
 test('a kill target is a tmux name or a pid, and a name on both accounts is two matches', async () => {
-  const base = { sessionId: '', cwd: '/r', repo: 'r', kind: 'interactive', status: 'idle', lastActive: 0 }
   const rows = [
-    { ...base, pid: 23156, account: 'personal', tmux: 'cc-take-home-tasks-2' },
-    { ...base, pid: 83438, account: 'work', tmux: 'cc-take-home-tasks-2' },
-    { ...base, pid: 75378, account: 'personal' },
+    { ...base, pid: 23156, status: 'idle', lastActive: 0, tmux: 'cc-take-home-tasks-2' },
+    { ...base, pid: 83438, status: 'idle', lastActive: 0, account: 'work', tmux: 'cc-take-home-tasks-2' },
+    { ...base, pid: 75378, status: 'idle', lastActive: 0 },
   ]
 
   expect(matchTarget(rows, 'cc-take-home-tasks-2').map(r => r.pid)).toEqual([23156, 83438])
