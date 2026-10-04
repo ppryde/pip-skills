@@ -39,7 +39,10 @@ profile your windows use: a window loads only its own profile's extensions,
 and a missing helper shows as "cannot be installed because it was not found"): the mod raises the
 window with `code <repo root>`, then sends
 `vscode://pip.agent-roster-vscode/attach?socket=…&name=…`, which the helper
-answers with a terminal running `tmux attach` (TMUX cleared). Any other
+answers by focusing a tab of that window already showing the session (one
+whose shell is an ancestor of one of the session's tmux clients), else with
+a new tab running `tmux attach` (TMUX cleared). A tab in a *different* VS Code
+window is not seen: the link lands in the repo's own window. Any other
 session, or any session without the helper, opens in a **new Terminal.app
 window** attached to it, on the socket found by pid as for kill; the
 session you are in is never touched. tmux mirrors every client of a session,

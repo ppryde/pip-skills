@@ -468,7 +468,13 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
     if (isRaised) {
       await $.clock.sleep(800)
       const sent = await $.process.run(['open', uri])
-      if (sent.exitCode === 0) return `Opened ${name} in a new VS Code terminal in ${root}${also}.`
+      // The helper decides there: a tab of that window already showing the
+      // session is focused, else a new one opens.
+      if (sent.exitCode === 0) {
+        return ttys.length
+          ? `Showed ${name} in VS Code (${root}): its tab is focused if that window has one, else a new tab opens.`
+          : `Opened ${name} in a new VS Code terminal in ${root}.`
+      }
     }
   }
 
