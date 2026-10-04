@@ -1,0 +1,6 @@
+{
+  "name": "context-vigil-mod",
+  "version": "0.1.0",
+  "description": "Context handover as a Claude Code mod: nudge, auto handover, last light, limits — no tmux, no status line.",
+  "types": "./types/index.d.ts"
+}
