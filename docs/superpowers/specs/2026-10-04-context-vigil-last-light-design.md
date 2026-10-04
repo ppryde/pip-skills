@@ -13,9 +13,14 @@ alone:
    when context crosses the threshold, so they can say "hand over" on the very
    next turn. Always on.
 3. **Vigil bar** (optional mod) — the same moment as a pop-up band above the
-   prompt with hotkeys, like Claude Code's own rating bar.
+   prompt with hotkeys, like Claude Code's own rating bar; skipped when the
+   person last spoke from the phone.
 
-User-facing text across all three (and the existing notices and install
+Plus two supporting changes: **3a**, every `tmux send-keys` path refuses to
+type into an open dialog; **3b**, install questions arrive as AskUserQuestion
+cards (terminal, desktop and phone).
+
+User-facing text across all of it (and the existing notices and install
 questions) gets a lighter, emoji-led voice — see §4. Model-facing text stays
 plain.
 
@@ -260,7 +265,11 @@ A throwaway Stop hook printing one `{"systemMessage": ...}` object, exit 0:
   attachment;
 - no continuation: the turn ended, no extra turn started;
 - **Esc interrupt does not fire Stop** (as documented); a background task's
-  completion notice starts a turn of its own and so fires Stop again.
+  completion notice starts a turn of its own and so fires Stop again;
+- **shown on the phone**: in a Remote Control session opened in the Claude
+  mobile app, a turn started from the phone ended with the notice rendered
+  there (`Stop says: 🕯️ …`, emoji, quotes and dash intact); one hook call,
+  `stop_hook_active` false, no continuation.
 
 ### Safety rules for the Stop path (from the hooks docs and the probe)
 
@@ -318,9 +327,23 @@ first-crossing / +step rule), it raises an **`AbovePrompt` band**:
   threshold / repeat step from context-vigil's global config file (read-only).
 - Draws nothing when the figures or config are missing.
 
-Surfaces: the band is raised on **terminal and desktop only**. Mobile gets the
-Stop notice (if the app shows `systemMessage`s — to be checked by the owner in
-a remote-control session); a mobile `$.ui.ask` card is future work.
+Surfaces: the band is raised on **terminal and desktop only**; the phone gets
+the Stop notice (verified, §2). **Where the person last spoke from** decides
+whether the band is worth raising: the mod records the `origin.kind` of each
+`prompt.submit` / `command.run` (`composer` = typed at the terminal, `bridge` =
+Remote Control from a phone or web client). When the last human message came
+over `bridge`, no band is raised — the person is not at the terminal, and the
+Stop notice already reached them. (`$.session.surfaces()` cannot be used for
+this: with a phone connected over Remote Control it reported only
+`[terminal]` and no `session.attach` fired — prototype test, 2026-10-04.)
+
+**Considered and dropped: an `$.ui.ask` card for the phone.** Prototyped and
+shown to render on the phone, but it is the engine's AskUserQuestion dialog:
+while open it takes the prompt's place, so anything typed into the pane lands
+in it — auto mode's `/clear` + Enter, the resume kick, last light's prompt, the
+person's queued messages. With the Stop notice already reaching the phone (a
+"hand over" reply is one message), the card's only gain is a tap instead of a
+word, at the cost of blocking input.
 
 ### Install
 
@@ -336,9 +359,54 @@ is 2.1.287); `status` says so when the bar is on but the build has no mods.
 ### Testing
 
 `claude plugin validate` and `claude plugin test` on the mod: band drawn when
-due, not when below threshold, not while `hasSurvey`; [1] submits the prompt
-as user; [2]/[0] hide as specified; mounted on `terminal` and `desktop`.
-Installer tests for the `CLAUDE_CODE_PLUGIN_DIRS` edit and its removal.
+due, not when below threshold, not while `hasSurvey`, not when the last human
+prompt's origin was `bridge`; [1] submits the prompt as user; [2]/[0] hide as
+specified; mounted on `terminal` and `desktop`. Installer tests for the
+`CLAUDE_CODE_PLUGIN_DIRS` edit and its removal.
+
+---
+
+## 3a. Safety net: never type into a dialog
+
+Every path that types into a pane with `tmux send-keys` — auto mode's `/clear`
+(Stop), the resume kick (SessionStart), last light's prompt — first captures
+the pane and refuses to type when any menu or dialog is showing (a `❯` cursor
+on an option row: permission prompts, AskUserQuestion, the trust prompt, the
+rating survey). On refusal:
+
+- `/clear`: fall back to the no-tmux path — the `systemMessage` "📜 Handover
+  saved — type /clear …" — and leave the clear flag so the handover still loads;
+- resume kick: skip; the handover is already in context from SessionStart;
+- last light: do not fire this tick (the gate re-checks next tick).
+
+The check is one shared function (the same one last light's gate 8 uses), with
+tests on captured panes of each dialog kind.
+
+---
+
+## 3b. Install questions as cards
+
+Install is driven by the agent, which has the **AskUserQuestion** tool — the
+engine's own question card, drawn in the terminal, the desktop app and the
+phone alike. Blocking is fine here: install is interactive by nature.
+
+- `install --questions-json` prints the questions in AskUserQuestion's exact
+  input shape (≤ 4 questions per card; `header` ≤ 12 chars; 2–4 options; the
+  default first and marked "(Recommended)"). The strings live in code (§4), so
+  SKILL.md never paraphrases them.
+- **Card 1** (always): 🎚️ Threshold · 🖥️ Launcher · 🌅 Last light · 🎛️ Vigil bar
+  (the bar question only when the Claude Code build supports mods; otherwise
+  the card has three).
+- **Card 2** (only when needed): 🌅 last-light threshold (if On), and the
+  existing ♾️ Always confirmation (if chosen).
+- Each option maps to exactly one `install --yes` flag value; "Other" free text
+  is accepted only for thresholds (validated 1–95).
+- SKILL.md: ask with AskUserQuestion using the JSON as printed; where the tool
+  is unavailable (`claude -p`), ask the same questions in plain text.
+- `last-light on` (§1 Setup) uses the same mechanism for its threshold card.
+
+Tests: the JSON validates against the card limits; every option round-trips to
+a valid flag; the bar question is absent when mods are unsupported.
 
 ---
 
@@ -355,10 +423,11 @@ tuned in review; these are the starting strings:
 | Handover saved, no tmux | `📜 Handover saved — type /clear, then send any message (e.g. "go") to pick it back up ✨ (run Claude inside tmux for hands-free handovers 🤖)` |
 | Last light, prepared | `🌅 Last light: a handover is ready 📜 — carry on as normal, or /clear to resume from it ✨` |
 | Bar | `🕯️ context {pct}% · threshold {threshold}%` + `📜 Hand over now` / `⏰ Remind me at +{step}%` / `✖ Dismiss` |
-| Install: threshold | `🎚️ Threshold — at what context % should I tap you on the shoulder? [35]` |
-| Install: launcher | `🖥️ Launcher — how should Claude start inside tmux for hands-free handovers? …` (existing walkthrough, emoji per option) |
-| Install: last light | `🌅 Last light (off by default) — with a 1-hour prompt cache, when you've stepped away with context ≥ 25% and the cache is 5 minutes from going cold 🧊, I'll have the agent prepare a handover. Nothing is cleared: come back, carry on, or /clear to resume ✨ Needs tmux. Turn it on? [y/N]` → `🎚️ Last-light threshold? [25]` |
-| Install: bar | `🎛️ Vigil bar (off by default) — a pop-up bar above the prompt when context crosses the threshold, with [1] hand over · [2] remind me later · [0] dismiss. Needs a Claude Code build with mods. Add it? [y/N]` |
+| Card: threshold | header `🎚️ Threshold` · `At what context % should I tap you on the shoulder?` · `35% (Recommended)` / `25%` / `50%` (+ Other) |
+| Card: launcher | header `🖥️ Launcher` · `How should Claude start for hands-free handovers?` · `🚀 On demand (Recommended)` / `♾️ Always` / `⏸ Not now` (descriptions carry the existing walkthrough) |
+| Card: last light | header `🌅 Last light` · `Prepare a handover before an idle 1-hour cache goes cold 🧊?` · `Off (Recommended)` / `On` — description: `When you've stepped away with context ≥ 25% and the cache is 5 minutes from going cold, the agent prepares a handover. Nothing is cleared: come back, carry on, or /clear to resume ✨ Needs tmux.` |
+| Card: last-light threshold | header `🎚️ Last light` · `At what context % should last light step in?` · `25% (Recommended)` / `35%` / `50%` (+ Other) |
+| Card: vigil bar | header `🎛️ Vigil bar` · `Add a pop-up bar above the prompt when context crosses the threshold?` · `No (Recommended)` / `Yes` — description: `[1] hand over · [2] remind me later · [0] dismiss. Terminal and desktop; needs a Claude Code build with mods.` |
 | status | `🕯️ installed` / `🌅 last light: on (25%)` / `🎛️ vigil bar: on` lines |
 
 ---
@@ -369,7 +438,8 @@ tuned in review; these are the starting strings:
   `$.prompt.submit` (which waits for idle, and whose `e.origin` tells plugin
   from user) would remove the tmux requirement, `send-keys` and pane-safety
   checks.
-- A mobile `$.ui.ask` card for the notice / bar.
+- An `$.ui.ask` card for the notice on the phone (prototyped, dropped — §3:
+  it blocks input; the Stop notice already reaches the phone).
 - Keeping the cache warm with keep-alive prompts (that *is* the loop).
 - Last light for headless runs or the 5-minute TTL.
 - A firing cap/fuse for last light (considered and dropped: it could block
