@@ -56,9 +56,11 @@ test('the pane draws repo tabs with their marks, and a tab narrows the list', as
     props: PANE_PROPS,
   })
 
-  expect((await ui.find({ key: 'tab-*all' }))?.text).toContain('All ◆1 ●1')
-  expect((await ui.find({ key: 'tab-pip-skills' }))?.text).toContain('pip-skills ◆1')
-  expect((await ui.find({ key: 'tab-warehouse' }))?.text).toContain('warehouse ●1')
+  expect((await ui.find({ key: 'tab-*all' }))?.text).toContain('All')
+  expect((await ui.find({ key: 'tab-pip-skills' }))?.text).toContain('pip-skills')
+  // The counts beside the tabs: All and pip-skills each hold one waiting.
+  expect(await ui.findAll({ type: 'Text', text: /^\?1$/ })).toHaveLength(2)
+  expect(await ui.findAll({ type: 'Text', text: /^●1$/ })).toHaveLength(2)
   // Boxes are not found by key: the sessions are found by their text.
   const session = (tmux: RegExp) => ui.find({ type: 'Text', text: tmux })
   expect(await session(/cc-b-1/)).toBeDefined()

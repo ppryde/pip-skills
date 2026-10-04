@@ -173,11 +173,18 @@ export function repoTabs(rows: SessionRow[]): RepoTab[] {
   )
 }
 
-/** A tab's label: the repo, then ◆ waiting and ● working counts, else its session count. */
-export function tabLabel(tab: Pick<RepoTab, 'waiting' | 'busy' | 'total'>, name: string): string {
-  const marks = [tab.waiting && `◆${tab.waiting}`, tab.busy && `●${tab.busy}`].filter(Boolean)
+export type TabMark = { text: string; color: string }
 
-  return `${name} ${marks.length ? marks.join(' ') : tab.total}`
+/** A tab's counts beside its name: red ? waiting, green ● working, grey ○ idle; zeros left out. */
+export function tabMarks(tab: Pick<RepoTab, 'waiting' | 'busy' | 'total'>): TabMark[] {
+  const idle = tab.total - tab.waiting - tab.busy
+  const marks: (TabMark | false)[] = [
+    tab.waiting > 0 && { text: `?${tab.waiting}`, color: 'red' },
+    tab.busy > 0 && { text: `●${tab.busy}`, color: 'green' },
+    idle > 0 && { text: `○${idle}`, color: 'gray' },
+  ]
+
+  return marks.filter((m): m is TabMark => m !== false)
 }
 
 export function headline(rows: SessionRow[]): string {
@@ -360,9 +367,58 @@ async function killFromPane($: EngineInterface, r: SessionRow) {
   await refresh($)
 }
 
-const USAGE = 'Usage: /roster, or /roster kill <tmux-name|pid>'
+// What may be spliced into the shell line and the AppleScript string below.
+const SAFE_NAME = /^[\w.-]+$/
 
-const STATUS_COLOR: Record<string, string> = { waiting: 'yellow', busy: 'green' }
+/** The shell line that attaches a terminal to one tmux session on one socket. */
+export function attachCommand(socket: string, name: string): string | undefined {
+  if (!SAFE_NAME.test(socket) || !SAFE_NAME.test(name)) return undefined
+
+  return `tmux -L ${socket} attach -t '=${name}'`
+}
+
+/**
+ * Opens a session in a new Terminal.app window, attached to its tmux
+ * session: never this session's own terminal. tmux mirrors every client of a
+ * session, so a window already showing it (a VS Code tab, which no outside
+ * program can bring forward) keeps working; the reply names where.
+ */
+async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
+  const name = nameOf(r)
+  if (r.sessionId === (await $.session.id())) return `${name} is this session.`
+  if (!r.tmux) return `${name} runs outside tmux: there is nothing to attach to.`
+  const socket = await socketOf($, r)
+  if (!socket) return `Could not find ${name}'s tmux server.`
+  const attach = attachCommand(socket, r.tmux)
+  if (!attach) return `Refused: ${name} has a name the opener will not quote.`
+  const clients = await $.process
+    .run(['tmux', '-L', socket, 'list-clients', '-t', `=${r.tmux}`, '-F', '#{client_tty}'])
+    .catch(() => undefined)
+  const ttys = (clients?.stdout ?? '').split('\n').filter(Boolean).map(t => t.replace('/dev/', ''))
+  const run = await $.process.run([
+    'osascript',
+    '-e',
+    'tell application "Terminal"',
+    '-e',
+    `do script "${attach}"`,
+    '-e',
+    'activate',
+    '-e',
+    'end tell',
+  ])
+  if (run.exitCode !== 0) return `Could not open ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
+  const also = ttys.length ? ` (also attached on ${ttys.join(', ')})` : ''
+
+  return `Opened ${name} in a new Terminal window${also}.`
+}
+
+async function openFromPane($: EngineInterface, r: SessionRow) {
+  $.ui.toast(await openSession($, r).catch(err => `Could not open: ${String(err)}`))
+}
+
+const USAGE = 'Usage: /roster, /roster open <tmux-name|pid>, or /roster kill <tmux-name|pid>'
+
+const STATUS_COLOR: Record<string, string> = { waiting: 'red', busy: 'green' }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -387,16 +443,17 @@ export const register: Register = on => {
     await refresh($)
     const args = e.args.trim()
     if (args) {
-      const target = /^kill\s+(\S+)$/.exec(args)?.[1]
-      if (!target) return { text: USAGE }
+      const [, verb, target] = /^(kill|open)\s+(\S+)$/.exec(args) ?? []
+      if (!verb || !target) return { text: USAGE }
       const { rows } = await read($, sessions)
       const matches = matchTarget(rows, target)
       if (matches.length === 0) return { text: `No live session named ${target}.` }
       if (matches.length > 1) {
         const pids = matches.map(m => `${m.pid} (${m.account})`).join(', ')
-        return { text: `${target} is ambiguous; kill by pid: ${pids}` }
+        return { text: `${target} is ambiguous; ${verb} by pid: ${pids}` }
       }
-      const message = await killSession($, matches[0]!)
+      const message =
+        verb === 'kill' ? await killSession($, matches[0]!) : await openSession($, matches[0]!)
       await refresh($)
 
       return { text: message }
@@ -437,9 +494,16 @@ export const register: Register = on => {
           </Button>
         </Box>
       ) : (
-        <Button key={`kill-${r.pid}`} dimColor onPress={() => void update($, pendingKill, () => r.pid)}>
-          kill
-        </Button>
+        <Box flexDirection="row" gap={1}>
+          {r.tmux && (
+            <Button key={`open-${r.pid}`} onPress={() => void openFromPane($, r)}>
+              open
+            </Button>
+          )}
+          <Button key={`kill-${r.pid}`} dimColor onPress={() => void update($, pendingKill, () => r.pid)}>
+            kill
+          </Button>
+        </Box>
       )
 
     const where = (r: SessionRow) =>
@@ -474,7 +538,11 @@ export const register: Register = on => {
         <Text dimColor wrap="truncate-end">
           {where(r)}
         </Text>
-        {r.status === 'waiting' && r.waitingFor && <Text color="yellow">▸ {r.waitingFor}</Text>}
+        {r.status === 'waiting' && (
+          <Text color="red" bold>
+            ? {r.waitingFor ?? 'waiting on you'}
+          </Text>
+        )}
         {r.prompt && (
           <Text dimColor italic wrap="truncate-end">
             you {ago(r.promptAt ?? 0, checkedAt)} ago: {r.prompt}
@@ -506,38 +574,47 @@ export const register: Register = on => {
       </Box>
     )
 
-    const pill = (text: string, color: string) => (
-      <Text backgroundColor={color} color="black" bold>
+    const pill = (text: string, color: string, ink = 'black') => (
+      <Text backgroundColor={color} color={ink} bold>
         {` ${text} `}
       </Text>
     )
 
     // Hotkeys 1-9 while the pane holds the keyboard: 1 is All, then the repos in order.
-    const tabButton = (repo: string | null, text: string, index: number) => (
-      <Button
-        key={`tab-${repo ?? '*all'}`}
-        hotkey={index < 9 ? String(index + 1) : undefined}
-        variant={tab === repo ? 'primary' : undefined}
-        dimColor={tab !== repo}
-        onPress={() => void update($, repoTab, () => repo)}
-      >
-        {text}
-      </Button>
+    // A Button's label is one plain string, so the coloured counts sit beside it.
+    const tabButton = (repo: string | null, name: string, marks: TabMark[], index: number) => (
+      <Box key={`tabbox-${repo ?? '*all'}`} flexDirection="row" columnGap={1} marginRight={1}>
+        <Button
+          key={`tab-${repo ?? '*all'}`}
+          hotkey={index < 9 ? String(index + 1) : undefined}
+          variant={tab === repo ? 'primary' : undefined}
+          dimColor={tab !== repo}
+          onPress={() => void update($, repoTab, () => repo)}
+        >
+          {name}
+        </Button>
+        {marks.map(m => (
+          <Text color={m.color} bold={m.color !== 'gray'}>
+            {m.text}
+          </Text>
+        ))}
+      </Box>
     )
+    const allMarks = tabMarks({ waiting: all.waiting.length, busy: all.busy.length, total: rows.length })
 
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" gap={1}>
-          {all.waiting.length > 0 && pill(`${all.waiting.length} NEED YOU`, 'yellow')}
-          {all.busy.length > 0 && pill(`${all.busy.length} WORKING`, 'green')}
-          <Text dimColor>{all.recent.length + all.older.length} idle</Text>
+          {all.waiting.length > 0 && pill(`? ${all.waiting.length} NEED YOU`, 'red', 'white')}
+          {all.busy.length > 0 && pill(`● ${all.busy.length} WORKING`, 'green')}
+          <Text dimColor>○ {all.recent.length + all.older.length} idle</Text>
         </Box>
-        <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop={1}>
-          {tabButton(null, tabLabel({ waiting: all.waiting.length, busy: all.busy.length, total: rows.length }, 'All'), 0)}
-          {tabs.map((t, i) => tabButton(t.repo, tabLabel(t, t.repo), i + 1))}
+        <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
+          {tabButton(null, 'All', allMarks, 0)}
+          {tabs.map((t, i) => tabButton(t.repo, t.repo, tabMarks(t), i + 1))}
         </Box>
         {rows.length === 0 && <Text dimColor>No live sessions found.</Text>}
-        {waiting.length > 0 && heading('Needs you', waiting.length, 'yellow')}
+        {waiting.length > 0 && heading('Needs you', waiting.length, 'red')}
         {waiting.map(card)}
         {busy.length > 0 && heading('Working', busy.length, 'green')}
         {busy.map(card)}

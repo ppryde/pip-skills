@@ -3,7 +3,7 @@
 `/roster` opens a pane of every Claude Code session running on this machine,
 across both accounts, in three sections:
 
-- **Needs you** (yellow) and **Working** (green): one card each, its border
+- **Needs you** (red, with a red `?`) and **Working** (green): one card each, its border
   the status. The card leads with the session's title (your `/rename`, else
   the AI-written one), then tmux name · repo/worktree · branch, why it waits,
   and the last prompt *you* typed with its age (`you 3d ago: …`): teammate
@@ -13,8 +13,8 @@ across both accounts, in three sections:
   for over a day folds behind **show N idle for over a day**.
 
 Above the sections, one tab per repo (worktrees under their repo), **All**
-first: each labelled with its marks (`pip-skills ◆2 ●1`: ◆ waiting on you,
-● working), repos that need you first. Click one, Tab to it, or press its
+first, each with its counts beside it: red `?2` waiting on you, green `●1`
+working, grey `○3` idle (zeros left out); repos that need you first. Click one, Tab to it, or press its
 number (1 = All, then 2–9) while the pane holds the keyboard. The header
 counts stay global, so nothing waiting in another repo hides behind a tab.
 
@@ -27,6 +27,17 @@ a session as a relay only, never as a drawing surface: it is never asked to
 draw the pane. So when the command arrives over the bridge
 (`origin.kind === 'bridge'`) its reply is the roster itself as text — the top
 15 sessions, each with its last prompt — instead of opening the pane.
+
+## Opening a session
+
+Each tmux session's row has an **open** button (from the phone,
+`/roster open <tmux-name|pid>`). It opens a **new Terminal.app window**
+attached to that session, on the socket found by pid as for kill; the
+session you are in is never touched. tmux mirrors every client of a session,
+so a window already showing it keeps working, and the reply names the ttys
+it is also attached on. An existing VS Code terminal tab cannot be brought
+forward instead: VS Code offers no outside way to select one. The first open
+asks macOS once to let Claude Code control Terminal.
 
 ## Killing a session
 

@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   ago,
+  attachCommand,
   grouped,
   headline,
   matchTarget,
@@ -10,7 +11,7 @@ import {
   repoTabs,
   sorted,
   summary,
-  tabLabel,
+  tabMarks,
   toRow,
   transcriptFacts,
 } from './register'
@@ -38,11 +39,11 @@ test('one tab per repo, those needing you first, each labelled with its marks', 
   ])
 
   expect(tabs.map(t => t.repo)).toEqual(['pip-skills', 'ledger-poc', 'warehouse', 'agents.md'])
-  expect(tabs.map(t => tabLabel(t, t.repo))).toEqual([
-    'pip-skills ◆1 ●1',
-    'ledger-poc ◆1',
-    'warehouse 1',
-    'agents.md 1',
+  expect(tabs.map(t => tabMarks(t).map(m => `${m.color}:${m.text}`))).toEqual([
+    ['red:?1', 'green:●1'],
+    ['red:?1'],
+    ['gray:○1'],
+    ['gray:○1'],
   ])
 })
 
@@ -180,4 +181,12 @@ test('a kill target is a tmux name or a pid, and a name on both accounts is two 
   expect(matchTarget(rows, '83438').map(r => r.pid)).toEqual([83438])
   expect(matchTarget(rows, '75378').map(r => r.pid)).toEqual([75378])
   expect(matchTarget(rows, 'cc-take-home')).toEqual([])
+})
+
+test('the opener attaches by exact name on the found socket, and refuses unquotable names', async () => {
+  expect(attachCommand('claude-personal', 'cc-pip-skills-10')).toBe(
+    "tmux -L claude-personal attach -t '=cc-pip-skills-10'",
+  )
+  expect(attachCommand('claude', "x'; rm -rf ~")).toBe(undefined)
+  expect(attachCommand('claude', 'a"b')).toBe(undefined)
 })
