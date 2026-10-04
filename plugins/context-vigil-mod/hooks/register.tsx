@@ -1,16 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Awaiting, EventKind, Git, Mode, Pending, PendingReason, Settings } from '../types'
+import type { Awaiting, EventKind, Git, Latch, Mode, Pending, PendingReason, RateLimit, Settings } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire, ttlFromLabel } from '../core/last-light'
 import { clearGate } from '../core/surfaces'
-import { formatHHMM } from '../core/limits'
+import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
 import { V } from '../core/voice'
 import type { WaitReason } from '../core/voice'
@@ -31,6 +31,7 @@ const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const
 const standDownA = atom({ plugin: 'context-vigil-mod', key: 'standDown' } as const, false)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
+const firedA = atom({ plugin: 'context-vigil-mod', key: 'firedEarlyStops' } as const, [] as string[])
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 
 // Module caches: rebuilt at session.start / after a hot reload.
@@ -216,6 +217,49 @@ async function tryClear($: EngineInterface) {
   retryTimer = $.clock.after(gate.recheckMs, () => { void tryClear($) })
 }
 
+async function setLatch($: EngineInterface, l: Latch) {
+  if (!l || (await read($, latchA))) return
+  await update($, latchA, () => l)
+  await log($, 'limit.latched', { kind: l.kind, resetsAtMs: l.resetsAtMs })
+  await notify($, V.limitLatched(formatHHMM(l.resetsAtMs)))
+  const now = await nowMs($)
+  $.clock.after(Math.max(0, l.resetsAtMs - now) + 1000, () => { void checkLatch($, []) })
+}
+
+async function checkLatch($: EngineInterface, limits: RateLimit[]) {
+  const l = await read($, latchA)
+  if (!latchCleared(l, await nowMs($), limits)) return
+  await update($, latchA, () => null)
+  await log($, 'limit.cleared', { kind: l?.kind })
+  await notify($, V.limitCleared)
+  const deferred = await read($, deferredA)
+  if (deferred) {
+    await update($, deferredA, () => null)
+    await startHandover($, deferred.reason, deferred.resume)
+    return
+  }
+  if (clearParked && (await read($, pendingA))) scheduleClear($, unattendedClear)
+}
+
+// Waits in hops of at most an hour; never submits while latched (spec §5); drops the limit
+// handover once the resume is sent so a later /clear does not re-inject it.
+function scheduleResume($: EngineInterface, at: number) {
+  $.clock.after(0, async () => {
+    const wait = nextHop(await nowMs($), at)
+    if (wait > 0) { $.clock.after(wait, () => { scheduleResume($, at) }); return }
+    if (await read($, latchA)) { $.clock.after(60_000, () => { scheduleResume($, at) }); return }
+    const pending = await read($, pendingA)
+    try {
+      await $.prompt.submit({ text: limitResumeText(pending?.path ?? '(no file)') })
+    } catch {
+      await notify($, V.handoverFailed)
+      await log($, 'guard.wait', { reason: 'submit-rejected' })
+      return
+    }
+    if (pending?.reason === 'limit') await savePending($, null)
+  })
+}
+
 async function cancelCountdown($: EngineInterface) {
   if ((await read($, countdownA)) === null) return
   await update($, countdownA, () => null)
@@ -359,6 +403,13 @@ export const register: Register = on => {
     return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
   })
 
+  on('classic.StopFailure', async ($, e, next) => {
+    const error = String((e as unknown as { error?: unknown }).error ?? '')
+    const usage = await $.session.usage().catch(() => null)
+    await setLatch($, latchFromStopFailure(error, usage?.rateLimits ?? [], await nowMs($)))
+    return next(e)
+  })
+
   on('classic.FileChanged', async ($, e, next) => {
     scheduleGit($)
     return next(e)
@@ -437,6 +488,18 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     const pct = e.context.percent ?? null
     await update($, contextA, () => pct)
+    const limits = e.rateLimits as RateLimit[]
+    await setLatch($, latchFromMeasure(limits))
+    await checkLatch($, limits)
+    const fired = await read($, firedA)
+    const limitDue = earlyStopDue(limits, settings, fired)
+    if (limitDue && !(await read($, standDownA))) {
+      await update($, firedA, () => [...fired, limitDue.key].slice(-20))
+      await log($, 'limit.early_stop', { kind: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
+      await notify($, V.earlyStop(limitDue.kind, limitDue.pct, formatHHMM(limitDue.resetsAtMs + RESUME_DELAY_MS)))
+      await startHandover($, 'limit', false)
+      scheduleResume($, limitDue.resetsAtMs + RESUME_DELAY_MS)
+    }
     if (pct !== null && !(await read($, standDownA))) {
       const due = nextThreshold(pct, settings, await read($, lastNudgedA))
       if (due !== null) {
