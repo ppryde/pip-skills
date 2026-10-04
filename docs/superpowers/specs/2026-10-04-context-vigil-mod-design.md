@@ -377,7 +377,7 @@ question with the explanation in the question text.
   `session.start` and before every clear, the mod checks whether classic is
   active for this session — classic's hooks registered in the account's
   `settings.json`, or a classic session record for this session id under
-  `.vigil/sessions/` — and, if so, stands down: no arming, no clearing, no
+  `$CLAUDE_CONFIG_DIR/context-vigil/sessions/` — and, if so, stands down: no arming, no clearing, no
   bar, and a one-line notice saying why. The mod records its own activity in
   its event log and `$.state`, so a later classic change can check the other
   way.
