@@ -17,6 +17,14 @@ last activity. The status line reads `agents: N waiting` while any session
 waits on you. Under 70 columns (a phone over Remote Control) each session
 takes a stacked block instead of a line.
 
+## Over Remote Control
+
+Remote Control refuses plugin slash commands (`/agents isn't available over
+Remote Control`). Type the bare word **`agents`** instead: a `prompt.submit`
+hook drops it before the model (no turn, no tokens), opens the pane, and
+shows the roster as plain text — the top 15 sessions, each with its last
+prompt — as the drop's reason.
+
 ## Where the data comes from
 
 Nothing is scraped from tmux. Every live Claude process keeps a registry file,

@@ -97,6 +97,28 @@ export function ago(then: number, now: number): string {
   return `${Math.round(s / 86400)}d`
 }
 
+export const KEYWORD = /^\s*agents\s*$/i
+const SUMMARY_ROWS = 15
+
+/** The roster as plain text, one line a session (two with its last prompt). */
+export function summary(rows: SessionRow[], now: number): string {
+  const waiting = rows.filter(r => r.status === 'waiting').length
+  const busy = rows.filter(r => r.status === 'busy').length
+  const lines = [`${rows.length} sessions · ${waiting} waiting · ${busy} busy`]
+  for (const r of rows.slice(0, SUMMARY_ROWS)) {
+    const where = r.worktree ? `${r.repo}/${r.worktree}` : r.repo
+    const status = r.status === 'waiting' && r.waitingFor ? `waiting: ${r.waitingFor}` : r.status
+    const work = r.account === 'work' ? ' · work' : ''
+    lines.push(
+      `${GLYPH[r.status] ?? '?'} ${r.tmux ?? `pid ${r.pid}`} · ${where} · ${status} · ${ago(r.lastActive, now)}${work}`,
+    )
+    if (r.lastPrompt) lines.push(`   › ${r.lastPrompt}`)
+  }
+  if (rows.length > SUMMARY_ROWS) lines.push(`… ${rows.length - SUMMARY_ROWS} more`)
+
+  return lines.join('\n')
+}
+
 async function transcriptOf($: EngineInterface, configDir: string, row: SessionRow) {
   const known = transcriptPaths.get(row.sessionId)
   if (known !== undefined) return known ?? undefined
@@ -202,6 +224,17 @@ export const register: Register = on => {
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
 
     return { text: 'Agents pane opened.' }
+  })
+
+  // Remote Control refuses plugin slash commands, so the bare word `agents`
+  // answers too: dropped before the model, the roster shown as the reason.
+  on('prompt.submit', async ($, e, next) => {
+    if (!KEYWORD.test(e.text)) return next(e)
+    await refresh($)
+    void $.ui.open({ id: PANE, title: TITLE })
+    const { rows, checkedAt } = await read($, sessions)
+
+    return { drop: summary(rows, checkedAt) }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

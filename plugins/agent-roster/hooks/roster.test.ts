@@ -1,6 +1,42 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, lastPromptOf, projectSlug, repoOf, sorted, toRow } from './register'
+import { KEYWORD, ago, lastPromptOf, projectSlug, repoOf, sorted, summary, toRow } from './register'
+
+test('the bare word agents is the keyword, nothing longer', async () => {
+  expect(KEYWORD.test('agents')).toBe(true)
+  expect(KEYWORD.test('  Agents \n')).toBe(true)
+  expect(KEYWORD.test('list the agents')).toBe(false)
+  expect(KEYWORD.test('/agents')).toBe(false)
+})
+
+test('summarises the roster as text, the last prompt under its session', async () => {
+  const base = { sessionId: '', account: 'personal', kind: 'interactive', lastActive: 0 }
+  const text = summary(
+    [
+      {
+        ...base,
+        pid: 1,
+        tmux: 'cc-ledger-poc-2',
+        cwd: '/r/ledger-poc',
+        repo: 'ledger-poc',
+        status: 'waiting',
+        waitingFor: 'input needed',
+        lastPrompt: 'add demo cards',
+      },
+      { ...base, pid: 2, account: 'work', cwd: '/r/warehouse', repo: 'warehouse', status: 'idle' },
+    ],
+    120_000,
+  )
+
+  expect(text).toBe(
+    [
+      '2 sessions · 1 waiting · 0 busy',
+      '◆ cc-ledger-poc-2 · ledger-poc · waiting: input needed · 2m',
+      '   › add demo cards',
+      '○ pid 2 · warehouse · idle · 2m · work',
+    ].join('\n'),
+  )
+})
 
 test('reads a registry entry into a row: tmux name, repo, worktree, why it waits', async () => {
   const row = toRow(
