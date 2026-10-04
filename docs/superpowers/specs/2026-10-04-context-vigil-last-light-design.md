@@ -199,9 +199,10 @@ Unit (no tmux, pane capture injected):
 
 - each gate in isolation, including absent/malformed `prompt_cache`, `ttl`
   `5m`, `expires_at` past, cold cache, paused scope, pending handover;
-- pane safety: empty box ✓; text in the box, a menu, a dialog,
-  `esc to interrupt` ✗;
-- prompt classification: marker vs real; arm on real only;
+- pane safety: empty box and dim placeholder ✓; typed text in the box, a
+  menu, a dialog, unreadable attributes ✗;
+- prompt classification: marker, `<task-notification>` and human; arm and
+  discard on human only;
 - `--prepared`: writes marker, no clear flag; refused over a pending real
   handover;
 - real prompt discards a prepared handover to the archive and re-arms;
