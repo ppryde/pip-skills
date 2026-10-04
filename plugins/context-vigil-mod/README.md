@@ -35,7 +35,7 @@ Every moment is in exactly one:
 
 ## The handover
 
-The mod registers a `vigil_handover` tool and asks the model to call it. Fields: `goal`, `state`, `decisions`, `next_step`, `open_questions`, `failed_attempts` and a required **`session_name`**. The mod adds a snapshot (cwd, branch, dirty files, files edited, context %) and saves `handovers/<session>-<n>.md`. It then clears (only when the prompt box is empty, the RC rules hold and no limit latch is set; every wait shows a notice), injects the handover into the fresh session and submits the resume prompt.
+The mod registers a `vigil_handover` tool and asks the model to call it. Required fields: `goal`, `state`, `next_step` and `session_name`; optional: `decisions`, `open_questions`, `failed_attempts`. The mod adds a snapshot (cwd, branch, dirty files, files edited, context %) and saves `handovers/<session>-<n>.md`. It then clears (only when the prompt box is empty, the RC rules hold and no limit latch is set; every wait shows a notice), injects the handover into the fresh session and submits the resume prompt.
 
 **Session naming.** After the clear, an **unnamed** session is renamed to the handover's `session_name` (a mod-run `/rename`: prompt border, `/resume`, Remote Control). A session that already has a name (a `/rename` of yours, or an earlier handover) **keeps its name** -- `/clear` carries it. Only a transcript `custom-title` counts as named; Claude Code's own auto title does not. If the check cannot run, no rename is attempted.
 
@@ -44,12 +44,19 @@ State that must cross a clear (pending handover, limit latch) lives in `$.store`
 ## The vigil bar
 
 Terminal only. Shown from the threshold crossing until you choose or a handover happens:
-`🕯️ context 41% · threshold 35%   1: 📜 Hand over now · 2: ⏰ Remind me at +5% · 0: ✖ Dismiss`
+`🕯️ context 41% · threshold 35%   📜 Hand over now · ⏰ Remind me at 40% · ✖ Dismiss`, with hotkeys `1`, `2`, `0` on the three buttons (the label names the absolute next step).
 
-- `1` starts a handover; `2` hides it until the next step; `0` hides it silently until the next handover or `/clear`.
+- `1` starts a handover; `2` hides it until the next step; `0` hides it silently until a `/clear`.
 - A bare digit typed into an **empty** prompt box presses a button, so the bar is threshold-only, never always-on.
 - It **yields to the feedback survey** (`hasSurvey`) and returns after it.
-- Off via `/vsetup bar`: the end-of-turn notice still fires at the threshold and every step after. Phone sessions get the notice, not the bar.
+- Off via `/vsetup bar`: a toast and log line (fired from the context measure) still mark the threshold and every step after. Phone sessions get the notice, not the bar.
+
+## Guards and failure paths
+
+- Draft guard: a clear waits while the terminal prompt box holds a draft, rechecked every 2 s, with a notice.
+- If the model does not call `vigil_handover`, it is asked once more; then a "couldn't write a handover" notice appears and nothing clears.
+- A handover asked for while the limit latch is set is deferred and starts when the latch lifts.
+- A handover still pending when a session restarts is offered at session start with a `/clear` notice.
 
 ## Last light
 
@@ -61,7 +68,7 @@ A rate-limit failure or a window at its limit sets an account-wide **latch** wit
 
 ## Remote Control
 
-"On the phone" = the last human prompt came from `bridge`. The first time auto mode would arm there, a one-off question asks whether to allow auto-clear in RC sessions (`/vsetup rc` re-asks). If allowed: a 30 s countdown with Cancel (any message cancels), and no clear within 2 min of the last phone prompt. Otherwise the handover is saved and a notice offers `/clear`.
+"On the phone" = the last human prompt came from `bridge`. The first time auto mode would arm there, a one-off question asks whether to allow auto-clear in RC sessions (`/vsetup rc` re-asks). If allowed: a 30 s countdown with Cancel (any message cancels), and no clear within 2 min of the last phone prompt. Otherwise the handover is saved and a notice says why nothing cleared (`/vsetup rc` to enable, or auto-clear is off for RC). The countdown and holdback apply only to unattended clears: `/vho` or the bar's `1` from the phone bypass them. The countdown bar draws even with the bar setting Off.
 
 ## Files
 
