@@ -277,16 +277,27 @@ test('a registry pid counts only while it is still Claude, and never 0 or 1', as
   expect(toRow({ pid: 1.5, cwd: '/r' }, 'personal')).toBe(undefined)
 })
 
-test('kill never ends a tmux session that also holds this one', async () => {
-  expect(mayKillTmuxSession([111, 222], 333)).toBe(true)
-  expect(mayKillTmuxSession([111, 333], 333)).toBe(false)
-  expect(mayKillTmuxSession([111], undefined)).toBe(true)
+test('kill ends a whole tmux session only when it cannot hold this one', async () => {
+  const target = { tmux: 'cc-a-1', account: 'personal' }
+  const self = { pid: 333, tmux: 'cc-me-1', account: 'personal' }
+
+  expect(mayKillTmuxSession(target, [111, 222], self)).toBe(true)
+  // This session's Claude sits in one of the target's panes.
+  expect(mayKillTmuxSession(target, [111, 333], self)).toBe(false)
+  // A shell above Claude hides the pid, but the tmux name still matches.
+  expect(mayKillTmuxSession(target, [999], { ...self, tmux: 'cc-a-1' })).toBe(false)
+  // The same name on the other account's socket is a different session.
+  expect(mayKillTmuxSession(target, [999], { ...self, tmux: 'cc-a-1', account: 'work' })).toBe(true)
+  // This session unknown: never a whole tmux session.
+  expect(mayKillTmuxSession(target, [111], undefined)).toBe(false)
 })
 
 test('a registered session is not listed again as a stray, by pid or by tmux name', async () => {
   const panes = 'cc-pip-skills-9\t90001\t2.1.289\t/Users/me/repos/pip-skills\t1791148000'
   expect(strayRows(panes, 'claude-personal', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toEqual([])
   expect(strayRows(panes, 'claude', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toHaveLength(1)
+  // On a socket that maps to no account, a registered session of that name on any account counts.
+  expect(strayRows(panes, 'default', { pids: new Set(), tmuxNames: new Set(['work:cc-pip-skills-9']) })).toEqual([])
 })
 
 test('profile names that would read as flags are left out', async () => {

@@ -401,7 +401,14 @@ export function strayRows(
     const pid = Number(pidText)
     // A registered session whose pane holds a shell above Claude shows the
     // shell's pid here: its tmux name still says it is listed already.
-    const isListed = registered.pids.has(pid) || registered.tmuxNames.has(`${account}:${tmux}`)
+    // The wrapper's sockets map to the registry's accounts; on any other the
+    // account is unknown, so a registered session of that name on any account counts.
+    const isWrapperSocket = socket === 'claude-personal' || socket === 'claude'
+    const isListed =
+      registered.pids.has(pid) ||
+      (isWrapperSocket
+        ? registered.tmuxNames.has(`${account}:${tmux}`)
+        : [...registered.tmuxNames].some(key => key.endsWith(`:${tmux}`)))
     if (!tmux || !cwd || !(pid > 1) || isListed || !CLAUDE_COMMAND.test(command ?? '')) continue
     rows.push({
       pid,
@@ -463,10 +470,17 @@ async function rescan($: EngineInterface) {
 
 /** A refresh the person asked for: branches re-read now, not when their minute is up. */
 async function refreshNow($: EngineInterface) {
-  // A scan already running read the old branches: let it finish, then look again.
-  await scanning
   branches.clear()
-  await refresh($)
+  await rescanAfterCurrent($)
+}
+
+/**
+ * A fresh scan after any one already running: that one began before a kill or
+ * a branch switch, so joining it would show the old state for another poll.
+ */
+async function rescanAfterCurrent($: EngineInterface) {
+  await scanning?.catch(() => undefined)
+  await refresh($).catch(() => undefined)
 }
 
 /** The sessions a `/roster kill` argument names: a tmux name or a pid. */
@@ -500,9 +514,21 @@ async function socketOf($: EngineInterface, r: SessionRow): Promise<string | und
   return undefined
 }
 
-/** Whether `kill-session` may end the target's whole tmux session: not when it also holds this one. */
-export function mayKillTmuxSession(targetPanes: readonly number[], selfPid: number | undefined): boolean {
-  return selfPid === undefined || !targetPanes.includes(selfPid)
+/**
+ * Whether `kill-session` may end the target's whole tmux session. Only when
+ * this session is known and the target holds it neither by pane (a shell above
+ * Claude shows the shell's pid there, so that alone is not enough) nor by tmux
+ * name on the same account; otherwise only the target process is signalled.
+ */
+export function mayKillTmuxSession(
+  target: { tmux?: string; account: string },
+  targetPanes: readonly number[],
+  self: { pid: number; tmux?: string; account: string } | undefined,
+): boolean {
+  if (!self) return false
+  if (targetPanes.includes(self.pid)) return false
+
+  return !(self.tmux && self.tmux === target.tmux && self.account === target.account)
 }
 
 /**
@@ -513,14 +539,14 @@ export function mayKillTmuxSession(targetPanes: readonly number[], selfPid: numb
 async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
   const name = nameOf(r)
   const selfId = await $.session.id()
-  const selfPid = (await read($, sessions)).rows.find(s => s.sessionId === selfId)?.pid
-  if ((selfId && r.sessionId === selfId) || r.pid === selfPid) return `Refused: ${name} is this session.`
+  const self = selfId ? (await read($, sessions)).rows.find(s => s.sessionId === selfId) : undefined
+  if ((selfId && r.sessionId === selfId) || r.pid === self?.pid) return `Refused: ${name} is this session.`
   if (!(await liveClaudePids($, [r.pid])).has(r.pid)) {
     return `Refused: pid ${r.pid} is no longer a Claude session; refresh and try again.`
   }
   const socket = await socketOf($, r)
   const panes = socket && r.tmux ? ((await panePids($, socket, r.tmux)) ?? []) : []
-  const isWholeSession = Boolean(socket && r.tmux) && mayKillTmuxSession(panes, selfPid)
+  const isWholeSession = Boolean(socket && r.tmux) && mayKillTmuxSession(r, panes, self)
   const run = isWholeSession
     ? await $.process.run(['tmux', '-L', socket!, 'kill-session', '-t', `=${r.tmux}`])
     : await $.process.run(['kill', String(r.pid)])
@@ -533,7 +559,7 @@ async function killFromPane($: EngineInterface, r: SessionRow) {
   const message = await killSession($, r).catch(err => `Could not kill: ${String(err)}`)
   await update($, pendingKill, () => null)
   $.ui.toast(message)
-  await refresh($)
+  await rescanAfterCurrent($)
 }
 
 // What may be spliced into the shell line, the AppleScript string and the
@@ -566,7 +592,8 @@ const CODE_CLIS = ['/opt/homebrew/bin/code', '/usr/local/bin/code']
 const VSCODE_WINDOWS_DIR = '.cache/agent-roster/vscode-windows'
 const VSCODE_NONCE_FILE = '.cache/agent-roster/attach-nonce'
 // A window's extension host runs as a VS Code helper process.
-const VSCODE_HOST = /Code Helper/
+// (VS Code, Code - Insiders, VSCodium: "… Helper").
+const VSCODE_HOST = /(Code|Codium)[^/]* Helper/
 
 export type VscodeWindow = { pid: number; folders: string[] }
 
@@ -825,7 +852,7 @@ export const register: Register = on => {
         verb === 'kill'
           ? await killSession($, matches[0]!).catch(failed)
           : await openSession($, matches[0]!).catch(failed)
-      await refresh($)
+      await rescanAfterCurrent($)
 
       return { text: message }
     }
