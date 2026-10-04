@@ -34,7 +34,9 @@ Each tmux session's row has an **open** button (from the phone,
 `/roster open <tmux-name|pid>`). A session of the **same repo** as the one
 running the roster opens in a **new terminal tab of that repo's VS Code
 window**, through the small helper extension in `vscode/` (install it with
-`sh plugins/agent-roster/vscode/build.sh install`): the mod raises the
+`sh plugins/agent-roster/vscode/build.sh install [profile…]`, naming every VS Code
+profile your windows use: a window loads only its own profile's extensions,
+and a missing helper shows as "cannot be installed because it was not found"): the mod raises the
 window with `code <repo root>`, then sends
 `vscode://pip.agent-roster-vscode/attach?socket=…&name=…`, which the helper
 answers with a terminal running `tmux attach` (TMUX cleared). Any other

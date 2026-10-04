@@ -35,4 +35,10 @@ out="$here/agent-roster-vscode-$version.vsix"
 rm -f "$out"
 (cd "$stage" && zip -qr "$out" '[Content_Types].xml' extension.vsixmanifest extension)
 echo "$out"
-if [ "${1:-}" = install ]; then code --install-extension "$out" --force; fi
+# A window with its own VS Code profile loads only that profile's extensions:
+# `sh build.sh install Personal Work` installs into Default and each named one.
+if [ "${1:-}" = install ]; then
+  shift
+  code --install-extension "$out" --force
+  for profile in "$@"; do code --install-extension "$out" --profile "$profile" --force; done
+fi
