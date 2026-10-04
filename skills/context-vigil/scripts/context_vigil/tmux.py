@@ -50,3 +50,15 @@ def send_detached(target: str, keystrokes: List[List[str]], delay: str) -> None:
         ["bash", "-c", "; ".join(steps)], stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
     )
+
+
+def capture(target: str) -> Optional[str]:
+    """The pane's visible screen with SGR escapes (``capture-pane -p -e``), or None."""
+    try:
+        result = subprocess.run(
+            [binary(), "capture-pane", "-p", "-e", "-t", target], timeout=5,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        )
+    except Exception:
+        return None
+    return result.stdout if result.returncode == 0 else None
