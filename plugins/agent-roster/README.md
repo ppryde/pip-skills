@@ -37,7 +37,7 @@ session's repo is open in VS Code:
 
 - **A VS Code window shows the repo** (any window, a worktree or subfolder of
   it counting): that window is raised (`code <its folder>`), then sent
-  `vscode://pip.agent-roster-vscode/attach?socket=…&name=…`; the helper there
+  `vscode://pip.agent-roster-vscode/attach?socket=…&name=…&nonce=…`; the helper there
   focuses the tab already showing the session (one whose shell is an ancestor
   of the session's tmux client), else opens a new tab running `tmux attach`
   (TMUX cleared).
@@ -58,7 +58,13 @@ answers the link with "cannot be installed because it was not found").
 after "Never"); by hand it is `sh plugins/agent-roster/vscode/build.sh install
 [profile…]`.
 
-The session you are in is never touched. tmux mirrors every client of a
+The link carries a one-time token the roster writes to
+`~/.cache/agent-roster/attach-nonce` just before sending it; the helper spends
+the token and ignores any link without it, so a web page opening a
+`vscode://` link can attach nothing. Kill re-checks that the pid is still a
+Claude process at the moment it acts, refuses the session it runs in by pid
+as well as id, and signals only the process when the target's tmux session
+also holds this one. The session you are in is never touched. tmux mirrors every client of a
 session, so a view already showing it keeps working; the window may resize to
 the latest client. The first Terminal open asks macOS once to let Claude Code
 control Terminal.

@@ -7,7 +7,24 @@ const vscode = require('vscode')
 const fs = require('fs')
 const { execFile } = require('child_process')
 
-const SAFE = /^[\w.-]+$/
+// No quotes or spaces, no leading dash, not `.` or `..`: as the roster checks.
+const SAFE = /^(?!-)(?!\.+$)[\w.-]+$/
+// The roster writes a one-time token here just before it sends a link; a
+// link without it (one any web page could open) does nothing.
+const NONCE_FILE = require('path').join(require('os').homedir(), '.cache', 'agent-roster', 'attach-nonce')
+
+/** Whether the link carries the token the roster left, which is spent either way. */
+function spendNonce(given) {
+  let expected = ''
+  try {
+    expected = fs.readFileSync(NONCE_FILE, 'utf8').trim()
+    fs.unlinkSync(NONCE_FILE)
+  } catch {
+    return false
+  }
+
+  return expected.length >= 16 && given === expected
+}
 // A Dock-launched VS Code may not have Homebrew on PATH: find tmux itself.
 const TMUX = ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'].find(p => fs.existsSync(p))
 // A client started from a tab's shell sits a level or two below it (zsh, a
@@ -85,6 +102,7 @@ exports.activate = context => {
         const socket = query.get('socket') ?? ''
         const name = query.get('name') ?? ''
         if (uri.path !== '/attach' || !SAFE.test(socket) || !SAFE.test(name)) return
+        if (!spendNonce(query.get('nonce') ?? '')) return
         if (!TMUX) {
           void vscode.window.showErrorMessage('agent-roster: tmux not found')
           return

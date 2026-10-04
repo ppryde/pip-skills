@@ -40,8 +40,16 @@ rm -f "$out"
 echo "$out"
 # A window with its own VS Code profile loads only that profile's extensions:
 # `sh build.sh install Personal Work` installs into Default and each named one.
+# One profile failing must not stop the rest: each is tried, failures named last.
 if [ "${1:-}" = install ]; then
   shift
-  code --install-extension "$out" --force
-  for profile in "$@"; do code --install-extension "$out" --profile "$profile" --force; done
+  failed=''
+  code --install-extension "$out" --force || failed=" Default"
+  for profile in "$@"; do
+    code --install-extension "$out" --profile "$profile" --force || failed="$failed $profile"
+  done
+  if [ -n "$failed" ]; then
+    echo "agent-roster helper failed to install into:$failed" >&2
+    exit 1
+  fi
 fi

@@ -3,9 +3,11 @@ import { expect, test } from 'claude-code/testing'
 import {
   ago,
   attachCommand,
+  claudePidsIn,
   grouped,
   headline,
   matchTarget,
+  mayKillTmuxSession,
   profileNames,
   projectSlug,
   repoFromGit,
@@ -196,11 +198,15 @@ test('the opener attaches by exact name on the found socket, and refuses unquota
   expect(attachCommand('claude', 'a"b')).toBe(undefined)
 })
 
-test('the VS Code link carries socket and exact name, and refuses what it cannot pass', async () => {
-  expect(vscodeUri('claude-personal', 'cc-pip-skills-9')).toBe(
-    'vscode://pip.agent-roster-vscode/attach?socket=claude-personal&name=cc-pip-skills-9',
+test('the VS Code link carries socket, exact name and the one-time token, and refuses what it cannot pass', async () => {
+  const nonce = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
+  expect(vscodeUri('claude-personal', 'cc-pip-skills-9', nonce)).toBe(
+    `vscode://pip.agent-roster-vscode/attach?socket=claude-personal&name=cc-pip-skills-9&nonce=${nonce}`,
   )
-  expect(vscodeUri('claude', 'a&b=c')).toBe(undefined)
+  expect(vscodeUri('claude', 'a&b=c', nonce)).toBe(undefined)
+  expect(vscodeUri('claude', 'ok', 'short')).toBe(undefined)
+  expect(vscodeUri('claude', '..', nonce)).toBe(undefined)
+  expect(attachCommand('claude', '-x')).toBe(undefined)
 })
 
 test("a sibling worktree belongs to its main checkout's repo, by what git says", async () => {
@@ -249,10 +255,40 @@ test('a pane running Claude with no registry entry shows as waiting at a startup
     'cc-pip-skills-9\t48701\t2.1.287\t/Users/me/repos/pip-skills\t1791148000',
     '11\t90605\tzsh\t/Users/me/repos/pip-skills\t1791148000',
   ].join('\n')
-  const rows = strayRows(panes, 'claude-personal', new Set([48701]))
+  const rows = strayRows(panes, 'claude-personal', { pids: new Set([48701]), tmuxNames: new Set() })
 
   expect(rows.map(r => [r.tmux, r.pid, r.status, r.account, r.repo, r.lastActive])).toEqual([
     ['cc-home-1', 50166, 'waiting', 'personal', 'me', 1791148516000],
   ])
   expect(rows[0]?.waitingFor).toContain('startup prompt')
+})
+
+test('a registry pid counts only while it is still Claude, and never 0 or 1', async () => {
+  const ps = [
+    '    1 /sbin/launchd',
+    '52936 /Users/me/.local/bin/claude',
+    '48701 /Users/me/.local/share/claude/versions/2.1.289',
+    '61234 /usr/bin/vim',
+    '',
+  ].join('\n')
+
+  expect([...claudePidsIn(ps)].sort()).toEqual([48701, 52936])
+  expect(toRow({ pid: 0, cwd: '/r' }, 'personal')).toBe(undefined)
+  expect(toRow({ pid: 1.5, cwd: '/r' }, 'personal')).toBe(undefined)
+})
+
+test('kill never ends a tmux session that also holds this one', async () => {
+  expect(mayKillTmuxSession([111, 222], 333)).toBe(true)
+  expect(mayKillTmuxSession([111, 333], 333)).toBe(false)
+  expect(mayKillTmuxSession([111], undefined)).toBe(true)
+})
+
+test('a registered session is not listed again as a stray, by pid or by tmux name', async () => {
+  const panes = 'cc-pip-skills-9\t90001\t2.1.289\t/Users/me/repos/pip-skills\t1791148000'
+  expect(strayRows(panes, 'claude-personal', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toEqual([])
+  expect(strayRows(panes, 'claude', { pids: new Set(), tmuxNames: new Set(['personal:cc-pip-skills-9']) })).toHaveLength(1)
+})
+
+test('profile names that would read as flags are left out', async () => {
+  expect(profileNames({ userDataProfiles: [{ name: '--help' }, { name: 'Work' }] })).toEqual(['Work'])
 })

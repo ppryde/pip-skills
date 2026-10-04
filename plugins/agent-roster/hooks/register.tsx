@@ -31,7 +31,10 @@ const repoTab = atom({ plugin: 'agent-roster', key: 'repoTab' } as const, null)
 const RANK: Record<string, number> = { waiting: 0, busy: 1 }
 
 // Caches only: a reload starts them empty and the next poll refills them.
-const transcriptPaths = new Map<string, string | null>()
+const transcriptPaths = new Map<string, string>()
+// sessionId → when to look for a missing transcript again.
+const transcriptMisses = new Map<string, number>()
+const TRANSCRIPT_RETRY_MS = 60_000
 const facts = new Map<string, { mtimeMs: number; facts: TranscriptFacts }>()
 const branches = new Map<string, { at: number; branch?: string }>()
 // A folder's repo never changes: resolved once.
@@ -57,11 +60,13 @@ export function projectSlug(cwd: string): string {
 export function toRow(raw: unknown, account: string): SessionRow | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const d = raw as Record<string, unknown>
-  if (typeof d.pid !== 'number' || typeof d.cwd !== 'string') return undefined
+  // pid 0 or 1 would make `kill` signal a process group or init: never a session.
+  const pid = d.pid
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1 || typeof d.cwd !== 'string') return undefined
   const tmux = typeof d.tmux === 'string' ? d.tmux.split(':')[0] : undefined
 
   return {
-    pid: d.pid,
+    pid,
     sessionId: String(d.sessionId ?? ''),
     account,
     tmux: tmux || undefined,
@@ -211,7 +216,7 @@ export function summary(rows: SessionRow[], now: number): string {
       const why = r.status === 'waiting' && r.waitingFor ? ` · ${r.waitingFor}` : ''
       const work = r.account === 'work' ? ' · work' : ''
       lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${why}${work}`)
-      if (r.prompt) lines.push(`   you ${ago(r.promptAt ?? 0, now)}: ${r.prompt}`)
+      if (r.prompt) lines.push(`   you${r.promptAt ? ` ${ago(r.promptAt, now)}` : ''}: ${r.prompt}`)
     }
     budget -= list.length
   }
@@ -224,8 +229,11 @@ export function summary(rows: SessionRow[], now: number): string {
 }
 
 async function transcriptOf($: EngineInterface, configDir: string, row: SessionRow) {
+  if (!row.sessionId) return undefined
   const known = transcriptPaths.get(row.sessionId)
-  if (known !== undefined) return known ?? undefined
+  if (known) return known
+  // A session before its first prompt has no transcript yet: look again later.
+  if ((transcriptMisses.get(row.sessionId) ?? 0) > Date.now()) return undefined
   const guess = `${configDir}/projects/${projectSlug(row.cwd)}/${row.sessionId}.jsonl`
   let path: string | undefined = (await $.fs.exists(guess)) ? guess : undefined
   if (!path) {
@@ -235,7 +243,8 @@ async function transcriptOf($: EngineInterface, configDir: string, row: SessionR
       .catch(() => undefined)
     path = found?.stdout.split('\n')[0]?.trim() || undefined
   }
-  transcriptPaths.set(row.sessionId, path ?? null)
+  if (path) transcriptPaths.set(row.sessionId, path)
+  else transcriptMisses.set(row.sessionId, Date.now() + TRANSCRIPT_RETRY_MS)
 
   return path
 }
@@ -318,11 +327,12 @@ async function scan($: EngineInterface): Promise<SessionRow[]> {
       }
     }
   }
-  // The registry outlives crashed processes: keep only pids still running.
-  const ps = found.length
-    ? await $.process.run(['ps', '-o', 'pid=', '-p', found.map(f => f.row.pid).join(',')])
-    : { stdout: '' }
-  const alive = new Set(ps.stdout.split('\n').map(line => Number(line.trim())))
+  // The registry outlives crashed processes, and their pids get reused: keep
+  // only pids still running Claude.
+  const alive = await liveClaudePids(
+    $,
+    found.map(f => f.row.pid),
+  )
   const live = found.filter(f => alive.has(f.row.pid))
 
   const registered = await Promise.all(
@@ -340,28 +350,59 @@ async function scan($: EngineInterface): Promise<SessionRow[]> {
       }
     }),
   )
-  const strays = await strayPanes($, new Set(live.map(f => f.row.pid)))
+  const strays = await strayPanes($, {
+    pids: new Set(live.map(f => f.row.pid)),
+    tmuxNames: new Set(live.filter(f => f.row.tmux).map(f => `${f.row.account}:${f.row.tmux}`)),
+  })
 
   return [...registered, ...strays]
 }
 
 // What tmux reports per pane, tab-separated, for the unregistered-session sweep.
 const PANE_FORMAT = '#{session_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{window_activity}'
-// Claude Code's binary runs under its version as its name (2.1.289).
+// Claude Code's binary runs under its version as its name (2.1.289), or as `claude`.
 const CLAUDE_COMMAND = /^(\d+\.\d+\.\d+|claude)$/
+
+/** From `ps -o pid=,comm=` output: the pids whose command is Claude Code (basename). */
+export function claudePidsIn(psOutput: string): Set<number> {
+  const pids = new Set<number>()
+  for (const line of psOutput.split('\n')) {
+    const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line)
+    if (!match) continue
+    const pid = Number(match[1])
+    const command = match[2]!.split('/').pop() ?? ''
+    if (pid > 1 && CLAUDE_COMMAND.test(command)) pids.add(pid)
+  }
+
+  return pids
+}
+
+async function liveClaudePids($: EngineInterface, pids: number[]): Promise<Set<number>> {
+  if (pids.length === 0) return new Set()
+  const ps = await $.process.run(['ps', '-o', 'pid=,comm=', '-p', pids.join(',')])
+
+  return claudePidsIn(ps.stdout)
+}
 
 /**
  * Panes running Claude with no registry entry: a session held at a startup
  * prompt (trusting a folder, a login) has not registered yet, and it is
  * exactly one that waits on the person.
  */
-export function strayRows(panes: string, socket: string, registered: ReadonlySet<number>): SessionRow[] {
+export function strayRows(
+  panes: string,
+  socket: string,
+  registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
+): SessionRow[] {
   const account = socket === 'claude-personal' ? 'personal' : socket === 'claude' ? 'work' : socket
   const rows: SessionRow[] = []
   for (const line of panes.split('\n')) {
     const [tmux, pidText, command, cwd, activity] = line.split('\t')
     const pid = Number(pidText)
-    if (!tmux || !cwd || !pid || registered.has(pid) || !CLAUDE_COMMAND.test(command ?? '')) continue
+    // A registered session whose pane holds a shell above Claude shows the
+    // shell's pid here: its tmux name still says it is listed already.
+    const isListed = registered.pids.has(pid) || registered.tmuxNames.has(`${account}:${tmux}`)
+    if (!tmux || !cwd || !(pid > 1) || isListed || !CLAUDE_COMMAND.test(command ?? '')) continue
     rows.push({
       pid,
       sessionId: '',
@@ -379,7 +420,10 @@ export function strayRows(panes: string, socket: string, registered: ReadonlySet
   return rows
 }
 
-async function strayPanes($: EngineInterface, registered: ReadonlySet<number>): Promise<SessionRow[]> {
+async function strayPanes(
+  $: EngineInterface,
+  registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
+): Promise<SessionRow[]> {
   const rows: SessionRow[] = []
   for (const socket of KNOWN_SOCKETS) {
     const panes = await $.process
@@ -391,7 +435,18 @@ async function strayPanes($: EngineInterface, registered: ReadonlySet<number>): 
   return rows
 }
 
-async function refresh($: EngineInterface) {
+// One scan at a time: a slow scan finishing after a newer one would put older rows back.
+let scanning: Promise<void> | undefined
+
+function refresh($: EngineInterface): Promise<void> {
+  scanning ??= rescan($).finally(() => {
+    scanning = undefined
+  })
+
+  return scanning
+}
+
+async function rescan($: EngineInterface) {
   let rows: SessionRow[]
   try {
     rows = sorted(await scan($))
@@ -408,6 +463,8 @@ async function refresh($: EngineInterface) {
 
 /** A refresh the person asked for: branches re-read now, not when their minute is up. */
 async function refreshNow($: EngineInterface) {
+  // A scan already running read the old branches: let it finish, then look again.
+  await scanning
   branches.clear()
   await refresh($)
 }
@@ -420,37 +477,56 @@ export function matchTarget(rows: SessionRow[], target: string): SessionRow[] {
 // The wrapper's sockets first; any other server under the tmux dir after.
 const KNOWN_SOCKETS = ['claude-personal', 'claude', 'default']
 
+/** The pids of every pane in a tmux session on one socket; undefined when it is not there. */
+async function panePids($: EngineInterface, socket: string, tmux: string): Promise<number[] | undefined> {
+  const panes = await $.process
+    .run(['tmux', '-L', socket, 'list-panes', '-s', '-t', `=${tmux}`, '-F', '#{pane_pid}'])
+    .catch(() => undefined)
+
+  return panes?.exitCode === 0 ? panes.stdout.split('\n').filter(Boolean).map(Number) : undefined
+}
+
 /** The tmux socket whose session of this name has the session's own pid in a pane. */
 async function socketOf($: EngineInterface, r: SessionRow): Promise<string | undefined> {
+  if (!r.tmux) return undefined
   const uid = (await $.process.run(['id', '-u'])).stdout.trim()
   const listed = await $.fs.list(`/tmp/tmux-${uid}`).catch(() => [])
   const sockets = [...new Set([...KNOWN_SOCKETS, ...listed.map(s => s.name)])]
   for (const socket of sockets) {
-    const panes = await $.process
-      .run(['tmux', '-L', socket, 'list-panes', '-s', '-t', `=${r.tmux}`, '-F', '#{pane_pid}'])
-      .catch(() => undefined)
     // A name alone is not enough: both accounts' sockets can hold the same one.
-    if (panes?.exitCode === 0 && panes.stdout.split('\n').includes(String(r.pid))) return socket
+    if ((await panePids($, socket, r.tmux))?.includes(r.pid)) return socket
   }
 
   return undefined
 }
 
+/** Whether `kill-session` may end the target's whole tmux session: not when it also holds this one. */
+export function mayKillTmuxSession(targetPanes: readonly number[], selfPid: number | undefined): boolean {
+  return selfPid === undefined || !targetPanes.includes(selfPid)
+}
+
 /**
  * Ends a session: its whole tmux session when it has one (so no orphaned
- * shell pane is left), else SIGTERM to its pid. Never the session it runs in.
+ * shell pane is left), else SIGTERM to its pid. Never the session it runs in,
+ * never a pid that stopped being Claude since the roster looked.
  */
 async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
   const name = nameOf(r)
-  if (r.sessionId === (await $.session.id())) return `Refused: ${name} is this session.`
-  const socket = r.tmux ? await socketOf($, r) : undefined
-  const run =
-    r.tmux && socket
-      ? await $.process.run(['tmux', '-L', socket, 'kill-session', '-t', `=${r.tmux}`])
-      : await $.process.run(['kill', String(r.pid)])
+  const selfId = await $.session.id()
+  const selfPid = (await read($, sessions)).rows.find(s => s.sessionId === selfId)?.pid
+  if ((selfId && r.sessionId === selfId) || r.pid === selfPid) return `Refused: ${name} is this session.`
+  if (!(await liveClaudePids($, [r.pid])).has(r.pid)) {
+    return `Refused: pid ${r.pid} is no longer a Claude session; refresh and try again.`
+  }
+  const socket = await socketOf($, r)
+  const panes = socket && r.tmux ? ((await panePids($, socket, r.tmux)) ?? []) : []
+  const isWholeSession = Boolean(socket && r.tmux) && mayKillTmuxSession(panes, selfPid)
+  const run = isWholeSession
+    ? await $.process.run(['tmux', '-L', socket!, 'kill-session', '-t', `=${r.tmux}`])
+    : await $.process.run(['kill', String(r.pid)])
   if (run.exitCode !== 0) return `Could not kill ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
 
-  return socket ? `Killed tmux session ${name} (socket ${socket}).` : `Sent SIGTERM to ${name}.`
+  return isWholeSession ? `Killed tmux session ${name} (socket ${socket}).` : `Sent SIGTERM to ${name}.`
 }
 
 async function killFromPane($: EngineInterface, r: SessionRow) {
@@ -460,8 +536,10 @@ async function killFromPane($: EngineInterface, r: SessionRow) {
   await refresh($)
 }
 
-// What may be spliced into the shell line and the AppleScript string below.
-const SAFE_NAME = /^[\w.-]+$/
+// What may be spliced into the shell line, the AppleScript string and the
+// link below: no quotes or spaces, no leading dash, not `.` or `..`.
+const SAFE_NAME = /^(?!-)(?!\.+$)[\w.-]+$/
+const SAFE_NONCE = /^[0-9a-f-]{16,64}$/
 
 /** The shell line that attaches a terminal to one tmux session on one socket. */
 export function attachCommand(socket: string, name: string): string | undefined {
@@ -470,17 +548,25 @@ export function attachCommand(socket: string, name: string): string | undefined 
   return `tmux -L ${socket} attach -t '=${name}'`
 }
 
-/** The link the VS Code helper (`vscode/`) answers with a terminal tab attached to the session. */
-export function vscodeUri(socket: string, name: string): string | undefined {
-  if (!SAFE_NAME.test(socket) || !SAFE_NAME.test(name)) return undefined
+/**
+ * The link the VS Code helper (`vscode/`) answers with a terminal tab attached
+ * to the session. `nonce` is a one-time token the roster leaves in a file the
+ * helper reads: a link a web page opens cannot carry it, so it does nothing.
+ */
+export function vscodeUri(socket: string, name: string, nonce: string): string | undefined {
+  if (!SAFE_NAME.test(socket) || !SAFE_NAME.test(name) || !SAFE_NONCE.test(nonce)) return undefined
 
-  return `vscode://pip.agent-roster-vscode/attach?socket=${socket}&name=${name}`
+  return `vscode://pip.agent-roster-vscode/attach?socket=${socket}&name=${name}&nonce=${nonce}`
 }
 
 // `code`, wherever Homebrew or the app put it.
 const CODE_CLIS = ['/opt/homebrew/bin/code', '/usr/local/bin/code']
-// Where the helper has each open VS Code window name its folders.
+// Where the helper has each open VS Code window name its folders, and where
+// the roster leaves the one-time token a link must carry.
 const VSCODE_WINDOWS_DIR = '.cache/agent-roster/vscode-windows'
+const VSCODE_NONCE_FILE = '.cache/agent-roster/attach-nonce'
+// A window's extension host runs as a VS Code helper process.
+const VSCODE_HOST = /Code Helper/
 
 export type VscodeWindow = { pid: number; folders: string[] }
 
@@ -514,9 +600,16 @@ async function vscodeFolderFor($: EngineInterface, r: SessionRow): Promise<strin
     }
   }
   if (windows.length === 0) return undefined
-  // A window that crashed leaves its file: only live extension hosts count.
-  const ps = await $.process.run(['ps', '-o', 'pid=', '-p', windows.map(w => w.pid).join(',')])
-  const alive = new Set(ps.stdout.split('\n').map(line => Number(line.trim())))
+  // A window that crashed leaves its file, and its pid gets reused: only live
+  // VS Code extension hosts count.
+  const ps = await $.process.run(['ps', '-o', 'pid=,comm=', '-p', windows.map(w => w.pid).join(',')])
+  const alive = new Set(
+    ps.stdout
+      .split('\n')
+      .map(line => /^\s*(\d+)\s+(.*)$/.exec(line))
+      .filter((m): m is RegExpExecArray => m !== null && VSCODE_HOST.test(m[2] ?? ''))
+      .map(m => Number(m[1])),
+  )
   const rootOf = new Map<string, string>()
   for (const f of new Set(windows.flatMap(w => w.folders))) rootOf.set(f, await repoRoot($, f))
 
@@ -548,7 +641,8 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
   const socket = await socketOf($, r)
   if (!socket) return `Could not find ${name}'s tmux server.`
   const attach = attachCommand(socket, r.tmux)
-  const uri = vscodeUri(socket, r.tmux)
+  const nonce = crypto.randomUUID()
+  const uri = vscodeUri(socket, r.tmux, nonce)
   if (!attach || !uri) return `Refused: ${name} has a name the opener will not quote.`
   const clients = await $.process
     .run(['tmux', '-L', socket, 'list-clients', '-t', `=${r.tmux}`, '-F', '#{client_tty}'])
@@ -568,9 +662,15 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
         break
       }
     }
-    if (isRaised) {
+    // The helper honours only a link carrying the token it finds in this file.
+    const home = await $.env.get('HOME')
+    const isArmed = await $.fs
+      .write(`${home}/${VSCODE_NONCE_FILE}`, nonce)
+      .then(() => true)
+      .catch(() => false)
+    if (isRaised && isArmed) {
       await $.clock.sleep(800)
-      const sent = await $.process.run(['open', uri])
+      const sent = await $.process.run(['open', uri]).catch(() => ({ exitCode: 1 }))
       // The helper decides there: a tab of that window already showing the
       // session is focused, else a new one opens.
       if (sent.exitCode === 0) {
@@ -612,7 +712,10 @@ export function profileNames(storage: unknown): string[] {
   const profiles = (storage as { userDataProfiles?: { name?: unknown }[] } | null)?.userDataProfiles
   if (!Array.isArray(profiles)) return []
 
-  return profiles.map(p => p?.name).filter((n): n is string => typeof n === 'string' && n.length > 0)
+  // A name starting with a dash would read as a flag to `code --profile`.
+  return profiles
+    .map(p => p?.name)
+    .filter((n): n is string => typeof n === 'string' && n.length > 0 && !n.startsWith('-'))
 }
 
 async function helperInstalled($: EngineInterface, home: string): Promise<boolean> {
@@ -651,19 +754,26 @@ async function installHelper($: EngineInterface): Promise<string> {
 
 /** Asks once, the first time the mod loads with VS Code present and no helper. */
 async function offerHelper($: EngineInterface) {
-  if (await $.store.get(HELPER_CHOICE)) return
+  // 'installed' or 'never' settle it; a number is "Not now" until then.
+  const choice = await $.store.get(HELPER_CHOICE)
+  if (typeof choice === 'string' || (typeof choice === 'number' && choice > Date.now())) return
+  // A -p or SDK run draws nowhere: nobody to ask.
+  if ((await $.session.surfaces()).length === 0) return
   const home = (await $.env.get('HOME')) ?? ''
   if (!(await $.fs.exists(`${home}/.vscode`))) return
   if (await helperInstalled($, home)) {
     await $.store.set(HELPER_CHOICE, 'installed')
     return
   }
-  // Rejects when dismissed or with nobody to ask (-p): ask again next session.
+  // Rejects when dismissed: ask again next session. Many sessions start at
+  // once, so "Not now" waits a day rather than asking in every one.
   const answer = await $.ui
     .ask(HELPER_QUESTION, { header: 'VS Code', options: ['Install', 'Not now', 'Never'] })
     .catch(() => undefined)
   if (answer === 'Install') {
     $.ui.toast(await installHelper($), { timeoutMs: 10_000 })
+  } else if (answer === 'Not now') {
+    await $.store.set(HELPER_CHOICE, Date.now() + 24 * 3600_000)
   } else if (answer === 'Never') {
     await $.store.set(HELPER_CHOICE, 'never')
     $.ui.toast('Not installing the VS Code helper; /roster setup-vscode installs it any time.')
@@ -699,7 +809,8 @@ export const register: Register = on => {
   on('command.run', { command: COMMAND }, async ($, e) => {
     await refresh($)
     const args = e.args.trim()
-    if (args === 'setup-vscode') return { text: await installHelper($) }
+    const failed = (err: unknown) => `Could not ${args.split(' ')[0]}: ${String(err)}`
+    if (args === 'setup-vscode') return { text: await installHelper($).catch(failed) }
     if (args) {
       const [, verb, target] = /^(kill|open)\s+(\S+)$/.exec(args) ?? []
       if (!verb || !target) return { text: USAGE }
@@ -711,7 +822,9 @@ export const register: Register = on => {
         return { text: `${target} is ambiguous; ${verb} by pid: ${pids}` }
       }
       const message =
-        verb === 'kill' ? await killSession($, matches[0]!) : await openSession($, matches[0]!)
+        verb === 'kill'
+          ? await killSession($, matches[0]!).catch(failed)
+          : await openSession($, matches[0]!).catch(failed)
       await refresh($)
 
       return { text: message }
@@ -803,7 +916,7 @@ export const register: Register = on => {
         )}
         {r.prompt && (
           <Text dimColor italic wrap="truncate-end">
-            you {ago(r.promptAt ?? 0, checkedAt)} ago: {r.prompt}
+            you{r.promptAt ? ` ${ago(r.promptAt, checkedAt)} ago` : ''}: {r.prompt}
           </Text>
         )}
       </Box>
