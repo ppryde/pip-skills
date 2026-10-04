@@ -288,7 +288,7 @@ def test_hook_and_cli_share_a_scope_across_subdirectories(repo: Path, run_cli) -
     assert result.returncode == 0, result.stderr
     assert state.clear_requested(paths.scope_dir(repo))
     out = hooks.stop({"cwd": str(repo), "session_id": "s1"})
-    assert out is not None and "handover saved" in out
+    assert out is not None and "Handover saved" in json.loads(out)["systemMessage"]
 
 
 def test_headless_child_never_touches_the_parent_scope_or_tmux(

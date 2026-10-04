@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from context_vigil import config, context, handover, paths, session, state, tmux
+from context_vigil import config, context, handover, messages, paths, session, state, tmux
 
 KICK_PROMPT = (
     "context-vigil: handover received — resume from the injected handover now, "
@@ -128,10 +128,7 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
         return None
     target = tmux.pane()
     if not tmux.reachable() or target is None:
-        return json.dumps({"systemMessage": (
-            "context-vigil: handover saved — type /clear, then send any message "
-            "(e.g. \"go\") to start the resumed turn. (Run Claude inside tmux "
-            "for hands-free handovers.)")})
+        return messages.system_message(messages.SAVED_TYPE_CLEAR)
     if state.consume_clear_flag(scope):
         delay = os.environ.get("CONTEXT_VIGIL_CLEAR_DELAY", "2")
         tmux.send_detached(target, [["/clear", "Enter"]], delay)
