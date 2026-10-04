@@ -18,7 +18,8 @@ working, grey `○3` idle (zeros left out); repos that need you first. Click one
 number (1 = All, then 2–9) while the pane holds the keyboard. The header
 counts stay global, so nothing waiting in another repo hides behind a tab.
 
-The status line reads `agents: N waiting` while any session waits on you.
+The pane rescans every 5 s; **refresh** (hotkey `r`) rescans now and re-reads
+git branches, and the header says how long ago it last looked. The status line reads `agents: N waiting` while any session waits on you.
 
 ## Over Remote Control
 
@@ -46,11 +47,16 @@ session's repo is open in VS Code:
 The helper extension (`vscode/`) is how the roster knows: it starts with every
 window and writes `~/.cache/agent-roster/vscode-windows/<pid>.json` naming the
 window's folders, removed when the window closes; files whose extension host
-pid has died are ignored. Install it with
-`sh plugins/agent-roster/vscode/build.sh install [profile…]`, naming every VS
-Code profile your windows use: a window loads only its own profile's
+pid has died are ignored. The first time the mod loads
+with VS Code present and no helper, it asks once — **Install**, **Not now**
+(asks again next session) or **Never** — and remembers the answer per account
+in `$.store`. **Install** builds the helper and installs it into Default and
+every profile VS Code's storage lists: a window loads only its own profile's
 extensions, and one without the helper is invisible to the roster (and
 answers the link with "cannot be installed because it was not found").
+`/roster setup-vscode` runs the same install any time (after a new profile, or
+after "Never"); by hand it is `sh plugins/agent-roster/vscode/build.sh install
+[profile…]`.
 
 The session you are in is never touched. tmux mirrors every client of a
 session, so a view already showing it keeps working; the window may resize to

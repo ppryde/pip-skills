@@ -6,6 +6,7 @@ import {
   grouped,
   headline,
   matchTarget,
+  profileNames,
   projectSlug,
   repoFromGit,
   repoOf,
@@ -231,4 +232,12 @@ test('open goes to a live VS Code window showing the repo, a worktree or subfold
   expect(windowFolderFor(windows, new Set([20, 30]), rootOf, '/r/pip-skills')).toBe('/r/pip-skills-agent-roster')
   // No window shows the repo: undefined, and the caller opens Terminal instead.
   expect(windowFolderFor(windows, new Set([10, 20, 30]), rootOf, '/r/ledger-poc')).toBe(undefined)
+})
+
+test("the helper installs into every VS Code profile VS Code's storage names", async () => {
+  expect(
+    profileNames({ userDataProfiles: [{ name: 'Personal', location: '-292c' }, { name: 'Agents' }, { location: 'x' }] }),
+  ).toEqual(['Personal', 'Agents'])
+  expect(profileNames({})).toEqual([])
+  expect(profileNames(null)).toEqual([])
 })

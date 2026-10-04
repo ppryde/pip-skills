@@ -73,5 +73,9 @@ test('the pane draws repo tabs with their marks, and a tab narrows the list', as
   expect(await session(/cc-a-2/)).toBeUndefined()
   await ui.press({ key: 'older' })
   expect(await session(/cc-a-2/)).toBeDefined()
+  // A manual refresh rescans and keeps the tab in view.
+  await ui.press({ key: 'refresh' })
+  expect(await session(/cc-a-1/)).toBeDefined()
+  expect(await session(/cc-b-1/)).toBeUndefined()
   await ui.unmount()
 })

@@ -31,7 +31,10 @@ cat > "$stage/extension.vsixmanifest" <<XML
 </PackageManifest>
 XML
 
-out="$here/agent-roster-vscode-$version.vsix"
+# Installing leaves nothing behind (an installed plugin's folder may be
+# read-only); a plain build keeps the .vsix beside this script.
+if [ "${1:-}" = install ]; then out_dir=$stage; else out_dir=$here; fi
+out="$out_dir/agent-roster-vscode-$version.vsix"
 rm -f "$out"
 (cd "$stage" && zip -qr "$out" '[Content_Types].xml' extension.vsixmanifest extension)
 echo "$out"

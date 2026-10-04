@@ -344,6 +344,12 @@ async function refresh($: EngineInterface) {
   $.ui.status(waiting ? `agents: ${waiting} waiting` : undefined)
 }
 
+/** A refresh the person asked for: branches re-read now, not when their minute is up. */
+async function refreshNow($: EngineInterface) {
+  branches.clear()
+  await refresh($)
+}
+
 /** The sessions a `/roster kill` argument names: a tmux name or a pid. */
 export function matchTarget(rows: SessionRow[], target: string): SessionRow[] {
   return rows.filter(r => r.tmux === target || String(r.pid) === target)
@@ -533,7 +539,77 @@ async function openFromPane($: EngineInterface, r: SessionRow) {
   $.ui.toast(await openSession($, r).catch(err => `Could not open: ${String(err)}`))
 }
 
-const USAGE = 'Usage: /roster, /roster open <tmux-name|pid>, or /roster kill <tmux-name|pid>'
+// The VS Code helper is offered once per account: `$.store` keeps the answer.
+const HELPER_CHOICE = 'vscodeHelper'
+const VSCODE_STORAGE = 'Library/Application Support/Code/User/globalStorage/storage.json'
+const HELPER_QUESTION =
+  'Install the agent-roster helper into all your VS Code profiles, so open can go straight to a running window?'
+
+/** The names of the VS Code profiles beyond Default, from VS Code's own storage. */
+export function profileNames(storage: unknown): string[] {
+  const profiles = (storage as { userDataProfiles?: { name?: unknown }[] } | null)?.userDataProfiles
+  if (!Array.isArray(profiles)) return []
+
+  return profiles.map(p => p?.name).filter((n): n is string => typeof n === 'string' && n.length > 0)
+}
+
+async function helperInstalled($: EngineInterface, home: string): Promise<boolean> {
+  const installed = await $.fs.list(`${home}/.vscode/extensions`).catch(() => [])
+
+  return installed.some(e => e.name.startsWith('pip.agent-roster-vscode-'))
+}
+
+/** Builds the helper and installs it into Default and every VS Code profile. */
+async function installHelper($: EngineInterface): Promise<string> {
+  const home = await $.env.get('HOME')
+  const storage = await $.fs.read(`${home}/${VSCODE_STORAGE}`).catch(() => undefined)
+  let profiles: string[] = []
+  try {
+    profiles = profileNames(JSON.parse(String(storage)))
+  } catch {
+    // No VS Code storage yet: Default alone.
+  }
+  // A Dock-launched host may lack Homebrew on PATH, where `code` lives.
+  const path = `/opt/homebrew/bin:/usr/local/bin:${(await $.env.get('PATH')) ?? '/usr/bin:/bin'}`
+  const run = await $.process
+    .run(['sh', `${$.plugin.root}/vscode/build.sh`, 'install', ...profiles], {
+      env: { PATH: path },
+      timeoutMs: 180_000,
+    })
+    .catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+  if (run.exitCode !== 0) {
+    const why = run.stderr.trim().split('\n').pop() || `exit ${run.exitCode}`
+    return `Could not install the VS Code helper: ${why}`
+  }
+  await $.store.set(HELPER_CHOICE, 'installed')
+  const where = ['Default', ...profiles].join(', ')
+
+  return `Installed the VS Code helper into ${where}. Reload open VS Code windows (Developer: Reload Window) so open can find them.`
+}
+
+/** Asks once, the first time the mod loads with VS Code present and no helper. */
+async function offerHelper($: EngineInterface) {
+  if (await $.store.get(HELPER_CHOICE)) return
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!(await $.fs.exists(`${home}/.vscode`))) return
+  if (await helperInstalled($, home)) {
+    await $.store.set(HELPER_CHOICE, 'installed')
+    return
+  }
+  // Rejects when dismissed or with nobody to ask (-p): ask again next session.
+  const answer = await $.ui
+    .ask(HELPER_QUESTION, { header: 'VS Code', options: ['Install', 'Not now', 'Never'] })
+    .catch(() => undefined)
+  if (answer === 'Install') {
+    $.ui.toast(await installHelper($), { timeoutMs: 10_000 })
+  } else if (answer === 'Never') {
+    await $.store.set(HELPER_CHOICE, 'never')
+    $.ui.toast('Not installing the VS Code helper; /roster setup-vscode installs it any time.')
+  }
+}
+
+const USAGE =
+  'Usage: /roster, /roster open <tmux-name|pid>, /roster kill <tmux-name|pid>, or /roster setup-vscode'
 
 const STATUS_COLOR: Record<string, string> = { waiting: 'red', busy: 'green' }
 
@@ -549,6 +625,8 @@ export const register: Register = on => {
         description: 'Every Claude session on this machine: tmux name, repo, status, last active',
       })
       .catch(() => undefined)
+    // After the session settles, so the question is not the first thing drawn.
+    $.clock.after(3000, () => void offerHelper($).catch(() => undefined))
 
     return next(e)
   })
@@ -559,6 +637,7 @@ export const register: Register = on => {
   on('command.run', { command: COMMAND }, async ($, e) => {
     await refresh($)
     const args = e.args.trim()
+    if (args === 'setup-vscode') return { text: await installHelper($) }
     if (args) {
       const [, verb, target] = /^(kill|open)\s+(\S+)$/.exec(args) ?? []
       if (!verb || !target) return { text: USAGE }
@@ -725,6 +804,11 @@ export const register: Register = on => {
           {all.waiting.length > 0 && pill(`? ${all.waiting.length} NEED YOU`, 'red', 'white')}
           {all.busy.length > 0 && pill(`● ${all.busy.length} WORKING`, 'green')}
           <Text dimColor>○ {all.recent.length + all.older.length} idle</Text>
+          <Box flexGrow={1} />
+          <Text dimColor>updated {ago(checkedAt, Date.now())} ago</Text>
+          <Button key="refresh" hotkey="r" dimColor onPress={() => void refreshNow($)}>
+            refresh
+          </Button>
         </Box>
         <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
           {tabButton(null, 'All', allMarks, 0)}
