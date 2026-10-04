@@ -7,8 +7,10 @@ import {
   matchTarget,
   projectSlug,
   repoOf,
+  repoTabs,
   sorted,
   summary,
+  tabLabel,
   toRow,
   transcriptFacts,
 } from './register'
@@ -24,6 +26,24 @@ test('the headline counts who needs you, who works and who idles', async () => {
   ]
 
   expect(headline(rows)).toBe('1 need you · 1 working · 1 idle')
+})
+
+test('one tab per repo, those needing you first, each labelled with its marks', async () => {
+  const tabs = repoTabs([
+    { ...base, pid: 1, repo: 'warehouse', status: 'idle', lastActive: 900 },
+    { ...base, pid: 2, repo: 'pip-skills', status: 'busy', lastActive: 10 },
+    { ...base, pid: 3, repo: 'ledger-poc', status: 'waiting', lastActive: 5 },
+    { ...base, pid: 4, repo: 'pip-skills', status: 'waiting', lastActive: 20 },
+    { ...base, pid: 5, repo: 'agents.md', status: 'idle', lastActive: 50 },
+  ])
+
+  expect(tabs.map(t => t.repo)).toEqual(['pip-skills', 'ledger-poc', 'warehouse', 'agents.md'])
+  expect(tabs.map(t => tabLabel(t, t.repo))).toEqual([
+    'pip-skills ◆1 ●1',
+    'ledger-poc ◆1',
+    'warehouse 1',
+    'agents.md 1',
+  ])
 })
 
 test('a /rename title beats the AI one; the prompt is the last one a person typed', async () => {

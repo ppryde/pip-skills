@@ -33,6 +33,8 @@ declare module 'claude-code' {
       pendingKill: number | null
       /** Whether idle sessions quiet for over a day are unfolded. */
       showOlder: boolean
+      /** The repo tab in view; null for All. */
+      repoTab: string | null
     }
   }
 }

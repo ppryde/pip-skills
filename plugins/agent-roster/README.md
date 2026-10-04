@@ -12,6 +12,12 @@ across both accounts, in three sections:
 - **Idle**: one quiet line each; `$` marks a session sitting in a shell. Idle
   for over a day folds behind **show N idle for over a day**.
 
+Above the sections, one tab per repo (worktrees under their repo), **All**
+first: each labelled with its marks (`pip-skills ◆2 ●1`: ◆ waiting on you,
+● working), repos that need you first. Click one, Tab to it, or press its
+number (1 = All, then 2–9) while the pane holds the keyboard. The header
+counts stay global, so nothing waiting in another repo hides behind a tab.
+
 The status line reads `agents: N waiting` while any session waits on you.
 
 ## Over Remote Control

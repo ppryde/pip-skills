@@ -25,6 +25,7 @@ const sessions = atom({ plugin: 'agent-roster', key: 'sessions' } as const, {
 })
 const pendingKill = atom({ plugin: 'agent-roster', key: 'pendingKill' } as const, null)
 const showOlder = atom({ plugin: 'agent-roster', key: 'showOlder' } as const, false)
+const repoTab = atom({ plugin: 'agent-roster', key: 'repoTab' } as const, null)
 
 // Waiting first: it needs you. Then busy, then the rest.
 const RANK: Record<string, number> = { waiting: 0, busy: 1 }
@@ -148,6 +149,35 @@ export function grouped(rows: SessionRow[], now: number) {
     recent: idle.filter(r => now - r.lastActive < RECENT_MS),
     older: idle.filter(r => now - r.lastActive >= RECENT_MS),
   }
+}
+
+export type RepoTab = { repo: string; waiting: number; busy: number; total: number; lastActive: number }
+
+/** One tab per repo (worktrees under their repo): those needing you first, then working, then recent. */
+export function repoTabs(rows: SessionRow[]): RepoTab[] {
+  const tabs = new Map<string, RepoTab>()
+  for (const r of rows) {
+    const tab = tabs.get(r.repo) ?? { repo: r.repo, waiting: 0, busy: 0, total: 0, lastActive: 0 }
+    tab.total += 1
+    if (r.status === 'waiting') tab.waiting += 1
+    if (r.status === 'busy') tab.busy += 1
+    tab.lastActive = Math.max(tab.lastActive, r.lastActive)
+    tabs.set(r.repo, tab)
+  }
+
+  return [...tabs.values()].sort(
+    (a, b) =>
+      Number(b.waiting > 0) - Number(a.waiting > 0) ||
+      Number(b.busy > 0) - Number(a.busy > 0) ||
+      b.lastActive - a.lastActive,
+  )
+}
+
+/** A tab's label: the repo, then ◆ waiting and ● working counts, else its session count. */
+export function tabLabel(tab: Pick<RepoTab, 'waiting' | 'busy' | 'total'>, name: string): string {
+  const marks = [tab.waiting && `◆${tab.waiting}`, tab.busy && `●${tab.busy}`].filter(Boolean)
+
+  return `${name} ${marks.length ? marks.join(' ') : tab.total}`
 }
 
 export function headline(rows: SessionRow[]): string {
@@ -385,7 +415,13 @@ export const register: Register = on => {
     const { rows, checkedAt, selfId } = await read($, sessions)
     const pending = await read($, pendingKill)
     const isShowingOlder = await read($, showOlder)
-    const { waiting, busy, recent, older } = grouped(rows, checkedAt)
+    const tabs = repoTabs(rows)
+    // A tab whose last session went away falls back to All.
+    const selected = await read($, repoTab)
+    const tab = tabs.some(t => t.repo === selected) ? selected : null
+    const visible = tab ? rows.filter(r => r.repo === tab) : rows
+    const { waiting, busy, recent, older } = grouped(visible, checkedAt)
+    const all = grouped(rows, checkedAt)
 
     // Two presses to kill: the first only arms the row.
     const controls = (r: SessionRow) =>
@@ -476,12 +512,29 @@ export const register: Register = on => {
       </Text>
     )
 
+    // Hotkeys 1-9 while the pane holds the keyboard: 1 is All, then the repos in order.
+    const tabButton = (repo: string | null, text: string, index: number) => (
+      <Button
+        key={`tab-${repo ?? '*all'}`}
+        hotkey={index < 9 ? String(index + 1) : undefined}
+        variant={tab === repo ? 'primary' : undefined}
+        dimColor={tab !== repo}
+        onPress={() => void update($, repoTab, () => repo)}
+      >
+        {text}
+      </Button>
+    )
+
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" gap={1}>
-          {waiting.length > 0 && pill(`${waiting.length} NEED YOU`, 'yellow')}
-          {busy.length > 0 && pill(`${busy.length} WORKING`, 'green')}
-          <Text dimColor>{recent.length + older.length} idle</Text>
+          {all.waiting.length > 0 && pill(`${all.waiting.length} NEED YOU`, 'yellow')}
+          {all.busy.length > 0 && pill(`${all.busy.length} WORKING`, 'green')}
+          <Text dimColor>{all.recent.length + all.older.length} idle</Text>
+        </Box>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginTop={1}>
+          {tabButton(null, tabLabel({ waiting: all.waiting.length, busy: all.busy.length, total: rows.length }, 'All'), 0)}
+          {tabs.map((t, i) => tabButton(t.repo, tabLabel(t, t.repo), i + 1))}
         </Box>
         {rows.length === 0 && <Text dimColor>No live sessions found.</Text>}
         {waiting.length > 0 && heading('Needs you', waiting.length, 'yellow')}
