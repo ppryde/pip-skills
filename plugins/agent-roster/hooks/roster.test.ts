@@ -1,6 +1,16 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, headline, lastPromptOf, projectSlug, repoOf, sorted, summary, toRow } from './register'
+import {
+  ago,
+  headline,
+  lastPromptOf,
+  matchTarget,
+  projectSlug,
+  repoOf,
+  sorted,
+  summary,
+  toRow,
+} from './register'
 
 test('the headline counts sessions, waiting and busy', async () => {
   expect(headline([])).toBe('0 sessions · 0 waiting · 0 busy')
@@ -96,4 +106,18 @@ test('waiting sessions first, then busy, then the rest by last active', async ()
   expect(rows.map(r => r.pid)).toEqual([4, 2, 3, 1])
   expect(ago(0, 90_000)).toBe('2m')
   expect(ago(0, 3 * 86_400_000)).toBe('3d')
+})
+
+test('a kill target is a tmux name or a pid, and a name on both accounts is two matches', async () => {
+  const base = { sessionId: '', cwd: '/r', repo: 'r', kind: 'interactive', status: 'idle', lastActive: 0 }
+  const rows = [
+    { ...base, pid: 23156, account: 'personal', tmux: 'cc-take-home-tasks-2' },
+    { ...base, pid: 83438, account: 'work', tmux: 'cc-take-home-tasks-2' },
+    { ...base, pid: 75378, account: 'personal' },
+  ]
+
+  expect(matchTarget(rows, 'cc-take-home-tasks-2').map(r => r.pid)).toEqual([23156, 83438])
+  expect(matchTarget(rows, '83438').map(r => r.pid)).toEqual([83438])
+  expect(matchTarget(rows, '75378').map(r => r.pid)).toEqual([75378])
+  expect(matchTarget(rows, 'cc-take-home')).toEqual([])
 })

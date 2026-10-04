@@ -25,6 +25,8 @@ declare module 'claude-code' {
   interface PluginState {
     'agent-roster': {
       sessions: { rows: SessionRow[]; checkedAt: number; selfId?: string }
+      /** The pid whose kill button was pressed and awaits confirmation. */
+      pendingKill: number | null
     }
   }
 }

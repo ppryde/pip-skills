@@ -19,6 +19,7 @@ const sessions = atom({ plugin: 'agent-roster', key: 'sessions' } as const, {
   rows: [],
   checkedAt: 0,
 })
+const pendingKill = atom({ plugin: 'agent-roster', key: 'pendingKill' } as const, null)
 
 const GLYPH: Record<string, string> = { waiting: '◆', busy: '●', idle: '○', shell: '$' }
 // Waiting first: it needs you. Then busy, then the rest.
@@ -212,6 +213,56 @@ async function refresh($: EngineInterface) {
   $.ui.status(waiting ? `agents: ${waiting} waiting` : undefined)
 }
 
+/** The sessions a `/roster kill` argument names: a tmux name or a pid. */
+export function matchTarget(rows: SessionRow[], target: string): SessionRow[] {
+  return rows.filter(r => r.tmux === target || String(r.pid) === target)
+}
+
+// The wrapper's sockets first; any other server under the tmux dir after.
+const KNOWN_SOCKETS = ['claude-personal', 'claude', 'default']
+
+/** The tmux socket whose session of this name has the session's own pid in a pane. */
+async function socketOf($: EngineInterface, r: SessionRow): Promise<string | undefined> {
+  const uid = (await $.process.run(['id', '-u'])).stdout.trim()
+  const listed = await $.fs.list(`/tmp/tmux-${uid}`).catch(() => [])
+  const sockets = [...new Set([...KNOWN_SOCKETS, ...listed.map(s => s.name)])]
+  for (const socket of sockets) {
+    const panes = await $.process
+      .run(['tmux', '-L', socket, 'list-panes', '-s', '-t', `=${r.tmux}`, '-F', '#{pane_pid}'])
+      .catch(() => undefined)
+    // A name alone is not enough: both accounts' sockets can hold the same one.
+    if (panes?.exitCode === 0 && panes.stdout.split('\n').includes(String(r.pid))) return socket
+  }
+
+  return undefined
+}
+
+/**
+ * Ends a session: its whole tmux session when it has one (so no orphaned
+ * shell pane is left), else SIGTERM to its pid. Never the session it runs in.
+ */
+async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
+  const name = r.tmux ?? `pid ${r.pid}`
+  if (r.sessionId === (await $.session.id())) return `Refused: ${name} is this session.`
+  const socket = r.tmux ? await socketOf($, r) : undefined
+  const run =
+    r.tmux && socket
+      ? await $.process.run(['tmux', '-L', socket, 'kill-session', '-t', `=${r.tmux}`])
+      : await $.process.run(['kill', String(r.pid)])
+  if (run.exitCode !== 0) return `Could not kill ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
+
+  return socket ? `Killed tmux session ${name} (socket ${socket}).` : `Sent SIGTERM to ${name}.`
+}
+
+async function killFromPane($: EngineInterface, r: SessionRow) {
+  const message = await killSession($, r).catch(err => `Could not kill: ${String(err)}`)
+  await update($, pendingKill, () => null)
+  $.ui.toast(message)
+  await refresh($)
+}
+
+const USAGE = 'Usage: /roster, or /roster kill <tmux-name|pid>'
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // Polling first: a refused command must not take the roster down with it.
@@ -233,6 +284,22 @@ export const register: Register = on => {
   // roster itself. That text is a transcript row the model reads too.
   on('command.run', { command: COMMAND }, async ($, e) => {
     await refresh($)
+    const args = e.args.trim()
+    if (args) {
+      const target = /^kill\s+(\S+)$/.exec(args)?.[1]
+      if (!target) return { text: USAGE }
+      const { rows } = await read($, sessions)
+      const matches = matchTarget(rows, target)
+      if (matches.length === 0) return { text: `No live session named ${target}.` }
+      if (matches.length > 1) {
+        const pids = matches.map(m => `${m.pid} (${m.account})`).join(', ')
+        return { text: `${target} is ambiguous; kill by pid: ${pids}` }
+      }
+      const message = await killSession($, matches[0]!)
+      await refresh($)
+
+      return { text: message }
+    }
     if (e.origin.kind === 'bridge') {
       const { rows, checkedAt } = await read($, sessions)
       return { text: summary(rows, checkedAt) }
@@ -243,8 +310,9 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const { rows, checkedAt, selfId } = await read($, sessions)
+    const pending = await read($, pendingKill)
     const isNarrow = e.props.bodyColumns < 70
     const waiting = rows.filter(r => r.status === 'waiting').length
     const busy = rows.filter(r => r.status === 'busy').length
@@ -273,12 +341,32 @@ export const register: Register = on => {
               {r.lastPrompt}
             </Text>
           )
+          // Two presses to kill: the first only arms this row.
+          const controls = isSelf ? null : pending === r.pid ? (
+            <Box flexDirection="row" gap={1}>
+              <Button key={`confirm-${r.pid}`} variant="primary" onPress={() => void killFromPane($, r)}>
+                confirm kill
+              </Button>
+              <Button key={`cancel-${r.pid}`} onPress={() => void update($, pendingKill, () => null)}>
+                cancel
+              </Button>
+            </Box>
+          ) : (
+            <Button key={`kill-${r.pid}`} dimColor onPress={() => void update($, pendingKill, () => r.pid)}>
+              kill
+            </Button>
+          )
 
           return isNarrow ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text bold={!isQuiet} dimColor={isQuiet} wrap="truncate-end">
-                {glyph} {name} <Text dimColor>{tags}</Text>
-              </Text>
+              <Box flexDirection="row" gap={1}>
+                <Box flexGrow={1}>
+                  <Text bold={!isQuiet} dimColor={isQuiet} wrap="truncate-end">
+                    {glyph} {name} <Text dimColor>{tags}</Text>
+                  </Text>
+                </Box>
+                {controls}
+              </Box>
               <Text dimColor wrap="truncate-end">
                 {'  '}
                 {where}
@@ -292,10 +380,15 @@ export const register: Register = on => {
             </Box>
           ) : (
             <Box flexDirection="column">
-              <Text bold={!isQuiet} dimColor={isQuiet} wrap="truncate-end">
-                {glyph} {name.padEnd(22)} {`${where}${branch}`.padEnd(44)} {status.padEnd(10)}{' '}
-                {ago(r.lastActive, checkedAt).padStart(4)} <Text dimColor>{tags}</Text>
-              </Text>
+              <Box flexDirection="row" gap={1}>
+                <Box flexGrow={1}>
+                  <Text bold={!isQuiet} dimColor={isQuiet} wrap="truncate-end">
+                    {glyph} {name.padEnd(22)} {`${where}${branch}`.padEnd(44)} {status.padEnd(10)}{' '}
+                    {ago(r.lastActive, checkedAt).padStart(4)} <Text dimColor>{tags}</Text>
+                  </Text>
+                </Box>
+                {controls}
+              </Box>
               {prompt}
             </Box>
           )

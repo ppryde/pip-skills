@@ -25,6 +25,20 @@ draw the pane. So when the command arrives over the bridge
 (`origin.kind === 'bridge'`) its reply is the roster itself as text — the top
 15 sessions, each with its last prompt — instead of opening the pane.
 
+## Killing a session
+
+Each row but the session the pane runs in has a **kill** button (click it in
+fullscreen, or Tab to it and Enter). The first press only arms the row:
+**confirm kill** or **cancel**. From the phone, or anywhere a pane is not to
+hand, `/roster kill <tmux-name|pid>`; a tmux name both accounts use is
+refused as ambiguous, with the pids to kill by.
+
+A session in tmux is ended with `tmux kill-session`, so no orphaned shell pane
+is left. The socket is found by matching the session's pid against each
+server's pane pids (the wrapper's `claude-personal` and `claude` first, then
+any server under `/tmp/tmux-<uid>/`), never by name alone. A session outside
+tmux gets SIGTERM. The session the command or pane runs in is always refused.
+
 ## Where the data comes from
 
 Nothing is scraped from tmux. Every live Claude process keeps a registry file,
