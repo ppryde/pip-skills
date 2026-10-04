@@ -231,7 +231,8 @@ async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dis
 }
 
 // Never blocks the resume: a failed rename is a notice, not an error.
-async function renameSession($: EngineInterface, name: string) {
+async function renameSession($: EngineInterface, name: string | undefined) {
+  if (!name?.trim()) return   // an older stored handover may carry no name
   await log($, 'rename', { name })
   try {
     await $.command.run({ command: 'rename', args: name })

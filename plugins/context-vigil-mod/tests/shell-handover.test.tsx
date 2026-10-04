@@ -173,3 +173,14 @@ test('a rejected rename still resumes, and says so', async ($, on) => {
   expect(w.notices).toContain("🏷️ couldn't name the new session — carrying on")
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
 })
+
+test('a stored handover with no name resumes without any rename', async ($, on) => {
+  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# OLD', resume: true, followUp: null, createdAt: 1 }
+  const w = world(on, { store: { 'pending:s1': old } })
+  await $.session.start(START)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.commands).not.toContain('rename')
+  expect(w.notices.some(n => n.includes('couldn'))).toBe(false)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
