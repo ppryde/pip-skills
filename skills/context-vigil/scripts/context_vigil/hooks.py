@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from context_vigil import config, context, handover, messages, paths, session, state, tmux
+from context_vigil import config, context, handover, messages, pane, paths, session, state, tmux
 
 KICK_PROMPT = (
     "context-vigil: handover received — resume from the injected handover now, "
@@ -129,6 +129,10 @@ def stop(payload: Dict[str, object]) -> Optional[str]:
     target = tmux.pane()
     if not tmux.reachable() or target is None:
         return messages.system_message(messages.SAVED_TYPE_CLEAR)
+    if not pane.pane_safe(target):
+        # a dialog (or the person's own typing) holds the box: typing /clear + Enter
+        # would answer it. Leave the flag armed; the manual /clear still loads it.
+        return messages.system_message(messages.SAVED_DIALOG_OPEN)
     if state.consume_clear_flag(scope):
         delay = os.environ.get("CONTEXT_VIGIL_CLEAR_DELAY", "2")
         tmux.send_detached(target, [["/clear", "Enter"]], delay)
@@ -155,7 +159,7 @@ def session_start(payload: Dict[str, object]) -> Optional[str]:
                 "additionalContext": f"{handover.RESUME_PREAMBLE}\n\n{text}",
             }})
             target = None if headless else tmux.pane()
-            if target is not None and tmux.reachable():
+            if target is not None and tmux.reachable() and pane.pane_safe(target):
                 delay = os.environ.get("CONTEXT_VIGIL_KICK_DELAY", "2")
                 tmux.send_detached(target, [["-l", KICK_PROMPT], ["Enter"]], delay)
     else:

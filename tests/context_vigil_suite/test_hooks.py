@@ -6,9 +6,12 @@ import time
 from pathlib import Path
 
 import pytest
-from context_vigil import config, hooks, paths, session, state
+from context_vigil import config, hooks, messages, paths, session, state
 
 from .test_context_window import _ingest
+
+IDLE_SCREEN = "─" * 40 + "\n❯\xa0\x1b[2mTry it\x1b[0m\n" + "─" * 40 + "\n"
+DIALOG_SCREEN = " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel\n"
 
 
 def _payload(repo: Path, **extra: object) -> dict:
@@ -24,7 +27,12 @@ def fake_tmux(iso: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A tmux stub that logs its argv; has-session succeeds."""
     log = iso / "tmux.log"
     stub = iso / "tmux"
-    stub.write_text(f'#!/usr/bin/env bash\necho "$@" >> "{log}"\nexit 0\n')
+    shot = iso / "idle-shot.txt"
+    shot.write_text(IDLE_SCREEN)
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = capture-pane ]; then cat "{shot}"; exit 0; fi\n'
+        f'echo "$@" >> "{log}"\nexit 0\n')
     stub.chmod(0o755)
     monkeypatch.setenv("CONTEXT_VIGIL_TMUX_BIN", str(stub))
     monkeypatch.setenv("TMUX", "/tmp/fake,1,0")
@@ -384,7 +392,63 @@ def test_clear_delay_defaults_to_two_seconds(
     monkeypatch.setenv("TMUX_PANE", "%1")
     sent = []
     monkeypatch.setattr(tmux, "reachable", lambda: True)
+    monkeypatch.setattr(tmux, "capture", lambda target: IDLE_SCREEN)
     monkeypatch.setattr(tmux, "send_detached", lambda t, keys, delay: sent.append(delay))
     state.request_clear(paths.scope_dir(repo), "H")
     hooks.stop({"cwd": str(repo)})
     assert sent == ["2"]
+
+
+# --- safety net: never type into a dialog --------------------------------------
+
+@pytest.fixture
+def screen_tmux(iso: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """A tmux stub: logs argv; `capture-pane` prints the file `shot`."""
+    log, shot = iso / "tmux.log", iso / "shot.txt"
+    stub = iso / "tmux"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = capture-pane ]; then cat "{shot}"; exit 0; fi\n'
+        f'echo "$@" >> "{log}"\nexit 0\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("CONTEXT_VIGIL_TMUX_BIN", str(stub))
+    monkeypatch.setenv("TMUX", "/tmp/fake,1,0")
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    monkeypatch.setenv("CONTEXT_VIGIL_CLEAR_DELAY", "0")
+    monkeypatch.setenv("CONTEXT_VIGIL_KICK_DELAY", "0")
+    return log, shot
+
+
+def _arm_clear(repo: Path) -> Path:
+    scope = paths.scope_dir(repo)
+    state.request_clear(scope, "# handover\n")
+    return scope
+
+
+def test_stop_refuses_to_type_clear_into_a_dialog(repo: Path, screen_tmux) -> None:
+    log, shot = screen_tmux
+    shot.write_text(DIALOG_SCREEN)
+    scope = _arm_clear(repo)
+    out = hooks.stop(_payload(repo))
+    assert json.loads(out) == {"systemMessage": messages.SAVED_DIALOG_OPEN}
+    assert state.clear_flag(scope).exists()          # still armed for the manual /clear
+    assert not log.exists() or "/clear" not in log.read_text()
+
+
+def test_stop_types_clear_into_an_idle_box(repo: Path, screen_tmux) -> None:
+    log, shot = screen_tmux
+    shot.write_text(IDLE_SCREEN)
+    _arm_clear(repo)
+    assert hooks.stop(_payload(repo)) is None
+    assert "/clear" in _wait_for(log, "/clear")
+
+
+def test_kick_skipped_when_a_dialog_is_open(repo: Path, screen_tmux) -> None:
+    log, shot = screen_tmux
+    shot.write_text(DIALOG_SCREEN)
+    scope = paths.scope_dir(repo)
+    state.write_handoff(scope, "# handover\n## Next Step\ngo\n")
+    out = hooks.session_start(_payload(repo, source="clear"))
+    assert out is not None and "additionalContext" in out   # handover still injected
+    time.sleep(0.3)
+    assert not log.exists() or "resume from the injected handover" not in log.read_text()
