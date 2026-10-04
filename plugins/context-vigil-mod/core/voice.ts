@@ -43,6 +43,7 @@ export const V = {
   setupSaved: '⚙️ context-vigil-mod settings saved',
   handingOver: '📜 Handing over…',
   settingUp: '⚙️ Setting up context-vigil-mod…',
+  renameFailed: '🏷️ couldn\'t name the new session — carrying on',
   cmdHandover: '📜 Hand over now (context-vigil-mod)',
   cmdSetup: '⚙️ context-vigil-mod setup — /vsetup [nudge|bar|auto|last-light|limits|rc]',
 }

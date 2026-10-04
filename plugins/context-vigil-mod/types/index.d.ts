@@ -33,6 +33,7 @@ export type Fields = {
   next_step: string
   open_questions: string
   failed_attempts: string
+  session_name: string
 }
 
 export type Snapshot = {
@@ -54,6 +55,7 @@ export type PendingReason = 'threshold' | 'request' | 'last_light' | 'limit'
 export type Pending = {
   session: string
   path: string
+  name: string
   reason: PendingReason
   markdown: string
   resume: boolean

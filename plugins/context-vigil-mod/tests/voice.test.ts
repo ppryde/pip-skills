@@ -15,7 +15,7 @@ test('every user-facing string is emoji-led', () => {
     V.nudge(41), V.handoverSaved('/x.md'), V.handoverFailed, V.clearRejected, V.countdownLine(30),
     V.countdownCancelled, V.setupUsage, V.rcAsk, V.pendingOffer('/x.md'), V.waiting('draft'), V.lastLightReady,
     V.lastLightAsk, V.limitLatched('14:05'), V.limitCleared, V.earlyStop('seven_day', 95, '14:05'),
-    V.classicActive, V.setupSaved, V.handingOver, V.settingUp, V.cmdHandover, V.cmdSetup,
+    V.classicActive, V.setupSaved, V.handingOver, V.settingUp, V.cmdHandover, V.cmdSetup, V.renameFailed,
   ]
   for (const s of samples) expect(/^\p{Extended_Pictographic}/u.test(s)).toBe(true)
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { INPUT_SCHEMA, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { FIELD_NAMES, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -16,12 +16,12 @@ describe('nextThreshold', () => {
 })
 
 describe('parseFields', () => {
-  const good = { goal: 'g', state: 's', next_step: 'n' }
+  const good = { goal: 'g', state: 's', next_step: 'n', session_name: 'nm' }
   test('required fields only; optional ones default to empty', () => {
-    expect(parseFields(good)).toEqual({ ok: true, fields: { goal: 'g', state: 's', decisions: '', next_step: 'n', open_questions: '', failed_attempts: '' } })
+    expect(parseFields(good)).toEqual({ ok: true, fields: { goal: 'g', state: 's', decisions: '', next_step: 'n', open_questions: '', failed_attempts: '', session_name: 'nm' } })
   })
   test('a missing or blank required field is rejected with its name', () => {
-    const r = parseFields({ goal: 'g', state: '  ', next_step: 'n' })
+    const r = parseFields({ ...good, state: '  ' })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('state')
   })
@@ -31,17 +31,41 @@ describe('parseFields', () => {
     if (!r.ok) expect(r.error).toContain('decisions')
   })
   test('strings are trimmed', () => {
-    const r = parseFields({ goal: ' g ', state: 's', next_step: 'n' })
+    const r = parseFields({ ...good, goal: ' g ' })
     expect(r.ok && r.fields.goal).toBe('g')
   })
-  test('the schema requires the three core fields', () => {
-    expect(INPUT_SCHEMA.required).toEqual(['goal', 'state', 'next_step'])
+  test('the schema requires the core fields and the session name', () => {
+    expect(INPUT_SCHEMA.required).toEqual(['goal', 'state', 'next_step', 'session_name'])
+    expect(INPUT_SCHEMA.properties.session_name?.description).toContain('name')
+  })
+  test('field names end with session_name', () => {
+    expect([...FIELD_NAMES]).toEqual(['goal', 'state', 'decisions', 'next_step', 'open_questions', 'failed_attempts', 'session_name'])
+  })
+  test('a missing or blank session_name is rejected, naming it', () => {
+    for (const session_name of [undefined, '   ', '/']) {
+      const r = parseFields({ goal: 'g', state: 's', next_step: 'n', session_name })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain('session_name')
+    }
+  })
+  test('session_name is stored cleaned', () => {
+    const r = parseFields({ ...good, session_name: '  /clear\n x ' })
+    expect(r.ok && r.fields.session_name).toBe('clear x')
+  })
+})
+
+describe('cleanName', () => {
+  test('whitespace and newlines collapse and trim', () => expect(cleanName('  vigil-mod:\n shell   flow ')).toBe('vigil-mod: shell flow'))
+  test('a leading slash is stripped', () => expect(cleanName('/clear x')).toBe('clear x'))
+  test('cut to 60 code units then trimmed', () => {
+    expect(cleanName('a'.repeat(70))).toBe('a'.repeat(60))
+    expect(cleanName('a'.repeat(59) + ' bbb')).toBe('a'.repeat(59))
   })
 })
 
 describe('renderHandover', () => {
   const snap = { session: 's1', at: '2026-10-04T12:00:00.000Z', cwd: '/repo', branch: 'main', dirty: ['a.ts'], edited: ['b.ts', 'c.ts'], contextPct: 41 }
-  const fields = { goal: 'Ship it', state: 'Half done', decisions: 'Use B', next_step: 'Write tests', open_questions: '', failed_attempts: 'tmux keys' }
+  const fields = { goal: 'Ship it', state: 'Half done', decisions: 'Use B', next_step: 'Write tests', open_questions: '', failed_attempts: 'tmux keys', session_name: 'vigil-mod: shell flow' }
   test('sections in order, empty ones left out, snapshot at the end', () => {
     const md = renderHandover(fields, snap)
     expect(md.startsWith('# 📜 Handover — s1 (2026-10-04T12:00:00.000Z)\n')).toBe(true)
@@ -53,6 +77,12 @@ describe('renderHandover', () => {
     expect(md).toContain('- context: 41%')
     expect(md).toContain('- dirty: a.ts')
     expect(md).toContain('- edited this session: b.ts, c.ts')
+  })
+  test('the next session name is the second line, never a section', () => {
+    const md = renderHandover(fields, snap)
+    expect(md.split('\n')[1]).toBe('**Next session:** vigil-mod: shell flow')
+    expect(md).not.toContain('## Session name')
+    expect(md).not.toContain('## session_name')
   })
   test('unknowns are said plainly', () => {
     const md = renderHandover(fields, { ...snap, branch: null, dirty: [], edited: [], contextPct: null })
