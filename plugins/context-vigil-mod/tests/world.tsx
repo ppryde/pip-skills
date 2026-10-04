@@ -22,6 +22,9 @@ export type World = {
   submitRefused: { value: boolean }    // makes $.prompt.submit reject
   renameRefused: { value: boolean }    // makes $.command.run({ command: 'rename' }) reject
   renames: string[]                    // args of every rename command run
+  titled: Set<string>                  // transcript paths holding a custom-title line
+  grepFails: { value: boolean }        // makes the custom-title grep exit 2
+  greps: string[][]                    // argv of every grep run
 }
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string> } = {}): World {
@@ -33,6 +36,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
+    titled: new Set(), grepFails: { value: false }, greps: [],
   }
   mock.store(on, opts.store ?? {})
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
@@ -44,6 +48,11 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
   on('process.run', (_$, e) => {
     w.runs.count++
+    if (e.argv[0] === 'grep') {
+      w.greps.push([...e.argv])
+      const exitCode = w.grepFails.value ? 2 : w.titled.has(e.argv[e.argv.length - 1] ?? '') ? 0 : 1
+      return { value: { exitCode, stdout: exitCode === 0 ? '1\n' : exitCode === 1 ? '0\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const a = e.argv.join(' ')
     const out = a.includes('symbolic-ref') ? w.git.branch : w.git.status
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }

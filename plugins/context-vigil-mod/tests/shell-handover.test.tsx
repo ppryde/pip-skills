@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, human, turn, world } from './world'
+import { START, human, turn, world, type World } from './world'
 
 const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
@@ -150,7 +150,7 @@ test('a consumed pending handover renames the new session before the resume subm
   w.commands.length = 0
   const before = w.submits.length
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
   await w.clock.advance(0)
   expect(w.commands).toContain('rename')
   expect(w.renames).toEqual(['Fix the bar'])
@@ -168,10 +168,53 @@ test('a rejected rename still resumes, and says so', async ($, on) => {
   await $.tool.call(call() as never)
   await w.clock.settle()
   w.sessionId.value = 's2'
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.classic.SessionStart({ source: 'clear', transcript_path: '/t/s2.jsonl' } as never)
   await w.clock.advance(500)
   expect(w.notices).toContain("🏷️ couldn't name the new session — carrying on")
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+async function handoverThenClear($: any, w: World, transcript: string | null = '/t/s2.jsonl') {
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call({ session_name: 'Fix the bar' }) as never)
+  await w.clock.settle()
+  w.commands.length = 0
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear', transcript_path: transcript ?? undefined } as never)
+  await w.clock.advance(500)
+}
+
+test('an unnamed old session is renamed, and the grep targets its own transcript', async ($, on) => {
+  const w = world(on)
+  await handoverThenClear($, w)
+  expect(w.renames).toEqual(['Fix the bar'])
+  expect(w.greps).toEqual([['grep', '-c', '-F', '"type":"custom-title"', '/t/s1.jsonl']])
+})
+
+test('an already-named old session keeps its name: no rename, resume still submitted', async ($, on) => {
+  const w = world(on)
+  w.titled.add('/t/s1.jsonl')
+  await handoverThenClear($, w)
+  expect(w.commands).not.toContain('rename')
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('a failed name check neither renames nor notifies, and still resumes', async ($, on) => {
+  const w = world(on)
+  w.grepFails.value = true
+  await handoverThenClear($, w)
+  expect(w.commands).not.toContain('rename')
+  expect(w.notices.some(n => n.includes('couldn'))).toBe(false)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('no transcript path means the name is unknown: no rename', async ($, on) => {
+  const w = world(on)
+  await handoverThenClear($, w, null)
+  expect(w.commands).not.toContain('rename')
+  expect(w.greps).toEqual([])
 })
 
 test('a stored handover with no name resumes without any rename', async ($, on) => {

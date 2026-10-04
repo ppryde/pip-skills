@@ -245,9 +245,24 @@ async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dis
   if (action === 'handover') await startHandover($, 'request', true)
 }
 
+// Does the transcript hold a custom-title line? null = could not tell.
+async function sessionNamed($: EngineInterface, transcriptPath: string): Promise<boolean | null> {
+  try {
+    const r = await $.process.run(['grep', '-c', '-F', '"type":"custom-title"', transcriptPath])
+    if (r.exitCode === 0) return Number.parseInt(r.stdout, 10) > 0
+    return r.exitCode === 1 ? false : null
+  } catch {
+    return null
+  }
+}
+
+// /clear carries an existing name into the new session, so only an unnamed one is renamed.
 // Never blocks the resume: a failed rename is a notice, not an error.
-async function renameSession($: EngineInterface, name: string | undefined) {
+async function renameSession($: EngineInterface, name: string | undefined, oldTranscript: string | undefined) {
   if (!name?.trim()) return   // an older stored handover may carry no name
+  const named = oldTranscript === undefined ? null : await sessionNamed($, oldTranscript)
+  if (named === true) return void (await log($, 'rename', { kept: true }))
+  if (named === null) return void (await log($, 'guard.wait', { reason: 'rename-unknown' }))
   await log($, 'rename', { name })
   try {
     await $.command.run({ command: 'rename', args: name })
@@ -335,7 +350,9 @@ export const register: Register = on => {
     if (!pending) return out
     const follow = pending.followUp
     // /rename starts from its own timer, before the resume submit, and never blocks it.
-    $.clock.after(0, () => { void renameSession($, pending.name) })
+    const tp = e.transcript_path
+    const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`
+    $.clock.after(0, () => { void renameSession($, pending.name, oldTranscript) })
     if (follow) $.clock.after(500, () => { void $.prompt.submit({ text: follow, asUser: true }) })
     else if (pending.resume) submitSoon($, resumeText(pending.path), 500)
     await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null })
