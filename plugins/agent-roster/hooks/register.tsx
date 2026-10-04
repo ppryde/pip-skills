@@ -318,26 +318,88 @@ async function scan($: EngineInterface): Promise<SessionRow[]> {
       }
     }
   }
-  if (found.length === 0) return []
-
   // The registry outlives crashed processes: keep only pids still running.
-  const ps = await $.process.run(['ps', '-o', 'pid=', '-p', found.map(f => f.row.pid).join(',')])
+  const ps = found.length
+    ? await $.process.run(['ps', '-o', 'pid=', '-p', found.map(f => f.row.pid).join(',')])
+    : { stdout: '' }
   const alive = new Set(ps.stdout.split('\n').map(line => Number(line.trim())))
+  const live = found.filter(f => alive.has(f.row.pid))
 
-  return Promise.all(
-    found
-      .filter(f => alive.has(f.row.pid))
-      .map(async ({ row, configDir }) => ({
-        ...row,
-        ...(await gitRepoOf($, row.cwd)),
-        branch: await branchOf($, row.cwd),
-        ...(await factsOf($, configDir, row)),
-      })),
+  const registered = await Promise.all(
+    live.map(async ({ row, configDir }) => {
+      // One session's details failing must not take the others down.
+      try {
+        return {
+          ...row,
+          ...(await gitRepoOf($, row.cwd)),
+          branch: await branchOf($, row.cwd),
+          ...(await factsOf($, configDir, row)),
+        }
+      } catch {
+        return row
+      }
+    }),
   )
+  const strays = await strayPanes($, new Set(live.map(f => f.row.pid)))
+
+  return [...registered, ...strays]
+}
+
+// What tmux reports per pane, tab-separated, for the unregistered-session sweep.
+const PANE_FORMAT = '#{session_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{window_activity}'
+// Claude Code's binary runs under its version as its name (2.1.289).
+const CLAUDE_COMMAND = /^(\d+\.\d+\.\d+|claude)$/
+
+/**
+ * Panes running Claude with no registry entry: a session held at a startup
+ * prompt (trusting a folder, a login) has not registered yet, and it is
+ * exactly one that waits on the person.
+ */
+export function strayRows(panes: string, socket: string, registered: ReadonlySet<number>): SessionRow[] {
+  const account = socket === 'claude-personal' ? 'personal' : socket === 'claude' ? 'work' : socket
+  const rows: SessionRow[] = []
+  for (const line of panes.split('\n')) {
+    const [tmux, pidText, command, cwd, activity] = line.split('\t')
+    const pid = Number(pidText)
+    if (!tmux || !cwd || !pid || registered.has(pid) || !CLAUDE_COMMAND.test(command ?? '')) continue
+    rows.push({
+      pid,
+      sessionId: '',
+      account,
+      tmux,
+      cwd,
+      ...repoOf(cwd),
+      status: 'waiting',
+      waitingFor: 'at a startup prompt (not registered yet)',
+      kind: 'interactive',
+      lastActive: Number(activity) * 1000 || 0,
+    })
+  }
+
+  return rows
+}
+
+async function strayPanes($: EngineInterface, registered: ReadonlySet<number>): Promise<SessionRow[]> {
+  const rows: SessionRow[] = []
+  for (const socket of KNOWN_SOCKETS) {
+    const panes = await $.process
+      .run(['tmux', '-L', socket, 'list-panes', '-a', '-F', PANE_FORMAT])
+      .catch(() => undefined)
+    if (panes?.exitCode === 0) rows.push(...strayRows(panes.stdout, socket, registered))
+  }
+
+  return rows
 }
 
 async function refresh($: EngineInterface) {
-  const rows = sorted(await scan($))
+  let rows: SessionRow[]
+  try {
+    rows = sorted(await scan($))
+  } catch (err) {
+    // Keep the last good roster on screen and say why it is stale.
+    await update($, sessions, held => ({ ...held, error: String(err).slice(0, 200) }))
+    return
+  }
   const selfId = await $.session.id()
   await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId }))
   const waiting = rows.filter(r => r.status === 'waiting').length
@@ -665,7 +727,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { rows, checkedAt, selfId } = await read($, sessions)
+    const { rows, checkedAt, selfId, error } = await read($, sessions)
     const pending = await read($, pendingKill)
     const isShowingOlder = await read($, showOlder)
     const tabs = repoTabs(rows)
@@ -810,6 +872,11 @@ export const register: Register = on => {
             refresh
           </Button>
         </Box>
+        {error && (
+          <Text color="red" wrap="truncate-end">
+            Last scan failed, showing the one before: {error}
+          </Text>
+        )}
         <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
           {tabButton(null, 'All', allMarks, 0)}
           {tabs.map((t, i) => tabButton(t.repo, t.repo, tabMarks(t), i + 1))}

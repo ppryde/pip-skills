@@ -84,7 +84,11 @@ Nothing is scraped from tmux. Every live Claude process keeps a registry file,
 status (`busy`, `idle`, `waiting` + `waitingFor`, `shell`) and the time of its
 last status change. The mod reads both config dirs (`~/.claude-personal` as
 `personal`, `~/.claude` as `work`) every 5 s and drops entries whose pid is no
-longer running (the registry outlives crashed processes).
+longer running (the registry outlives crashed processes). A session held at a startup
+prompt (trusting a folder, logging in) has not registered yet, so the roster
+also lists the panes on the wrapper's tmux sockets: one running Claude with no
+registry entry shows under *Needs you* as "at a startup prompt". If a scan
+fails, the header says why in red and the last good roster stays on screen.
 
 Title and prompt come from the session's transcript,
 `<config dir>/projects/<cwd slug>/<sessionId>.jsonl` (a `find` under

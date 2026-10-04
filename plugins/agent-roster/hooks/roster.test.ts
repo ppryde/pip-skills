@@ -12,6 +12,7 @@ import {
   repoOf,
   repoTabs,
   sorted,
+  strayRows,
   summary,
   tabMarks,
   toRow,
@@ -240,4 +241,18 @@ test("the helper installs into every VS Code profile VS Code's storage names", a
   ).toEqual(['Personal', 'Agents'])
   expect(profileNames({})).toEqual([])
   expect(profileNames(null)).toEqual([])
+})
+
+test('a pane running Claude with no registry entry shows as waiting at a startup prompt', async () => {
+  const panes = [
+    'cc-home-1\t50166\t2.1.289\t/Users/me\t1791148516',
+    'cc-pip-skills-9\t48701\t2.1.287\t/Users/me/repos/pip-skills\t1791148000',
+    '11\t90605\tzsh\t/Users/me/repos/pip-skills\t1791148000',
+  ].join('\n')
+  const rows = strayRows(panes, 'claude-personal', new Set([48701]))
+
+  expect(rows.map(r => [r.tmux, r.pid, r.status, r.account, r.repo, r.lastActive])).toEqual([
+    ['cc-home-1', 50166, 'waiting', 'personal', 'me', 1791148516000],
+  ])
+  expect(rows[0]?.waitingFor).toContain('startup prompt')
 })
