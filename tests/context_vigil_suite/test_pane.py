@@ -63,3 +63,20 @@ def test_pane_safe_uses_tmux_capture(iso: Path, monkeypatch: pytest.MonkeyPatch)
 
 def test_pane_safe_false_when_capture_fails(iso: Path) -> None:
     assert pane.pane_safe("%7") is False   # iso points the tmux binary at nothing
+
+
+@pytest.mark.parametrize("sgr", ["\x1b[38;5;2m", "\x1b[38;2;0;0;0m", "\x1b[48;2;1;2;3m\x1b[38;5;02m"])
+def test_colour_parameters_are_not_dim(sgr: str) -> None:
+    row = f"{sgr}❯\xa0{sgr}hello typed\x1b[39m"
+    assert pane.typed_text(row) == "hello typed"
+    assert pane.safe_to_type(screen(RULE, row, RULE, STATUS)) is False
+
+
+def test_colon_form_sgr_is_unsafe() -> None:
+    row = "❯\xa0\x1b[2m\x1b[38:2::1:2:3mhidden\x1b[0m"
+    assert pane.safe_to_type(screen(RULE, row, RULE, STATUS)) is False
+
+
+def test_dim_placeholder_with_colour_stays_safe() -> None:
+    row = "❯\xa0\x1b[2;38;5;244mTry this\x1b[0m"
+    assert pane.safe_to_type(screen(RULE, row, RULE, STATUS)) is True

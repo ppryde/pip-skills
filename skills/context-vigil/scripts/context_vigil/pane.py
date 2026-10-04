@@ -12,11 +12,12 @@ from typing import List, Optional
 
 from context_vigil import tmux
 
-_SGR = re.compile(r"\x1b\[([0-9;]*)m")
+_SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 _OTHER_ESC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
 _RULE = re.compile(r"^\s*─{10,}\s*$")
 _FOOTER = re.compile(r"(?i)enter to (select|confirm)|esc to (cancel|continue)")
 _BLANKS = " \t\xa0"
+_UNREADABLE = "?"  # typed_text sentinel: an SGR we cannot parse, so the row counts as typed
 
 
 def plain(text: str) -> str:
@@ -33,12 +34,21 @@ def typed_text(row: str) -> str:
     for match in _SGR.finditer(rest):
         if not dim:
             out.append(rest[pos:match.start()])
-        params = [p for p in match.group(1).split(";") if p] or ["0"]
-        for p in params:
+        if ":" in match.group(1):
+            return _UNREADABLE
+        params = [p.lstrip("0") or "0" for p in match.group(1).split(";")] or ["0"]
+        i = 0
+        while i < len(params):
+            p = params[i]
+            if p in ("38", "48", "58"):
+                kind = params[i + 1] if i + 1 < len(params) else ""
+                i += 2 + (1 if kind == "5" else 3 if kind == "2" else 0)
+                continue
             if p == "2":
                 dim = True
             elif p in ("0", "22"):
                 dim = False
+            i += 1
         pos = match.end()
     if not dim:
         out.append(rest[pos:])
