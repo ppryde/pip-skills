@@ -1,16 +1,23 @@
-# context-vigil: last light, and mid-turn nudges on every tool
+# context-vigil: last light, the end-of-turn notice, and the vigil bar
 
 Date: 2026-10-04 · Branch: `feat/context-vigil` · Builds on
 `2026-10-02-context-vigil-design.md`.
 
-Two changes, delivered as separate chunks so each can ship or be reverted alone:
+Three changes, delivered as separate chunks so each can ship or be reverted
+alone:
 
 1. **Last light** — before a 1-hour prompt cache goes cold on an idle session,
    ask the agent to *prepare* a handover. Nothing is cleared; the user returns
    to a choice.
-2. **Mid-turn nudges on every tool** — widen the PostToolUse nudge from the
-   Task tools to all tools, behind a shell pre-check so the common case stays
-   cheap.
+2. **End-of-turn notice** — the Stop hook tells the *user* (never the model)
+   when context crosses the threshold, so they can say "hand over" on the very
+   next turn. Always on.
+3. **Vigil bar** (optional mod) — the same moment as a pop-up band above the
+   prompt with hotkeys, like Claude Code's own rating bar.
+
+User-facing text across all three (and the existing notices and install
+questions) gets a lighter, emoji-led voice — see §4. Model-facing text stays
+plain.
 
 ---
 
@@ -80,8 +87,11 @@ smoke harness can drive it.
 7. No pending handover / `/clear` flag for the scope, and the scope is not
    paused.
 8. The session is in tmux (`tmux_pane` known and reachable), and the pane is
-   safe to type into: the capture shows the empty input box, no menu or
-   dialog, and no `esc to interrupt`. "Empty" must allow for the placeholder
+   safe to type into: the capture shows the empty input box and no menu or
+   dialog (no `❯` cursor on a numbered/option row). Busy-detection does not
+   rely on spinner text — Claude Code 2.1.289 no longer shows
+   `esc to interrupt` — because gate 3 already implies ~55 minutes with no API
+   traffic, so no model turn can be running. "Empty" must allow for the placeholder
    an idle box shows (`❯ Try "fix lint errors"`, rendered dim): the check uses
    `capture-pane -e` and treats the `❯` row as empty only when everything after
    the cursor carries the dim attribute (SGR 2) or is blank. Anything typed by
@@ -101,8 +111,8 @@ Under the session record's lock (`session.locked`), re-check gates 5–7, then:
 > `[context-vigil:last-light]` The prompt cache expires in about N minutes and
 > this session is idle. Prepare a handover: run `<launcher> notes-path`, fill
 > in the file it prints, then run `<launcher> handover --file <path>
-> --prepared`. Then reply in one line that a handover is ready and stop. Do
-> not /clear and do not continue the task.
+> --prepared`. Then reply with exactly the line it prints (the §4 "prepared"
+> line) and stop. Do not /clear and do not continue the task.
 
 A lock that cannot be had means no fire this tick.
 
@@ -113,9 +123,12 @@ hour; unguarded, the next tick 55 minutes later would fire again, forever.
 Two independent locks, on different state:
 
 - **Lock 1 — armed flag (session record).** Only a *real* prompt arms:
-  UserPromptSubmit sets `last_light_armed = true` when the prompt does **not**
-  start with the marker `[context-vigil:last-light]`. Firing disarms. The
-  injected prompt carries the marker and never re-arms.
+  UserPromptSubmit sets `last_light_armed = true` for a human prompt. Firing
+  disarms. Not human, so never arms and never discards: a prompt starting
+  with the marker `[context-vigil:last-light]` (ours), and a prompt starting
+  with `<task-notification>` (a background task finishing starts a turn of its
+  own — observed in the 2026-10-04 Stop probe; counting it would discard a
+  prepared handover and re-arm with nobody present).
 - **Lock 2 — prepared handover on disk (scope state).** No fire while a
   prepared handover exists for the scope. It leaves only by `/clear` (loads it),
   a real prompt (discards it) or `handover --discard`.
@@ -138,7 +151,7 @@ What happens next:
 | User does | Result |
 |---|---|
 | Types `/clear` | SessionStart (`clear`) loads the prepared handover like a normal one, archives it, removes the marker. |
-| Sends any other prompt | UserPromptSubmit (real prompt) archives the handover with a `discarded` suffix (recoverable by hand), removes the marker, and re-arms. The work has moved on; a later prepared handover will reflect it. |
+| Sends any other (human) prompt | UserPromptSubmit archives the handover with a `discarded` suffix (recoverable by hand), removes the marker, and re-arms. The work has moved on; a later prepared handover will reflect it. |
 | Quits claude | The handover waits; a new session in that scope is offered it as today ("never loaded without asking"). |
 
 The nudge cycle is untouched: a prepared handover does not reset the nudge gate
@@ -146,15 +159,11 @@ or `last_nudged_pct`.
 
 ### Setup
 
-**Install** prints a third question (after threshold and launcher):
+**Install** prints a third question after threshold and launcher (wording in
+§4 "Install: last light"), then the threshold question if yes.
 
-> **Last light** (off by default). With a 1-hour prompt cache, when this
-> session is idle with context ≥ 25% and the cache is 5 minutes from expiring,
-> context-vigil asks the agent to prepare a handover. Nothing is cleared: when
-> you come back, carry on as normal or type /clear to resume from it. Needs
-> tmux. Turn it on? [y/N] — if yes: threshold? [25]
-
-Applied by `install --yes … --last-light on|off [--last-light-threshold N]`.
+Applied by `install --yes … --last-light on|off [--last-light-threshold N]`
+(and `--bar on|off` for §3).
 SKILL.md tells the agent to ask it exactly as printed, like the others.
 
 **Later:** `context-vigil last-light [on|off] [--threshold N] [--yes]`, on the
@@ -212,54 +221,156 @@ cycle's `/clear` loads it.
 
 ---
 
-## 2. Mid-turn nudges on every tool
+## 2. End-of-turn notice (always on)
 
-### Today
+### Why
 
-PostToolUse runs the nudge only for `TaskCreate|TaskUpdate`, so a long run that
-never uses the Task tools is nudged at the next prompt (documented known limit).
+Today the nudge fires at UserPromptSubmit of the turn *after* the threshold is
+crossed: the agent answers, then asks, and the handover happens two turns
+later. Widening PostToolUse to every tool was assessed and dropped: 581 of 591
+turns that grew ≥ 20k tokens never used a Task tool, but a mid-turn nudge only
+helps a turn so long it would reach auto-compaction (rare: 33 of 4,716 turns
+grew ≥ 100k), it fires inside subagents (which share the parent's session id),
+and in an attended session it makes the agent stop mid-task to raise a handover
+nobody asked for. The PostToolUse entry for `TaskCreate|TaskUpdate` stays as is.
 
-### Change
+### Behaviour
 
-- PostToolUse matcher becomes `*` (all tools).
-- **Pre-check in the launcher**, before Python starts: for `hook nudge` on a
-  PostToolUse event, `ingest` maintains a per-session flag file
-  `sessions/<session_id>.due`, present only when a nudge would fire now
-  (pct ≥ threshold and not yet nudged this cycle, or pct ≥ last nudged +
-  repeat step, with a confident window). The launcher extracts `session_id` from
-  stdin with a shell pattern, and if `<data root>/sessions/<id>.due` does not
-  exist, exits 0 without starting Python. Target: ≈5 ms per tool call in the
-  common case.
-- Python `nudge()` remains the authority (it re-checks everything under the
-  lock); the flag only decides whether to ask it. A stale or missing flag can
-  delay a nudge by one tool call or ingest, never fire a wrong one.
-- UserPromptSubmit keeps running Python unconditionally (once per prompt is
-  cheap and it now also arms last light).
-- Data-root resolution in shell mirrors `paths.data_root()` for the read only
-  (`CONTEXT_VIGIL_HOME`, else `$CLAUDE_CONFIG_DIR/context-vigil`, else
-  `~/.claude/context-vigil`); on any doubt (unparseable id, unexpected
-  characters, missing root) it falls through to Python.
+At **Stop**, when context is over the threshold and a notice is due (first
+crossing, then every `nudge.repeat_step` points — the same sequence the nudge
+uses), the hook prints a `systemMessage` the **user** sees (§4 "notice").
 
-### Install migration
+The next UserPromptSubmit, in an attended session, injects a shorter
+model-facing context in place of today's ask-first template: context is at N%,
+the user has been shown the notice; if their message asks to hand over, follow
+the handover steps; otherwise answer normally and do not raise it. Unattended
+sessions (auto mode, headless) keep today's unattended nudge unchanged; a
+notice there is harmless and still shown.
 
-`install` replaces an existing context-vigil PostToolUse entry with matcher
-`TaskCreate|TaskUpdate` by the `*` entry (ours only, matched exactly as today);
-`status` reports the old matcher as "outdated — re-run install".
+### Verified behaviour (live probe, 2026-10-04, Claude Code 2.1.289, haiku)
 
-### Testing
+A throwaway Stop hook printing one `{"systemMessage": ...}` object, exit 0:
 
-- Launcher pre-check: no flag → Python not started (stub interpreter records
-  calls); flag → Python started; odd session ids fall through to Python.
-- `.due` lifecycle in `ingest`: appears at threshold, clears after a nudge,
-  reappears at +repeat step, cleared on SessionStart.
-- Install migration from the old matcher; uninstall removes either form.
-- SKILL.md / README: drop the "only after Task tools" limit.
+- shown in the transcript as `⎿ Stop says: <text>`, once per turn; quotes and
+  a backslash rendered correctly;
+- **not sent to the model**: a canary word in the notice was absent from the
+  model's context on the next turn (asked to repeat any `zq…` word, it
+  answered `NONE`); the transcript stores it as a `hook_system_message`
+  attachment;
+- no continuation: the turn ended, no extra turn started;
+- **Esc interrupt does not fire Stop** (as documented); a background task's
+  completion notice starts a turn of its own and so fires Stop again.
+
+### Safety rules for the Stop path (from the hooks docs and the probe)
+
+Only two things make a Stop hook continue the turn: exit 2, and
+`decision: "block"`. Plain non-JSON stdout may be added to the model's
+context. Therefore:
+
+1. The Stop handler writes **exactly one `json.dumps(...)` object, or
+   nothing** — never `print` of free text anywhere on the Stop path. Message
+   text is passed as a value to `json.dumps`, which does all escaping.
+2. **Never** emits `decision`, `block`, `continue: false` or `reason`.
+3. **Exit 0 always** — already guaranteed by the launcher (`hook` swallows
+   every failure and exits 0) and kept.
+4. Returns nothing when `stop_hook_active` is true.
+5. Stays silent when not due; the notice gate lives in the session record
+   (`last_noticed_pct`) under the record lock, so a burst of Stops (background
+   notifications) shows it once per step.
+6. Message length is capped (≤ 300 chars); `pct` and `threshold` are ints
+   formatted by Python, never interpolated from payload strings.
+
+Tests assert rules 1–6 directly: Stop output is empty or parses as one JSON
+object whose only key is `systemMessage`; payloads with quotes, newlines,
+backslashes and non-ASCII in every string field produce valid JSON; a raised
+exception yields empty stdout and exit 0 through the real launcher;
+`stop_hook_active: true` yields empty stdout.
+
+### Cost
+
+One context measurement per Stop (the same read UserPromptSubmit already
+does, ~80 ms per turn — not per tool call).
 
 ---
 
-## Out of scope
+## 3. Vigil bar (optional mod)
 
+A Claude Code mod (plugin hooks module) shipped inside the skill at
+`skills/context-vigil/mod/` (`.claude-plugin/plugin.json`, `hooks/hooks.json`,
+`hooks/register.tsx`, `types/index.d.ts`, a `*.test.ts`).
+
+### What it does
+
+On `turn.complete`, when context is over the threshold and a bar is due (same
+first-crossing / +step rule), it raises an **`AbovePrompt` band**:
+
+```
+🕯️ context 41% · threshold 35%    [1] 📜 Hand over now   [2] ⏰ Remind me at +5%   [0] ✖ Dismiss
+```
+
+- **[1]** `$.prompt.submit({ text: "hand over now", asUser: true })` — a real
+  user turn; the agent hands over (SKILL.md's "when asked to hand over").
+- **[2]** hide until context reaches the next step.
+- **[0]** hide for this cycle (until a handover or `/clear`).
+- Yields while `e.props.hasSurvey` (Claude Code's own rating bar) is showing.
+- Reads context from the mod API's live `context_window` figures and the
+  threshold / repeat step from context-vigil's global config file (read-only).
+- Draws nothing when the figures or config are missing.
+
+Surfaces: the band is raised on **terminal and desktop only**. Mobile gets the
+Stop notice (if the app shows `systemMessage`s — to be checked by the owner in
+a remote-control session); a mobile `$.ui.ask` card is future work.
+
+### Install
+
+A fourth install question (§4), default **no**. Yes adds the mod folder to
+`env.CLAUDE_CODE_PLUGIN_DIRS` in the user `settings.json` (the only settings
+file Claude Code reads it from), appended with the platform path separator,
+preserving any existing entries; uninstall removes only our path. The same
+settings.json protections apply (structural preview, atomic write, our entry
+only). `status` reports `vigil bar: on|off` and whether the folder is listed.
+Requires a Claude Code build with mods (the API this spec was written against
+is 2.1.287); `status` says so when the bar is on but the build has no mods.
+
+### Testing
+
+`claude plugin validate` and `claude plugin test` on the mod: band drawn when
+due, not when below threshold, not while `hasSurvey`; [1] submits the prompt
+as user; [2]/[0] hide as specified; mounted on `terminal` and `desktop`.
+Installer tests for the `CLAUDE_CODE_PLUGIN_DIRS` edit and its removal.
+
+---
+
+## 4. Voice: user-facing strings
+
+Model-facing text (nudges, the last-light prompt, injected contexts) stays
+plain. User-facing text gets an emoji lead and a lighter tone. Final wording is
+tuned in review; these are the starting strings:
+
+| Where | Text |
+|---|---|
+| Stop notice | `🕯️ context-vigil · context at {pct}% (threshold {threshold}%) · say "hand over" to pass the torch 🔥 — or keep going 🚀` |
+| Stop notice, repeat | `🕯️ context-vigil · now at {pct}% ⬆️ · say "hand over" whenever you're ready 📜` |
+| Handover saved, no tmux | `📜 Handover saved — type /clear, then send any message (e.g. "go") to pick it back up ✨ (run Claude inside tmux for hands-free handovers 🤖)` |
+| Last light, prepared | `🌅 Last light: a handover is ready 📜 — carry on as normal, or /clear to resume from it ✨` |
+| Bar | `🕯️ context {pct}% · threshold {threshold}%` + `📜 Hand over now` / `⏰ Remind me at +{step}%` / `✖ Dismiss` |
+| Install: threshold | `🎚️ Threshold — at what context % should I tap you on the shoulder? [35]` |
+| Install: launcher | `🖥️ Launcher — how should Claude start inside tmux for hands-free handovers? …` (existing walkthrough, emoji per option) |
+| Install: last light | `🌅 Last light (off by default) — with a 1-hour prompt cache, when you've stepped away with context ≥ 25% and the cache is 5 minutes from going cold 🧊, I'll have the agent prepare a handover. Nothing is cleared: come back, carry on, or /clear to resume ✨ Needs tmux. Turn it on? [y/N]` → `🎚️ Last-light threshold? [25]` |
+| Install: bar | `🎛️ Vigil bar (off by default) — a pop-up bar above the prompt when context crosses the threshold, with [1] hand over · [2] remind me later · [0] dismiss. Needs a Claude Code build with mods. Add it? [y/N]` |
+| status | `🕯️ installed` / `🌅 last light: on (25%)` / `🎛️ vigil bar: on` lines |
+
+---
+
+## Out of scope / future
+
+- **The mod as last light's engine** (next iteration): `$.clock` timers and
+  `$.prompt.submit` (which waits for idle, and whose `e.origin` tells plugin
+  from user) would remove the tmux requirement, `send-keys` and pane-safety
+  checks.
+- A mobile `$.ui.ask` card for the notice / bar.
 - Keeping the cache warm with keep-alive prompts (that *is* the loop).
-- Last light outside tmux, or for headless runs.
-- Anything for the 5-minute TTL.
-- A firing cap/fuse (considered and dropped: it could block genuine use).
+- Last light for headless runs or the 5-minute TTL.
+- A firing cap/fuse for last light (considered and dropped: it could block
+  genuine use).
+- Mid-turn nudges on every tool (assessed above and dropped).
