@@ -305,3 +305,119 @@ test('a clear forgets the day-log cache and the edited files', async ($, on) => 
   await $.tool.call(call() as never)
   expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).not.toContain('/repo/old.ts')
 })
+
+test('a pending handover with turns since it was written is not reused: /vho writes a fresh one', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call({ state: 'OLD STATE' }) as never)
+  await w.clock.settle()
+  w.clearRefused.value = false
+  for (let i = 0; i < 3; i++) {
+    await w.clock.advance(10 * MIN)
+    await $.prompt.submit(human(`more work ${i}`))
+    await $.turn.complete(turn(`w${i}`))
+  }
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(2)
+  expect(w.commands).not.toContain('clear')
+  await $.tool.call(call({ state: 'NEW STATE' }) as never)
+  await w.clock.settle()
+  expect(w.commands).toContain('clear')
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(ss.additionalContext?.join('\n')).toContain('NEW STATE')
+  expect(ss.additionalContext?.join('\n')).not.toContain('OLD STATE')
+})
+
+test('a pending handover with no turn since it was written is reused: /vho clears at once', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  w.draft.value = 'half a sen'
+  await $.tool.call(call() as never)
+  await $.turn.complete(turn('instruction'))
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  w.draft.value = ''
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(1)
+  expect(w.commands).toContain('clear')
+})
+
+test('a hot reload picks a clear parked on a draft back up instead of stranding it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  w.draft.value = 'half a sen'
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  await $.session.start(START)          // the reload: same session, $.state kept, timers gone
+  w.draft.value = ''
+  await w.clock.advance(5000)
+  expect(w.commands).toContain('clear')
+})
+
+test('a hot reload with a stale pending handover offers it instead of clearing', async ($, on) => {
+  const w = world(on)
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.clearRefused.value = false
+  await w.clock.advance(10 * MIN)
+  await $.turn.complete(turn('later'))
+  w.notices.length = 0
+  await $.session.start(START)
+  await w.clock.advance(5000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices).toContain('📜 A handover is waiting (/cfg/context-vigil-mod/handovers/s1-1.md) — /clear to resume from it')
+})
+
+test('a reload counts as presence: auto mode does not hand over at the next agent step', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
+})
+
+test('a rejected resume after a clear says so, naming the handover', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  w.submitRefused.value = true
+  await w.clock.advance(500)
+  expect(w.notices.some(n => n.includes("Couldn't resume") && n.includes('/cfg/context-vigil-mod/handovers/s1-1.md'))).toBe(true)
+  expect([...w.files.values()].join('')).toContain('resume-rejected')
+})
+
+test('a handover file that cannot be written: a notice, no pending, no clear, and the model is told', async ($, on) => {
+  const w = world(on)
+  w.handoverWriteRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  const r = await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(String((r as { result?: unknown }).result)).toContain('not saved')
+  expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
+  expect(w.state.get(PENDING) ?? null).toBeNull()
+  expect(w.store.get('pending:s1')).toBeUndefined()
+  expect(w.commands).not.toContain('clear')
+  expect([...w.files.values()].join('')).toContain('write-failed')
+})

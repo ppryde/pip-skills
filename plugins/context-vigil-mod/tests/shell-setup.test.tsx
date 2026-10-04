@@ -120,3 +120,30 @@ test('RC answered No: saved, and the unattended clear on the phone never runs', 
   expect(w.notices).toContain('📱 Handover saved — auto-clear is off for Remote Control sessions')
   expect(w.commands).not.toContain('clear')
 })
+
+test('/vsetup toString is an unknown step, not a crash', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(setup('toString'))
+  await w.clock.settle()
+  expect(w.notices).toContain('⚙️ /vsetup [nudge|bar|auto|last-light|limits|rc] — that step name is not one of these')
+})
+
+test('a clear landing while setup answers are saved does not break the answer hook', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(setup())
+  await w.clock.settle()
+  const card = cardOf(w.submits.at(-1)?.text ?? '')
+  w.onStoreSet.value = async key => {
+    if (key !== 'settings') return
+    w.onStoreSet.value = null
+    w.sessionId.value = 's2'
+    await $.classic.SessionStart({ source: 'clear' } as never)
+  }
+  const answers = Object.fromEntries(card.map(q => [q.question, q.header.includes('Nudge') ? '50%' : 'Off']))
+  const r = await $.tool.call(ask(card, answers) as never)
+  expect((r as { deny?: string }).deny).toBeUndefined()
+  expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50 })
+  expect(JSON.stringify((r as { context?: string[] }).context ?? [])).toContain('⏳ Limits')
+})

@@ -7,7 +7,7 @@ import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transitio
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire, ttlFromLabel } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
@@ -36,8 +36,8 @@ const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' 
 const LATCH_KEY = 'latch'
 
 // Facts about the person and the install that a /clear must not forget: module variables
-// survive it (same process). A new session (bindSession) starts them fresh. The cost: a hot
-// reload resets them too, so after one an agent step can read 'auto' until the person types.
+// survive it (same process). A new session or a hot reload (bindSession) starts them fresh,
+// counting that moment as the person being here for one idle window.
 let activity: Activity = EMPTY_ACTIVITY
 let lastLightArmed = false
 let standDown = false
@@ -66,6 +66,7 @@ let retryTimer: { cancel: () => void } | null = null
 let ttlMs = TTL_1H
 let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
+let countdownTick: { cancel: () => void } | null = null
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -85,13 +86,19 @@ async function notify($: EngineInterface, text: string) {
 }
 
 // Every plugin prompt goes through here: from a timer, never awaited by the hook the turn waits on.
-function submitSoon($: EngineInterface, text: string, delayMs = 0, onSent?: () => void, onFailed?: () => void) {
-  $.clock.after(delayMs, () => { void $.prompt.submit({ text }).then(() => onSent?.(), () => onFailed?.()) })
+function submitSoon($: EngineInterface, prompt: { text: string; asUser?: true }, delayMs = 0, onSent?: () => void, onFailed?: () => void) {
+  $.clock.after(delayMs, () => { void $.prompt.submit(prompt).then(() => onSent?.(), () => onFailed?.()) })
+}
+
+// A resume or held-prompt submit that is refused: say so, with the handover and the held text.
+async function resumeFailed($: EngineInterface, path: string | null, held: string | null) {
+  await notify($, V.resumeFailed(path, held))
+  await log($, 'guard.wait', { reason: 'resume-rejected', path, held: held !== null })
 }
 
 // PROBES.md §7: a mod never sees its own submit in prompt.submit, so `started` is marked here.
 function submitInstruction($: EngineInterface, reason: PendingReason) {
-  submitSoon($, instructionText(reason), 0, () => {
+  submitSoon($, { text: instructionText(reason) }, 0, () => {
     void update($, awaitingA, a => (a ? { ...a, started: true } : a))
   }, () => {
     // A rejected submit must not leave the handover waiting for a turn that never comes.
@@ -132,7 +139,7 @@ async function startSetup($: EngineInterface, only?: string) {
   const ids = nextCard(settings, [], only)
   if (!ids.length) { setupRun = null; await notify($, V.setupSaved); return }
   setupRun.asked.push(...ids)
-  submitSoon($, cardPrompt(ids.map(id => questionFor(id))))
+  submitSoon($, { text: cardPrompt(ids.map(id => questionFor(id))) })
 }
 
 // Spec §2 / pre-flight F24: asked when auto mode would first arm on the phone.
@@ -175,11 +182,13 @@ function resetCaches() {
   lastLightTimer = null
   ttlMs = TTL_1H
   setupRun = null
+  countdownTick?.cancel()
+  countdownTick = null
 }
 
 async function bindSession($: EngineInterface) {
   resetCaches()
-  activity = EMPTY_ACTIVITY
+  activity = { ...EMPTY_ACTIVITY, lastHumanAt: await nowMs($) }
   lastLightArmed = false
   standDown = false
   rcAsked = false
@@ -222,10 +231,32 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     return
   }
   const pending = await read($, pendingA)
-  if (pending && (reason === 'threshold' || reason === 'request')) { scheduleClear($, reason === 'threshold'); return }
+  if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA))) {
+    scheduleClear($, reason === 'threshold')
+    return
+  }
+  if (pending) await supersedePending($)
   await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false }))
   await log($, 'handover.requested', { reason, resume })
   submitInstruction($, reason)
+}
+
+// A stale pending handover gives way to the fresh one: its clear stops waiting and a /clear
+// in between injects nothing old. The file stays on disk.
+async function supersedePending($: EngineInterface) {
+  retryTimer?.cancel()
+  retryTimer = null
+  clearParked = false
+  lastWait = null
+  await setCountdown($, null)
+  await savePending($, null)
+}
+
+// The band draws the seconds left from the clock, which never redraws it: tick while it runs.
+async function setCountdown($: EngineInterface, endsAt: number | null) {
+  await update($, countdownA, () => endsAt)
+  countdownTick?.cancel()
+  countdownTick = endsAt === null ? null : $.clock.every(1000, () => { $.ui.invalidate('ui.render') })
 }
 
 function scheduleClear($: EngineInterface, unattended: boolean) {
@@ -247,7 +278,7 @@ async function tryClear($: EngineInterface) {
   })
   if (gate.go) {
     lastWait = null
-    await update($, countdownA, () => null)
+    await setCountdown($, null)
     await log($, 'clear', { unattended: unattendedClear })
     try {
       await $.command.run({ command: 'clear' })
@@ -263,7 +294,7 @@ async function tryClear($: EngineInterface) {
     await notify($, V.waiting(gate.reason))
     await log($, 'guard.wait', { reason: gate.reason, recheckMs: gate.recheckMs })
   }
-  if (gate.reason === 'countdown-start') await update($, countdownA, () => now + (gate.recheckMs ?? 0))
+  if (gate.reason === 'countdown-start') await setCountdown($, now + (gate.recheckMs ?? 0))
   if (gate.recheckMs === null) { clearParked = true; return }
   retryTimer = $.clock.after(gate.recheckMs, () => { void tryClear($) })
 }
@@ -310,7 +341,7 @@ function scheduleResume($: EngineInterface, at: number, job: { path: string | nu
     try {
       await $.prompt.submit({ text: limitResumeText(job.path ?? pending?.path ?? '(no file)') })
     } catch {
-      await notify($, V.handoverFailed)
+      await notify($, V.resumeFailed(job.path ?? pending?.path ?? null, null))
       await log($, 'guard.wait', { reason: 'submit-rejected' })
       return
     }
@@ -320,7 +351,7 @@ function scheduleResume($: EngineInterface, at: number, job: { path: string | nu
 
 async function cancelCountdown($: EngineInterface) {
   if ((await read($, countdownA)) === null) return
-  await update($, countdownA, () => null)
+  await setCountdown($, null)
   retryTimer?.cancel()
   retryTimer = null
   clearParked = true
@@ -409,7 +440,7 @@ async function askReturn($: EngineInterface, held: string) {
     return
   }
   await savePending($, null)
-  await $.prompt.submit({ text: held, asUser: true })
+  submitSoon($, { text: held, asUser: true }, 0, undefined, () => { void resumeFailed($, pending?.path ?? null, held) })
 }
 
 export const register: Register = on => {
@@ -422,10 +453,23 @@ export const register: Register = on => {
     await $.tool.register({ name: TOOL, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> })
     await checkInterlock($)
     await checkLatch($, [])   // a latch another process left behind and never lifted
-    const stored =(await $.store.get(pendingKey(session))) as Pending | null | undefined
-    if (stored && !(await read($, pendingA))) {
+    const stored = (await $.store.get(pendingKey(session))) as Pending | null | undefined
+    const live = await read($, pendingA)
+    if (stored && !live) {
       await update($, pendingA, () => stored)
       await notify($, V.pendingOffer(stored.path))
+    } else if (live) {
+      // A hot reload: $.state kept the pending handover but its clear's timers are gone.
+      await setCountdown($, null)
+      if (reusable(live, await read($, lastApiA))) scheduleClear($, live.reason === 'threshold')
+      else await notify($, V.pendingOffer(live.path))
+    }
+    // A reload counts as the person being here (bindSession): it re-arms last light too, and
+    // the fire the reload's dropped timer owed is scheduled again from the last turn.
+    const lastApi = await read($, lastApiA)
+    if (lastApi !== null) {
+      lastLightArmed = true
+      scheduleLastLight($, lastApi, await nowMs($))
     }
     scheduleGit($)
     return r
@@ -458,8 +502,8 @@ export const register: Register = on => {
     const tp = e.transcript_path
     const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`
     $.clock.after(0, () => { void renameSession($, pending.name, oldTranscript) })
-    if (follow) $.clock.after(500, () => { void $.prompt.submit({ text: follow, asUser: true }) })
-    else if (pending.resume) submitSoon($, resumeText(pending.path), 500)
+    if (follow) submitSoon($, { text: follow, asUser: true }, 500, undefined, () => { void resumeFailed($, pending.path, follow) })
+    else if (pending.resume) submitSoon($, { text: resumeText(pending.path) }, 500, undefined, () => { void resumeFailed($, pending.path, null) })
     await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null })
     return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
   })
@@ -485,7 +529,7 @@ export const register: Register = on => {
       await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
       const held = e.text
       $.clock.after(0, () => { void askReturn($, held) })
-      return { drop: 'held by context-vigil-mod: last light asks first' }
+      return { drop: V.heldForLastLight }
     }
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
@@ -580,7 +624,9 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'AskUserQuestion' } as never, async ($, e, next) => {
     const r = await next(e) as { context?: string[] }
-    if (!setupRun) return r as never
+    // Captured once: a clear landing during an await below resets the module's setupRun.
+    const run = setupRun
+    if (!run) return r as never
     const pairs = Object.entries(extractAnswers(e, r))
       .map(([q, answer]) => ({ step: stepForQuestion(q), answer }))
       .filter((p): p is { step: StepId; answer: string } => p.step !== undefined)
@@ -592,12 +638,12 @@ export const register: Register = on => {
     if (pairs.some(p => p.step === 'rc')) await log($, 'rc.answer', { answer: settings.rcAutoClear })
     const more = (prompt: string) => ({ ...r, context: [...(r.context ?? []), prompt] }) as never
     if (applied.retell.length) return more(cardPrompt(applied.retell.map(id => questionFor(id, true))))
-    const ids = nextCard(settings, setupRun.asked, setupRun.only)
+    const ids = nextCard(settings, run.asked, run.only)
     if (ids.length) {
-      setupRun.asked.push(...ids)
+      run.asked.push(...ids)
       return more(cardPrompt(ids.map(id => questionFor(id))))
     }
-    setupRun = null
+    if (setupRun === run) setupRun = null
     await notify($, V.setupSaved)
     if (settings.rcAutoClear === 'yes' && clearParked && (await read($, pendingA))) scheduleClear($, true)
     return r as never
@@ -626,7 +672,13 @@ export const register: Register = on => {
       session, at: new Date(now).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
       edited: [...edited], contextPct: await read($, contextA),
     })
-    await $.fs.write(path, markdown)
+    try {
+      await $.fs.write(path, markdown)
+    } catch (err) {
+      await notify($, V.handoverFailed)
+      await log($, 'guard.wait', { reason: 'write-failed', path, error: String(err) })
+      return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
+    }
     await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
     if (reason === 'limit' && limitResume) limitResume.path = path
     await log($, 'handover.written', { reason, bytes: markdown.length, path })

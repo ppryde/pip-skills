@@ -153,3 +153,22 @@ test('RC countdown: sending anything cancels it', async ($, on) => {
   expect(w.commands).not.toContain('clear')
   expect(w.notices).toContain('🧹 Handover countdown cancelled — the handover is saved; /clear to resume from it')
 })
+
+test('RC countdown: the band counts down each second', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  const ui = await $.ui.mount(BAND())
+  expect(await ui.find({ type: 'Text', text: /Handing over in 30 s/ })).toBeDefined()
+  await w.clock.advance(3000)
+  expect(await ui.find({ type: 'Text', text: /Handing over in 27 s/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('RC countdown: a hot reload mid-countdown still clears, and the band never sticks at 0 s', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  await $.session.start(START)          // the reload: same session, $.state kept, timers gone
+  await w.clock.advance(60_000)
+  expect(w.commands).toContain('clear')
+  expect(w.state.get('context-vigil-mod.countdownEndsAt')).toBeNull()
+})

@@ -161,7 +161,8 @@ test('a rejected limit resume is announced and logged, not swallowed', async ($,
   await w.clock.settle()
   w.submitRefused.value = true
   await w.clock.advance(HOUR + 300_000)
-  expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
+  expect(w.notices.some(n => n.includes("Couldn't resume"))).toBe(true)
+  expect(w.notices).not.toContain("📜 Couldn't write a handover — nothing was cleared")
   expect([...w.files.values()].some(t => t.includes('submit-rejected'))).toBe(true)
 })
 

@@ -26,6 +26,8 @@ export type World = {
   grepFails: { value: boolean }        // makes the custom-title grep exit 2
   greps: string[][]                    // argv of every grep run
   store: Map<string, unknown>          // $.store by key — per account, NOT wiped by a clear
+  handoverWriteRefused: { value: boolean }               // makes fs.write under /handovers/ deny
+  onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string> } = {}): World {
@@ -38,10 +40,11 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
+    handoverWriteRefused: { value: false }, onStoreSet: { value: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
-  on('store.set', (_$, e) => { w.store.set(e.key, e.value); return { value: undefined } })
+  on('store.set', async (_$, e) => { w.store.set(e.key, e.value); await w.onStoreSet.value?.(e.key); return { value: undefined } })
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
@@ -49,7 +52,11 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     const t = w.files.get(e.path)
     return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never }
   })
-  on('fs.write', (_$, e) => { w.files.set(e.path, e.text); return { value: undefined } })
+  on('fs.write', (_$, e) => {
+    if (w.handoverWriteRefused.value && e.path.includes('/handovers/')) return { deny: `EACCES ${e.path}` }
+    w.files.set(e.path, e.text)
+    return { value: undefined }
+  })
   on('fs.exists', (_$, e) => ({ value: w.files.has((e as { path: string }).path) }))
   on('process.run', (_$, e) => {
     w.runs.count++

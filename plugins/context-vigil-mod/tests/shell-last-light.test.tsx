@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { START, human, turn, world } from './world'
+import { V } from '../core/voice'
 
 const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
@@ -149,4 +150,56 @@ test('a 1-hour cache fires; a switch to a 5-minute cache cancels the scheduled f
   await $.turn.complete(turn('2'))
   await w.clock.advance(55 * MIN)
   expect(asks(w)).toBe(1)
+})
+
+test('a hot reload re-arms last light from the last turn', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(10 * MIN)
+  await $.session.start(START)          // the reload cancels the scheduled fire
+  await w.clock.advance(45 * MIN)
+  expect(asks(w)).toBe(1)
+})
+
+async function heldReturn($: any, w: ReturnType<typeof world>, answer: string) {
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(55 * MIN)
+  await $.tool.call(write)
+  await $.turn.complete(turn('ll'))
+  await w.clock.advance(70 * MIN)
+  w.askAnswer.value = answer
+}
+
+test('a rejected follow-up after a resume clear keeps the held message visible', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Resume from handover')
+  await $.prompt.submit(human('morning!'))
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  w.submitRefused.value = true
+  await w.clock.advance(500)
+  expect(w.notices.some(n => n.includes("Couldn't resume") && n.includes('morning!') && n.includes('/handovers/s1-1.md'))).toBe(true)
+})
+
+test('a rejected carry-on submit keeps the held message visible', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Carry on')
+  w.submitRefused.value = true
+  await $.prompt.submit(human('morning!')).catch(() => null)
+  await w.clock.settle()
+  expect(w.notices.some(n => n.includes("Couldn't resume") && n.includes('morning!'))).toBe(true)
+})
+
+test('the held prompt is dropped with a voice string', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Carry on')
+  const r = await $.prompt.submit(human('morning!'))
+  expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
 })
