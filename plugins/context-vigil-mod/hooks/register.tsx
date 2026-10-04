@@ -8,6 +8,7 @@ import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, injectText, instructionText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire, ttlFromLabel } from '../core/last-light'
 import { clearGate } from '../core/surfaces'
 import { formatHHMM } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
@@ -45,6 +46,8 @@ let clearParked = false
 let unattendedClear = false
 let lastWait: WaitReason | null = null
 let retryTimer: { cancel: () => void } | null = null
+let ttlMs = TTL_1H
+let lastLightTimer: { cancel: () => void } | null = null
 
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
@@ -124,6 +127,9 @@ function resetCaches() {
   clearParked = false
   unattendedClear = false
   lastWait = null
+  lastLightTimer?.cancel()
+  lastLightTimer = null
+  ttlMs = TTL_1H
 }
 
 async function bindSession($: EngineInterface) {
@@ -251,6 +257,45 @@ async function renameSession($: EngineInterface, name: string | undefined) {
   }
 }
 
+function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
+  lastLightTimer?.cancel()
+  lastLightTimer = null
+  if (!settings.lastLight) return
+  const at = fireAt(lastApiAt, ttlMs)
+  if (at === null || now >= lastApiAt + ttlMs) return   // no fire for a cache that is already cold
+  lastLightTimer = $.clock.after(Math.max(0, at - now), () => { void maybeFireLastLight($) })
+}
+
+async function maybeFireLastLight($: EngineInterface) {
+  lastLightTimer = null
+  const now = await nowMs($)
+  await observe($, { kind: 'agent-step', at: (await read($, activityA)).lastAgentAt ?? 0 })  // picks up a draft (spec §2)
+  const verdict = shouldFire({
+    enabled: settings.lastLight, mode: mode(await read($, activityA), now, settings),
+    contextPct: await read($, contextA), threshold: settings.lastLightAt,
+    pending: (await read($, pendingA)) !== null, latched: (await read($, latchA)) !== null,
+    armed: await read($, lastLightArmedA),
+  })
+  if (!verdict.fire) return
+  await update($, lastLightArmedA, () => false)
+  await log($, 'last_light.fired', { contextPct: await read($, contextA) })
+  await startHandover($, 'last_light', false)
+}
+
+async function askReturn($: EngineInterface, held: string) {
+  const choice = await $.ui.ask(V.lastLightAsk, [V.lastLightResume, V.lastLightCarryOn]).catch(() => V.lastLightCarryOn)
+  const resume = choice === V.lastLightResume
+  await log($, 'last_light.choice', { choice: resume ? 'resume' : 'carry_on' })
+  const pending = await read($, pendingA)
+  if (resume && pending) {
+    await savePending($, { ...pending, resume: false, followUp: held })
+    scheduleClear($, false)
+    return
+  }
+  await savePending($, null)
+  await $.prompt.submit({ text: held, asUser: true })
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
@@ -291,7 +336,8 @@ export const register: Register = on => {
     const follow = pending.followUp
     // /rename starts from its own timer, before the resume submit, and never blocks it.
     $.clock.after(0, () => { void renameSession($, pending.name) })
-    if (pending.resume || follow) submitSoon($, follow ?? resumeText(pending.path), 500)
+    if (follow) $.clock.after(500, () => { void $.prompt.submit({ text: follow, asUser: true }) })
+    else if (pending.resume) submitSoon($, resumeText(pending.path), 500)
     await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null })
     return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
   })
@@ -302,6 +348,16 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    const now = await nowMs($)
+    if (rearm(await read($, lastLightArmedA), e.origin.kind)) await update($, lastLightArmedA, () => true)
+    const pending = await read($, pendingA)
+    const lastApi = await read($, lastApiA)
+    if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null ? null : lastApi + ttlMs })) {
+      await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
+      const held = e.text
+      $.clock.after(0, () => { void askReturn($, held) })
+      return { drop: 'held by context-vigil-mod: last light asks first' }
+    }
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
     return next(e)
@@ -335,6 +391,7 @@ export const register: Register = on => {
     const now = await nowMs($)
     await observe($, { kind: 'agent-step', at: now })
     await update($, lastApiA, () => now)
+    scheduleLastLight($, now, now)
     const awaitingNow = await read($, awaitingA)
     if (awaitingNow?.started) {
       if (awaitingNow.attempts < 2) {
@@ -345,6 +402,17 @@ export const register: Register = on => {
         await notify($, V.handoverFailed)
         await log($, 'guard.wait', { reason: 'tool-not-called' })
       }
+    }
+    return next(e)
+  })
+
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const ttl = (e as unknown as { cache_ttl?: string }).cache_ttl
+    if (ttl) {
+      ttlMs = ttlFromLabel(ttl)
+      const lastApi = await read($, lastApiA)
+      if (lastApi === null) { lastLightTimer?.cancel(); lastLightTimer = null }
+      else scheduleLastLight($, lastApi, await nowMs($))
     }
     return next(e)
   })
