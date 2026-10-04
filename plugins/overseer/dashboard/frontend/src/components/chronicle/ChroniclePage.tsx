@@ -154,6 +154,9 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
   // Which per-day context series the shared panel draws; average is the more
   // typical picture, peak the worst case.
   const [ctxMetric, setCtxMetric] = useState<"avg" | "peak">("avg");
+  // Repo names on the cost-by-repo stack are hidden by default, so the page
+  // can be shared on screen without naming every repo you work in.
+  const [showRepoNames, setShowRepoNames] = useState(false);
   const [planFilter, setPlanFilter] = useState<string | null>(null);
   // Offered only across repos, and only when there is actually a split to
   // show — one plan is not a choice, it is a label.
@@ -418,12 +421,31 @@ export default function ChroniclePage({ summary, sessions, limits, loading, erro
                   : "What each day's calls would cost at API list prices."}
               </p>
               {showRepoStack && repoStack ? (
-                <StackedColumnChart
-                  points={repoStack.points}
-                  series={repoStack.series}
-                  format={formatUsd}
-                  title="API-equivalent cost per day, by repo"
-                />
+                <>
+                  <div className="chronicle__segment" role="group" aria-label="Repo names">
+                    <Button
+                      aria-pressed={!showRepoNames}
+                      onClick={() => setShowRepoNames(false)}
+                      className="chronicle__seg-btn"
+                    >
+                      Hide names
+                    </Button>
+                    <Button
+                      aria-pressed={showRepoNames}
+                      onClick={() => setShowRepoNames(true)}
+                      className="chronicle__seg-btn"
+                    >
+                      Show names
+                    </Button>
+                  </div>
+                  <StackedColumnChart
+                    points={repoStack.points}
+                    series={repoStack.series}
+                    format={formatUsd}
+                    title="API-equivalent cost per day, by repo"
+                    showNames={showRepoNames}
+                  />
+                </>
               ) : (
                 <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
               )}
