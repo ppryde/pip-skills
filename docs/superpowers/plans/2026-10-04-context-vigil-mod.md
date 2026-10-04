@@ -17,7 +17,7 @@
 - `$` appears ONLY in `hooks/register.tsx`. Helpers that take `$` are top-level `function` declarations in that same file (the validator rejects `$` passed anywhere else). `core/*.ts` import nothing from `claude-code` except types.
 - Shared types live in `types/index.d.ts`; core files `import type { … } from '../types'`. Imports are extensionless (`'../core/arming'`).
 - Files written only under `$CLAUDE_CONFIG_DIR/context-vigil-mod/` (`CLAUDE_CONFIG_DIR` read once via `$.env.get("CLAUDE_CONFIG_DIR")`, fallback `$HOME/.claude`). Never another account's directory.
-- Settings and cross-session flags in `$.store` (per account). Live session values in `$.state`.
+- Settings and cross-session flags in `$.store` (per account). Live session values in `$.state` — which every `/clear` WIPES (PROBES §9): nothing that must cross a clear may live only in `$.state`.
 - `$.command.run({ command: 'clear' })` and `$.prompt.submit(...)` are always started from a `$.clock.after(...)` timer, never awaited inside a hook the turn is waiting on.
 - Defaults (spec §6): nudge 35% (+5% steps), vigil bar On, auto mode Off, idle window 30 min, last light Off (threshold 25%), limits On (trigger 95%, windows `seven_day` + `spend_limit`), RC auto-clear unanswered (treated as No).
 - Working window: agent activity within the last **2 min**. RC countdown **30 s**; no RC clear within **2 min** of the last `bridge` prompt. Last-light lead **300 s**, TTL 1 h.
@@ -3454,6 +3454,24 @@ git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/t
 git commit -m "feat(context-vigil-mod): limit latch and configurable 7-day/spend early stop" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
+
+---
+
+### Task 14a: Survive the `$.state` wipe at `/clear` (probe §9, 2026-10-04)
+
+Probed live (PROBES §9): `$.state` is per session — after a `/clear` (mod-run or typed) every atom reads unset (version 0), already inside the new session's `classic.SessionStart`. Module variables survive (same process); `$.store` survives. So today the clear branch's `read($, pendingA)` is always null live: no inject, no rename, no resume — the core handover path. The world kept state across a clear, so the tests could not see it.
+
+**Files:**
+- Modify: `plugins/context-vigil-mod/hooks/register.tsx`, `tests/world.tsx`
+- Test: `tests/shell-handover.test.tsx`, `tests/shell-limits.test.tsx`, `tests/shell-last-light.test.tsx` (extend), and any test that fires a clear
+
+**Requirements:**
+1. **World fidelity first.** A `classic.SessionStart` with `source: 'clear'` wipes `w.state` (all keys, versions back to 0) BEFORE any plugin hook observes the event — exactly as live. (If the harness cannot put the world beneath-and-before the plugin, wipe in whatever helper the tests use to fire a clear, and make every clear in the tests go through it; say which in the report.) Run the suite: the existing clear tests must now FAIL (inject/rename/resume) — that is the RED.
+2. **Pending across the clear.** In the clear branch, take the pending handover from `$.store.get(pendingKey(<old session>))`, where the old session is the module variable `session` BEFORE it is rebound (it still holds the pre-clear id). Then delete that store key and continue as now (inject, rename with the old transcript, resume/follow-up). Do not rely on `pendingA` there.
+3. **Account-level limit state moves to `$.store`.** The latch (`latch`) and the early-stop fired marks (`fired`, capped at 20) live in `$.store` under those keys instead of `latchA` / `firedA` (`$.store` is per account — the latch is an account fact; a clear must not forget it nor re-fire an early stop for the same window). Keep a `$.state` mirror ONLY if something renders from it; otherwise drop the atoms.
+4. **Anything else read after a clear** that must carry over: audit every `read($, …A)` reachable from the clear branch and from timers that can span a clear (`scheduleResume`, last-light, retry/countdown timers). Each either (a) is correctly fresh after a clear, or (b) moves to a module variable / `$.store`. List the audit in the report as a table: atom → fresh-ok / moved-where.
+5. **Tests (GREEN):** a mod-run clear with a pending handover injects, renames (unnamed old session) and resumes, with state wiped; last light's Resume path survives the wipe; a latch set before a clear still blocks a clear/resume after it; an early stop that fired before a clear does not re-fire after it for the same `resetsAt`.
+- **Commit** `fix(context-vigil-mod): carry the handover and the limit latch across the $.state wipe at /clear` (trailers).
 
 ---
 
