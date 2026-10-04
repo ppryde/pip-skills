@@ -25,6 +25,7 @@ export type World = {
   titled: Set<string>                  // transcript paths holding a custom-title line
   grepFails: { value: boolean }        // makes the custom-title grep exit 2
   greps: string[][]                    // argv of every grep run
+  store: Map<string, unknown>          // $.store by key — per account, NOT wiped by a clear
 }
 
 export function world(on: On, opts: { now?: number; store?: Record<string, unknown>; files?: Record<string, string> } = {}): World {
@@ -36,9 +37,13 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     draft: { value: '' }, sessionId: { value: 's1' }, contextPct: { value: undefined },
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
-    titled: new Set(), grepFails: { value: false }, greps: [],
+    titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
   }
-  mock.store(on, opts.store ?? {})
+  // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
+  on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
+  on('store.set', (_$, e) => { w.store.set(e.key, e.value); return { value: undefined } })
+  on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
+  on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
   on('fs.read', (_$, e) => {
     const t = w.files.get(e.path)

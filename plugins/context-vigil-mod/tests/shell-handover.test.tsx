@@ -48,6 +48,19 @@ test('the handover crosses the $.state wipe: inject, rename, resume — and is s
   expect(again.additionalContext ?? []).toEqual([])           // the stored copy was deleted
 })
 
+test('the person present before a clear is still present after it: no armed handover', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('still here'))
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
+})
+
 test('/vhandoff does the same as /vho', async ($, on) => {
   const w = world(on)
   await $.session.start(START)

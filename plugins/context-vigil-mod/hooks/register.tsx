@@ -31,15 +31,20 @@ const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 
-// Account facts in $.store: the limit latch and the early stops already fired (capped at 20).
+// An account fact in $.store: the limit latch, shared by every session of the account.
 const LATCH_KEY = 'latch'
-const FIRED_KEY = 'fired'
 
 // Facts about the person and the install that a /clear must not forget: module variables
-// survive it (same process). A new session (bindSession) starts them fresh.
+// survive it (same process). A new session (bindSession) starts them fresh. The cost: a hot
+// reload resets them too, so after one an agent step can read 'auto' until the person types.
 let activity: Activity = EMPTY_ACTIVITY
 let lastLightArmed = false
 let standDown = false
+// Per process, never reset: each running session owes its own early stop before a hard limit,
+// and a clear (new session id) must not re-fire one for the same window. A reload may re-fire once.
+let firedEarlyStops: string[] = []
+// The limit resume waiting on its handover file; the tool call fills `path` when it is written.
+let limitResume: { path: string | null } | null = null
 
 // Module caches: rebuilt at session.start / after a hot reload.
 let root = '/nonexistent'
@@ -240,31 +245,38 @@ async function setLatch($: EngineInterface, l: Latch) {
   $.clock.after(Math.max(0, l.resetsAtMs - now) + 1000, () => { void checkLatch($, []) })
 }
 
+// The latch is account-wide: another session may lift it (delete the key) and drain only its
+// own work, so an absent latch drains this session's deferred handover too.
 async function checkLatch($: EngineInterface, limits: RateLimit[]) {
   const l = await readLatch($)
-  if (!latchCleared(l, await nowMs($), limits)) return
-  await $.store.delete(LATCH_KEY)
-  await log($, 'limit.cleared', { kind: l?.kind })
-  await notify($, V.limitCleared)
+  if (l) {
+    if (!latchCleared(l, await nowMs($), limits)) return
+    await $.store.delete(LATCH_KEY)
+    await log($, 'limit.cleared', { kind: l.kind })
+    await notify($, V.limitCleared)
+  }
   const deferred = await read($, deferredA)
   if (deferred) {
     await update($, deferredA, () => null)
     await startHandover($, deferred.reason, deferred.resume)
     return
   }
-  if (clearParked && (await read($, pendingA))) scheduleClear($, unattendedClear)
+  // Only a clear the latch parked: one parked for a cancelled countdown or a refusal stays put.
+  if (clearParked && lastWait === 'latched' && (await read($, pendingA))) scheduleClear($, unattendedClear)
 }
 
 // Waits in hops of at most an hour; never submits while latched (spec §5); drops the limit
-// handover once the resume is sent so a later /clear does not re-inject it.
-function scheduleResume($: EngineInterface, at: number) {
+// handover once the resume is sent so a later /clear does not re-inject it. The path comes from
+// `job`, so a clear that consumed the pending handover in between still names the file.
+function scheduleResume($: EngineInterface, at: number, job: { path: string | null } = { path: null }) {
+  limitResume = job
   $.clock.after(0, async () => {
     const wait = nextHop(await nowMs($), at)
-    if (wait > 0) { $.clock.after(wait, () => { scheduleResume($, at) }); return }
-    if (await readLatch($)) { $.clock.after(60_000, () => { scheduleResume($, at) }); return }
+    if (wait > 0) { $.clock.after(wait, () => { scheduleResume($, at, job) }); return }
+    if (await readLatch($)) { $.clock.after(60_000, () => { scheduleResume($, at, job) }); return }
     const pending = await read($, pendingA)
     try {
-      await $.prompt.submit({ text: limitResumeText(pending?.path ?? '(no file)') })
+      await $.prompt.submit({ text: limitResumeText(job.path ?? pending?.path ?? '(no file)') })
     } catch {
       await notify($, V.handoverFailed)
       await log($, 'guard.wait', { reason: 'submit-rejected' })
@@ -377,7 +389,8 @@ export const register: Register = on => {
     await $.command.register({ name: COMMANDS.setup, description: V.cmdSetup })
     await $.tool.register({ name: TOOL, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> })
     await checkInterlock($)
-    const stored = (await $.store.get(pendingKey(session))) as Pending | null | undefined
+    await checkLatch($, [])   // a latch another process left behind and never lifted
+    const stored =(await $.store.get(pendingKey(session))) as Pending | null | undefined
     if (stored && !(await read($, pendingA))) {
       await update($, pendingA, () => stored)
       await notify($, V.pendingOffer(stored.path))
@@ -507,10 +520,9 @@ export const register: Register = on => {
     const limits = e.rateLimits as RateLimit[]
     await setLatch($, latchFromMeasure(limits))
     await checkLatch($, limits)
-    const fired = ((await $.store.get(FIRED_KEY)) as string[] | undefined) ?? []
-    const limitDue = earlyStopDue(limits, settings, fired)
+    const limitDue = earlyStopDue(limits, settings, firedEarlyStops)
     if (limitDue && !standDown) {
-      await $.store.set(FIRED_KEY, [...fired, limitDue.key].slice(-20))
+      firedEarlyStops = [...firedEarlyStops, limitDue.key].slice(-20)
       await log($, 'limit.early_stop', { kind: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
       await notify($, V.earlyStop(limitDue.kind, limitDue.pct, formatHHMM(limitDue.resetsAtMs + RESUME_DELAY_MS)))
       await startHandover($, 'limit', false)
@@ -554,6 +566,7 @@ export const register: Register = on => {
     })
     await $.fs.write(path, markdown)
     await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
+    if (reason === 'limit' && limitResume) limitResume.path = path
     await log($, 'handover.written', { reason, bytes: markdown.length, path })
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
     if (reason === 'threshold' || reason === 'request') scheduleClear($, reason === 'threshold')

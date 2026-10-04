@@ -100,6 +100,59 @@ test('an early stop fired before a clear does not fire again after it for the sa
   expect(asks(w)).toBe(1)
 })
 
+test('a latch lifted by another session still drains this one: the deferred handover runs', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  expect(asks(w)).toBe(0)
+  expect(w.store.get('latch')).toBeDefined()
+  w.store.delete('latch')                                        // the other process lifted it
+  await $.session.measure(measure([]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+})
+
+test('with no latch, a measure does not retry a clear parked for another reason', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  await $.tool.call(write)
+  await w.clock.settle()
+  await $.session.measure(measure([]))
+  await w.clock.settle()
+  expect(w.notices.filter(n => n.startsWith('🧹 /clear was refused')).length).toBe(1)
+})
+
+test('a stale latch left in the store is lifted at session start', async ($, on) => {
+  const w = world(on, { now: 1_000_000 + 2 * HOUR, store: { latch: { kind: 'five_hour', resetsAtMs: 1_000_000 } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+})
+
+test('the limit resume names the handover file even after a clear consumed it', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  await $.tool.call(write)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(HOUR + 300_000)
+  const resume = w.submits.find(s => s.text.includes('limit has reset'))
+  expect(resume?.text).toContain('/cfg/context-vigil-mod/handovers/s1-1.md')
+  expect(resume?.text).not.toContain('(no file)')
+})
+
 test('a rejected limit resume is announced and logged, not swallowed', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   await $.session.start(START)
