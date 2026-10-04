@@ -30,3 +30,7 @@ Decision: last-light return question (Task 13) keeps `$.ui.ask` and awaits its l
 ## 7. Plugin prompt origin and { drop }
 Observed: human prompts reach hooks with origin `{ kind: 'composer' }`; `{ drop }` held the prompt yes; re-submit arrived yes (`held prompt re-sent "hello there"`, and the model answered it). The mod's own `$.prompt.submit` prompts (the probe_echo ask, the AskUserQuestion ask, the held re-send) never reached the mod's own `prompt.submit` hook — every logged origin is `composer`; the transcript shows them as "Prompt from the cvm-probe plugin".
 Decision: a mod never sees its own submitted prompts in `prompt.submit`, so nothing may rely on that (e.g. a countdown cancel keyed on our own plugin origin needs no guard — our resume prompt cannot cancel it). Other plugins' prompts were not probed; treat `kind: 'plugin'` from another plugin as agent activity as planned.
+
+## 8. Naming the session after a clear (owner request, added 2026-10-04)
+Observed: `sessionTitle` returned from `classic.SessionStart` (source `clear`) did NOT name the session (no `custom-title` in the new transcript). A mod-run `$.command.run({ command: 'rename', args })` right after the mod-run clear did: "Session renamed to: …", a `custom-title` + `agent-name` entry in the new transcript, the name in the prompt border; it resolves with `context` = a system-reminder "The user named this session …".
+Decision: rename via a mod-run `/rename` from a timer in the clear branch of `classic.SessionStart` (Task 11a/12).

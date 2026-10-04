@@ -195,7 +195,9 @@ the deciding origin.
 
 1. **Write.** The mod registers a tool, `vigil_handover`, via
    `$.tool.register`, with fields: `goal`, `state`, `decisions` (rulings and
-   why), `next_step`, `open_questions`, `failed_attempts`. It submits a short
+   why), `next_step`, `open_questions`, `failed_attempts`, and `session_name`
+   — the name the resuming session will carry (required; a few words saying
+   what that session will work on). It submits a short
    instruction prompt (`$.prompt.submit`, origin `plugin`) asking the model to
    call it. Typed, validated input replaces classic's CLI-and-file fill.
 2. **Save.** The shell adds the snapshot it already knows: cwd, branch, dirty
@@ -208,8 +210,15 @@ the deciding origin.
    the terminal prompt box is empty (`prompt.read`); the RC rules hold (§2);
    the limit latch is not set (§5). A failing guard waits and re-checks, and
    the person sees a notice for every wait.
-4. **Inject.** `classic.SessionStart` with `source: 'clear'` returns the
-   handover as `additionalContext`.
+4. **Inject and name.** `classic.SessionStart` with `source: 'clear'` returns
+   the handover as `additionalContext`, and starts
+   `$.command.run({ command: 'rename', args: <session_name> })` on a timer, so
+   the new session carries the handover's name (prompt border, `/resume`,
+   Remote Control). Every clear that consumes a pending handover is named —
+   auto, requested, last light. A rejected rename is logged and noticed, never
+   blocks the resume. (Verified live 2026-10-04: a mod-run `/rename` right
+   after a mod-run `/clear` writes the title; `sessionTitle` returned from
+   `classic.SessionStart` on a clear does NOT.)
 5. **Resume.** For auto mode and a requested handover, `$.prompt.submit` sends
    the resume prompt on a short timer after the clear, so work continues.
 

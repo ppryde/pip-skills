@@ -26,6 +26,7 @@
 - `$.state` atom refs must spell `plugin` and `key` as string literals (the validator requires literals), so the atoms repeat `'context-vigil-mod'`; T11's test pins that literal to `NAME`.
 - Plugin prompts carry no origin argument: `PromptSubmitArgs` omits `origin`, and the engine stamps every `$.prompt.submit` as `{ kind: 'plugin', name: 'context-vigil-mod' }`. Hooks read `e.origin.kind`.
 - `$.ui.ask` is not an op event: it runs as a `tool.call` of `AskUserQuestion` whose result is `{ questions, answers: { [question]: label } }` (claude-code-tools typings). The test world answers it there.
+- Every clear that consumes a pending handover renames the new session to the handover's `session_name` via a mod-run `/rename` (spec §3 step 4; Task 11a).
 - Stage only your own files: `git add <exact paths>`, never `git add -A` / `.`; tasks run one at a time in one worktree.
 - Tests never touch a real config dir: shell tests use the in-memory world in `tests/world.tsx` (`CLAUDE_CONFIG_DIR=/cfg`); the install-script test uses pytest `tmp_path`.
 - Gates for every task: `claude plugin validate plugins/context-vigil-mod`, `claude plugin test plugins/context-vigil-mod`, `bash plugins/context-vigil-mod/scripts/typecheck.sh` — all clean.
@@ -2384,7 +2385,36 @@ Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 
 ---
 
+### Task 11a: Next-session name in the handover (owner request, 2026-10-04)
+
+Spec §3 steps 1 and 4: the handover names the session that resumes it.
+
+**Files:**
+- Modify: `plugins/context-vigil-mod/types/index.d.ts` (`Fields` gains `session_name: string`; `Pending` gains `name: string`)
+- Modify: `plugins/context-vigil-mod/core/handover.ts`, `core/voice.ts`
+- Test: `tests/handover.test.ts`, `tests/voice.test.ts` (extend)
+
+**Interfaces:**
+- Produces: `FIELD_NAMES` ends with `'session_name'`; `session_name` is REQUIRED; `cleanName(raw: string): string`; `renderHandover` prints `**Next session:** <name>` on the line after the title; `V.renameFailed`.
+
+- [ ] **Step 1: Write the failing tests** (extend `tests/handover.test.ts`):
+  - `FIELD_NAMES` is `['goal', 'state', 'decisions', 'next_step', 'open_questions', 'failed_attempts', 'session_name']` and `INPUT_SCHEMA.required` is `['goal', 'state', 'next_step', 'session_name']`; `INPUT_SCHEMA.properties.session_name.description` mentions "name".
+  - `parseFields` with `session_name` missing or blank → `{ ok: false }`, error naming `session_name`.
+  - `cleanName('  vigil-mod:\n shell   flow ')` → `'vigil-mod: shell flow'` (whitespace and newlines collapse to single spaces, trimmed); a leading `/` is stripped (`'/clear x'` → `'clear x'`); longer than 60 code units → cut to 60 then trimmed; `parseFields` stores `cleanName`'d `session_name`, and a name that cleans to `''` is blank → error.
+  - `renderHandover` output's second line is `**Next session:** <name>`, and `session_name` does NOT also appear as a `##` section.
+  - Update every existing `good` / `fields` fixture to carry `session_name`.
+  - `tests/voice.test.ts`: `V.renameFailed` is emoji-led.
+- [ ] **Step 2: Run, see RED.**
+- [ ] **Step 3: Implement.** `DESCRIBE.session_name = 'A short name for the session that resumes this work: 2–6 words saying what it will do next (e.g. "vigil-mod: shell handover flow"). It becomes the new session\'s name after the clear.'`; `REQUIRED` gains `'session_name'`; `parseFields` applies `cleanName` to `session_name` before the blank check; `renderHandover` skips `session_name` in the section loop and pushes `` `**Next session:** ${f.session_name}` ``, `''` after the title. `instructionText` lists "session name" among the fields. `V.renameFailed = '🏷️ couldn\'t name the new session — carrying on'`.
+- [ ] **Step 4: Run all gates, GREEN.**
+- [ ] **Step 5: Commit** `feat(context-vigil-mod): handover names the resuming session` (with the two trailer lines).
+
+---
+
 ### Task 12: Shell — the handover flow and the vigil bar
+
+**Task 11a amendments (bind this task):** the `tool.call` handler saves `name: parsed.fields.session_name` in the `Pending` it builds; every `Pending` literal in tests carries `name`. In the `classic.SessionStart` `source: 'clear'` branch, when a pending handover is consumed, start the rename from a timer BEFORE the resume submit: `$.clock.after(0, () => { void renameSession($, pending.name) })`, where top-level `async function renameSession($, name)` runs `$.command.run({ command: 'rename', args: name })`, logs `'rename'` `{ name }`, and on rejection notifies `V.renameFailed` and logs `'guard.wait'` `{ reason: 'rename-rejected' }` — never blocking the resume. `tests/world.tsx` records `command.run` calls (already in `w.commands`); add tests: a consumed pending handover produces a `rename` command with the handover's name before the resume submit; a rename rejection still resumes. (`EventKind` gains `'rename'` if it is a closed union.)
+**Probe §7 amendment (bind this task):** a mod never sees its own `$.prompt.submit` in `prompt.submit`. Mark `awaiting.started = true` when the instruction prompt is submitted (in the submit timer once `$.prompt.submit` resolves), not in the `prompt.submit` hook; drop the `e.origin.kind === 'plugin' && e.text.includes(TOOL_FULL)` branch. Tests must not rely on the world echoing the mod's own submits through its `prompt.submit` hook.
 
 **Files:**
 - Modify: `plugins/context-vigil-mod/hooks/register.tsx`
