@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { FIELD_NAMES, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText } from '../core/handover'
+import { FIELD_NAMES, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -101,4 +101,18 @@ test('texts name the tool and the file', () => {
   expect(after).toContain('/cfg/x.md')
   expect(after).toContain('limit has reset')
   expect(after).not.toContain('injected above')
+})
+
+describe('reusable', () => {
+  const p = (reason: 'threshold' | 'request' | 'last_light' | 'limit') => ({ reason, createdAt: 1_000_000 })
+  test('no pending handover: nothing to reuse', () => expect(reusable(null, null)).toBe(false))
+  test('written for a clear, no turn since: reused', () => {
+    expect(reusable(p('request'), null)).toBe(true)
+    expect(reusable(p('threshold'), 1_000_000 + 30_000)).toBe(true)
+  })
+  test('a turn completed well after it was written: stale', () => expect(reusable(p('request'), 1_000_000 + 5 * 60_000)).toBe(false))
+  test('last light and limit handovers are never cleared into', () => {
+    expect(reusable(p('last_light'), null)).toBe(false)
+    expect(reusable(p('limit'), null)).toBe(false)
+  })
 })

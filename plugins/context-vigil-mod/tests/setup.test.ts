@@ -56,6 +56,10 @@ describe('nextCard', () => {
   test('isStep tells a known alias from a typo', () => {
     expect(isStep('limits')).toBe(true)
     expect(isStep('bogus')).toBe(false)
+    expect(isStep('toString')).toBe(false)
+    expect(isStep('constructor')).toBe(false)
+    expect(nextCard(DEFAULTS, [], 'toString')).toEqual([])
+    expect(nextCard(DEFAULTS, [], '__proto__')).toEqual([])
   })
 })
 

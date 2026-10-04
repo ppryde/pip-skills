@@ -1,4 +1,4 @@
-import type { Fields, PendingReason, Settings, Snapshot } from '../types'
+import type { Fields, Pending, PendingReason, Settings, Snapshot } from '../types'
 import { TOOL_FULL } from './name'
 
 export function nextThreshold(pct: number, s: Pick<Settings, 'nudgeAt' | 'step'>, lastNudged: number | null): number | null {
@@ -6,6 +6,17 @@ export function nextThreshold(pct: number, s: Pick<Settings, 'nudgeAt' | 'step'>
   const crossed = s.nudgeAt + Math.floor((pct - s.nudgeAt) / s.step) * s.step
   if (lastNudged !== null && crossed <= lastNudged) return null
   return crossed
+}
+
+// The turn that wrote a handover ends just after the tool call; a turn ending later than this
+// means the conversation moved on and the handover is stale.
+export const REUSE_SLACK_MS = 60_000
+
+// A pending handover is reused (cleared into) only when it was written for a clear and no
+// turn has completed since; anything else gets a fresh handover.
+export function reusable(p: Pick<Pending, 'reason' | 'createdAt'> | null, lastApiAt: number | null): boolean {
+  if (!p || (p.reason !== 'threshold' && p.reason !== 'request')) return false
+  return lastApiAt === null || lastApiAt <= p.createdAt + REUSE_SLACK_MS
 }
 
 export const FIELD_NAMES = ['goal', 'state', 'decisions', 'next_step', 'open_questions', 'failed_attempts', 'session_name'] as const

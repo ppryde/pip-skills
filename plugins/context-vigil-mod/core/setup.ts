@@ -116,11 +116,11 @@ const PARENT: Partial<Record<StepId, StepId>> = {
 }
 
 export function isStep(alias: string): boolean {
-  return alias in ALIASES
+  return Object.hasOwn(ALIASES, alias)
 }
 
 export function nextCard(s: Settings, asked: StepId[], only?: string): StepId[] {
-  const pool = only === undefined ? FLOW : (ALIASES[only] ?? [])
+  const pool = only === undefined ? FLOW : isStep(only) ? (ALIASES[only] ?? []) : []
   const explicit = only !== undefined
   const card: StepId[] = []
   for (const id of pool) {
