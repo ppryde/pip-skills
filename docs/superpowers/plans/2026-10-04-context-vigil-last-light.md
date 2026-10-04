@@ -2233,3 +2233,312 @@ git commit -m "docs(context-vigil): last light, notice, vigil bar, card install;
 - **Spec coverage:** §1 gates 1–8 → Tasks 2, 3, 7; firing/locks → 6, 7; prepared lifecycle (/clear loads, human prompt discards, quit keeps) → 5, 6 (the /clear path already loads any handoff via `consume_handoff`; quit-and-offer is the existing SessionStart path); setup/status → 10; §2 notice + safety rules + next-prompt context → 8 (rules 1–6 each tested); §3 bar incl. origin rule and survey yield → 11; install edit/uninstall → 10; §3a safety net → 3, 4 (last light's use in 7); §3b cards → 9, 10, 12; §4 strings → 1, 9; live verification → 12.
 - **Placeholders:** the mod test bodies (Task 11 Step 2) name the assertions but defer exact kit call names to this build's typings — deliberate, with an explicit "not done while a body is a comment" rule.
 - **Type consistency:** `last_light.tick(payload, now)`, `pane.pane_safe(target)`, `state.write_prepared/discard_prepared/is_prepared`, `messages.system_message`, record keys `last_light_armed`/`last_noticed_pct`, `cards.install_cards(mods)`/`last_light_card()` are used with the same names throughout.
+
+---
+
+## Addendum tasks (spec §5) — run after Task 12
+
+### Task 13: Census parity — `limits` in the store and `census read`
+
+**Files:**
+- Modify: `skills/context-vigil/scripts/context_vigil/census.py`, `skills/context-vigil/scripts/context_vigil/cli.py`
+- Test: `tests/context_vigil_suite/test_census_parity.py` (new)
+- Source to port (read it, port the logic, do not import it): `plugins/census/scripts/store.py` — `_live_limits`, `_window_is_fresher`, `_hoist_limits`, `limits`, `_with_meta`, `latest_for_worktree`, `for_session`, `read_all`; its tests `tests/census/test_limits_freshness.py` and `tests/census/test_read.py` are the behavioural reference.
+
+**Interfaces:**
+- Produces: store top-level `"limits"` (None until a payload carries `rate_limits`); `census.limits(now=None) -> Optional[dict]`; `census.read_all() -> dict`; `census.for_session_read(sid, now=None) -> Optional[dict]` and `census.latest_for_worktree_read(cwd, now=None) -> Optional[dict]` returning the census plugin's read shapes (entry + `limits` + its staleness meta — match `_with_meta`). Keep context-vigil's existing `for_session(sid)` and other internal readers unchanged (they have callers). CLI: `context-vigil census read [--worktree CWD | --session ID | --limits]` printing `json.dumps(out if out is not None else {})`.
+
+- [ ] **Step 1: Write the failing tests** — a contract test that feeds the same payload sequence (two sessions; rate-limit windows rising, a fresher window, an expired `resets_at`) into BOTH stores and compares outputs:
+
+```python
+# tests/context_vigil_suite/test_census_parity.py
+"""context-vigil's store answers `read` exactly as the census plugin does."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from context_vigil import census
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+def plugin_store(iso: Path, monkeypatch: pytest.MonkeyPatch):
+    """The census plugin's store module, pinned into tmp_path by CLAUDE_CONFIG_DIR."""
+    scripts = REPO / "plugins" / "census" / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    spec = importlib.util.spec_from_file_location("census_plugin_store", scripts / "store.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+NOW = 1_800_000_000.0
+
+
+def _payload(sid: str, cwd: str, five: float, resets: float) -> str:
+    return json.dumps({"session_id": sid, "workspace": {"current_dir": cwd},
+                       "context_window": {"used_percentage": 30},
+                       "rate_limits": {"five_hour": {"used_percentage": five,
+                                                     "resets_at": resets}}})
+
+
+SEQUENCE = [("s1", "/wt/a", 10, NOW + 3600), ("s2", "/wt/b", 25, NOW + 3600),
+            ("s1", "/wt/a", 20, NOW + 3600), ("s2", "/wt/b", 5, NOW + 7200)]
+
+
+def test_limits_match_the_census_plugin(plugin_store) -> None:
+    for sid, cwd, five, resets in SEQUENCE:
+        census.ingest(_payload(sid, cwd, five, resets), now=NOW)
+        plugin_store.ingest(_payload(sid, cwd, five, resets), now=NOW)
+    assert census.limits(now=NOW + 10) == plugin_store.limits(now=NOW + 10)
+
+
+def test_expired_window_is_dropped_on_read(plugin_store) -> None:
+    census.ingest(_payload("s1", "/wt/a", 50, NOW + 60), now=NOW)
+    assert census.limits(now=NOW + 120) in (None, {})
+
+
+def test_cli_census_read_shapes(run_cli) -> None:
+    census.ingest(_payload("s1", "/wt/a", 10, 9_999_999_999), now=None)
+    assert "five_hour" in json.loads(run_cli("census", "read", "--limits").stdout)
+    assert json.loads(run_cli("census", "read", "--session", "s1").stdout)
+    assert json.loads(run_cli("census", "read", "--session", "nope").stdout) == {}
+```
+
+Extend with one test per `read` mode comparing `context-vigil census read --session/--worktree` JSON against the plugin's `for_session`/`latest_for_worktree` for the same store sequence (ignoring context-vigil-only keys such as `carried`). If the plugin's `ingest` signature differs (check `store.ingest`), adapt the fixture call, not the assertion.
+
+- [ ] **Step 2: Run to verify failure** — `PYTHONPATH=skills/context-vigil/scripts .venv/bin/python -m pytest -q tests/context_vigil_suite/test_census_parity.py` → FAIL (`census.limits` missing / `invalid choice: 'census'`).
+
+- [ ] **Step 3: Implement** — port the functions named above into `context_vigil/census.py` (keep its lock, paths and atomic write); call `_hoist_limits(store, payload, now)` inside `merge`'s caller under the existing lock; make `_load` default `limits` to None for older stores. Add the CLI:
+
+```python
+    cp_ = sub.add_parser("census", help="read the status-line store (census-compatible)")
+    csub_ = cp_.add_subparsers(dest="census_action", required=True)
+    cread = csub_.add_parser("read", help="print store contents as JSON")
+    group = cread.add_mutually_exclusive_group()
+    group.add_argument("--worktree")
+    group.add_argument("--session")
+    group.add_argument("--limits", action="store_true")
+    cread.set_defaults(func=_cmd_census_read)
+```
+```python
+def _cmd_census_read(args: argparse.Namespace) -> int:
+    if args.limits:
+        out: object = census.limits()
+    elif args.session:
+        out = census.for_session_read(args.session)
+    elif args.worktree:
+        out = census.latest_for_worktree_read(args.worktree)
+    else:
+        out = census.read_all()
+    print(json.dumps(out if out is not None else {}))
+    return 0
+```
+
+- [ ] **Step 4: Run** the new test file plus `test_census_*.py` → PASS. **Step 5: Commit** `feat(context-vigil): census-compatible limits and read`.
+
+---
+
+### Task 14: Activation — everywhere by default, `on`/`off` per repo
+
+**Files:**
+- Modify: `config.py`, `hooks.py` (`nudge`, `_notice`), `last_light.py` (`tick`), `cli.py` (new `on`/`off`, `status`)
+- Test: `tests/context_vigil_suite/test_activation.py` (new), `test_config.py`
+
+**Interfaces:**
+- Produces: config keys `activation` (global only; `everywhere` default | `opt-in`; env `CONTEXT_VIGIL_ACTIVATION`) and `watch` (worktree layer only; `on` | `off`; no default — absent means "follow activation"); `config.watched(cwd) -> bool`; `config.watch_reason(cwd) -> str` (`"this repo: on"`, `"this repo: off"`, `"everywhere"`, `"opt-in (not turned on here)"`); CLI `context-vigil on` / `context-vigil off` printing `🕯️ watching this repo` / `💤 not watching this repo`.
+
+- [ ] **Step 1: Failing tests**
+
+```python
+# tests/context_vigil_suite/test_activation.py
+from __future__ import annotations
+
+from pathlib import Path
+
+from context_vigil import config, hooks, last_light
+
+from .test_context_window import _ingest
+
+
+def test_everywhere_by_default(repo: Path) -> None:
+    assert config.watched(repo) is True
+
+
+def test_off_here_wins_over_everywhere(run_cli, repo: Path) -> None:
+    assert run_cli("off", cwd=repo).stdout.strip() == "💤 not watching this repo"
+    assert config.watched(repo) is False
+    assert run_cli("on", cwd=repo).stdout.strip() == "🕯️ watching this repo"
+    assert config.watched(repo) is True
+
+
+def test_opt_in_needs_on(repo: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_ACTIVATION", "opt-in")
+    assert config.watched(repo) is False
+    config.set_value(repo, "watch", "on", worktree=True)
+    assert config.watched(repo) is True
+
+
+def test_unwatched_repo_gets_no_nudge_or_notice(repo: Path) -> None:
+    config.set_value(repo, "watch", "off", worktree=True)
+    _ingest(repo, "s1", 80, size=200000, model="claude-haiku-4-5")
+    payload = {"cwd": str(repo), "session_id": "s1", "hook_event_name": "UserPromptSubmit",
+               "prompt": "go"}
+    assert hooks.nudge(payload) is None
+    assert hooks.stop({**payload, "hook_event_name": "Stop"}) is None
+
+
+def test_unwatched_repo_has_no_last_light(repo: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_LAST_LIGHT", "on")
+    config.set_value(repo, "watch", "off", worktree=True)
+    payload = {"session_id": "s1", "cwd": str(repo), "workspace": {"current_dir": str(repo)},
+               "context_window": {"used_percentage": 60},
+               "prompt_cache": {"ttl": "1h", "warm": True, "expires_at": 1_800_000_200}}
+    assert last_light.tick(payload, now=1_800_000_000) == "unwatched"
+
+
+def test_activation_is_global_and_watch_is_worktree_only(repo: Path) -> None:
+    import pytest
+    with pytest.raises(config.ConfigError):
+        config.set_value(repo, "activation", "opt-in", worktree=True)
+    with pytest.raises(config.ConfigError):
+        config.set_value(repo, "watch", "off", worktree=False)
+```
+
+- [ ] **Step 2: Run → FAIL.**
+- [ ] **Step 3: Implement.** `config.py`: add `"activation": "everywhere"` to `DEFAULTS` (+ env `CONTEXT_VIGIL_ACTIVATION`, `GLOBAL_ONLY`); handle `watch` OUTSIDE `DEFAULTS` as a worktree-only key: `WORKTREE_ONLY = frozenset({"watch"})`; `coerce("watch", raw)` accepts on/off words (reuse `_TRUE`/`_FALSE`) and returns `"on"`/`"off"`; `set_value` refuses `watch` without `worktree=True` and `activation` with it; `watched(cwd)` reads the worktree file directly (`_read(paths.worktree_config_path(cwd)).get("watch")`, validated) and falls back to `activation`. Make `config get watch` work (resolve it separately; keep `KEYS` = `DEFAULTS` keys so existing enumerations don't change). `hooks.nudge` and `hooks._notice`: return None when `not config.watched(cwd)` (put the check before any record write; human-prompt arming in `nudge` still runs — arming is harmless and keeps last light consistent when the repo is turned back on). `last_light.tick`: after the `off` check, `if not config.watched(cwd): return "unwatched"`. CLI `on`/`off` subcommands call `config.set_value(cwd, "watch", ..., worktree=True)`. `status` adds `watching: yes|no ({config.watch_reason(cwd)})`.
+- [ ] **Step 4: Run** `test_activation.py test_config.py test_hooks.py test_notice.py test_last_light.py test_cli.py` → PASS. **Step 5: Commit** `feat(context-vigil): watch everywhere by default, opt a repo out with off`.
+
+---
+
+### Task 15: Free-form handovers — fill the blanks, never refuse
+
+**Files:**
+- Modify: `skills/context-vigil/scripts/context_vigil/handover.py` (`validate` → `complete`), `cli.py` (`_cmd_handover`: `--file -`, print filled line), `templates/handover.md` (comment noting free form is fine)
+- Test: `tests/context_vigil_suite/test_handover.py`, `test_cli.py`
+
+**Interfaces:**
+- Produces: `handover.complete(notes: str) -> Tuple[str, List[str]]` — the completed notes and the names of sections it filled or annotated (subset of `["Notes", "Failed Attempts", "Next Step"]`); constants `FILLED_FAILED = "None recorded."`, `FILLED_NEXT = "Not stated — ask the user what to do next before acting."`, `SEVERAL_STEPS = "(Several steps were listed — confirm with the user which comes first.)"`. `assemble(...)` calls `complete` instead of `validate` and never raises `HandoverError` for missing/empty/several sections (other refusals — size cap, inline rules — stay). `handover --file -` reads stdin. The CLI prints `filled: <names>` on its own line after the saved line when the list is non-empty.
+
+- [ ] **Step 1: Failing tests**
+
+```python
+# append to tests/context_vigil_suite/test_handover.py
+from context_vigil import handover as ho
+
+
+def test_free_text_is_kept_and_blanks_filled() -> None:
+    text, filled = ho.complete("Was refactoring the parser; tests half green.")
+    sections = ho.parse_sections(text)
+    assert "Was refactoring the parser" in sections["Notes"]
+    assert sections["Failed Attempts"] == ho.FILLED_FAILED
+    assert sections["Next Step"] == ho.FILLED_NEXT
+    assert filled == ["Notes", "Failed Attempts", "Next Step"]
+
+
+def test_complete_notes_pass_through_untouched() -> None:
+    notes = "## Goal\ng\n## Failed Attempts\nNone\n## Next Step\nrun the tests\n"
+    text, filled = ho.complete(notes)
+    assert filled == [] and ho.parse_sections(text)["Next Step"] == "run the tests"
+
+
+def test_several_next_steps_are_kept_and_flagged() -> None:
+    notes = "## Failed Attempts\nNone\n## Next Step\n- a\n- b\n"
+    text, filled = ho.complete(notes)
+    step = ho.parse_sections(text)["Next Step"]
+    assert step.startswith(ho.SEVERAL_STEPS) and "- a" in step and "- b" in step
+    assert filled == ["Next Step"]
+
+
+def test_placeholder_bodies_count_as_empty() -> None:
+    template = ho.template_path().read_text(encoding="utf-8")
+    _, filled = ho.complete(template)
+    assert "Failed Attempts" in filled and "Next Step" in filled
+```
+
+```python
+# append to tests/context_vigil_suite/test_cli.py
+def test_handover_accepts_free_text_from_stdin(run_cli, repo) -> None:
+    r = run_cli("handover", "--file", "-", "--no-snapshot", stdin="just some notes", cwd=repo)
+    assert r.returncode == 0, r.stderr
+    assert "filled: Notes, Failed Attempts, Next Step" in r.stdout
+```
+
+Update the existing `test_handover.py`/`test_cli.py` tests that asserted a refusal for missing/empty/several sections: they now assert the filled result instead (search for `HandoverError` and "missing or empty").
+
+- [ ] **Step 2: Run → FAIL.**
+- [ ] **Step 3: Implement** `complete` in `handover.py` using the existing `parse_sections`, `_HEADING`, `_PLACEHOLDER`, `_ITEM` helpers: collect text before the first recognised heading into `Notes` (prepend `## Notes\n<text>\n` to the remainder); for each required section absent or matching `_PLACEHOLDER`, replace or append the section with the filled body; for a multi-action Next Step, prefix `SEVERAL_STEPS + "\n"`. Keep `validate` deleted (or as a thin wrapper that never raises — remove it if nothing else calls it). In `_cmd_handover`, `notes = sys.stdin.read() if args.file == "-" else <existing read>`; skip `_tidy_notes` for `-`; after the saved/prepared line print `"filled: " + ", ".join(filled)` when non-empty (thread `filled` out of `assemble` by returning it alongside the document, or by calling `complete` in the CLI before `assemble` and passing the completed notes in — pick one, keep `assemble`'s other callers working).
+- [ ] **Step 4: Run** `test_handover.py test_cli.py test_last_light.py` → PASS. **Step 5: Commit** `feat(context-vigil): free-form handovers — fill the blanks, never refuse`.
+
+---
+
+### Task 16: `/ho` and `/handoff` user commands
+
+**Files:**
+- Create: `skills/context-vigil/templates/command-handover.md`
+- Modify: `install.py` (`plan_install`, `plan_uninstall`), `paths.py` (`commands_dir()`)
+- Test: `tests/context_vigil_suite/test_install.py`
+
+**Interfaces:**
+- Produces: `paths.commands_dir() -> Path` (= `config_dir() / "commands"`); `install.COMMAND_NAMES = ("ho", "handoff")`; `install.COMMAND_MARKER = "<!-- context-vigil managed command: do not edit -->"`; install plans a `Change` creating each `<commands_dir>/<name>.md` (from the template) unless a file of that name exists without the marker — then a `plan.manual` line `"/<name> not added: <path> exists and is not context-vigil's — rename it to use /<name>"`; uninstall removes only marker-bearing files; record key `"commands": [paths]`.
+
+Template (`templates/command-handover.md`):
+
+```markdown
+---
+description: Hand over now — context-vigil saves a handover and resets context (/clear), then resumes from it.
+argument-hint: [anything the next session must know]
+---
+<!-- context-vigil managed command: do not edit -->
+The user asked you to hand over now.
+
+1. If a subagent or background command you started has not reported back, wait for it (or stop it) first.
+2. Run `"{launcher}" notes-path`, fill in the file it prints (free form is fine; include: $ARGUMENTS), then run `"{launcher}" handover --file <that path>`.
+3. Tell the user what it printed.
+```
+
+(`{launcher}` is filled with `paths.launcher_path()` at install time.)
+
+- [ ] **Step 1: Failing tests**
+
+```python
+def test_install_adds_ho_and_handoff(cfg, run_cli) -> None:
+    r = run_cli("install", "--yes")
+    assert r.returncode == 0, r.stderr
+    for name in ("ho", "handoff"):
+        text = (cfg / "commands" / f"{name}.md").read_text()
+        assert inst.COMMAND_MARKER in text and "handover --file" in text
+        assert "{launcher}" not in text
+
+
+def test_install_leaves_a_foreign_command_alone(cfg, run_cli) -> None:
+    (cfg / "commands").mkdir()
+    (cfg / "commands" / "ho.md").write_text("mine\n")
+    r = run_cli("install", "--yes")
+    assert (cfg / "commands" / "ho.md").read_text() == "mine\n"
+    assert "/ho not added" in r.stdout
+    assert inst.COMMAND_MARKER in (cfg / "commands" / "handoff.md").read_text()
+
+
+def test_uninstall_removes_only_ours(cfg, run_cli) -> None:
+    (cfg / "commands").mkdir()
+    (cfg / "commands" / "ho.md").write_text("mine\n")
+    run_cli("install", "--yes")
+    run_cli("uninstall", "--yes")
+    assert (cfg / "commands" / "ho.md").read_text() == "mine\n"
+    assert not (cfg / "commands" / "handoff.md").exists()
+
+
+def test_dry_run_lists_the_commands(run_cli) -> None:
+    out = run_cli("install").stdout
+    assert "/ho" in out and "/handoff" in out
+```
+
+- [ ] **Step 2: Run → FAIL.** **Step 3: Implement** (a `Change(path, before="", after=text, summary=[f"{path}: adds the /{name} command"])` per command; deletion in uninstall as a `Change` whose `after == ""` must unlink — extend `apply` so an empty `after` for a path inside `commands_dir()` unlinks it, as it already does for settings.json). **Step 4: Run** `test_install.py test_setup_truth.py test_secrets.py` → PASS. **Step 5: Commit** `feat(context-vigil): /ho and /handoff commands`.
+
+After Task 16, Task 12's docs step is re-touched: add `on`/`off`, `census read`, free-form notes and `/ho` `/handoff` to SKILL.md and README (a short follow-up commit in Task 16, `docs(context-vigil): activation, census read, free-form notes, /ho`).
