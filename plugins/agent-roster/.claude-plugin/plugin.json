@@ -1,0 +1,11 @@
+{
+  "name": "agent-roster",
+  "version": "0.1.0",
+  "description": "A live /agents pane listing every Claude session on this machine, across accounts: tmux name, repo and worktree, branch, status, last active and last prompt. A mod: drawn by Claude Code itself, so it shows over Remote Control too.",
+  "author": {
+    "name": "Pip",
+    "url": "https://github.com/ppryde/pip-skills"
+  },
+  "keywords": ["sessions", "tmux", "agents", "pane", "remote-control", "mod"],
+  "types": "./types/index.d.ts"
+}
