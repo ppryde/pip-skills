@@ -164,11 +164,28 @@ test('RC countdown: the band counts down each second', async ($, on) => {
   await ui.unmount()
 })
 
-test('RC countdown: a hot reload mid-countdown still clears, and the band never sticks at 0 s', async ($, on) => {
+const OFFER = '📜 A handover is waiting (/cfg/context-vigil-mod/handovers/s1-1.md) — /clear to resume from it'
+
+test('RC countdown: a hot reload mid-countdown never clears; the handover is offered instead', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
   await countdownSession($, w)
+  w.notices.length = 0
   await $.session.start(START)          // the reload: same session, $.state kept, timers gone
   await w.clock.advance(60_000)
-  expect(w.commands).toContain('clear')
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices).toContain(OFFER)
   expect(w.state.get('context-vigil-mod.countdownEndsAt')).toBeNull()
 })
+
+for (const rcAutoClear of ['no', 'unanswered'] as const) {
+  test(`RC ${rcAutoClear}: a hot reload never runs the parked unattended clear; it offers the handover`, async ($, on) => {
+    const w = world(on, { store: { settings: { auto: true, rcAutoClear } } })
+    await countdownSession($, w)
+    expect(w.commands).not.toContain('clear')
+    w.notices.length = 0
+    await $.session.start(START)
+    await w.clock.advance(60_000)
+    expect(w.commands).not.toContain('clear')
+    expect(w.notices).toContain(OFFER)
+  })
+}

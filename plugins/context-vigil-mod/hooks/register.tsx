@@ -459,9 +459,11 @@ export const register: Register = on => {
       await update($, pendingA, () => stored)
       await notify($, V.pendingOffer(stored.path))
     } else if (live) {
-      // A hot reload: $.state kept the pending handover but its clear's timers are gone.
+      // A hot reload: $.state kept the pending handover but its clear's timers are gone. The
+      // reload also forgot the phone, so only a clear the person asked for is picked back up;
+      // an unattended one is offered, never run past an RC answer or a countdown it can't see.
       await setCountdown($, null)
-      if (reusable(live, await read($, lastApiA))) scheduleClear($, live.reason === 'threshold')
+      if (live.reason === 'request' && reusable(live, await read($, lastApiA))) scheduleClear($, false)
       else await notify($, V.pendingOffer(live.path))
     }
     // A reload counts as the person being here (bindSession): it re-arms last light too, and
