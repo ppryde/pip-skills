@@ -12,6 +12,8 @@ def test_defaults(repo: Path) -> None:
         "context.threshold": 35, "context.window": 200000, "context.mode": "local",
         "nudge.repeat_step": 5, "handover.max_tokens": 8000,
         "handover.cooldown_seconds": 60, "handover.archive_keep": 20,
+        "last_light.enabled": False, "last_light.threshold": 25,
+        "last_light.lead_seconds": 300,
     }
     assert config.resolve(repo)["context.threshold"] == (35, "default")
 
@@ -109,3 +111,46 @@ def test_numeric_setting_validated_and_env(
     if fallback_env is not None:
         monkeypatch.setenv(env_name, fallback_env[0])
         assert config.resolve(repo)[key] == fallback_env[1]
+
+
+def test_last_light_defaults(repo: Path) -> None:
+    assert config.last_light_enabled(repo) is False
+    assert config.last_light_threshold(repo) == 25
+    assert config.last_light_lead_seconds(repo) == 300
+
+
+@pytest.mark.parametrize("raw,expected", [("on", True), ("true", True), ("1", True),
+                                          ("yes", True), ("off", False), ("false", False),
+                                          ("0", False), ("no", False)])
+def test_last_light_enabled_coerces_words(repo: Path, raw: str, expected: bool) -> None:
+    config.set_value(repo, "last_light.enabled", raw)
+    assert config.last_light_enabled(repo) is expected
+
+
+def test_last_light_keys_are_global_only(repo: Path) -> None:
+    with pytest.raises(config.ConfigError, match="global"):
+        config.set_value(repo, "last_light.enabled", "on", worktree=True)
+
+
+def test_worktree_layer_is_ignored_for_global_only_keys(repo: Path) -> None:
+    path = paths.worktree_config_path(repo)
+    paths.ensure_dir(path.parent)
+    paths.write_private(path, json.dumps({"last_light.threshold": 60}))
+    assert config.last_light_threshold(repo) == 25
+
+
+@pytest.mark.parametrize("key,bad", [("last_light.threshold", "0"),
+                                     ("last_light.threshold", "96"),
+                                     ("last_light.lead_seconds", "0"),
+                                     ("last_light.lead_seconds", "3601"),
+                                     ("last_light.enabled", "maybe")])
+def test_last_light_ranges(repo: Path, key: str, bad: str) -> None:
+    with pytest.raises(config.ConfigError):
+        config.set_value(repo, key, bad)
+
+
+def test_env_overrides_last_light(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONTEXT_VIGIL_LAST_LIGHT", "on")
+    monkeypatch.setenv("CONTEXT_VIGIL_LAST_LIGHT_LEAD_SECONDS", "3595")
+    assert config.last_light_enabled(repo) is True
+    assert config.last_light_lead_seconds(repo) == 3595

@@ -21,6 +21,9 @@ DEFAULTS: Dict[str, object] = {
     "handover.max_tokens": 8000,
     "handover.cooldown_seconds": 60,
     "handover.archive_keep": 20,
+    "last_light.enabled": False,
+    "last_light.threshold": 25,
+    "last_light.lead_seconds": 300,
 }
 KEYS = tuple(DEFAULTS)
 ENV_VARS: Dict[str, str] = {
@@ -31,8 +34,15 @@ ENV_VARS: Dict[str, str] = {
     "handover.max_tokens": "CONTEXT_VIGIL_HANDOVER_MAX_TOKENS",
     "handover.cooldown_seconds": "CONTEXT_VIGIL_COOLDOWN_SECONDS",
     "handover.archive_keep": "CONTEXT_VIGIL_ARCHIVE_KEEP",
+    "last_light.enabled": "CONTEXT_VIGIL_LAST_LIGHT",
+    "last_light.threshold": "CONTEXT_VIGIL_LAST_LIGHT_THRESHOLD",
+    "last_light.lead_seconds": "CONTEXT_VIGIL_LAST_LIGHT_LEAD_SECONDS",
 }
 _MODES = ("local", "remote")
+GLOBAL_ONLY = frozenset({"last_light.enabled", "last_light.threshold",
+                         "last_light.lead_seconds"})
+_TRUE = ("true", "on", "yes", "1")
+_FALSE = ("false", "off", "no", "0")
 
 
 class ConfigError(ValueError):
@@ -46,6 +56,15 @@ def coerce(key: str, raw: object) -> object:
         if raw not in _MODES:
             raise ConfigError("context.mode must be local or remote")
         return raw
+    if key == "last_light.enabled":
+        if isinstance(raw, bool):
+            return raw
+        word = str(raw).strip().lower()
+        if word in _TRUE:
+            return True
+        if word in _FALSE:
+            return False
+        raise ConfigError("last_light.enabled must be on or off")
     try:
         number = int(str(raw))
     except ValueError as exc:
@@ -62,6 +81,10 @@ def coerce(key: str, raw: object) -> object:
         raise ConfigError("handover.cooldown_seconds must be a whole number 0–3600")
     if key == "handover.archive_keep" and not 0 <= number <= 1000:
         raise ConfigError("handover.archive_keep must be a whole number 0–1000")
+    if key == "last_light.threshold" and not 1 <= number <= 95:
+        raise ConfigError("last_light.threshold must be a whole number 1–95")
+    if key == "last_light.lead_seconds" and not 1 <= number <= 3600:
+        raise ConfigError("last_light.lead_seconds must be a whole number 1–3600")
     return number
 
 
@@ -94,6 +117,8 @@ def resolve(cwd: Path) -> Dict[str, Tuple[object, str]]:
             chosen = (value, "env")
         else:
             for layer, data in layers:
+                if layer == "worktree" and key in GLOBAL_ONLY:
+                    continue
                 if key in data:
                     ok, value = _valid(key, data[key])
                     if ok:
@@ -108,6 +133,8 @@ def load(cwd: Path) -> Dict[str, object]:
 
 
 def set_value(cwd: Path, key: str, raw: str, worktree: bool = False) -> object:
+    if worktree and key in GLOBAL_ONLY:
+        raise ConfigError(f"{key} is global only — set it without --worktree")
     value = coerce(key, raw)
     path = paths.worktree_config_path(cwd) if worktree else paths.global_config_path()
     data = _read(path)
@@ -142,3 +169,15 @@ def cooldown_seconds(cwd: Path) -> int:
 
 def archive_keep(cwd: Path) -> int:
     return int(str(load(cwd)["handover.archive_keep"]))
+
+
+def last_light_enabled(cwd: Path) -> bool:
+    return load(cwd)["last_light.enabled"] is True
+
+
+def last_light_threshold(cwd: Path) -> int:
+    return int(str(load(cwd)["last_light.threshold"]))
+
+
+def last_light_lead_seconds(cwd: Path) -> int:
+    return int(str(load(cwd)["last_light.lead_seconds"]))
