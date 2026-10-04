@@ -32,12 +32,14 @@ test('the pane draws repo tabs with their marks, and a tab narrows the list', as
   on('fs.exists', () => ({ value: false }))
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
   on('ui.status', () => ({ value: undefined }))
+  // 2.1.289's typings make this hook's `value` `undefined`, though the op
+  // answers a ProcessRunResult and the engine takes this one: cast past it.
   on('process.run', ($, e) => ({
     value: {
       exitCode: e.argv[0] === 'git' ? 1 : 0,
       stdout: e.argv[0] === 'ps' ? '1\n2\n3\n' : '',
       stderr: '',
-    },
+    } as never,
   }))
 
   await $.command.run({
