@@ -19,6 +19,7 @@ from context_vigil import (
     hooks,
     install,
     launcher,
+    messages,
     paths,
     session,
     state,
@@ -60,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     hp.add_argument("--inline", action="append", default=[],
                     help="embed a file (remote mode only; secret-bearing files are refused)")
     hp.add_argument("--no-snapshot", action="store_true")
+    hp.add_argument("--prepared", action="store_true",
+                    help="last light: save without arming /clear (carry on, or /clear to resume)")
     hp.set_defaults(func=_cmd_handover)
     sub.add_parser("notes-path", help="print (creating it from the template) the private "
                    "file to write handover notes in").set_defaults(func=_cmd_notes_path)
@@ -126,6 +129,17 @@ def _cmd_handover(args: argparse.Namespace) -> int:
             max_tokens=config.handover_max_tokens(cwd))
     except handover.HandoverError as exc:
         raise CliError(f"handover refused: {exc}") from exc
+    if args.prepared:
+        if session.is_headless(_env_session_id()):
+            raise CliError("--prepared is for interactive sessions")
+        if state.is_paused(scope):
+            raise CliError("handover refused: paused here (`context-vigil resume` to re-enable)")
+        if state.handoff_path(scope).exists() and not state.is_prepared(scope):
+            raise CliError("a handover is already pending — --prepared will not replace it")
+        state.write_prepared(scope, document, config.archive_keep(cwd))
+        _tidy_notes(notes_file, [scope, kept])
+        print(messages.LAST_LIGHT_PREPARED)
+        return 0
     headless = session.is_headless(_env_session_id())
     if headless:
         # no /clear is sent to a headless run: leave the handoff where the next run looks

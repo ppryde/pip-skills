@@ -233,3 +233,38 @@ class TestClearRequested:
         assert st.clear_requested(scope) is True
         assert st.clear_requested(scope) is True  # non-consuming: repeatable
         assert st.clear_flag(scope).exists()  # still there for the real consumer
+
+
+def test_write_prepared_sets_marker_without_clear_flag(tmp_path) -> None:
+    scope = tmp_path / "scope"
+    st.write_prepared(scope, "# prepared\n", 20)
+    assert st.is_prepared(scope)
+    assert not st.clear_flag(scope).exists()
+    assert st.read_handoff(scope) == "# prepared\n"
+
+
+def test_discard_prepared_archives_with_discarded_name(tmp_path) -> None:
+    scope = tmp_path / "scope"
+    st.write_prepared(scope, "# prepared\n", 20)
+    assert st.discard_prepared(scope, 20) is True
+    assert not st.handoff_path(scope).exists()
+    assert not st.prepared_marker(scope).exists()
+    names = [p.name for p in st.handoff_archive_dir(scope).iterdir()]
+    assert names == ["handoff.discarded.md"]
+
+
+def test_discard_prepared_leaves_a_real_handover_alone(tmp_path) -> None:
+    scope = tmp_path / "scope"
+    st.request_clear(scope, "# real\n")
+    assert st.discard_prepared(scope, 20) is False
+    assert st.read_handoff(scope) == "# real\n"
+
+
+def test_consume_and_real_write_drop_the_marker(tmp_path) -> None:
+    scope = tmp_path / "scope"
+    st.write_prepared(scope, "# prepared\n", 20)
+    assert st.consume_handoff(scope) == "# prepared\n"
+    assert not st.prepared_marker(scope).exists()
+    st.write_prepared(scope, "# prepared again\n", 20)
+    st.request_clear(scope, "# real\n")
+    assert not st.is_prepared(scope)

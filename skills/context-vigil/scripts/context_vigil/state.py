@@ -67,6 +67,15 @@ def handoff_path(scope: Path) -> Path:
     return scope / "handoff.md"
 
 
+def prepared_marker(scope: Path) -> Path:
+    """Beside handoff.md: this handoff was prepared by last light, not requested."""
+    return scope / "handoff-prepared"
+
+
+def is_prepared(scope: Path) -> bool:
+    return prepared_marker(scope).exists() and handoff_path(scope).exists()
+
+
 def handoff_archive_dir(scope: Path) -> Path:
     return scope / "archive"
 
@@ -202,7 +211,7 @@ def prune_archive(scope: Path, keep: int = ARCHIVE_KEEP) -> None:
             pass
 
 
-def _archive(scope: Path, path: Path, keep: int) -> None:
+def _archive(scope: Path, path: Path, keep: int, name: str = "handoff.md") -> None:
     """Move a handoff into the archive (0600), or drop it when ``keep`` is 0; then prune.
 
     Raises OSError on failure; callers decide whether that matters. A handoff that is
@@ -216,7 +225,7 @@ def _archive(scope: Path, path: Path, keep: int) -> None:
         prune_archive(scope, 0)
         return
     archive = paths.ensure_dir(handoff_archive_dir(scope))
-    target = _uniquify(archive / "handoff.md")
+    target = _uniquify(archive / name)
     path.rename(target)
     try:
         os.chmod(str(target), paths.PRIVATE_FILE_MODE)   # one written by an older version
@@ -229,6 +238,7 @@ def write_handoff(scope: Path, handoff_text: str, keep: int = ARCHIVE_KEEP) -> N
     """Save the handoff atomically (0600); an unconsumed older one is archived
     (uniquified), and the archive is pruned to the newest ``keep``."""
     paths.ensure_dir(scope)
+    prepared_marker(scope).unlink(missing_ok=True)   # a new handoff is never "prepared" by default
     target = handoff_path(scope)
     if target.exists():
         try:
@@ -236,6 +246,26 @@ def write_handoff(scope: Path, handoff_text: str, keep: int = ARCHIVE_KEEP) -> N
         except OSError:
             pass  # replacing below still keeps the new handoff; the old one is best-effort
     paths.write_private(target, handoff_text)
+
+
+def write_prepared(scope: Path, handoff_text: str, keep: int = ARCHIVE_KEEP) -> None:
+    """Save a last-light handoff: no clear flag, so nothing is cleared; /clear loads it."""
+    write_handoff(scope, handoff_text, keep)
+    _touch(prepared_marker(scope))
+
+
+def discard_prepared(scope: Path, keep: int = ARCHIVE_KEEP) -> bool:
+    """Archive a prepared handoff as ``handoff.discarded.md``. A real (requested)
+    handoff is never touched. Returns whether one was discarded; never raises."""
+    if not is_prepared(scope):
+        prepared_marker(scope).unlink(missing_ok=True)   # a stray marker
+        return False
+    try:
+        _archive(scope, handoff_path(scope), keep, name="handoff.discarded.md")
+    except OSError:
+        handoff_path(scope).unlink(missing_ok=True)
+    prepared_marker(scope).unlink(missing_ok=True)
+    return True
 
 
 def request_clear(scope: Path, handoff_text: str, keep: int = ARCHIVE_KEEP) -> str:
@@ -345,4 +375,8 @@ def consume_handoff(scope: Path, keep: int = ARCHIVE_KEEP) -> str | None:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+    try:
+        prepared_marker(scope).unlink(missing_ok=True)
+    except OSError:
+        pass
     return text

@@ -81,3 +81,28 @@ def test_status_shows_cooldown_seconds(run_cli, repo: Path) -> None:
     assert "handover.cooldown_seconds: 60 (default)" in run_cli("status", cwd=repo).stdout
     run_cli("config", "set", "handover.cooldown_seconds", "10", cwd=repo)
     assert "handover.cooldown_seconds: 10 (global)" in run_cli("status", cwd=repo).stdout
+
+
+_PREPARED_NOTES = (
+    "## Goal\ng\n## Current State\ns\n## Files in Flight\nNone\n"
+    "## Failed Attempts\nNone\n## Next Step\nn\n")
+
+
+def test_handover_prepared_saves_without_arming_clear(run_cli, repo) -> None:
+    from context_vigil import messages, paths, state
+    notes = run_cli("notes-path", cwd=repo).stdout.strip()
+    Path(notes).write_text(_PREPARED_NOTES)
+    r = run_cli("handover", "--file", notes, "--prepared", "--no-snapshot", cwd=repo)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == messages.LAST_LIGHT_PREPARED
+    scope = paths.scope_dir(repo)
+    assert state.is_prepared(scope) and not state.clear_flag(scope).exists()
+
+
+def test_handover_prepared_refused_over_a_real_pending_one(run_cli, repo) -> None:
+    from context_vigil import paths, state
+    state.request_clear(paths.scope_dir(repo), "# real\n")
+    notes = run_cli("notes-path", cwd=repo).stdout.strip()
+    Path(notes).write_text(_PREPARED_NOTES)
+    r = run_cli("handover", "--file", notes, "--prepared", "--no-snapshot", cwd=repo)
+    assert r.returncode == 1 and "already pending" in r.stderr
