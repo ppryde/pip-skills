@@ -52,30 +52,39 @@ ALWAYS_CONFIRM: List[Option] = [
 ]
 
 
+def _flags(card: Dict[str, Any], options: List[List[Option]]) -> Dict[str, Dict[str, str]]:
+    """header -> label -> install flag, so equal labels in different questions never collide."""
+    return {q["header"]: {label: flag for label, _, flag in opts}
+            for q, opts in zip(card["questions"], options)}
+
+
 def install_cards(mods: bool) -> Dict[str, Any]:
-    card1 = [
-        _question("🎚️ Threshold", "At what context % should I tap you on the shoulder?",
-                  THRESHOLD),
-        _question("🖥️ Launcher", "How should Claude start for hands-free handovers?", LAUNCH),
-        _question("🌅 Last light",
-                  "Prepare a handover before an idle 1-hour cache goes cold 🧊?", LAST_LIGHT),
+    questions = [
+        (_question("🎚️ Nudge at", "At what context % should I tap you on the shoulder?",
+                   THRESHOLD), THRESHOLD),
+        (_question("🖥️ Launcher", "How should Claude start for hands-free handovers?", LAUNCH),
+         LAUNCH),
+        (_question("🌅Last light",
+                   "Prepare a handover before an idle 1-hour cache goes cold 🧊?", LAST_LIGHT),
+         LAST_LIGHT),
     ]
-    options = THRESHOLD + LAUNCH + LAST_LIGHT + LAST_LIGHT_THRESHOLD + ALWAYS_CONFIRM
     if mods:
-        card1.append(_question("🎛️ Vigil bar", "Add a pop-up bar above the prompt when "
-                                                "context crosses the threshold?", BAR))
-        options += BAR
+        questions.append((_question("🎛️Vigil bar", "Add a pop-up bar above the prompt when "
+                                                   "context crosses the threshold?", BAR), BAR))
+    card1 = {"questions": [q for q, _ in questions]}
+    threshold_card = last_light_card()
+    confirm_card = {"questions": [_question(
+        "♾️ Always", "Make `claude` always start inside tmux?", ALWAYS_CONFIRM)]}
+    flags = _flags(card1, [opts for _, opts in questions])
+    flags.update(_flags(threshold_card, [LAST_LIGHT_THRESHOLD]))
+    flags.update(_flags(confirm_card, [ALWAYS_CONFIRM]))
     return {
-        "card1": {"questions": card1},
-        "followups": {
-            "last_light_threshold": last_light_card(),
-            "always_confirm": {"questions": [_question(
-                "♾️ Always", "Make `claude` always start inside tmux?", ALWAYS_CONFIRM)]},
-        },
-        "flags": {label: flag for label, _, flag in options},
+        "card1": card1,
+        "followups": {"last_light_threshold": threshold_card, "always_confirm": confirm_card},
+        "flags": flags,
     }
 
 
 def last_light_card() -> Dict[str, Any]:
     return {"questions": [_question("🌅 Threshold", "At what context % should last light "
-                                                     "step in?", LAST_LIGHT_THRESHOLD)]}
+                                                    "step in?", LAST_LIGHT_THRESHOLD)]}

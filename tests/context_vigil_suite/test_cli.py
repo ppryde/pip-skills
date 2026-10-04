@@ -112,7 +112,7 @@ def test_install_questions_json(run_cli) -> None:
     r = run_cli("install", "--questions-json", env={"CONTEXT_VIGIL_CLAUDE_BIN": "/nonexistent"})
     data = json.loads(r.stdout)
     assert [q["header"] for q in data["card1"]["questions"]] == [
-        "🎚️ Threshold", "🖥️ Launcher", "🌅 Last light"]          # no mods → no bar
+        "🎚️ Nudge at", "🖥️ Launcher", "🌅Last light"]          # no mods → no bar
 
 
 def test_last_light_command(run_cli, repo) -> None:

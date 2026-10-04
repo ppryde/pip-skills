@@ -143,26 +143,30 @@ def _plugin_dirs(data: Dict[str, Any]) -> List[str]:
     return [p for p in raw.split(os.pathsep) if p] if isinstance(raw, str) else []
 
 
-def _set_plugin_dirs(data: Dict[str, Any], dirs: List[str]) -> None:
+def _set_plugin_dirs(data: Dict[str, Any], dirs: List[str], drop_empty_env: bool) -> None:
     env = data.get("env")
-    if not isinstance(env, dict):
-        if not dirs:
-            return
-        env = data["env"] = {}
+    if env is not None and not isinstance(env, dict):
+        if dirs:
+            raise InstallError("settings.json `env` is not an object — fix it by hand "
+                               "before adding the vigil bar")
+        return
     if dirs:
+        if env is None:
+            env = data["env"] = {}
         env[MOD_ENV] = os.pathsep.join(dirs)
-    else:
-        env.pop(MOD_ENV, None)
-        if not env:
-            del data["env"]
+    elif env is not None and MOD_ENV in env:
+        del env[MOD_ENV]
+        if not env and drop_empty_env:
+            del data["env"]       # only an env we created, emptied by removing our key
 
 
-def _with_mod(data: Dict[str, Any], on: bool, ours: List[str]) -> None:
+def _with_mod(data: Dict[str, Any], on: bool, ours: List[str],
+              drop_empty_env: bool = False) -> None:
     """Add (on) or remove every path of ours from CLAUDE_CODE_PLUGIN_DIRS; others kept."""
     dirs = [d for d in _plugin_dirs(data) if d not in ours]
     if on:
         dirs.append(str(mod_dir()))
-    _set_plugin_dirs(data, dirs)
+    _set_plugin_dirs(data, dirs, drop_empty_env)
 
 
 def settings_path() -> Path:
@@ -606,8 +610,14 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None,
     if prior.get("bar") is not None:
         record["bar"] = prior["bar"]
     ours_mod = [str(mod_dir())] + ([str(prior["bar"])] if prior.get("bar") else [])
+    if prior.get("bar_created_env"):
+        record["bar_created_env"] = True
     if bar is not None:
-        _with_mod(data, bar, ours_mod)
+        if bar and "env" not in data:
+            record["bar_created_env"] = True
+        _with_mod(data, bar, ours_mod, bool(record.get("bar_created_env")))
+        if not bar:
+            record.pop("bar_created_env", None)
         record["bar"] = str(mod_dir()) if bar else None
     status = data.get("statusLine")
     command = status.get("command") if isinstance(status, dict) else None
@@ -725,7 +735,7 @@ def plan_uninstall() -> Plan:
     original = copy.deepcopy(data)
     data = _without_hooks(data, ours)
     ours_mod = [str(mod_dir())] + ([str(record["bar"])] if record.get("bar") else [])
-    _with_mod(data, False, ours_mod)
+    _with_mod(data, False, ours_mod, bool(record.get("bar_created_env")))
     status = data.get("statusLine")
     if isinstance(status, dict) and _is_capture(str(status.get("command", "")), record):
         del data["statusLine"]

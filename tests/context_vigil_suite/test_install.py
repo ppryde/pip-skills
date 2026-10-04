@@ -444,3 +444,18 @@ def test_claude_supports_mods(iso, monkeypatch, version: str, ok: bool) -> None:
     stub.chmod(0o755)
     monkeypatch.setenv("CONTEXT_VIGIL_CLAUDE_BIN", str(stub))
     assert install.claude_supports_mods() is ok
+
+
+def test_bar_keeps_a_preexisting_empty_env(cfg: Path) -> None:
+    _write(cfg, {"env": {}})
+    for choice in ("on", "off"):
+        install.apply(install.plan_install(None, bar=(choice == "on")))
+    assert _settings(cfg)["env"] == {}
+
+
+def test_bar_refuses_a_non_object_env(cfg: Path) -> None:
+    _write(cfg, {"env": "oops"})
+    before = (cfg / "settings.json").read_text()
+    with pytest.raises(install.InstallError, match="not an object"):
+        install.plan_install(None, bar=True)
+    assert (cfg / "settings.json").read_text() == before
