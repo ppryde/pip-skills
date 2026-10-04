@@ -409,14 +409,50 @@ export function vscodeUri(socket: string, name: string): string | undefined {
   return `vscode://pip.agent-roster-vscode/attach?socket=${socket}&name=${name}`
 }
 
-// `code` and the helper's install dir, wherever Homebrew or the app put them.
+// `code`, wherever Homebrew or the app put it.
 const CODE_CLIS = ['/opt/homebrew/bin/code', '/usr/local/bin/code']
+// Where the helper has each open VS Code window name its folders.
+const VSCODE_WINDOWS_DIR = '.cache/agent-roster/vscode-windows'
 
-async function helperInstalled($: EngineInterface): Promise<boolean> {
-  const home = await $.env.get('HOME')
-  const installed = await $.fs.list(`${home}/.vscode/extensions`).catch(() => [])
+export type VscodeWindow = { pid: number; folders: string[] }
 
-  return installed.some(e => e.name.startsWith('pip.agent-roster-vscode-'))
+/** The folder of a live window showing the target repo, matched by repo root (worktrees and subfolders alike). */
+export function windowFolderFor(
+  windows: VscodeWindow[],
+  alive: ReadonlySet<number>,
+  rootOf: ReadonlyMap<string, string>,
+  targetRoot: string,
+): string | undefined {
+  for (const w of windows) {
+    if (!alive.has(w.pid)) continue
+    const folder = w.folders.find(f => (rootOf.get(f) ?? f) === targetRoot)
+    if (folder) return folder
+  }
+
+  return undefined
+}
+
+/** The open VS Code window folder showing this session's repo, if the helper reported one. */
+async function vscodeFolderFor($: EngineInterface, r: SessionRow): Promise<string | undefined> {
+  const dir = `${await $.env.get('HOME')}/${VSCODE_WINDOWS_DIR}`
+  const windows: VscodeWindow[] = []
+  for (const entry of await $.fs.list(dir).catch(() => [])) {
+    if (!entry.name.endsWith('.json')) continue
+    try {
+      const w = JSON.parse(String(await $.fs.read(`${dir}/${entry.name}`))) as VscodeWindow
+      if (typeof w.pid === 'number' && Array.isArray(w.folders)) windows.push(w)
+    } catch {
+      // Half-written or foreign: skip it.
+    }
+  }
+  if (windows.length === 0) return undefined
+  // A window that crashed leaves its file: only live extension hosts count.
+  const ps = await $.process.run(['ps', '-o', 'pid=', '-p', windows.map(w => w.pid).join(',')])
+  const alive = new Set(ps.stdout.split('\n').map(line => Number(line.trim())))
+  const rootOf = new Map<string, string>()
+  for (const f of new Set(windows.flatMap(w => w.folders))) rootOf.set(f, await repoRoot($, f))
+
+  return windowFolderFor(windows, alive, rootOf, await repoRoot($, r.cwd))
 }
 
 /** The main checkout's root for a cwd (a worktree's included): where its VS Code window is. */
@@ -430,11 +466,11 @@ async function repoRoot($: EngineInterface, cwd: string): Promise<string> {
 }
 
 /**
- * A session of the repo this roster runs in opens in a new terminal tab of
- * that repo's VS Code window (through the helper); any other, or with no
- * helper, in a new Terminal.app window. Never this session's own terminal.
- * tmux mirrors every client of a session, so a view already showing it keeps
- * working; the reply names the ttys it is also attached on.
+ * A session whose repo is open in a VS Code window opens there: the window is
+ * raised and the helper focuses the tab already showing the session, else
+ * opens one. A repo with no window open gets a new Terminal.app window (never
+ * a new VS Code window). Never this session's own terminal. tmux mirrors
+ * every client of a session, so a view already showing it keeps working.
  */
 async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
   const name = nameOf(r)
@@ -452,14 +488,13 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
   const ttys = (clients?.stdout ?? '').split('\n').filter(Boolean).map(t => t.replace('/dev/', ''))
   const also = ttys.length ? ` (also attached on ${ttys.join(', ')})` : ''
 
-  const self = (await read($, sessions)).rows.find(s => s.sessionId === selfId)
-  if (self && self.repo === r.repo && (await helperInstalled($))) {
-    const root = await repoRoot($, self.cwd)
-    // Bring that repo's window forward first (`code <folder>` reuses an open
-    // one), so the link lands there rather than in whichever window was last.
+  const folder = await vscodeFolderFor($, r)
+  if (folder) {
+    // Bring that window forward first (`code <its folder>` raises the window
+    // showing it), so the link lands there rather than in whichever was last.
     let isRaised = false
     for (const cli of CODE_CLIS) {
-      const raised = await $.process.run([cli, root]).catch(() => undefined)
+      const raised = await $.process.run([cli, folder]).catch(() => undefined)
       if (raised?.exitCode === 0) {
         isRaised = true
         break
@@ -472,8 +507,8 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
       // session is focused, else a new one opens.
       if (sent.exitCode === 0) {
         return ttys.length
-          ? `Showed ${name} in VS Code (${root}): its tab is focused if that window has one, else a new tab opens.`
-          : `Opened ${name} in a new VS Code terminal in ${root}.`
+          ? `Showed ${name} in VS Code (${folder}): its tab is focused if that window has one, else a new tab opens.`
+          : `Opened ${name} in a new VS Code terminal in ${folder}.`
       }
     }
   }

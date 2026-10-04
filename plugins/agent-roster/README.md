@@ -31,27 +31,31 @@ draw the pane. So when the command arrives over the bridge
 ## Opening a session
 
 Each tmux session's row has an **open** button (from the phone,
-`/roster open <tmux-name|pid>`). A session of the **same repo** as the one
-running the roster opens in a **new terminal tab of that repo's VS Code
-window**, through the small helper extension in `vscode/` (install it with
-`sh plugins/agent-roster/vscode/build.sh install [profile…]`, naming every VS Code
-profile your windows use: a window loads only its own profile's extensions,
-and a missing helper shows as "cannot be installed because it was not found"): the mod raises the
-window with `code <repo root>`, then sends
-`vscode://pip.agent-roster-vscode/attach?socket=…&name=…`, which the helper
-answers by focusing a tab of that window already showing the session (one
-whose shell is an ancestor of one of the session's tmux clients), else with
-a new tab running `tmux attach` (TMUX cleared). A tab in a *different* VS Code
-window is not seen: the link lands in the repo's own window. Any other
-session, or any session without the helper, opens in a **new Terminal.app
-window** attached to it, on the socket found by pid as for kill; the
-session you are in is never touched. tmux mirrors every client of a session,
-so a window already showing it keeps working, and the reply names the ttys
-it is also attached on. An existing VS Code terminal tab cannot be brought
-forward instead: VS Code offers no outside way to select one. Repos are
-told apart by git (a sibling worktree counts under its main checkout), so
-tabs and "same repo" agree. The first open
-asks macOS once to let Claude Code control Terminal.
+`/roster open <tmux-name|pid>`). Where it opens depends on whether the
+session's repo is open in VS Code:
+
+- **A VS Code window shows the repo** (any window, a worktree or subfolder of
+  it counting): that window is raised (`code <its folder>`), then sent
+  `vscode://pip.agent-roster-vscode/attach?socket=…&name=…`; the helper there
+  focuses the tab already showing the session (one whose shell is an ancestor
+  of the session's tmux client), else opens a new tab running `tmux attach`
+  (TMUX cleared).
+- **No window shows it**: a new **Terminal.app window** attached to it; no new
+  VS Code window is opened.
+
+The helper extension (`vscode/`) is how the roster knows: it starts with every
+window and writes `~/.cache/agent-roster/vscode-windows/<pid>.json` naming the
+window's folders, removed when the window closes; files whose extension host
+pid has died are ignored. Install it with
+`sh plugins/agent-roster/vscode/build.sh install [profile…]`, naming every VS
+Code profile your windows use: a window loads only its own profile's
+extensions, and one without the helper is invisible to the roster (and
+answers the link with "cannot be installed because it was not found").
+
+The session you are in is never touched. tmux mirrors every client of a
+session, so a view already showing it keeps working; the window may resize to
+the latest client. The first Terminal open asks macOS once to let Claude Code
+control Terminal.
 
 ## Killing a session
 

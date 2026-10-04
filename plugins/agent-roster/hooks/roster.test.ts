@@ -16,6 +16,7 @@ import {
   toRow,
   transcriptFacts,
   vscodeUri,
+  windowFolderFor,
 } from './register'
 
 const DAY = 86_400_000
@@ -211,4 +212,23 @@ test("a sibling worktree belongs to its main checkout's repo, by what git says",
   })
   // Not a git folder: fall back to the path.
   expect(repoFromGit('/tmp/scratch-1', '', '')).toEqual({ repo: 'scratch-1' })
+})
+
+test('open goes to a live VS Code window showing the repo, a worktree or subfolder counting as the repo', async () => {
+  const windows = [
+    { pid: 10, folders: ['/r/pip-skills'] },
+    { pid: 20, folders: ['/r/pip-skills-agent-roster'] },
+    { pid: 30, folders: ['/r/warehouse'] },
+  ]
+  const rootOf = new Map([
+    ['/r/pip-skills', '/r/pip-skills'],
+    ['/r/pip-skills-agent-roster', '/r/pip-skills'],
+    ['/r/warehouse', '/r/warehouse'],
+  ])
+
+  expect(windowFolderFor(windows, new Set([10, 20, 30]), rootOf, '/r/pip-skills')).toBe('/r/pip-skills')
+  // The main checkout's window is dead (a crash left its file): the worktree's window serves.
+  expect(windowFolderFor(windows, new Set([20, 30]), rootOf, '/r/pip-skills')).toBe('/r/pip-skills-agent-roster')
+  // No window shows the repo: undefined, and the caller opens Terminal instead.
+  expect(windowFolderFor(windows, new Set([10, 20, 30]), rootOf, '/r/ledger-poc')).toBe(undefined)
 })
