@@ -26,7 +26,7 @@
 - `$.state` atom refs must spell `plugin` and `key` as string literals (the validator requires literals), so the atoms repeat `'context-vigil-mod'`; T11's test pins that literal to `NAME`.
 - Plugin prompts carry no origin argument: `PromptSubmitArgs` omits `origin`, and the engine stamps every `$.prompt.submit` as `{ kind: 'plugin', name: 'context-vigil-mod' }`. Hooks read `e.origin.kind`.
 - `$.ui.ask` is not an op event: it runs as a `tool.call` of `AskUserQuestion` whose result is `{ questions, answers: { [question]: label } }` (claude-code-tools typings). The test world answers it there.
-- Every clear that consumes a pending handover renames the new session to the handover's `session_name` via a mod-run `/rename` (spec §3 step 4; Task 11a).
+- Every clear that consumes a pending handover names an UNNAMED new session with the handover's `session_name` via a mod-run `/rename`; an already-named session keeps its name (spec §3 step 4; Tasks 11a, 12a).
 - Stage only your own files: `git add <exact paths>`, never `git add -A` / `.`; tasks run one at a time in one worktree.
 - Tests never touch a real config dir: shell tests use the in-memory world in `tests/world.tsx` (`CLAUDE_CONFIG_DIR=/cfg`); the install-script test uses pytest `tmp_path`.
 - Gates for every task: `claude plugin validate plugins/context-vigil-mod`, `claude plugin test plugins/context-vigil-mod`, `bash plugins/context-vigil-mod/scripts/typecheck.sh` — all clean.
@@ -2994,6 +2994,24 @@ git add plugins/context-vigil-mod/hooks/register.tsx plugins/context-vigil-mod/t
 git commit -m "feat(context-vigil-mod): handover flow, clear gate, vigil bar and RC countdown" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_016Fj6V4wmyLYFK41Ed3YAqf"
 ```
+
+---
+
+### Task 12a: Keep an existing session name (owner request, 2026-10-04)
+
+Spec §3 step 4 "An existing name is kept". Probed live (PROBES §8): `/clear` carries the old session's `custom-title` into the new transcript; a launch-time Remote Control name and Claude Code's `ai-title` are not `custom-title`.
+
+**Files:**
+- Modify: `plugins/context-vigil-mod/hooks/register.tsx`, `tests/world.tsx`
+- Test: `tests/shell-handover.test.tsx` (extend)
+
+**Interfaces:**
+- Produces: top-level `async function sessionNamed($, transcriptPath: string): Promise<boolean | null>` — runs `$.process.run` with argv `['grep', '-c', '-F', '"type":"custom-title"', transcriptPath]`; exit 0 with count > 0 → `true`; exit 1 (no match) → `false`; any other exit or a rejection → `null` (unknown).
+- In the `classic.SessionStart` `source: 'clear'` branch, the pre-clear transcript is `<dirname(e.transcript_path)>/<pending.session>.jsonl` (the old session id is `pending.session`). `renameSession` takes that path and renames ONLY when `sessionNamed` is `false`. `true` → log `'rename'` `{ kept: true }`, no command; `null` → log `'guard.wait'` `{ reason: 'rename-unknown' }`, no command, no notice. If `e.transcript_path` is absent, treat as `null`.
+
+- [ ] **Step 1: Failing tests.** world.tsx answers this grep from `w.titled` (a `Set<string>` of transcript paths holding a custom-title; `w.grepFails` makes it exit 2). Tests: (a) unnamed old session → one `rename` command with the handover's name; (b) old session in `w.titled` → no `rename` command, resume still submitted; (c) grep exit 2 → no `rename`, no notice, resume still submitted; (d) the grep argv targets `<dir>/<old session>.jsonl`.
+- [ ] **Step 2: RED. Step 3: Implement. Step 4: gates GREEN.**
+- [ ] **Step 5: Commit** `feat(context-vigil-mod): keep a session's existing name across the clear` (trailers).
 
 ---
 

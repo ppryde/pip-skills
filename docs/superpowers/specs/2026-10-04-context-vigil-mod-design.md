@@ -216,7 +216,15 @@ the deciding origin.
    the new session carries the handover's name (prompt border, `/resume`,
    Remote Control). Every clear that consumes a pending handover is named —
    auto, requested, last light. A rejected rename is logged and noticed, never
-   blocks the resume. (Verified live 2026-10-04: a mod-run `/rename` right
+   blocks the resume.
+   **An existing name is kept.** `/clear` itself carries a session's name
+   (`custom-title`) into the new session, so when the session was already
+   named — by the person's `/rename` or by an earlier handover — the mod does
+   not rename; only an unnamed session gets the handover's name. "Named" means
+   the pre-clear transcript holds a `"type":"custom-title"` line (checked with
+   `grep` via `$.process.run`, since `$.fs.read` refuses files over 4 MiB);
+   Claude Code's own `ai-title` does not count. If the check cannot run, the
+   mod does not rename (never overwrite a name it could not see). (Verified live 2026-10-04: a mod-run `/rename` right
    after a mod-run `/clear` writes the title; `sessionTitle` returned from
    `classic.SessionStart` on a clear does NOT.)
 5. **Resume.** For auto mode and a requested handover, `$.prompt.submit` sends
