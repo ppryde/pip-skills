@@ -106,3 +106,26 @@ def test_handover_prepared_refused_over_a_real_pending_one(run_cli, repo) -> Non
     Path(notes).write_text(_PREPARED_NOTES)
     r = run_cli("handover", "--file", notes, "--prepared", "--no-snapshot", cwd=repo)
     assert r.returncode == 1 and "already pending" in r.stderr
+
+
+def test_install_questions_json(run_cli) -> None:
+    r = run_cli("install", "--questions-json", env={"CONTEXT_VIGIL_CLAUDE_BIN": "/nonexistent"})
+    data = json.loads(r.stdout)
+    assert [q["header"] for q in data["card1"]["questions"]] == [
+        "🎚️ Threshold", "🖥️ Launcher", "🌅 Last light"]          # no mods → no bar
+
+
+def test_last_light_command(run_cli, repo) -> None:
+    dry = run_cli("last-light", "on", cwd=repo)
+    assert json.loads(dry.stdout.split("\n\n")[0])["questions"][0]["header"] == "🌅 Threshold"
+    assert "last-light on --yes" in dry.stdout
+    on = run_cli("last-light", "on", "--yes", "--threshold", "30", cwd=repo)
+    assert on.stdout.strip() == "🌅 last light: on (30%)"
+    off = run_cli("last-light", "off", cwd=repo)
+    assert off.stdout.strip() == "🌅 last light: off"
+
+
+def test_status_shows_last_light_and_bar(run_cli, repo) -> None:
+    out = run_cli("status", cwd=repo).stdout
+    assert "🌅 last light: off" in out
+    assert "🎛️ vigil bar: off" in out

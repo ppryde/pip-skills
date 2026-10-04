@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from context_vigil import (
+    cards,
     census,
     config,
     context,
@@ -83,12 +84,22 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--threshold", type=int, default=None)
     ip.add_argument("--launcher", choices=_LAUNCH_CHOICES, default=None)
     ip.add_argument("--confirm-always", action="store_true")
+    ip.add_argument("--questions-json", action="store_true",
+                    help="print the install questions as AskUserQuestion cards")
+    ip.add_argument("--last-light", choices=("on", "off"), default=None)
+    ip.add_argument("--last-light-threshold", type=int, default=None)
+    ip.add_argument("--bar", choices=("on", "off"), default=None)
     ip.set_defaults(func=_cmd_install)
     lp = sub.add_parser("launcher", help="choose how Claude launches (tmux)")
     lp.add_argument("choice", nargs="?", choices=launcher.CHOICES)
     lp.add_argument("--yes", action="store_true")
     lp.add_argument("--confirm-always", action="store_true")
     lp.set_defaults(func=_cmd_launcher)
+    llp = sub.add_parser("last-light", help="prepare a handover before an idle cache goes cold")
+    llp.add_argument("choice", nargs="?", choices=("on", "off"))
+    llp.add_argument("--threshold", type=int, default=None)
+    llp.add_argument("--yes", action="store_true")
+    llp.set_defaults(func=_cmd_last_light)
     up = sub.add_parser("uninstall", help="remove exactly what install added")
     up.add_argument("--yes", action="store_true")
     up.set_defaults(func=_cmd_uninstall)
@@ -385,6 +396,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
         f"({resolved['handover.archive_keep'][1]})",
         f"paused here: {'yes' if state.is_paused(scope) else 'no'}",
         f"nudge gate: {'armed' if state.gate_active(scope) else 'clear'}",
+        _last_light_line(cwd) + (
+            f", lead {config.last_light_lead_seconds(cwd)} s — this session: "
+            f"{last_light.session_state(cwd, _env_session_id())}"
+            if config.last_light_enabled(cwd) else ""),
+        _bar_line(),
         f"pending handover: {pending_text}",
         f"data: {paths.data_root()}",
         _python_line(),
@@ -404,8 +420,14 @@ def _summaries(plan: install.Plan) -> List[str]:
 
 
 def _cmd_install(args: argparse.Namespace) -> int:
+    if args.questions_json:
+        print(json.dumps(cards.install_cards(install.claude_supports_mods()),
+                         ensure_ascii=False, indent=2))
+        return 0
+    flag = {"on": True, "off": False, None: None}
     try:
-        plan = install.plan_install(args.threshold, args.launcher)
+        plan = install.plan_install(args.threshold, args.launcher, flag[args.last_light],
+                                    args.last_light_threshold, flag[args.bar])
     except (install.InstallError, config.ConfigError, OSError, UnicodeError) as exc:
         raise CliError(str(exc)) from exc
     summaries = _summaries(plan)
@@ -427,7 +449,8 @@ def _cmd_install(args: argparse.Namespace) -> int:
         print("\n" + launcher.walkthrough_text())
         print(f"\nIf choosing Always, confirm: {launcher.ALWAYS_CONFIRM}")
         print("\nApply with:  context-vigil install --yes [--threshold N] "
-              "[--launcher on-demand|always|not-now]")
+              "[--launcher on-demand|always|not-now] [--last-light on|off] "
+              "[--last-light-threshold N] [--bar on|off]")
         return 0
     if args.launcher == "always" and not args.confirm_always:
         raise CliError("--launcher always also needs --confirm-always "
@@ -445,6 +468,42 @@ def _cmd_install(args: argparse.Namespace) -> int:
     except OSError as exc:
         raise CliError(f"install failed part-way ({exc}); re-run, or `uninstall --yes`") from exc
     print("\n".join(_installed_lines(plan)))
+    return 0
+
+
+def _last_light_line(cwd: Path) -> str:
+    if not config.last_light_enabled(cwd):
+        return "🌅 last light: off"
+    return f"🌅 last light: on ({config.last_light_threshold(cwd)}%)"
+
+
+def _bar_line() -> str:
+    try:
+        record = json.loads(paths.read_private(paths.install_record_path()))
+    except (OSError, ValueError):
+        record = {}
+    if not (isinstance(record, dict) and record.get("bar")):
+        return "🎛️ vigil bar: off"
+    note = "" if install.claude_supports_mods() else " — but this Claude Code build has no mods"
+    return f"🎛️ vigil bar: on{note}"
+
+
+def _cmd_last_light(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    try:
+        if args.choice == "off":
+            config.set_value(cwd, "last_light.enabled", "off")
+        elif args.choice == "on" and not args.yes:
+            print(json.dumps(cards.last_light_card(), ensure_ascii=False, indent=2))
+            print("\nApply with:  context-vigil last-light on --yes [--threshold N]")
+            return 0
+        elif args.choice == "on":
+            if args.threshold is not None:
+                config.set_value(cwd, "last_light.threshold", str(args.threshold))
+            config.set_value(cwd, "last_light.enabled", "on")
+    except config.ConfigError as exc:
+        raise CliError(str(exc)) from exc
+    print(_last_light_line(cwd))
     return 0
 
 

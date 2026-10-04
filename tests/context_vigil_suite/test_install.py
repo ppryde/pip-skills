@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -396,3 +397,50 @@ def test_reinstall_with_changed_matcher_replaces_our_entry(cfg: Path,
     assert len(entries) == 1 and entries[0]["matcher"] == "Task.*|Bash"
 
 
+
+
+
+def test_bar_on_adds_our_mod_dir_preserving_others(cfg, run_cli, monkeypatch) -> None:
+    _write(cfg, {"env": {"CLAUDE_CODE_PLUGIN_DIRS": "/x/other", "KEEP": "1"}})
+    r = run_cli("install", "--yes", "--bar", "on")
+    assert r.returncode == 0, r.stderr
+    env = _settings(cfg)["env"]
+    assert env["KEEP"] == "1"
+    assert env["CLAUDE_CODE_PLUGIN_DIRS"].split(os.pathsep) == ["/x/other",
+                                                               str(install.mod_dir())]
+    assert "/x/other" not in r.stdout          # other entries are never printed
+
+
+def test_bar_off_and_uninstall_remove_only_ours(cfg, run_cli) -> None:
+    _write(cfg, {"env": {"CLAUDE_CODE_PLUGIN_DIRS": "/x/other"}})
+    run_cli("install", "--yes", "--bar", "on")
+    run_cli("install", "--yes", "--bar", "off")
+    assert _settings(cfg)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/x/other"
+    run_cli("install", "--yes", "--bar", "on")
+    run_cli("uninstall", "--yes")
+    assert _settings(cfg)["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == "/x/other"
+
+
+def test_bar_removal_drops_an_emptied_key(cfg, run_cli) -> None:
+    run_cli("install", "--yes", "--bar", "on")
+    run_cli("install", "--yes", "--bar", "off")
+    assert "CLAUDE_CODE_PLUGIN_DIRS" not in _settings(cfg).get("env", {})
+
+
+def test_install_sets_last_light_globally(run_cli, repo) -> None:
+    from context_vigil import config
+    assert run_cli("install", "--yes", "--last-light", "on",
+                   "--last-light-threshold", "30", cwd=repo).returncode == 0
+    assert config.last_light_enabled(repo) is True
+    assert config.last_light_threshold(repo) == 30
+
+
+@pytest.mark.parametrize("version,ok", [("2.1.287 (Claude Code)", True),
+                                        ("2.1.289", True), ("2.1.200", False),
+                                        ("garbage", False)])
+def test_claude_supports_mods(iso, monkeypatch, version: str, ok: bool) -> None:
+    stub = iso / "claude-stub"
+    stub.write_text(f'#!/usr/bin/env bash\necho "{version}"\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("CONTEXT_VIGIL_CLAUDE_BIN", str(stub))
+    assert install.claude_supports_mods() is ok

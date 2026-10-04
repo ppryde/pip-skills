@@ -97,3 +97,24 @@ def tick(payload: Dict[str, object], now: Optional[float] = None) -> str:
         text = PROMPT.format(minutes=max(1, int(left // 60)), launcher=paths.launcher_path())
         tmux.send_detached(target, [["-l", text], ["Enter"]], "0")
     return "fired"
+
+
+def session_state(cwd: Path, session_id: Optional[str]) -> str:
+    """One word or phrase for `status`: why last light is or is not ready."""
+    if not config.last_light_enabled(cwd):
+        return "off"
+    if not session_id:
+        return "no session"
+    scope = session.scope(cwd, session_id)
+    if state.is_prepared(scope):
+        return "prepared handover waiting"
+    if tmux.pane() is None or not tmux.reachable():
+        return "inactive: not tmux"
+    entry = census.for_session(session_id) or {}
+    payload = entry.get("payload")
+    cache = payload.get("prompt_cache") if isinstance(payload, dict) else None
+    if not isinstance(cache, dict):
+        return "inactive: no prompt_cache in status line"
+    if cache.get("ttl") != "1h":
+        return f"inactive: cache TTL {cache.get('ttl')}"
+    return "armed" if session.load(session_id)["last_light_armed"] is True else "disarmed"

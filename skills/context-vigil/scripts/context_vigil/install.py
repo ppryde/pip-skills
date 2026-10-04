@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import stat
+import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +40,8 @@ SL_END = "# --- end context-vigil ---"
 _SLURP = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\$\(cat\)\s*$")
 _SHELLS = ("bash", "sh", "zsh")
 USER_TMP_SUFFIX = ".context-vigil.tmp"
+MOD_ENV = "CLAUDE_CODE_PLUGIN_DIRS"
+MODS_SINCE = (2, 1, 287)
 
 
 class InstallError(Exception):
@@ -114,6 +117,52 @@ class Plan:
     record: Dict[str, Any] = field(default_factory=dict)
     threshold: Optional[int] = None
     notes: List[str] = field(default_factory=list)
+    last_light: Optional[bool] = None
+    last_light_threshold: Optional[int] = None
+
+
+def mod_dir() -> Path:
+    return paths.skill_dir() / "mod"
+
+
+def claude_supports_mods() -> bool:
+    """True when `claude --version` is a build with mods (>= 2.1.287). Never raises."""
+    binary = os.environ.get("CONTEXT_VIGIL_CLAUDE_BIN", "claude")
+    try:
+        out = subprocess.run([binary, "--version"], capture_output=True, text=True,
+                             timeout=5, stdin=subprocess.DEVNULL).stdout
+    except Exception:
+        return False
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+    return bool(match) and tuple(int(g) for g in match.groups()) >= MODS_SINCE
+
+
+def _plugin_dirs(data: Dict[str, Any]) -> List[str]:
+    env = data.get("env")
+    raw = env.get(MOD_ENV) if isinstance(env, dict) else None
+    return [p for p in raw.split(os.pathsep) if p] if isinstance(raw, str) else []
+
+
+def _set_plugin_dirs(data: Dict[str, Any], dirs: List[str]) -> None:
+    env = data.get("env")
+    if not isinstance(env, dict):
+        if not dirs:
+            return
+        env = data["env"] = {}
+    if dirs:
+        env[MOD_ENV] = os.pathsep.join(dirs)
+    else:
+        env.pop(MOD_ENV, None)
+        if not env:
+            del data["env"]
+
+
+def _with_mod(data: Dict[str, Any], on: bool, ours: List[str]) -> None:
+    """Add (on) or remove every path of ours from CLAUDE_CODE_PLUGIN_DIRS; others kept."""
+    dirs = [d for d in _plugin_dirs(data) if d not in ours]
+    if on:
+        dirs.append(str(mod_dir()))
+    _set_plugin_dirs(data, dirs)
 
 
 def settings_path() -> Path:
@@ -325,7 +374,8 @@ def _our_command_shown(command: str) -> str:
 
 def settings_summary(path: Path, before_text: str, before: Dict[str, Any],
                      after: Dict[str, Any], ours: Set[str],
-                     deleting: bool = False) -> List[str]:
+                     deleting: bool = False,
+                     mod_paths: Optional[List[str]] = None) -> List[str]:
     """Structural summary of OUR changes to settings.json — never a user value.
 
     ``env``, ``apiKeyHelper``, other hooks' commands and every other user key are
@@ -355,6 +405,12 @@ def settings_summary(path: Path, before_text: str, before: Dict[str, Any],
                          + ("" if was is None else " (replaces an older context-vigil one)"))
         elif now is None:
             lines.append("  - statusLine (context-vigil's capture command)")
+    for mod in mod_paths or []:
+        had, has = mod in _plugin_dirs(before), mod in _plugin_dirs(after)
+        if has and not had:
+            lines.append(f"  + env.{MOD_ENV}: adds {mod} (the vigil bar)")
+        elif had and not has:
+            lines.append(f"  - env.{MOD_ENV}: removes {mod} (the vigil bar)")
     return lines
 
 
@@ -519,11 +575,17 @@ def _settings_existed_before() -> bool:
     return prior if isinstance(prior, bool) else settings_path().exists()
 
 
-def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Plan:
+def plan_install(threshold: Optional[int], launcher: Optional[str] = None,
+                 last_light: Optional[bool] = None,
+                 last_light_threshold: Optional[int] = None,
+                 bar: Optional[bool] = None) -> Plan:
     if threshold is not None:
         config.coerce("context.threshold", threshold)
+    if last_light_threshold is not None:
+        config.coerce("last_light.threshold", last_light_threshold)
     before, data = _read_settings()
-    plan = Plan(threshold=threshold)
+    plan = Plan(threshold=threshold, last_light=last_light,
+                last_light_threshold=last_light_threshold)
     prior = _read_record()
     record: Dict[str, Any] = {"skill_dir": str(paths.skill_dir()), "statusline": None,
                               "launcher": launcher,
@@ -541,6 +603,12 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
     plan.manual.extend(other_install_hooks(data, ours))
     original = copy.deepcopy(data)
     data = _with_hooks(data, ours)
+    if prior.get("bar") is not None:
+        record["bar"] = prior["bar"]
+    ours_mod = [str(mod_dir())] + ([str(prior["bar"])] if prior.get("bar") else [])
+    if bar is not None:
+        _with_mod(data, bar, ours_mod)
+        record["bar"] = str(mod_dir()) if bar else None
     status = data.get("statusLine")
     command = status.get("command") if isinstance(status, dict) else None
     if not isinstance(command, str) or not command:
@@ -584,7 +652,7 @@ def plan_install(threshold: Optional[int], launcher: Optional[str] = None) -> Pl
     after = before if data == original else _dump(data)
     plan.changes.insert(0, Change(settings_path(), before, after,
                                   settings_summary(settings_path(), before, original, data,
-                                                   ours)))
+                                                   ours, mod_paths=ours_mod)))
     plan.record = record
     return plan
 
@@ -640,6 +708,10 @@ def apply(plan: Plan) -> None:
         return
     if plan.threshold is not None:
         config.set_value(Path.cwd(), "context.threshold", str(plan.threshold))
+    if plan.last_light is not None:
+        config.set_value(Path.cwd(), "last_light.enabled", "on" if plan.last_light else "off")
+    if plan.last_light_threshold is not None:
+        config.set_value(Path.cwd(), "last_light.threshold", str(plan.last_light_threshold))
 
 
 def plan_uninstall() -> Plan:
@@ -652,6 +724,8 @@ def plan_uninstall() -> Plan:
     ours = _our_commands(record)
     original = copy.deepcopy(data)
     data = _without_hooks(data, ours)
+    ours_mod = [str(mod_dir())] + ([str(record["bar"])] if record.get("bar") else [])
+    _with_mod(data, False, ours_mod)
     status = data.get("statusLine")
     if isinstance(status, dict) and _is_capture(str(status.get("command", "")), record):
         del data["statusLine"]
@@ -689,7 +763,7 @@ def plan_uninstall() -> Plan:
             plan.changes.append(Change(rc, text, stripped_rc, launch.removal_summary(rc, text)))
     plan.changes.insert(0, Change(settings_path(), before, after, settings_summary(
         settings_path(), before, original, data, ours,
-        deleting=bool(before) and after == "")))
+        deleting=bool(before) and after == "", mod_paths=ours_mod)))
     return plan
 
 
