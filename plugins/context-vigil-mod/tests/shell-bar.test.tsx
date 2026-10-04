@@ -189,3 +189,57 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     expect(w.notices).toContain(OFFER)
   })
 }
+
+// The phone facts (last human origin, last bridge prompt) must survive a hot reload, or a later
+// unattended clear skips the whole RC gate.
+async function autoHandoverAfter($: Engine, w: World) {
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)
+  await w.clock.advance(60_000)
+}
+
+for (const rcAutoClear of ['no', 'unanswered'] as const) {
+  test(`RC ${rcAutoClear}: a new unattended handover after a reload still meets the RC gate`, async ($, on) => {
+    const w = world(on, { store: { settings: { auto: true, rcAutoClear } } })
+    await $.session.start(START)
+    await $.prompt.submit(human('go', 'bridge'))
+    await $.session.start(START)          // the reload
+    await autoHandoverAfter($, w)
+    expect(w.submits.some(s => s.text.includes(TOOL))).toBe(true)
+    expect(w.commands).not.toContain('clear')
+  })
+
+  test(`RC ${rcAutoClear}: a deferred handover drained by the latch at a reload still meets the RC gate`, async ($, on) => {
+    const w = world(on, { now: 1_000_000, store: { settings: { auto: true, rcAutoClear }, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 60 * MIN } } })
+    await $.session.start(START)
+    await $.prompt.submit(human('go', 'bridge'))
+    await w.clock.advance(31 * MIN)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+    await $.session.measure(measure(36))          // armed while latched: deferred
+    await w.clock.settle()
+    expect(w.state.get('context-vigil-mod.deferred')).toMatchObject({ reason: 'threshold' })
+    await w.clock.advance(30 * MIN)               // past the reset
+    await $.session.start(START)                  // the reload lifts the latch and drains it
+    await w.clock.settle()
+    expect(w.submits.some(s => s.text.includes(TOOL))).toBe(true)
+    await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)
+    await w.clock.advance(60_000)
+    expect(w.commands).not.toContain('clear')
+  })
+}
+
+test('the phone facts cross a clear and a reload after it', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'no' } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go', 'bridge'))
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.state.get('context-vigil-mod.phoneFacts')).toMatchObject({ lastHumanOrigin: 'bridge' })
+  await $.session.start(START)            // a reload in the new session
+  await autoHandoverAfter($, w)
+  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(true)
+  expect(w.commands).not.toContain('clear')
+})

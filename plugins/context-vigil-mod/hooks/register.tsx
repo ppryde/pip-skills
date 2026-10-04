@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PendingReason, RateLimit, Settings, StepId } from '../types'
+import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Settings, StepId } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
@@ -31,6 +31,9 @@ const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
+// The phone facts of `activity`, written through so a hot reload (which keeps $.state) restores
+// them; a clear wipes this, so the clear branch writes it again from the module copy.
+const phoneA = atom({ plugin: 'context-vigil-mod', key: 'phoneFacts' } as const, null as PhoneFacts | null)
 
 // An account fact in $.store: the limit latch, shared by every session of the account.
 const LATCH_KEY = 'latch'
@@ -114,6 +117,7 @@ async function observe($: EngineInterface, signal: Signal) {
   const now = await nowMs($)
   // Every change is computed from the value it replaces, so overlapping observers cannot erase each other.
   activity = record(activity, signal)
+  if (signal.kind === 'prompt' && classifyOrigin(signal.origin) === 'human') await savePhoneFacts($)
   // Spec §2: a non-empty draft in the terminal box is you being here.
   if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) activity = record(activity, { kind: 'edit', at: now })
   const act = activity   // this observation's view: later awaits may move `activity` on
@@ -186,9 +190,15 @@ function resetCaches() {
   countdownTick = null
 }
 
+async function savePhoneFacts($: EngineInterface) {
+  const { lastHumanOrigin, lastBridgeAt } = activity
+  await update($, phoneA, () => ({ lastHumanOrigin, lastBridgeAt }))
+}
+
 async function bindSession($: EngineInterface) {
   resetCaches()
-  activity = { ...EMPTY_ACTIVITY, lastHumanAt: await nowMs($) }
+  // A reload keeps $.state: the phone facts come back so the RC gate still sees the phone.
+  activity = { ...EMPTY_ACTIVITY, ...(await read($, phoneA)), lastHumanAt: await nowMs($) }
   lastLightArmed = false
   standDown = false
   rcAsked = false
@@ -498,6 +508,7 @@ export const register: Register = on => {
     await update($, barDismissedA, () => false)
     await update($, countdownA, () => null)
     await update($, handoverCountA, () => 0)
+    if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
     if (!pending) return out
     const follow = pending.followUp
     // /rename starts from its own timer, before the resume submit, and never blocks it.

@@ -51,6 +51,9 @@ export type Git = { branch: string | null; dirty: string[] }
 export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string }
 export type Latch = { kind: string; resetsAtMs: number } | null
 
+// What a reload must not forget about the person's surface (the RC gate reads them).
+export type PhoneFacts = Pick<Activity, 'lastHumanOrigin' | 'lastBridgeAt'>
+
 export type PendingReason = 'threshold' | 'request' | 'last_light' | 'limit'
 export type Pending = {
   session: string
@@ -97,6 +100,7 @@ declare module 'claude-code' {
       countdownEndsAt: number | null
       lastApiAt: number | null
       rcAsked: boolean
+      phoneFacts: PhoneFacts | null
     }
   }
 }
