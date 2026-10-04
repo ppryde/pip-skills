@@ -186,7 +186,9 @@ the deciding origin.
   (Verified live in a demo mod: the band renders in the terminal, `e.surface`
   `"terminal"`.)
   It is not raised when the last human origin is `bridge`; the phone gets an
-  end-of-turn notice instead. Nothing is cleared unless the person asks.
+  end-of-turn notice instead. With the bar switched off in setup (§6), the
+  terminal also gets only the notice. Nothing is cleared unless the person
+  asks.
 - **Auto armed** — the handover runs by itself.
 
 **Steps.**
@@ -304,6 +306,7 @@ re-presents the same options.
 | Step | Options | Default |
 |---|---|---|
 | 🎚️ Nudge at | 25% · 35% · 50% · Tell me more | 35% (+5% steps) |
+| 🎛️ Vigil bar | On · Off · Tell me more | On |
 | 🤖 Auto mode | Off · On · Tell me more | Off |
 | ⏱️ Idle window (asked if auto mode on) | 15 · 30 · 60 min · Tell me more | 30 min |
 | 🌅 Last light | Off · On · Tell me more | Off |
@@ -313,6 +316,15 @@ re-presents the same options.
 
 Settings live in `$.store` — per account. Headers fit AskUserQuestion's
 12-UTF-16-unit limit.
+
+**Changing a setting later:** `/vsetup` re-runs the whole flow; `/vsetup
+<step>` (e.g. `/vsetup bar`) re-asks one step. There is no separate config
+command.
+
+**Vigil bar off:** no band is ever drawn; the end-of-turn notice still fires
+at the threshold (and every step after), so the nudge is never lost. The
+default is **On** — classic defaulted to "No (Recommended)", but the owner has
+since seen the bar and likes it.
 
 **How the cards are shown:** through the model's AskUserQuestion, prompted by
 the mod at setup (`/vsetup`) and at the first RC session. `$.ui.ask` is not
