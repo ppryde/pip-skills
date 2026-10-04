@@ -13,7 +13,18 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from context_vigil import config, context, handover, messages, pane, paths, session, state, tmux
+from context_vigil import (
+    config,
+    context,
+    handover,
+    last_light,
+    messages,
+    pane,
+    paths,
+    session,
+    state,
+    tmux,
+)
 
 KICK_PROMPT = (
     "context-vigil: handover received — resume from the injected handover now, "
@@ -60,6 +71,32 @@ def _str(payload: Dict[str, object], key: str) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+_BACKGROUND_PREFIX = "<task-notification>"
+
+
+def classify_prompt(payload: Dict[str, object]) -> str:
+    """``ours`` (last light's prompt, or our resume kick), ``background`` (a finished
+    background task starting a turn), else ``human``."""
+    text = payload.get("prompt")
+    text = text.lstrip() if isinstance(text, str) else ""
+    if text.startswith(last_light.MARKER) or text.startswith(KICK_PROMPT):
+        return "ours"
+    if text.startswith(_BACKGROUND_PREFIX):
+        return "background"
+    return "human"
+
+
+def _on_human_prompt(cwd: Path, session_id: Optional[str], scope: Path) -> None:
+    """Lock 1 arms; a prepared handover is stale once the person carries on."""
+    if session_id:
+        with session.locked(session_id) as got:
+            if got:
+                record = session.load(session_id)
+                record["last_light_armed"] = True
+                session.save(session_id, record)
+    state.discard_prepared(scope, config.archive_keep(cwd))
+
+
 def nudge(payload: Dict[str, object]) -> Optional[str]:
     cwd = _cwd(payload)
     session_id = _str(payload, "session_id")
@@ -70,6 +107,12 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
                 or state.cooldown_active(where, config.cooldown_seconds(cwd)))
 
     scope = session.scope(cwd, session_id, transcript_path)   # headless known before choosing
+    event = _str(payload, "hook_event_name")
+    kind = classify_prompt(payload) if event == "UserPromptSubmit" else None
+    if kind == "ours":
+        return None
+    if kind == "human":
+        _on_human_prompt(cwd, session_id, scope)
     if quiet(scope):
         return None
     threshold = config.threshold(cwd)
@@ -105,8 +148,8 @@ def nudge(payload: Dict[str, object]) -> Optional[str]:
         if session_id and record is not None:
             record["last_nudged_pct"] = pct
             session.save(session_id, record)
-    event = _str(payload, "hook_event_name")
-    template = NUDGE_ATTENDED if event == "UserPromptSubmit" else NUDGE_UNATTENDED
+    template = (NUDGE_ATTENDED if event == "UserPromptSubmit" and kind == "human"
+                else NUDGE_UNATTENDED)
     text = template.format(pct=pct, threshold=threshold, launcher=paths.launcher_path())
     if config.mode(cwd) == "remote":
         text += NUDGE_REMOTE

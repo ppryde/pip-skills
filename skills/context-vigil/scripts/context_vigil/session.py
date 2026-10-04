@@ -21,7 +21,9 @@ reaches the model. A record lives at ``sessions/<session_id>.json`` and holds:
 - ``window_model``: the latest model the window was resolved for (a change re-resolves it);
 - ``head_attempts``: reads of a still-unsettled transcript head (bounded);
 - ``head_checked``: the transcript head was read once for ``headless``;
-- ``last_nudged_pct``: the ctx % of the most recent nudge in this cycle.
+- ``last_nudged_pct``: the ctx % of the most recent nudge in this cycle;
+- ``last_light_armed``: a human prompt arrived since last light last fired (lock 1);
+- ``last_noticed_pct``: the ctx % of the most recent end-of-turn notice this cycle.
 
 Read-modify-write of a record happens under ``locked`` (an flock on a sidecar
 ``<id>.lock``, bounded wait). Quarantine-safe: loads degrade to defaults, saves
@@ -63,6 +65,8 @@ _DEFAULTS: Dict[str, Any] = {
     "head_attempts": 0,
     "head_checked": False,
     "last_nudged_pct": None,
+    "last_light_armed": False,
+    "last_noticed_pct": None,
 }
 
 
