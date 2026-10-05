@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { START, human, turn, world, type World } from './world'
+import { START, human, turn, usageTurn, world, type World } from './world'
 import { V } from '../core/voice'
 
 const MIN = 60_000
@@ -282,4 +282,158 @@ test('the held prompt is dropped with a voice string', async ($, on) => {
   await heldReturn($, w, 'Carry on')
   const r = await $.prompt.submit(human('morning!'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
+})
+
+// Information layer (PROBES §11): what the session's cache is, shown; never a gate.
+const TTL = 'context-vigil-mod.cacheTtl'
+const BAND = { plugin: 'context-vigil-mod', surface: 'terminal' as const, component: 'AbovePrompt' as const, props: { hasSurvey: false, isWorking: false } as never }
+const INFO = { type: 'Text' as const, text: /Last light is off for this session/ }
+async function infoShown($: any) {
+  const ui = await $.ui.mount(BAND)
+  const found = (await ui.find(INFO)) !== undefined
+  await ui.unmount()
+  return found
+}
+async function first5m($: any, w: World) {
+  w.cacheWrites.value = { h1: 0, m5: 100 }
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.turn.complete(usageTurn(5))
+  await w.clock.settle()
+}
+
+test('the first turn that wrote to the cache reads the type once; later turns never read again', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.turn.complete(usageTurn(5))
+  await w.clock.settle()
+  expect(w.tails.length).toBe(1)
+  expect(w.state.get(TTL)).toBe('1h')
+  await $.turn.complete(usageTurn(5, '2'))
+  await $.turn.complete(usageTurn(0, '3'))
+  await w.clock.settle()
+  expect(w.tails.length).toBe(1)
+})
+
+test('a turn with no cache write, or a subagent turn, does not read', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.turn.complete(usageTurn(0))
+  await $.turn.complete({ ...usageTurn(5), agentId: 'sub' } as never)
+  await $.turn.complete(turn())
+  await w.clock.settle()
+  expect(w.tails.length).toBe(0)
+})
+
+test('an unreadable transcript is unknown and is not retried every turn', async ($, on) => {
+  const w = world(on, LL)
+  w.cacheWrites.value = 'fail'
+  await $.session.start(START)
+  await $.turn.complete(usageTurn(5))
+  await w.clock.settle()
+  await $.turn.complete(usageTurn(5, '2'))
+  await w.clock.settle()
+  expect(w.tails.length).toBe(1)
+  expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
+  expect(await infoShown($)).toBe(false)
+})
+
+test('5-minute cache with last light on: the info line shows, and the log says so once', async ($, on) => {
+  const w = world(on, LL)
+  await first5m($, w)
+  expect(w.state.get(TTL)).toBe('5m')
+  expect(await infoShown($)).toBe(true)
+  expect(count(eventLog(w), '"kind":"last_light.off"')).toBe(1)
+  expect(eventLog(w)).toContain('"source":"response"')
+})
+
+test('last light off: nothing is shown or logged for a 5-minute cache', async ($, on) => {
+  const w = world(on, { store: { settings: { lastLight: false, nudgeAt: 90 } } })
+  await first5m($, w)
+  expect(await infoShown($)).toBe(false)
+  expect(eventLog(w)).not.toContain('last_light.off')
+})
+
+test('a 1-hour cache shows nothing', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.turn.complete(usageTurn(5))
+  await w.clock.settle()
+  expect(await infoShown($)).toBe(false)
+})
+
+test('0 dismisses the info line for the session', async ($, on) => {
+  const w = world(on, LL)
+  await first5m($, w)
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'dismiss-ttl' })
+  await ui.unmount()
+  expect(await infoShown($)).toBe(false)
+  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
+  await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)
+  expect(await infoShown($)).toBe(false)
+})
+
+test('the threshold bar wins while both apply; the info line returns after it', async ($, on) => {
+  const w = world(on, LL)
+  await first5m($, w)
+  await $.session.measure(measure(95))
+  let ui = await $.ui.mount(BAND)
+  expect(await ui.find({ key: 'handover' })).toBeDefined()
+  expect(await ui.find(INFO)).toBeUndefined()
+  await ui.press({ key: 'later' })
+  await ui.unmount()
+  expect(await infoShown($)).toBe(true)
+})
+
+test('a switch to a 1-hour cache hides the line and says last light is back on', async ($, on) => {
+  const w = world(on, LL)
+  await first5m($, w)
+  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
+  expect(w.state.get(TTL)).toBe('1h')
+  expect(await infoShown($)).toBe(false)
+  expect(w.notices).toContain('🌅 Last light is back on — 1-hour prompt cache')
+  expect(eventLog(w)).toContain('"kind":"last_light.on"')
+})
+
+test('a switch to a 5-minute cache shows the line; no notice for 1h learnt from unknown', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
+  expect(w.notices.some(n => n.includes('back on'))).toBe(false)
+  await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)
+  expect(await infoShown($)).toBe(true)
+  expect(eventLog(w)).toContain('"source":"switch"')
+})
+
+test('PreModelSwitch is ignored', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.classic.PreModelSwitch({ cache_ttl: '5m' } as never)
+  expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
+})
+
+test('a /clear resets the type to unknown and reads again on the new session', async ($, on) => {
+  const w = world(on, LL)
+  await first5m($, w)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(w.state.get(TTL) ?? 'unknown').toBe('unknown')
+  expect(await infoShown($)).toBe(false)
+  w.cacheWrites.value = { h1: 10, m5: 0 }
+  await $.turn.complete(usageTurn(5, '9'))
+  await w.clock.settle()
+  expect(w.tails.length).toBe(2)
+  expect(w.state.get(TTL)).toBe('1h')
+})
+
+test('fire-time check stays the only gate: a 1h state does not override a 5m transcript', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(usageTurn(5))
+  await w.clock.settle()
+  w.cacheWrites.value = { h1: 0, m5: 9 }
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(0)
 })

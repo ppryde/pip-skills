@@ -284,6 +284,11 @@ or nothing found, does not: `last_light.skip` with `ttl-5m` / `ttl-unknown`. No
 widening, no retry. Nothing is read per turn. A pending last-light handover implies
 1h was verified at fire time, so the return hold uses last API time + 1 h
 (PROBES §11).
+An information layer sits beside the gate, never in it: the first response of a
+session that wrote to the cache triggers one detached tail read into `$.state`
+(`cacheTtl`, reset by /clear); with last light on and a `5m` cache, a dismissible
+line above the prompt says it is off (the threshold bar wins), and
+`classic.PostModelSwitch` `cache_ttl` updates it (5m to 1h notifies "back on").
 
 **Fire conditions (all):** last light is on (§6); the session is in
 last-light territory (you idle, agent idle — §2); context ≥ the last-light

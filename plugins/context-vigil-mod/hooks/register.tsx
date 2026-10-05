@@ -8,7 +8,7 @@ import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
-import { TAIL_CMD, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
+import { TAIL_CMD, type CacheTtl, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
@@ -30,6 +30,10 @@ const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } 
 const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, null)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
 const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } as const, null as string | null)
+// Information only (PROBES §11): what the session's cache is. The fire-time check stays the gate.
+const cacheTtlA = atom({ plugin: 'context-vigil-mod', key: 'cacheTtl' } as const, 'unknown' as CacheTtl)
+const ttlReadA = atom({ plugin: 'context-vigil-mod', key: 'ttlRead' } as const, false)
+const ttlInfoDismissedA = atom({ plugin: 'context-vigil-mod', key: 'ttlInfoDismissed' } as const, false)
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
 const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const, null as Awaiting | null)
@@ -434,16 +438,37 @@ function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
 
 // The one place the cache lifetime is asked (PROBES §11): scheduling assumed 1 hour, the latest
 // write in the transcript's tail says whether that held. Nothing found is no fire; no retry.
-async function cacheIsOneHour($: EngineInterface): Promise<boolean> {
+async function readTtl($: EngineInterface): Promise<CacheTtl> {
   let writes = null
   try {
     const path = (await read($, transcriptA)) ?? transcriptPathFor(root, await $.session.cwd(), await $.session.id())
     const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', path])
     if (r.exitCode === 0) writes = parseWrites(r.stdout)
-  } catch { /* unknown, so no fire */ }
-  const ttl = ttlFromWrites(writes)
+  } catch { /* unknown */ }
+  return ttlFromWrites(writes)
+}
+
+async function cacheIsOneHour($: EngineInterface): Promise<boolean> {
+  const ttl = await readTtl($)
   if (ttl !== '1h') await log($, 'last_light.skip', { reason: `ttl-${ttl}` })
   return ttl === '1h'
+}
+
+async function setCacheTtl($: EngineInterface, to: CacheTtl, source: 'response' | 'switch') {
+  const from = await read($, cacheTtlA)
+  if (to === from) return
+  await update($, cacheTtlA, () => to)
+  if (!settings.lastLight) return
+  if (to === '5m') await log($, 'last_light.off', { ttl: to, source })
+  else if (from === '5m' && to === '1h') {
+    await log($, 'last_light.on', { ttl: to, source })
+    await notify($, V.lastLightBackOn)
+  }
+}
+
+// The session's first response that wrote to the cache: one detached tail read, never again.
+async function learnSessionTtl($: EngineInterface) {
+  await setCacheTtl($, await readTtl($), 'response')
 }
 
 async function maybeFireLastLight($: EngineInterface) {
@@ -534,6 +559,9 @@ export const register: Register = on => {
     await update($, barDismissedA, () => false)
     await update($, countdownA, () => null)
     await update($, handoverCountA, () => 0)
+    await update($, cacheTtlA, () => 'unknown')
+    await update($, ttlReadA, () => false)
+    await update($, ttlInfoDismissedA, () => false)
     if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
     if (!pending) return out
     const follow = pending.followUp
@@ -604,6 +632,10 @@ export const register: Register = on => {
     await observe($, { kind: 'agent-step', at: now })
     await update($, lastApiA, () => now)
     scheduleLastLight($, now, now)
+    if (e.agentId === undefined && (e.usage?.cache_creation_input_tokens ?? 0) > 0 && !(await read($, ttlReadA))) {
+      await update($, ttlReadA, () => true)
+      $.clock.after(0, () => { void learnSessionTtl($) })
+    }
     const awaitingNow = await read($, awaitingA)
     if (awaitingNow?.started) {
       if (awaitingNow.attempts < 2) {
@@ -615,6 +647,13 @@ export const register: Register = on => {
         await log($, 'guard.wait', { reason: 'tool-not-called' })
       }
     }
+    return next(e)
+  })
+
+  // Only the Post event: Pre is ambiguous (the cache left or the one entered).
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const label = (e as unknown as { cache_ttl?: unknown }).cache_ttl
+    if (label === '1h' || label === '5m') await setCacheTtl($, label, 'switch')
     return next(e)
   })
 
@@ -739,7 +778,16 @@ export const register: Register = on => {
         </Box>
       )
     }
-    if (!settings.bar || !(await read($, barShownA))) return next(e)
+    if (!settings.bar || !(await read($, barShownA))) {
+      // The threshold bar wins; otherwise the one quiet fact: last light is off for this cache.
+      if (!settings.lastLight || (await read($, cacheTtlA)) !== '5m' || (await read($, ttlInfoDismissedA))) return next(e)
+      return (
+        <Box>
+          <Text>{V.lastLightOff}   </Text>
+          <Button key="dismiss-ttl" hotkey="0" plain label={V.barDismiss} onPress={() => update($, ttlInfoDismissedA, () => true)} />
+        </Box>
+      )
+    }
     const pct = (await read($, contextA)) ?? 0
     const step = (await read($, lastNudgedA)) ?? settings.nudgeAt
     const latch = await readLatch($)
