@@ -16,6 +16,11 @@ parses its v1 entry JSON; it never touches census's on-disk store. Still
 quarantine-safe: if the CLI is missing, slow, fails, or prints junk, or the
 entry is stale or absent, every function returns None and the caller falls back
 to transcript-slug measurement. Never raises.
+
+A non-.py ``CENSUS_CLI`` must be executable. One context_percent can make two
+CLI calls (--session then --worktree), so the worst case is ~2x the timeout
+(~4 s). A FAILED --session call yields None outright; only an empty answer
+falls through to the worktree lookup.
 """
 from __future__ import annotations
 
@@ -46,29 +51,37 @@ def census_cli() -> list[str] | None:
     return [found] if found else None
 
 
+_FAILED: dict[str, Any] = {}  # sentinel (compared by identity): the call itself failed
+
+
 def _read(args: list[str]) -> dict[str, Any] | None:
-    """One ``census read`` call -> its JSON object, or None on ANY failure or an
-    empty answer. Inherits the environment, so CLAUDE_CONFIG_DIR / CENSUS_STORE
-    pick the right account."""
+    """One ``census read`` call -> its JSON object; None when census answered
+    ``{}`` (no matching entry); ``_FAILED`` on ANY failure (no CLI, timeout,
+    crash, non-zero exit, junk). Inherits the environment, so CLAUDE_CONFIG_DIR
+    / CENSUS_STORE pick the right account."""
     cmd = census_cli()
     if cmd is None:
-        return None
+        return _FAILED
     try:
         result = subprocess.run(
             [*cmd, "read", *args], capture_output=True, text=True, timeout=_TIMEOUT_SECONDS, check=False
         )
     except (OSError, subprocess.SubprocessError):
-        return None
+        return _FAILED
     if result.returncode != 0:
-        return None
+        return _FAILED
     try:
         data = json.loads(result.stdout)
     except ValueError:
-        return None
-    return data if isinstance(data, dict) and data else None
+        return _FAILED
+    if not isinstance(data, dict):
+        return _FAILED
+    return data or None
 
 
 def _entry_ts(entry: dict) -> float:
+    """The entry's ``updated_at`` as a float; malformed/missing reads as 0.0
+    (i.e. beyond any staleness horizon) -- quarantine-safe, never raises."""
     try:
         return float(entry.get("updated_at", 0) or 0)
     except (TypeError, ValueError):
@@ -78,12 +91,15 @@ def _entry_ts(entry: dict) -> float:
 def _fresh_entry(root: Path, now: float, session_id: str | None = None) -> dict | None:
     if session_id is not None:
         own = _read(["--session", session_id])
+        if own is _FAILED:
+            # Can't tell whether we have an entry: never guess with a sibling's.
+            return None
         if own is not None:
             # Our own entry IS this session: if it is stale, the answer is
             # "unavailable" -- never a sibling's reading (misattribution guard).
             return own if now - _entry_ts(own) <= STALE_HORIZON_SECONDS else None
     best = _read(["--worktree", os.path.realpath(str(root))])
-    if best is None or now - _entry_ts(best) > STALE_HORIZON_SECONDS:
+    if best is None or best is _FAILED or now - _entry_ts(best) > STALE_HORIZON_SECONDS:
         return None
     return best
 

@@ -1,11 +1,11 @@
 import json
+import os
 import time
 
 from scripts import census
 
 
 def _store(store_file, root, pct, *, updated=None, sid="s1"):
-    import os
     store_file.parent.mkdir(parents=True, exist_ok=True)
     store_file.write_text(json.dumps({
         "version": 1,
@@ -195,12 +195,11 @@ class TestCliFailures:
         assert census.context_percent(tmp_path) is None
 
     def test_slow_cli_reads_none(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "sleep 5")))
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "exec sleep 5")))
         monkeypatch.setattr(census, "_TIMEOUT_SECONDS", 0.2)
         assert census.context_percent(tmp_path) is None
 
     def test_own_stale_entry_never_falls_back_to_sibling(self, tmp_path, monkeypatch):
-        import json, os, time
         store = tmp_path / "census" / "status.json"
         monkeypatch.setenv("CENSUS_STORE", str(store))
         root = os.path.realpath(str(tmp_path))
@@ -212,3 +211,44 @@ class TestCliFailures:
                     "payload": {"context_window": {"used_percentage": 80}}},
         }}))
         assert census.context_percent(tmp_path, session_id="me") is None
+
+    def test_failed_session_call_never_falls_back_to_worktree(self, tmp_path, monkeypatch):
+        entry = json.dumps({"updated_at": time.time(),
+                            "payload": {"context_window": {"used_percentage": 80}}})
+        body = f"case \"$*\" in *--session*) exit 3;; esac\necho '{entry}'"
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, body)))
+        assert census.context_percent(tmp_path, session_id="x") is None
+
+
+class TestCliCalls:
+    def _logging_fake(self, tmp_path, monkeypatch, entries):
+        """Fake census: logs argv, prints entries['session'|'worktree']."""
+        log = tmp_path / "argv.log"
+        script = tmp_path / "fake-census"
+        lines = ['echo "$*" >> ' + str(log), 'case "$*" in']
+        for key, pct_age in entries.items():
+            pct, age = pct_age
+            entry = json.dumps({"updated_at": time.time() - age,
+                                "payload": {"context_window": {"used_percentage": pct}}})
+            lines.append(f"  *--{key}*) echo '{entry}';;")
+        lines += ["esac"]
+        script.write_text("#!/bin/sh\n" + "\n".join(lines) + "\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("CENSUS_CLI", str(script))
+        return log
+
+    def test_worktree_read_returns_pct(self, tmp_path, monkeypatch):
+        self._logging_fake(tmp_path, monkeypatch, {"worktree": (42, 0)})
+        assert census.context_percent(tmp_path) == 42
+
+    def test_session_id_is_asked_first(self, tmp_path, monkeypatch):
+        log = self._logging_fake(tmp_path, monkeypatch, {"session": (42, 0)})
+        assert census.context_percent(tmp_path, session_id="abc") == 42
+        assert log.read_text().splitlines()[0] == "read --session abc"
+
+    def test_stale_own_entry_makes_no_worktree_call(self, tmp_path, monkeypatch):
+        log = self._logging_fake(
+            tmp_path, monkeypatch, {"session": (42, 999), "worktree": (80, 0)}
+        )
+        assert census.context_percent(tmp_path, session_id="abc") is None
+        assert log.read_text().splitlines() == ["read --session abc"]
