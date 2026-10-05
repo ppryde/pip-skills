@@ -19,11 +19,19 @@ export function grownEnough(pct: number, baseline: number | null, step: number):
 // means the conversation moved on and the handover is stale.
 export const REUSE_SLACK_MS = 60_000
 
-// A pending handover is reused (cleared into) only when it was written for a clear and no
-// turn has completed since; anything else gets a fresh handover.
-export function reusable(p: Pick<Pending, 'reason' | 'createdAt'> | null, lastApiAt: number | null): boolean {
+// Is a handover still the latest word on the session? No turn has completed since it was written
+// (give or take the slack). A process that has seen no turn yet (a restart, a --resume) knows only
+// the clock: the handover must be young. One rule for reuse (R1-04) and for a manual /clear's
+// automatic resume (R1-10).
+export function fresh(p: Pick<Pending, 'createdAt'>, lastApiAt: number | null, now: number): boolean {
+  return (lastApiAt ?? now) <= p.createdAt + REUSE_SLACK_MS
+}
+
+// A pending handover is reused (cleared into) only when it was written for a clear and is fresh;
+// anything else gets a fresh handover.
+export function reusable(p: Pick<Pending, 'reason' | 'createdAt'> | null, lastApiAt: number | null, now: number): boolean {
   if (!p || (p.reason !== 'threshold' && p.reason !== 'request')) return false
-  return lastApiAt === null || lastApiAt <= p.createdAt + REUSE_SLACK_MS
+  return fresh(p, lastApiAt, now)
 }
 
 export const FIELD_NAMES = ['goal', 'state', 'decisions', 'next_step', 'open_questions', 'failed_attempts', 'session_name'] as const

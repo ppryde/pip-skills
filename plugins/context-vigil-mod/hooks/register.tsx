@@ -253,7 +253,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     return
   }
   const pending = await read($, pendingA)
-  if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA))) {
+  if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), await nowMs($))) {
     scheduleClear($, unattended)
     return
   }
@@ -538,7 +538,7 @@ export const register: Register = on => {
       // reload also forgot the phone, so only a clear the person asked for is picked back up;
       // an unattended one is offered, never run past an RC answer or a countdown it can't see.
       await setCountdown($, null)
-      if (live.reason === 'request' && reusable(live, await read($, lastApiA))) scheduleClear($, false)
+      if (live.reason === 'request' && reusable(live, await read($, lastApiA), await nowMs($))) scheduleClear($, false)
       else await notify($, V.pendingOffer(live.path))
     }
     // A reload counts as the person being here (bindSession): it re-arms last light too, and

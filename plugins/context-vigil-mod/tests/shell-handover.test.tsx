@@ -564,3 +564,14 @@ test('R1-02: an interrupted instruction turn is not retried, and the interrupt i
   expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
   expect(w.notices.some(n => n.includes('interrupted'))).toBe(true)
 })
+
+// R1-04: a pending restored from $.store after a restart is only reusable while it is young.
+test('R1-04: a day-old stored handover is not cleared into by /vho after a restart', async ($, on) => {
+  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', name: 'Old', reason: 'request', markdown: '# old', resume: true, followUp: null, createdAt: 100_000_000 - 86_400_000 }
+  const w = world(on, { now: 100_000_000, store: { 'pending:s1': old } })
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  expect(w.submits.filter(s => s.text.includes(TOOL))).toHaveLength(1)
+})

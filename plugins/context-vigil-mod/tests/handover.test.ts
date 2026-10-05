@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { FIELD_NAMES, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { FIELD_NAMES, fresh, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 
@@ -116,14 +116,19 @@ test('texts name the tool and the file', () => {
 
 describe('reusable', () => {
   const p = (reason: 'threshold' | 'request' | 'last_light' | 'limit') => ({ reason, createdAt: 1_000_000 })
-  test('no pending handover: nothing to reuse', () => expect(reusable(null, null)).toBe(false))
+  test('no pending handover: nothing to reuse', () => expect(reusable(null, null, 1_000_000)).toBe(false))
   test('written for a clear, no turn since: reused', () => {
-    expect(reusable(p('request'), null)).toBe(true)
-    expect(reusable(p('threshold'), 1_000_000 + 30_000)).toBe(true)
+    expect(reusable(p('request'), null, 1_000_000 + 10_000)).toBe(true)
+    expect(reusable(p('threshold'), 1_000_000 + 30_000, 1_000_000 + 90_000)).toBe(true)
   })
-  test('a turn completed well after it was written: stale', () => expect(reusable(p('request'), 1_000_000 + 5 * 60_000)).toBe(false))
+  test('a turn completed well after it was written: stale', () => expect(reusable(p('request'), 1_000_000 + 5 * 60_000, 1_000_000 + 6 * 60_000)).toBe(false))
+  test('R1-04: no turn seen by this process but the handover is a day old: stale', () => {
+    expect(reusable({ reason: 'request', createdAt: 1_000_000 - 86_400_000 }, null, 1_000_000)).toBe(false)
+    expect(fresh({ createdAt: 1_000_000 }, null, 1_000_000 + 61_000)).toBe(false)
+    expect(fresh({ createdAt: 1_000_000 }, null, 1_000_000 + 59_000)).toBe(true)
+  })
   test('last light and limit handovers are never cleared into', () => {
-    expect(reusable(p('last_light'), null)).toBe(false)
-    expect(reusable(p('limit'), null)).toBe(false)
+    expect(reusable(p('last_light'), null, 1_000_000)).toBe(false)
+    expect(reusable(p('limit'), null, 1_000_000)).toBe(false)
   })
 })
