@@ -16,7 +16,7 @@ test('/vsetup asks card 1 through the model, saves the answers, follows with car
   const prompt = w.submits.at(-1)?.text ?? ''
   expect(prompt).toContain('AskUserQuestion')
   const card = cardOf(prompt)
-  expect(card.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', '🌅 Lastlight'])
+  expect(card.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', 'Last light'])
   const answers = Object.fromEntries(card.map(q => [q.question, q.header.includes('Auto') ? 'On' : q.header.includes('Nudge') ? '50%' : 'Off']))
   const r = await $.tool.call(ask(card, answers) as never)
   const next = JSON.stringify((r as { context?: string[] }).context ?? [])
