@@ -21,6 +21,9 @@ export type Signal =
 export function record(a: Activity, s: Signal): Activity {
   switch (s.kind) {
     case 'prompt': {
+      // An origin the engine cannot attest might be a person: it disarms auto mode and restarts the
+      // idle clock, and counts for nothing else (not a phone fact, not a return, not agent work). R1-24.
+      if (s.origin === 'unclassified') return { ...a, lastHumanAt: s.at }
       const who = classifyOrigin(s.origin)
       if (who === 'human') {
         return { ...a, lastHumanAt: s.at, lastHumanOrigin: s.origin, lastBridgeAt: s.origin === 'bridge' ? s.at : a.lastBridgeAt }

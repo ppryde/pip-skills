@@ -24,6 +24,13 @@ describe('record', () => {
   test('an agent prompt is agent activity', () => {
     expect(record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'task-notification', at: 7 }).lastAgentAt).toBe(7)
   })
+  test('an unclassified prompt disarms auto mode and nothing else (R1-24)', () => {
+    const base = record(record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'bridge', at: 1 }), { kind: 'agent-step', at: 2 })
+    const a = record(base, { kind: 'prompt', origin: 'unclassified', at: 9 })
+    expect(a).toEqual({ ...base, lastHumanAt: 9 })
+    expect(mode(record(EMPTY_ACTIVITY, { kind: 'agent-step', at: 8 }), 10, S)).toBe('auto')
+    expect(mode(record(record(EMPTY_ACTIVITY, { kind: 'agent-step', at: 8 }), { kind: 'prompt', origin: 'unclassified', at: 9 }), 10, S)).toBe('attended')
+  })
   test('sdk marks the session headless', () => {
     const a = record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'sdk', at: 1 })
     expect(a.headless).toBe(true)

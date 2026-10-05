@@ -24,6 +24,7 @@ test('loop guard: only a human prompt re-arms', () => {
   expect(rearm(false, 'composer')).toBe(true)
   expect(rearm(false, 'bridge')).toBe(true)
   expect(rearm(false, 'plugin')).toBe(false)
+  expect(rearm(false, 'unclassified')).toBe(false)
   expect(rearm(false, 'scheduled-trigger')).toBe(false)
   expect(rearm(true, 'plugin')).toBe(true)
 })
@@ -34,6 +35,7 @@ describe('holdOnReturn', () => {
   test('not before expiry, not for agent prompts, not without a last-light handover', () => {
     expect(holdOnReturn({ ...f, now: 4 })).toBe(false)
     expect(holdOnReturn({ ...f, origin: 'plugin' })).toBe(false)
+    expect(holdOnReturn({ ...f, origin: 'unclassified' })).toBe(false)
     expect(holdOnReturn({ ...f, pendingIsLastLight: false })).toBe(false)
     expect(holdOnReturn({ ...f, cacheExpiresAt: null })).toBe(false)
   })
