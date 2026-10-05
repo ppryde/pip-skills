@@ -31,6 +31,7 @@ export type World = {
   tails: string[][]                    // argv of every transcript-tail run
   fsRead: { gate: Promise<void> | null; error: string | null }   // gate delays every fs.read; error makes it reject with that text
   clearHold: { held: boolean; release(): void }   // while held, $.command.run({ command: 'clear' }) stays pending until release()
+  askHold: { held: boolean; waiting: ((answer: string) => void)[] }   // while held, each ask stays open until its resolver is called
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
@@ -44,7 +45,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
@@ -134,9 +135,13 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   // Result shape { questions, answers: { [question]: label } } per the claude-code-tools typings.
   // A test that passes `answers` on the input gets them echoed; otherwise every question
   // gets w.askAnswer; null means the person dismissed the dialog.
-  on('tool.call', (_$, e) => {
+  on('tool.call', async (_$, e) => {
     const input = e as unknown as { tool: string; questions?: { question: string }[]; answers?: Record<string, string> }
     if (input.tool === 'AskUserQuestion') {
+      if (w.askHold.held && !input.answers) {
+        const held = await new Promise<string>(res => w.askHold.waiting.push(res))
+        return { result: { questions: input.questions, answers: Object.fromEntries((input.questions ?? []).map(q => [q.question, held])) } } as never
+      }
       if (input.answers) return { result: { questions: input.questions, answers: input.answers } } as never
       if (w.askAnswer.value === null) return { deny: 'dismissed' }
       const answer = w.askAnswer.value

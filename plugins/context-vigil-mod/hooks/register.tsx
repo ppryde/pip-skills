@@ -40,6 +40,9 @@ const deferredA = atom({ plugin: 'context-vigil-mod', key: 'deferred' } as const
 const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' } as const, 0)
 // The phone facts of `activity`, written through so a hot reload (which keeps $.state) restores
 // them; a clear wipes this, so the clear branch writes it again from the module copy.
+// The prompts held while the return question is open (R1-19, R2-11). In $.state so a hot reload
+// that kills the module (and its ask's closure) still knows what is owed; a clear wipes it.
+const returnHeldA = atom({ plugin: 'context-vigil-mod', key: 'returnHeld' } as const, null as string[] | null)
 const phoneA = atom({ plugin: 'context-vigil-mod', key: 'phoneFacts' } as const, null as PhoneFacts | null)
 
 // An account fact in $.store: the limit latch, shared by every session of the account.
@@ -303,6 +306,7 @@ async function resetSessionState($: EngineInterface) {
   await update($, cacheTtlA, () => 'unknown')
   await update($, ttlReadA, () => false)
   await update($, ttlInfoDismissedA, () => false)
+  await update($, returnHeldA, () => null)
 }
 
 async function prunePending($: EngineInterface) {
@@ -651,16 +655,19 @@ async function maybeFireLastLight($: EngineInterface) {
   await startHandover($, 'last_light', false)
 }
 
-// The prompts held while the return question is open (R1-19): one ask at a time, and a message
-// typed meanwhile joins the first instead of opening a second ask whose answer would undo the first.
-let returnHeld: string[] | null = null
-
+// One ask at a time: a message typed meanwhile joins the first instead of opening a second ask whose
+// answer would undo the first. Whichever answer acts first consumes the held texts, atomically, so a
+// dialog that outlives a reload can never send them twice (R2-11).
 async function askReturn($: EngineInterface) {
-  const choice = await $.ui.ask(V.lastLightAsk, [V.lastLightResume, V.lastLightCarryOn]).catch(() => V.lastLightCarryOn)
-  const held = (returnHeld ?? []).join('\n\n')
-  returnHeld = null
+  const choice = String(await $.ui.ask(V.lastLightAsk, [V.lastLightResume, V.lastLightCarryOn]).catch(() => V.lastLightCarryOn))
+  const taken: { v: string[] | null } = { v: null }
+  await update($, returnHeldA, h => { taken.v = h; return null })
+  if (!taken.v?.length) return   // already answered by another dialog
+  // Free text under "Other" is never a clear: carry on, with what was typed kept (intent: when in doubt, don't).
+  const typed = choice !== V.lastLightResume && choice !== V.lastLightCarryOn && choice.trim() ? [choice] : []
+  const held = [...taken.v, ...typed].join('\n\n')
   const resume = choice === V.lastLightResume
-  await log($, 'last_light.choice', { choice: resume ? 'resume' : 'carry_on' })
+  await log($, 'last_light.choice', { choice: resume ? 'resume' : 'carry_on', ...(typed.length ? { typed: true } : {}) })
   const pending = await read($, pendingA)
   if (resume && pending) {
     await savePending($, { ...pending, resume: false, followUp: held })
@@ -703,6 +710,8 @@ export const register: Register = on => {
       scheduleLastLight($, lastApi, await nowMs($))
     }
     scheduleGit($)
+    // R2-11: a reload while the return question was open: its dialog's closure is gone, ask again.
+    if ((await read($, returnHeldA))?.length && (await read($, pendingA))?.reason === 'last_light') $.clock.after(0, () => { void askReturn($) })
     return r
   })
 
@@ -797,9 +806,9 @@ export const register: Register = on => {
     // turn's own, which ran at about the handover's creation; never 'unknown, so drop it'.
     if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi !== null ? lastApi + TTL_1H : pending?.reason === 'last_light' ? pending.createdAt + TTL_1H : null })) {
       await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
-      if (returnHeld !== null) { returnHeld.push(e.text); return { drop: V.heldForLastLight } }
-      returnHeld = [e.text]
-      $.clock.after(0, () => { void askReturn($) })
+      let open = false
+      await update($, returnHeldA, h => { open = h !== null; return [...(h ?? []), e.text] })
+      if (!open) $.clock.after(0, () => { void askReturn($) })
       return { drop: V.heldForLastLight }
     }
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })

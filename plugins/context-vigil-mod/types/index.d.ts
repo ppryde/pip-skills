@@ -107,7 +107,7 @@ declare module 'claude-code' {
       ttlInfoDismissed: boolean
       countdownEndsAt: number | null
       lastApiAt: number | null
-      rcAsked: boolean
+      returnHeld: string[] | null
       phoneFacts: PhoneFacts | null
     }
   }

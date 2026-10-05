@@ -577,3 +577,33 @@ test('an in-process /resume holds the first prompt for a stored last-light hando
   const r = await $.prompt.submit(human('morning'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
 })
+
+// R2-11: the held messages live in $.state, so a reload while the ask is open loses nothing.
+test('a reload while the ask is open re-opens it; whichever answer acts first sends the held text once (R2-11)', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Carry on')
+  w.askHold.held = true
+  const r = await $.prompt.submit(human('one'))
+  expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
+  await w.clock.advance(1)
+  expect(w.askHold.waiting.length).toBe(1)
+  await $.session.start(START)                        // the reload: module variables are gone, $.state is not
+  await w.clock.advance(1)
+  expect(w.askHold.waiting.length).toBe(2)            // the new module asks again, it does not forget
+  w.askHold.waiting[1]?.('Carry on')
+  await w.clock.settle()
+  w.askHold.waiting[0]?.('Carry on')                  // the old dialog answers late: inert
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
+})
+
+test('an answer typed under Other is carry-on with the typed text appended, never a clear (R2-11)', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'use the handover please')
+  await $.prompt.submit(human('morning'))
+  await w.clock.settle()
+  const sent = w.submits.at(-1)?.text ?? ''
+  expect(sent).toContain('morning')
+  expect(sent).toContain('use the handover please')
+  expect(w.commands).not.toContain('clear')
+})
