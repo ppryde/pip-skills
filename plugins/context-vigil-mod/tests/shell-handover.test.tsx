@@ -679,3 +679,17 @@ test('R1-18: a restarted session never overwrites an earlier handover file', asy
   expect(String((r as { result?: unknown }).result)).toContain('/s1-2.md')
   expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).toBe('earlier')
 })
+
+test('a clear already in flight is not queued twice when the threshold crosses again (R2-10)', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  w.clearHold.held = true
+  await autoHandoverInFlight($, w)
+  await $.tool.call(call() as never)           // clear 1 is now queued and held
+  await w.clock.settle()
+  expect(w.commands.filter(c => c === 'clear').length).toBe(1)
+  await $.session.measure(measure(46))         // the instruction turn's growth crosses the next step
+  await w.clock.settle()
+  w.clearHold.release()
+  await w.clock.settle()
+  expect(w.commands.filter(c => c === 'clear').length).toBe(1)
+})

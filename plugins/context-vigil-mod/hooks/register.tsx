@@ -78,6 +78,9 @@ let clearParked = false
 let unattendedClear = false
 let lastWait: WaitReason | null = null
 let retryTimer: { cancel: () => void } | null = null
+// A /clear handed to the engine and not yet run: it is queued until the session is idle (R2-10),
+// so a second one must not follow it. Cleared when the command settles.
+let clearInFlight = false
 let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
 let countdownTick: { cancel: () => void } | null = null
@@ -320,6 +323,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
   }
   const pending = await read($, pendingA)
   if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), await nowMs($))) {
+    if (clearInFlight) return
     scheduleClear($, unattended)
     return
   }
@@ -356,7 +360,7 @@ function scheduleClear($: EngineInterface, unattended: boolean) {
 
 async function tryClear($: EngineInterface) {
   retryTimer = null
-  if (!(await read($, pendingA))) return
+  if (clearInFlight || !(await read($, pendingA))) return
   await reloadSettings($)
   await checkInterlock($)   // spec §7: at session start AND before every clear (TEMPORARY)
   const now = await nowMs($)
@@ -378,12 +382,15 @@ async function tryClear($: EngineInterface) {
     lastWait = null
     await setCountdown($, null)
     await log($, 'clear', { unattended: unattendedClear })
+    clearInFlight = true
     try {
       await $.command.run({ command: 'clear' })
     } catch {
       clearParked = true
       await notify($, V.clearRejected)
       await log($, 'guard.wait', { reason: 'clear-rejected' })
+    } finally {
+      clearInFlight = false
     }
     return
   }

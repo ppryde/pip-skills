@@ -30,6 +30,7 @@ export type World = {
   cacheWrites: { value: { h1: number; m5: number } | 'none' | 'fail' | { raw: string } }   // what the transcript tail says the latest response wrote
   tails: string[][]                    // argv of every transcript-tail run
   fsRead: { gate: Promise<void> | null; error: string | null }   // gate delays every fs.read; error makes it reject with that text
+  clearHold: { held: boolean; release(): void }   // while held, $.command.run({ command: 'clear' }) stays pending until release()
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
@@ -43,7 +44,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], onStoreSet: { value: null }, fsRead: { gate: null, error: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
@@ -101,11 +102,12 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('prompt.read', () => ({ value: { text: w.draft.value, cursor: w.draft.value.length } }))
   on('prompt.submit', (_$, e) => { if (w.submitRefused.value) throw new Error('submit refused'); w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
-  on('command.run', (_$, e) => {
+  on('command.run', async (_$, e) => {
     if (e.command === 'clear' && w.clearRefused.value) throw new Error('clear refused')
     if (e.command === 'rename' && w.renameRefused.value) throw new Error('rename refused')
     w.commands.push(e.command)
     if (e.command === 'rename') w.renames.push(String((e as { args?: string }).args ?? ''))
+    if (e.command === 'clear' && w.clearHold.held) await new Promise<void>(res => { w.clearHold.release = () => { w.clearHold.held = false; res() } })
     return {}
   })
   on('command.register', (_$, e) => { w.registered.commands.push(e.name); return { value: { command: e.name } } })
