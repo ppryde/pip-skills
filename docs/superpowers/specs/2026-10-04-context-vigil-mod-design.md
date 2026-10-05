@@ -241,7 +241,11 @@ Two guards on an unattended (auto) handover, both learned from a live smoke run:
    after a mod-run `/clear` writes the title; `sessionTitle` returned from
    `classic.SessionStart` on a clear does NOT.)
 5. **Resume.** For auto mode and a requested handover, `$.prompt.submit` sends
-   the resume prompt on a short timer after the clear, so work continues.
+   the resume prompt on a short timer after the clear, so work continues. A
+   `/clear` you run yourself picks up a saved handover the same way; the
+   automatic resume is sent only when no turn has run since the handover was
+   written and no usage limit is in force — otherwise the handover is injected
+   and a notice asks you where to pick up. Your own held message is always sent.
 
 **Git, cheaply.** Branch / dirty / ahead are refreshed only when stale: after
 `tool.call` on Edit, Write or Bash; at `turn.start`; and on `classic.FileChanged`

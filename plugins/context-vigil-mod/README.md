@@ -35,7 +35,7 @@ Every moment is in exactly one:
 
 ## The handover
 
-The mod registers a `vigil_handover` tool and asks the model to call it. Required fields: `goal`, `state`, `next_step` and `session_name`; optional: `decisions`, `open_questions`, `failed_attempts`. The mod adds a snapshot (cwd, branch, dirty files, files edited, context %) and saves `handovers/<session>-<n>.md`. It then clears (only when the prompt box is empty, the RC rules hold and no limit latch is set; every wait shows a notice), injects the handover into the fresh session and submits the resume prompt.
+The mod registers a `vigil_handover` tool and asks the model to call it. Required fields: `goal`, `state`, `next_step` and `session_name`; optional: `decisions`, `open_questions`, `failed_attempts`. The mod adds a snapshot (cwd, branch, dirty files, files edited, context %) and saves `handovers/<session>-<n>.md`. It then clears (only when the prompt box is empty, the RC rules hold and no limit latch is set; every wait shows a notice), injects the handover into the fresh session and submits the resume prompt. A `/clear` you run yourself picks up a saved handover the same way; the automatic resume is sent only when no turn has run since the handover was written and no usage limit is in force — otherwise the handover is injected and a notice asks you where to pick up.
 
 **Session naming.** After the clear, an **unnamed** session is renamed to the handover's `session_name` (a mod-run `/rename`: prompt border, `/resume`, Remote Control). A session that already has a name (a `/rename` of yours, or an earlier handover) **keeps its name** -- `/clear` carries it. Only a transcript `custom-title` counts as named; Claude Code's own auto title does not. If the check cannot run, no rename is attempted.
 

@@ -28,6 +28,8 @@ export const V = {
   handoverUnrequested: (path: string) => `📜 Handover saved — ${path} — it was not asked for, so nothing was cleared; /vho or /clear when you want to use it`,
   deferredDropped: '⏳ The handover that waited on the usage limit was not run — /vho when you want one',
   handoverInterrupted: '📜 Handover interrupted — nothing was cleared; /vho when you want one',
+  resumeStale: (path: string) => `📜 Handover injected (${path}) — it was written before later turns, so no automatic resume; say where to pick up`,
+  resumeLatched: (path: string) => `⏳ Handover injected (${path}) — the usage limit is in force, so the resume prompt was not sent; ask to resume when it lifts`,
   handoverFailed: '📜 Couldn\'t write a handover — nothing was cleared',
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,

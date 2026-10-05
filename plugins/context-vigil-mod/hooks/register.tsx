@@ -7,7 +7,7 @@ import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transitio
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
-import { INPUT_SCHEMA, TOOL_DESCRIPTION, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { TAIL_CMD, type CacheTtl, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
@@ -69,6 +69,9 @@ let git: Git = { branch: null, dirty: [] }
 let gitTimer: { cancel: () => void } | null = null
 const edited = new Set<string>()
 let dayText: Record<string, string> = {}
+// lastApiAt, mirrored out of $.state: a /clear wipes the atom, and the clear branch must still
+// know whether turns have run since a parked handover was written (R1-10).
+let lastApiMirror: number | null = null
 let clearParked = false
 let unattendedClear = false
 let lastWait: WaitReason | null = null
@@ -218,6 +221,7 @@ async function bindSession($: EngineInterface) {
   session = await $.session.id()
   cwd = await $.session.cwd()
   settings = loadSettings(await $.store.get(STORE_KEY))
+  lastApiMirror = await read($, lastApiA)
 }
 
 async function checkInterlock($: EngineInterface) {
@@ -563,6 +567,8 @@ export const register: Register = on => {
     // `session` — still the pre-clear id until it is rebound below.
     const pending = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
     if (pending) await $.store.delete(pendingKey(session))
+    const apiBefore = lastApiMirror
+    lastApiMirror = null   // the new session has run no turn
     session = await $.session.id()
     resetCaches()
     scheduleGit($)
@@ -585,9 +591,20 @@ export const register: Register = on => {
     const tp = e.transcript_path
     const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`
     $.clock.after(0, () => { void renameSession($, pending.name, oldTranscript) })
+    // The person's own held text is always sent. The mod's resume prompt needs a fresh handover
+    // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
+    let stale = false
     if (follow) submitSoon($, { text: follow, asUser: true }, 500, undefined, () => { void resumeFailed($, pending.path, follow) })
-    else if (pending.resume) submitSoon($, { text: resumeText(pending.path) }, 500, undefined, () => { void resumeFailed($, pending.path, null) })
-    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null })
+    else if (pending.resume) {
+      if (!fresh(pending, apiBefore, await nowMs($))) {
+        stale = true
+        await notify($, V.resumeStale(pending.path))
+      } else if (await readLatch($)) {
+        await notify($, V.resumeLatched(pending.path))
+        await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
+      } else submitSoon($, { text: resumeText(pending.path) }, 500, undefined, () => { void resumeFailed($, pending.path, null) })
+    }
+    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}) })
     return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
   })
 
@@ -649,6 +666,7 @@ export const register: Register = on => {
     const now = await nowMs($)
     await observe($, { kind: 'agent-step', at: now })
     await update($, lastApiA, () => now)
+    lastApiMirror = now
     scheduleLastLight($, now, now)
     if (e.agentId === undefined && (e.usage?.cache_creation_input_tokens ?? 0) > 0 && !(await read($, ttlReadA))) {
       await update($, ttlReadA, () => true)

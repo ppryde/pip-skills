@@ -326,7 +326,7 @@ test('no transcript path means the name is unknown: no rename', async ($, on) =>
 })
 
 test('a stored handover with no name resumes without any rename', async ($, on) => {
-  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# OLD', resume: true, followUp: null, createdAt: 1 }
+  const old = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', reason: 'request', markdown: '# OLD', resume: true, followUp: null, createdAt: 1_000_000 }
   const w = world(on, { store: { 'pending:s1': old } })
   await $.session.start(START)
   await $.classic.SessionStart({ source: 'clear' } as never)
@@ -574,4 +574,65 @@ test('R1-04: a day-old stored handover is not cleared into by /vho after a resta
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
   expect(w.submits.filter(s => s.text.includes(TOOL))).toHaveLength(1)
+})
+
+// R1-10: a manual /clear injects a parked handover, but the mod's own resume needs it fresh and no latch.
+async function parkHandover($: Engine, w: World) {
+  w.clearRefused.value = true
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.state.get(PENDING)).toBeTruthy()
+  w.clearRefused.value = false
+}
+const resumeSubmits = (w: World) => w.submits.filter(s => s.text.includes('Resume from the handover'))
+
+test('R1-10: a manual /clear after later turns injects the handover but sends no automatic resume', async ($, on) => {
+  const w = world(on)
+  await parkHandover($, w)
+  await w.clock.advance(2 * MIN)
+  await $.turn.complete(turn('t1'))
+  await $.turn.complete(turn('t2'))
+  w.notices.length = 0
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(1000)
+  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  expect(resumeSubmits(w)).toHaveLength(0)
+  expect(w.notices.some(n => n.includes('no automatic resume'))).toBe(true)
+})
+
+test('R1-10: a fresh parked handover still resumes after a manual /clear', async ($, on) => {
+  const w = world(on)
+  await parkHandover($, w)
+  await $.turn.complete(turn('instruction'))
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(1000)
+  expect(resumeSubmits(w)).toHaveLength(1)
+})
+
+test('R1-10: under the latch the handover is injected but the mod sends no resume', async ($, on) => {
+  const w = world(on)
+  await parkHandover($, w)
+  w.store.set('latch', { kind: 'five_hour', resetsAtMs: 1_000_000 + 60 * MIN })
+  w.notices.length = 0
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(1000)
+  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  expect(resumeSubmits(w)).toHaveLength(0)
+  expect(w.notices.some(n => n.includes('usage limit is in force'))).toBe(true)
+})
+
+test('R1-10: the person\'s held text is sent even under the latch', async ($, on) => {
+  const pending = { session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', name: 'N', reason: 'last_light', markdown: '# h', resume: false, followUp: 'my own words', createdAt: 1_000_000 }
+  const w = world(on, { store: { 'pending:s1': pending, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 60 * MIN } } })
+  await $.session.start(START)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(1000)
+  expect(w.submits.map(s => s.text)).toContain('my own words')
 })
