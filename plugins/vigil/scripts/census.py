@@ -38,15 +38,49 @@ STALE_HORIZON_SECONDS = 90  # ~1.5x the status line's 60s refresh; older = not l
 _TIMEOUT_SECONDS: float = 2
 
 
+def _version_key(name: str) -> tuple[int, ...]:
+    """A directory name as a comparable version; non-numeric parts sort as 0."""
+    return tuple(int(part) if part.isdigit() else 0 for part in name.split("."))
+
+
+def find_census(_from: Path | None = None) -> Path | None:
+    """The census plugin's ``scripts/cli.py`` in EITHER layout, or None.
+
+    Walks up from this file and, at each level, tests ``<parent>/census/scripts/cli.py``
+    (repo checkout), else the highest-version ``<parent>/census/<ver>/scripts/cli.py``
+    (marketplace cache, skipping versions Claude Code marked ``.orphaned_at``).
+    A local copy of ``find_plugin`` in overseer's cli_client: plugins cannot import
+    each other.
+    """
+    start = (_from or Path(__file__)).resolve()
+    for parent in start.parents:
+        candidate = parent / "census"
+        if not candidate.is_dir():
+            continue
+        direct = candidate / "scripts" / "cli.py"
+        if direct.is_file():
+            return direct
+        versioned = [
+            child / "scripts" / "cli.py"
+            for child in candidate.iterdir()
+            if child.is_dir()
+            and not (child / ".orphaned_at").exists()
+            and (child / "scripts" / "cli.py").is_file()
+        ]
+        if versioned:
+            return max(versioned, key=lambda cli: _version_key(cli.parents[1].name))
+    return None
+
+
 def census_cli() -> list[str] | None:
-    """How to run census: ``CENSUS_CLI``, else the sibling plugin's cli.py, else
+    """How to run census: ``CENSUS_CLI``, else the census plugin found by walking up (either layout), else
     ``census`` on PATH. None when none is found."""
     override = os.environ.get(CLI_ENV)
     if override:
         return [sys.executable, override] if override.endswith(".py") else [override]
-    sibling = Path(__file__).resolve().parents[2] / "census" / "scripts" / "cli.py"
-    if sibling.exists():
-        return [sys.executable, str(sibling)]
+    found_cli = find_census()
+    if found_cli is not None:
+        return [sys.executable, str(found_cli)]
     found = shutil.which("census")
     return [found] if found else None
 

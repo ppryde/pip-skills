@@ -138,3 +138,41 @@ def test_reads_v2_session_files(tmp_path, monkeypatch):
     monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "census"))
     monkeypatch.setattr(liveness, "_now_epoch", lambda: now)
     assert liveness.live_session_ids() == {"live"}
+
+
+def _cache(tmp_path, versions, orphaned=()):
+    base = tmp_path / "cache" / "mkt"
+    for ver in versions:
+        cli = base / "census" / ver / "scripts" / "cli.py"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("")
+    for ver in orphaned:
+        (base / "census" / ver / ".orphaned_at").write_text("1")
+    here = base / "overseer" / "0.2.2" / "scripts" / "liveness.py"
+    here.parent.mkdir(parents=True)
+    here.write_text("")
+    return base, here
+
+
+class TestFindCensusInCache:
+    def test_finds_cached_census_not_a_sibling(self, tmp_path):
+        base, here = _cache(tmp_path, ["0.3.0"])
+        assert liveness.find_census(_from=here) == base / "census" / "0.3.0" / "scripts" / "cli.py"
+
+    def test_prefers_highest_version_numerically(self, tmp_path):
+        base, here = _cache(tmp_path, ["0.9.0", "0.10.0"])
+        assert liveness.find_census(_from=here).parents[1].name == "0.10.0"
+
+    def test_skips_orphaned(self, tmp_path):
+        base, here = _cache(tmp_path, ["0.9.0", "0.10.0"], orphaned=["0.10.0"])
+        assert liveness.find_census(_from=here).parents[1].name == "0.9.0"
+
+    def test_repo_layout_and_absent(self, tmp_path):
+        direct = tmp_path / "plugins" / "census" / "scripts" / "cli.py"
+        direct.parent.mkdir(parents=True)
+        direct.write_text("")
+        here = tmp_path / "plugins" / "overseer" / "scripts" / "liveness.py"
+        here.parent.mkdir(parents=True)
+        here.write_text("")
+        assert liveness.find_census(_from=here) == direct
+        assert liveness.find_census(_from=tmp_path / "nowhere" / "x.py") is None

@@ -1117,7 +1117,7 @@ class TestClaim:
         """census unavailable/erroring must not wedge a claim (design spec §3:
         "claims must not wedge when census is down")."""
         import scripts.cli as cli
-        monkeypatch.setattr(cli, "_census_cli", lambda: None)  # plugin "absent"
+        monkeypatch.setattr(cli.liveness, "census_cli", lambda: None)  # plugin "absent"
         run(repo, "new-card", "--title", "T")
         run(repo, "claim", "WF-001", "--session", "sess-1")
         capsys.readouterr()
@@ -1314,14 +1314,15 @@ class TestClaimNudgedVerb:
 
 
 class TestClaimCensusHelper:
-    def test_census_cli_resolves_in_repo(self):
+    def test_census_cli_resolves_in_repo(self, monkeypatch):
         import scripts.cli as cli
-        found = cli._census_cli()
-        assert found is not None and found.name == "cli.py" and "census" in str(found)
+        monkeypatch.delenv("CENSUS_CLI", raising=False)
+        found = cli.liveness.census_cli()
+        assert found is not None and found[-1].endswith("cli.py") and "census" in found[-1]
 
     def test_census_session_live_absent_plugin_is_false(self, monkeypatch):
         import scripts.cli as cli
-        monkeypatch.setattr(cli, "_census_cli", lambda: None)
+        monkeypatch.setattr(cli.liveness, "census_cli", lambda: None)
         assert cli._census_session_live("sess-1") is False
 
     def test_census_session_live_real_subprocess_no_crash(self, repo, monkeypatch):
