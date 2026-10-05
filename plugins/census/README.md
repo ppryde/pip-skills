@@ -24,6 +24,7 @@ meaning, is read as its parent directory for one release):
 
 ```
 census/
+  cli.path                    where this census lives, for other tools
   limits.json                 account rate limits, forward-only merge
   sessions/<session_id>.json  one file per session, atomic replace
   status.json.v1-migrated     present for 7 days after a v1 migration, then deleted
@@ -44,6 +45,10 @@ census/
   "seven_day": { "used_percentage": 41.0, "resets_at": 1738800000 },
   "updated_at": 1738420000 }
 ```
+
+**Finding census.** Each `census ingest` writes the resolved path of its own `cli.py` to `cli.path`
+(only when it changed), so other tools can locate census without walking plugin directories.
+Readers use `CENSUS_CLI`, else `cli.path`, else `census` on `PATH`.
 
 **No lock; Windows-safe.** Each session writes only its own file (temp file plus `os.replace`), so
 sessions never contend. Only `limits.json` is shared, and its merge only ever moves forward, so a

@@ -16,6 +16,10 @@ from scripts import store as st
 
 def cmd_ingest(args: argparse.Namespace) -> int:
     st.ingest(sys.stdin.read())
+    try:  # the pointer is best-effort; ingest's exit code must stay 0
+        st.publish_location(Path(__file__))
+    except Exception:  # noqa: BLE001, S110 - best-effort pointer, never raises
+        pass
     return 0
 
 

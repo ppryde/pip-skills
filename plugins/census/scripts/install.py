@@ -148,6 +148,7 @@ def uninstall(shim: Path, statusline: Path, purge_dir: Path | None, apply: bool)
 
 
 _OWNED_FILES = (
+    "cli.path",
     "limits.json",
     "status.json",
     "status.json.lock",

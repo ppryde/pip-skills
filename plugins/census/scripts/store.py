@@ -97,6 +97,41 @@ def census_dir() -> Path:
     return config_dir() / "census"
 
 
+def pointer_path() -> Path:
+    """Where census publishes its own CLI location, for other tools to find."""
+    return census_dir() / "cli.path"
+
+
+def publish_location(cli: Path) -> None:
+    """Record ``cli``'s resolved path in ``pointer_path()``, rewriting only on change.
+
+    Atomic (temp file + ``os.replace``) so readers never see half a path. Never
+    raises: a pointer that cannot be written must not disturb the status line.
+    """
+    try:
+        target = pointer_path()
+        wanted = str(cli.resolve()).encode("utf-8")
+        try:
+            if target.read_bytes() == wanted:
+                return
+        except OSError:
+            pass
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".cli.path.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(wanted)
+            os.replace(tmp, target)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except Exception:  # noqa: BLE001, S110 - best-effort pointer, never raises
+        pass
+
+
 def store_path() -> Path:
     """The LEGACY v1 single-file store; present only until migrated. A
     ``CENSUS_STORE`` ending ``.json`` names that file exactly (v1 honoured any name)."""
