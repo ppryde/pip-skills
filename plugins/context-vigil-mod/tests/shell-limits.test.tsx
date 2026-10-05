@@ -406,3 +406,14 @@ test('a skipped limit resume keeps its handover; a later manual /clear injects i
   expect(w.notices.some(n => n.includes('Handover injected') && n.includes('no automatic resume') && n.includes('s1-1.md'))).toBe(true)
   expect(w.submits.length).toBe(before)                               // nothing sent over the new session
 })
+
+test('limit events log which window they are about, not just the event kind (R2-13)', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  const lines = [...w.files.entries()].find(([k]) => k.includes('/events/'))?.[1].trim().split('\n').map(l => JSON.parse(l)) ?? []
+  expect(lines.find(l => l.kind === 'limit.early_stop')?.window).toBe('seven_day')
+  expect(lines.find(l => l.kind === 'limit.latched')?.window).toBe('seven_day')
+})

@@ -452,7 +452,7 @@ async function setLatch($: EngineInterface, l: Latch) {
   const existing = await readLatch($)
   if (!existing) {
     await $.store.set(LATCH_KEY, l)
-    await log($, 'limit.latched', { kind: l.kind, resetsAtMs: l.resetsAtMs })
+    await log($, 'limit.latched', { window: l.kind, resetsAtMs: l.resetsAtMs })
     await notify($, V.limitLatched(formatHHMM(l.resetsAtMs)))
   } else if (latchTimer) return
   // R2-04: a latch another session set is lifted by this process too, or an idle one waits forever.
@@ -468,7 +468,7 @@ async function checkLatch($: EngineInterface, limits: RateLimit[]) {
   if (l) {
     if (!latchCleared(l, await nowMs($), limits)) return
     await $.store.delete(LATCH_KEY)
-    await log($, 'limit.cleared', { kind: l.kind })
+    await log($, 'limit.cleared', { window: l.kind })
     await notify($, V.limitCleared)
   }
   const deferred = await read($, deferredA)
@@ -932,7 +932,7 @@ export const register: Register = on => {
     const limitDue = earlyStopDue(limits, settings, firedEarlyStops)
     if (limitDue && !standDown) {
       firedEarlyStops = [...firedEarlyStops, limitDue.key].slice(-20)
-      await log($, 'limit.early_stop', { kind: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
+      await log($, 'limit.early_stop', { window: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
       await notify($, V.earlyStop(limitDue.kind, limitDue.pct, formatHHMM(limitDue.resetsAtMs + RESUME_DELAY_MS)))
       const started = await startHandover($, 'limit', false)
       await scheduleResume($, limitDue.resetsAtMs + RESUME_DELAY_MS)
