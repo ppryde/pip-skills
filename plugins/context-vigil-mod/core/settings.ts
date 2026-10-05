@@ -7,6 +7,10 @@ export function pendingKey(session: string): string {
   return `pending:${session}`
 }
 
+// A parked handover nobody came back for is not kept forever: $.store refuses writes past 4 MiB (R1-17).
+export const PENDING_KEEP_MS = 14 * 86_400_000
+export const PENDING_PREFIX = 'pending:'
+
 export const DEFAULTS: Settings = {
   nudgeAt: 35, step: 5, bar: true, auto: false, idleMin: 30,
   lastLight: false, lastLightAt: 25, limits: true, limitPct: 95,

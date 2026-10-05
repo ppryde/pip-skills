@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Activity, Awaiting, EventKind, EventRecord, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Settings, StepId } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
-import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
+import { DEFAULTS, PENDING_KEEP_MS, PENDING_PREFIX, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
@@ -283,6 +283,15 @@ async function resetSessionState($: EngineInterface) {
   await update($, cacheTtlA, () => 'unknown')
   await update($, ttlReadA, () => false)
   await update($, ttlInfoDismissedA, () => false)
+}
+
+async function prunePending($: EngineInterface) {
+  const now = await nowMs($)
+  for (const key of await $.store.keys().catch(() => [] as string[])) {
+    if (!key.startsWith(PENDING_PREFIX)) continue
+    const p = (await $.store.get(key)) as Pending | null | undefined
+    if (!p || now - p.createdAt > PENDING_KEEP_MS) await $.store.delete(key)
+  }
 }
 
 async function savePending($: EngineInterface, p: Pending | null) {
@@ -611,6 +620,7 @@ export const register: Register = on => {
     await $.tool.register({ name: TOOL, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> })
     await checkInterlock($)
     await checkLatch($, [])   // a latch another process left behind and never lifted
+    await prunePending($)
     const stored = (await $.store.get(pendingKey(session))) as Pending | null | undefined
     const live = await read($, pendingA)
     if (stored && !live) {

@@ -88,8 +88,8 @@ export type EventRecord = { ts: string; session: string; kind: EventKind } & Rec
 
 declare module 'claude-code' {
   interface PluginState {
-    // Per session, wiped by every /clear (PROBES §9). The latch and fired early stops live in
-    // $.store; activity, lastLightArmed and standDown in module variables.
+    // Per session, wiped by every /clear (PROBES §9). The limit latch lives in $.store;
+    // fired early stops (per running process), activity, lastLightArmed and standDown live in module variables.
     'context-vigil-mod': {
       mode: Mode
       contextPct: number | null

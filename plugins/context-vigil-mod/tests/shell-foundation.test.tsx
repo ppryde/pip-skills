@@ -160,3 +160,14 @@ test('R1-13: a /compact starts the nudge ladder over', async ($, on) => {
   await $.session.measure(m(36))
   expect(w.notices.filter(n => n.includes('Context at 36%'))).toHaveLength(1)
 })
+
+test('R1-17: parked handovers older than two weeks are pruned at session start; fresh ones stay', async ($, on) => {
+  const DAY = 86_400_000
+  const old = { session: 'old', path: '/p', name: 'n', reason: 'request', markdown: '# x', resume: true, followUp: null, createdAt: 1_000_000 - 30 * DAY }
+  const fresh = { ...old, session: 'other', createdAt: 1_000_000 - DAY }
+  const w = world(on, { now: 1_000_000, store: { 'pending:old': old, 'pending:other': fresh, settings: {} } })
+  await $.session.start(START)
+  expect(w.store.has('pending:old')).toBe(false)
+  expect(w.store.has('pending:other')).toBe(true)
+  expect(w.store.has('settings')).toBe(true)
+})
