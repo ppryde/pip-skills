@@ -58,6 +58,8 @@ let firedEarlyStops: string[] = []
 let limitResume: { path: string | null; at: number; stoppedAt: number; gen: number } | null = null
 let resumeChain: { cancel: () => void } | null = null
 let resumeGen = 0
+// The timer that lifts the account latch for this process: one, replaced never stacked (R2-04).
+let latchTimer: { cancel: () => void } | null = null
 // The first-RC question is asked once per process: a clear wipes $.state, so it cannot live there.
 // A new session (bindSession) starts it fresh; resetCaches leaves it alone.
 let rcAsked = false
@@ -433,12 +435,17 @@ async function tryClear($: EngineInterface) {
 }
 
 async function setLatch($: EngineInterface, l: Latch) {
-  if (!l || (await readLatch($))) return
-  await $.store.set(LATCH_KEY, l)
-  await log($, 'limit.latched', { kind: l.kind, resetsAtMs: l.resetsAtMs })
-  await notify($, V.limitLatched(formatHHMM(l.resetsAtMs)))
-  const now = await nowMs($)
-  $.clock.after(Math.max(0, l.resetsAtMs - now) + 1000, () => { void checkLatch($, []) })
+  if (!l) return
+  const existing = await readLatch($)
+  if (!existing) {
+    await $.store.set(LATCH_KEY, l)
+    await log($, 'limit.latched', { kind: l.kind, resetsAtMs: l.resetsAtMs })
+    await notify($, V.limitLatched(formatHHMM(l.resetsAtMs)))
+  } else if (latchTimer) return
+  // R2-04: a latch another session set is lifted by this process too, or an idle one waits forever.
+  const target = existing ?? l
+  latchTimer?.cancel()
+  latchTimer = $.clock.after(Math.max(0, target.resetsAtMs - (await nowMs($))) + 1000, () => { latchTimer = null; void checkLatch($, []) })
 }
 
 // The latch is account-wide: another session may lift it (delete the key) and drain only its
@@ -498,6 +505,7 @@ function hopResume($: EngineInterface, delayMs: number, job: NonNullable<typeof 
     if (job.gen !== resumeGen) return
     const wait = nextHop(await nowMs($), job.at)
     if (wait > 0) { hopResume($, wait, job); return }
+    await checkLatch($, [])   // R2-04: an expired latch nobody lifted is lifted here
     if (await readLatch($)) { hopResume($, 60_000, job); return }
     const pending = await read($, pendingA)
     const path = job.path ?? pending?.path ?? null
@@ -710,6 +718,12 @@ export const register: Register = on => {
       // the old session's.
       session = await $.session.id()
       resetCaches()
+      // R2-16: process-wide jobs belong to the conversation that is gone.
+      if (resumeChain || limitResume) await log($, 'guard.wait', { reason: 'resume-dropped', cause: 'session-changed' })
+      resumeChain?.cancel()
+      resumeChain = null
+      limitResume = null
+      await checkInterlock($)
       scheduleGit($)
       await resetSessionState($)
       await update($, lastApiA, () => null)

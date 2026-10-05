@@ -330,3 +330,36 @@ test('R1-12: no handover file means the resume says so, never "(no file)"', asyn
   expect(r?.text).toContain('No handover was written')
   expect(r?.text).not.toContain('(no file)')
 })
+
+test('an idle session lifts and resumes after a latch another session left behind (R2-04)', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 2 * HOUR } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  await w.clock.advance(2 * HOUR + 600_000)           // past the foreign latch's reset: no measure arrives
+  expect(w.store.get('latch')).toBeUndefined()
+  expect(w.submits.some(s => s.text.includes('limit has reset'))).toBe(true)
+})
+
+test('a latch another session set is lifted by this one\'s own timer at its reset (R2-04)', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + HOUR } } })
+  await $.session.start(START)
+  await $.session.measure(measure([{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.advance(HOUR + 2000)                  // no further measure
+  expect(w.store.get('latch')).toBeUndefined()
+  expect(w.notices).toContain('⏳ Usage limit lifted — back to normal')
+})
+
+test('an in-process /resume drops the old conversation\'s limit resume (R2-16)', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + 3 * HOUR) }]))
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'resume' } as never)
+  await w.clock.advance(3 * HOUR + 600_000)
+  expect(w.submits.some(s => s.text.includes('limit has reset'))).toBe(false)
+  expect([...w.files.entries()].filter(([k]) => k.includes('/events/')).map(([, v]) => v).join('')).toContain('resume-dropped')
+})
