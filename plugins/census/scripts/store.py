@@ -16,8 +16,10 @@ Layout of ``~/.claude/census/`` (override with ``CENSUS_STORE``)::
           "tmux_pane": "<%N, absent when the session isn't running inside tmux>",
           "payload": { ...full status-line payload verbatim... }
         }
-    limits.json                  account rate-limit windows, merged forward-only
-        { "version": 2, "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> }
+    limits/<account key>.json    one per Claude ACCOUNT (not per folder), merged forward-only
+        { "version": 2, "account": key, "org": ..., "org_name": ..., "billing": ...,
+          "five_hour": {...}, "seven_day": {...}, <any other window>: {...},
+          "updated_at": <epoch> }
 
 ``ingest`` takes no lock: a session writes only its own file (temp file +
 ``os.replace``), and limits only ever move forward, so racing writers cost at
@@ -27,6 +29,7 @@ most one refresh of a lower figure. ``read_all`` assembles the v1 view
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -44,7 +47,8 @@ CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 SCHEMA_VERSION = 2   # on-disk files (sessions/<sid>.json, limits.json)
 VIEW_VERSION = 1     # the shape `census read` prints — unchanged from v1
 SESSIONS_DIRNAME = "sessions"
-LIMITS_FILENAME = "limits.json"
+LIMITS_DIRNAME = "limits"
+LIMITS_FILENAME = "limits.json"   # the first v2 build's single file; migrated away
 LEGACY_FILENAME = "status.json"
 _SAFE_SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -145,7 +149,82 @@ def sessions_dir() -> Path:
     return census_dir() / SESSIONS_DIRNAME
 
 
-def limits_path() -> Path:
+_SAFE_KEY = _SAFE_SID
+# The first six are identity, not limits: never served as a limit, never overwritten by one.
+_LIMITS_META = ("version", "account", "org", "org_name", "billing")
+_LIMITS_RESERVED = (*_LIMITS_META, "updated_at")
+
+_ACCOUNTS: dict[str, dict[str, Any]] = {}
+
+
+def reset_account_cache() -> None:
+    """Forget resolved accounts (tests; a process normally resolves once)."""
+    _ACCOUNTS.clear()
+
+
+def _claude_json_path() -> Path:
+    override = os.environ.get(CONFIG_DIR_ENV)
+    return (Path(override) if override else Path.home()) / ".claude.json"
+
+
+def _cfg_key() -> str:
+    try:
+        resolved = str(config_dir().resolve())
+    except (OSError, RuntimeError):
+        resolved = str(config_dir())
+    return "cfg-" + hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+
+
+def _text_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def account_info() -> dict[str, Any]:
+    """The calling Claude account: ``{key, org, org_name, billing}``. Never raises.
+
+    ``key`` is ``oauthAccount.accountUuid`` from the account's ``.claude.json``
+    (``$CLAUDE_CONFIG_DIR/.claude.json``, else ``~/.claude.json``). Without one
+    (a pure API key, a missing or malformed file, an unsafe value) it is
+    ``cfg-`` + 12 hex of the SHA-256 of the resolved config dir. Cached per
+    process, keyed by the file consulted.
+    """
+    try:
+        path = _claude_json_path()
+        cache_key = str(path)
+    except Exception:  # noqa: BLE001 - e.g. no resolvable home
+        return {"key": "cfg-unknown", "org": None, "org_name": None, "billing": None}
+    cached = _ACCOUNTS.get(cache_key)
+    if cached is not None:
+        return cached
+    info: dict[str, Any] = {"key": None, "org": None, "org_name": None, "billing": None}
+    try:
+        oauth = (_read_json(path) or {}).get("oauthAccount")
+        uuid = oauth.get("accountUuid") if isinstance(oauth, dict) else None
+        if isinstance(uuid, str) and _SAFE_KEY.match(uuid) and isinstance(oauth, dict):
+            info = {
+                "key": uuid,
+                "org": _text_or_none(oauth.get("organizationUuid")),
+                "org_name": _text_or_none(oauth.get("organizationName")),
+                "billing": _text_or_none(oauth.get("billingType")),
+            }
+    except Exception:  # noqa: BLE001, S110 - fall back to the cfg- key
+        pass
+    if info["key"] is None:
+        info["key"] = _cfg_key()
+    _ACCOUNTS[cache_key] = info
+    return info
+
+
+def limits_dir() -> Path:
+    return census_dir() / LIMITS_DIRNAME
+
+
+def limits_path(key: str | None = None) -> Path:
+    return limits_dir() / f"{key or account_info()['key']}.json"
+
+
+def legacy_limits_path() -> Path:
+    """The first v2 build's single ``limits.json``; present only until migrated."""
     return census_dir() / LIMITS_FILENAME
 
 
@@ -312,10 +391,20 @@ def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
     return prior_active
 
 
-_LIMIT_WINDOWS = ("five_hour", "seven_day")
+_KNOWN_WINDOWS = ("five_hour", "seven_day")
 
 
-def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
+def _is_window(value: Any, key: str | None = None) -> bool:
+    """A rate-limit window: any object carrying ``used_percentage`` and ``resets_at``.
+
+    The two windows v1 knew by name stay windows whatever they carry, so a
+    half-formed reading is still gated and ordered, never stored verbatim."""
+    if not isinstance(value, dict):
+        return False
+    return key in _KNOWN_WINDOWS or ("used_percentage" in value and "resets_at" in value)
+
+
+def _live_limits(limits: Any, now: float, verbatim: bool = False) -> dict[str, Any] | None:
     """Keep only rate-limit windows whose reset time is still in the FUTURE.
 
     A window whose ``resets_at`` is in the past belongs to an EXPIRED window — a
@@ -330,13 +419,20 @@ def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
     single wrong-unit or corrupt value (a millisecond epoch reads as a reset
     tens of thousands of years out) would stay "live" forever and, being the
     latest window, would out-rank every honest reading indefinitely.
+
+    Any key whose value is window-shaped is a window (``five_hour``, ``seven_day``,
+    a future ``spend_limit``...). With ``verbatim`` an entry of any other shape is
+    kept as is (its real shape is not known yet); identity keys never are.
     """
     if not isinstance(limits, dict):
         return None
     live: dict[str, Any] = {}
-    for key in _LIMIT_WINDOWS:
-        window = limits.get(key)
-        if not isinstance(window, dict):
+    for key, window in limits.items():
+        if key in _LIMITS_RESERVED:
+            continue
+        if not _is_window(window, key):
+            if verbatim:
+                live[key] = window
             continue
         resets = _number(window.get("resets_at"))
         if resets is None:
@@ -406,31 +502,33 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
     """
     stored = store.get("limits")
     stored = stored if isinstance(stored, dict) else {}
-    live = _live_limits(stored, now) or {}
+    live = _live_limits(stored, now, verbatim=True) or {}
     merged = dict(live)
 
     changed = False
     for key, window in incoming.items():
         current = merged.get(key)
-        if not isinstance(current, dict) or _window_is_fresher(window, current):
+        if not _is_window(window, key):  # unknown shape: last write wins
+            if current != window or key not in merged:
+                merged[key] = window
+                changed = True
+        elif not isinstance(current, dict) or _window_is_fresher(window, current):
             merged[key] = window
             changed = True
 
     # A window ``_live_limits`` just dropped (expired, or implausibly distant)
     # is a change to the account figure too.
     dropped = any(
-        isinstance(stored.get(key), dict) and key not in live for key in _LIMIT_WINDOWS
+        _is_window(value, key) and key not in live
+        for key, value in stored.items()
+        if key not in _LIMITS_RESERVED
     )
 
     # ``updated_at`` means "when the account figure last MOVED", not "when a
     # status line last rendered". A reading that loses the ordering leaves it
     # alone, so a latched figure cannot masquerade as a fresh observation.
     #
-    # No reader is served this today: both ``_live_limits`` here and the
-    # dashboard's own limits section whitelist the two window keys. The field
-    # is written either way — it predates this ordering rule — so the choice is
-    # not whether to have it but whether it tells the truth. Kept honest rather
-    # than exposed: an API field nothing consumes would be dead surface.
+    # The v1 view serves it (``census read``), so it must tell the truth.
     previous_updated = _number(stored.get("updated_at"))
     store["limits"] = {
         **merged,
@@ -537,35 +635,64 @@ def merge(
     entry = build_entry(sessions.get(sid), payload, worktree, tmux_pane, now)
     entry.pop("version", None)
     sessions[sid] = entry
-    incoming = _live_limits(payload.get("rate_limits"), now)
+    incoming = _live_limits(payload.get("rate_limits"), now, verbatim=True)
     if incoming:
         _hoist_limits(store, incoming, now)
     _prune(sessions, now)
     return store
 
 
-def _stored_limits() -> dict[str, Any] | None:
-    data = _read_json(limits_path())
+def _stored_limits(key: str | None = None) -> dict[str, Any] | None:
+    """An account's limits minus the file's identity fields (v1-compatible)."""
+    data = _read_json(limits_path(key))
     if data is None:
         return None
-    data = dict(data)
-    data.pop("version", None)
-    return data
+    return {k: v for k, v in data.items() if k not in _LIMITS_META}
+
+
+def _identity() -> dict[str, Any]:
+    info = account_info()
+    return {"account": info["key"], "org": info["org"],
+            "org_name": info["org_name"], "billing": info["billing"]}
 
 
 def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
-    """Forward-only merge of live windows into ``limits.json``; no lock.
+    """Forward-only merge into the calling account's limits file; no lock.
 
     Two sessions may race here. The ordering (``_window_is_fresher``) only moves
     forward, so the loser of a race costs one refresh of a lower figure, and the
     next write from the working session restores it. Written only on change.
     """
-    stored = _stored_limits() or {}
-    holder: dict[str, Any] = {"limits": stored}
-    before = json.dumps(stored, sort_keys=True)
+    path = limits_path()
+    current = _read_json(path) or {}
+    holder: dict[str, Any] = {"limits": _stored_limits() or {}}
     _hoist_limits(holder, incoming, now)
-    if json.dumps(holder["limits"], sort_keys=True) != before:
-        _atomic_write(limits_path(), {"version": SCHEMA_VERSION, **holder["limits"]})
+    body = {"version": SCHEMA_VERSION, **_identity(), **holder["limits"]}
+    if json.dumps(body, sort_keys=True) != json.dumps(current, sort_keys=True):
+        _atomic_write(path, body)
+
+
+def _fold_old_limits(old: dict[str, Any], now: float) -> None:
+    """Fold a pre-account limits dict (v1 ``status.json`` or v2 ``limits.json``) into
+    the calling account's file: written as is when there is none, else merged."""
+    old = {k: v for k, v in old.items() if k not in _LIMITS_META}
+    if not limits_path().exists():
+        _atomic_write(limits_path(), {"version": SCHEMA_VERSION, **_identity(), **old})
+        return
+    incoming = _live_limits(old, now, verbatim=True)
+    if incoming:
+        _merge_limits_file(incoming, now)
+
+
+def _migrate_limits_json(now: float) -> None:
+    """Move the first v2 build's folder-wide ``limits.json`` to the calling account."""
+    legacy = legacy_limits_path()
+    if not legacy.exists():
+        return
+    old = _read_json(legacy)
+    if old is not None:
+        _fold_old_limits(old, now)
+    _unlink(legacy)
 
 
 def _session_files() -> list[Path]:
@@ -600,6 +727,10 @@ def migrate(now: float | None = None) -> bool:
         now = time.time()
     lock: Path | None = None
     try:
+        _migrate_limits_json(now)
+    except Exception:  # noqa: BLE001, S110 - a reader must never fail on migration
+        pass
+    try:
         legacy = store_path()
         if not legacy.exists():
             return False
@@ -625,12 +756,7 @@ def migrate(now: float | None = None) -> bool:
             _atomic_write(session_path(safe), {"version": SCHEMA_VERSION, **entry})
         old_limits = data.get("limits")
         if isinstance(old_limits, dict):
-            if not limits_path().exists():
-                _atomic_write(limits_path(), {"version": SCHEMA_VERSION, **old_limits})
-            else:
-                incoming = _live_limits(old_limits, now)
-                if incoming:
-                    _merge_limits_file(incoming, now)
+            _fold_old_limits(old_limits, now)
         os.replace(legacy, legacy.with_name(legacy.name + MIGRATED_SUFFIX))
         _unlink(legacy.with_name(legacy.name + ".lock"))
         for stray in census_dir().glob(".status.*.tmp"):
@@ -659,7 +785,7 @@ def _sweep(now: float) -> None:
         if now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS:
             _unlink(path)
     wall = time.time()
-    for folder in (sessions_dir(), census_dir()):
+    for folder in (sessions_dir(), limits_dir(), census_dir()):
         try:
             strays = [
                 p for p in folder.iterdir() if p.name.startswith(".") and p.name.endswith(".tmp")
@@ -704,8 +830,11 @@ def _ingest(raw: str, now: float) -> None:
     # status line, so TMUX_PANE is already in its environment.
     tmux_pane = os.environ.get("TMUX_PANE") or None
     entry = build_entry(_read_json(path), payload, resolve.worktree_cwd(payload), tmux_pane, now)
+    info = account_info()
+    entry["account"] = info["key"]
+    entry["org"] = info["org"]
     _atomic_write(path, entry)
-    incoming = _live_limits(payload.get("rate_limits"), now)
+    incoming = _live_limits(payload.get("rate_limits"), now, verbatim=True)
     if incoming:
         _merge_limits_file(incoming, now)
     _sweep(now)
@@ -761,7 +890,24 @@ def limits(now: float | None = None) -> dict[str, Any] | None:
     migrate()
     if now is None:
         now = time.time()
-    return _live_limits(_stored_limits(), now)
+    return _live_limits(_stored_limits(), now, verbatim=True)
+
+
+def all_limits() -> dict[str, Any]:
+    """Every account's limits file in this folder, keyed by account key (minus ``version``)."""
+    migrate()
+    out: dict[str, Any] = {}
+    try:
+        names = sorted(os.listdir(limits_dir()))
+    except OSError:
+        return out
+    for name in names:
+        if name.startswith(".") or not name.endswith(".json"):
+            continue
+        data = _read_json(limits_dir() / name)
+        if data is not None:
+            out[name[: -len(".json")]] = {k: v for k, v in data.items() if k != "version"}
+    return out
 
 
 def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | None:
@@ -793,7 +939,7 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
 
     if best is None:
         return None
-    return _with_meta(best, _live_limits(_stored_limits(), now), now)
+    return _with_meta(best, _live_limits(_stored_limits(), now, verbatim=True), now)
 
 
 def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
@@ -806,4 +952,4 @@ def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
     entry = _read_json(session_path(safe))
     if entry is None:
         return None
-    return _with_meta(_view_entry(entry), _live_limits(_stored_limits(), now), now)
+    return _with_meta(_view_entry(entry), _live_limits(_stored_limits(), now, verbatim=True), now)

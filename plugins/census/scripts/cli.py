@@ -25,7 +25,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 def cmd_read(args: argparse.Namespace) -> int:
     if args.limits:
-        out: object = st.limits()
+        out: object = st.all_limits() if args.all else st.limits()
     elif args.session:
         out = st.for_session(args.session)
     elif args.worktree:
@@ -98,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--worktree", help="freshest session indexed to this worktree cwd")
     group.add_argument("--session", help="the entry for this session id")
     group.add_argument("--limits", action="store_true", help="just the account rate limits")
+    read.add_argument("--all", action="store_true", help="with --limits: every account in this folder")
     read.set_defaults(func=cmd_read)
 
     install = sub.add_parser(
@@ -128,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
+        if getattr(args, "all", False) and not args.limits:
+            parser.error("--all is only valid with --limits")
     except SystemExit as exc:
         return 0 if not exc.code else 1
     result: int = args.func(args)

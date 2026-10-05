@@ -15,7 +15,7 @@ class TestStorePath:
         monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "c"))
         assert st.census_dir() == tmp_path / "c"
         assert st.sessions_dir() == tmp_path / "c" / "sessions"
-        assert st.limits_path() == tmp_path / "c" / "limits.json"
+        assert st.limits_path("k") == tmp_path / "c" / "limits" / "k.json"
 
     def test_rooted_at_config_dir(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CENSUS_STORE", raising=False)

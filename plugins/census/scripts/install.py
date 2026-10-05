@@ -161,6 +161,7 @@ def _owned_entries(directory: Path) -> list[Path]:
     """Census's own entries inside ``directory`` — never anything else."""
     found = [directory / name for name in _OWNED_FILES]
     found.append(directory / "sessions")
+    found.append(directory / "limits")
     try:
         found.extend(p for p in directory.iterdir() if p.name.startswith(".") and p.name.endswith(".tmp"))
     except OSError:
