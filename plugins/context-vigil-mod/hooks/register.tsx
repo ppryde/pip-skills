@@ -369,6 +369,8 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
   }
   const pending = await read($, pendingA)
   if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), now)) {
+    // R3-01: the person's /vho wants the resume; a volunteered pending saved resume:false.
+    if (pending && pending.resume !== resume) await savePending($, { ...pending, resume })
     if (!clearInFlight) scheduleClear($, unattended)
     return 'reused'
   }
@@ -1060,8 +1062,11 @@ export const register: Register = on => {
       await log($, 'guard.wait', { reason: 'write-failed', path, error: String(err) })
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
+    // R3-01: a volunteered call never replaces a live requested pending (its clear injects that one).
+    const live = await read($, pendingA)
+    const shield = !requested && live !== null && live.resume && reusable(live, await read($, lastApiA), now)
     try {
-      await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: awaiting?.unattended ?? false })
+      if (!shield) await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: awaiting?.unattended ?? false })
     } catch (err) {
       // R2-15: the file is written but the store refused it: say so, clear nothing.
       await notify($, V.handoverFailed)

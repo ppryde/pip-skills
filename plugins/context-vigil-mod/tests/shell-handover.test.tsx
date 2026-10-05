@@ -526,6 +526,42 @@ test('R1-01: a duplicate tool call after a requested handover does not clear a s
   expect(w.files.has('/cfg/context-vigil-mod/handovers/s1-2.md')).toBe(true)
 })
 
+test('a volunteered second tool call never overwrites the requested handover its clear is about to inject (R3-01)', async ($, on) => {
+  const w = world(on)
+  w.clearHold.held = true
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.commands.filter(c => c === 'clear').length).toBe(1)   // queued, held
+  await $.tool.call(call({ tool_use_id: 'h2' }) as never)        // the model repeats itself in the same turn
+  await w.clock.settle()
+  w.clearHold.release()
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
+test('/vho over a volunteered handover keeps the resume the person asked for (R3-01)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.tool.call(call() as never)               // volunteered: saved, never cleared
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.commands.filter(c => c === 'clear').length).toBe(1)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
+})
+
 // R1-02: only the instruction turn's own completion counts as a missed attempt.
 const instructionTurn = ($: Engine, w: World, id: string) => $.turn.start({ text: w.submits.at(-1)?.text ?? '', turnId: id } as never)
 const asked = (w: World) => w.submits.filter(s => s.text.includes(TOOL)).length
