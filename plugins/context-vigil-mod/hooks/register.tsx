@@ -656,6 +656,14 @@ export const register: Register = on => {
       if (stored) await notify($, V.pendingOffer(stored.path))
       return out
     }
+    if (e.source === 'compact') {
+      // R1-13: the context just shrank; the nudge ladder and its bar start over, nothing else does.
+      await update($, lastNudgedA, () => null)
+      await update($, baselineA, () => null)
+      await update($, barShownA, () => false)
+      await update($, barDismissedA, () => false)
+      return out
+    }
     if (e.source !== 'clear') return out
     // PROBES §9: $.state is already wiped here, so the handover comes from $.store, keyed by
     // `session` — still the pre-clear id until it is rebound below.

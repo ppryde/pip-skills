@@ -148,3 +148,15 @@ test('an unreadable day file is left alone, never truncated', async ($, on) => {
   await $.turn.complete(turn())
   expect(w.files.get(day)).toBe('{"kept":true}\n')
 })
+
+test('R1-13: a /compact starts the nudge ladder over', async ($, on) => {
+  const w = world(on, { store: { settings: { bar: false } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  const m = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
+  await $.session.measure(m(45))
+  expect(w.notices.filter(n => n.includes('Context at 45%'))).toHaveLength(1)
+  await $.classic.SessionStart({ source: 'compact' } as never)
+  await $.session.measure(m(36))
+  expect(w.notices.filter(n => n.includes('Context at 36%'))).toHaveLength(1)
+})
