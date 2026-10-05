@@ -148,9 +148,10 @@ prototype showed it reports only `[terminal]` with a phone attached, and no
 `session.attach` fired.
 
 - **First RC session:** the first time auto mode would arm while the last
-  human origin is `bridge`, the mod asks once — allow auto-clear in Remote
+  human origin is `bridge`, the mod asks — allow auto-clear in Remote
   Control sessions? (options + "Tell me more", §6). The answer is stored in
-  `$.store`. Until answered, or if declined, RC sessions never auto-clear: the
+  `$.store`; the question is asked until it is answered, so a dismissed card
+  is asked again in a later session. Until answered, or if declined, RC sessions never auto-clear: the
   handover is written and a notice offers `/clear`. Answering the question (or
   any card) counts as you being here: it never runs a clear that was parked
   while you were away; the saved handover stays offered (`/clear` to resume

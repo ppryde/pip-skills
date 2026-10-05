@@ -735,8 +735,9 @@ export const register: Register = on => {
       if (live.reason === 'request' && reusable(live, await read($, lastApiA), await nowMs($))) scheduleClear($, false)
       else await notify($, V.pendingOffer(live.path))
     }
-    // A reload counts as the person being here (bindSession): it re-arms last light too, and
-    // the fire the reload's dropped timer owed is scheduled again from the last turn.
+    // A reload counts as the person being here (bindSession), so this period's last light is skipped
+    // when the timer fires (not-idle, R1-07 deferred half). The timer is still armed here so that
+    // fix can make it live.
     const lastApi = await read($, lastApiA)
     if (lastApi !== null) {
       lastLightArmed = true
