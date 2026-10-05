@@ -15,10 +15,11 @@ other plugin.
 
 ## What it does
 
-- `.vigil/` (git-ignored, per-repo) holds the watch state: an `active` marker,
-  the armed flag, a paused flag, a TTL cooldown, a TTL `handover-gate` (arms
-  the once-per-cycle trigger nudge), and the pending `handoff.md` (archived to
-  `.vigil/archive/` after it injects once).
+- `.claude/vigil/` (per-repo, self-ignored via its own `.gitignore` — never
+  touches the repo's own) holds the watch state: an `active` marker, the armed
+  flag, a paused flag, a TTL cooldown, a TTL `handover-gate` (arms the
+  once-per-cycle trigger nudge), and the pending `handoff.md` (archived to
+  `.claude/vigil/archive/` after it injects once).
 - `vigil begin` activates the watch (auto under tmux, else manual).
 - `vigil context` reports `ctx NN%` against a configured threshold.
 - A `UserPromptSubmit` hook (`vigil nudge-hook`) watches ctx% every turn
@@ -29,6 +30,9 @@ other plugin.
   content, `--inline <path>` files, and your notes) and arms an in-process
   `/clear`; `SessionStart` re-injects it and clears the gate. `vigil
   pause`/`resume` suspend/re-arm auto-handover (and release the gate).
+  `--title "<task name>"` also renames the tmux window when the Stop hook
+  dispatches `/clear` — auto mode only, so a bank of parallel sessions stays
+  labeled with what each one is doing.
 - Injected `additionalContext` alone never starts a turn — the fresh session
   just sits idle. So after an automatic `/clear` (`SessionStart` fired with
   `source == "clear"`, tmux reachable, pane known), vigil also types a short

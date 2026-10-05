@@ -1,7 +1,9 @@
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from scripts import ingest, pricing, report, store
-from scripts.report import context_window_for, peak_context_pct
+from scripts.report import WeeklyAnchor, context_window_for, peak_context_pct
 from scripts.transcript import parse_ts
 
 from .conftest import TranscriptBuilder
@@ -14,10 +16,16 @@ TURN_USD = (3 * 5.0 + 1000 * 0.5 + 200 * 5.0 * 1.25 + 40 * 25.0) / 1_000_000
 
 def _seed(projects):
     """Two repos' worth of sessions, with repo_root stamped directly (the
-    builders' cwd isn't a git repo, so repo_root would otherwise be NULL)."""
+    builders' cwd isn't a git repo, so repo_root would otherwise be NULL).
+
+    Every session's prompt/turn ids are unique ACROSS sessions, not just
+    within one — a real transcript's ids are globally unique, and a store
+    that saw the same id twice under different sessions would (correctly)
+    treat the second as a copy from a resumed/forked session and skip it
+    (see TestCopiedRecords in test_ingest.py)."""
     TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=["Bash"]).write()
-    TranscriptBuilder(projects, "-a", "s2").prompt("u1", T1).turn("m1", T1).turn("m2", T1, tools=["Read", "Read"]).write()
-    TranscriptBuilder(projects, "-b", "s3").prompt("u1", T1).turn("m1", T1).write()
+    TranscriptBuilder(projects, "-a", "s2").prompt("u2", T1).turn("n1", T1).turn("n2", T1, tools=["Read", "Read"]).write()
+    TranscriptBuilder(projects, "-b", "s3").prompt("u3", T1).turn("o1", T1).write()
     conn = store.connect()
     ingest.sync(conn, projects)
     conn.execute("UPDATE sessions SET repo_root = '/repo/a' WHERE session_id IN ('s1', 's2')")
@@ -54,6 +62,9 @@ class TestSummary:
         assert out["totals"]["context_window"] == 200_000
         assert round(out["totals"]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
         assert round(out["by_day"][1]["peak_context_pct"], 6) == round(1203 / 200_000, 6)
+        # Every seeded turn is the same size, so the average equals the peak here.
+        assert out["by_day"][1]["avg_context_tokens"] == 1203
+        assert round(out["by_day"][1]["avg_context_pct"], 6) == round(1203 / 200_000, 6)
         assert out["by_day"][1]["cold_turns"] == 0
         assert round(out["by_day"][1]["cache_hit_rate"], 3) == round(1000 / 1203, 3)
         # Cost: every seeded turn is opus-5 with 3 in / 1000 read / 200 written
@@ -65,6 +76,26 @@ class TestSummary:
         assert round(out["by_model"][0]["cost_usd"], 6) == round(4 * TURN_USD, 6)
         assert round(out["shape"]["cost_usd"]["max"], 6) == round(2 * TURN_USD, 6)
         assert round(out["shape"]["cost_usd"]["p50"], 6) == round(TURN_USD, 6)
+
+    def test_avg_context_excludes_subagent_turns_and_differs_from_peak(self, projects):
+        builder = TranscriptBuilder(projects, "-a", "s1")
+        builder.prompt("u1", T0)
+        builder.turn("m1", T0, usage={"input_tokens": 1000, "cache_read_input_tokens": 0,
+                                       "cache_creation_input_tokens": 0, "output_tokens": 10})
+        builder.turn("m2", T0, usage={"input_tokens": 3000, "cache_read_input_tokens": 0,
+                                       "cache_creation_input_tokens": 0, "output_tokens": 10})
+        builder.write()
+        # A subagent turn at the default (1203-token) usage — smaller than the
+        # main loop's peak, so it would silently pull the average down if it
+        # weren't excluded like peak already excludes it.
+        builder.subagent("agent-1", ["a1"], T0)
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.summary(conn)
+        day = out["by_day"][0]
+        assert day["peak_context_tokens"] == 3000
+        assert day["avg_context_tokens"] == 2000
+        assert round(day["avg_context_pct"], 6) == round(2000 / 200_000, 6)
 
     def test_unpriced_model_is_counted_not_guessed(self, projects):
         conn = _seed(projects)
@@ -107,6 +138,32 @@ class TestSummary:
         out = report.summary(conn, since=cutoff)
         assert out["totals"]["sessions"] == 2
         assert [d["day"] for d in out["by_day"]] == ["2026-09-02"]
+
+    def test_trend_days_are_clipped_to_the_window_but_totals_keep_the_whole_session(self, projects):
+        """`since` is a SESSION-level filter (membership decided by the
+        session's last activity), so a session that touched a day before the
+        window still counts wholly in the totals once any of its activity is
+        inside it. A day TREND is a different read: a day outside the window
+        must not appear on the chart just because the session that touched it
+        also touched a later day that is inside."""
+        b = TranscriptBuilder(projects, "-a", "s1").prompt("u1", T0).turn("m1", T0, tools=["Edit"])
+        b.raw({
+            "type": "user", "uuid": "r1", "sessionId": "s1", "timestamp": T0,
+            "cwd": "/repo", "gitBranch": "main", "version": "2.1.258", "entrypoint": "cli",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "m1-tool0", "content": "ok"}]},
+            "toolUseResult": {"filePath": "/repo/a.py",
+                              "structuredPatch": [{"lines": ["+x"] * 3}]},
+        })
+        b.turn("m2", T1).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        cutoff = parse_ts(T1)
+        out = report.summary(conn, since=cutoff)
+        assert out["totals"]["turns"] == 2  # the whole session, both days
+        assert out["churn"]["lines_added"] == 3
+        assert [d["day"] for d in out["by_day"]] == ["2026-09-02"]
+        assert [d["day"] for d in out["churn"]["by_day"]] == []
 
     def test_branch_filter_is_session_level(self, projects):
         conn = _seed(projects)
@@ -356,6 +413,56 @@ class TestRepos:
         assert rows[1]["repo_root"] == "/repo/b"
 
 
+class TestAccounts:
+    def test_counts(self, projects):
+        conn = _seed(projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1' WHERE session_id IN ('s1', 's2')")
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-2' WHERE session_id = 's3'")
+        conn.commit()
+        rows = report.accounts(conn)
+        assert rows[0]["account_uuid"] == "acc-1"
+        assert rows[0]["sessions"] == 2
+        assert rows[1]["account_uuid"] == "acc-2"
+
+    def test_sessions_with_no_account_are_not_listed(self, projects):
+        conn = _seed(projects)
+        assert report.accounts(conn) == []
+
+    def test_missing_column_degrades_to_empty_rather_than_raising(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE sessions (session_id TEXT)")
+        assert report.accounts(conn) == []
+
+
+class TestAccountFilter:
+    def test_scopes_summary_and_sessions_to_one_account(self, projects):
+        conn = _seed(projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1' WHERE session_id IN ('s1', 's2')")
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-2' WHERE session_id = 's3'")
+        conn.commit()
+        out = report.summary(conn, account="acc-1")
+        assert out["totals"]["sessions"] == 2
+        rows = report.sessions(conn, account="acc-2")
+        assert [r["session_id"] for r in rows] == ["s3"]
+        # Composes with the repo filter.
+        out = report.summary(conn, repo_root="/repo/a", account="acc-1")
+        assert out["totals"]["sessions"] == 2
+        # An unknown account is an empty window, not an error.
+        assert report.summary(conn, account="nope")["totals"]["sessions"] == 0
+
+    def test_missing_column_degrades_to_unfiltered_rather_than_raising(self, projects):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE sessions (session_id TEXT, repo_root TEXT, git_branch TEXT, "
+                     "last_activity_at REAL, started_at REAL)")
+        conn.execute("INSERT INTO sessions VALUES ('s1', NULL, NULL, NULL, NULL)")
+        where, params = report._session_filter(None, None, account="acc-1", conn=conn)
+        assert where == "" and params == []
+
+
 class TestBiggestJumps:
     def _series(self, *contexts):
         return [{"ts": float(i * 10), "message_id": f"m{i}", "context_tokens": c, "output_tokens": 5,
@@ -423,6 +530,35 @@ class TestArtifactsReport:
         detail = report.session_detail(conn, "s2")
         assert [a["title"] for a in detail["artifacts"]] == ["Board v3", "lost"]
         assert [t["turn"] for t in detail["biggest_jumps"]] == [1, 2]
+
+    def test_a_page_published_from_several_sessions_is_one_row(self, projects):
+        """A page resumed into another session is a SEPARATE row per session
+        as far as `_ARTIFACT_PAGE_SQL` is concerned — `artifacts()` must
+        merge those back into one, or a republish across sessions inflates
+        both the listing and its `publishes` count."""
+        conn = _seed(projects)
+        url = "https://claude.ai/code/artifact/resumed"
+        conn.executemany(
+            "INSERT INTO artifacts(session_id, tool_use_id, ts, url, title, favicon, description) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [
+                ("s1", "p1", 3, url, "Map v1", "🗺️", None),
+                ("s2", "p2", 15, url, "Map v2", None, "The map"),
+                ("s2", "p3", 16, None, "lost", None, None),
+                ("s3", "p4", 30, url, "Map v3", None, None),  # /repo/b: outside the repo filter below
+            ],
+        )
+        conn.commit()
+        merged = {
+            "session_id": "s2", "session_title": None, "ts": 15.0, "url": url,
+            "title": "Map v2", "description": "The map", "favicon": "🗺️",
+            "publishes": 2, "first_ts": 3.0,
+        }
+        lost = {**merged, "ts": 16.0, "url": None, "title": "lost", "description": None,
+                "favicon": None, "publishes": 1, "first_ts": 16.0}
+        assert report.artifacts(conn, repo_root="/repo/a") == [lost, merged]
+        # `limit` counts MERGED pages, not raw rows.
+        assert report.artifacts(conn, repo_root="/repo/a", limit=1) == [lost]
 
 
 class TestUnmigratedStore:
@@ -992,8 +1128,9 @@ class TestDerivedMetrics:
         b.subagent("agent-1", ["a1"], T0)
         b.write()
         # A second session with NO file edits: it must not dilute the
-        # churn-derived averages.
-        TranscriptBuilder(projects, "-a", "s2").prompt("u1", T1).turn("m1", T1).write()
+        # churn-derived averages. Its own message id — reusing "m1" would
+        # collide with s1's and be skipped as a copy (see TestCopiedRecords).
+        TranscriptBuilder(projects, "-a", "s2").prompt("u2", T1).turn("n1", T1).write()
         conn = store.connect()
         ingest.sync(conn, projects)
         conn.execute("UPDATE sessions SET repo_root = '/repo/a'")
@@ -1041,3 +1178,377 @@ class TestDerivedMetrics:
         conn.commit()
         attr = report.summary(conn)["attribution"]
         assert round(attr["cost_usd"], 6) == round(TURN_USD, 6)   # once, not twice
+
+
+class TestSessionWindows:
+    """`_session_windows_from_ts`: activity-anchored 5h windows, pure over a
+    list of turn timestamps (no DB) — see the module docstring on why a
+    SESSION window is not simply "reset minus 5h"."""
+
+    H = 3600
+
+    def test_a_single_turn_opens_one_window(self):
+        windows = report._session_windows_from_ts([0.0])
+        assert windows == [(0.0, 5 * self.H)]
+
+    def test_activity_within_5h_of_open_stays_in_one_window_even_across_a_lull(self):
+        # A 4h lull between the 2nd and 3rd turns — still under 5h since the
+        # window OPENED, so no new window opens.
+        turns = [0.0, self.H, 4.9 * self.H]
+        windows = report._session_windows_from_ts(turns)
+        assert windows == [(0.0, 5 * self.H)]
+
+    def test_a_5h_plus_gap_opens_a_new_window(self):
+        turns = [0.0, 6 * self.H]  # 6h gap, past the first window's close at 5h
+        windows = report._session_windows_from_ts(turns)
+        assert windows == [(0.0, 5 * self.H), (6 * self.H, 11 * self.H)]
+
+    def test_a_turn_exactly_at_close_opens_a_new_window(self):
+        # >= close, not > close: the window's own boundary is exclusive.
+        turns = [0.0, 5 * self.H]
+        windows = report._session_windows_from_ts(turns)
+        assert windows == [(0.0, 5 * self.H), (5 * self.H, 10 * self.H)]
+
+    def test_no_turns_is_no_windows(self):
+        assert report._session_windows_from_ts([]) == []
+
+
+class TestWindowForHit:
+    def test_finds_the_window_open_at_the_hit(self):
+        windows = [(0.0, 100.0), (200.0, 300.0)]
+        assert report._window_for_hit(windows, 250.0) == (200.0, 300.0)
+
+    def test_a_hit_inside_the_gap_between_windows_gets_the_earlier_one(self):
+        # No turn ever opened a window covering [100, 200) — the account was
+        # rejected without a successful turn in between. The best-known
+        # window is still the last one that had opened.
+        windows = [(0.0, 100.0), (200.0, 300.0)]
+        assert report._window_for_hit(windows, 150.0) == (0.0, 100.0)
+
+    def test_a_hit_before_every_known_window_is_unknowable(self):
+        windows = [(200.0, 300.0)]
+        assert report._window_for_hit(windows, 50.0) is None
+
+    def test_no_windows_at_all(self):
+        assert report._window_for_hit([], 50.0) is None
+
+
+class TestWeeklyAnchor:
+    def test_anchor_read_off_an_observed_reset(self):
+        # 2026-09-06 is a Sunday; 20:00 BST (Europe/London is on daylight
+        # time in September) = 19:00 UTC.
+        resets_at = datetime(2026, 9, 6, 19, 0, tzinfo=ZoneInfo("UTC")).timestamp()
+        anchor = report._weekly_anchor_from_reset(resets_at, "8pm (Europe/London)")
+        assert anchor == WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+
+    def test_no_zone_in_the_reset_text_falls_back_to_utc(self):
+        resets_at = datetime(2026, 9, 6, 20, 0, tzinfo=ZoneInfo("UTC")).timestamp()
+        anchor = report._weekly_anchor_from_reset(resets_at, None)
+        assert anchor == WeeklyAnchor(weekday=6, hour=20, minute=0, tz="UTC")
+
+    def test_nearest_reset_lands_on_the_correct_sunday(self):
+        anchor = WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+        # A Wednesday hit -> the Sunday later that same week.
+        hit = datetime(2026, 9, 2, 10, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        expected = datetime(2026, 9, 6, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        assert report._nearest_weekly_reset(anchor, hit) == expected
+
+    def test_nearest_reset_rolls_to_next_week_when_this_weeks_has_passed(self):
+        anchor = WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+        # A hit on the anchor's own weekday, after the anchor's time of day.
+        hit = datetime(2026, 9, 6, 21, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        expected = datetime(2026, 9, 13, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        assert report._nearest_weekly_reset(anchor, hit) == expected
+
+    def test_nearest_reset_across_a_dst_change_week(self):
+        # UK clocks spring forward on 2026-03-29 (the anchor's own weekday):
+        # a hit earlier that week, while still on GMT, must still resolve to
+        # 20:00 BST that Sunday — not 20:00 GMT (an hour off in UTC terms).
+        anchor = WeeklyAnchor(weekday=6, hour=20, minute=0, tz="Europe/London")
+        hit = datetime(2026, 3, 25, 10, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        expected = datetime(2026, 3, 29, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+        assert report._nearest_weekly_reset(anchor, hit) == expected
+        # Sanity: that Sunday is indeed on daylight time (+01:00), so the
+        # naive "add 7 days in UTC" answer would have been an hour early.
+        assert datetime.fromtimestamp(expected, tz=ZoneInfo("Europe/London")).utcoffset().total_seconds() == 3600
+
+    def test_unknown_zone_falls_back_to_utc_rather_than_raising(self):
+        anchor = report._weekly_anchor_from_reset(1_000_000.0, "8pm (Nowhere/Fake)")
+        assert anchor.tz == "UTC"
+
+
+class TestLimits:
+    SESSION_TEXT = "You've hit your session limit · resets 3pm (Europe/London)"
+    WEEKLY_TEXT = "You've hit your weekly limit · resets 8pm (Europe/London)"
+    MONTHLY_TEXT = "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"
+    MODEL_TEXT = "You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."
+
+    def test_the_same_hit_across_two_sessions_is_one_event(self, projects):
+        # Claude Code writes the SAME real hit into every session running at
+        # the time; the resets_at they all state is identical.
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 1
+        assert out["events"][0]["sessions"] == 2
+        assert out["events"][0]["kind"] == "session"
+        assert out["by_kind"] == {"session": 1}
+
+    def test_a_hit_parsed_in_one_session_but_not_another_is_still_one_event(self, projects):
+        # The same real-world hit: one session's copy states a reset
+        # (`quotaLimits`), the other's is bare. These used to be two
+        # disjoint group-key SHAPES -- ("resets_at", X) vs ("bucket", Y) --
+        # which split one event in two whenever only some of the sessions
+        # that logged a hit happened to carry a parseable reset.
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", "2026-09-01T10:01:00.000Z", "You've hit your session limit").write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 1
+        event = out["events"][0]
+        assert event["sessions"] == 2
+        # The row that stated a reset wins over the one that didn't.
+        assert event["resets_at"] == resets_at
+        assert event["resets_at_inferred"] is False
+
+    def test_two_copies_either_side_of_a_bucket_boundary_are_one_event(self, projects):
+        # Both bare (no reset at all), 11 minutes apart -- the old 10-minute
+        # bucketing put these in two different buckets despite being the
+        # same real-world hit; close-in-time clustering doesn't.
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", "2026-09-01T10:00:00.000Z", self.MONTHLY_TEXT).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h2", "2026-09-01T10:11:00.000Z", self.MONTHLY_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn)
+        assert len(out["events"]) == 1
+        assert out["events"][0]["sessions"] == 2
+
+    def test_different_reset_times_are_distinct_events(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T1, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-02T15:00:00.000Z")}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 2
+
+    def test_different_accounts_never_merge(self, projects):
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1' WHERE session_id = 's1'")
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-2' WHERE session_id = 's2'")
+        conn.commit()
+        out = report.limits(conn)
+        assert len(out["events"]) == 2
+        assert {e["sessions"] for e in out["events"]} == {1}
+
+    def test_model_kind_keeps_the_model_name_and_by_kind_count(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit("h1", T0, self.MODEL_TEXT).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn)
+        assert out["events"][0]["kind"] == "model"
+        assert out["events"][0]["model"] == "Fable 5"
+        assert out["by_kind"] == {"model": 1}
+
+    def test_hits_with_no_reset_time_bucket_by_the_hit_moment(self, projects):
+        # monthly-spend carries no reset time at all, so two hits close
+        # together are the same event, and two far apart are not.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.limit_hit("h1", "2026-09-01T10:00:00.000Z", self.MONTHLY_TEXT)
+        b.limit_hit("h2", "2026-09-01T10:02:00.000Z", self.MONTHLY_TEXT)
+        b.limit_hit("h3", "2026-09-15T10:00:00.000Z", self.MONTHLY_TEXT)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn)
+        assert len(out["events"]) == 2
+        assert sorted(e["sessions"] for e in out["events"]) == [1, 1]  # 1 session, 2 rows folded
+
+    def test_since_filters_on_the_hit_time_not_session_activity(self, projects):
+        # A session active recently but whose HIT happened long before the
+        # window must not count as an in-window hit — same fix `_within`
+        # applies to a day trend elsewhere in this module.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.limit_hit("h1", T0, self.SESSION_TEXT,
+                   quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")})
+        b.turn("m1", T1)  # keeps the session's last_activity_at recent
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        out = report.limits(conn, since=parse_ts(T1) - 3600)
+        assert out["events"] == []
+
+    def test_tokens_to_limit_sums_the_account_wide_window(self, projects):
+        window_start = "2026-09-01T10:00:00.000Z"          # opens the window this hit falls in
+        hit_ts = "2026-09-01T14:55:00.000Z"
+        b = TranscriptBuilder(projects, "-a", "s1")
+        # A PRIOR window (00:00-05:00): a 5h+ gap to `window_start` (10:00)
+        # means this turn opens its OWN window, wholly excluded from the sum.
+        b.turn("before", "2026-09-01T00:00:00.000Z")
+        b.turn("in-window-1", window_start)                 # included: default usage
+        b.turn("in-window-2", "2026-09-01T12:00:00.000Z",   # included: custom usage
+              usage={"input_tokens": 10, "cache_read_input_tokens": 0,
+                     "cache_creation_input_tokens": 0, "output_tokens": 20})
+        b.turn("after", "2026-09-01T16:00:00.000Z")         # excluded: after the hit
+        b.limit_hit("h1", hit_ts, self.SESSION_TEXT,
+                   quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")})
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        tokens = report.limits(conn)["events"][0]["tokens_to_limit"]
+        assert tokens["input_tokens"] == 13     # 3 (default) + 10
+        assert tokens["cache_read_tokens"] == 1000
+        assert tokens["cache_creation_tokens"] == 200
+        assert tokens["output_tokens"] == 60    # 40 (default) + 20
+        assert tokens["total_tokens"] == 1273
+        assert round(tokens["cost_usd"], 6) == round(TURN_USD + (10 * 5.0 + 20 * 25.0) / 1_000_000, 6)
+        assert tokens["window_start"] == parse_ts(window_start)
+
+    def test_tokens_to_limit_is_none_without_an_account(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-01T15:00:00.000Z")}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)  # no account_uuid stamped
+        assert report.limits(conn)["events"][0]["tokens_to_limit"] is None
+
+    def test_tokens_to_limit_is_none_for_kinds_with_no_documented_window(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.limit_hit("h1", T0, self.MONTHLY_TEXT)
+        b.limit_hit("h2", T0, self.MODEL_TEXT)
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        for event in report.limits(conn)["events"]:
+            assert event["tokens_to_limit"] is None
+
+    def test_resets_at_is_not_inferred_when_the_banner_stated_one(self, projects):
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        event = report.limits(conn)["events"][0]
+        assert event["resets_at"] == resets_at
+        assert event["resets_at_inferred"] is False
+
+    def test_a_session_hit_with_no_stated_reset_infers_one_from_its_window(self, projects):
+        # A bare banner with no "resets ..." clause at all: `reset_raw` and
+        # the parsed `resets_at` are both None going in.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.turn("m1", "2026-09-01T10:00:00.000Z")  # opens a window: [10:00, 15:00)
+        b.limit_hit("h1", "2026-09-01T14:00:00.000Z", "You've hit your session limit")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        event = report.limits(conn)["events"][0]
+        assert event["reset_raw"] is None
+        assert event["resets_at"] == parse_ts("2026-09-01T15:00:00.000Z")  # window's close
+        assert event["resets_at_inferred"] is True
+        assert event["tokens_to_limit"] is not None
+
+    def test_a_stated_reset_disagreeing_with_the_window_is_kept_for_display_without_crashing(self, projects):
+        # The window this account's OWN turns imply closes at 15:00; the
+        # banner instead states 15:10 (the ~10-minute quantisation census has
+        # observed on real five-hour boundaries). The display value stays
+        # whatever the banner said; the token sum still starts from the
+        # window's OPEN, not from the stated reset.
+        b = TranscriptBuilder(projects, "-a", "s1")
+        b.turn("m1", "2026-09-01T10:00:00.000Z")
+        b.limit_hit("h1", "2026-09-01T14:55:00.000Z", self.SESSION_TEXT,
+                   quotaLimits={"resetsAt": parse_ts("2026-09-01T15:10:00.000Z")})
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        event = report.limits(conn)["events"][0]
+        assert event["resets_at"] == parse_ts("2026-09-01T15:10:00.000Z")
+        assert event["resets_at_inferred"] is False
+        assert event["tokens_to_limit"]["window_start"] == parse_ts("2026-09-01T10:00:00.000Z")
+
+    def test_a_weekly_hit_with_no_stated_reset_infers_one_from_the_account_s_other_weekly_hits(self, projects):
+        b = TranscriptBuilder(projects, "-a", "s1")
+        # A prior weekly hit that DID parse, so the account has an anchor —
+        # Sunday 8pm Europe/London.
+        b.limit_hit("h1", "2026-08-30T10:00:00.000Z", self.WEEKLY_TEXT,  # 2026-08-30 was a Sunday
+                   quotaLimits={"resetsAt": datetime(2026, 8, 30, 19, 0, tzinfo=ZoneInfo("UTC")).timestamp()})
+        # A later weekly hit with a bare, reset-less banner.
+        b.limit_hit("h2", "2026-09-02T10:00:00.000Z", "You've hit your weekly limit")
+        b.write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        events = {e["hit_at"]: e for e in report.limits(conn)["events"]}
+        bare = events[parse_ts("2026-09-02T10:00:00.000Z")]
+        assert bare["resets_at_inferred"] is True
+        # The next Sunday 8pm after 2026-09-02 is 2026-09-06.
+        assert bare["resets_at"] == datetime(2026, 9, 6, 20, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()
+
+    def test_a_weekly_hit_with_no_reset_and_no_anchor_stays_unknown(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, "You've hit your weekly limit").write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET account_uuid = 'acc-1'")
+        conn.commit()
+        event = report.limits(conn)["events"][0]
+        assert event["resets_at"] is None
+        assert event["resets_at_inferred"] is False
+        assert event["tokens_to_limit"] is None
+
+    def test_repo_root_scopes_which_sessions_hits_are_read_from(self, projects):
+        resets_at = parse_ts("2026-09-01T15:00:00.000Z")
+        TranscriptBuilder(projects, "-a", "s1").limit_hit(
+            "h1", T0, self.SESSION_TEXT, quotaLimits={"resetsAt": resets_at}).write()
+        TranscriptBuilder(projects, "-b", "s2").limit_hit(
+            "h1", T0, self.SESSION_TEXT,
+            quotaLimits={"resetsAt": parse_ts("2026-09-02T15:00:00.000Z")}).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("UPDATE sessions SET repo_root = '/repo/a' WHERE session_id = 's1'")
+        conn.execute("UPDATE sessions SET repo_root = '/repo/b' WHERE session_id = 's2'")
+        conn.commit()
+        out = report.limits(conn, repo_root="/repo/a")
+        assert len(out["events"]) == 1
+
+    def test_missing_table_degrades_to_empty_rather_than_raising(self, projects):
+        TranscriptBuilder(projects, "-a", "s1").turn("m1", T0).write()
+        conn = store.connect()
+        ingest.sync(conn, projects)
+        conn.execute("DROP TABLE limit_hits")
+        conn.commit()
+        assert report.limits(conn) == {"events": [], "by_kind": {}}

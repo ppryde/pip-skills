@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "card": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "counts": {
+      "additionalProperties": false,
+      "properties": {
+        "critical": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "important": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "minor": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "critical",
+        "important",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "detail": {
+      "description": "absolute path inside the card's dispatch directory",
+      "minLength": 1,
+      "type": "string"
+    },
+    "learned": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "round": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "schema": {
+      "const": "overseer.reviewer/1"
+    },
+    "slot": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "stage": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "approved",
+        "found wanting"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "card",
+    "stage",
+    "round",
+    "slot",
+    "status",
+    "counts",
+    "detail",
+    "learned"
+  ],
+  "title": "overseer.reviewer/1",
+  "type": "object"
+}

@@ -13,7 +13,8 @@ description: >
 
 Two jobs, one lifecycle: **measure** context accumulation, and **hand over**
 (reset + resume) before the window overflows. Vigil is self-contained — it needs
-no other plugin. State lives in a git-ignored `.vigil/` in the working directory.
+no other plugin. State lives in `.claude/vigil/` in the working directory,
+self-ignored via its own `.gitignore` — it never edits the repo's own.
 
 Drive it through the CLI (locate `cli.py` relative to this skill; when installed
 as a plugin the scripts live under the plugin root):
@@ -39,7 +40,7 @@ point; (b) you finish a coherent unit of work; or (c) the user asks. Run:
 
 ```
 handover [--notes "the critical prose a fresh you must know"] \
-         [--content-file F | -] [--no-snapshot]
+         [--content-file F | -] [--no-snapshot] [--title "short task name"]
 ```
 
 The handover document is assembled from a generic session snapshot (cwd, git
@@ -48,10 +49,16 @@ caller can pipe richer context via `-`), plus your `--notes`. `--no-snapshot`
 drops the generic capture when the caller supplies the whole payload. In auto
 mode the Stop hook sends `/clear` at turn end; in manual mode you tell the user
 to type `/clear`. Either way `SessionStart` re-injects the handover — once (it is
-archived to `.vigil/archive/` on inject) — and you resume lean. After an auto
+archived to `.claude/vigil/archive/` on inject) — and you resume lean. After an auto
 `/clear`, injected context alone can't start a turn, so vigil also types a
 resume prompt into the pane so the fresh session picks the work back up
 hands-free — no human keystroke needed to get going again.
+
+Pass `--title "<3-6 word summary>"` to also rename the tmux window at the
+moment the Stop hook dispatches `/clear` — so a window showing many parallel
+sessions tells you what each one is doing without attaching. Auto mode
+(tmux) only: there's no window to rename in manual mode, and the title is
+silently dropped if the cycle never dispatches.
 
 ## Defer and pause
 Never clear a discussion out from under a live human. While a live exchange is

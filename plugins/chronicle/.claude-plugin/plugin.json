@@ -1,6 +1,6 @@
 {
   "name": "chronicle",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Records every Claude Code session's toil into an account-scoped SQLite chronicle \u2014 per-turn token usage (input, cache read/creation, output, thinking), context growth, prompts, tool calls, subagents, compactions, duration and API-equivalent cost \u2014 read from the transcripts on disk, pull only, no hooks. Turns carry attribution, so tokens and cost are accounted to the plugin, skill, subagent type and MCP server that spent them; edits carry their diffs, so per-file churn and what actually grew the context are counted too. The overseer dashboard grows a Chronicle page when it is present and keeps the chronicle synced while it shows.",
   "author": {
     "name": "Pip",

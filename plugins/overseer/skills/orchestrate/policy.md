@@ -4,11 +4,11 @@ The single tuning point for delegation, review depth, and watchdogs.
 Tiers: cheap / mid / strong — map to the smallest, middle, and most capable
 models the harness offers (currently haiku / sonnet / opus-or-better).
 
-| Complexity | Planner | Workers | Reviewers | Rounds cap | Progress cadence | Unresponsive after |
-|---|---|---|---|---|---|---|
-| S | mid | 1 × cheap | 1 × mid | 2 | ~30k tokens | 60k without a report |
-| M | mid | 1–2 × mid | 2 × mid, distinct lenses | 3 | ~50k tokens | 100k without a report |
-| L | strong | mid, chunked | round 1: 3 (one strong); rounds 2+: 2 (strong retained) | 4 | ~80k tokens | 160k without a report |
+| Complexity | Planner | Workers | Reviewers | Rounds cap | Unresponsive after (no transcript change) |
+|---|---|---|---|---|---|
+| S | mid | 1 × cheap | 1 × mid | 2 | 60k without a report |
+| M | mid | 1–2 × mid | 2 × mid, distinct lenses | 3 | 100k without a report |
+| L | strong | mid, chunked | round 1: 3 (one strong); rounds 2+: 2 (strong retained) | 4 | 160k without a report |
 
 ## Right-sizing the ceremony
 

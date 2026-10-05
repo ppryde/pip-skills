@@ -29,7 +29,9 @@ Tables (see ``_SCHEMA``):
                  nothing here depends on it).
 - ``cursors``    per-transcript-file byte offset + the file's mtime/size as
                  last seen, so ``sync`` can skip files that have not moved.
-- ``meta``       schema version, last sync time.
+- ``price_history`` list prices per model with the time each took effect, so a
+                 turn is costed at the rate in force when it ran.
+- ``meta``       schema version, last sync time, last pricing refresh.
 
 Why SQLite: the writers are many short-lived hook processes (one per session,
 per Stop), the readers are the CLI and the dashboard, and the data is tabular
@@ -42,8 +44,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
+from typing import NamedTuple
+
+from scripts.redact import FIDELITIES
 
 DB_ENV = "CHRONICLE_DB"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
@@ -126,6 +132,8 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 CREATE INDEX IF NOT EXISTS turns_session_ts ON turns(session_id, ts);
 CREATE INDEX IF NOT EXISTS turns_ts ON turns(ts);
+-- Ingest's copied-record check looks each id up across every session.
+CREATE INDEX IF NOT EXISTS turns_message_id ON turns(message_id);
 
 CREATE TABLE IF NOT EXISTS tool_calls (
     session_id   TEXT NOT NULL,
@@ -155,6 +163,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS tool_calls_name ON tool_calls(tool_name);
+CREATE INDEX IF NOT EXISTS tool_calls_tool_use_id ON tool_calls(tool_use_id);
 
 -- One row per file change, from the unified diff Claude Code writes with
 -- every Edit/Write result. Counts only: the diff CONTENT is deliberately not
@@ -198,6 +207,7 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX IF NOT EXISTS events_session_kind ON events(session_id, kind);
+CREATE INDEX IF NOT EXISTS events_uuid ON events(uuid);
 
 CREATE TABLE IF NOT EXISTS accounts (
     -- Identity only, and deliberately only the parts that do not change and
@@ -213,6 +223,54 @@ CREATE TABLE IF NOT EXISTS accounts (
     organization_uuid TEXT,
     first_seen        REAL,
     last_seen         REAL
+);
+
+-- One row per usage-limit banner RECORD (see transcript.LimitHit) — the same
+-- real-world hit is written into every session and subagent running at the
+-- time, so this is deliberately not deduplicated at write time: "how many
+-- sessions saw it" is itself part of what `report.limits` answers, on the
+-- read side, by clustering rows close together in time within one
+-- (account, kind, model) family (see `report._cluster_limit_rows`).
+--
+-- `raw_text` extends the "nothing personal is ever written" policy above:
+-- today's banners carry no PII, but `kind='other'` exists precisely to keep
+-- an unrecognised future wording verbatim rather than dropping it, and this
+-- store is read by the dashboard. So `raw_text` is kept here for a person
+-- reading the store directly to debug an `other` classification, but
+-- `report.limits` never selects it and no API route or UI ever surfaces it.
+CREATE TABLE IF NOT EXISTS limit_hits (
+    session_id  TEXT NOT NULL,
+    agent_id    TEXT NOT NULL DEFAULT '',
+    uuid        TEXT NOT NULL,
+    ts          REAL,
+    kind        TEXT NOT NULL DEFAULT 'other',
+    model       TEXT,
+    reset_raw   TEXT,
+    resets_at   REAL,
+    raw_text    TEXT NOT NULL DEFAULT '',  -- debugging only; never leaves this table (see above)
+    PRIMARY KEY (session_id, uuid)
+);
+CREATE INDEX IF NOT EXISTS limit_hits_ts ON limit_hits(ts);
+CREATE INDEX IF NOT EXISTS limit_hits_kind ON limit_hits(kind);
+
+-- Anthropic's list prices WITH HISTORY, USD per million tokens (see
+-- `scripts.ratebook`). A row is the rate a model had from `effective_from`
+-- (epoch seconds; 0 = the beginning of time) until its next row. Append-only:
+-- only `pricing rebuild` ever deletes. A change found by polling the pricing
+-- page is stamped with the time it was OBSERVED, which is an UPPER bound on
+-- when it really took effect. `cache_write_*` may be NULL (the source did not
+-- say): the reader then falls back to the 1.25x / 2x multipliers.
+CREATE TABLE IF NOT EXISTS price_history (
+    model          TEXT NOT NULL,
+    effective_from REAL NOT NULL,
+    input          REAL NOT NULL,
+    output         REAL NOT NULL,
+    cache_read     REAL NOT NULL,
+    cache_write_5m REAL,
+    cache_write_1h REAL,
+    source         TEXT NOT NULL DEFAULT '',
+    observed_at    REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (model, effective_from)
 );
 
 CREATE TABLE IF NOT EXISTS cursors (
@@ -247,7 +305,12 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("tool_calls", "qualifier", "TEXT"),
     # The account that owns this session's bridge, from its `bridge-session`
     # record. Sparse: only sessions bridged from claude.ai carry one, so NULL
-    # is the common case and means "not stated", never "no account".
+    # is the common case and means "not stated", never "no account". A bridged
+    # session's account CAN change mid-stream (`/login` re-emits
+    # `bridge-session` with a new `ownerAccountUuid`), so this is write-once
+    # per session like `account_uuid` below (see
+    # `ingest._upsert_session_identity`) — an incremental ingest that lands on
+    # the switched-to account must not relabel the session's original owner.
     ("sessions", "owner_account_uuid", "TEXT"),
     # The plan AS IT WAS when this session was ingested, read from the config
     # dir the transcript came from. Pinned per session rather than per account
@@ -276,6 +339,31 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("turns", "agent_type", "TEXT"),
     ("turns", "mcp_server", "TEXT"),
     ("turns", "mcp_tool", "TEXT"),
+    # Which account this session belongs to: the `accountUuid` of the config
+    # dir its transcript was ingested from, at first ingest. Write-once like
+    # the plan snapshot (see `ingest._upsert_session_identity`) and for the
+    # same reason — an account logging into a different config dir later must
+    # not relabel history. Deliberately NOT the transcript's own top-level
+    # `accountUuid` field: that names the Artifact/claude.ai account a record
+    # was made from (only `artifact-autoreact-ledger` rows carry it), not
+    # who ran the session.
+    ("sessions", "account_uuid", "TEXT"),
+    # A session can move between accounts mid-run: `bridge-session` carries
+    # `ownerAccountUuid` and `/login` re-emits it with a new owner. So the
+    # account is ALSO recorded per turn — `turns.account_uuid` is the bridge
+    # owner in force when the turn was written, NULL for a turn before any
+    # bridge record (or in a session never bridged), which reads as "fall back
+    # to the session's config-dir account" (`COALESCE(t.account_uuid,
+    # s.account_uuid)` — see `report._effective_account_sql`). Bridge records
+    # carry no timestamp, so this is by position in the JSONL (see
+    # `transcript.fold`). Backfilled by `chronicle sync --full`.
+    ("turns", "account_uuid", "TEXT"),
+    # The LAST bridge owner seen in the session's transcript — what an
+    # incremental ingest seeds its walk with, since the bridge record can land
+    # in an earlier batch than the turns it governs. Mutable, deliberately
+    # distinct from the write-once `owner_account_uuid` (the FIRST owner),
+    # which must stay untouched.
+    ("sessions", "bridge_owner_uuid", "TEXT"),
 )
 
 
@@ -284,6 +372,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in present:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # `account_uuid` is a MIGRATED column (added above, not in `_SCHEMA`'s own
+    # `CREATE TABLE sessions`), so its index has to be created here, after the
+    # ALTER that guarantees the column exists — naming it in `_SCHEMA` would
+    # fail outright on a brand-new store, whose table is created without it.
+    # `report._session_windows` scans a single account's turns via this same
+    # join (`turns JOIN sessions ON ... WHERE sessions.account_uuid = ?`), so
+    # this is what keeps that scan from also being a full scan of `sessions`.
+    conn.execute("CREATE INDEX IF NOT EXISTS sessions_account_uuid ON sessions(account_uuid)")
 
 
 def config_dir() -> Path:
@@ -331,6 +427,296 @@ def claude_dirs() -> list[Path]:
     return out
 
 
+DEFAULT_VOLUME_CLAUDE_DIR = ".config/claude"
+# What `sessions.config_dir` and a cursor path carry for a transcript read out
+# of a Docker volume: not a host path, so nothing may `Path()`/`stat()` it.
+VOLUME_LABEL_PREFIX = "docker://"
+
+# A volume name and the Claude dir within it are interpolated into a `docker`
+# argv, where a leading "-" would be read as an option and a quote or space
+# would change what runs. Validated wherever one enters the system (the CLI,
+# and the config loader — a hand-edited file is no more trustworthy).
+_VOLUME_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_CLAUDE_DIR_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9_./-]*$")
+
+
+class Volume(NamedTuple):
+    """A Docker named volume holding a Claude config dir, read in place."""
+    name: str
+    claude_dir: str = DEFAULT_VOLUME_CLAUDE_DIR
+
+    @property
+    def label(self) -> str:
+        """The stable stand-in for a host config dir: ``docker://<name>``."""
+        return f"{VOLUME_LABEL_PREFIX}{self.name}"
+
+
+def is_volume_label(value: str | None) -> bool:
+    return bool(value) and str(value).startswith(VOLUME_LABEL_PREFIX)
+
+
+def normalise_volume(name: object, claude_dir: object = DEFAULT_VOLUME_CLAUDE_DIR) -> Volume:
+    """A validated ``Volume``; ``ValueError`` names what is wrong with it.
+    ``claude_dir`` is stored without surrounding slashes (it is joined onto
+    ``/v/`` inside the helper container)."""
+    if not isinstance(name, str) or not _VOLUME_NAME_RE.match(name):
+        raise ValueError(f"invalid volume name: {name!r}")
+    clean = claude_dir.strip("/") if isinstance(claude_dir, str) else ""
+    if not _CLAUDE_DIR_RE.match(clean) or ".." in Path(clean).parts:
+        raise ValueError(f"invalid claude dir: {claude_dir!r}")
+    return Volume(name, clean)
+
+
+def _read_machine_config() -> dict:
+    """The machine config as a dict; ``{}`` if absent, unreadable or not an
+    object. Never raises: a broken file must degrade, not stop an ingest."""
+    machine = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    try:
+        data = json.loads(machine.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_volumes() -> tuple[list[Volume], list[str]]:
+    """The configured Docker volumes, plus a description of every entry that
+    had to be skipped.
+
+    Configured beside ``claude_dirs`` in the shared machine config::
+
+        {"volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}]}
+
+    ``claude_dir`` defaults to ``.config/claude``. A config with no ``volumes``
+    key — every file written before this existed — yields none. An invalid
+    entry (wrong shape, an injection-shaped name) is dropped and reported, not
+    raised: it must never stop the local dirs syncing, but neither should it
+    vanish without a word, so `sync` surfaces the problems it gets back.
+    """
+    raw = _read_machine_config().get("volumes")
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], ["volumes must be a list of {name, claude_dir} objects"]
+    found: dict[str, Volume] = {}
+    problems: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            problems.append(f"skipped volume entry {entry!r}: not an object")
+            continue
+        try:
+            volume = normalise_volume(entry.get("name"),
+                                      entry.get("claude_dir", DEFAULT_VOLUME_CLAUDE_DIR))
+        except ValueError as exc:
+            problems.append(f"skipped volume entry {entry!r}: {exc}")
+            continue
+        found.setdefault(volume.name, volume)
+    return list(found.values()), problems
+
+
+def volumes() -> list[Volume]:
+    return load_volumes()[0]
+
+
+def save_volumes(vols: list[Volume]) -> Path:
+    """Write ``vols`` into the machine config, PRESERVING every other key
+    (``claude_dirs``, ``path_map``, anything overseer keeps there). A file that
+    exists but is not valid JSON raises ``ValueError`` rather than being
+    overwritten — a typo is the user's to fix, not ours to erase."""
+    path = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text() or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: malformed config JSON: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{path}: config is not a JSON object")
+        data = loaded
+    data["volumes"] = [{"name": v.name, "claude_dir": v.claude_dir} for v in vols]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Remote boxes (WF-122): Enterprise "prod-access" machines whose Claude runs
+# never touch this filesystem, read over ssh and redacted before a byte
+# leaves the box (see `scripts.remote_agent`, `scripts.remote`). A remote's
+# LOCAL mirror of its own redacted transcripts is ingested exactly like any
+# other Claude config dir; `sessions.config_dir` carries the synthetic label
+# below instead of the mirror's real path — the same trick `docker://` plays
+# for a volume, and for the same reason: the mirror is an implementation
+# detail, not something a person should have to know to filter by account.
+
+REMOTE_LABEL_PREFIX = "remote://"
+DEFAULT_REMOTE_CLAUDE_DIR = "/opt/wf-state/.config/claude"
+DEFAULT_REMOTE_FIDELITY = "minimal"
+DEFAULT_REMOTE_INTERVAL_S = 900
+MIN_REMOTE_INTERVAL_S = 60
+
+# `name` and `host` are interpolated into an `ssh` argv, where a leading "-"
+# is read as an option and a space/quote/shell metacharacter can change what
+# runs. `claude_dir` travels only as JSON in the request the remote script
+# reads off its own stdin (never through a shell) but is held to the same
+# discipline — it is still an absolute path opinion a hostile config could
+# abuse to point outside `projects/`.
+_REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_REMOTE_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_REMOTE_CLAUDE_DIR_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+
+
+class Remote(NamedTuple):
+    """One Enterprise box read over ssh, at most once every ``interval_s``."""
+    name: str
+    host: str
+    claude_dir: str = DEFAULT_REMOTE_CLAUDE_DIR
+    fidelity: str = DEFAULT_REMOTE_FIDELITY
+    mirror_dir: str | None = None
+    interval_s: int = DEFAULT_REMOTE_INTERVAL_S
+    enabled: bool = True
+
+    @property
+    def label(self) -> str:
+        """The stable stand-in for a host config dir: ``remote://<name>``."""
+        return f"{REMOTE_LABEL_PREFIX}{self.name}"
+
+    def mirror_root(self) -> Path:
+        """Where this remote's redacted, append-only mirror lives on THIS
+        filesystem: the ``mirror_dir`` override, or
+        ``<config_dir>/chronicle/remotes/<name>``."""
+        if self.mirror_dir:
+            return Path(self.mirror_dir).expanduser()
+        return config_dir() / "chronicle" / "remotes" / self.name
+
+
+def is_remote_label(value: str | None) -> bool:
+    return bool(value) and str(value).startswith(REMOTE_LABEL_PREFIX)
+
+
+def normalise_remote(name: object, host: object, *, claude_dir: object = DEFAULT_REMOTE_CLAUDE_DIR,
+                     fidelity: object = DEFAULT_REMOTE_FIDELITY, mirror_dir: object = None,
+                     interval_s: object = DEFAULT_REMOTE_INTERVAL_S, enabled: object = True) -> Remote:
+    """A validated ``Remote``; ``ValueError`` names what is wrong with it.
+    Never connects — this is pure validation."""
+    if not isinstance(name, str) or not _REMOTE_NAME_RE.match(name):
+        raise ValueError(f"invalid remote name: {name!r}")
+    if not isinstance(host, str) or not _REMOTE_HOST_RE.match(host):
+        raise ValueError(f"invalid remote host: {host!r}")
+    clean_dir = claude_dir if isinstance(claude_dir, str) else ""
+    if not _REMOTE_CLAUDE_DIR_RE.match(clean_dir) or ".." in Path(clean_dir).parts:
+        raise ValueError(f"invalid claude dir: {claude_dir!r}")
+    if fidelity not in FIDELITIES:
+        raise ValueError(f"invalid fidelity: {fidelity!r}")
+    clean_mirror: str | None = None
+    if mirror_dir:
+        if not isinstance(mirror_dir, str) or not mirror_dir.strip():
+            raise ValueError(f"invalid mirror_dir: {mirror_dir!r}")
+        clean_mirror = mirror_dir
+    try:
+        if isinstance(interval_s, bool) or not isinstance(interval_s, (int, float, str)):
+            raise TypeError
+        clean_interval = max(MIN_REMOTE_INTERVAL_S, int(interval_s))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid interval_s: {interval_s!r}") from exc
+    return Remote(name, host, clean_dir, fidelity, clean_mirror, clean_interval, bool(enabled))
+
+
+def load_remotes() -> tuple[list[Remote], list[str]]:
+    """The configured remote boxes, plus a description of every entry that
+    had to be skipped (never raised — one bad entry must not stop the local
+    dirs, or the other remotes, from syncing)."""
+    raw = _read_machine_config().get("remotes")
+    if raw is None:
+        return [], []
+    if not isinstance(raw, list):
+        return [], ["remotes must be a list of {name, host, ...} objects"]
+    found: dict[str, Remote] = {}
+    problems: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            problems.append(f"skipped remote entry {entry!r}: not an object")
+            continue
+        try:
+            remote = normalise_remote(
+                entry.get("name"), entry.get("host"),
+                claude_dir=entry.get("claude_dir", DEFAULT_REMOTE_CLAUDE_DIR),
+                fidelity=entry.get("fidelity", DEFAULT_REMOTE_FIDELITY),
+                mirror_dir=entry.get("mirror_dir"),
+                interval_s=entry.get("interval_s", DEFAULT_REMOTE_INTERVAL_S),
+                enabled=entry.get("enabled", True),
+            )
+        except ValueError as exc:
+            problems.append(f"skipped remote entry {entry!r}: {exc}")
+            continue
+        found.setdefault(remote.name, remote)
+    return list(found.values()), problems
+
+
+def remotes() -> list[Remote]:
+    return load_remotes()[0]
+
+
+def remote_mirror_dir_for(label: str | None) -> Path | None:
+    """The mirror root a ``remote://<name>`` label resolves to, or None when
+    no configured remote owns it (removed from the config, or not a remote
+    label at all)."""
+    if not is_remote_label(label):
+        return None
+    assert label is not None
+    name = label[len(REMOTE_LABEL_PREFIX):]
+    for remote in remotes():
+        if remote.name == name:
+            return remote.mirror_root()
+    return None
+
+
+def remote_label_for(config_dir: Path) -> str | None:
+    """The reverse of `remote_mirror_dir_for`: the ``remote://<name>`` label
+    for a config dir that IS a configured remote's mirror root, or None for
+    every other path (an ordinary host dir, a mirror since removed from the
+    config). Used by `ingest.config_dir_of` so a session read out of a
+    remote's mirror is stamped with the stable label rather than the mirror's
+    real (and irrelevant to a person filtering by account) path."""
+    try:
+        resolved = config_dir.resolve()
+    except OSError:
+        return None
+    for remote in remotes():
+        try:
+            if remote.mirror_root().resolve() == resolved:
+                return remote.label
+        except OSError:
+            continue
+    return None
+
+
+def save_remotes(rems: list[Remote]) -> Path:
+    """Write ``rems`` into the machine config, PRESERVING every other key —
+    same contract as `save_volumes`."""
+    path = config_dir().joinpath(*MACHINE_CONFIG_RELPATH)
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text() or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: malformed config JSON: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{path}: config is not a JSON object")
+        data = loaded
+    data["remotes"] = [
+        {"name": r.name, "host": r.host, "claude_dir": r.claude_dir, "fidelity": r.fidelity,
+         "mirror_dir": r.mirror_dir, "interval_s": r.interval_s, "enabled": r.enabled}
+        for r in rems
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
 # The ONLY fields ever read out of `.claude.json`. A whitelist, not a
 # blacklist: that file also holds emailAddress, fullName, displayName,
 # organizationName and more, and this store is read by the dashboard and can
@@ -358,10 +744,21 @@ def account_profile(config_dir: Path) -> dict[str, str] | None:
     signal that distinguishes key auth from a subscription; that case returns
     an empty dict, distinct from None (no file / unreadable / malformed).
     """
-    path = config_dir / ".claude.json"
     try:
-        data = json.loads(path.read_text() or "{}")
-    except (OSError, json.JSONDecodeError):
+        text = (config_dir / ".claude.json").read_text()
+    except OSError:
+        return None
+    return parse_account_profile(text)
+
+
+def parse_account_profile(text: str) -> dict[str, str] | None:
+    """`account_profile`'s whitelist applied to ``.claude.json`` TEXT — the
+    seam a Docker volume's file goes through, having been read by a helper
+    container rather than off this filesystem. Same contract: None for text
+    that is not a JSON object, ``{}`` for no ``oauthAccount`` (API-key auth)."""
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
         return None

@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type {
+  AccountEntry,
   BoardCard,
   BoardResponse,
   Context,
@@ -12,7 +13,7 @@ import type {
   RepoEntry,
 } from "../api/types";
 import type { PartyMember } from "../board/party";
-import TopBar, { type TopBarProps } from "./TopBar";
+import TopBar, { COIN_SPIN_MS, type TopBarProps } from "./TopBar";
 
 // `controlsOpen`/`filtersOpen` are App-owned, so TopBar is a fully
 // controlled component — it renders the "Controls ▾"/"Filters ▾" buttons
@@ -113,6 +114,9 @@ function baseProps() {
     branches: [] as string[],
     activeBranch: null as string | null,
     onSelectBranch: () => {},
+    accounts: [] as AccountEntry[],
+    activeAccount: null as string | null,
+    onSelectAccount: () => {},
     // WF-086: Board|Atlas view toggle — every existing test gets a stable
     // default (board view, no-op handler) via this shared fixture so only
     // the toggle's own describe block below needs to care about it.
@@ -718,15 +722,27 @@ describe("<TopBar/> Filters toggle (Task 2)", () => {
     expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
   });
 
-  it("puts the toggle cluster in [Filters ▾] [Controls ▾] [＋] order", () => {
+  // Desktop revision: Filters ▾ now lives alone in `.topbar__filters-toggle`
+  // (row 2), separate from Controls ▾/＋ in `.topbar__actions-cluster` (row
+  // 3) — see TopBar.tsx's JSX comments on both. Mobile still renders all
+  // three as one visual line (styles.css gives both wrappers matching
+  // `order`s), but the DOM/CSS grouping the old single `.topbar__toggle-
+  // cluster` test pinned no longer exists, so this checks the two new
+  // groupings instead.
+  it("puts Filters ▾ alone in .topbar__filters-toggle, and Controls ▾/＋ together in .topbar__actions-cluster", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
-    const cluster = container.querySelector(".topbar__toggle-cluster")!;
-    expect(cluster).not.toBeNull();
-    const buttons = Array.from(cluster.querySelectorAll("button"));
-    expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
-    expect(buttons[1]).toHaveAccessibleName(/^controls/i);
-    expect(buttons[2]).toHaveAccessibleName(/new card/i);
+    const filtersGroup = container.querySelector(".topbar__filters-toggle")!;
+    expect(filtersGroup).not.toBeNull();
+    const filtersButtons = Array.from(filtersGroup.querySelectorAll("button"));
+    expect(filtersButtons).toHaveLength(1);
+    expect(filtersButtons[0]).toHaveAccessibleName(/^filters/i);
+
+    const actions = container.querySelector(".topbar__actions-cluster")!;
+    expect(actions).not.toBeNull();
+    const actionButtons = Array.from(actions.querySelectorAll("button"));
+    expect(actionButtons).toHaveLength(2);
+    expect(actionButtons[0]).toHaveAccessibleName(/^controls/i);
+    expect(actionButtons[1]).toHaveAccessibleName(/new card/i);
   });
 });
 
@@ -795,6 +811,234 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     expect(onSelectView).toHaveBeenNthCalledWith(2, "atlas");
   });
 
+  it("slots the pressed coin leftmost and keeps the others in source order behind it", () => {
+    const slots = (container: HTMLElement) =>
+      Object.fromEntries(
+        Array.from(container.querySelectorAll(".topbar__view-toggle-btn")).map((b) => [
+          b.getAttribute("aria-label"),
+          b.getAttribute("data-slot"),
+        ])
+      );
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+    expect(slots(container)).toEqual({ Board: "0", Atlas: "1", Chronicle: "2", Almoner: "3" });
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="chronicle" />);
+    expect(slots(container)).toEqual({ Chronicle: "0", Board: "1", Atlas: "2", Almoner: "3" });
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="almoner" />);
+    expect(slots(container)).toEqual({ Almoner: "0", Board: "1", Atlas: "2", Chronicle: "3" });
+  });
+
+  it("gives each page its own coin art", () => {
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+    const icons = Object.fromEntries(
+      Array.from(container.querySelectorAll(".topbar__view-toggle-btn")).map((b) => [
+        b.getAttribute("aria-label"),
+        b.querySelector("img")!.getAttribute("src")!.split("/").pop(),
+      ])
+    );
+    expect(icons).toEqual({
+      Board: "scry.png",
+      Atlas: "treasure-map.png",
+      Chronicle: "journal.png",
+      Almoner: "scroll.png",
+    });
+  });
+
+  it("sits still on load: no coin carries data-spin until the first view change", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    container
+      .querySelectorAll(".topbar__view-toggle-btn")
+      .forEach((btn) => expect(btn).not.toHaveAttribute("data-spin"));
+  });
+
+  it("a re-render with no view change leaves settled coins alone", () => {
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    rerender(<StatefulTopBar {...baseProps()} view="board" refreshing />);
+    container
+      .querySelectorAll(".topbar__view-toggle-btn")
+      .forEach((btn) => expect(btn).not.toHaveAttribute("data-spin"));
+  });
+});
+
+// Owner's ask (WF-11x, follow-up to #76): "all of the coins switch places —
+// I would love it if they didn't actually move, they just spin and turn into
+// a different menu item." #76 slid every coin to a new slot on each view
+// change; this replaces that with coins fixed to their slot for life, which
+// spin in place and swap face only when their own assignment actually
+// changes.
+describe("<TopBar/> coin spin-in-place (WF-11x)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const bySlot = (container: HTMLElement, slot: number) =>
+    container.querySelector(`.topbar__view-toggle-btn[data-slot="${slot}"]`) as HTMLElement;
+
+  /** The declarations inside `@keyframes <name> { ... }` in the real
+   * stylesheet source — brace-counted rather than a regex match, since the
+   * block's own percentage selectors (`50% { ... }`) nest braces inside it.
+   * Same "read the real CSS, don't trust jsdom computed style" approach as
+   * the truncation-styling describe block further down this file. */
+  function keyframesBody(css: string, name: string): string {
+    const start = css.indexOf(`@keyframes ${name}`);
+    expect(start, `expected @keyframes ${name}`).toBeGreaterThanOrEqual(0);
+    const openBrace = css.indexOf("{", start);
+    let depth = 0;
+    let end = openBrace;
+    for (; end < css.length; end++) {
+      if (css[end] === "{") depth++;
+      else if (css[end] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return css.slice(openBrace + 1, end);
+  }
+
+  it("never remounts or reorders a coin's DOM node across a view change", () => {
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+    const nodesBefore = [0, 1, 2, 3].map((slot) => bySlot(container, slot));
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="almoner" />);
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
+    const nodesAfter = [0, 1, 2, 3].map((slot) => bySlot(container, slot));
+
+    nodesBefore.forEach((node, i) => expect(nodesAfter[i]).toBe(node));
+  });
+
+  it("updates aria-pressed and the accessible name immediately, but the icon only at the spin's midpoint", () => {
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    const front = bySlot(container, 0);
+    const iconBefore = front.querySelector("img")!.getAttribute("src");
+    expect(front).toHaveAttribute("aria-label", "Board");
+
+    rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+    // Immediate: correctness for screen readers and the next click never
+    // waits on the animation.
+    expect(front).toHaveAttribute("aria-label", "Atlas");
+    expect(front).toHaveAttribute("aria-pressed", "true");
+    // Lagged: the face is still the old icon right up to the midpoint.
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(iconBefore);
+
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS / 2 - 1));
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(iconBefore);
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(front.querySelector("img")!.getAttribute("src")).not.toBe(iconBefore);
+  });
+
+  it("spins only the slots whose assigned page actually changed", () => {
+    const all = { chronicleAvailable: true, almonerAvailable: true };
+    const { container, rerender } = render(<StatefulTopBar {...baseProps()} {...all} view="board" />);
+
+    rerender(<StatefulTopBar {...baseProps()} {...all} view="atlas" />);
+    // Board <-> Atlas swap slots 0 and 1; Chronicle/Almoner sit at 2 and 3
+    // throughout and never had a reason to move.
+    expect(bySlot(container, 0)).toHaveAttribute("data-spin");
+    expect(bySlot(container, 1)).toHaveAttribute("data-spin");
+    expect(bySlot(container, 2)).not.toHaveAttribute("data-spin");
+    expect(bySlot(container, 3)).not.toHaveAttribute("data-spin");
+
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
+    expect(bySlot(container, 0)).not.toHaveAttribute("data-spin");
+    expect(bySlot(container, 1)).not.toHaveAttribute("data-spin");
+  });
+
+  it("restarts the spin, and the last click wins, when a second change lands before the first settles", () => {
+    // Board -> Atlas -> Chronicle, the second click landing before the
+    // first spin's midpoint. A straight reversal (Board -> Atlas -> Board)
+    // would settle back to a NULL data-spin either way, making a
+    // `not.toBe(firstToken)` check vacuous — a third, distinct destination
+    // is what actually proves a fresh animation ran rather than the first
+    // one just continuing to a coincidentally-matching end state.
+    const withChronicle = { chronicleAvailable: true };
+    const { container, rerender } = render(
+      <StatefulTopBar {...baseProps()} {...withChronicle} view="board" />
+    );
+    const front = bySlot(container, 0);
+    // Ground truth for "did the final face really land on Chronicle" below,
+    // read from Chronicle's own coin before anything has spun.
+    const chronicleIcon = bySlot(container, 2).querySelector("img")!.getAttribute("src");
+
+    rerender(<StatefulTopBar {...baseProps()} {...withChronicle} view="atlas" />);
+    const firstToken = front.getAttribute("data-spin");
+    expect(firstToken).not.toBeNull();
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS / 4));
+
+    // Second click, well before the first spin's midpoint has fired.
+    rerender(<StatefulTopBar {...baseProps()} {...withChronicle} view="chronicle" />);
+    expect(front).toHaveAttribute("aria-label", "Chronicle");
+    // The keyframe name alternates, so a browser sees a fresh animation
+    // rather than the first (superseded) one continuing.
+    expect(front.getAttribute("data-spin")).not.toBeNull();
+    expect(front.getAttribute("data-spin")).not.toBe(firstToken);
+
+    // Settle fully: the face must land on Chronicle — the superseded
+    // Atlas face from the cancelled first spin must never have appeared.
+    act(() => vi.advanceTimersByTime(COIN_SPIN_MS));
+    expect(front).not.toHaveAttribute("data-spin");
+    expect(front.querySelector("img")!.getAttribute("src")).toBe(chronicleIcon);
+  });
+
+  it("swaps instantly with no spin under prefers-reduced-motion", () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      const { container, rerender } = render(<StatefulTopBar {...baseProps()} view="board" />);
+      const front = bySlot(container, 0);
+      const iconBefore = front.querySelector("img")!.getAttribute("src");
+
+      rerender(<StatefulTopBar {...baseProps()} view="atlas" />);
+      expect(front).toHaveAttribute("aria-label", "Atlas");
+      expect(front).not.toHaveAttribute("data-spin");
+      expect(front.querySelector("img")!.getAttribute("src")).not.toBe(iconBefore);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
+  it("shares one duration between the row's CSS custom property and the JS midpoint timer", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} view="board" />);
+    const row = container.querySelector(".topbar__view-toggle") as HTMLElement;
+    expect(row.style.getPropertyValue("--coin-spin-ms")).toBe(`${COIN_SPIN_MS}ms`);
+  });
+
+  it("never rotates past 90deg in either direction, so the icon is never mirrored", () => {
+    const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+    for (const name of ["topbar-coin-spin-a", "topbar-coin-spin-b"]) {
+      const body = keyframesBody(css, name);
+      const degrees = [...body.matchAll(/rotate:\s*y\s*(-?\d+(?:\.\d+)?)deg/g)].map((m) =>
+        Number(m[1])
+      );
+      expect(degrees.length).toBeGreaterThan(0);
+      degrees.forEach((deg) => expect(Math.abs(deg)).toBeLessThanOrEqual(90));
+    }
+  });
+
+  it("swaps sides exactly at the midpoint, where the coin is edge-on", () => {
+    const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+    for (const name of ["topbar-coin-spin-a", "topbar-coin-spin-b"]) {
+      const body = keyframesBody(css, name);
+      expect(body).toMatch(/50%\s*\{\s*rotate:\s*y\s*90deg;?\s*\}/);
+      expect(body).toMatch(/50\.001%\s*\{\s*rotate:\s*y\s*-90deg;?\s*\}/);
+    }
+  });
+});
+
+describe("<TopBar/> view toggle (WF-086) — identity placement", () => {
   it("puts both view-toggle circles inside the always-visible .topbar__identity, never in #topbar-controls-group", () => {
     const { container } = render(<StatefulTopBar {...baseProps()} />);
     const circles = container.querySelectorAll(".topbar__view-toggle-btn");
@@ -819,13 +1063,15 @@ describe("<TopBar/> view toggle (WF-086)", () => {
     const titleIndex = kids.findIndex((c) => c.tagName === "H1");
     expect(stackIndex).toBeGreaterThanOrEqual(0);
     expect(stackIndex).toBeLessThan(titleIndex);
-    // The identity cluster itself still precedes the repo selector in the bar.
-    const header = container.querySelector("header.topbar")!;
-    const barKids = Array.from(header.children);
-    const identityIndex = barKids.indexOf(identity);
-    const repoIndex = barKids.findIndex((c) => c.classList.contains("topbar__repo-select"));
-    expect(identityIndex).toBeGreaterThanOrEqual(0);
-    expect(identityIndex).toBeLessThan(repoIndex);
+    // The identity cluster itself still precedes the repo selector in the
+    // bar — the repo selector now lives inside the desktop-row `.topbar__
+    // row2-left` wrapper (see TopBar.tsx), so this compares DOM position via
+    // `compareDocumentPosition` rather than `header`'s DIRECT children.
+    const repo = container.querySelector(".topbar__repo-select")!;
+    expect(repo).not.toBeNull();
+    expect(
+      identity.compareDocumentPosition(repo) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 });
 
@@ -917,6 +1163,112 @@ describe("<TopBar/> Epic Atlas controls (WF-091)", () => {
 // than `.topbar__repo-select select`/`.topbar__branch-select select`
 // (which keep only their own genuine overrides — a transparent background,
 // plus the branch select's own wobble variant — nothing duplicated).
+// Owner's ask (revised): "on desktop can we do menu left, title right for
+// top line, account/repo/branch in that order in left of second line and
+// filters on the right [alone — nothing else shares row 2], then all labels
+// [everything else] on the third row". `.topbar__row2-left`/`.topbar__
+// row2-right`/`.topbar__row3` are the structural hooks a `@media (min-width:
+// 721px)` grid in styles.css pins to `row2-left`/`row2-right`/`row3`; all
+// three default to `display: contents` (see styles.css) so mobile —
+// asserted untouched by the whole existing suite above/below — never sees
+// them as real boxes. These tests pin the DOM membership/order a screenshot
+// can't regression-guard on its own.
+describe("<TopBar/> desktop row grouping", () => {
+  it("puts Account, Repo, Branch in that order inside .topbar__row2-left", () => {
+    const { container } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        accounts={[
+          { account_uuid: "acc-a", short_uuid: "acc-a", plan: null, config_dirs: [], sessions: 0, last_activity_at: null },
+          { account_uuid: "acc-b", short_uuid: "acc-b", plan: null, config_dirs: [], sessions: 0, last_activity_at: null },
+        ]}
+        activeAccount={null}
+        repos={[{ label: "repo-a", root: "/a", current: true, has_board: true, live_sessions: 0 }]}
+        activeRoot="/a"
+        branches={["feat/a"]}
+        activeBranch="feat/a"
+      />
+    );
+
+    const left = container.querySelector(".topbar__row2-left")!;
+    expect(left).not.toBeNull();
+    const classesInOrder = Array.from(left.children).map((c) => c.className);
+    const accountIdx = classesInOrder.findIndex((c) => c.includes("topbar__account-select"));
+    const repoIdx = classesInOrder.findIndex((c) => c.includes("topbar__repo-select"));
+    const branchIdx = classesInOrder.findIndex((c) => c.includes("topbar__branch-select"));
+    expect(accountIdx).toBeGreaterThanOrEqual(0);
+    expect(repoIdx).toBeGreaterThan(accountIdx);
+    expect(branchIdx).toBeGreaterThan(repoIdx);
+  });
+
+  it("puts ONLY the Filters ▾ toggle inside .topbar__row2-right", () => {
+    const { container } = render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+
+    const right = container.querySelector(".topbar__row2-right")!;
+    expect(right).not.toBeNull();
+    const buttons = Array.from(right.querySelectorAll("button"));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName(/^filters/i);
+    // Nothing else — no pills, no gold/vanquished/fleet, no Controls ▾/＋.
+    expect(right.querySelector(".topbar__pill")).toBeNull();
+    expect(right.querySelector(".topbar__gold-pill")).toBeNull();
+    expect(right.querySelector(".topbar__actions-cluster")).toBeNull();
+  });
+
+  it("groups the rest/last-refreshed pills, the gold/vanquished/fleet pills, and the actions cluster inside .topbar__row3, actions last", () => {
+    const { container } = render(
+      <StatefulTopBar
+        {...baseProps()}
+        limits={{
+          five_hour: { used_percentage: 28 } as RateWindow,
+          seven_day: { used_percentage: 63 } as RateWindow,
+        }}
+        lastRefreshedAt={new Date(2026, 0, 1, 14, 32)}
+      />
+    );
+
+    const row3 = container.querySelector(".topbar__row3")!;
+    expect(row3).not.toBeNull();
+    expect(row3.querySelector(".topbar__pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__gold-pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__vanquished-pill")).not.toBeNull();
+    expect(row3.querySelector(".topbar__fleet-pill")).not.toBeNull();
+    const actions = row3.querySelector(".topbar__actions-cluster");
+    expect(actions).not.toBeNull();
+    // The actions cluster is the rightmost (last) status/actions child —
+    // #topbar-controls-group (the Provisions group) may follow it in the
+    // DOM too (it wraps to its own line below via its own flex-basis), so
+    // this only pins ordering among the always-visible pieces, not against
+    // that collapsible group.
+    const alwaysVisible = Array.from(row3.children).filter(
+      (c) => c.id !== "topbar-controls-group"
+    );
+    expect(alwaysVisible[alwaysVisible.length - 1]).toBe(actions);
+  });
+
+  it("nests the Provisions group inside .topbar__row3, still toggled by controlsOpen", () => {
+    render(<StatefulTopBar {...baseProps()} onClear={() => {}} />);
+    openControls();
+
+    const row3 = document.querySelector(".topbar__row3")!;
+    const group = document.getElementById("topbar-controls-group")!;
+    expect(row3.contains(group)).toBe(true);
+    expect(group).toBeVisible();
+  });
+
+  it("keeps every row control reachable outside row2-left/row2-right/row3 too (mobile flattens them via display:contents)", () => {
+    // A structural smoke test: nothing about wrapping these controls should
+    // make them any less queryable by their own existing class/role — the
+    // whole rest of this file's assertions (Repo/Branch/Account selects,
+    // gold/vanquished/fleet pills, Filters/Controls/＋) already prove this,
+    // this just documents the intent for future readers of this describe
+    // block.
+    render(<StatefulTopBar {...baseProps()} />);
+    expect(screen.getByRole("button", { name: /^filters/i })).toBeInTheDocument();
+    expect(screen.getByText(/vanquished/)).toBeInTheDocument();
+  });
+});
+
 describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
 
@@ -993,5 +1345,56 @@ describe("topbar repo/branch select truncation styling (WF-085b)", () => {
   it("lets the repo/branch chip wrappers shrink below their content width so the ellipsis can engage", () => {
     expect(ruleBodyFor(".topbar__repo-select")).toMatch(/min-width:\s*0/);
     expect(ruleBodyFor(".topbar__branch-select")).toMatch(/min-width:\s*0/);
+  });
+});
+
+// PR #81 review round: two CSS-geometry regressions jsdom's layout-free DOM
+// can't render its way into failing — no viewport/box-model math ever
+// executes there, so these assert on the styles.css SOURCE the same way the
+// describe block above does. The actual geometry (row-gap distance, mobile
+// gap width) was verified separately with real headless-Chrome measurements
+// (see PR #81's review-round comment) — these tests exist so a future edit
+// to either value regresses loudly here instead of only in a screenshot.
+describe("topbar desktop-row geometry regressions (PR #81 review round)", () => {
+  const css = readFileSync(path.resolve(process.cwd(), "src/styles.css"), "utf-8");
+
+  it("gives the no-banner desktop grid its own template with no banner row, so row-gap never doubles up", () => {
+    // The FIRST `grid-template-areas` in the file is the base `.topbar` rule
+    // inside the `@media (min-width: 721px)` block (the non-media `.topbar`
+    // rule earlier in the file has no grid-template-areas at all) — this is
+    // the template used whenever `quarantinedCount` is 0, i.e. almost always.
+    // A blanket `row-gap` applies between every pair of row tracks whether or
+    // not either side holds content, so a 4-row template with an always-
+    // empty "banner" track (this test's old, wrong shape) renders TWO gaps
+    // between row2 and row3 instead of one — see the block comment directly
+    // above this rule in styles.css for the full "why".
+    const [, areas] = css.match(/grid-template-areas:\s*([\s\S]*?);/) ?? [];
+    expect(areas, "expected a grid-template-areas declaration").toBeTruthy();
+    expect(areas).not.toMatch(/banner/);
+    expect(areas).toMatch(/row2-left\s+row2-right/);
+    expect(areas).toMatch(/row3\s+row3/);
+  });
+
+  it("splices the banner row back in only via :has(), scoped to when the banner actually renders", () => {
+    const hasRule = css.match(
+      /\.topbar:has\(\.topbar__quarantine-banner\)\s*\{([\s\S]*?)\}/
+    );
+    expect(hasRule, "expected a .topbar:has(.topbar__quarantine-banner) rule").not.toBeNull();
+    expect(hasRule![1]).toMatch(/banner\s+banner/);
+  });
+
+  it("cancels the mobile actions-cluster gap against the actual column-gap (0.5rem), not the desktop gap (0.75rem)", () => {
+    // Regression: this used to be -0.35rem, computed against `.topbar`'s
+    // DESKTOP `gap: 0.75rem` — but mobile overrides `gap` to the shorthand
+    // `0.4rem 0.5rem` (row-gap column-gap), so the real column-gap here is
+    // 0.5rem and the correct cancelling offset is -0.1rem (0.5rem - 0.4rem).
+    // The wrong value rendered a ~0.15rem gap instead of the intended
+    // 0.4rem — see TopBar.tsx/styles.css review notes for the measured px.
+    // `.topbar__actions-cluster` also has an unrelated DESKTOP rule earlier
+    // in the file (the atomic-wrapper `display:inline-flex` one) — anchoring
+    // on the full `order: 41` mobile declaration avoids matching that one.
+    const mobileRule = css.match(/\.topbar__actions-cluster\s*\{\s*order:\s*41;\s*margin-left:\s*(-?[\d.]+rem);\s*\}/);
+    expect(mobileRule, "expected the mobile .topbar__actions-cluster { order: 41; ... } rule").not.toBeNull();
+    expect(mobileRule![1]).toBe("-0.1rem");
   });
 });

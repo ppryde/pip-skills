@@ -9,9 +9,10 @@ Each entry names the plugin and, in brackets, the skills it provides.
 `census` provides none — it is a status-line writer, which is why this
 section is "Plugins" and not "Skills".
 
+- **agent-roster** — a mod: `/roster` opens a live pane of every Claude session on the machine, across accounts (tmux name, repo/worktree, branch, status, last active, last prompt); read from the session registry; no skills
 - **almoner** — one triaged, read-only digest of what is asking for your attention across configured sources (Notion today), gathered into a per-account SQLite store; no skills yet
 - **census** — records the status-line payload (context %, model, PR state, 5h/7d rate limits) into one worktree-indexed store; one writer, many readers
-- **chronicle** — per-session token, cost, tool, subagent and per-file churn accounting, read from the transcripts on disk; pull only, no hooks (chronicle)
+- **chronicle** — per-session token, cost, tool, subagent and per-file churn accounting, read from the transcripts on disk; pull only, no hooks (chronicle, chronicle-reconcile: the ad-hoc audit of the store against the console, run by hand and never from sync)
 - **context-vigil-mod** — context handover as a Claude Code mod (no tmux, no status line): threshold nudge + vigil bar, auto handover with in-process /clear and resume, last light, limit latch and configurable early stop; runs side by side with classic context-vigil; no skills (commands /vho, /vhandoff, /vsetup)
 - **django-inquisition** — Django ORM performance audit against ~70 heuristics, ranked by impact (optimise-orm)
 - **email-absolution** — righteous HTML email construction (elder, scribe, visitation)

@@ -4,6 +4,7 @@
  * import the wrappers below instead.
  */
 import type {
+  AccountsResponse,
   AlmonerDigest,
   AlmonerStatus,
   BoardResponse,
@@ -11,6 +12,7 @@ import type {
   ChronicleQuery,
   ChronicleSyncResponse,
   ChronicleAgentDetail,
+  ChronicleLimitsResponse,
   ChronicleSessionDetail,
   ChronicleSessionsResponse,
   ChronicleStatus,
@@ -89,12 +91,33 @@ export function setActiveRoot(root: string | null): void {
   activeRoot = root;
 }
 
-/** Appends `?root=...` (or `&root=...` if the url already has a query
- * string) when a root is active; otherwise returns `url` unchanged. */
+/** WF-116: the account selector's choice, same single-choke-point shape as
+ * `activeRoot` above — `null` means "no selection" / "every account",
+ * which every wrapper below treats as "omit the `account` query param
+ * entirely" (unchanged pre-selector behaviour). */
+let activeAccount: string | null = null;
+
+/**
+ * Sets the account every subsequent `withRoot`-routed call threads through
+ * as `?account=...`. Called by the same data hooks `setActiveRoot` is
+ * (`useSessions`, `useChronicle`), at the same point in their effect.
+ */
+export function setActiveAccount(account: string | null): void {
+  activeAccount = account;
+}
+
+/** Appends `?root=...`/`&account=...` (as `?`/`&` the url already needs)
+ * for whichever of `activeRoot`/`activeAccount` is set; returns `url`
+ * unchanged when neither is. */
 function withRoot(url: string): string {
-  if (activeRoot === null) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}root=${encodeURIComponent(activeRoot)}`;
+  let out = url;
+  if (activeRoot !== null) {
+    out += `${out.includes("?") ? "&" : "?"}root=${encodeURIComponent(activeRoot)}`;
+  }
+  if (activeAccount !== null) {
+    out += `${out.includes("?") ? "&" : "?"}account=${encodeURIComponent(activeAccount)}`;
+  }
+  return out;
 }
 
 /**
@@ -168,6 +191,13 @@ export function getBoard(opts?: { signal?: AbortSignal }): Promise<BoardResponse
  * marks whichever entry is its own launch root with `current: true`. */
 export function getRepos(): Promise<ReposResponse> {
   return request<ReposResponse>("GET", "/api/repos");
+}
+
+/** Account discovery (WF-116) — always global, like `getRepos`: the union
+ * of chronicle's account history and every watched config dir's current
+ * login, never scoped by the currently-selected account itself. */
+export function getAccounts(): Promise<AccountsResponse> {
+  return request<AccountsResponse>("GET", "/api/accounts");
 }
 
 /** Census sessions, scoped to the active root (WF-031) — same `withRoot`
@@ -313,12 +343,49 @@ export function clearRepo(
 
 // --- Chronicle (optional) ---------------------------------------------------
 
+/** Local midnight of the given date, as an ISO datetime carrying THIS
+ * browser's own UTC offset — so the backend (which may run in a different
+ * zone entirely) resolves the day boundary the way the browser sees it, not
+ * its own local midnight. */
+function localMidnightSince(d: Date): string {
+  const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offsetMin = -midnight.getTimezoneOffset(); // minutes EAST of UTC
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMin);
+  const date = `${midnight.getFullYear()}-${pad(midnight.getMonth() + 1)}-${pad(midnight.getDate())}`;
+  const offset = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return `${date}T00:00:00${offset}`;
+}
+
+/** The 1st of the current month at local midnight. Computed fresh on every
+ * call, never cached: `query.since` is a request-time instruction, not a
+ * stored value, which is what lets a poll tick after a month boundary see
+ * the new month. */
+function monthToDateSince(now: Date = new Date()): string {
+  return localMidnightSince(new Date(now.getFullYear(), now.getMonth(), 1));
+}
+
+/** Today at local midnight. Same request-time-not-cached reasoning as
+ * `monthToDateSince` — a poll tick after midnight sees the new day. */
+function todaySince(now: Date = new Date()): string {
+  return localMidnightSince(now);
+}
+
 /** Query-string tail for the chronicle reads. `scope=all` is appended AFTER
- * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`. */
+ * `withRoot`'s `root` param — the backend ignores `root` when `scope=all`.
+ * `since` and `days` are mutually exclusive on the backend, so `since` wins
+ * here rather than sending both and letting the server 400. */
 function chronicleQuery(base: string, query: ChronicleQuery = {}): string {
   const url = withRoot(base);
   const params: string[] = [];
-  if (query.days !== undefined) params.push(`days=${encodeURIComponent(String(query.days))}`);
+  if (query.since === "today") {
+    params.push(`since=${encodeURIComponent(todaySince())}`);
+  } else if (query.since === "month-to-date") {
+    params.push(`since=${encodeURIComponent(monthToDateSince())}`);
+  } else if (query.days !== undefined) {
+    params.push(`days=${encodeURIComponent(String(query.days))}`);
+  }
   if (query.scope === "all") params.push("scope=all");
   if (query.branch) params.push(`branch=${encodeURIComponent(query.branch)}`);
   if (params.length === 0) return url;
@@ -344,6 +411,14 @@ export function getChronicleSessions(
     "GET",
     `${url}${url.includes("?") ? "&" : "?"}limit=${limit}`
   );
+}
+
+/** Deduplicated usage-limit hits (the same real hit is written into every
+ * session running at the time; the backend folds those into one event per
+ * account/kind/reset — see `chronicle limits`), scoped by the same
+ * root/scope/days/branch query every other Chronicle read takes. */
+export function getChronicleLimits(query?: ChronicleQuery): Promise<ChronicleLimitsResponse> {
+  return request<ChronicleLimitsResponse>("GET", chronicleQuery("/api/chronicle/limits", query));
 }
 
 export function getChronicleSession(id: string): Promise<ChronicleSessionDetail> {

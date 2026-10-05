@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,14 +27,38 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 if str(_PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_ROOT))
 
-from scripts import ingest, report, store
+import sqlite3
+
+from scripts import (
+    chrome_profile,
+    dedupe,
+    ingest,
+    pricehistory,
+    pricerefresh,
+    redact,
+    remote,
+    report,
+    store,
+    volumes,
+)
+
+# One error contract for every verb: success prints a single JSON object to
+# stdout; failure prints `{"error": ...}` to stderr and exits 2 for invalid
+# input (a malformed argument — nothing was attempted) or 1 for a runtime
+# failure or a thing not found (a store, a session, a transcript).
+INVALID_INPUT = 2
+NOT_FOUND = 1
+
+
+def _fail(message: str, *, code: int = NOT_FOUND) -> int:
+    print(json.dumps({"error": message}), file=sys.stderr)
+    return code
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
     path = Path(args.transcript)
     if not path.is_file():
-        print(f"chronicle: no transcript at {path}", file=sys.stderr)
-        return 1
+        return _fail(f"no transcript at {path}")
     conn = store.connect()
     try:
         result = ingest.ingest_session(conn, path, args.session_id)
@@ -45,21 +70,260 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Reconcile the store with the transcripts on disk (see ``ingest.sync``).
-    Defaults to every watched config dir's ``projects/``; ``--projects`` (one
-    or more) replaces that set."""
-    projects = [Path(p) for p in args.projects] if args.projects else store.projects_dirs()
+    Defaults to every watched config dir's ``projects/`` PLUS every configured
+    Docker volume, read in place (``chronicle volumes``), PLUS every enabled
+    remote box's local mirror, pulled first (``chronicle remotes``);
+    ``--projects`` (one or more) replaces that set with exactly those dirs and
+    reads no volumes and no remotes.
+
+    Docker trouble never fails the sync: it comes back as ``volume_errors``.
+    Neither does a remote's: it comes back as ``remote_errors``, and
+    ``CHRONICLE_NO_REMOTES=1`` skips remotes entirely, before any ssh call."""
+    explicit = bool(args.projects)
+    projects = [Path(p) for p in args.projects] if explicit else store.projects_dirs()
+    configured, problems = ([], []) if explicit else store.load_volumes()
+    remote_list, remote_problems = ([], []) if explicit else store.load_remotes()
     conn = store.connect()
     try:
-        result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)))
+        remote_result = (remote.sync_remotes(conn, remote_list) if remote_list
+                         else {"remotes": [], "remote_errors": []})
+        if not explicit:
+            projects.extend(r.mirror_root() / "projects" for r in remote_list if r.enabled)
+        result = ingest.sync(conn, projects, full=bool(getattr(args, "full", False)),
+                             volumes=[volumes.VolumeSource.of(v) for v in configured])
+        # List prices, at most daily and never fatal: the outcome rides in the
+        # result (`pricing: {status, changed, ...}`) and a failure changes
+        # nothing else about the sync. Off with CHRONICLE_NO_PRICING_REFRESH=1.
+        pricing = pricerefresh.maybe_refresh(conn)
     finally:
         conn.close()
+    # Config entries that were skipped as invalid are volume/remote errors
+    # too: one the user believes is being synced and is not deserves the same
+    # visibility as one whose connection failed.
+    result["volume_errors"] = [{"volume": None, "error": p} for p in problems] + result["volume_errors"]
+    result["remote_errors"] = (
+        [{"remote": None, "error": p} for p in remote_problems] + remote_result["remote_errors"]
+    )
     out: dict[str, Any] = {
         **result,
+        "pricing": pricing,
+        "remotes": remote_result["remotes"],
         "projects_dirs": [str(p) for p in projects],
         "db": str(store.db_path()),
     }
     print(json.dumps(out))
     return 0
+
+
+def cmd_pricing(args: argparse.Namespace) -> int:
+    """`chronicle pricing status|seed|refresh|backfill` — the rate history behind every
+    cost figure (see ``scripts.pricerefresh`` and the README's "Pricing").
+
+    ``refresh --dry-run`` and ``status`` only read (a dry run on a missing store
+    compares against the built-in table and creates nothing); ``seed`` and a
+    real ``refresh`` write. A refresh that could not complete prints its JSON
+    status and exits 1."""
+    if args.action == "status":
+        conn = _open_readonly()
+        if conn is None:
+            print(json.dumps({"db": str(store.db_path()), "exists": False,
+                              **pricerefresh.status(sqlite3.connect(":memory:"))}))
+            return 0
+        try:
+            out = {"db": str(store.db_path()), "exists": True, **pricerefresh.status(conn)}
+        finally:
+            conn.close()
+        print(json.dumps(out))
+        return 0
+    if args.action == "seed":
+        conn = store.connect()
+        try:
+            out = pricerefresh.seed(conn)
+        finally:
+            conn.close()
+        print(json.dumps({**out, "db": str(store.db_path())}))
+        return 0
+    if args.action == "backfill":
+        if args.since_month is not None and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", args.since_month):
+            return _fail(f"invalid --from value: {args.since_month!r} (want YYYY-MM)", code=INVALID_INPUT)
+        if args.limit < 1:
+            return _fail("--limit must be at least 1", code=INVALID_INPUT)
+        if args.dry_run:
+            conn = _open_readonly() or sqlite3.connect(":memory:")
+        else:
+            conn = store.connect()
+        try:
+            result = pricehistory.backfill(conn, since_month=args.since_month,
+                                           dry_run=bool(args.dry_run), limit=args.limit)
+        finally:
+            conn.close()
+        print(json.dumps(result))
+        return 1 if result["status"] == "error" else 0
+    # refresh
+    if args.dry_run:
+        conn = _open_readonly() or sqlite3.connect(":memory:")
+        try:
+            result = pricerefresh.refresh(conn, dry_run=True)
+        finally:
+            conn.close()
+    else:
+        conn = store.connect()
+        try:
+            result = pricerefresh.refresh(conn)
+            pricerefresh.record_attempt(conn, result, time.time())
+        finally:
+            conn.close()
+    print(json.dumps(result))
+    return 1 if result["status"] in ("error", "refused") else 0
+
+
+def cmd_dedupe(args: argparse.Namespace) -> int:
+    """Collapse calls the store holds more than once (see ``scripts.dedupe``).
+    A dry run unless ``--apply``; prints what was or would be removed."""
+    conn = store.connect()
+    try:
+        result = dedupe.dedupe(conn, apply=bool(args.apply))
+    finally:
+        conn.close()
+    print(json.dumps({**result, "db": str(store.db_path())}))
+    return 0
+
+
+def cmd_volumes(args: argparse.Namespace) -> int:
+    """`chronicle volumes list|add|rm` — the Docker named volumes `sync` reads
+    in place, kept in the shared machine config's ``volumes`` list.
+
+    ``add`` checks the volume with docker first (so a typo is refused instead
+    of being synced as a silent nothing) and validates the name and Claude dir
+    before either can reach a docker argv. Without docker it fails with a clear
+    message and writes nothing."""
+    current, problems = store.load_volumes()
+    if args.action == "list":
+        print(json.dumps({
+            "volumes": [{"name": v.name, "claude_dir": v.claude_dir, "label": v.label}
+                        for v in current],
+            "problems": problems,
+            "config": str(store.config_dir().joinpath(*store.MACHINE_CONFIG_RELPATH)),
+        }))
+        return 0
+    if args.action == "add":
+        try:
+            volume = store.normalise_volume(args.name, args.claude_dir)
+        except ValueError as exc:
+            return _fail(str(exc), code=INVALID_INPUT)
+        try:
+            exists = volumes.volume_exists(volume.name)
+        except volumes.VolumeError as exc:
+            return _fail(f"cannot check volume {volume.name!r} with docker: {exc}")
+        if not exists:
+            return _fail(f"docker volume not found: {volume.name}")
+        updated = [v for v in current if v.name != volume.name] + [volume]
+        changed = volume not in current
+    else:                                           # rm
+        updated = [v for v in current if v.name != args.name]
+        changed = len(updated) != len(current)
+    if changed:
+        try:
+            store.save_volumes(updated)
+        except (ValueError, OSError) as exc:
+            return _fail(f"cannot update the machine config: {exc}")
+    out: dict[str, Any] = {
+        "volumes": [{"name": v.name, "claude_dir": v.claude_dir, "label": v.label} for v in updated],
+        "changed": changed,
+    }
+    if args.action == "add":
+        out["hint"] = "run `chronicle sync` to ingest it; the dashboard's Sync does the same"
+    print(json.dumps(out))
+    return 0
+
+
+def _remote_json(r: store.Remote) -> dict[str, Any]:
+    return {"name": r.name, "host": r.host, "claude_dir": r.claude_dir, "fidelity": r.fidelity,
+           "mirror_dir": str(r.mirror_root()), "interval_s": r.interval_s, "enabled": r.enabled,
+           "label": r.label}
+
+
+def cmd_remotes(args: argparse.Namespace) -> int:
+    """`chronicle remotes list|add|rm|status|sync|probe` — Enterprise
+    "prod-access" boxes read over ssh and redacted before a byte leaves them
+    (see the README's "Remote boxes" section and ``scripts.remote``), kept in
+    the shared machine config's ``remotes`` list.
+
+    ``add`` NEVER CONNECTS — it only validates (name/host/claude_dir are held
+    to strict regexes, since they end up in an ssh argv or the remote agent's
+    request) and saves. ``probe`` is the one read-only connection: it lists
+    the remote's transcripts without pulling any content and writes nothing,
+    remote or local. ``sync`` (unlike the one `chronicle sync` folds in on
+    every regular sync) ignores the per-remote throttle."""
+    current, problems = store.load_remotes()
+    by_name = {r.name: r for r in current}
+    if args.action == "list":
+        print(json.dumps({"remotes": [_remote_json(r) for r in current], "problems": problems,
+                          "config": str(store.config_dir().joinpath(*store.MACHINE_CONFIG_RELPATH))}))
+        return 0
+    if args.action == "add":
+        try:
+            entry = store.normalise_remote(
+                args.name, args.host, claude_dir=args.claude_dir, fidelity=args.fidelity,
+                mirror_dir=args.mirror_dir, interval_s=args.interval, enabled=True,
+            )
+        except ValueError as exc:
+            return _fail(str(exc), code=INVALID_INPUT)
+        updated = [r for r in current if r.name != entry.name] + [entry]
+        changed = by_name.get(entry.name) != entry
+        try:
+            store.save_remotes(updated)
+        except (ValueError, OSError) as exc:
+            return _fail(f"cannot update the machine config: {exc}")
+        print(json.dumps({
+            "remotes": [_remote_json(r) for r in updated], "changed": changed,
+            "hint": "run `chronicle remotes probe` to check it, then `chronicle remotes sync` "
+                    "(or the next regular `chronicle sync`) to pull it",
+        }))
+        return 0
+    if args.action == "rm":
+        updated = [r for r in current if r.name != args.name]
+        changed = len(updated) != len(current)
+        if changed:
+            try:
+                store.save_remotes(updated)
+            except (ValueError, OSError) as exc:
+                return _fail(f"cannot update the machine config: {exc}")
+        print(json.dumps({"remotes": [_remote_json(r) for r in updated], "changed": changed}))
+        return 0
+    names = [args.name] if getattr(args, "name", None) else list(by_name)
+    unknown = [n for n in names if n not in by_name]
+    if args.action == "status":
+        conn = _open_readonly()
+        try:
+            statuses = [remote.status_of(conn, by_name[n]) if conn is not None
+                       else {**_remote_json(by_name[n]), "note": "no store yet — never synced"}
+                       for n in names if n in by_name]
+        finally:
+            if conn is not None:
+                conn.close()
+        statuses += [{"name": n, "error": "not configured"} for n in unknown]
+        print(json.dumps({"remotes": statuses}))
+        return 0
+    if args.action == "probe":
+        results = [remote.probe_remote(by_name[n]) for n in names if n in by_name]
+        results += [{"name": n, "ok": False, "error": "not configured"} for n in unknown]
+        print(json.dumps({"remotes": results}))
+        return 0
+    if args.action == "sync":
+        conn = store.connect()
+        try:
+            result = remote.sync_remotes(
+                conn, [by_name[n] for n in names if n in by_name], force=True,
+                only=(args.name if getattr(args, "name", None) else None),
+                dry_run=bool(getattr(args, "dry_run", False)),
+            )
+        finally:
+            conn.close()
+        result["problems"] = [{"remote": n, "error": "not configured"} for n in unknown]
+        print(json.dumps(result))
+        return 0
+    return _fail(f"unknown action: {args.action}", code=INVALID_INPUT)
 
 
 def _open_readonly() -> Any:
@@ -87,13 +351,53 @@ def _since(days: int | None) -> float | None:
     return time.time() - days * 86400 if days else None
 
 
+def _parse_since(value: str) -> float:
+    """``--since`` into a Unix epoch: a bare date (``2026-09-01``) or a full
+    ISO 8601 datetime. A value with no UTC offset is assumed to already be in
+    the LOCAL zone — the same frame ``--days`` measures from via
+    ``time.time()`` — so a bare date means local midnight, not UTC midnight;
+    this is what lets the dashboard's "month to date" mean the 1st of the
+    month where the browser is, not where the server is.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()  # naive -> presumed local, per datetime's own contract
+        return parsed.timestamp()
+    except (ValueError, OverflowError):
+        # `fromisoformat` alone accepts a year like 9999 or 1 — the overflow
+        # only surfaces in `astimezone()`/`timestamp()`, converting a year at
+        # the edge of what `datetime` (or a POSIX timestamp) can hold into
+        # another timezone. Both stages fold into one invalid-input error.
+        raise argparse.ArgumentTypeError(f"invalid --since value: {value!r}") from None
+
+
+def _resolve_since(args: argparse.Namespace) -> float | None:
+    return args.since if args.since is not None else _since(args.days)
+
+
 def cmd_summary(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
         print(json.dumps({"totals": None}))
         return 0
     try:
-        out = report.summary(conn, repo_root=args.root, since=_since(args.days), branch=args.branch)
+        out = report.summary(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
+                             account=args.account)
+    finally:
+        conn.close()
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_limits(args: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"events": [], "by_kind": {}}))
+        return 0
+    try:
+        out = report.limits(conn, repo_root=args.root, since=_resolve_since(args), branch=args.branch,
+                            account=args.account)
     finally:
         conn.close()
     print(json.dumps(out))
@@ -106,8 +410,8 @@ def cmd_sessions(args: argparse.Namespace) -> int:
         print(json.dumps({"sessions": []}))
         return 0
     try:
-        rows = report.sessions(conn, repo_root=args.root, since=_since(args.days), limit=args.limit,
-                               branch=args.branch)
+        rows = report.sessions(conn, repo_root=args.root, since=_resolve_since(args), limit=args.limit,
+                               branch=args.branch, account=args.account)
     finally:
         conn.close()
     print(json.dumps({"sessions": rows}))
@@ -117,15 +421,13 @@ def cmd_sessions(args: argparse.Namespace) -> int:
 def cmd_session(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
-        return 1
+        return _fail(f"no store at {store.db_path()}")
     try:
         detail = report.session_detail(conn, args.session_id)
     finally:
         conn.close()
     if detail is None:
-        print(f"chronicle: no session {args.session_id}", file=sys.stderr)
-        return 1
+        return _fail(f"no session {args.session_id}")
     print(json.dumps(detail))
     return 0
 
@@ -201,9 +503,12 @@ def _pull_account_profile(args: argparse.Namespace, dest: Path) -> str | None:
 
 
 def cmd_pull_volume(args: argparse.Namespace) -> int:
-    """`chronicle pull-volume` — copy transcripts out of a docker named volume
-    onto this filesystem, so a containerised account can be watched like any
-    other config dir.
+    """`chronicle pull-volume` — LEGACY: superseded by `chronicle volumes add`,
+    which `sync` reads in place and so never goes stale. Kept because it still
+    works and some setups may depend on it.
+
+    Copy transcripts out of a docker named volume onto this filesystem, so a
+    containerised account can be watched like any other config dir.
 
     A named volume lives inside the Docker VM; on macOS its Mountpoint is not a
     host path at all, so it cannot simply be listed in `claude_dirs`. A helper
@@ -214,20 +519,15 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     Pull only, like every other verb here: nothing watches, nothing daemonises.
     """
     if not _VOLUME_RE.match(args.volume):
-        print(json.dumps({"error": f"invalid volume name: {args.volume!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid volume name: {args.volume!r}", code=INVALID_INPUT)
     source = args.source.strip("/")
     if not _SOURCE_RE.match(source) or ".." in Path(source).parts:
-        print(json.dumps({"error": f"invalid source path: {args.source!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid source path: {args.source!r}", code=INVALID_INPUT)
     if not _IMAGE_RE.match(args.image):
-        print(json.dumps({"error": f"invalid image: {args.image!r}"}), file=sys.stderr)
-        return 2
+        return _fail(f"invalid image: {args.image!r}", code=INVALID_INPUT)
     dest = Path(args.dest).expanduser()
     if not dest.is_absolute():
-        print(json.dumps({"error": "dest must be an absolute path (docker requires one)"}),
-              file=sys.stderr)
-        return 2
+        return _fail("dest must be an absolute path (docker requires one)", code=INVALID_INPUT)
     # Created HERE, not by the container: the container needs no shell to
     # mkdir, so nothing is interpolated into one.
     #
@@ -244,8 +544,7 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
     try:
         projects.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        print(json.dumps({"error": f"cannot create {projects}: {exc}"}), file=sys.stderr)
-        return 1
+        return _fail(f"cannot create {projects}: {exc}")
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{args.volume}:/v:ro",
@@ -257,15 +556,16 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=_PULL_TIMEOUT_SECONDS, check=False)
     except FileNotFoundError:
-        print(json.dumps({"error": "docker not found on PATH"}), file=sys.stderr)
-        return 1
+        return _fail("docker not found on PATH")
     except subprocess.SubprocessError as exc:
-        print(json.dumps({"error": f"docker run failed: {exc}"}), file=sys.stderr)
-        return 1
+        return _fail(f"docker run failed: {exc}")
     if result.returncode != 0:
+        # More than `_fail` carries (the process's own returncode alongside
+        # the message), so this one stays a direct print rather than going
+        # through the helper.
         print(json.dumps({"error": (result.stderr or result.stdout).strip()[:500],
                           "returncode": result.returncode}), file=sys.stderr)
-        return 1
+        return NOT_FOUND
     account_plan = _pull_account_profile(args, dest)
     pulled = list(projects.rglob("*.jsonl"))
     # A pulled transcript this user cannot read is the failure mode of the
@@ -280,6 +580,8 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
         "transcripts": len(pulled),
         "bytes": sum(f.stat().st_size for f in pulled),
         "hint": f"watch it with: overseer claude-dirs add {dest}",
+        "legacy": "a copy goes stale until the next pull; `chronicle volumes add "
+                  f"{args.volume}` reads the volume in place on every sync instead",
     }
     if account_plan:
         out["plan"] = account_plan
@@ -297,16 +599,13 @@ def cmd_pull_volume(args: argparse.Namespace) -> int:
 def cmd_agent(args: argparse.Namespace) -> int:
     conn = _open_readonly()
     if conn is None:
-        print(f"chronicle: no store at {store.db_path()}", file=sys.stderr)
-        return 1
+        return _fail(f"no store at {store.db_path()}")
     try:
         detail = report.agent_detail(conn, args.session_id, args.agent_id)
     finally:
         conn.close()
     if detail is None:
-        print(f"chronicle: no agent {args.agent_id} in session {args.session_id}",
-              file=sys.stderr)
-        return 1
+        return _fail(f"no agent {args.agent_id} in session {args.session_id}")
     print(json.dumps(detail))
     return 0
 
@@ -321,6 +620,57 @@ def cmd_repos(_: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(json.dumps({"repos": rows}))
+    return 0
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    """Open `url` in the Chrome profile signed in as the account at
+    `--config-dir` (default: the active one — same account the terminal
+    running this command is already in, which is the account that would have
+    printed the link). Multi-account contracting setups: one config dir per
+    client, so this is how a client's artifact link lands in THAT client's
+    browser identity instead of whichever Chrome window has focus."""
+    if sys.platform != "darwin":
+        print("chronicle open: macOS only (uses `open --args --profile-directory`)",
+              file=sys.stderr)
+        return 1
+    if store.is_volume_label(args.config_dir):
+        print(f"chronicle open: {args.config_dir} is a docker volume, not a config dir with a "
+              "signed-in browser identity; pass the host config dir of that account",
+              file=sys.stderr)
+        return 1
+    if store.is_remote_label(args.config_dir):
+        print(f"chronicle open: {args.config_dir} is a remote box, not a config dir with a "
+              "signed-in browser identity on THIS machine; there is no local Chrome profile for it",
+              file=sys.stderr)
+        return 1
+    config_dir = Path(args.config_dir) if args.config_dir else store.config_dir()
+    email = chrome_profile.account_email(config_dir)
+    if not email:
+        print(f"chronicle open: no signed-in account at {config_dir}/.claude.json", file=sys.stderr)
+        return 1
+    profiles = chrome_profile.read_profiles(chrome_profile.DEFAULT_LOCAL_STATE)
+    profile_dir = chrome_profile.profile_for_email(email, profiles)
+    if not profile_dir:
+        known = ", ".join(sorted(profiles)) or "(none)"
+        print(f"chronicle open: no Chrome profile signed in as {email}; known: {known}",
+              file=sys.stderr)
+        return 1
+    subprocess.run(chrome_profile.open_command(args.url, profile_dir), check=False)
+    print(json.dumps({"url": args.url, "email": email, "profile_dir": profile_dir}))
+    return 0
+
+
+def cmd_accounts(_: argparse.Namespace) -> int:
+    conn = _open_readonly()
+    if conn is None:
+        print(json.dumps({"accounts": []}))
+        return 0
+    try:
+        rows = report.accounts(conn)
+    finally:
+        conn.close()
+    print(json.dumps({"accounts": rows}))
     return 0
 
 
@@ -345,19 +695,63 @@ def build_parser() -> argparse.ArgumentParser:
                        help="forget every cursor and re-read all transcripts (after a schema change)")
         p.set_defaults(fn=cmd_sync)
 
+    p = sub.add_parser("dedupe",
+                       help="collapse API calls stored more than once (a dry run unless --apply)")
+    p.add_argument("--apply", action="store_true",
+                   help="really delete the duplicate rows and recompute the affected sessions")
+    p.set_defaults(fn=cmd_dedupe)
+
     sub.add_parser("status", help="store location and row counts (JSON)").set_defaults(fn=cmd_status)
+
+    p = sub.add_parser("pricing", help="list-price history behind the cost figures")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("status", help="rates per model with effective ranges, as-of, last refresh (JSON)")
+    actions.add_parser("seed", help="write the built-in rate table into the store's history")
+    refresh = actions.add_parser(
+        "refresh", help="fetch the pricing page and append any changed or new rates")
+    refresh.add_argument("--dry-run", action="store_true",
+                         help="show what would change; write nothing")
+    backfill = actions.add_parser(
+        "backfill", help="recover past rates from Internet Archive snapshots of the pricing page "
+                         "(manual, polite, resumable, best-effort)")
+    backfill.add_argument("--from", dest="since_month", default=None, metavar="YYYY-MM",
+                          help="earliest month to look at (default: 2026-05)")
+    backfill.add_argument("--dry-run", action="store_true", help="show the rows it would add; write nothing")
+    backfill.add_argument("--limit", type=int, default=pricehistory.DEFAULT_LIMIT,
+                          help="most requests to make this run, listings included (default: %(default)s)")
+    p.set_defaults(fn=cmd_pricing)
 
     p = sub.add_parser("summary", help="aggregate metrics (JSON)")
     p.add_argument("--root", default=None, help="scope to one main repo root")
-    p.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None, help="only sessions active in the last N days")
+    window.add_argument("--since", type=_parse_since, default=None,
+                        help="only sessions active since this ISO date/datetime (a bare date is local "
+                             "midnight; a datetime with no UTC offset is assumed local)")
     p.add_argument("--branch", default=None,
                    help="only sessions whose last-seen git branch matches (session-level)")
+    p.add_argument("--account", default=None,
+                   help="only this account uuid's share: sessions with at least one of its turns, "
+                        "counting only those turns' tokens and cost (see the README's "
+                        "\"Account attribution\")")
     p.set_defaults(fn=cmd_summary)
+
+    p = sub.add_parser("limits", help="deduplicated usage-limit hits, with tokens burned reaching each (JSON)")
+    p.add_argument("--root", default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
+    p.add_argument("--branch", default=None)
+    p.add_argument("--account", default=None)
+    p.set_defaults(fn=cmd_limits)
 
     p = sub.add_parser("sessions", help="session rows, most recent first (JSON)")
     p.add_argument("--root", default=None)
-    p.add_argument("--days", type=int, default=None)
+    window = p.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, default=None)
+    window.add_argument("--since", type=_parse_since, default=None)
     p.add_argument("--branch", default=None)
+    p.add_argument("--account", default=None)
     p.add_argument("--limit", type=int, default=200)
     p.set_defaults(fn=cmd_sessions)
 
@@ -372,8 +766,59 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("repos", help="repo roots seen, with session counts (JSON)").set_defaults(fn=cmd_repos)
 
+    p = sub.add_parser("open",
+                       help="open a URL in the Chrome profile signed in as the active account (macOS)")
+    p.add_argument("url")
+    p.add_argument("--config-dir", default=None,
+                   help="account whose signed-in email to match (default: the active account)")
+    p.set_defaults(fn=cmd_open)
+
+    sub.add_parser("accounts", help="account uuids seen, with session counts (JSON)").set_defaults(
+        fn=cmd_accounts)
+
+    p = sub.add_parser("volumes",
+                       help="docker named volumes to read transcripts from IN PLACE, on every sync")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="the configured volumes (JSON)")
+    add = actions.add_parser("add", help="watch a volume (checked with docker first)")
+    add.add_argument("name", help="docker named volume, e.g. wf-state")
+    add.add_argument("--claude-dir", default=store.DEFAULT_VOLUME_CLAUDE_DIR,
+                     help="the Claude config dir within the volume (default: %(default)s)")
+    actions.add_parser("rm", help="stop watching a volume (its ingested history stays)").add_argument("name")
+    p.set_defaults(fn=cmd_volumes)
+
+    p = sub.add_parser("remotes",
+                       help="Enterprise 'prod-access' boxes read over ssh and redacted before a "
+                            "byte leaves them (see README: Remote boxes)")
+    actions = p.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="the configured remotes (JSON)")
+    add = actions.add_parser("add", help="watch a remote (never connects — validates and saves)")
+    add.add_argument("name", help="a short local label, e.g. prod-access-env")
+    add.add_argument("host", help="an ssh host or alias, e.g. prod-access-env.wayflyer.team")
+    add.add_argument("--claude-dir", default=store.DEFAULT_REMOTE_CLAUDE_DIR,
+                     help="CLAUDE_CONFIG_DIR on the remote box (default: %(default)s)")
+    add.add_argument("--fidelity", default=store.DEFAULT_REMOTE_FIDELITY, choices=list(redact.FIDELITIES),
+                     help="what survives redaction (default: %(default)s)")
+    add.add_argument("--mirror-dir", default=None,
+                     help="where the redacted, append-only mirror lives (default: "
+                          "<config dir>/chronicle/remotes/<name>)")
+    add.add_argument("--interval", type=int, default=store.DEFAULT_REMOTE_INTERVAL_S,
+                     help="seconds between pulls, minimum %(default)s not enforced here "
+                          f"(clamped to >= {store.MIN_REMOTE_INTERVAL_S}) (default: %(default)s)")
+    actions.add_parser("rm", help="stop watching a remote (its mirror and ingested history stay)"
+                       ).add_argument("name")
+    status = actions.add_parser("status", help="last sync outcome per remote (JSON)")
+    status.add_argument("name", nargs="?", default=None, help="one remote (default: every configured one)")
+    sync = actions.add_parser("sync", help="pull now, ignoring the per-remote throttle")
+    sync.add_argument("name", nargs="?", default=None, help="one remote (default: every enabled one)")
+    sync.add_argument("--dry-run", action="store_true", help="report what would sync; write nothing")
+    probe = actions.add_parser("probe", help="one read-only connection: lists, pulls no content, writes nothing")
+    probe.add_argument("name", nargs="?", default=None, help="one remote (default: every configured one)")
+    p.set_defaults(fn=cmd_remotes)
+
     p = sub.add_parser("pull-volume",
-                       help="copy transcripts out of a docker named volume onto this filesystem")
+                       help="LEGACY, superseded by `volumes add`: manually copy a docker "
+                            "volume's transcripts onto this filesystem (goes stale)")
     p.add_argument("--volume", required=True, help="docker named volume, e.g. wf-state")
     p.add_argument("--dest", required=True,
                    help="absolute host dir to copy into; watch it with `overseer claude-dirs add`")

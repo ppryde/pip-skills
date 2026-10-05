@@ -158,6 +158,67 @@ class TestCooldown:
         assert st.cooldown_active(tmp_path) is True
 
 
+class TestRenameTitle:
+    def test_request_clear_with_title_writes_sanitized_title(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        assert st.request_clear(tmp_path, "H", title="fix the auth bug") == "armed"
+        assert st.rename_title_path(tmp_path).read_text() == "fix the auth bug"
+
+    def test_request_clear_without_title_writes_no_title_file(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        assert not st.rename_title_path(tmp_path).exists()
+
+    def test_title_whitespace_is_collapsed(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H", title="  fix   the\nauth  bug  ")
+        assert st.rename_title_path(tmp_path).read_text() == "fix the auth bug"
+
+    def test_title_is_truncated_to_max_length(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        long_title = "x" * 200
+        st.request_clear(tmp_path, "H", title=long_title)
+        stored = st.rename_title_path(tmp_path).read_text()
+        assert len(stored) == st.MAX_TITLE_LENGTH
+
+    def test_blank_title_treated_as_no_title(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H", title="   ")
+        assert not st.rename_title_path(tmp_path).exists()
+
+    def test_consume_rename_title_returns_and_deletes(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H", title="ship the release")
+        assert st.consume_rename_title(tmp_path) == "ship the release"
+        assert not st.rename_title_path(tmp_path).exists()
+
+    def test_consume_rename_title_none_when_absent(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H")
+        assert st.consume_rename_title(tmp_path) is None
+
+    def test_stale_title_cleared_when_rearmed_without_one(self, tmp_path):
+        # A previously armed title must not silently survive onto a later
+        # handover that passes no title of its own.
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H", title="first task")
+        st.consume_clear_flag(tmp_path)  # sets cooldown
+        marker = st.cooldown_marker(tmp_path)
+        old = marker.stat().st_mtime - (st.COOLDOWN_TTL_SECONDS + 1)
+        import os
+        os.utime(marker, (old, old))
+        st.request_clear(tmp_path, "H2")
+        assert not st.rename_title_path(tmp_path).exists()
+
+
 class TestBeginCycle:
     def test_begin_cycle_clears_gate_flag_and_touches_cooldown(self, tmp_path):
         ensure_root(tmp_path)
@@ -168,6 +229,13 @@ class TestBeginCycle:
         assert not st.clear_flag(tmp_path).exists()   # queued clear unlinked
         assert st.gate_active(tmp_path) is False       # gate cleared → re-armed
         assert st.cooldown_active(tmp_path) is True    # fresh cooldown grace
+
+    def test_begin_cycle_clears_rename_title(self, tmp_path):
+        ensure_root(tmp_path)
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "H", title="stranded task name")
+        st.begin_cycle(tmp_path)
+        assert not st.rename_title_path(tmp_path).exists()
 
     def test_begin_cycle_cooldown_suppresses_immediate_rearm(self, tmp_path):
         # The storm guard: census lag can re-present a high ctx%, but the fresh

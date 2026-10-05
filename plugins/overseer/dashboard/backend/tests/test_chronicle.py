@@ -60,6 +60,51 @@ def _seed(root: Path, tmp_path: Path, *, repo_root: str) -> None:
     conn.close()
 
 
+def _seed_limit_hit(root: Path, tmp_path: Path, *, repo_root: str,
+                    text: str = "You've hit your session limit · resets 11:50am (Europe/London)",
+                    session_id: str = "limsess1") -> None:
+    """A single usage-limit banner, ingested exactly like `_seed`'s turns."""
+    transcript = tmp_path / "projects" / "-repo" / f"{session_id}.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    record = _record("assistant", session_id, "2026-09-01T10:00:00Z", message={
+        "id": f"m-{session_id}", "model": "<synthetic>", "role": "assistant",
+        "content": [{"type": "text", "text": text}]},
+        isApiErrorMessage=True, error="rate_limit", apiErrorStatus=429, sessionId=session_id)
+    transcript.write_text(json.dumps(record) + "\n")
+    subprocess.run(
+        [sys.executable, str(_CHRONICLE_CLI), "ingest", "--transcript", str(transcript)],
+        check=True, capture_output=True, text=True, env=dict(os.environ),
+    )
+    import sqlite3
+    conn = sqlite3.connect(os.environ["CHRONICLE_DB"])
+    conn.execute("UPDATE sessions SET repo_root = ? WHERE session_id = ?", (repo_root, session_id))
+    conn.commit()
+    conn.close()
+
+
+def test_limits_scoped_to_launch_root(client: TestClient, root: Path, tmp_path: Path) -> None:
+    _seed_limit_hit(root, tmp_path, repo_root=str(root.resolve()))
+    body = client.get("/api/chronicle/limits").json()
+    assert body["by_kind"] == {"session": 1}
+    assert len(body["events"]) == 1
+    assert body["events"][0]["kind"] == "session"
+    assert body["events"][0]["sessions"] == 1
+
+
+def test_limits_hidden_outside_its_root_unless_scope_all(client: TestClient, root: Path,
+                                                          tmp_path: Path) -> None:
+    _seed_limit_hit(root, tmp_path, repo_root="/somewhere/else")
+    assert client.get("/api/chronicle/limits").json()["events"] == []
+    assert len(client.get("/api/chronicle/limits?scope=all").json()["events"]) == 1
+
+
+def test_limits_days_window(client: TestClient, root: Path, tmp_path: Path) -> None:
+    _seed_limit_hit(root, tmp_path, repo_root=str(root.resolve()))
+    assert client.get("/api/chronicle/limits?days=1").json()["events"] == []
+    assert len(client.get("/api/chronicle/limits?days=3650").json()["events"]) == 1
+    assert client.get("/api/chronicle/limits?days=0").status_code == 400
+
+
 def test_sync_pulls_new_transcripts(client: TestClient, root: Path, tmp_path: Path,
                                     monkeypatch: pytest.MonkeyPatch) -> None:
     """POST /api/chronicle/sync ingests what's on disk under the (pinned)
@@ -85,6 +130,41 @@ def test_sync_pulls_new_transcripts(client: TestClient, root: Path, tmp_path: Pa
     status = client.get("/api/chronicle/status").json()
     assert status["turns"] == 1
     assert status["synced_at"] == again["synced_at"]
+
+
+def test_sync_survives_a_configured_docker_volume_that_cannot_be_read(
+        client: TestClient, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Docker volume in the machine config is read in place by the SAME
+    `chronicle sync` the Sync button (and its once-a-minute poll) runs. With the
+    daemon unreachable the request must still succeed, the local dir must still
+    sync, and the failure must come back as `volume_errors` for the page to show.
+
+    chronicle runs here as a real subprocess, so docker is replaced by a stub on
+    PATH that always fails — nothing in this test can reach a real docker."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    stub = bin_dir / "docker"
+    stub.write_text("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    config_dir = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    (config_dir / "overseer").mkdir(parents=True, exist_ok=True)
+    (config_dir / "overseer" / "config.json").write_text(
+        json.dumps({"volumes": [{"name": "wf-state", "claude_dir": ".config/claude"}]}))
+    transcript = config_dir / "projects" / "-repo" / "sess1.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(json.dumps(_record("assistant", "a1", "2026-09-01T10:00:05Z", message={
+        "id": "m1", "model": "claude-opus-5", "role": "assistant",
+        "usage": {"input_tokens": 1, "output_tokens": 2},
+        "content": [{"type": "text", "text": "hi"}]})) + "\n")
+
+    response = client.post("/api/chronicle/sync")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sessions"] == ["sess1"]
+    assert body["volume_errors"] == [
+        {"volume": "wf-state", "error": "Cannot connect to the Docker daemon"}]
 
 
 def test_sync_is_not_token_gated(root: Path) -> None:
@@ -162,6 +242,36 @@ def test_unknown_root_is_400(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
+def test_since_window(client: TestClient, root: Path, tmp_path: Path) -> None:
+    """`since` is the exact-instant sibling of `days` — an ISO date or
+    datetime, validated and passed through to chronicle's own `--since`
+    (which chronicle's own tests cover for correctness). The seeded session
+    is dated 2026-09-01; a `since` before it includes it, one after excludes
+    it, and a malformed value or one paired with `days` is refused."""
+    _seed(root, tmp_path, repo_root=str(root.resolve()))
+    assert client.get("/api/chronicle/summary?since=2020-01-01").json()["totals"]["sessions"] == 1
+    assert client.get("/api/chronicle/summary?since=2030-01-01").json()["totals"]["sessions"] == 0
+    assert len(client.get("/api/chronicle/sessions?since=2020-01-01").json()["sessions"]) == 1
+    assert client.get("/api/chronicle/sessions?since=2030-01-01").json()["sessions"] == []
+    assert client.get("/api/chronicle/summary?since=not-a-date").status_code == 400
+    assert client.get("/api/chronicle/summary?days=7&since=2020-01-01").status_code == 400
+    assert client.get("/api/chronicle/sessions?days=7&since=2020-01-01").status_code == 400
+
+
+def test_an_out_of_range_since_is_400_not_a_silent_empty_result(client: TestClient) -> None:
+    # `datetime.fromisoformat` alone accepts "9999-12-31" and "0001-01-01" —
+    # the overflow only surfaces converting a naive value to an aware one at
+    # the edge of what `datetime`/a POSIX timestamp can hold. Validating with
+    # `fromisoformat` alone let both through to chronicle's own `--since`,
+    # which chronicle exits 2 on; `run_chronicle` treats any non-zero exit as
+    # "no data", so the route quietly answered 200 with an empty result
+    # instead of 400 — indistinguishable from a real "nothing in this
+    # window" answer.
+    for value in ("9999-12-31", "0001-01-01"):
+        assert client.get(f"/api/chronicle/summary?since={value}").status_code == 400
+        assert client.get(f"/api/chronicle/sessions?since={value}").status_code == 400
+
+
 def test_session_detail(client: TestClient, root: Path, tmp_path: Path) -> None:
     _seed(root, tmp_path, repo_root=str(root.resolve()))
     detail = client.get("/api/chronicle/session/sess1").json()
@@ -180,6 +290,7 @@ def test_plugin_absent_degrades(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert client.get("/api/chronicle/status").json() == {"installed": False, "exists": False}
     assert client.get("/api/chronicle/summary").json() == {"totals": None}
     assert client.get("/api/chronicle/sessions").json() == {"sessions": []}
+    assert client.get("/api/chronicle/limits").json() == {"events": [], "by_kind": {}}
     assert client.get("/api/chronicle/session/sess1").status_code == 404
     assert client.post("/api/chronicle/sync").status_code == 503
 
@@ -242,7 +353,7 @@ class TestChronicleOnlyRoots:
         _seed(root, tmp_path, repo_root=str(root.resolve()))
         stranger = tmp_path / "never-heard-of-it"
         stranger.mkdir()
-        for route in ("/api/chronicle/sessions", "/api/chronicle/summary"):
+        for route in ("/api/chronicle/sessions", "/api/chronicle/summary", "/api/chronicle/limits"):
             resp = client.get(route, params={"root": str(stranger)})
             assert resp.status_code == 400, route
             assert "unknown root" in resp.json()["detail"]
@@ -259,6 +370,27 @@ class TestChronicleOnlyRoots:
         assert entry["has_board"] is False       # no board.db — the holding page still applies
         assert entry["chronicled"] is True       # but the Chronicle may be scoped to it
         assert entry["live_sessions"] == 0       # census knows nothing of it
+
+    def test_repos_hides_a_scratchpad_checkout(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        # Benchmark/e2e harnesses build disposable checkouts, all named `repo`,
+        # under Claude's per-session scratchpad. They are data, not repos.
+        scratch = tmp_path / "claude-502" / "-Users-x-repos-y" / "sess" / "scratchpad" / "bench" / "repo"
+        scratch.mkdir(parents=True)
+        _seed(root, tmp_path, repo_root=str(scratch.resolve()))
+        roots = {r["root"] for r in client.get("/api/repos").json()["repos"]}
+        assert str(scratch.resolve()) not in roots
+
+    def test_repos_keeps_a_lookalike_outside_the_scratchpad_layout(
+        self, client: TestClient, root: Path, tmp_path: Path
+    ) -> None:
+        # `scratchpad` alone (no `claude-<uid>` ancestor) is a real project name.
+        keeper = tmp_path / "scratchpad" / "my-repo"
+        keeper.mkdir(parents=True)
+        _seed(root, tmp_path, repo_root=str(keeper.resolve()))
+        roots = {r["root"] for r in client.get("/api/repos").json()["repos"]}
+        assert str(keeper.resolve()) in roots
 
 
 class TestSiblingPluginContract:

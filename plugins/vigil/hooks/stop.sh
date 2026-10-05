@@ -43,10 +43,24 @@ fi
 decision="$(printf '%s' "$input" \
   | "$py" "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" stop-hook 2>/dev/null || true)"
 
-if [ "$decision" = "DISPATCH_CLEAR" ]; then
+first_line="$(printf '%s\n' "$decision" | head -n1)"
+if [ "$first_line" = "DISPATCH_CLEAR" ]; then
+  # Second line, if present, is "TITLE:<text>" — the task summary vigil
+  # renames the tmux window to before it types /clear, so the window
+  # reflects what the fresh session is about to work on.
+  title_line="$(printf '%s\n' "$decision" | sed -n '2p')"
+  title=""
+  case "$title_line" in
+    TITLE:*) title="${title_line#TITLE:}" ;;
+  esac
   delay="${VIGIL_CLEAR_DELAY:-1}"
-  ( sleep "$delay"; tmux send-keys -t "${TMUX_PANE:-}" "/clear" Enter || true ) \
-    >/dev/null 2>&1 </dev/null &
+  (
+    sleep "$delay"
+    if [ -n "$title" ]; then
+      tmux rename-window -t "${TMUX_PANE:-}" "$title" || true
+    fi
+    tmux send-keys -t "${TMUX_PANE:-}" "/clear" Enter || true
+  ) >/dev/null 2>&1 </dev/null &
 fi
 
 exit 0

@@ -155,6 +155,19 @@ class TestHandover:
         run(repo, "begin")
         assert run(repo, "handover", "--no-snapshot", "--inline", "/no/such/file") == 1
 
+    def test_title_arms_rename(self, repo):
+        run(repo, "begin")
+        assert run(repo, "handover", "--no-snapshot", "--notes", "x",
+                   "--title", "fix the auth bug") == 0
+        from scripts import state as st
+        assert st.rename_title_path(repo).read_text() == "fix the auth bug"
+
+    def test_no_title_arms_no_rename(self, repo):
+        run(repo, "begin")
+        assert run(repo, "handover", "--no-snapshot", "--notes", "x") == 0
+        from scripts import state as st
+        assert not st.rename_title_path(repo).exists()
+
 
 class TestNudgeHook:
     def _stdin(self, monkeypatch, payload):
@@ -387,6 +400,28 @@ class TestHookBackends:
         assert run(repo, "stop-hook") == 0
         assert "DISPATCH_CLEAR" in capsys.readouterr().out
         assert not st.clear_flag(repo).exists()
+
+    def test_stop_hook_emits_title_line_when_armed_with_title(self, repo, capsys, monkeypatch):
+        from scripts import state as st
+        st.begin(repo)
+        st.request_clear(repo, "H", title="fix the auth bug")
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "stop-hook") == 0
+        out = capsys.readouterr().out
+        lines = out.strip().splitlines()
+        assert lines == ["DISPATCH_CLEAR", "TITLE:fix the auth bug"]
+        assert st.consume_rename_title(repo) is None  # consumed, not left behind
+
+    def test_stop_hook_omits_title_line_when_armed_without_title(
+        self, repo, capsys, monkeypatch,
+    ):
+        from scripts import state as st
+        st.begin(repo)
+        st.request_clear(repo, "H")
+        self._stdin(monkeypatch, {"cwd": str(repo)})
+        assert run(repo, "stop-hook") == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "DISPATCH_CLEAR"
 
     def test_stop_hook_silent_on_bad_stdin(self, repo, capsys, monkeypatch):
         monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))

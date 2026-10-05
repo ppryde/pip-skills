@@ -158,6 +158,67 @@ class TestStopHook:
         assert marker.exists()
         assert "/clear" in marker.read_text()
 
+    def test_auto_mode_renames_window_before_clear_when_title_armed(self, tmp_path):
+        from scripts import state as st
+        st.begin(tmp_path)
+        st.request_clear(tmp_path, "HANDOFF FROM HOOK TEST", title="fix the auth bug")
+        # fake tmux on PATH: has-session succeeds silently; rename-window and
+        # send-keys both append their argv to the marker, in call order.
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        marker = tmp_path / "tmux-called"
+        fake = bindir / "tmux"
+        fake.write_text(
+            '#!/usr/bin/env bash\n'
+            'if [ "$1" = "has-session" ]; then exit 0; fi\n'
+            'echo "$@" >> "%s"\n' % marker
+        )
+        fake.chmod(0o755)
+        env = _base_env({
+            "PATH": f"{bindir}:{os.environ['PATH']}",
+            "TMUX": "/tmp/fake,1,0",
+            "TMUX_PANE": "%9",
+            "VIGIL_CLEAR_DELAY": "0",
+        })
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert not st.clear_flag(tmp_path).exists()  # consumed
+        deadline = time.time() + 3
+        while time.time() < deadline and not marker.exists():
+            time.sleep(0.05)
+        assert marker.exists()
+        calls = marker.read_text().strip().splitlines()
+        assert calls[0] == "rename-window -t %9 fix the auth bug"
+        assert calls[1] == "send-keys -t %9 /clear Enter"
+
+    def test_auto_mode_skips_rename_when_no_title_armed(self, tmp_path):
+        st = _promote_and_arm(tmp_path)  # no title
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        marker = tmp_path / "tmux-called"
+        fake = bindir / "tmux"
+        fake.write_text(
+            '#!/usr/bin/env bash\n'
+            'if [ "$1" = "has-session" ]; then exit 0; fi\n'
+            'echo "$@" >> "%s"\n' % marker
+        )
+        fake.chmod(0o755)
+        env = _base_env({
+            "PATH": f"{bindir}:{os.environ['PATH']}",
+            "TMUX": "/tmp/fake,1,0",
+            "TMUX_PANE": "%9",
+            "VIGIL_CLEAR_DELAY": "0",
+        })
+        result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
+        assert result.returncode == 0
+        assert not st.clear_flag(tmp_path).exists()  # consumed
+        deadline = time.time() + 3
+        while time.time() < deadline and not marker.exists():
+            time.sleep(0.05)
+        assert marker.exists()
+        calls = marker.read_text().strip().splitlines()
+        assert calls == ["send-keys -t %9 /clear Enter"]  # no rename-window call
+
     def test_induced_failure_still_exits_0(self, tmp_path):
         _promote_and_arm(tmp_path)
         # TMUX set but tmux binary absent from PATH, bad pane target, junk stdin

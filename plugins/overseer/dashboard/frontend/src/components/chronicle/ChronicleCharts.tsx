@@ -8,9 +8,10 @@
  * hover tooltip that never gates a value, and a `<details>` table view twin
  * under every plot so nothing is reachable by pointer alone.
  */
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { niceTicks } from "../../board/chronicle/format";
+import { formatDay, formatTokens, formatUsd, formatWhen, niceTicks } from "../../board/chronicle/format";
+import type { ChronicleLimitEvent, ChronicleLimitKind } from "../../api/types";
 
 export interface ChartPoint {
   /** Axis label (a day, a turn index). */
@@ -219,6 +220,261 @@ export function ColumnChart({
         title={title}
         rows={points.map((p) => ({ label: p.detail ?? p.label, value: format(p.value) }))}
       />
+    </div>
+  );
+}
+
+export interface StackedSeries {
+  /** Grouping key — colour is assigned from this, never from position, so a
+   * series keeps its colour as filters change which others are present. */
+  key: string;
+  label: string;
+}
+
+export interface StackedPoint {
+  label: string;
+  detail?: string;
+  /** One entry per `series`, same order, zero-filled where absent. */
+  segments: { key: string; value: number }[];
+}
+
+interface StackedColumnChartProps {
+  points: StackedPoint[];
+  series: StackedSeries[];
+  format: (n: number) => string;
+  title: string;
+  height?: number;
+  /** False swaps each series' label for a stable "Repo N" (by rank) in the
+   * legend, tooltip and table — colours still tell the segments apart, but
+   * a screen share no longer reads out which repos you work in. */
+  showNames?: boolean;
+}
+
+// Validated categorical palette (dataviz skill default, first 7 slots — the
+// 8th slot is reserved for a muted "Other" grey rather than diluting a real
+// series into it). Order is the CVD-safety mechanism: fixed, never cycled.
+// Re-validate with scripts/validate_palette.js before touching these hexes.
+const CAT_PALETTE = [
+  "#2a78d6", // blue
+  "#eb6834", // orange
+  "#1baf7a", // aqua
+  "#eda100", // yellow
+  "#e87ba4", // magenta
+  "#008300", // green
+  "#4a3aa7", // violet
+];
+const CAT_OTHER = "#898781"; // muted ink — "Other" is never mistaken for a named repo
+
+/** Deterministic palette slot for a series key — a small string hash, not
+ * the series' rank, so a repo's colour survives filters that change which
+ * OTHER repos are in view (see costByRepo.ts). */
+function paletteColor(key: string, isOther: boolean): string {
+  if (isOther) return CAT_OTHER;
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return CAT_PALETTE[h % CAT_PALETTE.length];
+}
+
+// 2px surface gap between stacked segments (chart-guidance spacer),
+// expressed as a stroke on each segment so adjacent fills never touch.
+const STACK_GAP = 2;
+
+/** Cost (or any additive measure) per bar, stacked by an identity series
+ * (repos). Unlike ColumnChart's single hue, colour here carries identity —
+ * a fixed categorical palette, a legend, and a per-repo tooltip breakdown,
+ * since the reader is meant to tell the segments apart, not just read one
+ * magnitude. */
+export function StackedColumnChart({
+  points,
+  series,
+  format,
+  title,
+  height = 180,
+  showNames = true,
+}: StackedColumnChartProps) {
+  const [hover, setHover] = useState<number | null>(null);
+  const id = useId();
+  const width = 520;
+  const plotW = width - MARGIN.left - MARGIN.right;
+  const plotH = height - MARGIN.top - MARGIN.bottom;
+  const capped = points.length > MAX_POINTS;
+  const rendered = capped ? points.slice(-MAX_POINTS) : points;
+  const totals = rendered.map((p) => p.segments.reduce((sum, s) => sum + Math.max(0, s.value), 0));
+  const max = Math.max(0, ...totals);
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1] || 1;
+  const slot = rendered.length > 0 ? plotW / rendered.length : plotW;
+  const bar = Math.min(MAX_BAR, Math.max(2, slot - 2));
+  const stride = labelStride(rendered.length, plotW);
+  const y = (v: number) => MARGIN.top + plotH - (v / top) * plotH;
+  const colorOf = (key: string) => paletteColor(key, key === "__other__");
+  const labelOf = (key: string) => {
+    const i = series.findIndex((s) => s.key === key);
+    if (i < 0) return key;
+    if (showNames || key === "__other__") return series[i].label;
+    return `Repo ${i + 1}`;
+  };
+
+  if (points.length === 0 || series.length === 0) {
+    return <p className="chr-chart__empty">No data in this window.</p>;
+  }
+
+  return (
+    <div className="chr-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="chr-chart__svg"
+        role="img"
+        aria-labelledby={`${id}-title`}
+        onMouseLeave={() => setHover(null)}
+      >
+        <title id={`${id}-title`}>{title}</title>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line
+              x1={MARGIN.left}
+              x2={width - MARGIN.right}
+              y1={y(t)}
+              y2={y(t)}
+              className="chr-chart__grid"
+            />
+            <text x={MARGIN.left - 6} y={y(t) + 3} className="chr-chart__tick" textAnchor="end">
+              {format(t)}
+            </text>
+          </g>
+        ))}
+        {rendered.map((p, i) => {
+          const cx = MARGIN.left + slot * i + slot / 2;
+          const x0 = cx - bar / 2;
+          const base = MARGIN.top + plotH;
+          let cursor = base;
+          return (
+            <g key={`${i}-${p.detail ?? p.label}`}>
+              {p.segments.map((seg) => {
+                const h = Math.max(0, (Math.max(0, seg.value) / top) * plotH);
+                if (h === 0) return null;
+                const yTop = cursor - h;
+                const el = (
+                  <rect
+                    key={seg.key}
+                    x={x0}
+                    y={yTop}
+                    width={bar}
+                    height={h}
+                    fill={colorOf(seg.key)}
+                    stroke="var(--qb-panel)"
+                    strokeWidth={STACK_GAP}
+                    className={hover === i ? "chr-chart__bar--hover" : undefined}
+                    data-testid="chr-stack-seg"
+                  />
+                );
+                cursor = yTop;
+                return el;
+              })}
+              {/* Hit target: the whole slot, not the painted pixels. */}
+              <rect
+                x={MARGIN.left + slot * i}
+                y={MARGIN.top}
+                width={slot}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHover(i)}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                tabIndex={0}
+                aria-label={`${p.detail ?? p.label}: ${format(totals[i])}`}
+              />
+              {i % stride === 0 && (
+                <text x={cx} y={height - 6} className="chr-chart__tick" textAnchor="middle">
+                  {p.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <line
+          x1={MARGIN.left}
+          x2={width - MARGIN.right}
+          y1={MARGIN.top + plotH}
+          y2={MARGIN.top + plotH}
+          className="chr-chart__axis"
+        />
+      </svg>
+      {hover !== null && rendered[hover] && (
+        <Tooltip
+          x={`${((MARGIN.left + slot * hover + slot / 2) / width) * 100}%` as unknown as number}
+          y={0}
+        >
+          <strong>{format(totals[hover])}</strong>
+          <span>{rendered[hover].detail ?? rendered[hover].label}</span>
+          <ul className="chr-chart__tooltip-breakdown">
+            {rendered[hover].segments
+              .filter((s) => s.value > 0)
+              .sort((a, b) => b.value - a.value)
+              .map((s) => (
+                <li key={s.key}>
+                  <span
+                    className="chr-chart__legend-swatch"
+                    style={{ background: colorOf(s.key) }}
+                    aria-hidden="true"
+                  />
+                  <span>{labelOf(s.key)}</span>
+                  <span className="chr-num">{format(s.value)}</span>
+                </li>
+              ))}
+          </ul>
+        </Tooltip>
+      )}
+      {capped && (
+        <p className="chr-chart__note">
+          Showing the most recent {MAX_POINTS} of {points.length} points — see Table view for the
+          full history.
+        </p>
+      )}
+      <ul className="chr-chart__legend" aria-label={`${title} — repos`}>
+        {series.map((s) => (
+          <li key={s.key} className="chr-chart__legend-item">
+            <span
+              className="chr-chart__legend-swatch"
+              style={{ background: colorOf(s.key) }}
+              aria-hidden="true"
+            />
+            <span>{labelOf(s.key)}</span>
+          </li>
+        ))}
+      </ul>
+      <details className="chr-chart__table">
+        <summary>Table view</summary>
+        <table>
+          <caption className="sr-only">{title}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              {series.map((s) => (
+                <th scope="col" key={s.key}>
+                  {labelOf(s.key)}
+                </th>
+              ))}
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((p, i) => (
+              <tr key={`${i}-${p.detail ?? p.label}`}>
+                <td>{p.detail ?? p.label}</td>
+                {series.map((s) => (
+                  <td className="chr-num" key={s.key}>
+                    {format(p.segments.find((seg) => seg.key === s.key)?.value ?? 0)}
+                  </td>
+                ))}
+                <td className="chr-num">
+                  {format(p.segments.reduce((sum, s) => sum + Math.max(0, s.value), 0))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }
@@ -603,6 +859,220 @@ export function LineChart({
           };
         })}
       />
+    </div>
+  );
+}
+
+/* --- usage-limit timeline --------------------------------------------------
+ * "Limits hit": events over time, coloured by kind. A stacked column per day
+ * (kinds are an IDENTITY, not a magnitude, so this is the one chart here that
+ * breaks the single-hue rule) plus a detail table beneath — the same
+ * pointer-optional twin every chart above gives its data.
+ */
+
+/** Label and hue for each kind, in the fixed stacking/legend order. One of
+ * the seven measure hues per kind (`--chr-cost` for the money-shaped one),
+ * reusing the page's existing ramp rather than inventing a new one. */
+export const LIMIT_KIND_META: Record<ChronicleLimitKind, { label: string; hue: string }> = {
+  session: { label: "Session (5h)", hue: "--chr-turns" },
+  weekly: { label: "Weekly", hue: "--chr-peak" },
+  monthly_spend: { label: "Monthly spend", hue: "--chr-cost" },
+  model: { label: "Per-model", hue: "--chr-tools" },
+  other: { label: "Other", hue: "--qb-ink-400" },
+};
+
+const LIMIT_KIND_ORDER: ChronicleLimitKind[] = ["session", "weekly", "monthly_spend", "model", "other"];
+
+/** "2026-09-04" from an epoch, in the VIEWER's local zone — the same zone the
+ * banner's own reset time was read in, and the convention `formatDay`
+ * already renders. */
+function dayKey(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+interface LimitsTimelineProps {
+  events: ChronicleLimitEvent[];
+  height?: number;
+}
+
+/** One stacked bar per day this window saw a hit, segmented by kind, with a
+ * legend and an event-by-event table (kind, when, reset, sessions affected,
+ * tokens burned) beneath — the detail a hover alone could never carry for
+ * every event at once. */
+export function LimitsTimeline({ events, height = 200 }: LimitsTimelineProps) {
+  const [hover, setHover] = useState<number | null>(null);
+  const id = useId();
+  const width = 520;
+  const plotW = width - MARGIN.left - MARGIN.right;
+  const plotH = height - MARGIN.top - MARGIN.bottom;
+
+  const { days, counts, presentKinds } = useMemo(() => {
+    const byDay = new Map<string, Record<ChronicleLimitKind, number>>();
+    const seen = new Set<ChronicleLimitKind>();
+    for (const e of events) {
+      if (e.hit_at === null) continue;
+      const key = dayKey(e.hit_at);
+      const row = byDay.get(key) ?? { session: 0, weekly: 0, monthly_spend: 0, model: 0, other: 0 };
+      row[e.kind] += 1;
+      byDay.set(key, row);
+      seen.add(e.kind);
+    }
+    const sortedDays = [...byDay.keys()].sort();
+    return {
+      days: sortedDays,
+      counts: sortedDays.map((d) => byDay.get(d)!),
+      presentKinds: LIMIT_KIND_ORDER.filter((k) => seen.has(k)),
+    };
+  }, [events]);
+
+  if (events.length === 0) {
+    return <p className="chr-chart__empty">No limit hits in this window.</p>;
+  }
+
+  const totals = counts.map((row) => LIMIT_KIND_ORDER.reduce((sum, k) => sum + row[k], 0));
+  const max = Math.max(0, ...totals);
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1] || 1;
+  const slot = days.length > 0 ? plotW / days.length : plotW;
+  const bar = Math.min(MAX_BAR, Math.max(4, slot - 2));
+  const stride = labelStride(days.length, plotW);
+  const y = (v: number) => MARGIN.top + plotH - (v / top) * plotH;
+
+  return (
+    <div className="chr-chart chr-limits">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="chr-chart__svg"
+        role="img"
+        aria-labelledby={`${id}-title`}
+        onMouseLeave={() => setHover(null)}
+      >
+        <title id={`${id}-title`}>Usage-limit hits per day, by kind</title>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={MARGIN.left} x2={width - MARGIN.right} y1={y(t)} y2={y(t)} className="chr-chart__grid" />
+            <text x={MARGIN.left - 6} y={y(t) + 3} className="chr-chart__tick" textAnchor="end">
+              {Math.round(t)}
+            </text>
+          </g>
+        ))}
+        {days.map((d, i) => {
+          const cx = MARGIN.left + slot * i + slot / 2;
+          const x0 = cx - bar / 2;
+          let stacked = 0;
+          return (
+            <g key={d}>
+              {LIMIT_KIND_ORDER.map((k) => {
+                const v = counts[i][k];
+                if (v === 0) return null;
+                const yTop = y(stacked + v);
+                const yBase = y(stacked);
+                stacked += v;
+                return (
+                  <rect
+                    key={k}
+                    x={x0}
+                    y={yTop}
+                    width={bar}
+                    height={Math.max(0, yBase - yTop)}
+                    className={`chr-limits__seg chr-limits__seg--${k}${hover === i ? " chr-limits__seg--hover" : ""}`}
+                    data-testid="chr-limits-seg"
+                    data-kind={k}
+                  />
+                );
+              })}
+              <rect
+                x={MARGIN.left + slot * i}
+                y={MARGIN.top}
+                width={slot}
+                height={plotH}
+                fill="transparent"
+                onMouseEnter={() => setHover(i)}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                tabIndex={0}
+                aria-label={`${formatDay(d)}: ${LIMIT_KIND_ORDER.filter((k) => counts[i][k] > 0)
+                  .map((k) => `${counts[i][k]} ${LIMIT_KIND_META[k].label}`)
+                  .join(", ")}`}
+              />
+              {i % stride === 0 && (
+                <text x={cx} y={height - 6} className="chr-chart__tick" textAnchor="middle">
+                  {formatDay(d)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <line
+          x1={MARGIN.left}
+          x2={width - MARGIN.right}
+          y1={MARGIN.top + plotH}
+          y2={MARGIN.top + plotH}
+          className="chr-chart__axis"
+        />
+      </svg>
+      {hover !== null && (
+        <Tooltip x={`${((MARGIN.left + slot * hover + slot / 2) / width) * 100}%` as unknown as number} y={0}>
+          <strong>{formatDay(days[hover])}</strong>
+          {LIMIT_KIND_ORDER.filter((k) => counts[hover][k] > 0).map((k) => (
+            <span key={k}>
+              {LIMIT_KIND_META[k].label}: {counts[hover][k]}
+            </span>
+          ))}
+        </Tooltip>
+      )}
+      <ul className="chr-chart__legend" aria-label="Limit kinds">
+        {presentKinds.map((k) => (
+          <li key={k} className="chr-chart__legend-item">
+            <span
+              className={`chr-limits__swatch chr-limits__swatch--${k}`}
+              aria-hidden="true"
+            />
+            <span>{LIMIT_KIND_META[k].label}</span>
+          </li>
+        ))}
+      </ul>
+      <details className="chr-chart__table">
+        <summary>Table view</summary>
+        <table className="chr-table chr-table--compact">
+          <caption className="sr-only">Usage-limit hits</caption>
+          <thead>
+            <tr>
+              <th scope="col">Kind</th>
+              <th scope="col">Hit at</th>
+              <th scope="col">Resets</th>
+              <th scope="col" className="chr-num">Sessions</th>
+              <th scope="col" className="chr-num">Tokens to limit</th>
+              <th scope="col" className="chr-num">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...events]
+              .sort((a, b) => (b.hit_at ?? 0) - (a.hit_at ?? 0))
+              .map((e, i) => (
+                <tr key={`${i}-${e.hit_at ?? "?"}-${e.kind}`}>
+                  <td>{LIMIT_KIND_META[e.kind].label}{e.model ? ` (${e.model})` : ""}</td>
+                  <td>{formatWhen(e.hit_at)}</td>
+                  <td>
+                    {e.reset_raw ?? (e.resets_at_inferred ? formatWhen(e.resets_at) : "—")}
+                    {e.resets_at_inferred ? " (inferred)" : ""}
+                  </td>
+                  <td className="chr-num">{e.sessions}</td>
+                  <td className="chr-num">
+                    {e.tokens_to_limit ? formatTokens(e.tokens_to_limit.total_tokens) : "—"}
+                  </td>
+                  <td className="chr-num">
+                    {e.tokens_to_limit ? formatUsd(e.tokens_to_limit.cost_usd) : "—"}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }

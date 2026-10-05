@@ -30,12 +30,13 @@ import {
   shortModel,
 } from "../../board/chronicle/format";
 import { windowInsights } from "../../board/chronicle/insights";
+import { costByRepo } from "../../board/chronicle/costByRepo";
 import { Button } from "../../ui";
 import { planLabel, plansPresent } from "../../board/chronicle/plan";
 import Waylaid from "../Waylaid";
 import ArtifactList from "./ArtifactList";
 import CounselPanel from "./CounselPanel";
-import { BarList, ColumnChart, Donut } from "./ChronicleCharts";
+import { BarList, ColumnChart, Donut, LimitsTimeline, StackedColumnChart } from "./ChronicleCharts";
 import Gauge from "./Gauge";
 import SessionDrawer from "./SessionDrawer";
 import CostAttributionPanel from "./CostAttributionPanel";
@@ -98,6 +99,9 @@ function churnCell(s: ChronicleSession): string {
 
 const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => string }[] = [
   { key: "started_at", label: "Started", render: (s) => formatWhen(s.started_at) },
+  // Beside Started so "what did that cost" is on screen without scrolling
+  // sideways, and one click ranks the sessions by spend.
+  { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
   { key: "duration_s", label: "Span", render: (s) => formatDuration(s.duration_s) },
   { key: "turns", label: "Turns", render: (s) => String(s.turns) },
   { key: "prompts", label: "Prompts", render: (s) => String(s.prompts) },
@@ -115,7 +119,6 @@ const COLUMNS: { key: SortKey; label: string; render: (s: ChronicleSession) => s
   { key: "files_touched", label: "Files", render: (s) => (s.files_touched > 0 ? String(s.files_touched) : "—") },
   { key: "lines", label: "Lines", render: churnCell },
   { key: "artifacts", label: "Artifacts", render: (s) => (s.artifacts > 0 ? String(s.artifacts) : "—") },
-  { key: "cost_usd", label: "Cost", render: (s) => formatCostWithUnpriced(s.cost_usd, s.unpriced_turns) },
 ];
 
 function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc"): ChronicleSession[] {
@@ -130,7 +133,7 @@ function sortSessions(rows: ChronicleSession[], key: SortKey, dir: "asc" | "desc
   });
 }
 
-export default function ChroniclePage({ summary, sessions, loading, error, onRetry, scope = "repo" }: ChroniclePageProps) {
+export default function ChroniclePage({ summary, sessions, limits, loading, error, onRetry, scope = "repo" }: ChroniclePageProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("started_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -148,6 +151,12 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
   // narrows the rows already on screen. Keeping it here means toggling it can
   // never silently reshape the totals the reader just looked at.
   const [liveOnly, setLiveOnly] = useState(false);
+  // Which per-day context series the shared panel draws; average is the more
+  // typical picture, peak the worst case.
+  const [ctxMetric, setCtxMetric] = useState<"avg" | "peak">("avg");
+  // Repo names on the cost-by-repo stack are hidden by default, so the page
+  // can be shared on screen without naming every repo you work in.
+  const [showRepoNames, setShowRepoNames] = useState(false);
   const [planFilter, setPlanFilter] = useState<string | null>(null);
   // Offered only across repos, and only when there is actually a split to
   // show — one plan is not a choice, it is a label.
@@ -198,12 +207,23 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
     detail: `${d.day} · ${formatPct(d.peak_context_pct)} of window`,
     value: d.peak_context_tokens,
   }));
+  const avgPerDay = byDay.map((d) => ({
+    label: formatDay(d.day),
+    detail: `${d.day} · ${formatPct(d.avg_context_pct)} of window`,
+    value: d.avg_context_tokens,
+  }));
   const hitRatePerDay = byDay.map((d) => ({
     label: formatDay(d.day),
     detail: `${d.day} · ${d.cold_turns} cold`,
     value: d.cache_hit_rate ?? 0,
   }));
   const costPerDay = byDay.map((d) => ({ label: formatDay(d.day), detail: d.day, value: d.cost_usd }));
+  // Server-side `by_day` sums every repo in scope into one line — a
+  // per-repo split only exists client-side, from `sessions`. Only worth
+  // computing (and only shown) under "all repos": within one repo it would
+  // always be a single, uninteresting segment.
+  const repoStack = useMemo(() => (scope === "all" ? costByRepo(sessions) : null), [scope, sessions]);
+  const showRepoStack = !!repoStack && repoStack.series.length > 1;
   const churnPerDay = (summary?.churn?.by_day ?? []).map((d) => ({
     label: formatDay(d.day),
     detail: `${d.day} · +${d.lines_added} / -${d.lines_removed} · ${d.edits} edits`,
@@ -394,9 +414,41 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               />
             </section>
             <section className="chr-panel">
-              <h3 className="chr-panel__title">Cost per day</h3>
-              <p className="chr-panel__sub">What each day's calls would cost at API list prices.</p>
-              <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+              <h3 className="chr-panel__title">Cost per day{showRepoStack ? ", by repo" : ""}</h3>
+              <p className="chr-panel__sub">
+                {showRepoStack
+                  ? "What each day's calls would cost at API list prices, split by repo."
+                  : "What each day's calls would cost at API list prices."}
+              </p>
+              {showRepoStack && repoStack ? (
+                <>
+                  <div className="chronicle__segment" role="group" aria-label="Repo names">
+                    <Button
+                      aria-pressed={!showRepoNames}
+                      onClick={() => setShowRepoNames(false)}
+                      className="chronicle__seg-btn"
+                    >
+                      Hide names
+                    </Button>
+                    <Button
+                      aria-pressed={showRepoNames}
+                      onClick={() => setShowRepoNames(true)}
+                      className="chronicle__seg-btn"
+                    >
+                      Show names
+                    </Button>
+                  </div>
+                  <StackedColumnChart
+                    points={repoStack.points}
+                    series={repoStack.series}
+                    format={formatUsd}
+                    title="API-equivalent cost per day, by repo"
+                    showNames={showRepoNames}
+                  />
+                </>
+              ) : (
+                <ColumnChart points={costPerDay} format={formatUsd} title="API-equivalent cost per day" hue="--chr-cost" />
+              )}
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Turns by model</h3>
@@ -429,9 +481,25 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               <ColumnChart points={outputPerDay} format={formatTokens} title="Output tokens per day" hue="--chr-output" />
             </section>
             <section className="chr-panel">
-              <h3 className="chr-panel__title">Peak context per day</h3>
-              <p className="chr-panel__sub">Largest single window any session reached that day.</p>
-              <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
+              <h3 className="chr-panel__title">{ctxMetric === "avg" ? "Average" : "Peak"} context per day</h3>
+              <p className="chr-panel__sub">
+                {ctxMetric === "avg"
+                  ? "Mean main-agent context size that day, subagent turns excluded."
+                  : "Largest single window any session reached that day."}
+              </p>
+              <div className="chronicle__segment" role="group" aria-label="Context per day metric">
+                <Button aria-pressed={ctxMetric === "avg"} onClick={() => setCtxMetric("avg")} className="chronicle__seg-btn">
+                  Average
+                </Button>
+                <Button aria-pressed={ctxMetric === "peak"} onClick={() => setCtxMetric("peak")} className="chronicle__seg-btn">
+                  Peak
+                </Button>
+              </div>
+              {ctxMetric === "avg" ? (
+                <ColumnChart points={avgPerDay} format={formatTokens} title="Average context tokens per day" hue="--chr-avg" />
+              ) : (
+                <ColumnChart points={peakPerDay} format={formatTokens} title="Peak context tokens per day" hue="--chr-peak" />
+              )}
             </section>
             <section className="chr-panel">
               <h3 className="chr-panel__title">Cache hit rate per day</h3>
@@ -469,6 +537,18 @@ export default function ChroniclePage({ summary, sessions, loading, error, onRet
               a server's tools were called, and what each cost. */}
           <div className="chronicle__grid chronicle__grid--wide">
             <McpExplorer mcp={summary?.mcp} />
+          </div>
+
+          <div className="chronicle__grid chronicle__grid--wide">
+            <section className="chr-panel chr-panel--wide">
+              <h3 className="chr-panel__title">Limits hit</h3>
+              <p className="chr-panel__sub">
+                {limits && limits.events.length > 0
+                  ? `${formatTokens(limits.events.length)} deduplicated hit${limits.events.length === 1 ? "" : "s"} in this window — Claude Code logs the same hit into every session running at the time.`
+                  : "When Claude Code writes a usage-limit banner into a session, it shows up here."}
+              </p>
+              <LimitsTimeline events={limits?.events ?? []} />
+            </section>
           </div>
 
           <div className="chronicle__grid chronicle__grid--wide">

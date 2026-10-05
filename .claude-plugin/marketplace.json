@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.31.0",
+  "version": "1.33.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -184,6 +184,20 @@
       "description": "One triaged view of what is asking for your attention. Gathers configured sources (Notion first) read-only, collapses each conversation into one row, marks what awaits you by the last-speaker rule, and caches every gather in a local SQLite store read through a 7/14/30-day window. The overseer dashboard grows an Almoner page when it is present.",
       "category": "engineering",
       "tags": ["triage", "inbox", "notion", "digest", "sqlite", "dashboard"]
+    },
+    {
+      "name": "agent-roster",
+      "source": "./plugins/agent-roster",
+      "description": "A live /roster pane (the roster as text over Remote Control) listing every Claude session on this machine, across accounts: tmux name, repo and worktree, branch, status, last active and last prompt. A mod.",
+      "category": "engineering",
+      "tags": [
+        "sessions",
+        "tmux",
+        "agents",
+        "pane",
+        "remote-control",
+        "mod"
+      ]
     }
   ]
 }

@@ -15,7 +15,7 @@ import {
 import type { Board as BoardModel } from "../api/types";
 import type { UseBoardResult } from "../board/useBoard";
 import type { PartyMember } from "../board/party";
-import { collapseStagesForMobile, groupIntoLanes } from "../board/layout";
+import { collapseStages, groupIntoLanes } from "../board/layout";
 import { groupChildrenByEpic } from "../board/epicChildren";
 import { laneIconKey } from "../board/laneIcons";
 import { useMediaQuery } from "../board/useMediaQuery";
@@ -106,22 +106,23 @@ function Board({
     [board.cards]
   );
 
-  // WF-085 in-progress lane: collapse the 7 `kind:"stage"` lanes into ONE
-  // "In Progress" lane (`collapseStagesForMobile`, board/layout.ts) — fewer,
-  // mostly-empty columns. As of the user's "hide the additional columns for
-  // now on desktop" request this is applied on EVERY viewport (was mobile-
-  // only), so desktop and mobile both show the collapsed set (Backlog / In
-  // Progress / Parked / Done / Abandoned). `displayLanes` (NOT `lanes`) is
-  // what the swipe track, the icon-nav, AND the desktop columns render from,
-  // so they can never disagree about which lanes exist. Drag/drop below
-  // deliberately keeps using `lanes` (the real per-stage layout), never
-  // `displayLanes` — see `handleDragEnd`'s comment — so the stage granularity
-  // is preserved under the hood for when the columns come back.
+  // Collapse the 7 `kind:"stage"` lanes into the STAGE_GROUPS lanes
+  // (`collapseStages`, board/layout.ts) — fewer, mostly-empty columns. Applied
+  // on EVERY viewport since the user's "hide the additional columns for now on
+  // desktop" request, so desktop and mobile both show the same collapsed set:
+  // Backlog / In Progress / In Review / Parked / Done / Abandoned. In Review
+  // (verification + awaiting-merge) is split out of the old single In Progress
+  // lane so work waiting on the USER — verify it, merge it — is visible rather
+  // than buried among the five agent-driven stages.
+  //
+  // `displayLanes` (NOT `lanes`) is what the swipe track, the icon-nav, AND
+  // the desktop columns render from, so they can never disagree about which
+  // lanes exist. Drag/drop below deliberately keeps using `lanes` (the real
+  // per-stage layout), never `displayLanes` — see `handleDragEnd`'s comment —
+  // so the stage granularity is preserved under the hood for when the columns
+  // come back.
   const isMobile = useMediaQuery("(max-width:720px)");
-  const displayLanes = useMemo(
-    () => collapseStagesForMobile(lanes),
-    [lanes]
-  );
+  const displayLanes = useMemo(() => collapseStages(lanes), [lanes]);
 
   const [highlightedEpicId, setHighlightedEpicId] = useState<string | null>(
     null
@@ -336,14 +337,13 @@ function Board({
       if (!dragged) return;
 
       // Deliberately `lanes` (the real per-stage layout), never
-      // `displayLanes` — the mobile "in-progress" lane is a view/navigation
-      // construct only, with no single stage of its own, so it must never
-      // be wired as a stage-change drop target. Its droppable id
-      // ("in-progress") never matches any REAL lane key here, so a drop on
-      // its background resolves to `targetLane: undefined` below and
-      // no-ops harmlessly; a drop on a CARD inside it still resolves via
-      // that card's own real stage lane, same as desktop. Either way: no
-      // crash, and desktop drag/drop (the real 7 stage lanes) is untouched.
+      // `displayLanes` — a collapsed group lane is a view construct spanning
+      // several stages, so it must never itself be wired as a stage-change
+      // drop target. A drop on a CARD inside one resolves via that card's own
+      // real stage lane. A drop on a group lane's BACKGROUND resolves through
+      // `GROUP_LANDING_STAGE` (dragPlan.ts): "in-review" lands on the real
+      // `verification` lane, while "in-progress" is unmapped and so still
+      // resolves to `targetLane: undefined` and no-ops harmlessly.
       const { lane: targetLane, index } = locateDropTarget(
         String(over.id),
         lanes

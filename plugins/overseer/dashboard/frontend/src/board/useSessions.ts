@@ -20,6 +20,10 @@
  * already correct, so Party re-scopes to the newly-selected repo exactly
  * when the board does (no cross-effect race).
  *
+ * `account` (WF-116) is the same shape as `root`: `setActiveAccount(account)`
+ * fires alongside `setActiveRoot`, so a switch of either re-scopes this list
+ * in the same effect run.
+ *
  * `enabled` (task 10, mirroring `useBoard`'s own gate — WF-032) hard-gates
  * BOTH the mount/root-change fetch AND the poll: App.tsx passes `false` for
  * an "unbegun" repo (`has_board: false`), which 400s the backend's
@@ -27,7 +31,7 @@
  * `useBoard`'s doc comment for the identical rationale.
  */
 import { useEffect, useRef, useState } from "react";
-import { getSessions, setActiveRoot } from "../api/client";
+import { getSessions, setActiveAccount, setActiveRoot } from "../api/client";
 import type { SessionSummary } from "../api/types";
 import { useVisibleInterval } from "./useDocumentVisible";
 
@@ -59,7 +63,8 @@ function activity(session: SessionSummary): number {
 
 export function useSessions(
   root: string | null = null,
-  enabled: boolean = true
+  enabled: boolean = true,
+  account: string | null = null
 ): UseSessionsResult {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const isMountedRef = useRef(true);
@@ -71,6 +76,8 @@ export function useSessions(
   enabledRef.current = enabled;
   // The root the previous effect run served — see the root-change effect.
   const prevRootRef = useRef<string | null>(null);
+  // Same, for the account filter (WF-116) — see the same effect.
+  const prevAccountRef = useRef<string | null>(null);
   // Epoch for in-flight fetches, as in `useBoard`: a response is applied
   // only if no root switch (or disable) has happened since it was issued —
   // otherwise a slow fetch for repo A could land on top of repo C's list
@@ -105,8 +112,11 @@ export function useSessions(
   // change with nothing to drop re-renders no consumer. As in `useBoard`,
   // `null` → a named root is the launch root resolving, not a switch.
   useEffect(() => {
-    const switched = prevRootRef.current !== null && prevRootRef.current !== root;
+    const switched =
+      (prevRootRef.current !== null && prevRootRef.current !== root) ||
+      (prevAccountRef.current !== null && prevAccountRef.current !== account);
     prevRootRef.current = root;
+    prevAccountRef.current = account;
     if (switched || !enabled) {
       requestIdRef.current += 1;
       setSessions((prev) => (prev.length === 0 ? prev : []));
@@ -114,13 +124,14 @@ export function useSessions(
     if (!enabled) return;
     isMountedRef.current = true;
     setActiveRoot(root);
+    setActiveAccount(account);
     void loadSessions();
 
     return () => {
       isMountedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root, enabled]);
+  }, [root, enabled, account]);
 
   // Poll every 5 seconds while the tab is in the foreground, skipping ticks
   // while disabled; a hidden tab polls nothing and catches up once on return.

@@ -19,7 +19,8 @@ plugin root). If it isn't found, vigil isn't installed — nudge the user.
   context` at stage boundaries and card completion — it prints `ctx NN%`
   against the configured threshold — and `resume`/`handoff` auto-append
   `ctx NN%` when vigil is installed.
-- **Hand over — you decide, never a blind threshold.** When you are over
+- **Hand over — you decide, never a blind threshold.** The default trigger is
+  every stage boundary once the stage is recorded in the ledger. When you are over
   threshold at a clean stop point, when a card completes, or on command: build
   the enriched handover from the ledger and pipe it to vigil as the payload,
   suppressing the generic snapshot:

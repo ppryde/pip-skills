@@ -1,3 +1,4 @@
+import io
 import json
 import shutil
 import subprocess
@@ -126,6 +127,81 @@ class TestProgressAndReview:
         assert run(repo, "log-review", "WF-001", "--stage", "plan-review",
                    "--reviewers", "2", "--verdict", "approved") == 0
         assert "### plan-review — round 1 (2 reviewers)" in _card(repo).body
+
+
+class TestAppendBody:
+    """`append-body` (IMPROVEMENTS.md "Overseer: No Verb Appends To A Card
+    Body") — appends server-side; the caller never holds the whole body."""
+
+    def test_appends_to_existing_section_leaving_following_sections_untouched(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--body",
+            "## Decisions\n- first decision\n\n## Progress log\n- old progress")
+        assert run(repo, "append-body", "WF-001", "Decisions",
+                   "--text", "- second decision") == 0
+        body = _card(repo).body
+        assert body.index("- first decision") < body.index("- second decision")
+        assert body.index("- second decision") < body.index("## Progress log")
+        assert "- old progress" in body
+
+    def test_creates_missing_section_at_end_of_body(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--body", "## Goal\nShip it")
+        assert run(repo, "append-body", "WF-001", "Decisions",
+                   "--text", "- chose X over Y") == 0
+        body = _card(repo).body
+        assert body.endswith("## Decisions\n- chose X over Y")
+
+    def test_heading_given_with_hashes_is_tolerated(self, repo):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--body", "## Decisions\n- one")
+        assert run(repo, "append-body", "WF-001", "## Decisions",
+                   "--text", "- two") == 0
+        body = _card(repo).body
+        assert body.count("## Decisions") == 1
+        assert "- two" in body
+
+    def test_reads_multiline_text_from_stdin(self, repo, monkeypatch):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--body", "## Decisions\n- one")
+        monkeypatch.setattr(sys, "stdin", io.StringIO("- two\n- three\n"))
+        assert run(repo, "append-body", "WF-001", "Decisions", "--text", "-") == 0
+        body = _card(repo).body
+        assert "- two\n- three" in body
+        assert "- two\n- three\n\n" not in body  # trailing stdin newline stripped
+
+    def test_text_is_required_so_a_forgotten_flag_cannot_block_on_stdin(self, repo):
+        run(repo, "new-card", "--title", "T")
+        assert run(repo, "append-body", "WF-001", "Decisions") == 1  # usage error, not a hang
+
+    def test_reads_from_stdin_when_text_is_dash(self, repo, monkeypatch):
+        run(repo, "new-card", "--title", "T")
+        run(repo, "set-field", "WF-001", "--body", "## Decisions\n- one")
+        monkeypatch.setattr(sys, "stdin", io.StringIO("- from stdin"))
+        assert run(repo, "append-body", "WF-001", "Decisions", "--text", "-") == 0
+        assert "- from stdin" in _card(repo).body
+
+    def test_unknown_card_errors(self, repo, capsys):
+        assert run(repo, "append-body", "WF-999", "Decisions", "--text", "x") == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_preserves_rest_of_body_byte_for_byte(self, repo):
+        run(repo, "new-card", "--title", "T")
+        body = "## Goal\nShip it\n\n## Decisions\n- one\n\n## Verification\n_(pending)_"
+        run(repo, "set-field", "WF-001", "--body", body)
+        run(repo, "append-body", "WF-001", "Decisions", "--text", "- two")
+        result = _card(repo).body
+        assert "## Goal\nShip it" in result
+        assert "## Verification\n_(pending)_" in result
+
+    def test_does_not_ack_claim(self, repo):
+        """Like `set-field`, not a design-spec §3 work verb — a narrower,
+        safer alternative to `set-field --body`, so it follows the same
+        non-acking convention rather than `log-progress`'s."""
+        run(repo, "new-card", "--title", "T")
+        run(repo, "claim", "WF-001", "--session", "sess-1")
+        run(repo, "append-body", "WF-001", "Decisions", "--text", "- x")
+        assert _card(repo).claim_acked is False
 
 
 class TestUsageErrors:

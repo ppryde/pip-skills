@@ -8,6 +8,7 @@ vi.mock("../../api/client", async (importOriginal) => {
     ...actual,
     getChronicleSummary: vi.fn(),
     getChronicleSessions: vi.fn(),
+    getChronicleLimits: vi.fn(),
     getChronicleSession: vi.fn(),
     getChronicleAgent: vi.fn(),
     syncChronicle: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock("../../api/client", async (importOriginal) => {
 import { useState } from "react";
 import * as client from "../../api/client";
 import { useChronicle, useChronicleSync } from "../../board/chronicle/useChronicle";
-import ChronicleFilterBar from "./ChronicleFilterBar";
+import ChronicleFilterBar, { type ChronicleTimeWindow } from "./ChronicleFilterBar";
 import ChroniclePage from "./ChroniclePage";
 
 /** App.tsx's wiring in miniature: the filter state, the fetch, the sync
@@ -27,11 +28,14 @@ import ChroniclePage from "./ChroniclePage";
  * — the Sync, All-repos and branch controls here stand in for the top bar's
  * (TopBarChronicle.test.tsx covers those). */
 function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repoScopable: boolean }) {
-  const [days, setDays] = useState<number | undefined>(30);
+  const [timeWindow, setTimeWindow] = useState<ChronicleTimeWindow>(30);
   const [allRepos, setAllRepos] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);
   const scope = allRepos || !repoScopable ? "all" : "repo";
-  const data = useChronicle(activeRoot, { days, scope, branch }, true);
+  const days = typeof timeWindow === "number" ? timeWindow : undefined;
+  const since =
+    timeWindow === "today" || timeWindow === "month-to-date" ? timeWindow : undefined;
+  const data = useChronicle(activeRoot, { days, since, scope, branch }, true);
   const { sync, syncing, note } = useChronicleSync(data.refresh);
   return (
     <>
@@ -44,10 +48,11 @@ function Harness({ activeRoot, repoScopable }: { activeRoot: string | null; repo
       <button type="button" onClick={() => setBranch("feat/x")}>
         Branch feat/x
       </button>
-      <ChronicleFilterBar days={days} onDays={setDays} syncNote={note} filtersOpen />
+      <ChronicleFilterBar timeWindow={timeWindow} onTimeWindow={setTimeWindow} syncNote={note} filtersOpen />
       <ChroniclePage
         summary={data.summary}
         sessions={data.sessions}
+        limits={data.limits}
         loading={data.loading}
         error={data.error}
         onRetry={() => void data.refresh()}
@@ -112,7 +117,7 @@ function summary(): ChronicleSummary {
       peak_context_tokens: 120_000, peak_context_pct: 0.6, context_window: 200_000,
       cost_usd: 12.3, unpriced_turns: 0, pricing_as_of: "2026-06-24",
     },
-    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
+    by_day: [{ day: "2026-09-01", sessions: 2, turns: 12, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, output_tokens: 900, cold_turns: 2, peak_context_tokens: 1110, peak_context_pct: 0.00555, avg_context_tokens: 800, avg_context_pct: 0.004, cache_hit_rate: 0.901, cost_usd: 12.3, unpriced_turns: 0 }],
     by_model: [{ model: "claude-opus-5", turns: 12, sessions: 2, input_tokens: 20, cache_read_tokens: 2000, cache_creation_tokens: 200, cache_5m_tokens: 50, cache_1h_tokens: 150, output_tokens: 900, cost_usd: 12.3 }],
     tools: [{ tool_name: "Bash", calls: 6, sessions: 2, result_chars: 1200, median_s: 2.5, subagent_calls: 3 }],
     mcp: {
@@ -151,6 +156,7 @@ function summary(): ChronicleSummary {
 const mocked = client as unknown as {
   getChronicleSummary: ReturnType<typeof vi.fn>;
   getChronicleSessions: ReturnType<typeof vi.fn>;
+  getChronicleLimits: ReturnType<typeof vi.fn>;
   getChronicleSession: ReturnType<typeof vi.fn>;
   getChronicleAgent: ReturnType<typeof vi.fn>;
   syncChronicle: ReturnType<typeof vi.fn>;
@@ -165,6 +171,7 @@ beforeEach(() => {
       session({ session_id: "bbbb2222-x", turns: 5, live: true }),
     ],
   });
+  mocked.getChronicleLimits.mockResolvedValue({ events: [], by_kind: {} });
   mocked.syncChronicle.mockResolvedValue({ scanned: 3, changed: 1, lines: 12, sessions: ["aaaa1111-x"], synced_at: 1 });
 });
 
@@ -175,12 +182,15 @@ afterEach(() => {
 /** Position of the Subagents cell in a session row: the two leading columns
  * (Session, Repo · branch) plus its place among the sortable ones. Named so
  * the assertion reads as a column rather than a magic number. */
-const COLUMN_INDEX_SUBAGENTS = 2 + 5;
+const COLUMN_INDEX_SUBAGENTS = 2 + 6;
 
 /** The page renders from props alone; these tests drive it directly rather
  * than through the fetch harness, since only the scope prop is under test. */
 function pageProps(sessions: ChronicleSession[]) {
-  return { summary: summary(), sessions, loading: false, error: null, onRetry: () => {} };
+  return {
+    summary: summary(), sessions, limits: { events: [], by_kind: {} }, loading: false, error: null,
+    onRetry: () => {},
+  };
 }
 
 describe("<ChroniclePage/>", () => {
@@ -200,6 +210,27 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByText("tribunal · skill")).toBeInTheDocument();
   });
 
+  it("shows the limits panel's empty state with none, and the hit count when there are some", async () => {
+    render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
+    await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
+    expect(screen.getByText(/When Claude Code writes a usage-limit banner/)).toBeInTheDocument();
+
+    mocked.getChronicleLimits.mockResolvedValue({
+      events: [
+        {
+          account_uuid: "acc-1", kind: "session", model: null,
+          hit_at: 1_788_256_800, last_seen_at: 1_788_256_800,
+          resets_at: 1_788_275_400, resets_at_inferred: false, reset_raw: "11:50am (Europe/London)",
+          sessions: 2, tokens_to_limit: null,
+        },
+      ],
+      by_kind: { session: 1 },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Branch feat/x" })); // any filter change re-fetches
+    await waitFor(() => expect(screen.getByText(/1 deduplicated hit in this window/)).toBeInTheDocument());
+    expect(screen.getByRole("img", { name: "Usage-limit hits per day, by kind" })).toBeInTheDocument();
+  });
+
   it("renders tiles, charts and the session table from the summary", async () => {
     render(<Harness activeRoot="/repos/pip-skills" repoScopable />);
     await waitFor(() => expect(screen.getByText("Fix the widget")).toBeInTheDocument());
@@ -210,7 +241,14 @@ describe("<ChroniclePage/>", () => {
     expect(screen.getByText("Scroll sideways for more columns →")).toBeInTheDocument();
     expect(screen.getByText("1 live")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Context tokens per day" })).toBeInTheDocument();
+    // One panel, two series: average by default, peak a click away.
+    expect(screen.getByRole("img", { name: "Average context tokens per day" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Peak context tokens per day" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Average" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Peak" }));
     expect(screen.getByRole("img", { name: "Peak context tokens per day" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Average context tokens per day" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Peak" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("img", { name: "Cache hit rate per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "API-equivalent cost per day" })).toBeInTheDocument();
     // Cost: the tile (its pricing caveat lives behind the label's
@@ -276,6 +314,48 @@ describe("<ChroniclePage/>", () => {
     );
   });
 
+  it("Month to date sends since instead of days, and All time clears it again", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Month to date" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({
+        days: undefined,
+        since: "month-to-date",
+        scope: "repo",
+        branch: null,
+      })
+    );
+    expect(screen.getByRole("button", { name: "Month to date" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "30 days" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({
+        days: 30,
+        since: undefined,
+        scope: "repo",
+        branch: null,
+      })
+    );
+  });
+
+  it("Today sends since instead of days", async () => {
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(mocked.getChronicleSummary).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+    await waitFor(() =>
+      expect(mocked.getChronicleSummary).toHaveBeenLastCalledWith({
+        days: undefined,
+        since: "today",
+        scope: "repo",
+        branch: null,
+      })
+    );
+    expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("pins scope to all repos when the repo is not scopable", async () => {
     render(<Harness activeRoot="/unbegun" repoScopable={false} />);
     await waitFor(() =>
@@ -309,6 +389,30 @@ describe("<ChroniclePage/>", () => {
     fireEvent.click(table().getByRole("button", { name: /^Turns/ }));
     rows = table().getAllByRole("row").slice(1);
     expect(rows[0]).toHaveTextContent("bbbb2222");
+  });
+
+  it("ranks sessions by cost, with Cost sitting right after Started", async () => {
+    mocked.getChronicleSessions.mockResolvedValue({
+      sessions: [
+        session({ session_id: "aaaa1111-x", title: "Cheap one", cost_usd: 1.25, started_at: 2000 }),
+        session({ session_id: "bbbb2222-x", title: "Pricey one", cost_usd: 88.5, started_at: 1000 }),
+        session({ session_id: "cccc3333-x", title: "Middling", cost_usd: 12, started_at: 1500 }),
+      ],
+    });
+    render(<Harness activeRoot={null} repoScopable />);
+    await waitFor(() => expect(screen.getByText("Cheap one")).toBeInTheDocument());
+    const table = () => within(screen.getByRole("table", { name: "Sessions" }));
+    const headers = table().getAllByRole("columnheader").map((h) => h.textContent?.replace(/[ ↑↓]/g, ""));
+    expect(headers.slice(2, 4)).toEqual(["Started", "Cost"]);
+
+    fireEvent.click(table().getByRole("button", { name: /^Cost/ }));
+    let rows = table().getAllByRole("row").slice(1);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining("Pricey one"), expect.stringContaining("Middling"), expect.stringContaining("Cheap one"),
+    ]);
+    fireEvent.click(table().getByRole("button", { name: /^Cost/ })); // second click flips to ascending
+    rows = table().getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Cheap one");
   });
 
   it("shows what each session changed, ranked by lines moved", async () => {
