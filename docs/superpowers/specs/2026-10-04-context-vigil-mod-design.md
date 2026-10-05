@@ -438,7 +438,7 @@ question with the explanation in the question text.
 ## 8. Testing (drafted from discussion — review)
 
 - **TDD throughout.** Every core module is written test-first with
-  `*.test.ts`, run by `claude plugin test plugins/context-vigil-mod`.
+  `*.test.ts` (in `tests/context_vigil_mod/`), run by `bash tests/run-mods.sh context-vigil-mod`.
 - **Core:** pure functions with table tests — origin classification, every
   §2 transition, threshold and repeat step, handover formatting, last-light
   arithmetic and every fire condition, the loop guard, latch set/clear, early
@@ -451,7 +451,7 @@ question with the explanation in the question text.
   → `next(e)`; false again → the bar draws from `$.state` with no new
   crossing needed; a crossing during the survey shows after it).
 - **Gates:** `claude plugin validate`, `tsc -p plugins/context-vigil-mod`,
-  `claude plugin test`.
+  `bash tests/run-mods.sh`.
 - **Live smokes** (owner-run where the auto-mode classifier forbids driving a
   session): handover in a terminal; handover driven from a phone; last light
   with a short TTL override; a forced `rate_limit` StopFailure.

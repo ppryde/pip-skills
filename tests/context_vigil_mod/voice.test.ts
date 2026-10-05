@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { V } from '../core/voice'
+import { V } from '../../plugins/context-vigil-mod/core/voice'
 
 test('bar strings', () => {
   expect(V.barLine(41, 35, null)).toBe('🕯️ context 41% · threshold 35%')

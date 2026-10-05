@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { COUNTDOWN_MS, HOLDBACK_MS, RECHECK_MS, clearGate, needsRcQuestion } from '../core/surfaces'
+import { COUNTDOWN_MS, HOLDBACK_MS, RECHECK_MS, clearGate, needsRcQuestion } from '../../plugins/context-vigil-mod/core/surfaces'
 
 const base = { now: 1_000_000, draft: '', onPhone: false, lastBridgeAt: null, rcAutoClear: 'unanswered' as const, latched: false, countdownEndsAt: null, classicActive: false, unattended: true }
 

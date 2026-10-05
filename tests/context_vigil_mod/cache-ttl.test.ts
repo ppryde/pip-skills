@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { transcriptPathFor, ttlFromWrites, parseWrites, TAIL_CMD } from '../core/cache-ttl'
+import { transcriptPathFor, ttlFromWrites, parseWrites, TAIL_CMD } from '../../plugins/context-vigil-mod/core/cache-ttl'
 
 const row = (h1: number, m5: number) => `{"ephemeral_1h_input_tokens":${h1},"ephemeral_5m_input_tokens":${m5}}`
 

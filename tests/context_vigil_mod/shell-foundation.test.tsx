@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
-import { NAME } from '../core/name'
+import { NAME } from '../../plugins/context-vigil-mod/core/name'
 import { START, human, turn, world } from './world'
-import { V } from '../core/voice'
+import { V } from '../../plugins/context-vigil-mod/core/voice'
 
 const MIN = 60_000
 

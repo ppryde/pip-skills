@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { LEAD_MS, TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
+import { LEAD_MS, TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../../plugins/context-vigil-mod/core/last-light'
 
 test('fireAt is last API activity + 1h − lead', () => {
   expect(fireAt(1000)).toBe(1000 + TTL_1H - LEAD_MS)
