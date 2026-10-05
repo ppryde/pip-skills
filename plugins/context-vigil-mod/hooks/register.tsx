@@ -780,6 +780,7 @@ export const register: Register = on => {
     // The person's own held text is always sent. The mod's resume prompt needs a fresh handover
     // (no turn since it was written) and no latch (R1-10); otherwise a notice says why not.
     let stale = false
+    let noResume = false
     if (follow) submitSoon($, { text: follow, asUser: true }, 500, undefined, () => { void resumeFailed($, pending.path, follow) })
     else if (pending.resume) {
       if (!fresh(pending, apiBefore, await nowMs($))) {
@@ -789,8 +790,13 @@ export const register: Register = on => {
         await notify($, V.resumeLatched(pending.path))
         await log($, 'guard.wait', { reason: 'latched', deferred: 'resume' })
       } else submitSoon($, { text: resumeText(pending.path) }, 500, undefined, () => { void resumeFailed($, pending.path, null) })
+    } else {
+      // R2-17: a handover that carries no automatic resume (a limit or last-light one) is still
+      // injected on a manual /clear; never silently.
+      await notify($, V.injectedNoResume(pending.path))
+      noResume = true
     }
-    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}) })
+    await log($, 'resume', { path: pending.path, reason: pending.reason, followUp: follow !== null, ...(stale ? { stale: true } : {}), ...(noResume ? { noResume: true } : {}) })
     return { ...out, additionalContext: [...(out.additionalContext ?? []), injectText(pending.markdown)] }
   })
 

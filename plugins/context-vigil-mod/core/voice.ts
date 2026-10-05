@@ -30,6 +30,7 @@ export const V = {
   deferredDropped: '⏳ The handover that waited on the usage limit was not run — /vho when you want one',
   handoverInterrupted: '📜 Handover interrupted — nothing was cleared; /vho when you want one',
   resumeStale: (path: string) => `📜 Handover injected (${path}) — it was written before later turns, so no automatic resume; say where to pick up`,
+  injectedNoResume: (path: string) => `📜 Handover injected (${path}) — it asks for no automatic resume, so say where to pick up`,
   resumeLatched: (path: string) => `⏳ Handover injected (${path}) — the usage limit is in force, so the resume prompt was not sent; ask to resume when it lifts`,
   handoverInProgress: '📜 A handover is already in progress — one at a time',
   resumeSkipped: (path: string | null) =>

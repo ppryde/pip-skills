@@ -385,3 +385,24 @@ test('an early stop with a fresh /vho handover already on disk writes no second 
   await w.clock.advance(HOUR + 300_000)
   expect(w.submits.find(s => s.text.includes('limit has reset'))?.text).toContain('/handovers/s1-1.md')
 })
+
+test('a skipped limit resume keeps its handover; a later manual /clear injects it and says there is no automatic resume (R2-17)', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  await $.tool.call(write)
+  await w.clock.advance(1000)
+  await $.prompt.submit(human('back already'))
+  await w.clock.advance(HOUR + 300_000)
+  expect(w.notices.some(n => n.includes('you are back') && n.includes('s1-1.md'))).toBe(true)
+  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)    // still /clear-able, as the notice says
+  const before = w.submits.length
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(1000)
+  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  expect(w.notices.some(n => n.includes('Handover injected') && n.includes('no automatic resume') && n.includes('s1-1.md'))).toBe(true)
+  expect(w.submits.length).toBe(before)                               // nothing sent over the new session
+})
