@@ -23,6 +23,7 @@ def _no_real_tmux(monkeypatch):
     """
     for var in ("TMUX", "TMUX_PANE", "VIGIL_TMUX_BIN", "VIGIL_KICK_DELAY"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("CENSUS_CLI", raising=False)
 
 
 @pytest.fixture

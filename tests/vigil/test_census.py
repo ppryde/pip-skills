@@ -20,17 +20,6 @@ def _store(store_file, root, pct, *, updated=None, sid="s1"):
     }))
 
 
-class TestStorePath:
-    def test_censusstore_env_wins(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "x.json"))
-        assert census.store_path() == tmp_path / "x.json"
-
-    def test_rooted_at_config_dir(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("CENSUS_STORE", raising=False)
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-        assert census.store_path() == tmp_path / "cfg" / "census" / "status.json"
-
-
 class TestContextPercent:
     def test_reads_pct_for_worktree(self, tmp_path, monkeypatch):
         store = tmp_path / "census" / "status.json"
@@ -184,3 +173,42 @@ class TestCmdContextIntegration:
         # no census entry and no transcript in a tmp root -> unknown, not a crash
         assert main(["--root", str(repo), "context"]) == 0
         assert "ctx unknown" in capsys.readouterr().out
+
+
+class TestCliFailures:
+    def _fake(self, tmp_path, body):
+        script = tmp_path / "fake-census"
+        script.write_text("#!/bin/sh\n" + body + "\n")
+        script.chmod(0o755)
+        return script
+
+    def test_missing_cli_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(tmp_path / "does-not-exist"))
+        assert census.context_percent(tmp_path) is None
+
+    def test_nonzero_exit_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "exit 3")))
+        assert census.context_percent(tmp_path) is None
+
+    def test_junk_output_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "echo not-json")))
+        assert census.context_percent(tmp_path) is None
+
+    def test_slow_cli_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "sleep 5")))
+        monkeypatch.setattr(census, "_TIMEOUT_SECONDS", 0.2)
+        assert census.context_percent(tmp_path) is None
+
+    def test_own_stale_entry_never_falls_back_to_sibling(self, tmp_path, monkeypatch):
+        import json, os, time
+        store = tmp_path / "census" / "status.json"
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        root = os.path.realpath(str(tmp_path))
+        store.parent.mkdir(parents=True)
+        store.write_text(json.dumps({"version": 1, "limits": None, "sessions": {
+            "me": {"worktree_cwd": root, "updated_at": time.time() - 999,
+                   "payload": {"context_window": {"used_percentage": 10}}},
+            "sib": {"worktree_cwd": root, "updated_at": time.time(),
+                    "payload": {"context_window": {"used_percentage": 80}}},
+        }}))
+        assert census.context_percent(tmp_path, session_id="me") is None
