@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Settings, StepId } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
-import { EMPTY_ACTIVITY, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
+import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
@@ -504,8 +504,14 @@ async function maybeFireLastLight($: EngineInterface) {
   await reloadSettings($)
   const now = await nowMs($)
   await observe($, { kind: 'agent-step', at: activity.lastAgentAt ?? 0 })  // picks up a draft (spec §2)
+  // Last light runs on the cache's clock, not the idle window (§2 vs §4): you are idle when nothing
+  // has come from you since the agent's last API activity (R1-07). `lastHumanAt` moves on a prompt,
+  // a command, an edit and the draft pickup above.
+  const lastApiAt = await read($, lastApiA)
+  const youIdle = lastApiAt !== null && (activity.lastHumanAt === null || activity.lastHumanAt <= lastApiAt)
+  const agentIdle = activity.lastAgentAt === null || now - activity.lastAgentAt >= WORKING_MS
   const verdict = shouldFire({
-    enabled: settings.lastLight, mode: mode(activity, now, settings),
+    enabled: settings.lastLight, youIdle, agentIdle,
     contextPct: await read($, contextA), threshold: settings.lastLightAt,
     pending: (await read($, pendingA)) !== null, latched: (await readLatch($)) !== null,
     armed: lastLightArmed,

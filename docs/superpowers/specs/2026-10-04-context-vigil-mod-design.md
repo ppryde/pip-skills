@@ -112,7 +112,9 @@ Every moment is in exactly one of three states; each feature has one home.
 |---|---|---|---|
 | engaged | anything | **attended** | nudge only (bar in the terminal, notice on the phone); never clears |
 | idle ≥ idle window | working | **auto armed** | hands over, clears, resumes by itself (§3) |
-| idle | idle | **last-light territory** | no clear; before the cache goes cold, write the handover only (§4) |
+| idle* | idle | **last-light territory** | no clear; before the cache goes cold, write the handover only (§4) |
+
+\* "idle" here means nothing from you since the agent's last turn (§4), not the idle window.
 
 **Engaged** — any of these within the idle window (default **30 min**, set in
 setup):
@@ -298,7 +300,11 @@ line above the prompt says it is off (the threshold bar wins), and
 `classic.PostModelSwitch` `cache_ttl` updates it (5m to 1h notifies "back on").
 
 **Fire conditions (all):** last light is on (§6); the session is in
-last-light territory (you idle, agent idle — §2); context ≥ the last-light
+last-light territory: **you idle** — no human signal (prompt, slash command,
+prompt-box edit or draft) since the last API activity — and **agent idle** (no
+step in the last 2 min). The idle window (§2) governs auto mode only; last
+light runs on the cache's clock, so it works with any idle window, 60 min
+included; context ≥ the last-light
 threshold (default **25%**); no handover already pending; the limit latch is
 not set; **armed** — a real human prompt (`composer`, `bridge`, `slack-ping`)
 has arrived since the last fire.

@@ -232,7 +232,9 @@ test('without a reported path the transcript is found by the project folder conv
   expect(w.tails.at(-1)?.at(-1)).toBe('/cfg/projects/-repo/s1.jsonl')
 })
 
-test('a hot reload re-arms last light from the last turn', async ($, on) => {
+// R1-07 (hot-reload half, deferred): a reload counts as you being here (arming safety), so it
+// fails closed for that idle period; the next turn schedules last light normally again.
+test('a hot reload skips that idle period\'s last light; the next turn re-arms it', async ($, on) => {
   const w = world(on, LL)
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
@@ -241,6 +243,9 @@ test('a hot reload re-arms last light from the last turn', async ($, on) => {
   await w.clock.advance(10 * MIN)
   await $.session.start(START)          // the reload cancels the scheduled fire
   await w.clock.advance(45 * MIN)
+  expect(asks(w)).toBe(0)
+  await $.turn.complete(turn('next'))
+  await w.clock.advance(55 * MIN)
   expect(asks(w)).toBe(1)
 })
 
@@ -472,4 +477,27 @@ test('R1-05: a return after the cache expired keeps the pending for the ask', as
   await $.prompt.submit(human('back'))
   expect(w.state.get(PENDING)).toBeTruthy()
   expect(eventLog(w)).not.toContain('last_light.dropped')
+})
+
+// R1-07: "you idle" for last light is: nothing from you since the agent's last turn.
+test('R1-07: with a 60-minute idle window last light still fires at +55', async ($, on) => {
+  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90, idleMin: 60 } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(1)
+})
+
+test('R1-07: a draft after the turn blocks that period\'s last light', async ($, on) => {
+  const w = world(on, { store: { settings: { lastLight: true, nudgeAt: 90, idleMin: 60 } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(40 * MIN)
+  w.draft.value = 'typing'               // a draft in the box is you being here
+  await w.clock.advance(15 * MIN)
+  expect(asks(w)).toBe(0)
 })

@@ -1,4 +1,3 @@
-import type { Mode } from '../types'
 import { classifyOrigin } from './arming'
 
 export const LEAD_MS = 300_000
@@ -11,7 +10,8 @@ export function fireAt(lastApiAt: number): number {
 
 export type FireFacts = {
   enabled: boolean
-  mode: Mode
+  youIdle: boolean     // nothing from the person since the agent's last API activity
+  agentIdle: boolean   // no step in the last WORKING_MS
   contextPct: number | null
   threshold: number
   pending: boolean
@@ -22,7 +22,7 @@ export type FireFacts = {
 export function shouldFire(f: FireFacts):
   { fire: true } | { fire: false; reason: 'off' | 'not-idle' | 'small' | 'pending' | 'latched' | 'disarmed' } {
   if (!f.enabled) return { fire: false, reason: 'off' }
-  if (f.mode !== 'idle') return { fire: false, reason: 'not-idle' }
+  if (!f.youIdle || !f.agentIdle) return { fire: false, reason: 'not-idle' }
   if (f.contextPct === null || f.contextPct < f.threshold) return { fire: false, reason: 'small' }
   if (f.pending) return { fire: false, reason: 'pending' }
   if (f.latched) return { fire: false, reason: 'latched' }

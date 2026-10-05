@@ -6,12 +6,12 @@ test('fireAt is last API activity + 1h − lead', () => {
 })
 
 describe('shouldFire', () => {
-  const ok = { enabled: true, mode: 'idle' as const, contextPct: 30, threshold: 25, pending: false, latched: false, armed: true }
+  const ok = { enabled: true, youIdle: true, agentIdle: true, contextPct: 30, threshold: 25, pending: false, latched: false, armed: true }
   test('fires when every condition holds', () => expect(shouldFire(ok)).toEqual({ fire: true }))
   test('each condition blocks with its reason', () => {
     expect(shouldFire({ ...ok, enabled: false })).toEqual({ fire: false, reason: 'off' })
-    expect(shouldFire({ ...ok, mode: 'attended' })).toEqual({ fire: false, reason: 'not-idle' })
-    expect(shouldFire({ ...ok, mode: 'auto' })).toEqual({ fire: false, reason: 'not-idle' })
+    expect(shouldFire({ ...ok, youIdle: false })).toEqual({ fire: false, reason: 'not-idle' })
+    expect(shouldFire({ ...ok, agentIdle: false })).toEqual({ fire: false, reason: 'not-idle' })
     expect(shouldFire({ ...ok, contextPct: 24 })).toEqual({ fire: false, reason: 'small' })
     expect(shouldFire({ ...ok, contextPct: null })).toEqual({ fire: false, reason: 'small' })
     expect(shouldFire({ ...ok, pending: true })).toEqual({ fire: false, reason: 'pending' })
