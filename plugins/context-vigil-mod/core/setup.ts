@@ -161,7 +161,7 @@ export function applyAnswers(s: Settings, pairs: { step: StepId; answer: string 
     const st = STEPS[step]
     if (st.multiSelect) {
       const picked = answer.split(',').map(x => x.trim()).filter(Boolean)
-      if (picked.includes(TELL)) { retell.push(step); continue }
+      if (picked.length === 0 || picked.includes(TELL)) { retell.push(step); continue }
       const order: Window[] = ['seven_day', 'spend_limit']
       out = { ...out, limitWindows: order.filter(w => picked.includes(w) || picked.includes(WINDOW_LABEL[w])) }
       continue

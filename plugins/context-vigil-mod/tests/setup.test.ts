@@ -126,10 +126,14 @@ describe('applyAnswers', () => {
     expect(bad.retell).toEqual(['limit_pct'])
     expect(bad.settings.limitPct).toBe(95)
   })
-  test('windows multi-select, comma-joined, any order, may be empty', () => {
+  test('windows multi-select, comma-joined, any order; empty is re-asked', () => {
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'spend_limit' }]).settings.limitWindows).toEqual(['spend_limit'])
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'spend_limit, seven_day' }]).settings.limitWindows).toEqual(['seven_day', 'spend_limit'])
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: `seven_day, ${TELL}` }]).retell).toEqual(['limit_windows'])
+    // R1-23: an empty selection is re-asked, never stored as "watch nothing"
+    const empty = applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: '' }])
+    expect(empty.retell).toEqual(['limit_windows'])
+    expect(empty.settings.limitWindows).toEqual(DEFAULTS.limitWindows)
   })
   test('an unknown label is retold', () => {
     expect(applyAnswers(DEFAULTS, [{ step: 'bar', answer: 'Maybe' }]).retell).toEqual(['bar'])
