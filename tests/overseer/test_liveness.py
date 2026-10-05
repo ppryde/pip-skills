@@ -78,3 +78,63 @@ def test_live_session_ids_honours_config_dir_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
     monkeypatch.setattr(liveness, "_now_epoch", lambda: now)
     assert liveness.live_session_ids() == {"sess-live"}
+
+
+def test_empty_sessions_is_unknown_not_none_live(tmp_path, monkeypatch):
+    monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "census"))
+    (tmp_path / "census" / "sessions").mkdir(parents=True)
+    assert liveness.live_session_ids() is None
+
+
+def test_cli_failure_is_unknown(tmp_path, monkeypatch):
+    fake = tmp_path / "fake-census"
+    fake.write_text("#!/bin/sh\nexit 1\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("CENSUS_CLI", str(fake))
+    assert liveness.live_session_ids() is None
+
+
+def test_junk_output_is_unknown(tmp_path, monkeypatch):
+    fake = tmp_path / "fake-census"
+    fake.write_text("#!/bin/sh\necho '[1,2]'\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("CENSUS_CLI", str(fake))
+    assert liveness.live_session_ids() is None
+
+
+def test_cli_timeout_is_unknown(tmp_path, monkeypatch):
+    fake = tmp_path / "fake-census"
+    fake.write_text("#!/bin/sh\nexec sleep 5\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("CENSUS_CLI", str(fake))
+    monkeypatch.setattr(liveness, "_TIMEOUT_SECONDS", 0.2)
+    assert liveness.live_session_ids() is None
+
+
+def test_fake_cli_view_yields_only_fresh_sessions(tmp_path, monkeypatch):
+    now = 1_000_000.0
+    view = {
+        "version": 1,
+        "limits": None,
+        "sessions": {
+            "fresh": {"updated_at": now},
+            "stale": {"updated_at": now - 999},
+        },
+    }
+    fake = tmp_path / "fake-census"
+    fake.write_text(f"#!/bin/sh\ncat <<'EOF_VIEW'\n{json.dumps(view)}\nEOF_VIEW\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("CENSUS_CLI", str(fake))
+    monkeypatch.setattr(liveness, "_now_epoch", lambda: now)
+    assert liveness.live_session_ids() == {"fresh"}
+
+
+def test_reads_v2_session_files(tmp_path, monkeypatch):
+    sessions = tmp_path / "census" / "sessions"
+    sessions.mkdir(parents=True)
+    now = 1_000_000.0
+    (sessions / "live.json").write_text(json.dumps({"version": 2, "updated_at": now}))
+    (sessions / "old.json").write_text(json.dumps({"version": 2, "updated_at": now - 999}))
+    monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "census"))
+    monkeypatch.setattr(liveness, "_now_epoch", lambda: now)
+    assert liveness.live_session_ids() == {"live"}

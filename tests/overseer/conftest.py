@@ -44,6 +44,7 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)
+    monkeypatch.delenv("CENSUS_CLI", raising=False)
     # WF-113: work verbs stamp the calling Claude session as a card's
     # orchestrator, and the PreToolUse guard reads OVERSEER_GUARD. A suite run
     # from inside Claude Code inherits both — strip them so no test depends
