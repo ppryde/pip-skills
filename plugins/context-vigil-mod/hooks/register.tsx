@@ -42,6 +42,8 @@ const handoverCountA = atom({ plugin: 'context-vigil-mod', key: 'handoverCount' 
 // them; a clear wipes this, so the clear branch writes it again from the module copy.
 // The prompts held while the return question is open (R1-19, R2-11). In $.state so a hot reload
 // that kills the module (and its ask's closure) still knows what is owed; a clear wipes it.
+// R3-02: the held text also lives here, because a /clear or /resume wipes $.state while the ask stays open.
+let returnHeldMirror: string[] | null = null
 const returnHeldA = atom({ plugin: 'context-vigil-mod', key: 'returnHeld' } as const, null as string[] | null)
 const phoneA = atom({ plugin: 'context-vigil-mod', key: 'phoneFacts' } as const, null as PhoneFacts | null)
 
@@ -699,7 +701,8 @@ async function askReturn($: EngineInterface) {
   const choice = String(await $.ui.ask(V.lastLightAsk, [V.lastLightResume, V.lastLightCarryOn]).catch(() => V.lastLightCarryOn))
   const taken: { v: string[] | null } = { v: null }
   await update($, returnHeldA, h => { taken.v = h; return null })
-  if (!taken.v?.length) return   // already answered by another dialog
+  returnHeldMirror = null
+  if (!taken.v?.length) { await log($, 'last_light.choice', { stale: true }); return }   // already answered, or a clear took it
   // Free text under "Other" is never a clear: carry on, with what was typed kept (intent: when in doubt, don't).
   const typed = choice !== V.lastLightResume && choice !== V.lastLightCarryOn && choice.trim() ? [choice] : []
   const held = [...taken.v, ...typed].join('\n\n')
@@ -770,6 +773,13 @@ export const register: Register = on => {
       resumeChain?.cancel()
       resumeChain = null
       limitResume = null
+      // R3-02: never submit into a different conversation; say what was not sent.
+      const heldAway = returnHeldMirror
+      returnHeldMirror = null
+      if (heldAway?.length) {
+        await notify($, V.heldNotSent(heldAway.join('\n\n')))
+        await log($, 'last_light.choice', { choice: 'dropped', viaResume: true })
+      }
       await checkInterlock($)
       scheduleGit($)
       await resetSessionState($)
@@ -793,6 +803,8 @@ export const register: Register = on => {
     // `session` — still the pre-clear id until it is rebound below.
     const pending = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
     if (pending) await $.store.delete(pendingKey(session))
+    const heldOnClear = returnHeldMirror?.length ? returnHeldMirror.join('\n\n') : null   // R3-02
+    returnHeldMirror = null
     const apiBefore = lastApiMirror
     lastApiMirror = null   // the new session has run no turn
     session = await $.session.id()
@@ -800,8 +812,12 @@ export const register: Register = on => {
     scheduleGit($)
     await resetSessionState($)
     if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
-    if (!pending) return out
-    const follow = pending.followUp
+    if (heldOnClear) await log($, 'last_light.choice', { choice: 'resume', viaClear: true })
+    if (!pending) {
+      if (heldOnClear) submitSoon($, { text: heldOnClear, asUser: true }, 500, undefined, () => { void resumeFailed($, null, heldOnClear) })
+      return out
+    }
+    const follow = pending.followUp ?? heldOnClear
     // /rename starts from its own timer, before the resume submit, and never blocks it.
     const tp = e.transcript_path
     const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`
@@ -851,7 +867,9 @@ export const register: Register = on => {
     if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi !== null ? lastApi + TTL_1H : pending?.reason === 'last_light' ? pending.createdAt + TTL_1H : null })) {
       await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
       let open = false
-      await update($, returnHeldA, h => { open = h !== null; return [...(h ?? []), e.text] })
+      let after: string[] = []
+      await update($, returnHeldA, h => { open = h !== null; after = [...(h ?? []), e.text]; return after })
+      returnHeldMirror = after
       if (!open) $.clock.after(0, () => { void askReturn($) })
       return { drop: V.heldForLastLight }
     }

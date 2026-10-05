@@ -597,6 +597,38 @@ test('a reload while the ask is open re-opens it; whichever answer acts first se
   expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
 })
 
+test('a /clear while the return question is open still sends the held text after the injected handover (R3-02)', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Carry on')
+  w.askHold.held = true
+  await $.prompt.submit(human('one'))
+  await w.clock.advance(1)
+  expect(w.askHold.waiting.length).toBe(1)
+  w.sessionId.value = 's2'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(ss.additionalContext?.join('\n')).toContain('## Goal')
+  await w.clock.advance(500)
+  expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
+  w.askHold.waiting[0]?.('Carry on')                  // the dialog outlives the clear: inert, nothing twice
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
+})
+
+test('a /resume while the return question is open never submits the held text into the other conversation; a notice carries it (R3-02)', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Carry on')
+  w.askHold.held = true
+  await $.prompt.submit(human('one'))
+  await w.clock.advance(1)
+  w.sessionId.value = 's9'
+  await $.classic.SessionStart({ source: 'resume' } as never)
+  await w.clock.settle()
+  expect(w.notices.some(n => n.includes('held message was not sent') && n.includes('one'))).toBe(true)
+  w.askHold.waiting[0]?.('Carry on')
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text === 'one').length).toBe(0)
+})
+
 test('an answer typed under Other is carry-on with the typed text appended, never a clear (R2-11)', async ($, on) => {
   const w = world(on, LL)
   await heldReturn($, w, 'use the handover please')

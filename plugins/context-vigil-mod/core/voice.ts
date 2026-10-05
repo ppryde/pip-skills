@@ -60,6 +60,7 @@ export const V = {
   renameFailed: '🏷️ couldn\'t name the new session — carrying on',
   resumeFailed: (path: string | null, held: string | null) =>
     `▶️ Couldn't resume${path ? ` — the handover is at ${path}` : ''}${held ? ` — your message was not sent: ${held}` : ''}`,
+  heldNotSent: (held: string) => `🌅 Your held message was not sent: ${held}`,
   heldForLastLight: '🌅 Held by context-vigil-mod — last light asks first',
   cmdHandover: '📜 Hand over now (context-vigil-mod)',
   cmdSetup: '⚙️ context-vigil-mod setup — /vsetup [nudge|bar|auto|last-light|limits|rc]',
