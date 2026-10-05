@@ -363,3 +363,25 @@ test('an in-process /resume drops the old conversation\'s limit resume (R2-16)',
   expect(w.submits.some(s => s.text.includes('limit has reset'))).toBe(false)
   expect([...w.files.entries()].filter(([k]) => k.includes('/events/')).map(([, v]) => v).join('')).toContain('resume-dropped')
 })
+
+test('an early stop with a fresh /vho handover already on disk writes no second one and leaves its clear waiting (R2-12)', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+  w.draft.value = 'half a thought'
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.notices.some(n => n.includes('there is a draft'))).toBe(true)
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)                                             // no second handover
+  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)    // the requested one is untouched
+  w.draft.value = ''
+  await w.clock.advance(5000)
+  expect(w.commands).toContain('clear')                               // the person's clear still happens
+  await w.clock.advance(HOUR + 300_000)
+  expect(w.submits.find(s => s.text.includes('limit has reset'))?.text).toContain('/handovers/s1-1.md')
+})

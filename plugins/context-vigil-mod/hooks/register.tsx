@@ -328,15 +328,24 @@ async function savePending($: EngineInterface, p: Pending | null) {
 // An instruction nobody answered for this long, with the agent idle, is lost (R2-03).
 const AWAITING_LOST_MS = 10 * 60_000
 
-async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold') {
-  if (standDown) return
+// What startHandover did, so a caller can say it truthfully (R2-14).
+type Started = 'started' | 'reused' | 'covered' | 'standdown' | 'latched' | 'in-flight'
+
+async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold'): Promise<Started> {
+  if (standDown) return 'standdown'
   const now = await nowMs($)
+  // R2-12: a fresh handover is already on disk (one asked for, waiting to clear): an early stop needs
+  // no second one — the limit resume names this file and the waiting clear is left alone.
+  if (reason === 'limit' && reusable(await read($, pendingA), await read($, lastApiA), now)) {
+    await log($, 'guard.wait', { reason: 'limit-covered' })
+    return 'covered'
+  }
   if (await readLatch($)) {
     // Spec §5: while latched the mod never submits; Task 14's checkLatch starts it later.
     await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false, unattended, since: now }))
     await notify($, V.waiting('latched'))
     await log($, 'guard.wait', { reason: 'latched', deferred: reason })
-    return
+    return 'latched'
   }
   // R1-11: one handover in flight at a time; a second instruction would produce a second tool call.
   // Lost = old AND nothing is running (a queued instruction would have started), so one waiting
@@ -347,7 +356,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     if (now - inFlight.since < AWAITING_LOST_MS || !idle) {
       await notify($, V.handoverInProgress)
       await log($, 'guard.wait', { reason: 'handover-in-flight', asked: reason })
-      return
+      return 'in-flight'
     }
     await update($, awaitingA, () => null)
     await notify($, V.handoverLost)
@@ -355,14 +364,14 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
   }
   const pending = await read($, pendingA)
   if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), now)) {
-    if (clearInFlight) return
-    scheduleClear($, unattended)
-    return
+    if (!clearInFlight) scheduleClear($, unattended)
+    return 'reused'
   }
   if (pending) await supersedePending($)
   await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false, unattended, since: now }))
   await log($, 'handover.requested', { reason, resume })
   submitInstruction($, reason)
+  return 'started'
 }
 
 // A stale pending handover gives way to the fresh one: its clear stops waiting and a /clear
@@ -917,8 +926,9 @@ export const register: Register = on => {
       firedEarlyStops = [...firedEarlyStops, limitDue.key].slice(-20)
       await log($, 'limit.early_stop', { kind: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
       await notify($, V.earlyStop(limitDue.kind, limitDue.pct, formatHHMM(limitDue.resetsAtMs + RESUME_DELAY_MS)))
-      await startHandover($, 'limit', false)
+      const started = await startHandover($, 'limit', false)
       await scheduleResume($, limitDue.resetsAtMs + RESUME_DELAY_MS)
+      if (started === 'covered' && limitResume) limitResume.path = (await read($, pendingA))?.path ?? limitResume.path
     }
     if (pct !== null && !standDown) {
       const due = nextThreshold(pct, settings, await read($, lastNudgedA))
