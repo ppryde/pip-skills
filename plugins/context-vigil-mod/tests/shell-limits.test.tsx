@@ -207,6 +207,32 @@ test('a rejected limit resume is announced and logged, not swallowed', async ($,
   expect([...w.files.values()].some(t => t.includes('submit-rejected'))).toBe(true)
 })
 
+test('a refused limit resume clears the job: the next early stop is judged on its own stop time and file (R3-05)', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  await $.tool.call(write)
+  await w.clock.settle()
+  w.submitRefused.value = true
+  await w.clock.advance(HOUR + 300_000)
+  expect(w.notices.some(n => n.includes("Couldn't resume"))).toBe(true)
+  w.submitRefused.value = false
+  const first = [...w.files.keys()].filter(p => p.includes('/handovers/'))
+  await $.prompt.submit(human('back at the desk'))
+  await w.clock.advance(60_000)
+  const resetsAt = iso(1_000_000 + 4 * HOUR)
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 97, resetsAt }]))
+  await w.clock.settle()
+  await $.tool.call({ ...(write as object), tool_use_id: 'h2' } as never)
+  await w.clock.settle()
+  await w.clock.advance(4 * HOUR)
+  const r = resumes(w)
+  expect(r.length).toBe(1)
+  for (const p of first) expect(r[0]!.text).not.toContain(p)
+})
+
 test('configured trigger and windows: below or unwatched does nothing; the watched window at its trigger fires', async ($, on) => {
   const w = world(on, { store: { settings: { limitPct: 98, limitWindows: ['spend_limit'] } } })
   await $.session.start(START)

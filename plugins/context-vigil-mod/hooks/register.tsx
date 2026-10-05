@@ -552,6 +552,8 @@ function hopResume($: EngineInterface, delayMs: number, job: NonNullable<typeof 
     } catch {
       await notify($, V.resumeFailed(path, null))
       await log($, 'guard.wait', { reason: 'submit-rejected' })
+      limitResume = null   // R3-05: the chain has ended; the next early stop starts its own job
+      resumeChain = null
       return
     }
     limitResume = null
