@@ -58,7 +58,8 @@ process; never raises.
 **Any window kind.** Every `rate_limits` entry that is an object with `used_percentage` and
 `resets_at` is a window (`five_hour`, `seven_day`, a future `spend_limit`...) and is merged
 forward-only. An entry of any other shape is stored verbatim, last write wins, until its real shape
-is known.
+is known. Such entries are never pruned: if Claude Code stops sending one, its last value stays
+until the file is removed.
 
 **Finding census.** Each `census ingest` writes the resolved path of its own `cli.py` to `cli.path`
 (only when it changed), so other tools can locate census without walking plugin directories.

@@ -431,7 +431,7 @@ def _live_limits(limits: Any, now: float, verbatim: bool = False) -> dict[str, A
         if key in _LIMITS_RESERVED:
             continue
         if not _is_window(window, key):
-            if verbatim:
+            if verbatim and key not in _KNOWN_WINDOWS:
                 live[key] = window
             continue
         resets = _number(window.get("resets_at"))
@@ -484,7 +484,9 @@ def _window_is_fresher(incoming: dict[str, Any], stored: dict[str, Any]) -> bool
     return incoming_pct > stored_pct
 
 
-def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -> None:
+def _hoist_limits(
+    store: dict[str, Any], incoming: dict[str, Any], now: float
+) -> None:
     """Fold live rate-limit windows into top-level ``limits``, highest-usage-wins.
 
     ``resets_at`` gating alone is not enough. A dormant session's 5h window can
@@ -508,7 +510,9 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
     changed = False
     for key, window in incoming.items():
         current = merged.get(key)
-        if not _is_window(window, key):  # unknown shape: last write wins
+        if not _is_window(window, key):  # unknown shape: last write wins...
+            if _is_window(current, key):
+                continue  # ...but never over a live window
             if current != window or key not in merged:
                 merged[key] = window
                 changed = True
@@ -674,14 +678,33 @@ def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
 
 def _fold_old_limits(old: dict[str, Any], now: float) -> None:
     """Fold a pre-account limits dict (v1 ``status.json`` or v2 ``limits.json``) into
-    the calling account's file: written as is when there is none, else merged."""
+    the calling account's file through the forward-only merge."""
     old = {k: v for k, v in old.items() if k not in _LIMITS_META}
-    if not limits_path().exists():
-        _atomic_write(limits_path(), {"version": SCHEMA_VERSION, **_identity(), **old})
-        return
+    path = limits_path()
+    if not path.exists() and _create_limits_file(
+        path, {"version": SCHEMA_VERSION, **_identity(), **old}
+    ):
+        return  # no account file existed: keep the legacy figures as they were
+    # A file exists (or a fresh ingest just created it): merge, never overwrite.
     incoming = _live_limits(old, now, verbatim=True)
     if incoming:
         _merge_limits_file(incoming, now)
+
+
+def _create_limits_file(path: Path, body: dict[str, Any]) -> bool:
+    """Create ``path`` only if it does not exist (hard link is exclusive and atomic).
+    False when it already exists, so a concurrent fresher file is never clobbered."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(body, handle)
+        os.link(tmp, path)
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        _unlink(Path(tmp))
 
 
 def _migrate_limits_json(now: float) -> None:
@@ -893,9 +916,11 @@ def limits(now: float | None = None) -> dict[str, Any] | None:
     return _live_limits(_stored_limits(), now, verbatim=True)
 
 
-def all_limits() -> dict[str, Any]:
+def all_limits(now: float | None = None) -> dict[str, Any]:
     """Every account's limits file in this folder, keyed by account key (minus ``version``)."""
     migrate()
+    if now is None:
+        now = time.time()
     out: dict[str, Any] = {}
     try:
         names = sorted(os.listdir(limits_dir()))
@@ -905,8 +930,12 @@ def all_limits() -> dict[str, Any]:
         if name.startswith(".") or not name.endswith(".json"):
             continue
         data = _read_json(limits_dir() / name)
-        if data is not None:
-            out[name[: -len(".json")]] = {k: v for k, v in data.items() if k != "version"}
+        if data is None:
+            continue
+        live = _live_limits(data, now, verbatim=True) or {}
+        meta = {k: v for k, v in data.items() if k in _LIMITS_RESERVED and k != "version"}
+        out[name[: -len(".json")]] = {**{k: meta[k] for k in meta if k != "updated_at"}, **live,
+                                      **({"updated_at": meta["updated_at"]} if "updated_at" in meta else {})}
     return out
 
 

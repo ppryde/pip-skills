@@ -168,3 +168,43 @@ def test_purge_removes_limits_dir(shared, monkeypatch):
     install._purge(folder, True)
     assert not (folder / "limits").exists()
     assert not (folder / "limits.json").exists()
+
+
+@pytest.mark.parametrize("bad", [None, "x", 5, {"resets_at": 1}])
+def test_non_window_never_overwrites_live_window(shared, monkeypatch, capsys, bad):
+    _login(monkeypatch, shared, "cfg-a", _acct("uuid-a"))
+    _ingest("s1", {"five_hour": _win(50), "spend_limit": _win(40)})
+    _ingest("s2", {"five_hour": bad, "spend_limit": {"used_percentage": 1}})
+    got = _read(capsys, "--limits")
+    assert got["five_hour"]["used_percentage"] == 50
+    assert got["spend_limit"]["used_percentage"] == 40
+
+
+def test_known_window_key_never_stored_verbatim(shared, monkeypatch, capsys):
+    _login(monkeypatch, shared, "cfg-a", _acct("uuid-a"))
+    _ingest("s1", {"five_hour": None, "seven_day": "x"})
+    assert "five_hour" not in _read(capsys, "--limits")
+
+
+def test_fold_never_regresses_a_fresh_account_file(shared, monkeypatch, capsys):
+    _login(monkeypatch, shared, "cfg-a", _acct("uuid-a"))
+    folder = shared / "shared"
+    reset = time.time() + 3600
+    _ingest("s1", {"five_hour": {"used_percentage": 60, "resets_at": reset}})
+    (folder / "limits.json").write_text(json.dumps(
+        {"version": 2, "five_hour": {"used_percentage": 5, "resets_at": reset}}))
+    st._migrate_limits_json(time.time())
+    assert _read(capsys, "--limits")["five_hour"]["used_percentage"] == 60
+
+
+def test_all_limits_drops_expired_windows_keeps_identity(shared, monkeypatch, capsys):
+    _login(monkeypatch, shared, "cfg-a", _acct("uuid-a", "org-a"))
+    _ingest("s1", {"five_hour": _win(10), "seven_day": _win(20, 86400)})
+    path = st.limits_path()
+    body = json.loads(path.read_text())
+    body["five_hour"]["resets_at"] = time.time() - 10
+    path.write_text(json.dumps(body))
+    got = _read(capsys, "--limits", "--all")["uuid-a"]
+    assert "five_hour" not in got
+    assert got["seven_day"]["used_percentage"] == 20
+    assert got["org"] == "org-a" and got["account"] == "uuid-a" and "updated_at" in got
