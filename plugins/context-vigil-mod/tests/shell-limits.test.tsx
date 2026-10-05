@@ -239,3 +239,55 @@ test('R1-09: the tool handler honours Awaiting.unattended for the attended re-ch
   expect(w.commands).not.toContain('clear')
   expect(w.notices.some(n => n.includes('you came back'))).toBe(true)
 })
+
+// R1-12: one resume chain per process; nothing sent over a person who has come back; a null path has its own text.
+const stop = async ($: Engine, w: ReturnType<typeof world>, hours = 3) => {
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + hours * HOUR) }]))
+  await w.clock.settle()
+  await $.tool.call(write)
+  await w.clock.settle()
+}
+const resumes = (w: { submits: { text: string }[] }) => w.submits.filter(s => s.text.includes('limit has reset'))
+
+test('R1-12: two windows over the trigger give one resume prompt', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await stop($, w)
+  await $.session.measure(measure([{ kind: 'spend_limit', percentUsed: 97, resetsAt: iso(1_000_000 + 4 * HOUR) }]))
+  await w.clock.settle()
+  await w.clock.advance(5 * HOUR)
+  expect(resumes(w)).toHaveLength(1)
+})
+
+test('R1-12: a message from the person since the stop means no resume prompt, a notice instead', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await stop($, w)
+  await w.clock.advance(HOUR)
+  await $.prompt.submit(human('back already'))
+  await w.clock.advance(3 * HOUR)
+  expect(resumes(w)).toHaveLength(0)
+  expect(w.notices.some(n => n.includes('you are back') && n.includes('s1-1.md'))).toBe(true)
+})
+
+test('R1-12: a draft in the box at resume time means no resume prompt', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await stop($, w)
+  await w.clock.advance(3 * HOUR)
+  w.draft.value = 'half a thought'
+  await w.clock.advance(300_000)
+  expect(resumes(w)).toHaveLength(0)
+  expect(w.notices.some(n => n.includes('you are back'))).toBe(true)
+})
+
+test('R1-12: no handover file means the resume says so, never "(no file)"', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure([{ kind: 'seven_day', percentUsed: 96, resetsAt: iso(1_000_000 + HOUR) }]))
+  await w.clock.settle()
+  await w.clock.advance(HOUR + 300_000)
+  const r = resumes(w)[0]
+  expect(r?.text).toContain('No handover was written')
+  expect(r?.text).not.toContain('(no file)')
+})

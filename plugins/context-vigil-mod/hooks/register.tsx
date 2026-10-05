@@ -55,7 +55,9 @@ let standDown = false
 // and a clear (new session id) must not re-fire one for the same window. A reload may re-fire once.
 let firedEarlyStops: string[] = []
 // The limit resume waiting on its handover file; the tool call fills `path` when it is written.
-let limitResume: { path: string | null } | null = null
+let limitResume: { path: string | null; at: number; stoppedAt: number; gen: number } | null = null
+let resumeChain: { cancel: () => void } | null = null
+let resumeGen = 0
 // The first-RC question is asked once per process: a clear wipes $.state, so it cannot live there.
 // A new session (bindSession) starts it fresh; resetCaches leaves it alone.
 let rcAsked = false
@@ -424,22 +426,41 @@ async function checkLatch($: EngineInterface, limits: RateLimit[]) {
 }
 
 // Waits in hops of at most an hour; never submits while latched (spec §5); drops the limit
-// handover once the resume is sent so a later /clear does not re-inject it. The path comes from
-// `job`, so a clear that consumed the pending handover in between still names the file.
-function scheduleResume($: EngineInterface, at: number, job: { path: string | null } = { path: null }) {
-  limitResume = job
-  $.clock.after(0, async () => {
-    const wait = nextHop(await nowMs($), at)
-    if (wait > 0) { $.clock.after(wait, () => { scheduleResume($, at, job) }); return }
-    if (await readLatch($)) { $.clock.after(60_000, () => { scheduleResume($, at, job) }); return }
+// handover once the resume is sent so a later /clear does not re-inject it. One chain per process
+// (R1-12): a second early stop moves the existing job's time out, it never starts a second chain.
+// Nothing is sent over a person who has come back since the stop, or over a draft: a notice names
+// the handover instead. The path lives on the job, so a clear that consumed the pending handover
+// in between still names the file.
+async function scheduleResume($: EngineInterface, at: number) {
+  const stoppedAt = await nowMs($)
+  resumeChain?.cancel()
+  limitResume = { path: limitResume?.path ?? null, at: Math.max(limitResume?.at ?? 0, at), stoppedAt: limitResume?.stoppedAt ?? stoppedAt, gen: ++resumeGen }
+  hopResume($, 0, limitResume)
+}
+
+function hopResume($: EngineInterface, delayMs: number, job: NonNullable<typeof limitResume>) {
+  resumeChain = $.clock.after(delayMs, async () => {
+    if (job.gen !== resumeGen) return
+    const wait = nextHop(await nowMs($), job.at)
+    if (wait > 0) { hopResume($, wait, job); return }
+    if (await readLatch($)) { hopResume($, 60_000, job); return }
     const pending = await read($, pendingA)
+    const path = job.path ?? pending?.path ?? null
+    const back = activity.lastHumanAt !== null && activity.lastHumanAt > job.stoppedAt
+    if (back || (await $.prompt.read()).text.trim()) {
+      await notify($, V.resumeSkipped(path))
+      await log($, 'guard.wait', { reason: 'resume-skipped', human: true })
+      limitResume = null
+      return
+    }
     try {
-      await $.prompt.submit({ text: limitResumeText(job.path ?? pending?.path ?? '(no file)') })
+      await $.prompt.submit({ text: limitResumeText(path) })
     } catch {
-      await notify($, V.resumeFailed(job.path ?? pending?.path ?? null, null))
+      await notify($, V.resumeFailed(path, null))
       await log($, 'guard.wait', { reason: 'submit-rejected' })
       return
     }
+    limitResume = null
     if (pending?.reason === 'limit') await savePending($, null)
   })
 }
@@ -783,7 +804,7 @@ export const register: Register = on => {
       await log($, 'limit.early_stop', { kind: limitDue.kind, pct: limitDue.pct, resetsAtMs: limitDue.resetsAtMs })
       await notify($, V.earlyStop(limitDue.kind, limitDue.pct, formatHHMM(limitDue.resetsAtMs + RESUME_DELAY_MS)))
       await startHandover($, 'limit', false)
-      scheduleResume($, limitDue.resetsAtMs + RESUME_DELAY_MS)
+      await scheduleResume($, limitDue.resetsAtMs + RESUME_DELAY_MS)
     }
     if (pct !== null && !standDown) {
       const due = nextThreshold(pct, settings, await read($, lastNudgedA))

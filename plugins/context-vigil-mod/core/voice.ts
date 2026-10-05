@@ -31,6 +31,8 @@ export const V = {
   resumeStale: (path: string) => `📜 Handover injected (${path}) — it was written before later turns, so no automatic resume; say where to pick up`,
   resumeLatched: (path: string) => `⏳ Handover injected (${path}) — the usage limit is in force, so the resume prompt was not sent; ask to resume when it lifts`,
   handoverInProgress: '📜 A handover is already in progress — one at a time',
+  resumeSkipped: (path: string | null) =>
+    `⏳ The limit has reset — you are back, so no resume was sent; ${path ? `the handover is at ${path}` : 'no handover was written'}`,
   handoverFailed: '📜 Couldn\'t write a handover — nothing was cleared',
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,

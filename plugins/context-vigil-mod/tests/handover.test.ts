@@ -112,6 +112,7 @@ test('texts name the tool and the file', () => {
   expect(after).toContain('/cfg/x.md')
   expect(after).toContain('limit has reset')
   expect(after).not.toContain('injected above')
+  expect(limitResumeText(null)).toContain('No handover was written')
 })
 
 describe('reusable', () => {

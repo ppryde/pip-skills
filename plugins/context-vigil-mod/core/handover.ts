@@ -115,6 +115,9 @@ export function injectText(markdown: string): string {
 }
 
 // After a limit early stop there was no clear: the conversation is still here.
-export function limitResumeText(path: string): string {
+export function limitResumeText(path: string | null): string {
+  if (path === null) {
+    return '[context-vigil-mod] The usage limit has reset. No handover was written before the stop (it was deferred or classic was active); pick up from the conversation as it stands.'
+  }
   return `[context-vigil-mod] The usage limit has reset. Continue the work; the handover you wrote is saved at ${path} if you need it.`
 }
