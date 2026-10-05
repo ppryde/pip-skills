@@ -716,6 +716,8 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'AskUserQuestion' } as never, async ($, e, next) => {
     const r = await next(e) as { context?: string[] }
+    // An answered question is a human act, whoever asked it; a dismissed card observes nothing (R1-03).
+    if (Object.keys(extractAnswers(e, r)).length) await observe($, { kind: 'human-command', at: await nowMs($) })
     // Captured once: a clear landing during an await below resets the module's setupRun.
     const run = setupRun
     if (!run) return r as never
@@ -737,7 +739,9 @@ export const register: Register = on => {
     }
     if (setupRun === run) setupRun = null
     await notify($, V.setupSaved)
-    if (settings.rcAutoClear === 'yes' && clearParked && (await read($, pendingA))) scheduleClear($, true)
+    // The person who just answered is here: a clear parked while they were away is offered, never run.
+    const parked = clearParked ? await read($, pendingA) : null
+    if (parked) await notify($, V.pendingOffer(parked.path))
     return r as never
   })
 

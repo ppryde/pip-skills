@@ -143,7 +143,10 @@ prototype showed it reports only `[terminal]` with a phone attached, and no
   human origin is `bridge`, the mod asks once — allow auto-clear in Remote
   Control sessions? (options + "Tell me more", §6). The answer is stored in
   `$.store`. Until answered, or if declined, RC sessions never auto-clear: the
-  handover is written and a notice offers `/clear`.
+  handover is written and a notice offers `/clear`. Answering the question (or
+  any card) counts as you being here: it never runs a clear that was parked
+  while you were away; the saved handover stays offered (`/clear` to resume
+  from it) and the answer governs the next unattended threshold.
 - **When allowed, two safety nets stay on,** because phone typing is invisible
   to the mod:
   - a **30 s countdown** shown as a notice (and in the bar where drawn) with a

@@ -98,6 +98,8 @@ test('RC answered Yes: saved, and the unattended clear on the phone goes through
   const card = cardOf(w.submits.at(-1)?.text ?? '')
   await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'Yes' }) as never)
   expect(w.store.get('settings')).toMatchObject({ rcAutoClear: 'yes' })
+  await w.clock.advance(31 * MIN)                // answering was presence: wait out the idle window
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', command: 'ls' } as never)
   await $.session.measure({ context: { window: 1_000_000, percent: 20 }, rateLimits: [], changed: ['context'] as never })
   await $.session.measure({ context: { window: 1_000_000, percent: 36 }, rateLimits: [], changed: ['context'] as never })
   await w.clock.settle()
@@ -108,12 +110,46 @@ test('RC answered Yes: saved, and the unattended clear on the phone goes through
   expect(w.commands).toContain('clear')
 })
 
+const at = (percent: number) => ({ context: { window: 1_000_000, percent }, rateLimits: [], changed: ['context'] as never })
+const handWritten = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never
+
+// R1-03: an answered card is the person being here.
+test('R1-03: answering Yes to a parked unattended clear offers it, never runs it', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await armOnPhone($ as never, w)
+  const card = cardOf(w.submits.at(-1)?.text ?? '')
+  await $.session.measure(at(20))
+  await $.session.measure(at(36))
+  await w.clock.settle()
+  await $.tool.call(handWritten)
+  await w.clock.settle()
+  expect(w.notices).toContain('📱 Handover saved — auto-clear in Remote Control is not switched on (/vsetup rc)')
+  w.notices.length = 0
+  await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'Yes' }) as never)
+  await w.clock.advance(31_000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+  expect(w.notices.some(n => n.includes('A handover is waiting'))).toBe(true)
+})
+
+test('R1-03: any answered AskUserQuestion counts as presence, the mod asked it or not', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  expect(w.state.get('context-vigil-mod.mode')).toBe('auto')
+  await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q2', questions: [{ question: 'Pick?' }], answers: { 'Pick?': 'A' } } as never)
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+})
+
 test('RC answered No: saved, and the unattended clear on the phone never runs', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true } } })
   await armOnPhone($ as never, w)
   const card = cardOf(w.submits.at(-1)?.text ?? '')
   await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'No' }) as never)
   expect(w.store.get('settings')).toMatchObject({ rcAutoClear: 'no' })
+  await w.clock.advance(31 * MIN)                // answering was presence: wait out the idle window
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', command: 'ls' } as never)
   await $.session.measure({ context: { window: 1_000_000, percent: 20 }, rateLimits: [], changed: ['context'] as never })
   await $.session.measure({ context: { window: 1_000_000, percent: 36 }, rateLimits: [], changed: ['context'] as never })
   await w.clock.settle()
