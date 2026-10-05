@@ -198,6 +198,21 @@
         "remote-control",
         "mod"
       ]
+    },
+    {
+      "name": "context-vigil-mod",
+      "source": "./plugins/context-vigil-mod",
+      "description": "Context handover as a Claude Code mod: a threshold nudge and vigil bar, auto handover with an in-process /clear and resume while you're away, last light before the 1-hour prompt cache expires, and a limit latch with early stop. No tmux, no status line. Commands /vho, /vhandoff, /vsetup. A mod.",
+      "category": "engineering",
+      "tags": [
+        "context",
+        "handover",
+        "clear",
+        "resume",
+        "rate-limits",
+        "remote-control",
+        "mod"
+      ]
     }
   ]
 }
