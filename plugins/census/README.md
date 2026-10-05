@@ -19,7 +19,8 @@ worktrees).
 
 A folder at `$CLAUDE_CONFIG_DIR/census/` — i.e. `~/.claude/census/` by default, or
 `~/.claude-personal/census/` when that account sets `CLAUDE_CONFIG_DIR` (override the folder
-entirely with `CENSUS_STORE`):
+entirely with `CENSUS_STORE`, which names the census directory; a value ending in `.json`, the v1
+meaning, is read as its parent directory for one release):
 
 ```
 census/
@@ -48,6 +49,9 @@ census/
 sessions never contend. Only `limits.json` is shared, and its merge only ever moves forward, so a
 lost race costs at most one refresh of a lower figure and can never stick wrong. A session id that
 is not a safe filename (`[A-Za-z0-9._-]+`, up to 128 chars) is refused.
+
+Pruning is write-side: each ingest deletes session files whose `updated_at` is more than 24 h older
+than that ingest; reads never delete.
 
 `census read` prints the unchanged v1 view (`{version: 1, limits, sessions}`), so readers see no
 difference.
@@ -81,7 +85,8 @@ difference.
 ## Upgrading from v1
 
 Automatic. The first `census` run on a v1 `status.json` splits it into per-session files and
-`limits.json`, then renames it to `status.json.v1-migrated`, kept for 7 days and then deleted. Run
+`limits.json`, then renames it to `status.json.v1-migrated`, kept for 7 days and then deleted. Migration is idempotent; if another process holds the migration lock, that run skips
+migration but still records its own session. Run
 `census install --yes` once per account to replace an old hand-made launcher with the managed one.
 
 ## Usage
@@ -92,7 +97,7 @@ census install --yes      # launcher at ~/.local/bin/census + status-line block
 census uninstall --yes    # remove both; --purge also deletes this account's data
 ```
 
-`--shim` or `--statusline` limits either command to one half. Both are idempotent. The older
+`--shim PATH` and `--statusline PATH` override the launcher and status-line script locations. Both are idempotent. The older
 `census install-statusline [--uninstall]` still works as a **deprecated alias** for one release.
 
 Or add the one line yourself, after your script slurps stdin into `$input`:
