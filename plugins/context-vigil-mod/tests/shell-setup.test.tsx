@@ -16,11 +16,11 @@ test('/vsetup asks card 1 through the model, saves the answers, follows with car
   const prompt = w.submits.at(-1)?.text ?? ''
   expect(prompt).toContain('AskUserQuestion')
   const card = cardOf(prompt)
-  expect(card.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️Vigil bar', '🤖 Auto mode', '🌅Last light'])
+  expect(card.map(q => q.header)).toEqual(['🎚️ Nudge at', '🎛️ The bar', '🤖 Auto mode', '🌅 Lastlight'])
   const answers = Object.fromEntries(card.map(q => [q.question, q.header.includes('Auto') ? 'On' : q.header.includes('Nudge') ? '50%' : 'Off']))
   const r = await $.tool.call(ask(card, answers) as never)
   const next = JSON.stringify((r as { context?: string[] }).context ?? [])
-  expect(next).toContain('⏱️Idle time')
+  expect(next).toContain('⏱️ Idle time')
   expect(next).toContain('⏳ Limits')
   expect(next).not.toContain('⏳ Trigger %')
   expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50, bar: false, auto: true, lastLight: false })
@@ -33,7 +33,7 @@ test('Tell me more re-asks that question with the explanation', async ($, on) =>
   await w.clock.settle()
   const card = cardOf(w.submits.at(-1)?.text ?? '')
   const r = await $.tool.call(ask(card, { [card[0]?.question ?? '']: 'Tell me more' }) as never)
-  expect(JSON.stringify((r as { context?: string[] }).context ?? [])).toContain('A one-line bar')
+  expect(JSON.stringify((r as { context?: string[] }).context ?? [])).toContain('1 hand over · 2 remind me at +5% · 0 dismiss')
 })
 
 test('answers to questions that are not ours are left alone', async ($, on) => {

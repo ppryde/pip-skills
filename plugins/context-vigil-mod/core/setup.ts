@@ -28,46 +28,47 @@ const onOff = (key: 'bar' | 'auto' | 'lastLight' | 'limits', recommendOn: boolea
   return onFirst ? [on, off] : [off, on]
 }
 const always = () => true
+const WINDOW_LABEL: Record<Window, string> = { seven_day: 'Weekly (seven_day)', spend_limit: 'Spend cap (spend_limit)' }
 
 export const STEPS: Record<StepId, Step> = {
   nudge: {
-    header: '🎚️ Nudge at', question: 'At what context % should I nudge you to hand over?',
-    explain: 'When context crosses this level you get the vigil bar in the terminal (or a notice on the phone), and again every +5%. Lower means earlier, smaller handovers. Default 35%.',
+    header: '🎚️ Nudge at', question: 'Big contexts get slower and pricier. At what % should I suggest a handover?',
+    explain: 'The vigil bar shows in the terminal when context reaches this level, and again every +5%. Lower means earlier, smaller handovers. Terminal only. Default 35%.',
     options: pctOpts('nudgeAt', [25, 35, 50], 35), askIf: always,
   },
   bar: {
-    header: '🎛️Vigil bar', question: 'Show the vigil bar above the prompt at the threshold?',
-    explain: 'A one-line bar: 1 hand over · 2 remind me at +5% · 0 dismiss. A bare digit typed into an empty prompt presses it, so it only shows from the threshold until you choose. Off means notices only. Default On.',
+    header: '🎛️ The bar', question: "Show a one-line bar above the prompt when it's time to hand over?",
+    explain: '1 hand over · 2 remind me at +5% · 0 dismiss. A bare digit typed into an empty prompt presses it, so the bar only shows from the threshold until you pick. Off = a notice line instead. Default On.',
     options: onOff('bar', true, true), askIf: always,
   },
   auto: {
-    header: '🤖 Auto mode', question: 'Let me hand over, clear and resume by myself while you are away?',
+    header: '🤖 Auto mode', question: "While you're away and I'm still working, may I hand over, clear and carry on by myself?",
     explain: 'Auto mode arms only when you have sent nothing for the idle window and the agent is still working on its own; any message from you disarms it at once. Default Off.',
     options: onOff('auto', false, false), askIf: always,
   },
   idle: {
-    header: '⏱️Idle time', question: 'How long without a message from you before auto mode may arm?',
-    explain: 'Messages, slash commands and typing in the terminal all count as you being here. Pick longer if you jump between windows a lot. Default 30 min.',
-    options: [15, 30, 60].map(n => ({ label: `${n} min`, description: n === 30 ? 'Recommended' : '', apply: (s: Settings) => ({ ...s, idleMin: n }) })),
+    header: '⏱️ Idle time', question: "Auto handovers pause while you're interacting. How long without a message from you before I treat the session as unattended?",
+    explain: 'Messages, slash commands and typing in the terminal all count as you being here. Pick longer if you flit between windows. Default 30 min.',
+    options: [15, 30, 60].map(n => ({ label: `${n} min`, description: { 15: 'You step away properly when you leave', 30: 'Recommended', 60: 'You flit between windows and come back later' }[n] ?? '', apply: (s: Settings) => ({ ...s, idleMin: n }) })),
     askIf: s => s.auto,
   },
   last_light: {
-    header: '🌅Last light', question: 'Write a handover before an idle 1-hour cache goes cold?',
+    header: '🌅 Lastlight', question: "When we're both idle, write a handover just before the 1-hour cache expires, so coming back is cheap?",
     explain: 'Works only with a 1-hour prompt cache: Just before I would act I check which one your session writes, and stay off for a 5-minute cache (or if I cannot tell) rather than warm a cold one. When you and the agent are both idle, a few minutes before that cache expires I write a handover — nothing is cleared. When you come back I ask: resume from it cheaply, or carry on and pay the cold cache. Default Off.',
     options: onOff('lastLight', false, false), askIf: always,
   },
   last_light_at: {
-    header: '🌅 Threshold', question: 'At what context % should last light step in?',
+    header: '🌅 Threshold', question: 'Only bother when context is at least…?',
     explain: 'Below this, a cold cache is cheap enough not to bother. Default 25%.',
     options: pctOpts('lastLightAt', [25, 35, 50], 25), askIf: s => s.lastLight,
   },
   limits: {
-    header: '⏳ Limits', question: 'Stop early and hand over before a 7-day or spend limit runs out?',
+    header: '⏳ Limits', question: 'Near a 7-day or spend limit, stop early with a handover so no work is lost?',
     explain: 'Near the limit I write a handover and arrange to resume after the reset if this session stays open. The 5-hour limit is left to Claude Code\'s own wrap-up and auto-continue. Default On.',
     options: onOff('limits', true, true), askIf: always,
   },
   limit_pct: {
-    header: '⏳ Trigger %', question: 'At what % of the limit should I stop early?',
+    header: '⏳ Trigger %', question: 'Stop at what % of the limit?',
     explain: 'Higher squeezes more work in; lower leaves more room for the handover itself. Type any whole number under Other. Default 95%.',
     options: [90, 95, 98].map(n => ({ label: n === 95 ? '95% (Recommended)' : `${n}%`, description: '', apply: (s: Settings) => ({ ...s, limitPct: n }) })),
     other: (s, text) => {
@@ -79,11 +80,11 @@ export const STEPS: Record<StepId, Step> = {
   limit_windows: {
     header: '⏳ Windows', question: 'Which limits should I watch?',
     explain: 'seven_day is the weekly window; spend_limit is a gateway or monthly spend cap. Pick either or both. Default both.',
-    options: (['seven_day', 'spend_limit'] as Window[]).map(w => ({ label: w, description: '', apply: (s: Settings) => s })),
+    options: (['seven_day', 'spend_limit'] as Window[]).map(w => ({ label: WINDOW_LABEL[w], description: '', apply: (s: Settings) => s })),
     multiSelect: true, askIf: s => s.limits,
   },
   rc: {
-    header: '📱 RC clear', question: 'Allow auto-clear in Remote Control (phone) sessions?',
+    header: '📱 RC clear', question: "I can't see you typing on the phone, so a clear could land mid-message. Allow auto-clear in phone sessions?",
     explain: 'Your phone\'s typing is invisible to me, so a clear could land while you write. With Yes, a 30-second countdown runs first (send anything to cancel) and I never clear within 2 minutes of your last phone message. Default No.',
     options: [
       { label: 'No', description: 'Recommended', apply: s => ({ ...s, rcAutoClear: 'no' }) },
@@ -162,7 +163,7 @@ export function applyAnswers(s: Settings, pairs: { step: StepId; answer: string 
       const picked = answer.split(',').map(x => x.trim()).filter(Boolean)
       if (picked.includes(TELL)) { retell.push(step); continue }
       const order: Window[] = ['seven_day', 'spend_limit']
-      out = { ...out, limitWindows: order.filter(w => picked.includes(w)) }
+      out = { ...out, limitWindows: order.filter(w => picked.includes(w) || picked.includes(WINDOW_LABEL[w])) }
       continue
     }
     if (answer === TELL) { retell.push(step); continue }
