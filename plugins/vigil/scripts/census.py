@@ -11,7 +11,7 @@ census has no entry for it yet), lookup falls back to the newest write for the
 worktree (``census read --worktree``).
 
 census is a HARD-coupled contract: vigil reads only through the ``census read``
-CLI (``CENSUS_CLI``, the sibling plugin's cli.py, or ``census`` on PATH) and
+CLI (``CENSUS_CLI``, the ``cli.path`` pointer census publishes, or ``census`` on PATH) and
 parses its v1 entry JSON; it never touches census's on-disk store. Still
 quarantine-safe: if the CLI is missing, slow, fails, or prints junk, or the
 entry is stale or absent, every function returns None and the caller falls back
@@ -38,49 +38,32 @@ STALE_HORIZON_SECONDS = 90  # ~1.5x the status line's 60s refresh; older = not l
 _TIMEOUT_SECONDS: float = 2
 
 
-def _version_key(name: str) -> tuple[int, ...]:
-    """A directory name as a comparable version; non-numeric parts sort as 0."""
-    return tuple(int(part) if part.isdigit() else 0 for part in name.split("."))
+def _pointer_file() -> Path:
+    """Where census publishes its CLI location (``cli.path`` in its directory).
 
-
-def find_census(_from: Path | None = None) -> Path | None:
-    """The census plugin's ``scripts/cli.py`` in EITHER layout, or None.
-
-    Walks up from this file and, at each level, tests ``<parent>/census/scripts/cli.py``
-    (repo checkout), else the highest-version ``<parent>/census/<ver>/scripts/cli.py``
-    (marketplace cache, skipping versions Claude Code marked ``.orphaned_at``).
-    A local copy of ``find_plugin`` in overseer's cli_client: plugins cannot import
-    each other.
+    Mirrors census's own directory rules: ``CENSUS_STORE`` (a value ending ``.json``
+    means its parent), else ``$CLAUDE_CONFIG_DIR/census``, else ``~/.claude/census``.
     """
-    start = (_from or Path(__file__)).resolve()
-    for parent in start.parents:
-        candidate = parent / "census"
-        if not candidate.is_dir():
-            continue
-        direct = candidate / "scripts" / "cli.py"
-        if direct.is_file():
-            return direct
-        versioned = [
-            child / "scripts" / "cli.py"
-            for child in candidate.iterdir()
-            if child.is_dir()
-            and not (child / ".orphaned_at").exists()
-            and (child / "scripts" / "cli.py").is_file()
-        ]
-        if versioned:
-            return max(versioned, key=lambda cli: _version_key(cli.parents[1].name))
-    return None
+    store = os.environ.get("CENSUS_STORE")
+    if store:
+        path = Path(store)
+        return (path.parent if path.suffix == ".json" else path) / "cli.path"
+    config = os.environ.get("CLAUDE_CONFIG_DIR")
+    return (Path(config) if config else Path.home() / ".claude") / "census" / "cli.path"
 
 
 def census_cli() -> list[str] | None:
-    """How to run census: ``CENSUS_CLI``, else the census plugin found by walking up (either layout), else
-    ``census`` on PATH. None when none is found."""
+    """How to run census: ``CENSUS_CLI``, else the path census published in ``cli.path``,
+    else ``census`` on PATH. None when none is found. Never raises."""
     override = os.environ.get(CLI_ENV)
     if override:
         return [sys.executable, override] if override.endswith(".py") else [override]
-    found_cli = find_census()
-    if found_cli is not None:
-        return [sys.executable, str(found_cli)]
+    try:
+        recorded = _pointer_file().read_text(encoding="utf-8").strip()
+        if recorded and Path(recorded).is_file():
+            return [sys.executable, recorded]
+    except (OSError, ValueError):
+        pass
     found = shutil.which("census")
     return [found] if found else None
 

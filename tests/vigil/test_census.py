@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import time
 
 from scripts import census
@@ -254,39 +255,52 @@ class TestCliCalls:
         assert log.read_text().splitlines() == ["read --session abc"]
 
 
-def _cache(tmp_path, versions, orphaned=()):
-    base = tmp_path / "cache" / "mkt"
-    for ver in versions:
-        cli = base / "census" / ver / "scripts" / "cli.py"
-        cli.parent.mkdir(parents=True)
-        cli.write_text("")
-    for ver in orphaned:
-        (base / "census" / ver / ".orphaned_at").write_text("1")
-    here = base / "vigil" / "0.2.2" / "scripts" / "census.py"
-    here.parent.mkdir(parents=True)
-    here.write_text("")
-    return base, here
+class TestCensusCliDiscovery:
+    @staticmethod
+    def _pointer(tmp_path, monkeypatch, target):
+        monkeypatch.delenv("CENSUS_CLI", raising=False)
+        monkeypatch.delenv("CENSUS_STORE", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.setenv("PATH", str(tmp_path / "emptybin"))
+        pointer = tmp_path / "cfg" / "census" / "cli.path"
+        pointer.parent.mkdir(parents=True)
+        pointer.write_text(str(target))
+        return pointer
 
+    def test_pointer_to_existing_cli_is_used(self, tmp_path, monkeypatch):
+        fake = tmp_path / "cli.py"
+        fake.write_text("")
+        self._pointer(tmp_path, monkeypatch, fake)
+        assert census.census_cli() == [sys.executable, str(fake)]
 
-class TestFindCensusInCache:
-    def test_finds_cached_census_not_a_sibling(self, tmp_path):
-        base, here = _cache(tmp_path, ["0.3.0"])
-        assert census.find_census(_from=here) == base / "census" / "0.3.0" / "scripts" / "cli.py"
+    def test_pointer_to_missing_file_falls_through_to_none(self, tmp_path, monkeypatch):
+        self._pointer(tmp_path, monkeypatch, tmp_path / "gone.py")
+        assert census.census_cli() is None
 
-    def test_prefers_highest_version_numerically(self, tmp_path):
-        base, here = _cache(tmp_path, ["0.9.0", "0.10.0"])
-        assert census.find_census(_from=here).parents[1].name == "0.10.0"
+    def test_missing_pointer_falls_through_to_path(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CENSUS_CLI", raising=False)
+        monkeypatch.delenv("CENSUS_STORE", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        binary = tmp_path / "bin" / "census"
+        binary.parent.mkdir()
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+        monkeypatch.setenv("PATH", str(binary.parent))
+        assert census.census_cli() == [str(binary)]
 
-    def test_skips_orphaned(self, tmp_path):
-        base, here = _cache(tmp_path, ["0.9.0", "0.10.0"], orphaned=["0.10.0"])
-        assert census.find_census(_from=here).parents[1].name == "0.9.0"
+    def test_census_cli_env_beats_pointer(self, tmp_path, monkeypatch):
+        fake = tmp_path / "cli.py"
+        fake.write_text("")
+        self._pointer(tmp_path, monkeypatch, fake)
+        monkeypatch.setenv("CENSUS_CLI", "/somewhere/census")
+        assert census.census_cli() == ["/somewhere/census"]
 
-    def test_repo_layout_and_absent(self, tmp_path):
-        direct = tmp_path / "plugins" / "census" / "scripts" / "cli.py"
-        direct.parent.mkdir(parents=True)
-        direct.write_text("")
-        here = tmp_path / "plugins" / "vigil" / "scripts" / "census.py"
-        here.parent.mkdir(parents=True)
-        here.write_text("")
-        assert census.find_census(_from=here) == direct
-        assert census.find_census(_from=tmp_path / "nowhere" / "x.py") is None
+    def test_census_store_json_resolves_pointer_in_parent(self, tmp_path, monkeypatch):
+        fake = tmp_path / "cli.py"
+        fake.write_text("")
+        self._pointer(tmp_path, monkeypatch, tmp_path / "unused.py")
+        store = tmp_path / "elsewhere" / "status.json"
+        store.parent.mkdir()
+        (store.parent / "cli.path").write_text(str(fake))
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        assert census.census_cli() == [sys.executable, str(fake)]

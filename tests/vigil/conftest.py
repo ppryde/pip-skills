@@ -1,6 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.store import ensure_root
+
+_CENSUS_CLI = Path(__file__).resolve().parents[2] / "plugins" / "census" / "scripts" / "cli.py"
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +27,8 @@ def _no_real_tmux(monkeypatch):
     """
     for var in ("TMUX", "TMUX_PANE", "VIGIL_TMUX_BIN", "VIGIL_KICK_DELAY"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.delenv("CENSUS_CLI", raising=False)
+    # Hermetic census lookup: the repo's own CLI, never a real pointer or PATH entry.
+    monkeypatch.setenv("CENSUS_CLI", str(_CENSUS_CLI))
 
 
 @pytest.fixture

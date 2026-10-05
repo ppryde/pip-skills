@@ -1316,7 +1316,6 @@ class TestClaimNudgedVerb:
 class TestClaimCensusHelper:
     def test_census_cli_resolves_in_repo(self, monkeypatch):
         import scripts.cli as cli
-        monkeypatch.delenv("CENSUS_CLI", raising=False)
         found = cli.liveness.census_cli()
         assert found is not None and found[-1].endswith("cli.py") and "census" in found[-1]
 
