@@ -372,7 +372,7 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
   const pending = await read($, pendingA)
   if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), now)) {
     // R3-01: the person's /vho wants the resume; a volunteered pending saved resume:false.
-    if (pending && pending.resume !== resume) await savePending($, { ...pending, resume })
+    if (pending && (pending.resume !== resume || (unattended && !pending.unattended))) await savePending($, { ...pending, resume, unattended: pending.unattended || unattended })
     if (!clearInFlight) scheduleClear($, unattended)
     return 'reused'
   }
@@ -700,8 +700,7 @@ async function maybeFireLastLight($: EngineInterface) {
 async function askReturn($: EngineInterface) {
   const choice = String(await $.ui.ask(V.lastLightAsk, [V.lastLightResume, V.lastLightCarryOn]).catch(() => V.lastLightCarryOn))
   const taken: { v: string[] | null } = { v: null }
-  await update($, returnHeldA, h => { taken.v = h; return null })
-  returnHeldMirror = null
+  await update($, returnHeldA, h => { taken.v = h; returnHeldMirror = null; return null })
   if (!taken.v?.length) { await log($, 'last_light.choice', { stale: true }); return }   // already answered, or a clear took it
   // Free text under "Other" is never a clear: carry on, with what was typed kept (intent: when in doubt, don't).
   const typed = choice !== V.lastLightResume && choice !== V.lastLightCarryOn && choice.trim() ? [choice] : []
@@ -752,6 +751,7 @@ export const register: Register = on => {
     }
     scheduleGit($)
     // R2-11: a reload while the return question was open: its dialog's closure is gone, ask again.
+    returnHeldMirror = await read($, returnHeldA)   // a real reload reset the module copy; $.state kept the text
     if ((await read($, returnHeldA))?.length && (await read($, pendingA))?.reason === 'last_light') $.clock.after(0, () => { void askReturn($) })
     return r
   })
@@ -817,7 +817,7 @@ export const register: Register = on => {
       if (heldOnClear) submitSoon($, { text: heldOnClear, asUser: true }, 500, undefined, () => { void resumeFailed($, null, heldOnClear) })
       return out
     }
-    const follow = pending.followUp ?? heldOnClear
+    const follow = [pending.followUp, heldOnClear].filter(Boolean).join('\n\n') || null
     // /rename starts from its own timer, before the resume submit, and never blocks it.
     const tp = e.transcript_path
     const oldTranscript = tp === undefined ? undefined : `${tp.slice(0, tp.lastIndexOf('/') + 1)}${pending.session}.jsonl`

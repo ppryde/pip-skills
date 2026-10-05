@@ -614,6 +614,26 @@ test('a /clear while the return question is open still sends the held text after
   expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
 })
 
+test('a second held message while a Resume is already queued rides the clear with the first (R3-02)', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Resume from handover')
+  w.clearHold.held = true
+  await $.prompt.submit(human('one'))
+  await w.clock.settle()
+  expect(w.commands).toContain('clear')
+  w.askHold.held = true
+  await $.prompt.submit(human('two'))
+  await w.clock.advance(1)
+  w.clearHold.release()
+  await w.clock.settle()
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  const sent = w.submits.at(-1)?.text ?? ''
+  expect(sent).toContain('one')
+  expect(sent).toContain('two')
+})
+
 test('a /resume while the return question is open never submits the held text into the other conversation; a notice carries it (R3-02)', async ($, on) => {
   const w = world(on, LL)
   await heldReturn($, w, 'Carry on')

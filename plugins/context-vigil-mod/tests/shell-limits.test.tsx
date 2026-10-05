@@ -298,7 +298,26 @@ test('R3-06: a hot reload offers a latch-drained unattended request, it never ru
   await $.session.start(START)   // the hot reload: $.state kept the parked pending, the timers are gone
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
-  expect(w.notices.length).toBeGreaterThan(0)
+  expect(w.notices.some(n => n.includes('/cfg/context-vigil-mod/handovers/'))).toBe(true)   // the pendingOffer
+})
+
+test('R3-06: a reused unattended pending is marked unattended, so a hot reload offers it (R3-06)', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi', 'bridge'))
+  await $.session.measure(measure([], 10))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call(write)                      // volunteered: saved as a reusable request pending
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  await $.session.measure(measure([], 40))      // the threshold reuses it, unattended
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  w.notices.length = 0
+  await $.session.start(START)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.some(n => n.includes('/cfg/context-vigil-mod/handovers/s1-1.md'))).toBe(true)
 })
 
 test('R1-09: with auto off a drained request is dropped with a notice', async ($, on) => {
