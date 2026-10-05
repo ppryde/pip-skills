@@ -537,6 +537,12 @@ def _sweep(now: float) -> None:
     for path in _session_files():
         entry = _read_json(path)
         if entry is None:
+            # Unparseable: age it by mtime so a corrupt file cannot live forever.
+            try:
+                if time.time() - path.stat().st_mtime > SESSION_TTL_SECONDS:
+                    _unlink(path)
+            except OSError:
+                pass
             continue
         if now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS:
             _unlink(path)
@@ -561,32 +567,29 @@ def ingest(raw: str, now: float | None = None) -> None:
 
     No lock: this session writes only its own file; limits merge forward-only.
     """
-    if now is None:
-        now = time.time()
     try:
-        payload = json.loads(raw)
-    except ValueError:
+        _ingest(raw, time.time() if now is None else now)
+    except Exception:  # noqa: BLE001 - quarantine: a broken store must never break the status line
         return
+
+
+def _ingest(raw: str, now: float) -> None:
+    payload = json.loads(raw)
     if not isinstance(payload, dict):
         return
     sid = safe_session_id(payload.get("session_id"))
     if sid is None:
         return
-    try:
-        path = session_path(sid)
-        # census-card-claim-design.md section 2: ingest runs inside the session's
-        # status line, so TMUX_PANE is already in its environment.
-        tmux_pane = os.environ.get("TMUX_PANE") or None
-        entry = build_entry(
-            _read_json(path), payload, resolve.worktree_cwd(payload), tmux_pane, now
-        )
-        _atomic_write(path, entry)
-        incoming = _live_limits(payload.get("rate_limits"), now)
-        if incoming:
-            _merge_limits_file(incoming, now)
-        _sweep(now)
-    except OSError:
-        return
+    path = session_path(sid)
+    # census-card-claim-design.md section 2: ingest runs inside the session's
+    # status line, so TMUX_PANE is already in its environment.
+    tmux_pane = os.environ.get("TMUX_PANE") or None
+    entry = build_entry(_read_json(path), payload, resolve.worktree_cwd(payload), tmux_pane, now)
+    _atomic_write(path, entry)
+    incoming = _live_limits(payload.get("rate_limits"), now)
+    if incoming:
+        _merge_limits_file(incoming, now)
+    _sweep(now)
 
 
 # --- Readers -------------------------------------------------------------------

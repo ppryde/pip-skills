@@ -1,5 +1,6 @@
 """census v2 on disk: one file per session, a forward-merged limits file, no lock."""
 import json
+import os
 from pathlib import Path
 
 from scripts import store as st
@@ -57,6 +58,17 @@ class TestSessionFiles:
         assert set(st.read_all()["sessions"]) == {"new"}
         assert not st.session_path("old").exists()
 
+    def test_unparseable_file_older_than_ttl_is_swept(self, store_file):
+        import time
+
+        st.sessions_dir().mkdir(parents=True)
+        bad = st.session_path("bad")
+        bad.write_text("{not json")
+        old = time.time() - st.SESSION_TTL_SECONDS - 100
+        os.utime(bad, (old, old))
+        st.ingest(_payload("s1"), now=time.time())
+        assert not bad.exists()
+
     def test_reads_never_prune(self, store_file):
         st.ingest(_payload("s1"), now=0.0)
         st.read_all(now=10 * st.SESSION_TTL_SECONDS)
@@ -90,3 +102,14 @@ class TestPortable:
         for path in (PLUGIN / "scripts").glob("*.py"):
             text = path.read_text()
             assert "import fcntl" not in text, path.name
+
+
+class TestIngestNeverRaises:
+    def test_deeply_nested_payload(self, store_file):
+        raw = "[" * 100_000 + "]" * 100_000
+        assert st.ingest(raw, now=1.0) is None
+
+    def test_odd_cwd_and_workspace_types(self, store_file):
+        for extra in ({"cwd": 7}, {"workspace": "x"}, {"cwd": 7, "workspace": "x"}):
+            raw = json.dumps({"session_id": "s1", **extra})
+            assert st.ingest(raw, now=1.0) is None

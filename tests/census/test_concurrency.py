@@ -10,7 +10,7 @@ CLI = Path(__file__).resolve().parents[2] / "plugins" / "census" / "scripts" / "
 
 
 def _spawn_ingest(store_path, sid):
-    """Launch a real subprocess that ingests one payload — exercises cross-process flock."""
+    """Launch a real subprocess that ingests one payload — exercises lock-free per-session files."""
     env = dict(os.environ, CENSUS_STORE=str(store_path))
     payload = json.dumps({"session_id": sid, "cwd": f"/wt/{sid}"})
     return subprocess.Popen(

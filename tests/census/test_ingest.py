@@ -32,10 +32,12 @@ class TestBasicIngest:
     def test_missing_session_id_writes_nothing(self, store_file):
         st.ingest(json.dumps({"cwd": "/wt/a"}), now=1.0)
         assert st.read_all()["sessions"] == {}
+        assert not st.sessions_dir().exists() or list(st.sessions_dir().iterdir()) == []
 
     def test_invalid_json_writes_nothing(self, store_file):
         st.ingest("{not json", now=1.0)
         assert st.read_all()["sessions"] == {}
+        assert not st.sessions_dir().exists() or list(st.sessions_dir().iterdir()) == []
 
     def test_upsert_overwrites_same_session(self, store_file):
         st.ingest(_payload(sid="abc", cwd="/wt/a"), now=1.0)
