@@ -185,3 +185,28 @@ test('a clear landing while setup answers are saved does not break the answer ho
   expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50 })
   expect(JSON.stringify((r as { context?: string[] }).context ?? [])).toContain('⏳ Limits')
 })
+
+// R1-06: settings are an account fact; another session's change is seen at the next decision.
+test('R1-06: auto switched off by another session stops this one at the threshold', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(at(20))
+  w.store.set('settings', { auto: false })           // session A answered Off
+  await $.session.measure(at(36))
+  await w.clock.settle()
+  expect(w.submits.some(s => s.text.includes(TOOL))).toBe(false)
+})
+
+test('R1-06: answering a card keeps what another session changed', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.command.run(setup('nudge'))
+  await w.clock.settle()
+  const card = cardOf(w.submits.at(-1)?.text ?? '')
+  w.store.set('settings', { auto: false, rcAutoClear: 'yes' })   // session A, meanwhile
+  await $.tool.call(ask(card, { [card[0]?.question ?? '']: '50%' }) as never)
+  expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50, auto: false, rcAutoClear: 'yes' })
+})

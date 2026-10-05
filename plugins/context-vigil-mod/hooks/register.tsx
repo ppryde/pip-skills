@@ -224,6 +224,12 @@ async function bindSession($: EngineInterface) {
   lastApiMirror = await read($, lastApiA)
 }
 
+// Settings are an account fact other sessions write too: re-read before a decision that matters
+// (R1-06). One cheap store read; loadSettings fills what is missing.
+async function reloadSettings($: EngineInterface) {
+  settings = loadSettings(await $.store.get(STORE_KEY))
+}
+
 async function checkInterlock($: EngineInterface) {
   const text = await $.fs.read(`${root}/settings.json`).then(t => String(t)).catch(() => null)
   const record = await $.fs.exists(classicSessionPath(root, session)).catch(() => false)
@@ -295,6 +301,7 @@ function scheduleClear($: EngineInterface, unattended: boolean) {
 async function tryClear($: EngineInterface) {
   retryTimer = null
   if (!(await read($, pendingA))) return
+  await reloadSettings($)
   await checkInterlock($)   // spec §7: at session start AND before every clear (TEMPORARY)
   const now = await nowMs($)
   // An unattended clear is only for an unattended session: re-checked here, not just when it began.
@@ -355,6 +362,7 @@ async function checkLatch($: EngineInterface, limits: RateLimit[]) {
   }
   const deferred = await read($, deferredA)
   if (deferred) {
+    await reloadSettings($)
     await update($, deferredA, () => null)
     // R1-09: hours later the person may be anywhere. A threshold or request runs only if auto mode
     // is on and they are not attended, and then as an unattended handover (attended re-check, RC
@@ -493,6 +501,7 @@ async function learnSessionTtl($: EngineInterface) {
 
 async function maybeFireLastLight($: EngineInterface) {
   lastLightTimer = null
+  await reloadSettings($)
   const now = await nowMs($)
   await observe($, { kind: 'agent-step', at: activity.lastAgentAt ?? 0 })  // picks up a draft (spec §2)
   const verdict = shouldFire({
@@ -707,6 +716,7 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
+    await reloadSettings($)
     const pct = e.context.percent ?? null
     const prevPct = await read($, contextA)
     await update($, contextA, () => pct)
@@ -758,6 +768,7 @@ export const register: Register = on => {
       .map(([q, answer]) => ({ step: stepForQuestion(q), answer }))
       .filter((p): p is { step: StepId; answer: string } => p.step !== undefined)
     if (!pairs.length) return r as never
+    await reloadSettings($)
     const applied = applyAnswers(settings, pairs)
     settings = applied.settings
     await $.store.set(STORE_KEY, settings)
