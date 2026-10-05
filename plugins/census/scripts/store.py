@@ -429,6 +429,7 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
             capture_output=True,
             text=True,
             timeout=_GIT_BRANCH_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

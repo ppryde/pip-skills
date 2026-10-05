@@ -11,7 +11,6 @@ from pathlib import Path
 from scripts import statusline as sl
 
 SHIM_MARKER = "# census launcher (managed by `census install`; do not edit)"
-_OLD_SHIM_HINT = "census launcher"
 
 
 def _sh_quote(text: str) -> str:
