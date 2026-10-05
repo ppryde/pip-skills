@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import { V } from '../core/voice'
 import { START, human, turn, world, type World } from './world'
 
 const MIN = 60_000
@@ -789,4 +790,32 @@ test('the instruction retry under stand-down is dropped with a notice (R2-09)', 
   expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
   expect(w.state.get('context-vigil-mod.awaiting')).toBe(null)
   expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
+})
+
+test('a store that refuses the pending handover: the hook does not throw, a notice and the result say so (R2-15)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  w.onStoreSet.value = async key => { if (key.startsWith('pending:')) throw new Error('store is full') }
+  const r = await $.tool.call(call() as never) as { result?: string }
+  expect(r.result).toContain('not saved')
+  expect(w.notices).toContain(V.handoverFailed)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+})
+
+test('a clear attempt that errors is announced and leaves the handover offered, not stranded (R2-15)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  w.promptReadFails.count = 1
+  await w.clock.settle()
+  expect(w.notices).toContain(V.clearRejected)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)
 })

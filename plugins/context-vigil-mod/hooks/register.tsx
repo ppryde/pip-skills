@@ -90,6 +90,11 @@ let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
 let countdownTick: { cancel: () => void } | null = null
 
+// A timer-driven job that threw: logged, never an unhandled rejection (R2-15).
+async function timerFailed($: EngineInterface, job: string, err: unknown) {
+  await log($, 'guard.wait', { reason: 'timer-error', job, error: String(err) }).catch(() => {})
+}
+
 async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
 }
@@ -399,7 +404,20 @@ function scheduleClear($: EngineInterface, unattended: boolean) {
   retryTimer = $.clock.after(0, () => { void tryClear($) })
 }
 
+// R2-15: a timer-driven attempt has nobody to throw to. A failure parks the handover as an offer,
+// with a notice, instead of leaving it pending with no retry.
 async function tryClear($: EngineInterface) {
+  try {
+    await tryClearInner($)
+  } catch (err) {
+    clearParked = true
+    lastWait = null
+    await notify($, V.clearRejected)
+    await log($, 'guard.wait', { reason: 'clear-error', error: String(err) }).catch(() => {})
+  }
+}
+
+async function tryClearInner($: EngineInterface) {
   retryTimer = null
   if (clearInFlight || !(await read($, pendingA))) return
   await reloadSettings($)
@@ -458,7 +476,7 @@ async function setLatch($: EngineInterface, l: Latch) {
   // R2-04: a latch another session set is lifted by this process too, or an idle one waits forever.
   const target = existing ?? l
   latchTimer?.cancel()
-  latchTimer = $.clock.after(Math.max(0, target.resetsAtMs - (await nowMs($))) + 1000, () => { latchTimer = null; void checkLatch($, []) })
+  latchTimer = $.clock.after(Math.max(0, target.resetsAtMs - (await nowMs($))) + 1000, () => { latchTimer = null; void checkLatch($, []).catch(err => timerFailed($, 'latch-lift', err)) })
 }
 
 // The latch is account-wide: another session may lift it (delete the key) and drain only its
@@ -603,7 +621,7 @@ function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
   lastLightTimer = null
   if (!settings.lastLight) return
   if (now >= lastApiAt + TTL_1H) return   // no fire for a cache that is already cold
-  lastLightTimer = $.clock.after(Math.max(0, fireAt(lastApiAt) - now), () => { void maybeFireLastLight($) })
+  lastLightTimer = $.clock.after(Math.max(0, fireAt(lastApiAt) - now), () => { void maybeFireLastLight($).catch(err => timerFailed($, 'last-light', err)) })
 }
 
 // The one place the cache lifetime is asked (PROBES §11): scheduling assumed 1 hour, the latest
@@ -1039,7 +1057,14 @@ export const register: Register = on => {
       await log($, 'guard.wait', { reason: 'write-failed', path, error: String(err) })
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
-    await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
+    try {
+      await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
+    } catch (err) {
+      // R2-15: the file is written but the store refused it: say so, clear nothing.
+      await notify($, V.handoverFailed)
+      await log($, 'guard.wait', { reason: 'store-failed', path, error: String(err) })
+      return { result: `Handover not saved to the store (the file is at ${path}): ${String(err)}. Nothing was cleared; tell the person.` } as never
+    }
     if (reason === 'limit' && limitResume) limitResume.path = path
     await log($, 'handover.written', { reason, bytes: markdown.length, path })
     if (!requested) {

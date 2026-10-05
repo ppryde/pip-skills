@@ -31,6 +31,7 @@ export type World = {
   tails: string[][]                    // argv of every transcript-tail run
   fsRead: { gate: Promise<void> | null; error: string | null }   // gate delays every fs.read; error makes it reject with that text
   clearHold: { held: boolean; release(): void }   // while held, $.command.run({ command: 'clear' }) stays pending until release()
+  promptReadFails: { count: number }   // the next N $.prompt.read calls reject
   askHold: { held: boolean; waiting: ((answer: string) => void)[] }   // while held, each ask stays open until its resolver is called
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
@@ -45,7 +46,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], clearHold: { held: false, release() {} }, askHold: { held: false, waiting: [] }, promptReadFails: { count: 0 }, onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
@@ -100,7 +101,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.repo', () => ({ value: { root: '/repo', remote: null, internal: false, name: 'repo', id: 'r' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: w.contextPct.value }, rateLimits: w.rateLimits.value } }))
-  on('prompt.read', () => ({ value: { text: w.draft.value, cursor: w.draft.value.length } }))
+  on('prompt.read', () => { if (w.promptReadFails.count > 0) { w.promptReadFails.count--; throw new Error('prompt.read failed') } return { value: { text: w.draft.value, cursor: w.draft.value.length } } })
   on('prompt.submit', (_$, e) => { if (w.submitRefused.value) throw new Error('submit refused'); w.submits.push({ text: e.text, origin: e.origin.kind }); return { text: e.text, origin: e.origin } })
   on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
   on('command.run', async (_$, e) => {
