@@ -346,6 +346,7 @@ waits cancels it (a notice says so). When the latch lifts it runs only if auto
 mode is on and you are still away, and then as an unattended handover — the
 clear takes the attended re-check and the Remote Control rules like any auto
 clear. Otherwise it is dropped with a notice; `/vho` again when you want one.
+This holds whether the latch landed before or after the handover file was written: a clear the latch parked follows the same rule.
 
 **Early stop for seven_day and spend_limit** (folding in the behaviour of
 `~/.claude-personal/census/five-hour-guard.py`, which itself stays untouched):

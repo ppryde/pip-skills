@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { START, human, world } from './world'
+import { START, human, turn, world, type World } from './world'
 
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
 const HOUR = 3_600_000
@@ -31,10 +31,11 @@ test('while latched nothing is submitted or cleared; at the lift the deferred ha
   expect(w.commands).toContain('clear')
 })
 
-test('a clear parked by the latch goes ahead when it lifts', async ($, on) => {
-  const w = world(on, { now: 1_000_000 })
+// A clear parked on the latch (R2-01): the latch lands between the instruction and the write.
+async function parkedOnLatch($: Engine, w: World, opts: { turnAfterWrite?: boolean } = {}) {
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
+  await $.turn.complete(turn('before'))
   await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
   await w.clock.settle()
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
@@ -42,8 +43,46 @@ test('a clear parked by the latch goes ahead when it lifts', async ($, on) => {
   await $.tool.call(write)
   await w.clock.settle()
   expect(w.commands).not.toContain('clear')
+  if (opts.turnAfterWrite) { await w.clock.advance(5 * 60_000); await $.turn.complete(turn('after')) }
+}
+const parkedDropped = (w: World) => [...w.files.entries()].find(([k]) => k.includes('/events/'))?.[1].includes('"parked-dropped"') ?? false
+
+test('a clear parked by the latch, auto Off, is offered at the lift — never run (R2-01)', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await parkedOnLatch($, w)
   await w.clock.advance(HOUR + 2000)                             // the latch's own timer lifts it at resetsAt
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.some(n => n.startsWith('📜 A handover is waiting'))).toBe(true)
+  expect(parkedDropped(w)).toBe(true)
+  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)
+})
+
+test('a clear parked by the latch, auto On and the person still away, runs at the lift as unattended (R2-01)', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await parkedOnLatch($, w)
+  await w.clock.advance(HOUR + 2000)
   expect(w.commands).toContain('clear')
+})
+
+test('a person who returns while a clear is parked on the latch turns it into an offer (R2-01)', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await parkedOnLatch($, w)
+  w.notices.length = 0
+  await $.prompt.submit(human('carry on'))
+  expect(w.notices.some(n => n.startsWith('📜 A handover is waiting'))).toBe(true)
+  await $.turn.complete(turn('mine'))
+  await w.clock.advance(HOUR + 2000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.state.get('context-vigil-mod.pending')).not.toBe(null)
+})
+
+test('a clear parked by the latch is offered, not run, when a turn has run since the write (R2-01)', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await parkedOnLatch($, w, { turnAfterWrite: true })
+  await w.clock.advance(HOUR + 2000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.some(n => n.startsWith('📜 A handover is waiting'))).toBe(true)
+  expect(parkedDropped(w)).toBe(true)
 })
 
 test('seven_day at the trigger: handover once per window, then one resume after the reset', async ($, on) => {

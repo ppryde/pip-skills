@@ -160,6 +160,11 @@ async function observe($: EngineInterface, signal: Signal) {
     await notify($, V.deferredDropped)
     await log($, 'guard.wait', { reason: 'deferred-dropped', deferred: dropped?.reason })
   }
+  // R2-01: the same act turns a clear the latch parked into an offer; the handover stays pending.
+  if (clearParked && lastWait === 'latched' && (signal.kind === 'human-command' || (signal.kind === 'prompt' && classifyOrigin(signal.origin) === 'human'))) {
+    const parked = await read($, pendingA)
+    if (parked) await dropParkedClear($, parked, 'human')
+  }
   // Spec §2: a non-empty draft in the terminal box is you being here.
   if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) activity = record(activity, { kind: 'edit', at: now })
   const act = activity   // this observation's view: later awaits may move `activity` on
@@ -172,6 +177,14 @@ async function observe($: EngineInterface, signal: Signal) {
     await log($, t, { from: prev, to: next, idleMs: act.lastHumanAt === null ? null : now - act.lastHumanAt, origin: act.lastHumanOrigin })
   }
   if (t === 'arm') await maybeAskRc($)
+}
+
+// A clear the latch parked is no longer going to run: it is offered instead (spec §5). Pending and
+// file stay; `clearParked` stays so the latch's lift leaves it alone. Never silent.
+async function dropParkedClear($: EngineInterface, pending: Pending, cause: 'human' | 'auto-off' | 'attended' | 'stale') {
+  lastWait = null
+  await notify($, V.pendingOffer(pending.path))
+  await log($, 'guard.wait', { reason: 'parked-dropped', cause })
 }
 
 function cardPrompt(questions: unknown[]): string {
@@ -440,7 +453,16 @@ async function checkLatch($: EngineInterface, limits: RateLimit[]) {
     return
   }
   // Only a clear the latch parked: one parked for a cancelled countdown or a refusal stays put.
-  if (clearParked && lastWait === 'latched' && (await read($, pendingA))) scheduleClear($, unattendedClear)
+  // R2-01: hours later it follows the deferred handover's rule — only if auto mode is on, the person
+  // is still away and no turn has run since the write, and then as an unattended clear. Else offered.
+  if (!clearParked || lastWait !== 'latched') return
+  const parked = await read($, pendingA)
+  if (!parked) return
+  await reloadSettings($)
+  const now = await nowMs($)
+  const away = mode(activity, now, settings) !== 'attended'
+  if (settings.auto && away && fresh(parked, await read($, lastApiA), now)) scheduleClear($, true)
+  else await dropParkedClear($, parked, !settings.auto ? 'auto-off' : !away ? 'attended' : 'stale')
 }
 
 // Waits in hops of at most an hour; never submits while latched (spec §5); drops the limit
