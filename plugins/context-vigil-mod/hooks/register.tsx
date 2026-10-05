@@ -793,7 +793,9 @@ export const register: Register = on => {
     if (rearm(lastLightArmed, e.origin.kind)) lastLightArmed = true
     const pending = await read($, pendingA)
     const lastApi = await read($, lastApiA)
-    if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null ? null : lastApi + TTL_1H })) {
+    // R2-05: no turn seen in this process (a restart, a /resume) = the cache clock is the last-light
+    // turn's own, which ran at about the handover's creation; never 'unknown, so drop it'.
+    if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi !== null ? lastApi + TTL_1H : pending?.reason === 'last_light' ? pending.createdAt + TTL_1H : null })) {
       await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
       if (returnHeld !== null) { returnHeld.push(e.text); return { drop: V.heldForLastLight } }
       returnHeld = [e.text]

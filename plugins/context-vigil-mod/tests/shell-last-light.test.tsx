@@ -540,3 +540,40 @@ test('R1-19: a second prompt while the return question is open joins the first; 
   expect(sent).toContain('one')
   expect(sent).toContain('two')
 })
+
+const HOUR = 60 * MIN
+const storedLastLight = (now: number, ageMs: number) => ({
+  session: 's1', path: '/cfg/context-vigil-mod/handovers/s1-1.md', name: 'Name', reason: 'last_light', markdown: '## Goal\nG', resume: false, followUp: null, createdAt: now - ageMs,
+})
+
+test('after a restart the first prompt is held and offered a choice, however long the gap (R2-05)', async ($, on) => {
+  const now = 20 * HOUR
+  const w = world(on, { ...LL, now, store: { ...LL.store, 'pending:s1': storedLastLight(now, 8 * HOUR) } })
+  await $.session.start(START)                      // a fresh process: lastApiAt is unknown
+  w.askAnswer.value = 'Carry on'
+  const r = await $.prompt.submit(human('morning'))
+  expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
+  await w.clock.settle()
+  expect(w.submits.at(-1)?.text).toBe('morning')
+  expect(eventLog(w)).toContain('last_light.choice')
+})
+
+test('after a restart a last-light handover from ten minutes ago is dropped, not held (R2-05, R1-05 kept)', async ($, on) => {
+  const now = 20 * HOUR
+  const w = world(on, { ...LL, now, store: { ...LL.store, 'pending:s1': storedLastLight(now, 10 * MIN) } })
+  await $.session.start(START)
+  const r = await $.prompt.submit(human('back already'))
+  expect((r as { drop?: string }).drop).toBeUndefined()
+  expect(eventLog(w)).toContain('last_light.dropped')
+})
+
+test('an in-process /resume holds the first prompt for a stored last-light handover too (R2-05)', async ($, on) => {
+  const now = 20 * HOUR
+  const w = world(on, { ...LL, now, store: { ...LL.store, 'pending:s2': storedLastLight(now, 8 * HOUR) } })
+  await $.session.start(START)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'resume' } as never)
+  w.askAnswer.value = 'Carry on'
+  const r = await $.prompt.submit(human('morning'))
+  expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
+})
