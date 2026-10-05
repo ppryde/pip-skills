@@ -734,7 +734,7 @@ export const register: Register = on => {
       // reload also forgot the phone, so only a clear the person asked for is picked back up;
       // an unattended one is offered, never run past an RC answer or a countdown it can't see.
       await setCountdown($, null)
-      if (live.reason === 'request' && reusable(live, await read($, lastApiA), await nowMs($))) scheduleClear($, false)
+      if (live.reason === 'request' && !live.unattended && reusable(live, await read($, lastApiA), await nowMs($))) scheduleClear($, false)
       else await notify($, V.pendingOffer(live.path))
     }
     // A reload counts as the person being here (bindSession), so this period's last light is skipped
@@ -1061,7 +1061,7 @@ export const register: Register = on => {
       return { result: `Handover not saved: writing ${path} failed (${String(err)}). Nothing was cleared; tell the person.` } as never
     }
     try {
-      await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
+      await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now, unattended: awaiting?.unattended ?? false })
     } catch (err) {
       // R2-15: the file is written but the store refused it: say so, clear nothing.
       await notify($, V.handoverFailed)

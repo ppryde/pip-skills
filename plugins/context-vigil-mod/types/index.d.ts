@@ -64,6 +64,7 @@ export type Pending = {
   resume: boolean
   followUp: string | null
   createdAt: number
+  unattended?: boolean   // R3-06: the clear that follows is the mod's own; a reload offers it, never runs it
 }
 
 // A handover the model has been asked to write and has not written yet. `started` turns

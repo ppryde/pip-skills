@@ -284,6 +284,23 @@ test('R1-09: a drained request runs as an unattended handover: RC gate, never a 
   expect(w.notices.some(n => n.includes('not switched on'))).toBe(true)
 })
 
+test('R3-06: a hot reload offers a latch-drained unattended request, it never runs it as an attended clear', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await latchedVho($, w, 'bridge')
+  await w.clock.advance(HOUR + 1000)
+  await $.session.measure(measure(lift))
+  await w.clock.settle()
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.some(n => n.includes('not switched on'))).toBe(true)
+  w.notices.length = 0
+  await $.session.start(START)   // the hot reload: $.state kept the parked pending, the timers are gone
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.length).toBeGreaterThan(0)
+})
+
 test('R1-09: with auto off a drained request is dropped with a notice', async ($, on) => {
   const w = world(on, { now: 1_000_000 })
   await latchedVho($, w)
