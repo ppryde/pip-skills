@@ -27,6 +27,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -37,8 +38,12 @@ from scripts import resolve
 
 STORE_ENV = "CENSUS_STORE"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
-STORE_RELPATH = ("census", "status.json")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # on-disk files (sessions/<sid>.json, limits.json)
+VIEW_VERSION = 1     # the shape `census read` prints — unchanged from v1
+SESSIONS_DIRNAME = "sessions"
+LIMITS_FILENAME = "limits.json"
+LEGACY_FILENAME = "status.json"
+_SAFE_SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
 STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
@@ -78,11 +83,39 @@ def config_dir() -> Path:
     return Path(override) if override else Path.home() / ".claude"
 
 
-def store_path() -> Path:
+def census_dir() -> Path:
+    """This account's census directory.
+
+    ``CENSUS_STORE`` overrides it. In v1 that variable named the ``status.json``
+    file itself, so a value ending ``.json`` still means "its parent directory".
+    """
     override = os.environ.get(STORE_ENV)
     if override:
-        return Path(override)
-    return config_dir().joinpath(*STORE_RELPATH)
+        path = Path(override)
+        return path.parent if path.suffix == ".json" else path
+    return config_dir() / "census"
+
+
+def store_path() -> Path:
+    """The LEGACY v1 single-file store; present only until migrated."""
+    return census_dir() / LEGACY_FILENAME
+
+
+def sessions_dir() -> Path:
+    return census_dir() / SESSIONS_DIRNAME
+
+
+def limits_path() -> Path:
+    return census_dir() / LIMITS_FILENAME
+
+
+def safe_session_id(sid: object) -> str | None:
+    """``sid`` when it is safe as a filename, else None (never a path escape)."""
+    return sid if isinstance(sid, str) and _SAFE_SID.match(sid) else None
+
+
+def session_path(sid: str) -> Path:
+    return sessions_dir() / f"{sid}.json"
 
 
 def _empty_store() -> dict[str, Any]:
