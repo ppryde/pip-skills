@@ -514,3 +514,20 @@ test('R1-14: a subagent turn neither moves the cache clock nor re-arms the last-
   expect(asks(w)).toBe(1)
   expect(w.state.get('context-vigil-mod.lastApiAt')).toBe(1_000_000)
 })
+
+test('R1-19: a second prompt while the return question is open joins the first; nothing is lost', async ($, on) => {
+  const w = world(on, LL)
+  await heldReturn($, w, 'Resume from handover')
+  const a = await $.prompt.submit(human('one'))
+  const b = await $.prompt.submit(human('two'))
+  expect((a as { drop?: string }).drop).toBeDefined()
+  expect((b as { drop?: string }).drop).toBeDefined()
+  await w.clock.settle()
+  expect(w.state.get(PENDING)).not.toBe(null)   // the Resume answer was not undone by a second ask
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  await w.clock.advance(500)
+  const sent = w.submits.at(-1)?.text ?? ''
+  expect(sent).toContain('one')
+  expect(sent).toContain('two')
+})

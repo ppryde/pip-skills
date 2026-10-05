@@ -596,8 +596,14 @@ async function maybeFireLastLight($: EngineInterface) {
   await startHandover($, 'last_light', false)
 }
 
-async function askReturn($: EngineInterface, held: string) {
+// The prompts held while the return question is open (R1-19): one ask at a time, and a message
+// typed meanwhile joins the first instead of opening a second ask whose answer would undo the first.
+let returnHeld: string[] | null = null
+
+async function askReturn($: EngineInterface) {
   const choice = await $.ui.ask(V.lastLightAsk, [V.lastLightResume, V.lastLightCarryOn]).catch(() => V.lastLightCarryOn)
+  const held = (returnHeld ?? []).join('\n\n')
+  returnHeld = null
   const resume = choice === V.lastLightResume
   await log($, 'last_light.choice', { choice: resume ? 'resume' : 'carry_on' })
   const pending = await read($, pendingA)
@@ -728,8 +734,9 @@ export const register: Register = on => {
     const lastApi = await read($, lastApiA)
     if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null ? null : lastApi + TTL_1H })) {
       await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
-      const held = e.text
-      $.clock.after(0, () => { void askReturn($, held) })
+      if (returnHeld !== null) { returnHeld.push(e.text); return { drop: V.heldForLastLight } }
+      returnHeld = [e.text]
+      $.clock.after(0, () => { void askReturn($) })
       return { drop: V.heldForLastLight }
     }
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })
