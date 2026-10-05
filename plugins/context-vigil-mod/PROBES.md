@@ -5,7 +5,7 @@ terminal half driven by a script, phone half by the owner. Phone results marked
 **pending** until the owner reports them.
 
 ## 1. Notice reaching the phone
-Observed: toast → terminal not captured (transient), phone **pending**; ui.log line → terminal yes (`⏺ cvm-probe: 🧪 probe log line …` in the transcript), phone **pending**.
+Observed: toast → terminal not captured (transient), phone **pending**; ui.log line → terminal yes (`⏺ cvm-probe: 🧪 probe log line …` in the transcript), phone: shows and resolves there — the Mods Field Notes record "ui.ask can be answered on the phone and resolves with the label (verified 2026-10-04)", and an open ask raises Remote Control's "action required" push (this probe's original "phone pending" was an unanswered dialog, not a non-resolving one).
 Decision: notify() uses both `ui.toast` and `ui.log` until the phone result narrows it.
 
 Phone result (owner on the Claude Android app, 2026-10-04, CC 2.1.289): **neither reaches the phone** — not from a command handler, not from an idle `$.clock` timer. Also not: `$.session.append` `system` (stored as an `informational` row) or `user` (stored `isMeta`). Reaches the phone: a plugin prompt (`$.prompt.submit`, shown as "The <plugin> plugin sent a message: …", starts a model turn), a slash command's reply `{ text }` (grey `<plugin>: …` line), model output / tools / the model's AskUserQuestion. A `ui.render` observer saw only `terminal` asks — never `mobile`, no `session.attach` — so mod UI (panes, bars) does not draw on the phone today. Live consequence: the RC countdown notice was never seen on the phone (smoke #4, two runs).

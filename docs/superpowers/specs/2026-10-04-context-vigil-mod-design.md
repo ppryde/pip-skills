@@ -123,7 +123,11 @@ setup):
   `bridge` (Remote Control — phone or web) or `slack-ping`;
 - a slash command run by the person (`command.run` with a person origin);
 - an edit in the terminal's prompt box (`prompt.edit`), or a non-empty draft
-  there (`prompt.read`).
+  there (`prompt.read`);
+- a prompt whose origin is `unclassified` (a same-user channel the engine cannot
+  attest) disarms auto mode and restarts the idle clock, but counts for nothing
+  else: it is not a phone fact, does not re-arm last light and is never held on
+  return.
 
 **Working** — a `turn.step` or `turn.complete` within the last **2 min**. This
 covers one long self-driven turn as well as turns started by
@@ -295,8 +299,8 @@ widening, no retry. Nothing is read per turn. A pending last-light handover impl
 (PROBES §11).
 An information layer sits beside the gate, never in it: the first response of a
 session that wrote to the cache triggers one detached tail read into `$.state`
-(`cacheTtl`, reset by /clear); with last light on and a `5m` cache, a dismissible
-line above the prompt says it is off (the threshold bar wins), and
+(`cacheTtl`, reset by /clear); with last light on and a `5m` cache, a line above the
+prompt says it is off until your next message (the threshold bar wins; no hotkey, per §3), and
 `classic.PostModelSwitch` `cache_ttl` updates it (5m to 1h notifies "back on").
 
 **Fire conditions (all):** last light is on (§6); the session is in
@@ -347,11 +351,14 @@ clear. Otherwise it is dropped with a notice; `/vho` again when you want one.
 `~/.claude-personal/census/five-hour-guard.py`, which itself stays untouched):
 when limits are on (§6) and a **watched** window (configured; default both
 `seven_day` and `spend_limit`) reaches the **configured trigger %** (default
-95%; 90 / 95 / 98 or any value via Other), once per window
-(keyed on its `resetsAt`): write a handover (§3 steps 1–2), show a notice, and
+95%; 90 / 95 / 98 or any value via Other), once per window per
+running process (the mark is a module variable; a restarted process may fire
+once more — ruling F4/F5): write a handover (§3 steps 1–2), show a notice, and
 arrange the resume for after the reset (a `$.clock.after` to `resetsAt` + 5
 min, re-armed in ≤ 1 h hops, which submits the resume prompt if the session
-is still open). The 5-hour window is left to Claude Code's built-in graceful
+is still open **and nothing has come from you since the stop** (otherwise a
+notice names the handover and leaves the conversation to you); one resume
+chain per process). The 5-hour window is left to Claude Code's built-in graceful
 wrap-up and auto-continue.
 
 ---
