@@ -632,6 +632,12 @@ export const register: Register = on => {
       return { drop: V.heldForLastLight }
     }
     await observe($, { kind: 'prompt', origin: e.origin.kind, at: await nowMs($) })
+    // R1-05: back while the cache is still warm, the last-light handover has no job left: drop it
+    // (the file stays), or it blocks every later last light and is offered stale as "cheap".
+    if (pending?.reason === 'last_light' && classifyOrigin(e.origin.kind) === 'human') {
+      await savePending($, null)
+      await log($, 'last_light.dropped', { path: pending.path })
+    }
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
     return next(e)
   })
