@@ -100,8 +100,10 @@ mid-write ones, and `.`-prefixed temp files), and prints **the v1 JSON shape**:
 as today. `version` in the printed view stays `1` — it is the view's shape, which
 did not change; the on-disk files say 2.
 
-Pruning moves to the read side and ingest: session files whose `updated_at` is more
-than 24 h old are deleted.
+Pruning stays on the write side, as in v1: each ingest deletes session files whose
+`updated_at` is more than 24 h older than that ingest's `now`. Reads never delete
+(a reader's clock is not the writer's, and tests read with fixed clocks). Readers
+filter nothing either, so `census read` matches v1 exactly.
 
 The overseer dashboard (`cli_client.py`) and overseer claim liveness (`cli.py`
 `read --session`) go through this CLI and need no change.
@@ -158,7 +160,13 @@ Both call the CLI through a small shared helper in each plugin: run `census` wit
 2 s timeout and the caller's `CLAUDE_CONFIG_DIR`, parse JSON, and treat any failure
 (census missing, non-zero exit, bad JSON, timeout) as "no data" — the same outcome
 as today's absent store. Because the CLI migrates a v1 store itself, readers need no
-v1 fallback. Their tests stub the CLI (a fake `census` on `PATH` in `tmp_path`).
+v1 fallback. The CLI is found by `CENSUS_CLI` (env), else the sibling
+`plugins/census/scripts/cli.py`, else `census` on `PATH`.
+
+overseer liveness reads an EMPTY `sessions` as "liveness unknown" (`None`), not "no
+live sessions": `census read` cannot tell a missing store from an empty one, and
+`db.reclaim_stale` falls back to its own TTL on `None` — the safe side, since an
+empty set would mark every claim stale.
 
 agent-ui stays layout-coupled on purpose: it ships to users without census and reads
 the folder directly with its own fallback.
@@ -184,8 +192,9 @@ running (repo test-isolation rule).
 - **Install / uninstall.** Dry run changes nothing; install twice is a no-op;
   uninstall leaves the status-line script byte-identical to before install; the shim
   resolves the plugin path and an interpreter.
-- **Readers.** vigil and liveness get their data from `census read` (fake CLI on
-  `PATH`); census missing, failing, slow or printing junk all read as "no data".
+- **Readers.** vigil and liveness get their data from `census read` — the real
+  sibling CLI in the existing tests, a fake one via `CENSUS_CLI` for failure cases;
+  census missing, failing, slow or printing junk all read as "no data".
 
 Gates: `poetry run pytest`, `ruff`, `mypy` for `plugins/census`, `plugins/vigil`,
 `plugins/overseer`.
@@ -208,3 +217,11 @@ subagent sessions, especially during long main-agent turns. Deferred: those runs
 short, fold into their main session, and already have transcripts (chronicle reads
 them). The v2 layout is the precondition — a second writer can add files without
 touching anyone else's.
+
+Fallback is built in, not bolted on: the status-line writer stays the baseline and
+is never removed. A mod writer would be purely additive — subagent and headless
+files of its own, plus optional extra fields — so when mods are unavailable (older
+build, disabled, `disableAllHooks`, a locked-down machine) census keeps working
+exactly as v2 does today. If both ever write a main session, the status line owns
+that session's file and the mod writes alongside it, so the two never fight over
+one file.
