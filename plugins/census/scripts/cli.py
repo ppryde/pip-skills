@@ -33,7 +33,7 @@ def cmd_read(args: argparse.Namespace) -> int:
 
 
 def _statusline_path() -> Path:
-    return Path.home() / ".claude" / "statusline-command.sh"
+    return st.config_dir() / "statusline-command.sh"
 
 
 def cmd_install_statusline(args: argparse.Namespace) -> int:

@@ -97,6 +97,8 @@ census install --yes      # launcher at ~/.local/bin/census + status-line block
 census uninstall --yes    # remove both; --purge also deletes this account's data
 ```
 
+In a marketplace install the launcher follows census upgrades on its own: if the version directory it was installed from is gone it runs the newest live one. Re-run `census install --yes` only if the plugin moves. `--purge` deletes only census's own files (`sessions/`, `limits.json`, `status.json*`, lock and temp files) and removes the directory only if that leaves it empty.
+
 `--shim PATH` and `--statusline PATH` override the launcher and status-line script locations. Both are idempotent. The older
 `census install-statusline [--uninstall]` still works as a **deprecated alias** for one release.
 

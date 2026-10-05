@@ -98,7 +98,11 @@ def census_dir() -> Path:
 
 
 def store_path() -> Path:
-    """The LEGACY v1 single-file store; present only until migrated."""
+    """The LEGACY v1 single-file store; present only until migrated. A
+    ``CENSUS_STORE`` ending ``.json`` names that file exactly (v1 honoured any name)."""
+    override = os.environ.get(STORE_ENV)
+    if override and Path(override).suffix == ".json":
+        return Path(override)
     return census_dir() / LEGACY_FILENAME
 
 
@@ -133,18 +137,31 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+_REPLACE_RETRIES = 3
+_REPLACE_RETRY_SECONDS = 0.02
+
+
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
     """Write ``data`` to ``path`` via a same-directory temp file and ``os.replace``.
 
-    ``os.replace`` is atomic on POSIX and Windows, so a reader sees the old file or
-    the new one, never half of either. Raises OSError for the caller to swallow.
+    Atomic for readers on POSIX and Windows: they see the old file or the new one,
+    never half of either. On Windows a replace can be briefly refused
+    (PermissionError) while a reader has the target open, hence the short retry.
+    Raises OSError for the caller to swallow.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
             json.dump(data, handle)
-        os.replace(tmp, path)
+        for attempt in range(_REPLACE_RETRIES + 1):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == _REPLACE_RETRIES:
+                    raise
+                time.sleep(_REPLACE_RETRY_SECONDS)
     except OSError:
         try:
             os.unlink(tmp)
