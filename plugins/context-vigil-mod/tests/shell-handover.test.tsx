@@ -494,3 +494,31 @@ test('a handover file that cannot be written: a notice, no pending, no clear, an
   expect(w.commands).not.toContain('clear')
   expect([...w.files.values()].join('')).toContain('write-failed')
 })
+
+// R1-01: the clear is tied to an `awaiting` the mod created.
+test('R1-01: a handover tool call nobody asked for saves the file and never clears', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  const r = await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(String((r as { result?: unknown }).result)).toContain('nothing was cleared')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).toContain('## Goal')
+  expect(w.commands).not.toContain('clear')
+  expect((w.state.get(PENDING) as { resume: boolean }).resume).toBe(false)
+  expect(w.notices.length).toBeGreaterThan(0)
+})
+
+test('R1-01: a duplicate tool call after a requested handover does not clear a second time', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.commands.filter(c => c === 'clear')).toHaveLength(1)
+  await $.tool.call(call({ tool_use_id: 'h2' }) as never)
+  await w.clock.settle()
+  expect(w.commands.filter(c => c === 'clear')).toHaveLength(1)
+  expect(w.files.has('/cfg/context-vigil-mod/handovers/s1-2.md')).toBe(true)
+})

@@ -737,8 +737,11 @@ export const register: Register = on => {
     const parsed = parseFields(input)
     if (!parsed.ok) return { deny: `${parsed.error} — call ${TOOL_FULL} again with every required field` }
     const awaiting = await read($, awaitingA)
+    // Only a handover the mod asked for may end in a clear; a call with no `awaiting` is the
+    // model volunteering (or repeating itself): save it, offer it, never clear (R1-01).
+    const requested = awaiting !== null
     const reason = awaiting?.reason ?? 'request'
-    const resume = awaiting?.resume ?? true
+    const resume = awaiting?.resume ?? false
     await update($, awaitingA, () => null)
     const n = (await read($, handoverCountA)) + 1
     await update($, handoverCountA, () => n)
@@ -758,6 +761,11 @@ export const register: Register = on => {
     await savePending($, { session, path, name: parsed.fields.session_name, reason, markdown, resume, followUp: null, createdAt: now })
     if (reason === 'limit' && limitResume) limitResume.path = path
     await log($, 'handover.written', { reason, bytes: markdown.length, path })
+    if (!requested) {
+      await notify($, V.handoverUnrequested(path))
+      await log($, 'guard.wait', { reason: 'unrequested', path })
+      return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
+    }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
     if (reason === 'threshold' || reason === 'request') scheduleClear($, reason === 'threshold')
     return { result: `Saved handover to ${path}` } as never

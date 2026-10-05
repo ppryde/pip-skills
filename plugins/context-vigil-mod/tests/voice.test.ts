@@ -12,7 +12,7 @@ test('bar strings', () => {
 })
 test('every user-facing string is emoji-led', () => {
   const samples = [
-    V.nudge(41), V.handoverSaved('/x.md'), V.handoverFailed, V.clearRejected, V.countdownLine(30),
+    V.nudge(41), V.handoverSaved('/x.md'), V.handoverUnrequested('/x.md'), V.handoverFailed, V.clearRejected, V.countdownLine(30),
     V.countdownCancelled, V.setupUsage, V.rcAsk, V.pendingOffer('/x.md'), V.waiting('draft'), V.lastLightReady,
     V.lastLightAsk, V.limitLatched('14:05'), V.limitCleared, V.earlyStop('seven_day', 95, '14:05'),
     V.classicActive, V.setupSaved, V.handingOver, V.settingUp, V.cmdHandover, V.cmdSetup, V.renameFailed,
