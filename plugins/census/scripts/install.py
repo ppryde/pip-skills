@@ -34,43 +34,57 @@ def shim_text(cli: Path) -> str:
     )
 
 
-def _shim_owner(shim: Path) -> str:
-    """'none', 'ours' (any census launcher, old or new) or 'foreign'."""
+def _read_text(path: Path) -> str:
+    """Read without newline translation; undecodable bytes survive a round trip."""
+    return path.read_bytes().decode("utf-8", "surrogateescape")
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.write_bytes(text.encode("utf-8", "surrogateescape"))
+
+
+def _is_old_launcher(text: str) -> bool:
+    return any(line.startswith("# census launcher") for line in text.splitlines()[:3])
+
+
+def _shim_owner(shim: Path) -> tuple[str, str]:
+    """('none' | 'ours' | 'foreign', text). 'ours' is any census launcher, old or new."""
     try:
-        text = shim.read_text()
+        text = _read_text(shim)
     except FileNotFoundError:
-        return "none"
+        return "none", ""
     except OSError:
-        return "foreign"
-    return "ours" if (SHIM_MARKER in text or _OLD_SHIM_HINT in text) else "foreign"
+        return "foreign", ""
+    ours = SHIM_MARKER in text or _is_old_launcher(text)
+    return ("ours" if ours else "foreign"), text
 
 
 def install(shim: Path, statusline: Path, cli: Path, apply: bool) -> tuple[int, list[str]]:
     lines: list[str] = []
     verb = "" if apply else "would "
-    owner = _shim_owner(shim)
+    owner, current = _shim_owner(shim)
     wanted = shim_text(cli)
     if owner == "foreign":
         return 1, [f"refused: {shim} exists and is not a census launcher — move it, or pass --shim"]
-    if owner == "ours" and shim.read_text() == wanted:
+    if owner == "ours" and current == wanted:
         lines.append(f"launcher {shim}: up to date")
     else:
         lines.append(f"launcher {shim}: {verb}{'replace' if owner == 'ours' else 'create'} → {cli}")
         if apply:
             shim.parent.mkdir(parents=True, exist_ok=True)
-            shim.write_text(wanted)
+            _write_text(shim, wanted)
             shim.chmod(0o755)
     if not statusline.exists():
         lines.append(f"no status-line script at {statusline} — add this line after `input=$(cat)`:")
         lines.append(f"  {sl.INGEST}")
-        return 0, lines
-    text = statusline.read_text()
-    if sl.is_installed(text):
-        lines.append(f"status line {statusline}: census block present")
     else:
-        lines.append(f"status line {statusline}: {verb}add the census block after `{sl.DEFAULT_ANCHOR}`")
-        if apply:
-            statusline.write_text(sl.add_block(text))
+        text = _read_text(statusline)
+        if sl.is_installed(text):
+            lines.append(f"status line {statusline}: census block present")
+        else:
+            lines.append(f"status line {statusline}: {verb}add the census block after `{sl.DEFAULT_ANCHOR}`")
+            if apply:
+                _write_text(statusline, sl.add_block(text))
     if not apply:
         lines.append("dry run — nothing changed; re-run with --yes")
     return 0, lines
@@ -79,17 +93,18 @@ def install(shim: Path, statusline: Path, cli: Path, apply: bool) -> tuple[int, 
 def uninstall(shim: Path, statusline: Path, purge_dir: Path | None, apply: bool) -> tuple[int, list[str]]:
     lines: list[str] = []
     verb = "" if apply else "would "
-    owner = _shim_owner(shim)
+    owner, _ = _shim_owner(shim)
     if owner == "ours":
         lines.append(f"launcher {shim}: {verb}remove")
         if apply:
             shim.unlink()
     elif owner == "foreign":
         lines.append(f"launcher {shim}: not a census launcher — left alone")
-    if statusline.exists() and sl.is_installed(statusline.read_text()):
+    text = _read_text(statusline) if statusline.exists() else ""
+    if sl.is_installed(text):
         lines.append(f"status line {statusline}: {verb}remove the census block")
         if apply:
-            statusline.write_text(sl.remove_block(statusline.read_text()))
+            _write_text(statusline, sl.remove_block(text))
     if purge_dir is not None and purge_dir.exists():
         lines.append(f"data {purge_dir}: {verb}delete")
         if apply:
