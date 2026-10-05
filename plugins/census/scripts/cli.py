@@ -9,8 +9,9 @@ from pathlib import Path
 if __package__ in (None, ""):  # direct invocation: put plugin root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import statusline as sl  # noqa: E402
-from scripts import store as st  # noqa: E402
+from scripts import install as ins
+from scripts import statusline as sl
+from scripts import store as st
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -50,6 +51,36 @@ def cmd_install_statusline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_shim() -> Path:
+    return Path.home() / ".local" / "bin" / "census"
+
+
+def _this_cli() -> Path:
+    return Path(__file__).resolve()
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    code, lines = ins.install(
+        Path(args.shim) if args.shim else _default_shim(),
+        Path(args.statusline) if args.statusline else _statusline_path(),
+        _this_cli(),
+        apply=args.yes,
+    )
+    print("\n".join(lines))
+    return code
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    code, lines = ins.uninstall(
+        Path(args.shim) if args.shim else _default_shim(),
+        Path(args.statusline) if args.statusline else _statusline_path(),
+        st.census_dir() if args.purge else None,
+        apply=args.yes,
+    )
+    print("\n".join(lines))
+    return code
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="census", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -66,11 +97,25 @@ def build_parser() -> argparse.ArgumentParser:
     read.set_defaults(func=cmd_read)
 
     install = sub.add_parser(
-        "install-statusline", help="add (or --uninstall) the census block in the status-line script"
+        "install-statusline",
+        help="(deprecated alias) add or --uninstall only the status-line block",
     )
     install.add_argument("--path", help="status-line script (default ~/.claude/statusline-command.sh)")
     install.add_argument("--uninstall", action="store_true", help="remove the block instead")
     install.set_defaults(func=cmd_install_statusline)
+
+    inst = sub.add_parser("install", help="install the census launcher and status-line block")
+    inst.add_argument("--yes", action="store_true", help="apply (default is a dry run)")
+    inst.add_argument("--shim", help="launcher path (default ~/.local/bin/census)")
+    inst.add_argument("--statusline", help="status-line script (default ~/.claude/statusline-command.sh)")
+    inst.set_defaults(func=cmd_install)
+
+    uninst = sub.add_parser("uninstall", help="remove the launcher and status-line block")
+    uninst.add_argument("--purge", action="store_true", help="also delete this account's census data")
+    uninst.add_argument("--yes", action="store_true", help="apply (default is a dry run)")
+    uninst.add_argument("--shim", help="launcher path (default ~/.local/bin/census)")
+    uninst.add_argument("--statusline", help="status-line script (default ~/.claude/statusline-command.sh)")
+    uninst.set_defaults(func=cmd_uninstall)
 
     return parser
 
