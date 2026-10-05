@@ -142,19 +142,29 @@ worktree path and `/usr/bin/python3`, plus `install-statusline`. v2 owns both.
 
 ## Readers moving to v2
 
-Readers that read census's on-disk contract directly keep that principle — they
-import no census code and shell nothing — and switch to the v2 layout:
+The owner has drawn the contract: overseer and vigil may couple to census. So no
+reader outside census knows the file layout any more — the `census read` CLI is the
+contract, and the two readers that open `status.json` today switch to it. Today they
+are deliberately soft (import nothing, shell nothing); that principle is dropped.
 
 | Reader | Today | v2 |
 |---|---|---|
-| `plugins/vigil/scripts/census.py` | opens `status.json`, own entry by session id else newest `worktree_cwd` match | reads `sessions/<sid>.json`; else scans `sessions/` for the newest `worktree_cwd` match |
-| `plugins/overseer/scripts/liveness.py` | `status.json` session keys + `updated_at` | lists `sessions/`, reads `updated_at` |
+| `plugins/vigil/scripts/census.py` | opens `status.json`; own entry by session id, else newest `worktree_cwd` match | `census read --session <id>`, else `census read --worktree <cwd>` |
+| `plugins/overseer/scripts/liveness.py` | `status.json` session keys + `updated_at` | `census read` (sessions + `stale`) |
 | overseer dashboard, overseer claim CLI | `census read` | none |
-| agent-ui watcher (other repo) | its own `statusline-cache/` | prefers `<config>/census/sessions/`, falls back — in progress on agent-ui `feat/watcher-reads-census` |
+| agent-ui watcher (other repo) | its own `statusline-cache/` | prefers `<config>/census/sessions/`, falls back — done on agent-ui `feat/watcher-reads-census` (af18ad1), not pushed |
 
-Both in-repo readers fall back to a v1 `status.json` when no `sessions/` exists, for
-one release, so the order of upgrades does not matter. The five-hour guard that read
-`limits` is retired (2026-10-05; the limit latch lives in context-vigil-mod).
+Both call the CLI through a small shared helper in each plugin: run `census` with a
+2 s timeout and the caller's `CLAUDE_CONFIG_DIR`, parse JSON, and treat any failure
+(census missing, non-zero exit, bad JSON, timeout) as "no data" — the same outcome
+as today's absent store. Because the CLI migrates a v1 store itself, readers need no
+v1 fallback. Their tests stub the CLI (a fake `census` on `PATH` in `tmp_path`).
+
+agent-ui stays layout-coupled on purpose: it ships to users without census and reads
+the folder directly with its own fallback.
+
+The five-hour guard that read `limits` is retired (2026-10-05; the limit latch lives
+in context-vigil-mod).
 
 ## Testing
 
@@ -174,7 +184,8 @@ running (repo test-isolation rule).
 - **Install / uninstall.** Dry run changes nothing; install twice is a no-op;
   uninstall leaves the status-line script byte-identical to before install; the shim
   resolves the plugin path and an interpreter.
-- **Readers.** vigil and liveness read v2, and fall back to v1.
+- **Readers.** vigil and liveness get their data from `census read` (fake CLI on
+  `PATH`); census missing, failing, slow or printing junk all read as "no data".
 
 Gates: `poetry run pytest`, `ruff`, `mypy` for `plugins/census`, `plugins/vigil`,
 `plugins/overseer`.
