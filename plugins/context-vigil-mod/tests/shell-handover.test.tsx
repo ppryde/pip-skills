@@ -657,3 +657,14 @@ test('R1-08: after an in-process /resume the handover is filed under the new ses
   expect(injected).toContain('Handover — s2')
   expect(injected).not.toContain('Handover — s1')
 })
+
+test('R1-11: a second /vho while one is in flight starts nothing new and says so', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
+  expect(w.notices.some(n => n.includes('already in progress'))).toBe(true)
+})

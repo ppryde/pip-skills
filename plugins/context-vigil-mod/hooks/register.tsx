@@ -299,6 +299,12 @@ async function startHandover($: EngineInterface, reason: PendingReason, resume: 
     await log($, 'guard.wait', { reason: 'latched', deferred: reason })
     return
   }
+  // R1-11: one handover in flight at a time; a second instruction would produce a second tool call.
+  if (await read($, awaitingA)) {
+    await notify($, V.handoverInProgress)
+    await log($, 'guard.wait', { reason: 'handover-in-flight', asked: reason })
+    return
+  }
   const pending = await read($, pendingA)
   if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), await nowMs($))) {
     scheduleClear($, unattended)
