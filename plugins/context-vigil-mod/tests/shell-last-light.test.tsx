@@ -501,3 +501,16 @@ test('R1-07: a draft after the turn blocks that period\'s last light', async ($,
   await w.clock.advance(15 * MIN)
   expect(asks(w)).toBe(0)
 })
+
+test('R1-14: a subagent turn neither moves the cache clock nor re-arms the last-light timer', async ($, on) => {
+  const w = world(on, LL)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(30 * MIN)
+  await $.turn.complete({ ...turn('sub'), agentId: 'a1' } as never)
+  await w.clock.advance(25 * MIN)   // T+55: the main cache's own clock
+  expect(asks(w)).toBe(1)
+  expect(w.state.get('context-vigil-mod.lastApiAt')).toBe(1_000_000)
+})

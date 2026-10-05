@@ -762,9 +762,13 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const now = await nowMs($)
     await observe($, { kind: 'agent-step', at: now })
-    await update($, lastApiA, () => now)
-    lastApiMirror = now
-    scheduleLastLight($, now, now)
+    // A subagent writes its own (5-minute) cache: only the main loop's turn moves the main cache's
+    // clock (R1-14, PROBES §11).
+    if (e.agentId === undefined) {
+      await update($, lastApiA, () => now)
+      lastApiMirror = now
+      scheduleLastLight($, now, now)
+    }
     if (e.agentId === undefined && (e.usage?.cache_creation_input_tokens ?? 0) > 0 && !(await read($, ttlReadA))) {
       await update($, ttlReadA, () => true)
       $.clock.after(0, () => { void learnSessionTtl($) })
