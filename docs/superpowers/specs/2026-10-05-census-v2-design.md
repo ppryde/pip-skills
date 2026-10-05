@@ -160,8 +160,12 @@ Both call the CLI through a small shared helper in each plugin: run `census` wit
 2 s timeout and the caller's `CLAUDE_CONFIG_DIR`, parse JSON, and treat any failure
 (census missing, non-zero exit, bad JSON, timeout) as "no data" — the same outcome
 as today's absent store. Because the CLI migrates a v1 store itself, readers need no
-v1 fallback. The CLI is found by `CENSUS_CLI` (env), else the sibling
-`plugins/census/scripts/cli.py`, else `census` on `PATH`.
+v1 fallback. Census publishes its own location: every ingest writes
+`<census dir>/cli.path` (the absolute path of the running `cli.py`, rewritten only
+when it changes), so it follows upgrades by itself. Readers find the CLI by
+`CENSUS_CLI` (env), else `cli.path` (run with the reader's own Python), else
+`census` on `PATH`. No reader walks plugin directories. `uninstall --purge` removes
+`cli.path` with the other census-owned files.
 
 overseer liveness reads an EMPTY `sessions` as "liveness unknown" (`None`), not "no
 live sessions": `census read` cannot tell a missing store from an empty one, and
