@@ -323,7 +323,12 @@ early, as a band, before the person sends. The choice is logged.
 that window's `resetsAt`. While latched, the mod never clears and never
 submits (built-in auto-continue owns the retry); the bar and notices show
 `⏳ resumes HH:MM`. The latch clears after `resetsAt`, or when
-`session.measure` shows the window has reset.
+`session.measure` shows the window has reset. A handover that was asked for or
+due while latched waits for the latch. Any message or command from you while it
+waits cancels it (a notice says so). When the latch lifts it runs only if auto
+mode is on and you are still away, and then as an unattended handover — the
+clear takes the attended re-check and the Remote Control rules like any auto
+clear. Otherwise it is dropped with a notice; `/vho` again when you want one.
 
 **Early stop for seven_day and spend_limit** (folding in the behaviour of
 `~/.claude-personal/census/five-hour-guard.py`, which itself stays untouched):

@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 import { START, human, world } from './world'
 
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'
@@ -10,7 +11,7 @@ const asks = (w: { submits: { text: string }[] }) => w.submits.filter(s => s.tex
 const write = { tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never
 
 test('while latched nothing is submitted or cleared; at the lift the deferred handover runs', async ($, on) => {
-  const w = world(on, { now: 1_000_000 })
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
@@ -101,7 +102,7 @@ test('an early stop fired before a clear does not fire again after it for the sa
 })
 
 test('a latch lifted by another session still drains this one: the deferred handover runs', async ($, on) => {
-  const w = world(on, { now: 1_000_000 })
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
   w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
   await $.session.start(START)
   await $.prompt.submit(human('hi'))
@@ -111,6 +112,7 @@ test('a latch lifted by another session still drains this one: the deferred hand
   expect(asks(w)).toBe(0)
   expect(w.store.get('latch')).toBeDefined()
   w.store.delete('latch')                                        // the other process lifted it
+  await w.clock.advance(31 * 60_000)                             // the person has long since gone quiet
   await $.session.measure(measure([]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
@@ -175,4 +177,65 @@ test('configured trigger and windows: below or unwatched does nothing; the watch
   await $.session.measure(measure([{ kind: 'spend_limit', percentUsed: 98, resetsAt: iso(5 * HOUR) }]))
   await w.clock.settle()
   expect(asks(w)).toBe(1)
+})
+
+// R1-09: a handover deferred by the latch is re-validated when it drains.
+const MIN = 60_000
+const vho = { command: 'vho', args: '', origin: { kind: 'composer' } as never } as never
+async function latchedVho($: Engine, w: ReturnType<typeof world>, origin: 'composer' | 'bridge' = 'composer') {
+  await $.session.start(START)
+  await $.prompt.submit(human('hi', origin))
+  w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: iso(1_000_000 + HOUR) }]
+  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.store.get('latch')).toBeDefined()
+  expect(w.state.get('context-vigil-mod.deferred')).toMatchObject({ reason: 'request' })
+}
+const lift = [{ kind: 'five_hour', percentUsed: 1, resetsAt: iso(1_000_000 + 6 * HOUR) }]
+
+test('R1-09: a person who comes back cancels the deferred handover', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await latchedVho($, w)
+  await $.prompt.submit(human('x', 'bridge'))
+  expect(w.state.get('context-vigil-mod.deferred')).toBeNull()
+  expect(w.notices.some(n => n.includes('was not run'))).toBe(true)
+  await w.clock.advance(HOUR + 1000)
+  await $.session.measure(measure(lift))
+  await w.clock.settle()
+  expect(asks(w)).toBe(0)
+})
+
+test('R1-09: a drained request runs as an unattended handover: RC gate, never a bare clear', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await latchedVho($, w, 'bridge')
+  await w.clock.advance(HOUR + 1000)
+  await $.session.measure(measure(lift))
+  await w.clock.settle()
+  expect(asks(w)).toBe(1)
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.some(n => n.includes('not switched on'))).toBe(true)
+})
+
+test('R1-09: with auto off a drained request is dropped with a notice', async ($, on) => {
+  const w = world(on, { now: 1_000_000 })
+  await latchedVho($, w)
+  await w.clock.advance(HOUR + 1000)
+  await $.session.measure(measure(lift))
+  await w.clock.settle()
+  expect(asks(w)).toBe(0)
+  expect(w.notices.some(n => n.includes('was not run'))).toBe(true)
+})
+
+test('R1-09: the tool handler honours Awaiting.unattended for the attended re-check', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true } } })
+  await $.session.start(START)
+  w.state.set('context-vigil-mod.awaiting', { reason: 'request', resume: true, attempts: 1, started: true, unattended: true })
+  await $.prompt.submit(human('i am here'))
+  await $.tool.call(write)
+  await w.clock.settle()
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices.some(n => n.includes('you came back'))).toBe(true)
 })

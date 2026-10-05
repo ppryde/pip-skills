@@ -214,7 +214,7 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     expect(w.commands).not.toContain('clear')
   })
 
-  test(`RC ${rcAutoClear}: a deferred handover drained by the latch at a reload still meets the RC gate`, async ($, on) => {
+  test(`RC ${rcAutoClear}: a deferred handover drained by the latch still meets the RC gate`, async ($, on) => {
     const w = world(on, { now: 1_000_000, store: { settings: { auto: true, rcAutoClear }, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 60 * MIN } } })
     await $.session.start(START)
     await $.prompt.submit(human('go', 'bridge'))
@@ -225,7 +225,7 @@ for (const rcAutoClear of ['no', 'unanswered'] as const) {
     await w.clock.settle()
     expect(w.state.get('context-vigil-mod.deferred')).toMatchObject({ reason: 'threshold' })
     await w.clock.advance(30 * MIN)               // past the reset
-    await $.session.start(START)                  // the reload lifts the latch and drains it
+    await $.session.measure(measure(36))          // the lifted latch drains it, as an unattended handover
     await w.clock.settle()
     expect(w.submits.some(s => s.text.includes(TOOL))).toBe(true)
     await $.tool.call({ tool: TOOL, tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never)

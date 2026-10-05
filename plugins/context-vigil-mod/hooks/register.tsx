@@ -124,6 +124,13 @@ async function observe($: EngineInterface, signal: Signal) {
   // Every change is computed from the value it replaces, so overlapping observers cannot erase each other.
   activity = record(activity, signal)
   if (signal.kind === 'prompt' && classifyOrigin(signal.origin) === 'human') await savePhoneFacts($)
+  // R1-09: an explicit act from the person cancels a handover that waited on the latch.
+  if ((signal.kind === 'human-command' || (signal.kind === 'prompt' && classifyOrigin(signal.origin) === 'human')) && (await read($, deferredA))) {
+    const dropped = await read($, deferredA)
+    await update($, deferredA, () => null)
+    await notify($, V.deferredDropped)
+    await log($, 'guard.wait', { reason: 'deferred-dropped', deferred: dropped?.reason })
+  }
   // Spec §2: a non-empty draft in the terminal box is you being here.
   if (signal.kind === 'agent-step' && (await $.prompt.read()).text.trim()) activity = record(activity, { kind: 'edit', at: now })
   const act = activity   // this observation's view: later awaits may move `activity` on
@@ -236,22 +243,22 @@ async function savePending($: EngineInterface, p: Pending | null) {
   else await $.store.delete(pendingKey(prev?.session ?? session))
 }
 
-async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean) {
+async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold') {
   if (standDown) return
   if (await readLatch($)) {
     // Spec §5: while latched the mod never submits; Task 14's checkLatch starts it later.
-    await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false }))
+    await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false, unattended }))
     await notify($, V.waiting('latched'))
     await log($, 'guard.wait', { reason: 'latched', deferred: reason })
     return
   }
   const pending = await read($, pendingA)
   if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA))) {
-    scheduleClear($, reason === 'threshold')
+    scheduleClear($, unattended)
     return
   }
   if (pending) await supersedePending($)
-  await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false }))
+  await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false, unattended }))
   await log($, 'handover.requested', { reason, resume })
   submitInstruction($, reason)
 }
@@ -345,7 +352,16 @@ async function checkLatch($: EngineInterface, limits: RateLimit[]) {
   const deferred = await read($, deferredA)
   if (deferred) {
     await update($, deferredA, () => null)
-    await startHandover($, deferred.reason, deferred.resume)
+    // R1-09: hours later the person may be anywhere. A threshold or request runs only if auto mode
+    // is on and they are not attended, and then as an unattended handover (attended re-check, RC
+    // gate). A last light should not get here (shouldFire refuses under a latch); drop it quietly.
+    if (deferred.reason === 'limit') await startHandover($, deferred.reason, deferred.resume, false)
+    else if (deferred.reason !== 'last_light' && settings.auto && mode(activity, await nowMs($), settings) !== 'attended') {
+      await startHandover($, deferred.reason, deferred.resume, true)
+    } else {
+      if (deferred.reason !== 'last_light') await notify($, V.deferredDropped)
+      await log($, 'guard.wait', { reason: 'deferred-dropped', deferred: deferred.reason })
+    }
     return
   }
   // Only a clear the latch parked: one parked for a cancelled countdown or a refusal stays put.
@@ -767,7 +783,7 @@ export const register: Register = on => {
       return { result: `Saved handover to ${path} (not requested by context-vigil-mod; nothing was cleared)` } as never
     }
     await notify($, reason === 'last_light' ? V.lastLightReady : V.handoverSaved(path))
-    if (reason === 'threshold' || reason === 'request') scheduleClear($, reason === 'threshold')
+    if (reason === 'threshold' || reason === 'request') scheduleClear($, awaiting?.unattended ?? false)
     return { result: `Saved handover to ${path}` } as never
   })
 
