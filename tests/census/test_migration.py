@@ -67,7 +67,8 @@ class TestMigrate:
             _write_v1(path)
         for account in ("a", "b"):
             monkeypatch.setenv("CENSUS_STORE", str(tmp_path / account / "census"))
-            (tmp_path / account / "census" / ".migrate.lock").write_text("") if account == "a" else None
+            if account == "a":
+                (tmp_path / account / "census" / ".migrate.lock").write_text("")
             st.migrate(now=200.0)
         assert (tmp_path / "a" / "census" / "status.json").exists()      # a was locked
         assert not (tmp_path / "b" / "census" / "status.json").exists()  # b migrated
@@ -97,3 +98,25 @@ class TestMigrate:
         os.utime(retired, (old, old))
         st.ingest(json.dumps({"session_id": "s9", "cwd": "/wt"}), now=time.time())
         assert not retired.exists()
+
+    def test_read_all_migrates_without_explicit_call(self, store_file):
+        _write_v1(store_file)
+        assert set(st.read_all()["sessions"]) == {"s1"}
+        assert not store_file.exists()
+
+    def test_cli_read_prints_migrated_sessions(self, store_file, capsys):
+        from scripts import cli
+
+        _write_v1(store_file)
+        cli.main(["read"])
+        assert "s1" in json.loads(capsys.readouterr().out)["sessions"]
+
+    def test_unexpected_error_returns_false_and_releases_lock(self, store_file, monkeypatch):
+        _write_v1(store_file)
+
+        def boom(*a, **k):
+            raise ValueError("boom")
+
+        monkeypatch.setattr(st, "_atomic_write", boom)
+        assert st.migrate(now=200.0) is False
+        assert not (store_file.parent / ".migrate.lock").exists()

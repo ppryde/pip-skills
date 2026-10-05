@@ -121,7 +121,6 @@ def session_path(sid: str) -> Path:
 
 def _empty_store() -> dict[str, Any]:
     """An empty v1-shaped dict, the input to the pure ``merge``."""
-    migrate()
     return {"version": VIEW_VERSION, "limits": None, "sessions": {}}
 
 
@@ -546,17 +545,18 @@ def migrate(now: float | None = None) -> bool:
     """
     if now is None:
         now = time.time()
-    legacy = store_path()
-    if not legacy.exists():
-        return False
-    lock = census_dir() / _MIGRATE_LOCK
+    lock: Path | None = None
     try:
+        legacy = store_path()
+        if not legacy.exists():
+            return False
+        lock = census_dir() / _MIGRATE_LOCK
+        # Lock age is wall-clock time.time() on purpose (mtime is wall-clock), unlike `now`.
         if lock.exists() and time.time() - lock.stat().st_mtime > _MIGRATE_LOCK_STALE_SECONDS:
             _unlink(lock)
-        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except OSError:
+        os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except Exception:  # noqa: BLE001 - a reader must never fail on migration
         return False
-    os.close(fd)
     try:
         data = _read_json(legacy) or {}
         sessions = data.get("sessions")
@@ -583,7 +583,7 @@ def migrate(now: float | None = None) -> bool:
         for stray in census_dir().glob(".status.*.tmp"):
             _unlink(stray)
         return True
-    except OSError:
+    except Exception:  # noqa: BLE001 - never raise from a reader
         return False
     finally:
         _unlink(lock)
@@ -695,6 +695,7 @@ def _all_sessions() -> dict[str, dict[str, Any]]:
 
 def read_all(now: float | None = None) -> dict[str, Any]:
     """The whole store as the v1 view: ``{version: 1, limits, sessions}``."""
+    migrate()
     return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": _all_sessions()}
 
 
