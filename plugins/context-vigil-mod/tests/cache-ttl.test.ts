@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { transcriptPathFor, ttlFromSwitch, ttlFromWrites, ttlMsOf, parseWrites, TAIL_CMD } from '../core/cache-ttl'
+import { transcriptPathFor, ttlFromWrites, parseWrites, TAIL_CMD } from '../core/cache-ttl'
 
 const row = (h1: number, m5: number) => `{"ephemeral_1h_input_tokens":${h1},"ephemeral_5m_input_tokens":${m5}}`
 
@@ -17,41 +17,20 @@ describe('parseWrites', () => {
     expect(parseWrites('garbage\n')).toBe(null)
   })
   test('the tail command is bounded and never reads whole rows', () => {
-    expect(TAIL_CMD).toContain('tail -c')
+    expect(TAIL_CMD).toContain('tail -c 65536')
     expect(TAIL_CMD).toContain('grep -o')
   })
 })
 
 describe('ttlFromWrites', () => {
   test('1h tokens only is 1h; 5m tokens only is 5m', () => {
-    expect(ttlFromWrites({ h1: 10, m5: 0 }, 'unknown')).toBe('1h')
-    expect(ttlFromWrites({ h1: 0, m5: 10 }, '1h')).toBe('5m')
+    expect(ttlFromWrites({ h1: 10, m5: 0 })).toBe('1h')
+    expect(ttlFromWrites({ h1: 0, m5: 10 })).toBe('5m')
   })
   test('mixed tokens: 5m wins, because the shortest-lived write goes cold first', () => {
-    expect(ttlFromWrites({ h1: 900, m5: 1 }, '1h')).toBe('5m')
+    expect(ttlFromWrites({ h1: 900, m5: 1 })).toBe('5m')
   })
-  test('no write information keeps the previous value, unknown included', () => {
-    expect(ttlFromWrites(null, '1h')).toBe('1h')
-    expect(ttlFromWrites(null, '5m')).toBe('5m')
-    expect(ttlFromWrites(null, 'unknown')).toBe('unknown')
-  })
-})
-
-describe('ttlFromSwitch', () => {
-  test('the engine label is authoritative', () => {
-    expect(ttlFromSwitch('5m', '1h')).toBe('5m')
-    expect(ttlFromSwitch('1h', 'unknown')).toBe('1h')
-  })
-  test('a missing or junk label changes nothing', () => {
-    expect(ttlFromSwitch(undefined, '1h')).toBe('1h')
-    expect(ttlFromSwitch('10m', '5m')).toBe('5m')
-  })
-})
-
-test('ttlMsOf: only a known ttl has a length', () => {
-  expect(ttlMsOf('1h')).toBe(3_600_000)
-  expect(ttlMsOf('5m')).toBe(300_000)
-  expect(ttlMsOf('unknown')).toBe(null)
+  test('no write found is unknown', () => expect(ttlFromWrites(null)).toBe('unknown'))
 })
 
 test('transcriptPathFor mirrors how Claude Code names a project folder', () => {

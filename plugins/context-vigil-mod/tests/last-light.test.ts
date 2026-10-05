@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { LEAD_MS, TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 
-test('fireAt is last API activity + 1h − lead; only a known 1-hour cache fires', () => {
-  expect(fireAt(1000, '1h')).toBe(1000 + TTL_1H - LEAD_MS)
-  expect(fireAt(1000, '5m')).toBe(null)
-  expect(fireAt(1000, 'unknown')).toBe(null)
+test('fireAt is last API activity + 1h − lead', () => {
+  expect(fireAt(1000)).toBe(1000 + TTL_1H - LEAD_MS)
 })
 
 describe('shouldFire', () => {

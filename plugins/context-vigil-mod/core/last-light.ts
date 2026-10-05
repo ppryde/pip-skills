@@ -1,14 +1,11 @@
 import type { Mode } from '../types'
 import { classifyOrigin } from './arming'
-import type { CacheTtl } from './cache-ttl'
 
 export const LEAD_MS = 300_000
 export const TTL_1H = 3_600_000
 
-// Only a cache known to live an hour is worth a handover before it goes cold; a 5-minute or
-// unknown one would be warmed long after it expired.
-export function fireAt(lastApiAt: number, ttl: CacheTtl): number | null {
-  if (ttl !== '1h') return null
+// Scheduled on the assumption of a 1-hour cache; the fire checks the assumption (PROBES §11).
+export function fireAt(lastApiAt: number): number {
   return lastApiAt + TTL_1H - LEAD_MS
 }
 

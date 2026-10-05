@@ -27,7 +27,7 @@ export type World = {
   greps: string[][]                    // argv of every grep run
   store: Map<string, unknown>          // $.store by key — per account, NOT wiped by a clear
   handoverWriteRefused: { value: boolean }               // makes fs.write under /handovers/ deny
-  cacheWrites: { value: { h1: number; m5: number } | 'none' | 'fail' }   // what the transcript tail says the latest response wrote
+  cacheWrites: { value: { h1: number; m5: number } | 'none' | 'fail' | { raw: string } }   // what the transcript tail says the latest response wrote
   tails: string[][]                    // argv of every transcript-tail run
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
@@ -71,6 +71,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
       w.tails.push([...e.argv])
       const cw = w.cacheWrites.value
       if (cw === 'fail') return { value: { exitCode: 1, stdout: '', stderr: 'tail: no such file', isStdoutTruncated: false, isStderrTruncated: false } }
+      if (typeof cw === 'object' && 'raw' in cw) return { value: { exitCode: 0, stdout: cw.raw, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       const stdout = cw === 'none' ? '' : `"cache_creation":{"ephemeral_5m_input_tokens":${cw.m5},"ephemeral_1h_input_tokens":${cw.h1}}\n`
       return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
@@ -142,9 +143,5 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
 }
 
 export const START = { cwd: '/repo', surface: 'terminal' as const, isInteractive: true }
-const usage = (cacheCreation: number) => ({ input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 50, cache_creation_input_tokens: cacheCreation, model: 'm' })
-// A turn whose response wrote to the cache (usage.cache_creation_input_tokens > 0), as the engine reports it.
-export const turn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const, usage: usage(5) })
-// A pure cache read: nothing written, so nothing to learn about the lifetime.
-export const readTurn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const, usage: usage(0) })
+export const turn = (id = 't') => ({ answer: 'a', durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const })
 export const human = (text: string, kind: 'composer' | 'bridge' = 'composer') => ({ text, wait: false, origin: { kind } as never })

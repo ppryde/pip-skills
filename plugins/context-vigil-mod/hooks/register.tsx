@@ -8,8 +8,8 @@ import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
-import { TAIL_CMD, type CacheTtl, parseWrites, transcriptPathFor, ttlFromSwitch, ttlFromWrites, ttlMsOf } from '../core/cache-ttl'
-import { fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
+import { TAIL_CMD, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
+import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
 import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
@@ -29,9 +29,6 @@ const barShownA = atom({ plugin: 'context-vigil-mod', key: 'barShown' } as const
 const barDismissedA = atom({ plugin: 'context-vigil-mod', key: 'barDismissed' } as const, false)
 const pendingA = atom({ plugin: 'context-vigil-mod', key: 'pending' } as const, null)
 const countdownA = atom({ plugin: 'context-vigil-mod', key: 'countdownEndsAt' } as const, null)
-// The main conversation's prompt-cache lifetime (PROBES §11). Per session, so a /clear wipes it
-// back to unknown; a hot reload keeps it.
-const cacheTtlA = atom({ plugin: 'context-vigil-mod', key: 'cacheTtl' } as const, 'unknown' as CacheTtl)
 const transcriptA = atom({ plugin: 'context-vigil-mod', key: 'transcriptPath' } as const, null as string | null)
 const lastApiA = atom({ plugin: 'context-vigil-mod', key: 'lastApiAt' } as const, null)
 const awaitingA = atom({ plugin: 'context-vigil-mod', key: 'awaiting' } as const, null as Awaiting | null)
@@ -72,7 +69,6 @@ let clearParked = false
 let unattendedClear = false
 let lastWait: WaitReason | null = null
 let retryTimer: { cancel: () => void } | null = null
-let skipLogged: CacheTtl | null = null   // the ttl a last_light.skip was last logged for
 let setupRun: { only: string | undefined; asked: StepId[] } | null = null
 let lastLightTimer: { cancel: () => void } | null = null
 let countdownTick: { cancel: () => void } | null = null
@@ -190,7 +186,6 @@ function resetCaches() {
   lastWait = null
   lastLightTimer?.cancel()
   lastLightTimer = null
-  skipLogged = null
   setupRun = null
   countdownTick?.cancel()
   countdownTick = null
@@ -429,54 +424,26 @@ async function renameSession($: EngineInterface, name: string | undefined, oldTr
   }
 }
 
-function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number, ttl: CacheTtl) {
+function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
   lastLightTimer?.cancel()
   lastLightTimer = null
   if (!settings.lastLight) return
-  const at = fireAt(lastApiAt, ttl)
-  if (at === null) {
-    // Once per state, not per turn: a 5-minute or unknown cache has nothing to warm.
-    if (skipLogged !== ttl) void log($, 'last_light.skip', { reason: `ttl-${ttl}` })
-    skipLogged = ttl
-    return
-  }
-  skipLogged = null
-  if (now >= lastApiAt + (ttlMsOf(ttl) ?? 0)) return   // no fire for a cache that is already cold
-  lastLightTimer = $.clock.after(Math.max(0, at - now), () => { void maybeFireLastLight($) })
+  if (now >= lastApiAt + TTL_1H) return   // no fire for a cache that is already cold
+  lastLightTimer = $.clock.after(Math.max(0, fireAt(lastApiAt) - now), () => { void maybeFireLastLight($) })
 }
 
-async function rescheduleLastLight($: EngineInterface) {
-  const lastApi = await read($, lastApiA)
-  if (lastApi === null) { lastLightTimer?.cancel(); lastLightTimer = null; return }
-  scheduleLastLight($, lastApi, await nowMs($), await read($, cacheTtlA))
-}
-
-async function setTtl($: EngineInterface, to: CacheTtl, source: 'response' | 'pre-switch' | 'post-switch'): Promise<boolean> {
-  const from = await read($, cacheTtlA)
-  if (to === from) return false
-  await update($, cacheTtlA, () => to)
-  await log($, 'cache.ttl', { from, to, source })
-  return true
-}
-
-// What the latest cache write of the main conversation says its lifetime is (PROBES §11): the
-// per-response 1h/5m split lives only in the transcript, so its tail is read — detached, and a
-// failure leaves the lifetime as it was.
-async function learnTtl($: EngineInterface) {
-  const prev = await read($, cacheTtlA)
+// The one place the cache lifetime is asked (PROBES §11): scheduling assumed 1 hour, the latest
+// write in the transcript's tail says whether that held. Nothing found is no fire; no retry.
+async function cacheIsOneHour($: EngineInterface): Promise<boolean> {
   let writes = null
   try {
     const path = (await read($, transcriptA)) ?? transcriptPathFor(root, await $.session.cwd(), await $.session.id())
     const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', path])
     if (r.exitCode === 0) writes = parseWrites(r.stdout)
-  } catch { /* unknown stays unknown */ }
-  await setTtl($, ttlFromWrites(writes, prev), 'response')
-  await rescheduleLastLight($)
-}
-
-async function switchTtl($: EngineInterface, label: unknown, source: 'pre-switch' | 'post-switch') {
-  await setTtl($, ttlFromSwitch(label, await read($, cacheTtlA)), source)
-  await rescheduleLastLight($)
+  } catch { /* unknown, so no fire */ }
+  const ttl = ttlFromWrites(writes)
+  if (ttl !== '1h') await log($, 'last_light.skip', { reason: `ttl-${ttl}` })
+  return ttl === '1h'
 }
 
 async function maybeFireLastLight($: EngineInterface) {
@@ -490,6 +457,7 @@ async function maybeFireLastLight($: EngineInterface) {
     armed: lastLightArmed,
   })
   if (!verdict.fire) return
+  if (!(await cacheIsOneHour($))) return
   lastLightArmed = false
   await log($, 'last_light.fired', { contextPct: await read($, contextA) })
   await startHandover($, 'last_light', false)
@@ -537,7 +505,7 @@ export const register: Register = on => {
     const lastApi = await read($, lastApiA)
     if (lastApi !== null) {
       lastLightArmed = true
-      scheduleLastLight($, lastApi, await nowMs($), await read($, cacheTtlA))
+      scheduleLastLight($, lastApi, await nowMs($))
     }
     scheduleGit($)
     return r
@@ -566,7 +534,6 @@ export const register: Register = on => {
     await update($, barDismissedA, () => false)
     await update($, countdownA, () => null)
     await update($, handoverCountA, () => 0)
-    await update($, cacheTtlA, () => 'unknown')   // a new session knows nothing of the old cache
     if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
     if (!pending) return out
     const follow = pending.followUp
@@ -597,7 +564,7 @@ export const register: Register = on => {
     if (rearm(lastLightArmed, e.origin.kind)) lastLightArmed = true
     const pending = await read($, pendingA)
     const lastApi = await read($, lastApiA)
-    if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null || ttlMsOf(await read($, cacheTtlA)) === null ? null : lastApi + (ttlMsOf(await read($, cacheTtlA)) ?? 0) })) {
+    if (holdOnReturn({ pendingIsLastLight: pending?.reason === 'last_light', origin: e.origin.kind, now, cacheExpiresAt: lastApi === null ? null : lastApi + TTL_1H })) {
       await observe($, { kind: 'prompt', origin: e.origin.kind, at: now })
       const held = e.text
       $.clock.after(0, () => { void askReturn($, held) })
@@ -636,10 +603,7 @@ export const register: Register = on => {
     const now = await nowMs($)
     await observe($, { kind: 'agent-step', at: now })
     await update($, lastApiA, () => now)
-    // Only a response that wrote to the cache says anything about its lifetime; a pure read, a
-    // subagent's turn or a turn with no usage keeps what is known and just moves the timer.
-    if (e.agentId === undefined && (e.usage?.cache_creation_input_tokens ?? 0) > 0) $.clock.after(0, () => { void learnTtl($) })
-    else scheduleLastLight($, now, now, await read($, cacheTtlA))
+    scheduleLastLight($, now, now)
     const awaitingNow = await read($, awaitingA)
     if (awaitingNow?.started) {
       if (awaitingNow.attempts < 2) {
@@ -651,17 +615,6 @@ export const register: Register = on => {
         await log($, 'guard.wait', { reason: 'tool-not-called' })
       }
     }
-    return next(e)
-  })
-
-  // Both carry the lifetime the engine believes; the next response confirms or overrides it.
-  on('classic.PreModelSwitch', async ($, e, next) => {
-    await switchTtl($, (e as unknown as { cache_ttl?: unknown }).cache_ttl, 'pre-switch')
-    return next(e)
-  })
-
-  on('classic.PostModelSwitch', async ($, e, next) => {
-    await switchTtl($, (e as unknown as { cache_ttl?: unknown }).cache_ttl, 'post-switch')
     return next(e)
   })
 

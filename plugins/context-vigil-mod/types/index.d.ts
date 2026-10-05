@@ -79,7 +79,7 @@ export type EventKind =
   | 'arm' | 'disarm' | 'threshold' | 'bar' | 'handover.requested' | 'handover.written'
   | 'guard.wait' | 'guard.baseline' | 'clear.skipped' | 'clear' | 'resume' | 'last_light.fired' | 'last_light.choice'
   | 'limit.latched' | 'limit.cleared' | 'limit.early_stop' | 'rc.answer' | 'setup'
-  | 'standdown' | 'rename' | 'cache.ttl' | 'last_light.skip'
+  | 'standdown' | 'rename' | 'last_light.skip'
 
 export type EventRecord = { ts: string; session: string; kind: EventKind } & Record<string, unknown>
 
@@ -98,7 +98,6 @@ declare module 'claude-code' {
       awaiting: Awaiting | null
       deferred: Awaiting | null
       handoverCount: number
-      cacheTtl: '1h' | '5m' | 'unknown'
       transcriptPath: string | null
       countdownEndsAt: number | null
       lastApiAt: number | null
