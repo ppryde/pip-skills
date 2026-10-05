@@ -52,3 +52,12 @@ Researched, not probed live. Sources: https://code.claude.com/docs/en/prompt-cac
 - Transcript path: from `classic.SessionStart`, else `<config>/projects/<cwd, non-alphanumerics to ->/<id>.jsonl`. Subagent transcripts live in their own files (not verified for every version).
 - Information layer (not a gate): `$.state.cacheTtl` is set by one detached tail read on the session's first cache-writing `turn.complete` and by `classic.PostModelSwitch` `cache_ttl`; it drives only the "Last light is off" line and the "back on" notice (`last_light.off` / `last_light.on`). The fire-time check ignores it.
 - Not used: `classic.PreModelSwitch` `cache_ttl` (unprobed whether it describes the cache left or entered), and the statusline `prompt_cache.ttl` (not an event a mod receives).
+
+## 12. Is `turn.start.e.text` exactly the text a plugin submitted? (added 2026-10-05, R2-03) — UNPROBED
+The instruction retry binds `turnId` by comparing `turn.start.e.text` with the instruction text. The typings say the text is "the user's text as the turn proceeds with it", so a hook or attachment that alters it would leave `turnId` unbound. Open: does a plugin-submitted prompt arrive in `turn.start` byte-for-byte? Until probed, a lost instruction is expired by `startHandover` (10 min and agent idle) instead of waiting forever.
+
+## 13. A prompt queued behind a mod-run `/clear` (added 2026-10-05, R2-02) — UNPROBED
+`$.command.run({ command: 'clear' })` is queued until the session is idle. Open: does a prompt the person sends while it is queued land in the new session, get dropped, or run first? Record the answer when the follow-up card for the clear's timing runs it.
+
+## 14. Does a half-typed draft survive a mod-run `/clear`? (added 2026-10-05, R2-02) — UNPROBED
+Open: is the composer's draft kept across a mod-run `/clear`? The mod reads the draft just before queueing the clear; if the clear wipes it, the draft guard is the only protection. Record the answer when the follow-up card runs it.

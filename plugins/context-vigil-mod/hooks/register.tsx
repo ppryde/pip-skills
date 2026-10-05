@@ -319,29 +319,42 @@ async function savePending($: EngineInterface, p: Pending | null) {
   else await $.store.delete(pendingKey(prev?.session ?? session))
 }
 
+// An instruction nobody answered for this long, with the agent idle, is lost (R2-03).
+const AWAITING_LOST_MS = 10 * 60_000
+
 async function startHandover($: EngineInterface, reason: PendingReason, resume: boolean, unattended: boolean = reason === 'threshold') {
   if (standDown) return
+  const now = await nowMs($)
   if (await readLatch($)) {
     // Spec §5: while latched the mod never submits; Task 14's checkLatch starts it later.
-    await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false, unattended }))
+    await update($, deferredA, () => ({ reason, resume, attempts: 1, started: false, unattended, since: now }))
     await notify($, V.waiting('latched'))
     await log($, 'guard.wait', { reason: 'latched', deferred: reason })
     return
   }
   // R1-11: one handover in flight at a time; a second instruction would produce a second tool call.
-  if (await read($, awaitingA)) {
-    await notify($, V.handoverInProgress)
-    await log($, 'guard.wait', { reason: 'handover-in-flight', asked: reason })
-    return
+  // Lost = old AND nothing is running (a queued instruction would have started), so one waiting
+  // behind a long turn is never re-sent; a deleted or altered instruction no longer blocks forever.
+  const inFlight = await read($, awaitingA)
+  if (inFlight) {
+    const idle = activity.lastAgentAt === null || now - activity.lastAgentAt >= WORKING_MS
+    if (now - inFlight.since < AWAITING_LOST_MS || !idle) {
+      await notify($, V.handoverInProgress)
+      await log($, 'guard.wait', { reason: 'handover-in-flight', asked: reason })
+      return
+    }
+    await update($, awaitingA, () => null)
+    await notify($, V.handoverLost)
+    await log($, 'guard.wait', { reason: 'awaiting-expired', asked: reason })
   }
   const pending = await read($, pendingA)
-  if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), await nowMs($))) {
+  if ((reason === 'threshold' || reason === 'request') && reusable(pending, await read($, lastApiA), now)) {
     if (clearInFlight) return
     scheduleClear($, unattended)
     return
   }
   if (pending) await supersedePending($)
-  await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false, unattended }))
+  await update($, awaitingA, () => ({ reason, resume, attempts: 1, started: false, unattended, since: now }))
   await log($, 'handover.requested', { reason, resume })
   submitInstruction($, reason)
 }
@@ -835,6 +848,17 @@ export const register: Register = on => {
         await observe($, { kind: 'human-command', at: now })
         await notify($, V.handoverInterrupted)
         await log($, 'guard.wait', { reason: 'instruction-interrupted' })
+      } else if (standDown) {
+        // R2-09: the classic hooks own the session now (spec §7); no second instruction.
+        await update($, awaitingA, () => null)
+        await notify($, V.handoverFailed)
+        await log($, 'guard.wait', { reason: 'standdown', deferred: awaitingNow.reason })
+      } else if (awaitingNow.attempts < 2 && (await readLatch($))) {
+        // R2-09: the turn died on a limit. Never submit while latched (spec §5): wait for the lift.
+        await update($, awaitingA, () => null)
+        await update($, deferredA, () => ({ ...awaitingNow, started: false, turnId: undefined }))
+        await notify($, V.waiting('latched'))
+        await log($, 'guard.wait', { reason: 'latched', deferred: awaitingNow.reason })
       } else if (awaitingNow.attempts < 2) {
         await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false, turnId: undefined }))
         submitInstruction($, awaitingNow.reason)

@@ -723,3 +723,70 @@ test('a channel prompt in the idle window keeps auto mode disarmed: a nudge, no 
   expect(w.submits.some(x => x.text.includes(TOOL))).toBe(false)
   expect(w.state.get('context-vigil-mod.barShown')).toBe(true)   // nudged on the bar instead
 })
+
+test('a lost instruction stops blocking after ten idle minutes: /vho starts a fresh one (R2-03)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()                               // started: true, but no turn.start ever matches
+  await $.turn.complete(turn('other'))
+  await $.command.run(vho)                             // still inside ten minutes: refused, one instruction
+  await w.clock.settle()
+  expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
+  await w.clock.advance(10 * MIN)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(2)
+  expect(w.notices.some(n => n.includes('never completed'))).toBe(true)
+  expect(eventLog(w)).toContain('"awaiting-expired"')
+})
+
+test('an instruction queued behind a long running turn is not declared lost (R2-03)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  for (let i = 0; i < 11; i++) {
+    await w.clock.advance(MIN)
+    await $.tool.call({ tool: 'Bash', tool_use_id: `b${i}`, command: 'ls' } as never)
+  }
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
+  expect(w.notices.some(n => n.includes('already in progress'))).toBe(true)
+})
+
+test('the instruction retry never submits while latched: it waits for the latch (R2-09)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.turn.start({ text: w.submits.at(-1)?.text ?? '', turnId: 'a' } as never)
+  w.rateLimits.value = [{ kind: 'five_hour', percentUsed: 100, resetsAt: new Date(1_000_000 + 60 * MIN).toISOString() }]
+  await $.classic.StopFailure({ error: 'rate_limit' } as never)
+  await $.turn.complete(turn('a'))
+  await w.clock.settle()
+  expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
+  expect(w.state.get('context-vigil-mod.awaiting')).toBe(null)
+  expect(w.state.get('context-vigil-mod.deferred')).toMatchObject({ reason: 'request' })
+  expect(w.notices).toContain('⏳ Handover waiting — the usage limit is in force')
+})
+
+test('the instruction retry under stand-down is dropped with a notice (R2-09)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.turn.start({ text: w.submits.at(-1)?.text ?? '', turnId: 'a' } as never)
+  w.files.set('/cfg/context-vigil/sessions/s1.json', '')   // the classic hooks claim the session (spec §7)
+  await $.session.start(START)                           // a reload re-reads the interlock; $.state keeps `awaiting`
+  await $.turn.complete(turn('a'))
+  await w.clock.settle()
+  expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
+  expect(w.state.get('context-vigil-mod.awaiting')).toBe(null)
+  expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
+})

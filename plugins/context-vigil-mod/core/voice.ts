@@ -34,6 +34,7 @@ export const V = {
   handoverInProgress: '📜 A handover is already in progress — one at a time',
   resumeSkipped: (path: string | null) =>
     `⏳ The limit has reset — you are back, so no resume was sent; ${path ? `the handover is at ${path}` : 'no handover was written'}`,
+  handoverLost: '📜 The earlier handover instruction never completed — starting again',
   handoverFailed: '📜 Couldn\'t write a handover — nothing was cleared',
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,
