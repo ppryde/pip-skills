@@ -20,7 +20,7 @@ export const V = {
   barHandover: '📜 Hand over now',
   barLater: (next: number) => `⏰ Remind me at ${next}%`,
   barDismiss: '✖ Dismiss',
-  lastLightOff: '🌅 Last light is off for this session — 5-minute prompt cache',
+  lastLightOff: '🌅 Last light is off for this session — 5-minute prompt cache (/vsetup last-light)',
   lastLightBackOn: '🌅 Last light is back on — 1-hour prompt cache',
   nudge: (pct: number) => `🕯️ Context at ${pct}% — say "hand over" (or /vho) when you're ready 📜`,
   handoverSaved: (path: string) => `📜 Handover saved — ${path}`,

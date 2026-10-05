@@ -559,6 +559,7 @@ async function setCacheTtl($: EngineInterface, to: CacheTtl, source: 'response' 
   const from = await read($, cacheTtlA)
   if (to === from) return
   await update($, cacheTtlA, () => to)
+  if (to === '5m') await update($, ttlInfoDismissedA, () => false)   // shown again until the next message
   if (!settings.lastLight) return
   if (to === '5m') await log($, 'last_light.off', { ttl: to, source })
   else if (from === '5m' && to === '1h') {
@@ -746,6 +747,8 @@ export const register: Register = on => {
       await savePending($, null)
       await log($, 'last_light.dropped', { path: pending.path })
     }
+    // R1-20: the "last light is off" line goes away with the person's next message (no hotkey: spec §3).
+    if (classifyOrigin(e.origin.kind) === 'human' && (await read($, cacheTtlA)) === '5m') await update($, ttlInfoDismissedA, () => true)
     if (e.origin.kind !== 'plugin') await cancelCountdown($)
     return next(e)
   })
@@ -960,8 +963,7 @@ export const register: Register = on => {
       if (!settings.lastLight || (await read($, cacheTtlA)) !== '5m' || (await read($, ttlInfoDismissedA))) return next(e)
       return (
         <Box>
-          <Text>{V.lastLightOff}   </Text>
-          <Button key="dismiss-ttl" hotkey="0" plain label={V.barDismiss} onPress={() => update($, ttlInfoDismissedA, () => true)} />
+          <Text>{V.lastLightOff}</Text>
         </Box>
       )
     }

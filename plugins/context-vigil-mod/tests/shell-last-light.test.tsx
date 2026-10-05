@@ -367,16 +367,25 @@ test('a 1-hour cache shows nothing', async ($, on) => {
   expect(await infoShown($)).toBe(false)
 })
 
-test('0 dismisses the info line for the session', async ($, on) => {
+test('R1-20: the info line is Text only — no Button, no hotkey, so a leading 0 stays the person\'s', async ($, on) => {
   const w = world(on, LL)
   await first5m($, w)
   const ui = await $.ui.mount(BAND)
-  await ui.press({ key: 'dismiss-ttl' })
+  expect(await ui.find(INFO)).toBeDefined()
+  expect(await ui.find({ type: 'Button' as const })).toBeUndefined()
   await ui.unmount()
+})
+
+test('R1-20: the next human prompt hides the line; a plugin prompt does not; a later 5m switch shows it again', async ($, on) => {
+  const w = world(on, LL)
+  await first5m($, w)
+  await $.prompt.submit({ text: 'resume', wait: false, origin: { kind: 'plugin' } as never })
+  expect(await infoShown($)).toBe(true)
+  await $.prompt.submit(human('hello'))
   expect(await infoShown($)).toBe(false)
   await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
   await $.classic.PostModelSwitch({ cache_ttl: '5m' } as never)
-  expect(await infoShown($)).toBe(false)
+  expect(await infoShown($)).toBe(true)
 })
 
 test('the threshold bar wins while both apply; the info line returns after it', async ($, on) => {
