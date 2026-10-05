@@ -563,6 +563,8 @@ async function showNudge($: EngineInterface, pct: number) {
 }
 
 async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dismiss') {
+  // R2-07: a pressed button is the person being here, same as the countdown's Cancel (R1-22).
+  await observe($, { kind: 'human-command', at: await nowMs($) })
   await update($, barShownA, () => false)
   if (action === 'dismiss') await update($, barDismissedA, () => true)
   await log($, 'bar', { action })

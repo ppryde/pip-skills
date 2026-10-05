@@ -256,3 +256,23 @@ test('the phone facts cross a clear and a reload after it', async ($, on) => {
   expect(w.submits.some(s => s.text.includes(TOOL))).toBe(true)
   expect(w.commands).not.toContain('clear')
 })
+
+test('pressing a bar button is presence: the idle window restarts, no unattended handover follows (R2-07)', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await w.clock.advance(28 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b0' } as never)
+  await $.session.measure(measure(36))                       // attended at 28 min: the bar
+  let ui = await $.ui.mount(BAND())
+  await ui.press({ key: 'later' })
+  await ui.unmount()
+  await w.clock.advance(3 * MIN)                              // 31 min after the prompt, 3 after the press
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1' } as never)
+  await $.session.measure(measure(41))
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(0)
+  ui = await $.ui.mount(BAND())
+  expect(await ui.find({ key: 'handover' })).toBeDefined()    // still a nudge for the person who is here
+  await ui.unmount()
+})
