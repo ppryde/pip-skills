@@ -693,3 +693,18 @@ test('a clear already in flight is not queued twice when the threshold crosses a
   await w.clock.settle()
   expect(w.commands.filter(c => c === 'clear').length).toBe(1)
 })
+
+test('auto mode switched Off while an unattended clear waits stops it, with a notice (R2-08)', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await autoHandoverInFlight($, w)
+  await $.tool.call(call() as never)
+  w.draft.value = 'half a sen'                   // typed after the tool hook's own look at the box
+  await w.clock.settle()
+  expect(w.notices).toContain('✍️ Handover waiting — there is a draft in your prompt box')
+  w.store.set('settings', { auto: false })      // another session, or /vsetup auto on the phone
+  w.draft.value = ''
+  await w.clock.advance(5000)
+  expect(w.commands).not.toContain('clear')
+  expect(w.notices).toContain('📜 Handover saved — auto mode was switched off, so nothing was cleared; /vho or /clear when you are ready')
+  expect(eventLog(w)).toContain('"auto-off"')
+})

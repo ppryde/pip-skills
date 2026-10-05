@@ -377,13 +377,15 @@ async function tryClear($: EngineInterface) {
   await reloadSettings($)
   await checkInterlock($)   // spec §7: at session start AND before every clear (TEMPORARY)
   const now = await nowMs($)
-  // An unattended clear is only for an unattended session: re-checked here, not just when it began.
-  if (unattendedClear && mode(activity, now, settings) === 'attended') {
+  // An unattended clear is only for an unattended session with auto mode on: re-checked here, not
+  // just when it began (R1-06, R2-08). Every exit leaves the handover offered, with a notice.
+  const autoOff = unattendedClear && !settings.auto
+  if (autoOff || (unattendedClear && mode(activity, now, settings) === 'attended')) {
     await setCountdown($, null)
     lastWait = null
     clearParked = true
-    await notify($, V.clearSkippedAttended)
-    await log($, 'clear.skipped', { reason: 'attended' })
+    await notify($, autoOff ? V.clearSkippedAutoOff : V.clearSkippedAttended)
+    await log($, 'clear.skipped', { reason: autoOff ? 'auto-off' : 'attended' })
     return
   }
   const gate = clearGate({

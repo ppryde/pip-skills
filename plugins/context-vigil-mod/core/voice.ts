@@ -25,6 +25,7 @@ export const V = {
   nudge: (pct: number) => `🕯️ Context at ${pct}% — say "hand over" (or /vho) when you're ready 📜`,
   handoverSaved: (path: string) => `📜 Handover saved — ${path}`,
   clearSkippedAttended: '📜 Handover saved — you came back, so nothing was cleared; /vho or /clear when you are ready',
+  clearSkippedAutoOff: '📜 Handover saved — auto mode was switched off, so nothing was cleared; /vho or /clear when you are ready',
   handoverUnrequested: (path: string) => `📜 Handover saved — ${path} — it was not asked for, so nothing was cleared; /vho or /clear when you want to use it`,
   deferredDropped: '⏳ The handover that waited on the usage limit was not run — /vho when you want one',
   handoverInterrupted: '📜 Handover interrupted — nothing was cleared; /vho when you want one',
