@@ -956,7 +956,7 @@ export const register: Register = on => {
       return (
         <Box>
           <Text>{V.countdownLine(left)}   </Text>
-          <Button key="cancel" hotkey="0" plain label={V.cancel} onPress={() => cancelCountdown($)} />
+          <Button key="cancel" hotkey="0" plain label={V.cancel} onPress={async () => { await observe($, { kind: 'human-command', at: await nowMs($) }); await cancelCountdown($) }} />
         </Box>
       )
     }

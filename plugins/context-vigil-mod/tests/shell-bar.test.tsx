@@ -146,6 +146,16 @@ test('RC countdown: Cancel stops the clear and keeps the handover', async ($, on
   expect(w.state.get('context-vigil-mod.pending')).toMatchObject({ reason: 'threshold' })
 })
 
+test('R1-22: pressing Cancel counts as the person being here', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
+  await countdownSession($, w)
+  const ui = await $.ui.mount(BAND())
+  await ui.press({ key: 'cancel' })
+  await ui.unmount()
+  await w.clock.settle()
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+})
+
 test('RC countdown: sending anything cancels it', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true, rcAutoClear: 'yes' } } })
   await countdownSession($, w)
