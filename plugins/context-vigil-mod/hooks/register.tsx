@@ -660,10 +660,14 @@ async function maybeFireLastLight($: EngineInterface) {
     armed: lastLightArmed,
   })
   if (!verdict.fire) return
+  // R2-14: under stand-down nothing is read, fired or spent (spec §7, SMOKES #7).
+  if (standDown) { await log($, 'last_light.skip', { reason: 'standdown' }); return }
   if (!(await cacheIsOneHour($))) return
+  const contextPct = await read($, contextA)
+  const outcome = await startHandover($, 'last_light', false)
+  if (outcome !== 'started') { await log($, 'last_light.skip', { reason: outcome }); return }
   lastLightArmed = false
-  await log($, 'last_light.fired', { contextPct: await read($, contextA) })
-  await startHandover($, 'last_light', false)
+  await log($, 'last_light.fired', { contextPct })
 }
 
 // One ask at a time: a message typed meanwhile joins the first instead of opening a second ask whose
@@ -997,8 +1001,13 @@ export const register: Register = on => {
 
   for (const command of [COMMANDS.handover, COMMANDS.handoff]) {
     on('command.run', { command }, async $ => {
-      await startHandover($, 'request', true)
-      return { text: V.handingOver }
+      // R2-14: the reply says what actually happened (a notice also went out for latch and in-flight).
+      const outcome = await startHandover($, 'request', true)
+      const text = outcome === 'standdown' ? V.classicActive
+        : outcome === 'latched' ? V.waiting('latched')
+        : outcome === 'in-flight' ? V.handoverInProgress
+        : V.handingOver
+      return { text }
     })
   }
 

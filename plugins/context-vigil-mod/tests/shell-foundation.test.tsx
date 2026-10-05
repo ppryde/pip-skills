@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { NAME } from '../core/name'
 import { START, human, turn, world } from './world'
+import { V } from '../core/voice'
 
 const MIN = 60_000
 
@@ -170,4 +171,31 @@ test('R1-17: parked handovers older than two weeks are pruned at session start; 
   expect(w.store.has('pending:old')).toBe(false)
   expect(w.store.has('pending:other')).toBe(true)
   expect(w.store.has('settings')).toBe(true)
+})
+
+const CLASSIC = { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) }
+const vhoCmd = { command: 'vho', args: '', origin: { kind: 'composer' } as never } as never
+
+test('/vho under stand-down says classic is in charge, not "Handing over" (R2-14)', async ($, on) => {
+  const w = world(on, { files: CLASSIC })
+  await $.session.start(START)
+  const r = await $.command.run(vhoCmd) as { text?: string }
+  expect(r.text).toBe(V.classicActive)
+  expect(w.submits).toHaveLength(0)
+})
+
+test('/vho while a handover is in flight says so, not "Handing over" (R2-14)', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vhoCmd)
+  await w.clock.settle()
+  const r = await $.command.run(vhoCmd) as { text?: string }
+  expect(r.text).toBe(V.handoverInProgress)
+})
+
+test('/vho while the limit latch is set says it is waiting (R2-14)', async ($, on) => {
+  const w = world(on, { store: { latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 3_600_000 } } })
+  await $.session.start(START)
+  const r = await $.command.run(vhoCmd) as { text?: string }
+  expect(r.text).toBe(V.waiting('latched'))
 })

@@ -607,3 +607,16 @@ test('an answer typed under Other is carry-on with the typed text appended, neve
   expect(sent).toContain('use the handover please')
   expect(w.commands).not.toContain('clear')
 })
+
+test('under stand-down last light logs a skip, never "fired", and spends no arm (R2-14)', async ($, on) => {
+  const classic = { '/cfg/settings.json': JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } }) }
+  const w = world(on, { ...LL, files: classic })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(0)
+  expect(eventLog(w)).not.toContain('last_light.fired')
+  expect(eventLog(w)).toContain('"reason":"standdown"')
+})
