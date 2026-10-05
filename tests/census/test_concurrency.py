@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import store as st
+
 CLI = Path(__file__).resolve().parents[2] / "plugins" / "census" / "scripts" / "cli.py"
 
 
@@ -27,5 +29,5 @@ def test_concurrent_writers_do_not_lose_entries(store_file):
     for proc, _ in procs:
         assert proc.returncode == 0
 
-    sessions = json.loads(store_file.read_text())["sessions"]
-    assert set(sessions) == set(ids), "the flock read-modify-write lost concurrent entries"
+    sessions = st.read_all()["sessions"]
+    assert set(sessions) == set(ids), "a concurrent writer lost a session file"

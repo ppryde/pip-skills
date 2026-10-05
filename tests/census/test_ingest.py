@@ -10,7 +10,7 @@ def _payload(sid="s1", cwd="/wt/a", **extra):
 
 
 def _read(store_file):
-    return json.loads(store_file.read_text())
+    return st.read_all()
 
 
 class TestBasicIngest:
@@ -31,11 +31,11 @@ class TestBasicIngest:
 
     def test_missing_session_id_writes_nothing(self, store_file):
         st.ingest(json.dumps({"cwd": "/wt/a"}), now=1.0)
-        assert not store_file.exists()
+        assert st.read_all()["sessions"] == {}
 
     def test_invalid_json_writes_nothing(self, store_file):
         st.ingest("{not json", now=1.0)
-        assert not store_file.exists()
+        assert st.read_all()["sessions"] == {}
 
     def test_upsert_overwrites_same_session(self, store_file):
         st.ingest(_payload(sid="abc", cwd="/wt/a"), now=1.0)

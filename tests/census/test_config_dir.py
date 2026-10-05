@@ -60,8 +60,10 @@ class TestAccountIsolation:
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(work))
         st.ingest(json.dumps({"session_id": "w1", "cwd": "/proj/work"}), now=2.0)
 
-        p_store = json.loads((personal / "census" / "status.json").read_text())
-        w_store = json.loads((work / "census" / "status.json").read_text())
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        p_store = st.read_all()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(work))
+        w_store = st.read_all()
 
         # sessions do not leak across accounts
         assert set(p_store["sessions"]) == {"p1"}

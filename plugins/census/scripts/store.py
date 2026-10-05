@@ -1,29 +1,32 @@
-"""Census store: one worktree-indexed JSON file of status-line payloads.
+"""Census store: lock-free per-session files plus one forward-merged limits file.
 
-Quarantine-safe: every public entry point swallows read / parse / lock / write
+Quarantine-safe: every public entry point swallows read / parse / write
 failures and never raises. A broken store must never break the status-line
 render or the CLI command it piggybacks on.
 
-Layout of ``~/.claude/census/status.json`` (override with ``CENSUS_STORE``)::
+Layout of ``~/.claude/census/`` (override with ``CENSUS_STORE``)::
 
-    {
-      "version": 1,
-      "limits": { "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> },
-      "sessions": {
-        "<session_id>": {
+    sessions/<session_id>.json   one file per session, written only by that session
+        {
+          "version": 2,
           "worktree_cwd": "<abs path>",
-          "updated_at": <epoch — last time the status line ran for this session>,
-          "active_at": <epoch — last time the session's activity counters moved>,
+          "updated_at": <epoch - last time the status line ran for this session>,
+          "active_at": <epoch - last time the session's activity counters moved>,
           "branch": "<current git branch, null when unresolvable/detached>",
           "tmux_pane": "<%N, absent when the session isn't running inside tmux>",
           "payload": { ...full status-line payload verbatim... }
         }
-      }
-    }
+    limits.json                  account rate-limit windows, merged forward-only
+        { "version": 2, "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> }
+
+``ingest`` takes no lock: a session writes only its own file (temp file +
+``os.replace``), and limits only ever move forward, so racing writers cost at
+most one refresh of a lower figure. ``read_all`` assembles the v1 view
+(``{version: 1, limits, sessions}``) that ``census read`` prints. A legacy
+``status.json`` (v1) is the old single-file store.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import math
 import os
@@ -65,8 +68,6 @@ _SAME_WINDOW_TOLERANCE_SECONDS = 60
 # nothing: no real window falls in the eight-to-ten-day band, and no plausible
 # corruption does either.
 _MAX_WINDOW_HORIZON_SECONDS = 10 * 24 * 3600
-_LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
-_LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
 
 
@@ -119,28 +120,27 @@ def session_path(sid: str) -> Path:
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"version": SCHEMA_VERSION, "limits": None, "sessions": {}}
+    """An empty v1-shaped dict, the input to the pure ``merge``."""
+    return {"version": VIEW_VERSION, "limits": None, "sessions": {}}
 
 
-def _load(path: Path) -> dict[str, Any]:
-    """Load the store, healing any missing/corrupt shape into a valid skeleton."""
+def _read_json(path: Path) -> dict[str, Any] | None:
+    """A JSON object from ``path``, or None when missing, unreadable or not an object."""
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
-        return _empty_store()
-    if not isinstance(data, dict):
-        return _empty_store()
-    data.setdefault("version", SCHEMA_VERSION)
-    if not isinstance(data.get("sessions"), dict):
-        data["sessions"] = {}
-    if "limits" not in data:
-        data["limits"] = None
-    return data
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
+    """Write ``data`` to ``path`` via a same-directory temp file and ``os.replace``.
+
+    ``os.replace`` is atomic on POSIX and Windows, so a reader sees the old file or
+    the new one, never half of either. Raises OSError for the caller to swallow.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".status.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
             json.dump(data, handle)
@@ -150,6 +150,14 @@ def _atomic_write(path: Path, data: dict[str, Any]) -> None:
             os.unlink(tmp)
         except OSError:
             pass
+        raise
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _context_is_blank(payload: dict[str, Any]) -> bool:
@@ -432,6 +440,34 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
     return branch
 
 
+def build_entry(
+    previous: Any,
+    payload: dict[str, Any],
+    worktree: str | None,
+    tmux_pane: str | None,
+    now: float,
+) -> dict[str, Any]:
+    """The v2 session file body for one ingest (v1's per-session rules, unchanged)."""
+    if _context_is_blank(payload) and isinstance(previous, dict):
+        prior_payload = previous.get("payload")
+        if isinstance(prior_payload, dict) and isinstance(
+            prior_payload.get("context_window"), dict
+        ):
+            payload = {**payload, "context_window": prior_payload["context_window"]}
+    entry: dict[str, Any] = {
+        "version": SCHEMA_VERSION,
+        "worktree_cwd": worktree,
+        "updated_at": now,
+        "active_at": _active_at(previous, payload, now),
+        "branch": _git_branch(worktree),
+        "payload": payload,
+    }
+    # Replaced wholesale each ingest: a session that left tmux must not keep a pane.
+    if tmux_pane is not None:
+        entry["tmux_pane"] = tmux_pane
+    return entry
+
+
 def merge(
     store: dict[str, Any],
     payload: dict[str, Any],
@@ -439,62 +475,91 @@ def merge(
     tmux_pane: str | None,
     now: float,
 ) -> dict[str, Any]:
-    """Fold one status-line payload into ``store`` in place; return ``store``.
-
-    - Upserts the session entry keyed by ``session_id`` (no-op without one).
-    - Preserves the prior context window when the incoming one is blank.
-    - Stamps ``active_at`` only when the activity fingerprint moved, so a
-      timer-driven rerun of the status line refreshes ``updated_at`` alone.
-    - Hoists ``rate_limits`` to top-level ``limits``, but only LIVE windows
-      (``resets_at`` in the future), and only when the incoming reading orders
-      above the stored one — a frozen reading from a dormant session must not
-      clobber the current account figure.
-    - Prunes stale sessions.
-    """
+    """Fold one payload into a v1-shaped dict in place; return it. Pure (no I/O
+    beyond git); kept for unit tests of the per-session and limits rules."""
     sid = payload.get("session_id")
     if not isinstance(sid, str) or not sid:
         return store
-
     sessions = store["sessions"]
-    previous = sessions.get(sid)
-
-    if _context_is_blank(payload) and isinstance(previous, dict):
-        prior_payload = previous.get("payload")
-        if isinstance(prior_payload, dict) and isinstance(
-            prior_payload.get("context_window"), dict
-        ):
-            payload = {**payload, "context_window": prior_payload["context_window"]}
-
-    active = _active_at(previous, payload, now)
-    sessions[sid] = {
-        "worktree_cwd": worktree,
-        "updated_at": now,
-        "active_at": active,
-        "branch": _git_branch(worktree),
-        "payload": payload,
-    }
-    # Sibling fields (worktree_cwd, payload) are replaced wholesale on every
-    # ingest, not merged with the previous entry — an untethered session (e.g.
-    # one that has moved out of tmux) must not go on reporting a stale pane.
-    # tmux_pane follows the same rule: present this ingest → stored; absent →
-    # the key is left out of the freshly-built dict, so a repeat ingest
-    # without TMUX_PANE drops any pane recorded by a prior ingest.
-    if tmux_pane is not None:
-        sessions[sid]["tmux_pane"] = tmux_pane
-
+    entry = build_entry(sessions.get(sid), payload, worktree, tmux_pane, now)
+    entry.pop("version", None)
+    sessions[sid] = entry
     incoming = _live_limits(payload.get("rate_limits"), now)
     if incoming:
         _hoist_limits(store, incoming, now)
-
     _prune(sessions, now)
     return store
+
+
+def _stored_limits() -> dict[str, Any] | None:
+    data = _read_json(limits_path())
+    if data is None:
+        return None
+    data = dict(data)
+    data.pop("version", None)
+    return data
+
+
+def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
+    """Forward-only merge of live windows into ``limits.json``; no lock.
+
+    Two sessions may race here. The ordering (``_window_is_fresher``) only moves
+    forward, so the loser of a race costs one refresh of a lower figure, and the
+    next write from the working session restores it. Written only on change.
+    """
+    stored = _stored_limits() or {}
+    holder: dict[str, Any] = {"limits": stored}
+    before = json.dumps(stored, sort_keys=True)
+    _hoist_limits(holder, incoming, now)
+    if json.dumps(holder["limits"], sort_keys=True) != before:
+        _atomic_write(limits_path(), {"version": SCHEMA_VERSION, **holder["limits"]})
+
+
+def _session_files() -> list[Path]:
+    try:
+        names = os.listdir(sessions_dir())
+    except OSError:
+        return []
+    return [
+        sessions_dir() / name
+        for name in sorted(names)
+        if not name.startswith(".") and name.endswith(".json")
+    ]
+
+
+_STRAY_TMP_SECONDS = 3600
+
+
+def _sweep(now: float) -> None:
+    """Ingest-side housekeeping: prune session files past the TTL (by their own
+    ``updated_at`` against this ingest's ``now``, as v1 did) and delete stray temp
+    files older than an hour (by mtime)."""
+    for path in _session_files():
+        entry = _read_json(path)
+        if entry is None:
+            continue
+        if now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS:
+            _unlink(path)
+    wall = time.time()
+    for folder in (sessions_dir(), census_dir()):
+        try:
+            strays = [
+                p for p in folder.iterdir() if p.name.startswith(".") and p.name.endswith(".tmp")
+            ]
+        except OSError:
+            continue
+        for stray in strays:
+            try:
+                if wall - stray.stat().st_mtime > _STRAY_TMP_SECONDS:
+                    _unlink(stray)
+            except OSError:
+                pass
 
 
 def ingest(raw: str, now: float | None = None) -> None:
     """Parse a status-line payload from ``raw`` and record it. Never raises.
 
-    Holds an exclusive ``fcntl.flock`` for the read-modify-write so concurrent
-    per-turn writers from every session cannot lose each other's entries.
+    No lock: this session writes only its own file; limits merge forward-only.
     """
     if now is None:
         now = time.time()
@@ -502,35 +567,26 @@ def ingest(raw: str, now: float | None = None) -> None:
         payload = json.loads(raw)
     except ValueError:
         return
-    if not isinstance(payload, dict) or not payload.get("session_id"):
+    if not isinstance(payload, dict):
         return
-
-    path = store_path()
-    lock_path = path.with_name(path.name + ".lock")
+    sid = safe_session_id(payload.get("session_id"))
+    if sid is None:
+        return
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "w") as lock:
-            if not _acquire(lock):
-                return
-            store = _load(path)
-            # census-card-claim-design.md §2: ingest runs as a child of the
-            # session process (the status-line pipeline), so TMUX_PANE is
-            # already in its environment — no new plumbing needed to capture it.
-            tmux_pane = os.environ.get("TMUX_PANE") or None
-            merge(store, payload, resolve.worktree_cwd(payload), tmux_pane, now)
-            _atomic_write(path, store)
+        path = session_path(sid)
+        # census-card-claim-design.md section 2: ingest runs inside the session's
+        # status line, so TMUX_PANE is already in its environment.
+        tmux_pane = os.environ.get("TMUX_PANE") or None
+        entry = build_entry(
+            _read_json(path), payload, resolve.worktree_cwd(payload), tmux_pane, now
+        )
+        _atomic_write(path, entry)
+        incoming = _live_limits(payload.get("rate_limits"), now)
+        if incoming:
+            _merge_limits_file(incoming, now)
+        _sweep(now)
     except OSError:
         return
-
-
-def _acquire(lock: Any) -> bool:
-    for _ in range(_LOCK_ATTEMPTS):
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            time.sleep(_LOCK_DELAY_SECONDS)
-    return False
 
 
 # --- Readers -------------------------------------------------------------------
@@ -553,9 +609,24 @@ def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]
     return result
 
 
-def read_all() -> dict[str, Any]:
-    """The whole store, healed to a valid shape."""
-    return _load(store_path())
+def _view_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    out = dict(entry)
+    out.pop("version", None)
+    return out
+
+
+def _all_sessions() -> dict[str, dict[str, Any]]:
+    sessions: dict[str, dict[str, Any]] = {}
+    for path in _session_files():
+        entry = _read_json(path)
+        if entry is not None:
+            sessions[path.name[: -len(".json")]] = _view_entry(entry)
+    return sessions
+
+
+def read_all(now: float | None = None) -> dict[str, Any]:
+    """The whole store as the v1 view: ``{version: 1, limits, sessions}``."""
+    return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": _all_sessions()}
 
 
 def limits(now: float | None = None) -> dict[str, Any] | None:
@@ -566,7 +637,7 @@ def limits(now: float | None = None) -> dict[str, Any] | None:
     """
     if now is None:
         now = time.time()
-    return _live_limits(_load(store_path()).get("limits"), now)
+    return _live_limits(_stored_limits(), now)
 
 
 def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | None:
@@ -585,12 +656,11 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
     if now is None:
         now = time.time()
     key = resolve.normalise(cwd)
-    store = _load(store_path())
 
     best: dict[str, Any] | None = None
     best_rank = (-1.0, -1.0)
-    for entry in store.get("sessions", {}).values():
-        if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
+    for entry in _all_sessions().values():
+        if entry.get("worktree_cwd") != key:
             continue
         rank = (_entry_activity(entry), _number(entry.get("updated_at")) or 0.0)
         if rank > best_rank:
@@ -598,14 +668,16 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
 
     if best is None:
         return None
-    return _with_meta(best, _live_limits(store.get("limits"), now), now)
+    return _with_meta(best, _live_limits(_stored_limits(), now), now)
 
 
 def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
     if now is None:
         now = time.time()
-    store = _load(store_path())
-    entry = store.get("sessions", {}).get(sid)
-    if not isinstance(entry, dict):
+    safe = safe_session_id(sid)
+    if safe is None:
         return None
-    return _with_meta(entry, _live_limits(store.get("limits"), now), now)
+    entry = _read_json(session_path(safe))
+    if entry is None:
+        return None
+    return _with_meta(_view_entry(entry), _live_limits(_stored_limits(), now), now)
