@@ -121,6 +121,7 @@ def session_path(sid: str) -> Path:
 
 def _empty_store() -> dict[str, Any]:
     """An empty v1-shaped dict, the input to the pure ``merge``."""
+    migrate()
     return {"version": VIEW_VERSION, "limits": None, "sessions": {}}
 
 
@@ -530,6 +531,64 @@ def _session_files() -> list[Path]:
 _STRAY_TMP_SECONDS = 3600
 
 
+MIGRATED_SUFFIX = ".v1-migrated"
+MIGRATED_KEEP_SECONDS = 7 * 24 * 3600
+_MIGRATE_LOCK = ".migrate.lock"
+_MIGRATE_LOCK_STALE_SECONDS = 60
+
+
+def migrate(now: float | None = None) -> bool:
+    """Split a v1 ``status.json`` into v2 files, then retire it. Never raises.
+
+    One migrator per account at a time: ``O_CREAT | O_EXCL`` on ``.migrate.lock``
+    (portable, unlike flock). A lock older than a minute is a crashed migrator's
+    and is broken. Returns True only when this call migrated.
+    """
+    if now is None:
+        now = time.time()
+    legacy = store_path()
+    if not legacy.exists():
+        return False
+    lock = census_dir() / _MIGRATE_LOCK
+    try:
+        if lock.exists() and time.time() - lock.stat().st_mtime > _MIGRATE_LOCK_STALE_SECONDS:
+            _unlink(lock)
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError:
+        return False
+    os.close(fd)
+    try:
+        data = _read_json(legacy) or {}
+        sessions = data.get("sessions")
+        for sid, entry in (sessions.items() if isinstance(sessions, dict) else []):
+            safe = safe_session_id(sid)
+            if safe is None or not isinstance(entry, dict):
+                continue
+            current = _read_json(session_path(safe))
+            if current is not None and (_number(current.get("updated_at")) or 0.0) >= (
+                _number(entry.get("updated_at")) or 0.0
+            ):
+                continue
+            _atomic_write(session_path(safe), {"version": SCHEMA_VERSION, **entry})
+        old_limits = data.get("limits")
+        if isinstance(old_limits, dict):
+            if not limits_path().exists():
+                _atomic_write(limits_path(), {"version": SCHEMA_VERSION, **old_limits})
+            else:
+                incoming = _live_limits(old_limits, now)
+                if incoming:
+                    _merge_limits_file(incoming, now)
+        os.replace(legacy, legacy.with_name(legacy.name + MIGRATED_SUFFIX))
+        _unlink(legacy.with_name(legacy.name + ".lock"))
+        for stray in census_dir().glob(".status.*.tmp"):
+            _unlink(stray)
+        return True
+    except OSError:
+        return False
+    finally:
+        _unlink(lock)
+
+
 def _sweep(now: float) -> None:
     """Ingest-side housekeeping: prune session files past the TTL (by their own
     ``updated_at`` against this ingest's ``now``, as v1 did) and delete stray temp
@@ -560,6 +619,12 @@ def _sweep(now: float) -> None:
                     _unlink(stray)
             except OSError:
                 pass
+    retired = store_path().with_name(store_path().name + MIGRATED_SUFFIX)
+    try:
+        if wall - retired.stat().st_mtime > MIGRATED_KEEP_SECONDS:
+            _unlink(retired)
+    except OSError:
+        pass
 
 
 def ingest(raw: str, now: float | None = None) -> None:
@@ -574,6 +639,7 @@ def ingest(raw: str, now: float | None = None) -> None:
 
 
 def _ingest(raw: str, now: float) -> None:
+    migrate(now)
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         return
@@ -638,6 +704,7 @@ def limits(now: float | None = None) -> dict[str, Any] | None:
     A window whose reset time has passed since it was written is dropped, so a
     reader never sees a fossil reading even if no fresh write has replaced it yet.
     """
+    migrate()
     if now is None:
         now = time.time()
     return _live_limits(_stored_limits(), now)
@@ -656,6 +723,7 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
     ``idle`` flags so a consumer can distinguish a live reading from one frozen
     by a dead session, and a working session from a dozing one.
     """
+    migrate()
     if now is None:
         now = time.time()
     key = resolve.normalise(cwd)
@@ -675,6 +743,7 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
 
 
 def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
+    migrate()
     if now is None:
         now = time.time()
     safe = safe_session_id(sid)
