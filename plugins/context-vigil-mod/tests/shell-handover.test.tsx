@@ -636,3 +636,24 @@ test('R1-10: the person\'s held text is sent even under the latch', async ($, on
   await w.clock.advance(1000)
   expect(w.submits.map(s => s.text)).toContain('my own words')
 })
+
+// R1-08: an in-process /resume or fork is a different session.
+test('R1-08: after an in-process /resume the handover is filed under the new session and s1\'s is never injected', async ($, on) => {
+  const w = world(on)
+  await parkHandover($, w)                              // s1's handover is parked
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'resume' } as never)
+  await $.command.run(vho)
+  await w.clock.settle()
+  expect(w.submits.filter(s => s.text.includes(TOOL))).toHaveLength(2)   // a fresh instruction, not a clear into s1's file
+  expect(w.commands).not.toContain('clear')
+  await $.tool.call(call() as never)
+  await w.clock.settle()
+  expect(w.files.has('/cfg/context-vigil-mod/handovers/s2-1.md')).toBe(true)
+  expect(w.commands).toContain('clear')
+  w.sessionId.value = 's3'
+  const ss = await $.classic.SessionStart({ source: 'clear' } as never)
+  const injected = ss.additionalContext?.join('\n') ?? ''
+  expect(injected).toContain('Handover — s2')
+  expect(injected).not.toContain('Handover — s1')
+})

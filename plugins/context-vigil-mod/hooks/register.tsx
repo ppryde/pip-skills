@@ -246,6 +246,22 @@ async function readLatch($: EngineInterface): Promise<Latch> {
   return ((await $.store.get(LATCH_KEY)) as Latch | undefined) ?? null
 }
 
+// Per-session state the new session must not inherit. After a clear the wipe already empties
+// these; reset anyway so nothing leans on it.
+async function resetSessionState($: EngineInterface) {
+  await update($, awaitingA, () => null)
+  await update($, deferredA, () => null)
+  await update($, lastNudgedA, () => null)
+  await update($, baselineA, () => null)
+  await update($, barShownA, () => false)
+  await update($, barDismissedA, () => false)
+  await update($, countdownA, () => null)
+  await update($, handoverCountA, () => 0)
+  await update($, cacheTtlA, () => 'unknown')
+  await update($, ttlReadA, () => false)
+  await update($, ttlInfoDismissedA, () => false)
+}
+
 async function savePending($: EngineInterface, p: Pending | null) {
   const prev = await read($, pendingA)
   await update($, pendingA, () => p)
@@ -577,6 +593,21 @@ export const register: Register = on => {
     const watch = repo ? watchPaths(repo.root) : []
     const out = watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
     if (e.transcript_path) await update($, transcriptA, () => e.transcript_path ?? null)
+    if (e.source === 'resume' || e.source === 'fork') {
+      // R1-08: session.start fires once per process, so an in-process /resume or fork is a new
+      // session that only this event announces. Rebind it; whatever it parked is offered, never
+      // the old session's.
+      session = await $.session.id()
+      resetCaches()
+      scheduleGit($)
+      await resetSessionState($)
+      await update($, lastApiA, () => null)
+      lastApiMirror = null
+      const stored = ((await $.store.get(pendingKey(session))) as Pending | null | undefined) ?? null
+      await update($, pendingA, () => stored)
+      if (stored) await notify($, V.pendingOffer(stored.path))
+      return out
+    }
     if (e.source !== 'clear') return out
     // PROBES §9: $.state is already wiped here, so the handover comes from $.store, keyed by
     // `session` — still the pre-clear id until it is rebound below.
@@ -587,18 +618,7 @@ export const register: Register = on => {
     session = await $.session.id()
     resetCaches()
     scheduleGit($)
-    // The wipe already empties these; reset anyway so the clear never leans on it.
-    await update($, awaitingA, () => null)
-    await update($, deferredA, () => null)
-    await update($, lastNudgedA, () => null)
-    await update($, baselineA, () => null)
-    await update($, barShownA, () => false)
-    await update($, barDismissedA, () => false)
-    await update($, countdownA, () => null)
-    await update($, handoverCountA, () => 0)
-    await update($, cacheTtlA, () => 'unknown')
-    await update($, ttlReadA, () => false)
-    await update($, ttlInfoDismissedA, () => false)
+    await resetSessionState($)
     if (activity.lastHumanOrigin !== null) await savePhoneFacts($)   // the wipe took them; a later reload needs them
     if (!pending) return out
     const follow = pending.followUp
