@@ -668,3 +668,14 @@ test('R1-11: a second /vho while one is in flight starts nothing new and says so
   expect(w.submits.filter(x => x.text.includes(TOOL))).toHaveLength(1)
   expect(w.notices.some(n => n.includes('already in progress'))).toBe(true)
 })
+
+test('R1-18: a restarted session never overwrites an earlier handover file', async ($, on) => {
+  const w = world(on, { files: { '/cfg/context-vigil-mod/handovers/s1-1.md': 'earlier' } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.command.run(vho)
+  await w.clock.settle()
+  const r = await $.tool.call(call() as never)
+  expect(String((r as { result?: unknown }).result)).toContain('/s1-2.md')
+  expect(w.files.get('/cfg/context-vigil-mod/handovers/s1-1.md')).toBe('earlier')
+})

@@ -903,7 +903,9 @@ export const register: Register = on => {
     const reason = awaiting?.reason ?? 'request'
     const resume = awaiting?.resume ?? false
     await update($, awaitingA, () => null)
-    const n = (await read($, handoverCountA)) + 1
+    // The count lives in $.state and a restart or --resume starts it at 0: skip files already on disk (R1-18).
+    let n = (await read($, handoverCountA)) + 1
+    while (await $.fs.exists(handoverPath(root, session, n)).catch(() => false)) n++
     await update($, handoverCountA, () => n)
     const path = handoverPath(root, session, n)
     const now = await nowMs($)
