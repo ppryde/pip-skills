@@ -189,6 +189,8 @@ async function startSetup($: EngineInterface, only?: string) {
 async function maybeAskRc($: EngineInterface) {
   if (!needsRcQuestion(onPhone(activity), settings.rcAutoClear, settings.auto)) return
   if (setupRun || rcAsked) return
+  // R1-21: the mod's own prompts obey stand-down (§7) and the latch (§5); asked on a later arm instead.
+  if (standDown || (await readLatch($))) return
   rcAsked = true
   await notify($, V.rcAsk)
   await log($, 'rc.answer', { asked: true })

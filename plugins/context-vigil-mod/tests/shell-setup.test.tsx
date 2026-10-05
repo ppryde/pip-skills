@@ -210,3 +210,17 @@ test('R1-06: answering a card keeps what another session changed', async ($, on)
   await $.tool.call(ask(card, { [card[0]?.question ?? '']: '50%' }) as never)
   expect(w.store.get('settings')).toMatchObject({ nudgeAt: 50, auto: false, rcAutoClear: 'yes' })
 })
+
+test('R1-21: with classic active, the RC question is never submitted', async ($, on) => {
+  const classic = JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: '"/s/context-vigil/scripts/context-vigil" hook stop' }] }] } })
+  const w = world(on, { store: { settings: { auto: true } }, files: { '/cfg/settings.json': classic } })
+  await armOnPhone($ as never, w)
+  expect(w.submits.filter(x => x.origin === 'plugin')).toEqual([])   // 'go' is the test's own prompt
+  expect(w.notices).not.toContain('📱 First Remote Control session with auto mode — one quick question about auto-clear')
+})
+
+test('R1-21: while the usage limit is latched, the RC question is not submitted', async ($, on) => {
+  const w = world(on, { now: 1_000_000, store: { settings: { auto: true }, latch: { kind: 'five_hour', resetsAtMs: 1_000_000 + 10 * 3_600_000 } } })
+  await armOnPhone($ as never, w)
+  expect(w.submits.filter(s => s.text.includes('📱 RC clear'))).toHaveLength(0)
+})
