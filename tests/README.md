@@ -13,7 +13,7 @@ tests/
   README.md        # this file
 ```
 
-Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`.
+Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`.
 
 ## How a suite finds its code
 
