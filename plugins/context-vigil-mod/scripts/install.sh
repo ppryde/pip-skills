@@ -7,23 +7,27 @@ cmd="${1:-status}"
 plugin="$(cd "$(dirname "$0")/.." && pwd)"
 cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 file="$cfg/settings.json"
-mkdir -p "$cfg"
-[ -f "$file" ] || echo '{}' > "$file"
 command -v jq >/dev/null || { echo "install.sh needs jq" >&2; exit 2; }
 
-current=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // ""' "$file")
+# status reads only; install/uninstall create the file on demand (see ensure_file).
+current=""
+[ -f "$file" ] && current=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // ""' "$file")
+ensure_file() { mkdir -p "$cfg"; [ -f "$file" ] || echo '{}' > "$file"; }
 # grep without -q: under pipefail, -q exiting early can SIGPIPE the writer.
 has_ours() { printf '%s' "$current" | tr ':' '\n' | grep -Fx "$plugin" >/dev/null; }
 
 write() {
   local tmp
   tmp=$(mktemp "$cfg/.settings.XXXXXX")
+  trap 'rm -f "$tmp"' RETURN
   jq --arg v "$1" 'if $v == "" then (.env |= (. // {} | del(.CLAUDE_CODE_PLUGIN_DIRS))) else (.env |= ((. // {}) + {CLAUDE_CODE_PLUGIN_DIRS: $v})) end' "$file" > "$tmp"
-  mv "$tmp" "$file"
+  # cat into the existing file: keeps a dotfiles symlink and the file's mode (mv would not).
+  cat "$tmp" > "$file"
 }
 
 case "$cmd" in
   install)
+    ensure_file
     # Keep in step with CLASSIC in core/interlock.ts (same match, TS form). TEMPORARY: removed when classic retires.
     if jq -r '[.hooks // {} | .[]? | .[]? | .hooks[]? | .command? // ""] | .[]' "$file" | grep -E '/scripts/context-vigil"[[:space:]]+hook[[:space:]]' >/dev/null; then
       echo "classic context-vigil hooks are installed in $file — uninstall classic first, then re-run (spec §7)" >&2
@@ -34,6 +38,7 @@ case "$cmd" in
     echo "context-vigil-mod installed in $file — start a new session, then run /vsetup"
     ;;
   uninstall)
+    if [ ! -f "$file" ] || ! has_ours; then echo "context-vigil-mod not installed in $file — nothing to remove"; exit 0; fi
     next=$(printf '%s' "$current" | tr ':' '\n' | grep -Fxv "$plugin" | paste -sd: - || true)
     write "$next"
     echo "context-vigil-mod removed from $file"

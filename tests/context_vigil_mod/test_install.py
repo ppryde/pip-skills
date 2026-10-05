@@ -73,3 +73,40 @@ def test_other_hooks_do_not_block_install(tmp_path):
     s = settings(tmp_path)
     assert s["env"]["CLAUDE_CODE_PLUGIN_DIRS"] == PLUGIN
     assert s["hooks"] == other["hooks"]
+
+
+def test_install_keeps_a_symlinked_settings_file_and_its_mode(tmp_path):
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    real = tmp_path / "dotfiles-settings.json"
+    real.write_text("{}")
+    real.chmod(0o644)
+    (cfg / "settings.json").symlink_to(real)
+    assert run(tmp_path, "install").returncode == 0
+    assert (cfg / "settings.json").is_symlink()
+    assert PLUGIN in real.read_text()
+    assert (real.stat().st_mode & 0o777) == 0o644
+    assert not list(cfg.glob(".settings.*"))
+
+
+def test_status_creates_nothing(tmp_path):
+    assert run(tmp_path, "status").returncode == 0
+    assert not (tmp_path / "cfg").exists()
+
+
+def test_invalid_json_leaves_original_and_no_temp_file(tmp_path):
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "settings.json").write_text("{ not json")
+    r = run(tmp_path, "install")
+    assert r.returncode != 0
+    assert (cfg / "settings.json").read_text() == "{ not json"
+    assert not list(cfg.glob(".settings.*"))
+
+
+def test_uninstall_with_nothing_to_remove_is_a_no_op(tmp_path):
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "settings.json").write_text('{"model":"opus"}')
+    assert run(tmp_path, "uninstall").returncode == 0
+    assert (cfg / "settings.json").read_text() == '{"model":"opus"}'
