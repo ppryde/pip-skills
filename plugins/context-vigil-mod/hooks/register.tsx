@@ -631,6 +631,8 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     scheduleGit($)
+    // The instruction's own turn is the only one whose end counts as an attempt (R1-02).
+    await update($, awaitingA, a => (a && a.turnId === undefined && e.text === instructionText(a.reason) ? { ...a, turnId: e.turnId } : a))
     return next(e)
   })
 
@@ -653,9 +655,16 @@ export const register: Register = on => {
       $.clock.after(0, () => { void learnSessionTtl($) })
     }
     const awaitingNow = await read($, awaitingA)
-    if (awaitingNow?.started) {
-      if (awaitingNow.attempts < 2) {
-        await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false }))
+    // A subagent's turn, or a main turn that began before the instruction, is not the attempt.
+    if (awaitingNow?.started && e.agentId === undefined && awaitingNow.turnId !== undefined && e.turnId === awaitingNow.turnId) {
+      if (e.isAborted) {
+        // The person pressed Esc: that is presence, and no retry (R1-02).
+        await update($, awaitingA, () => null)
+        await observe($, { kind: 'human-command', at: now })
+        await notify($, V.handoverInterrupted)
+        await log($, 'guard.wait', { reason: 'instruction-interrupted' })
+      } else if (awaitingNow.attempts < 2) {
+        await update($, awaitingA, () => ({ ...awaitingNow, attempts: awaitingNow.attempts + 1, started: false, turnId: undefined }))
         submitInstruction($, awaitingNow.reason)
       } else {
         await update($, awaitingA, () => null)

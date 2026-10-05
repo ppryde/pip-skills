@@ -27,6 +27,7 @@ export const V = {
   clearSkippedAttended: '📜 Handover saved — you came back, so nothing was cleared; /vho or /clear when you are ready',
   handoverUnrequested: (path: string) => `📜 Handover saved — ${path} — it was not asked for, so nothing was cleared; /vho or /clear when you want to use it`,
   deferredDropped: '⏳ The handover that waited on the usage limit was not run — /vho when you want one',
+  handoverInterrupted: '📜 Handover interrupted — nothing was cleared; /vho when you want one',
   handoverFailed: '📜 Couldn\'t write a handover — nothing was cleared',
   clearRejected: '🧹 /clear was refused — the handover is still pending; /clear to resume from it',
   countdownLine: (s: number) => `🧹 Handing over in ${s} s — 0 or send anything to cancel`,

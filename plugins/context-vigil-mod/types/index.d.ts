@@ -69,9 +69,10 @@ export type Pending = {
 // A handover the model has been asked to write and has not written yet. `started` turns
 // true when the instruction prompt itself passes prompt.submit, so only ITS turn's
 // turn.complete counts as a missed attempt.
-// `unattended` says the clear that follows is the mod's own (auto mode, or a deferred handover
+// `turnId` is the main-loop turn whose turn.start carried the instruction: only ITS turn.complete
+// is an attempt (R1-02). `unattended` says the clear that follows is the mod's own (auto mode, or a deferred handover
 // drained while the person was away): it takes the attended re-check and the RC gate.
-export type Awaiting = { reason: PendingReason; resume: boolean; attempts: number; started: boolean; unattended: boolean }
+export type Awaiting = { reason: PendingReason; resume: boolean; attempts: number; started: boolean; unattended: boolean; turnId?: string }
 
 export type StepId =
   | 'nudge' | 'bar' | 'auto' | 'idle' | 'last_light' | 'last_light_at'

@@ -84,9 +84,11 @@ test('no tool call: one retry, then a visible failure and no clear', async ($, o
   await $.session.start(START)
   await $.command.run(vho)
   await w.clock.settle()
+  await $.turn.start({ text: w.submits.at(-1)?.text ?? '', turnId: 'a' } as never)
   await $.turn.complete(turn('a'))
   await w.clock.settle()
   expect(w.submits.filter(s => s.text.includes(TOOL)).length).toBe(2)
+  await $.turn.start({ text: w.submits.at(-1)?.text ?? '', turnId: 'b' } as never)
   await $.turn.complete(turn('b'))
   await w.clock.settle()
   expect(w.notices).toContain("📜 Couldn't write a handover — nothing was cleared")
@@ -521,4 +523,44 @@ test('R1-01: a duplicate tool call after a requested handover does not clear a s
   await w.clock.settle()
   expect(w.commands.filter(c => c === 'clear')).toHaveLength(1)
   expect(w.files.has('/cfg/context-vigil-mod/handovers/s1-2.md')).toBe(true)
+})
+
+// R1-02: only the instruction turn's own completion counts as a missed attempt.
+const instructionTurn = ($: Engine, w: World, id: string) => $.turn.start({ text: w.submits.at(-1)?.text ?? '', turnId: id } as never)
+const asked = (w: World) => w.submits.filter(s => s.text.includes(TOOL)).length
+
+test('R1-02: a subagent turn ending is not a missed attempt', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await instructionTurn($, w, 'i1')
+  await $.turn.complete({ ...turn('sub'), agentId: 'a1' } as never)
+  await w.clock.settle()
+  expect(asked(w)).toBe(1)
+  expect(w.notices).not.toContain("📜 Couldn't write a handover — nothing was cleared")
+})
+
+test('R1-02: a main turn already in flight ending is not a missed attempt', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await $.turn.complete(turn('inflight'))     // started before the instruction; no turn.start of ours yet
+  await w.clock.settle()
+  expect(asked(w)).toBe(1)
+})
+
+test('R1-02: an interrupted instruction turn is not retried, and the interrupt is presence', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.command.run(vho)
+  await w.clock.settle()
+  await instructionTurn($, w, 'i1')
+  await $.turn.complete({ ...turn('i1'), isAborted: true, reason: 'aborted' } as never)
+  await w.clock.settle()
+  expect(asked(w)).toBe(1)
+  expect(w.state.get('context-vigil-mod.awaiting')).toBeNull()
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+  expect(w.notices.some(n => n.includes('interrupted'))).toBe(true)
 })
