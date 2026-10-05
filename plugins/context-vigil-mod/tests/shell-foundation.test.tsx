@@ -118,3 +118,33 @@ test('a refused toast is not an unhandled rejection: the log line still goes out
   await $.session.start(START)
   expect(w.logs.filter(n => n.includes('standing down')).length).toBe(1)
 })
+
+// R1-15: the first write of a day is a read-then-append; two hooks racing it must keep both lines.
+test('two events racing the first log of a day both land in the file', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  let open = () => {}
+  w.fsRead.gate = new Promise<void>(r => { open = r })
+  const arm = $.turn.complete(turn())
+  const disarm = $.prompt.submit(human('back'))
+  await w.clock.advance(1)
+  open()
+  await Promise.all([arm, disarm])
+  const day = [...w.files.keys()].find(k => k.startsWith('/cfg/context-vigil-mod/events/')) ?? ''
+  const kinds = (w.files.get(day) ?? '').trim().split('\n').map(l => (JSON.parse(l) as { kind: string }).kind)
+  expect(kinds).toContain('arm')
+  expect(kinds).toContain('disarm')
+})
+
+test('an unreadable day file is left alone, never truncated', async ($, on) => {
+  const day = '/cfg/context-vigil-mod/events/1970-01-01/s1.jsonl'
+  const w = world(on, { store: { settings: { auto: true } }, now: 1_000_000, files: { [day]: '{"kept":true}\n' } })
+  await $.session.start(START)
+  w.fsRead.error = 'EIO read failed'
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.turn.complete(turn())
+  expect(w.files.get(day)).toBe('{"kept":true}\n')
+})

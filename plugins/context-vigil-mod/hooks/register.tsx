@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Activity, Awaiting, EventKind, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Settings, StepId } from '../types'
+import type { Activity, Awaiting, EventKind, EventRecord, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Settings, StepId } from '../types'
 import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
 import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
@@ -84,12 +84,33 @@ async function nowMs($: EngineInterface): Promise<number> {
   return $.clock.now()
 }
 
+// Appends are serialised through one chain, so a day file's first read-then-append cannot be raced
+// by a second hook (R1-15). A day file that exists but cannot be read is never overwritten.
+let logChain: Promise<void> = Promise.resolve()
+
+async function appendToDayFile($: EngineInterface, path: string, rec: EventRecord) {
+  if (dayText[path] === undefined) {
+    try {
+      dayText[path] = String(await $.fs.read(path))
+    } catch (err) {
+      if (!/ENOENT|no such file|not found/i.test(String((err as { code?: string; message?: string })?.code ?? '') + String((err as Error)?.message ?? err))) {
+        try { await $.ui.log(`context-vigil-mod: event log skipped, ${path} is unreadable: ${String(err)}`) } catch { /* nowhere left to say it */ }
+        return
+      }
+      dayText[path] = ''
+    }
+  }
+  dayText[path] = appendLine(dayText[path] ?? '', rec)
+  await $.fs.write(path, dayText[path] ?? '').catch(() => {})
+}
+
 async function log($: EngineInterface, kind: EventKind, fields: Record<string, unknown> = {}) {
   const now = await nowMs($)
   const path = eventsPath(root, dayKey(now), session)
-  if (dayText[path] === undefined) dayText[path] = await $.fs.read(path).then(t => String(t)).catch(() => '')
-  dayText[path] = appendLine(dayText[path] ?? '', makeRecord(now, session, kind, fields))
-  await $.fs.write(path, dayText[path] ?? '').catch(() => {})
+  const rec = makeRecord(now, session, kind, fields)
+  const turn = logChain.then(() => appendToDayFile($, path, rec))
+  logChain = turn.catch(() => {})
+  await turn
 }
 
 // PROBES.md §1 decides the channel; both are sent until it says otherwise.

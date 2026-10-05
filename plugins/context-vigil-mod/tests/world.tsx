@@ -29,6 +29,7 @@ export type World = {
   handoverWriteRefused: { value: boolean }               // makes fs.write under /handovers/ deny
   cacheWrites: { value: { h1: number; m5: number } | 'none' | 'fail' | { raw: string } }   // what the transcript tail says the latest response wrote
   tails: string[][]                    // argv of every transcript-tail run
+  fsRead: { gate: Promise<void> | null; error: string | null }   // gate delays every fs.read; error makes it reject with that text
   onStoreSet: { value: ((key: string) => Promise<unknown>) | null }  // runs inside store.set, before it answers
 }
 
@@ -42,7 +43,7 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
     rateLimits: { value: [] }, git: { branch: 'main\n', status: '' }, runs: { count: 0 }, state: new Map(), askAnswer: { value: null },
     toastRefused: { value: false }, clearRefused: { value: false }, renameRefused: { value: false }, submitRefused: { value: false }, renames: [],
     titled: new Set(), grepFails: { value: false }, greps: [], store: new Map(Object.entries(opts.store ?? {})),
-    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], onStoreSet: { value: null },
+    handoverWriteRefused: { value: false }, cacheWrites: { value: { h1: 100, m5: 0 } }, tails: [], onStoreSet: { value: null }, fsRead: { gate: null, error: null },
   }
   // $.store, per account: in memory, survives a clear, and open to the test (another process's writes).
   on('store.get', (_$, e) => ({ value: w.store.get(e.key) as never }))
@@ -50,7 +51,9 @@ export function world(on: On, opts: { now?: number; store?: Record<string, unkno
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
-  on('fs.read', (_$, e) => {
+  on('fs.read', async (_$, e) => {
+    await w.fsRead.gate
+    if (w.fsRead.error !== null) return { deny: w.fsRead.error }
     const t = w.files.get(e.path)
     return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never }
   })
