@@ -203,6 +203,51 @@ running (repo test-isolation rule).
 Gates: `poetry run pytest`, `ruff`, `mypy` for `plugins/census`, `plugins/vigil`,
 `plugins/overseer`.
 
+## Amendment (2026-10-06): limits keyed by account
+
+Supersedes every `limits.json` above. Owner decision: one census folder may be
+shared by several Claude config dirs (`CENSUS_STORE` set alike in each), so limits
+must be keyed by account, not by folder.
+
+**Account resolution.** Neither the status-line payload nor the mod API carries an
+account id. Census reads `oauthAccount` from the account's `.claude.json`:
+`$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set, else
+`~/.claude.json`. Account key = `oauthAccount.accountUuid`. With no `oauthAccount`
+(a pure API key) the key is `cfg-` + the first 12 hex chars of the SHA-256 of the
+resolved config dir path. Resolution is cached per process (one ingest = one
+process) and never raises; if it fails entirely the key is the `cfg-` form. A future
+payload field naming the account is preferred over `.claude.json` when present.
+
+**Layout.**
+
+```
+<census dir>/
+  limits/<account key>.json    one per account
+  sessions/<sid>.json          each now also carries "account" and "org"
+  cli.path
+```
+
+`limits/<key>.json`: `{"version": 2, "account": key, "org": organizationUuid|null,
+"org_name": organizationName|null, "billing": billingType|null, <window>: {...}…,
+"updated_at"}`. Every key of the payload's `rate_limits` whose value is an object with
+`used_percentage` and `resets_at` is a window and goes through the forward-only merge
+(the v1 rule, generalised from five_hour/seven_day to any window name, e.g. a future
+`spend_limit`). A `rate_limits` entry of any other shape is stored verbatim under its
+key (last write wins) until its real shape is known.
+
+**Reads.** `census read`, `--session`, `--worktree` and `--limits` answer for the
+CALLING account (resolved the same way): the view's `limits` is that account's file
+minus `version`/`account`/`org`/`org_name`/`billing` — byte-compatible with v1 for a
+single account. New `census read --limits --all` prints `{<key>: <limits file minus
+version>}` for every account in the folder. Session entries in the view gain
+`account` and `org` (additive).
+
+**Migration.** A v2 `limits.json` (from the first v2 build) moves to
+`limits/<calling account key>.json` through the same forward-only merge, then is
+deleted; v1 `status.json` limits go to the calling account's file.
+
+**Purge** removes `limits/` with the other census-owned entries.
+
 ## Rollout
 
 1. Land v2 (this spec). The first status-line refresh per account migrates it.
