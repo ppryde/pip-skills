@@ -708,3 +708,18 @@ test('auto mode switched Off while an unattended clear waits stops it, with a no
   expect(w.notices).toContain('📜 Handover saved — auto mode was switched off, so nothing was cleared; /vho or /clear when you are ready')
   expect(eventLog(w)).toContain('"auto-off"')
 })
+
+test('a channel prompt in the idle window keeps auto mode disarmed: a nudge, no handover (R2-06)', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b', command: 'ls' } as never)
+  await $.session.measure(measure(20))
+  await $.prompt.submit({ text: 'from slack', wait: false, origin: { kind: 'channel' } as never })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'ls' } as never)
+  await $.session.measure(measure(36))
+  await w.clock.settle()
+  expect(w.submits.some(x => x.text.includes(TOOL))).toBe(false)
+  expect(w.state.get('context-vigil-mod.barShown')).toBe(true)   // nudged on the bar instead
+})

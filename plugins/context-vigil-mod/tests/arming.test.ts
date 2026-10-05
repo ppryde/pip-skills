@@ -31,6 +31,16 @@ describe('record', () => {
     expect(mode(record(EMPTY_ACTIVITY, { kind: 'agent-step', at: 8 }), 10, S)).toBe('auto')
     expect(mode(record(record(EMPTY_ACTIVITY, { kind: 'agent-step', at: 8 }), { kind: 'prompt', origin: 'unclassified', at: 9 }), 10, S)).toBe('attended')
   })
+  test('a channel or auto-continuation prompt disarms auto mode and nothing else (R2-06)', () => {
+    const base = record(record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'bridge', at: 1 }), { kind: 'agent-step', at: 2 })
+    for (const origin of ['channel', 'auto-continuation']) {
+      const a = record(base, { kind: 'prompt', origin, at: 9 })
+      expect(a).toEqual({ ...base, lastHumanAt: 9 })
+      expect(a.lastHumanOrigin).toBe('bridge')
+      expect(a.lastBridgeAt).toBe(1)
+      expect(mode(record(record(EMPTY_ACTIVITY, { kind: 'agent-step', at: 8 }), { kind: 'prompt', origin, at: 9 }), 10, S)).toBe('attended')
+    }
+  })
   test('sdk marks the session headless', () => {
     const a = record(EMPTY_ACTIVITY, { kind: 'prompt', origin: 'sdk', at: 1 })
     expect(a.headless).toBe(true)

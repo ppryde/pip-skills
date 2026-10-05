@@ -1,6 +1,10 @@
 import type { Activity, Mode, Settings, Who } from '../types'
 
 const HUMAN = new Set(['composer', 'bridge', 'slack-ping'])
+// Presence evidence that is not attestably the person's own message: a same-user channel the engine
+// cannot attest (R1-24), a message relayed by an MCP channel server, the engine's follow-up to a UI
+// action (R2-06). They disarm auto mode and nothing else.
+const DISARM_ONLY = new Set(['unclassified', 'channel', 'auto-continuation'])
 
 export function classifyOrigin(kind: string): Who {
   if (HUMAN.has(kind)) return 'human'
@@ -23,7 +27,7 @@ export function record(a: Activity, s: Signal): Activity {
     case 'prompt': {
       // An origin the engine cannot attest might be a person: it disarms auto mode and restarts the
       // idle clock, and counts for nothing else (not a phone fact, not a return, not agent work). R1-24.
-      if (s.origin === 'unclassified') return { ...a, lastHumanAt: s.at }
+      if (DISARM_ONLY.has(s.origin)) return { ...a, lastHumanAt: s.at }
       const who = classifyOrigin(s.origin)
       if (who === 'human') {
         return { ...a, lastHumanAt: s.at, lastHumanOrigin: s.origin, lastBridgeAt: s.origin === 'bridge' ? s.at : a.lastBridgeAt }

@@ -125,9 +125,11 @@ setup):
 - an edit in the terminal's prompt box (`prompt.edit`), or a non-empty draft
   there (`prompt.read`);
 - a prompt whose origin is `unclassified` (a same-user channel the engine cannot
-  attest) disarms auto mode and restarts the idle clock, but counts for nothing
-  else: it is not a phone fact, does not re-arm last light and is never held on
-  return.
+  attest), `channel` (a message relayed by an MCP channel server such as Slack or
+  Telegram — a person, but not attestably you) or `auto-continuation` (the
+  engine's programmatic follow-up to a UI action of yours) disarms auto mode and
+  restarts the idle clock, but counts for nothing else: it is not a phone fact,
+  does not re-arm last light and is never held on return.
 
 **Working** — a `turn.step` or `turn.complete` within the last **2 min**. This
 covers one long self-driven turn as well as turns started by

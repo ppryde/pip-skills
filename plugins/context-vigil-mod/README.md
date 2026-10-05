@@ -31,7 +31,7 @@ Every moment is in exactly one:
 | idle >= idle window | working | **auto armed** | hands over, clears, resumes by itself |
 | idle | idle | **last-light territory** | no clear; before the cache goes cold, write the handover only |
 
-*Engaged* = a `composer`, `bridge` (Remote Control) or `slack-ping` prompt, a slash command you ran, or a prompt-box edit/draft, within the idle window. *Working* = agent activity within the last 2 min. Auto mode is off until enabled in `/vsetup auto`. `sdk` sessions (`claude -p`) are unattended from the first turn. An `unclassified` prompt disarms auto mode but counts for nothing else.
+*Engaged* = a `composer`, `bridge` (Remote Control) or `slack-ping` prompt, a slash command you ran, or a prompt-box edit/draft, within the idle window. *Working* = agent activity within the last 2 min. Auto mode is off until enabled in `/vsetup auto`. `sdk` sessions (`claude -p`) are unattended from the first turn. An `unclassified`, `channel` or `auto-continuation` prompt disarms auto mode but counts for nothing else.
 
 ## The handover
 
