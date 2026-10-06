@@ -14,7 +14,8 @@ Gathers from three read-only sources and renders one of three styles:
 Every source is optional and fail-safe: a missing one leaves its lines out,
 it never raises. Pure stdlib.
 
-Styles are sized for a phone (no line wider than ~40 columns):
+Styles are sized for a phone (no line wider than 44 columns; free text such as
+branch, session and tool names is clipped to fit):
 ``compact`` (six lines), ``detailed`` (sections, pace forecasts, tool
 breakdown), ``playful`` (the Witchfinder's reading).
 """
@@ -22,7 +23,9 @@ breakdown), ``playful`` (the Witchfinder's reading).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -34,7 +37,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-STALE_SECONDS = 90  # census: not rendered for 90s = session dead or closed
+STALE_SECONDS = 90  # census: not rendered for 90s (idle without refreshInterval, or closed)
+MAX_RESET_SECONDS = 10 * 86400  # census's own ceiling: further out is a corrupt/ms value
 TIMEOUT_SECONDS = 4
 WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
 WINDOW_LABEL = {"five_hour": "5h", "seven_day": "7d"}
@@ -63,7 +67,7 @@ class Window:
 
     @property
     def label(self) -> str:
-        return WINDOW_LABEL.get(self.key, self.key.replace("_", " "))
+        return WINDOW_LABEL.get(self.key) or clip(self.key.replace("_", " "), 12)
 
     def pace(self, now: float) -> float | None:
         """Projected percent at reset if usage continues at the rate so far
@@ -87,6 +91,9 @@ class Vitals:
     session_name: str | None = None
     stale: bool = False
     idle: bool = False
+    age: float | None = None  # seconds since census last saw the status line render
+    borrowed: bool = False  # reading is another session's (worktree fallback)
+    has_reading: bool = False
     model: str | None = None
     effort: str | None = None
     ctx_pct: float | None = None
@@ -127,7 +134,8 @@ class Vitals:
 def _num(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    f = float(value)
+    return f if math.isfinite(f) else None
 
 
 def _int(value: Any) -> int | None:
@@ -191,7 +199,8 @@ def _census_read(args: list[str]) -> dict[str, Any] | None:
 
 def census_entry(session_id: str | None, cwd: str) -> dict[str, Any] | None:
     """This session's census entry; the freshest for the worktree when the
-    session has none (or no id was given)."""
+    session has none (or no id was given). A fallback entry may belong to a
+    sibling session -- ``apply_census`` flags that as ``borrowed``."""
     if session_id:
         own = _census_read(["--session", session_id])
         if own:
@@ -202,10 +211,16 @@ def census_entry(session_id: str | None, cwd: str) -> dict[str, Any] | None:
 def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
     """Fold a census entry (``census read`` v1 shape) into ``v``."""
     payload = _dict(entry.get("payload"))
+    v.has_reading = True
     updated = _num(entry.get("updated_at"))
-    v.stale = bool(entry.get("stale")) or (updated is not None and v.now - updated > STALE_SECONDS)
+    if updated is not None:
+        v.age = max(0.0, v.now - updated)
+    v.stale = bool(entry.get("stale")) or (v.age is not None and v.age > STALE_SECONDS)
     v.idle = bool(entry.get("idle"))
-    v.session_id = v.session_id or payload.get("session_id")
+    owner = payload.get("session_id")
+    if v.session_id and isinstance(owner, str) and owner != v.session_id:
+        v.borrowed = True
+    v.session_id = v.session_id or (owner if isinstance(owner, str) else None)
     v.session_name = payload.get("session_name") or None
     v.branch = v.branch or entry.get("branch") or None
 
@@ -245,7 +260,7 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
     for key in sorted(limits, key=lambda k: (k not in WINDOW_SECONDS, WINDOW_SECONDS.get(k, 0))):
         win = _dict(limits[key])
         used, resets = _num(win.get("used_percentage")), _num(win.get("resets_at"))
-        if used is not None and resets is not None and resets > v.now:
+        if used is not None and resets is not None and 0 < resets - v.now <= MAX_RESET_SECONDS:
             v.windows.append(Window(key, used, resets))
 
 
@@ -253,7 +268,7 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
 
 
 def apply_git(v: Vitals, cwd: str, with_pr: bool) -> None:
-    status = _run(["git", "status", "--porcelain=v2", "--branch"], cwd=cwd)
+    status = _run(["git", "status", "--porcelain=v2", "--branch", "--untracked-files=all"], cwd=cwd)
     if status is None:
         return
     dirty = untracked = 0
@@ -284,10 +299,26 @@ def apply_git(v: Vitals, cwd: str, with_pr: bool) -> None:
 # --------------------------------------------------------------------- transcript
 
 
-def apply_transcript(v: Vitals, path: str | None) -> None:
+def _is_prompt(rec: dict[str, Any], content: Any) -> bool:
+    """A prompt the user typed: string content, or blocks with text (an image
+    prompt). Not meta records, compaction summaries, command/caveat wrappers
+    (``<...``), tool results or interruption markers."""
+    if rec.get("isMeta") or rec.get("isCompactSummary"):
+        return False
+    if isinstance(content, str):
+        return not content.startswith("<")
+    if isinstance(content, list):
+        texts = [b.get("text") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        return any(
+            isinstance(t, str) and not t.startswith(("<", "[Request interrupted")) for t in texts
+        )
+    return False
+
+
+def apply_transcript(v: Vitals, path: Any) -> None:
     """Count tool calls by name and real user prompts. Streams the file and
     only parses lines that can matter, so a long transcript stays cheap."""
-    if not path:
+    if not isinstance(path, str) or not path:
         return
     tools: Counter[str] = Counter()
     prompts = 0
@@ -306,19 +337,13 @@ def apply_transcript(v: Vitals, path: str | None) -> None:
                     continue
                 content = _dict(rec.get("message")).get("content")
                 if rec.get("type") == "user":
-                    # str content = a typed prompt; "<..." = command/caveat wrappers
-                    if (
-                        isinstance(content, str)
-                        and not rec.get("isMeta")
-                        and not content.startswith("<")
-                    ):
-                        prompts += 1
+                    prompts += _is_prompt(rec, content)
                     continue
                 if rec.get("type") == "assistant" and isinstance(content, list):
                     for block in content:
                         if isinstance(block, dict) and block.get("type") == "tool_use":
                             tools[str(block.get("name") or "?")] += 1
-    except OSError:
+    except (OSError, ValueError):  # ValueError: e.g. a NUL byte in the path
         return
     v.tools = tools
     v.prompts = prompts
@@ -330,7 +355,7 @@ def apply_transcript(v: Vitals, path: str | None) -> None:
 def fmt_tokens(n: int | None) -> str:
     if n is None:
         return "?"
-    if n >= 1_000_000:
+    if n >= 999_500:
         return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
     if n >= 1000:
         return f"{n / 1000:.1f}k".replace(".0k", "k") if n < 10_000 else f"{round(n / 1000)}k"
@@ -383,6 +408,19 @@ def gauge(pct: float | None) -> str:
     return "🟢"
 
 
+def clip(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters, ending in an ellipsis if cut."""
+    return text if len(text) <= limit else text[: max(0, limit - 1)] + "…"
+
+
+def tool_label(name: str) -> str:
+    """An MCP tool's own name (``mcp__server__ctx_search`` -> ``ctx_search``),
+    clipped so a breakdown line fits a phone."""
+    if name.startswith("mcp__"):
+        name = name.rsplit("__", 1)[-1]
+    return clip(name, 14)
+
+
 def plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
@@ -391,13 +429,14 @@ def pct(value: float | None) -> str:
     return "?%" if value is None else f"{round(value)}%"
 
 
-def repo_line(v: Vitals) -> str | None:
+def repo_line(v: Vitals, budget: int = 40) -> str | None:
+    """Branch, then PR; the branch is clipped so the PR always shows."""
     if v.branch is None and v.pr_number is None:
         return None
-    parts = [v.branch or "detached"]
+    pr = ""
     if v.pr_number:
-        parts.append(f"PR #{v.pr_number}" + (f" {v.pr_state}" if v.pr_state else ""))
-    return " · ".join(parts)
+        pr = f" · PR #{v.pr_number}" + (f" {v.pr_state}" if v.pr_state else "")
+    return clip(v.branch or "detached", budget - len(pr)) + pr
 
 
 def sync_line(v: Vitals) -> str | None:
@@ -405,17 +444,20 @@ def sync_line(v: Vitals) -> str | None:
         return None
     parts = ["clean" if v.dirty == 0 else f"{v.dirty} dirty"]
     if v.untracked:
-        parts.append(f"{v.untracked} untracked")
+        parts.append(f"{v.untracked} new")
     if v.ahead is not None:
         parts.append(f"↑{v.ahead} ↓{v.behind}")
     return " · ".join(parts)
 
 
 def liveness(v: Vitals) -> str | None:
+    """Why the figures may not be this session's live ones, or None."""
+    if v.borrowed:
+        return "another session's reading"
+    if v.stale and v.age is not None:
+        return f"reading is {fmt_duration(v.age)} old"
     if v.stale:
-        return "stale reading (status line not rendering)"
-    if v.idle:
-        return "idle 10m+"
+        return "reading may be stale"
     return None
 
 
@@ -430,7 +472,7 @@ def render_compact(v: Vitals) -> str:
         if v.ctx_size:
             ctx += f"/{fmt_tokens(v.ctx_size)}"
     lines.append(ctx)
-    mind = [v.model or "model ?"]
+    mind = [clip(v.model or "model ?", 18)]
     if v.effort:
         mind.append(v.effort)
     if v.cost_usd is not None:
@@ -440,19 +482,19 @@ def render_compact(v: Vitals) -> str:
         lines.append(f"🌿 {repo}")
     if (sync := sync_line(v)) is not None:
         lines.append(f"✎  {sync}")
-    if v.windows:
+    if any(w.key in WINDOW_SECONDS for w in v.windows):
         lines.append(
             "⏳ "
             + " · ".join(
                 f"{w.label} {pct(w.used)} {gauge(w.used)} {fmt_duration(w.resets_at - v.now)}"
-                for w in v.windows[:2]
+                for w in [w for w in v.windows if w.key in WINDOW_SECONDS][:2]
             )
         )
     clock = [fmt_duration((v.duration_ms or 0) / 1000) if v.duration_ms is not None else None]
     if v.tools:
         clock.append(f"{v.tool_calls} tools")
     if v.agents:
-        clock.append(f"{v.agents} agents")
+        clock.append(plural(v.agents, "agent"))
     if any(clock):
         lines.append("⏱  " + " · ".join(c for c in clock if c))
     if (live := liveness(v)) is not None:
@@ -463,7 +505,7 @@ def render_compact(v: Vitals) -> str:
 def render_detailed(v: Vitals) -> str:
     out: list[str] = ["SESSION VITALS", "══════════════"]
     if v.session_name:
-        out.append(f"“{v.session_name}”")
+        out.append(f"“{clip(v.session_name, 40)}”")
     if (live := liveness(v)) is not None:
         out.append(f"⚠️  {live}")
 
@@ -480,7 +522,8 @@ def render_detailed(v: Vitals) -> str:
             cache += f" · warm {fmt_duration(left)}" if left > 0 else " · cold"
         out.append(cache)
 
-    out += ["", f"🧠 {v.model or 'model ?'}" + (f" · effort {v.effort}" if v.effort else "")]
+    model = clip(v.model or "model ?", 22)
+    out += ["", f"🧠 {model}" + (f" · effort {v.effort}" if v.effort else "")]
     if v.cost_usd is not None:
         out.append(f"   ↳ cost {fmt_cost(v.cost_usd)}")
     if v.tokens_in is not None or v.tokens_out is not None:
@@ -490,8 +533,10 @@ def render_detailed(v: Vitals) -> str:
         out += ["", f"🌳 {repo}"]
         if (sync := sync_line(v)) is not None:
             out.append(f"   ↳ {sync}")
-        if v.lines_added is not None:
-            out.append(f"   ↳ +{v.lines_added} / -{v.lines_removed or 0} lines this session")
+    if v.lines_added is not None:
+        if repo_line(v) is None:
+            out += ["", "🌳 not a git repo"]
+        out.append(f"   ↳ +{v.lines_added} / -{v.lines_removed or 0} lines this session")
 
     if v.duration_ms is not None or v.tools:
         head = f"⏱  {fmt_duration(v.duration_ms / 1000)}" if v.duration_ms is not None else "⏱"
@@ -501,10 +546,9 @@ def render_detailed(v: Vitals) -> str:
         if v.prompts is not None:
             out.append(f"   ↳ {plural(v.prompts, 'prompt')} · {plural(v.tool_calls, 'tool call')}")
         if v.tools:
-            top = v.tools.most_common(5)
-            out.append("   ↳ " + " · ".join(f"{name} {n}" for name, n in top[:3]))
-            if len(top) > 3:
-                out.append("     " + " · ".join(f"{name} {n}" for name, n in top[3:]))
+            top = [f"{tool_label(name)} {n}" for name, n in v.tools.most_common(6)]
+            for i in range(0, len(top), 2):
+                out.append(("   ↳ " if i == 0 else "     ") + " · ".join(top[i : i + 2]))
         if v.agents:
             out.append(f"   ↳ {plural(v.agents, 'subagent')} spawned")
 
@@ -540,8 +584,8 @@ def _limit_verse(w: Window, now: float) -> str:
 
 def _verdict(v: Vitals) -> str:
     worst_limit = max((w.used for w in v.windows), default=0.0)
-    if v.stale:
-        return "The vigil is broken.\n   This reading is of the dead."
+    if not v.has_reading:
+        return "The signs are hidden.\n   No census reading to judge."
     if (v.ctx_pct or 0) >= 80 or worst_limit >= 90:
         return "Found wanting.\n   Seek absolution: hand over."
     if (v.ctx_pct or 0) >= 50 or worst_limit >= 70 or (v.dirty or 0) > 20:
@@ -560,14 +604,14 @@ def render_playful(v: Vitals) -> str:
         )
     out.append(f"   {_ctx_verse(v.ctx_pct)}")
 
-    out += ["", "🧠 THE MIND", f"   {v.model or 'an unknown spirit'}"]
+    out += ["", "🧠 THE MIND", f"   {clip(v.model or 'an unknown spirit', 38)}"]
     if v.cost_usd is not None:
         out.append(f"   {fmt_cost(v.cost_usd)} tithed this session")
     if v.tokens_out is not None:
         out.append(f"   {fmt_tokens(v.tokens_out)} tokens of prophecy")
 
-    if (repo := repo_line(v)) is not None:
-        out += ["", "📜 THE SANCTUM", f"   {repo}"]
+    if repo_line(v) is not None:
+        out += ["", "📜 THE SANCTUM", f"   {repo_line(v, 38)}"]
         if v.dirty is not None:
             out.append(
                 "   unblemished — nothing uncommitted"
@@ -591,10 +635,13 @@ def render_playful(v: Vitals) -> str:
     if v.windows:
         out += ["", "🚪 THE GATES (rate limits)"]
         for w in v.windows:
-            out.append(f"   {gauge(w.used)} {w.label} {pct(w.used)} — {_limit_verse(w, v.now)}")
+            out.append(f"   {gauge(w.used)} {w.label} {pct(w.used)}")
+            out.append(f"      {_limit_verse(w, v.now)}")
             out.append(f"      reopens {fmt_reset(w.resets_at, v.now)}")
 
     out += ["", f"✨ {_verdict(v)}"]
+    if (live := liveness(v)) is not None:
+        out.append(f"   (⚠️  {live})")
     return "\n".join(out)
 
 
@@ -606,12 +653,18 @@ RENDERERS = {"compact": render_compact, "detailed": render_detailed, "playful": 
 
 def gather(session_id: str | None, cwd: str, *, with_pr: bool, now: float | None = None) -> Vitals:
     v = Vitals(now=time.time() if now is None else now, session_id=session_id)
-    entry = census_entry(session_id, cwd)
+    # Each source is independent: one failing (odd input we did not foresee)
+    # must not hide the others.
+    entry: dict[str, Any] | None = None
+    with contextlib.suppress(Exception):
+        entry = census_entry(session_id, cwd)
+        if entry:
+            apply_census(v, entry)
+    with contextlib.suppress(Exception):
+        apply_git(v, cwd, with_pr)
     if entry:
-        apply_census(v, entry)
-    apply_git(v, cwd, with_pr)
-    if entry:
-        apply_transcript(v, _dict(entry.get("payload")).get("transcript_path"))
+        with contextlib.suppress(Exception):
+            apply_transcript(v, _dict(entry.get("payload")).get("transcript_path"))
     return v
 
 
@@ -624,8 +677,8 @@ def _clean_session(value: str | None) -> str | None:
 
 def resolve_style(words: list[str]) -> str:
     """The first word naming a style or alias wins; otherwise compact."""
-    for word in words:
-        w = word.strip().lower()
+    for word in " ".join(words).split():
+        w = word.lower()
         if w in STYLES:
             return w
         if w in ALIASES:
@@ -643,10 +696,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     session = _clean_session(args.session) or _clean_session(os.environ.get("CLAUDE_SESSION_ID"))
     style = args.style or resolve_style(args.words)
-    vitals = gather(session, args.cwd, with_pr=not args.no_pr)
-    if vitals.model is None and vitals.ctx_pct is None:
+    try:
+        vitals = gather(session, args.cwd, with_pr=not args.no_pr)
+        reading = RENDERERS[style](vitals)
+    except Exception as exc:  # noqa: BLE001 -- last line of defence: never dump a traceback
+        print(f"(vitals could not read this session: {type(exc).__name__}: {exc})")
+        return 0
+    if not vitals.has_reading:
         print("(no census reading yet — the status line feeds it)")
-    print(RENDERERS[style](vitals))
+    print(reading)
     return 0
 
 

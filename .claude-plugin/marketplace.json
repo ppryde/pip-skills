@@ -224,7 +224,7 @@
     {
       "name": "vitals",
       "source": "./plugins/vitals",
-      "description": "On-demand session vital signs sized for a phone: context, model, cost, rate-limit windows with pace forecasts, git/PR state and tool counts. /vitals [style], or /vitals:lean, /vitals:detailed, /vitals:playful. Reads census, git and the transcript; writes nothing.",
+      "description": "On-demand session vital signs sized for a phone: context, model, cost, rate-limit windows with pace forecasts, git/PR state and tool counts. /vitals:vitals [style], or /vitals:lean, /vitals:detailed, /vitals:playful. Reads census, git and the transcript; writes nothing.",
       "category": "engineering",
       "tags": [
         "status",

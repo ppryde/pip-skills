@@ -124,6 +124,34 @@ def test_ctx_pct_derived_when_missing():
     assert v.ctx_pct == pytest.approx(8.8002)
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_non_finite_numbers_are_unknown(bad):
+    e = entry()
+    e["payload"]["context_window"]["used_percentage"] = bad
+    e["payload"]["prompt_cache"]["hit_ratio"] = bad
+    e["limits"]["five_hour"]["used_percentage"] = bad
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, e)
+    assert v.cache_hit is None and [w.key for w in v.windows] == ["seven_day"]
+    for render in vitals.RENDERERS.values():
+        render(v)
+
+
+def test_millisecond_or_far_resets_dropped():
+    v = Vitals(now=NOW)
+    vitals.apply_census(
+        v, entry(limits={"five_hour": {"used_percentage": 5, "resets_at": NOW * 1000}})
+    )
+    assert v.windows == []
+
+
+@pytest.mark.parametrize("path", [["a", "b"], "bad\x00path", 42])
+def test_odd_transcript_path_is_quiet(path):
+    v = Vitals(now=NOW)
+    vitals.apply_transcript(v, path)
+    assert v.prompts is None
+
+
 def test_junk_entry_never_raises():
     v = Vitals(now=NOW)
     vitals.apply_census(v, {"payload": "nope", "limits": [1], "updated_at": "x"})
@@ -153,6 +181,15 @@ def test_transcript_counts_main_thread_tools_and_real_prompts(tmp_path):
         {"type": "user", "message": {"content": "<command-name>/clear</command-name>"}},
         {"type": "user", "message": {"content": [{"type": "tool_result"}]}},
         {
+            "type": "user",
+            "message": {"content": [{"type": "image"}, {"type": "text", "text": "see this"}]},
+        },
+        {
+            "type": "user",
+            "message": {"content": [{"type": "text", "text": "[Request interrupted"}]},
+        },
+        {"type": "user", "isCompactSummary": True, "message": {"content": "This session is..."}},
+        {
             "type": "assistant",
             "message": {
                 "content": [
@@ -173,7 +210,7 @@ def test_transcript_counts_main_thread_tools_and_real_prompts(tmp_path):
     v = Vitals(now=NOW)
     vitals.apply_transcript(v, str(path))
     assert v.tools == Counter({"Bash": 1, "Agent": 1})
-    assert v.prompts == 1 and v.agents == 1
+    assert v.prompts == 2 and v.agents == 1
 
 
 def test_missing_transcript_is_quiet(tmp_path):
@@ -207,10 +244,12 @@ def test_git_branch_dirty_and_untracked(tmp_path):
     )
     (repo / "a.txt").write_text("a")
     git(repo, "add", "a.txt")
-    (repo / "b.txt").write_text("b")
+    (repo / "new").mkdir()
+    (repo / "new" / "b.txt").write_text("b")
+    (repo / "new" / "c.txt").write_text("c")
     v = Vitals(now=NOW)
     vitals.apply_git(v, str(repo), with_pr=False)
-    assert (v.branch, v.dirty, v.untracked) == ("feat/v", 1, 1)
+    assert (v.branch, v.dirty, v.untracked) == ("feat/v", 1, 2)  # files, not dirs
     assert v.ahead is None  # no upstream
 
 
@@ -242,7 +281,7 @@ def test_compact_is_lean_and_complete():
     assert "ctx 9%" in lines[0] and "88k/1M" in lines[0]
     assert "Opus 5.5 · high · $0.90" in out
     assert "feat/x · PR #102 open" in out
-    assert "2 dirty · 1 untracked · ↑1 ↓0" in out
+    assert "2 dirty · 1 new · ↑1 ↓0" in out
     assert "5h 3%" in out and "7d 22%" in out
     assert "18 tools · 2 agents" in out
 
@@ -252,7 +291,7 @@ def test_detailed_shows_pace_and_breakdown():
     assert "912k headroom" in out
     assert "cache hit 89% · warm 59m" in out
     assert "3 prompts · 18 tool calls" in out
-    assert "Bash 7 · Read 4 · Edit 3" in out
+    assert "↳ Bash 7 · Read 4" in out and "  Edit 3 · Agent 2" in out
     assert "2 subagents spawned" in out
     # 22% after 2 of 7 days -> 77% at reset
     assert "pace → 77% at reset (within)" in out
@@ -263,21 +302,87 @@ def test_playful_verdict_follows_thresholds():
     assert "The soul is clean" in vitals.render_playful(v)
     v.ctx_pct = 85
     assert "Found wanting" in vitals.render_playful(v)
-    v.ctx_pct, v.stale = 10, True
-    assert "vigil is broken" in vitals.render_playful(v)
+    assert "signs are hidden" in vitals.render_playful(Vitals(now=NOW))
 
 
-def test_stale_reading_is_flagged():
+def test_stale_reading_shows_age_without_hiding_the_verdict():
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, entry(updated_at=NOW - 300))
+    v.ctx_pct = 85
+    assert "reading is 5m old" in vitals.render_compact(v)
+    playful = vitals.render_playful(v)
+    assert "Found wanting" in playful and "reading is 5m old" in playful
+
+
+def test_sibling_sessions_reading_is_flagged_as_borrowed():
+    v = Vitals(now=NOW, session_id="me")
+    vitals.apply_census(v, entry())  # payload session_id is sess-1
+    assert v.borrowed
+    assert "another session's reading" in vitals.render_compact(v)
+    own = Vitals(now=NOW, session_id="sess-1")
+    vitals.apply_census(own, entry())
+    assert not own.borrowed
+
+
+def long_vitals():
     v = full_vitals()
-    v.stale = True
-    assert "stale reading" in vitals.render_compact(v)
+    v.branch = "feat/census-v2-account-keyed-limits-and-more"
+    v.pr_number, v.pr_state = 12345, "draft"
+    v.session_name = "a very long session name that goes on and on and on"
+    v.model = "Claude Opus 5.5 with an extremely long display name"
+    v.tools = Counter(
+        {
+            "mcp__plugin_context-mode_context-mode__ctx_batch_execute": 120,
+            "mcp__claude_ai_Slack__slack_search_public_and_private": 100,
+            "Bash": 50,
+            "NotebookEditWithAVeryLongName": 10,
+        }
+    )
+    v.windows.append(Window("seven_day_opus_extra", 100, NOW + 86400))
+    v.dirty, v.untracked, v.ahead, v.behind = 12345, 6789, 123, 456
+    return v
+
+
+@pytest.mark.parametrize("style", vitals.STYLES)
+def test_every_style_fits_a_phone_with_long_real_world_data(style):
+    out = vitals.RENDERERS[style](long_vitals())
+    widest = max(out.splitlines(), key=width)
+    assert width(widest) <= 44, widest
+
+
+def test_repo_line_keeps_pr_when_branch_clipped():
+    line = vitals.repo_line(long_vitals())
+    assert line.endswith("· PR #12345 draft") and "…" in line
+
+
+def test_mcp_tool_names_shortened():
+    assert vitals.tool_label("mcp__plugin_context-mode_context-mode__ctx_search") == "ctx_search"
+    assert vitals.tool_label("mcp__x__an_extremely_long_tool_name") == "an_extremely_…"
+
+
+def test_compact_shows_only_known_windows():
+    v = full_vitals()
+    v.windows = [Window("seven_day_opus", 50, NOW + HOUR)]
+    assert "⏳" not in vitals.render_compact(v)
+
+
+def test_unknown_window_label_abbreviated():
+    assert Window("seven_day_opus_extra_long", 1, NOW).label == "seven day o…"
 
 
 # ---------------------------------------------------------------- formatting
 
 
 @pytest.mark.parametrize(
-    "n,expected", [(None, "?"), (213, "213"), (1500, "1.5k"), (88_002, "88k"), (1_000_000, "1M")]
+    "n,expected",
+    [
+        (None, "?"),
+        (213, "213"),
+        (1500, "1.5k"),
+        (88_002, "88k"),
+        (999_600, "1M"),
+        (1_000_000, "1M"),
+    ],
 )
 def test_fmt_tokens(n, expected):
     assert vitals.fmt_tokens(n) == expected
@@ -305,6 +410,7 @@ def test_bar_clamps():
         (["drama"], "playful"),
         (["Trend"], "detailed"),
         (["nonsense"], "compact"),
+        (["please detailed"], "detailed"),
     ],
 )
 def test_resolve_style(words, style):
