@@ -244,6 +244,10 @@ interface StackedColumnChartProps {
   format: (n: number) => string;
   title: string;
   height?: number;
+  /** False swaps each series' label for a stable "Repo N" (by rank) in the
+   * legend, tooltip and table — colours still tell the segments apart, but
+   * a screen share no longer reads out which repos you work in. */
+  showNames?: boolean;
 }
 
 // Validated categorical palette (dataviz skill default, first 7 slots — the
@@ -280,7 +284,14 @@ const STACK_GAP = 2;
  * a fixed categorical palette, a legend, and a per-repo tooltip breakdown,
  * since the reader is meant to tell the segments apart, not just read one
  * magnitude. */
-export function StackedColumnChart({ points, series, format, title, height = 180 }: StackedColumnChartProps) {
+export function StackedColumnChart({
+  points,
+  series,
+  format,
+  title,
+  height = 180,
+  showNames = true,
+}: StackedColumnChartProps) {
   const [hover, setHover] = useState<number | null>(null);
   const id = useId();
   const width = 520;
@@ -297,6 +308,12 @@ export function StackedColumnChart({ points, series, format, title, height = 180
   const stride = labelStride(rendered.length, plotW);
   const y = (v: number) => MARGIN.top + plotH - (v / top) * plotH;
   const colorOf = (key: string) => paletteColor(key, key === "__other__");
+  const labelOf = (key: string) => {
+    const i = series.findIndex((s) => s.key === key);
+    if (i < 0) return key;
+    if (showNames || key === "__other__") return series[i].label;
+    return `Repo ${i + 1}`;
+  };
 
   if (points.length === 0 || series.length === 0) {
     return <p className="chr-chart__empty">No data in this window.</p>;
@@ -401,7 +418,7 @@ export function StackedColumnChart({ points, series, format, title, height = 180
                     style={{ background: colorOf(s.key) }}
                     aria-hidden="true"
                   />
-                  <span>{series.find((sr) => sr.key === s.key)?.label ?? s.key}</span>
+                  <span>{labelOf(s.key)}</span>
                   <span className="chr-num">{format(s.value)}</span>
                 </li>
               ))}
@@ -422,7 +439,7 @@ export function StackedColumnChart({ points, series, format, title, height = 180
               style={{ background: colorOf(s.key) }}
               aria-hidden="true"
             />
-            <span>{s.label}</span>
+            <span>{labelOf(s.key)}</span>
           </li>
         ))}
       </ul>
@@ -435,7 +452,7 @@ export function StackedColumnChart({ points, series, format, title, height = 180
               <th scope="col">Day</th>
               {series.map((s) => (
                 <th scope="col" key={s.key}>
-                  {s.label}
+                  {labelOf(s.key)}
                 </th>
               ))}
               <th scope="col">Total</th>

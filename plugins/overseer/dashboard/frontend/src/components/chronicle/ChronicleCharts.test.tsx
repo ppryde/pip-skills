@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ChronicleLimitEvent } from "../../api/types";
-import { BarList, ColumnChart, Donut, LimitsTimeline, LineChart } from "./ChronicleCharts";
+import { BarList, ColumnChart, Donut, LimitsTimeline, LineChart, StackedColumnChart } from "./ChronicleCharts";
 
 const fmt = (n: number) => String(n);
 
@@ -282,5 +282,39 @@ describe("<LimitsTimeline/>", () => {
     const row = within(table).getByText(/Session \(5h\)/).closest("tr")!;
     const resetCell = within(row).getAllByRole("cell")[2];
     expect(resetCell.textContent).toBe("11:50am (Europe/London)");
+  });
+});
+
+describe("<StackedColumnChart/>", () => {
+  const series = [
+    { key: "/r/alpha", label: "alpha" },
+    { key: "/r/beta", label: "beta" },
+    { key: "__other__", label: "Other" },
+  ];
+  const points = [
+    {
+      label: "1 Sep",
+      segments: [
+        { key: "/r/alpha", value: 3 },
+        { key: "/r/beta", value: 2 },
+        { key: "__other__", value: 1 },
+      ],
+    },
+  ];
+
+  it("names repos in the legend by default", () => {
+    render(<StackedColumnChart points={points} series={series} format={fmt} title="Cost" />);
+    const legend = screen.getByRole("list", { name: "Cost — repos" });
+    expect(legend).toHaveTextContent("alphabetaOther");
+  });
+
+  it("swaps repo names for stable placeholders when names are hidden", () => {
+    const { container } = render(
+      <StackedColumnChart points={points} series={series} format={fmt} title="Cost" showNames={false} />,
+    );
+    const legend = screen.getByRole("list", { name: "Cost — repos" });
+    expect(legend).toHaveTextContent("Repo 1Repo 2Other");
+    expect(container).not.toHaveTextContent("alpha");
+    expect(container).not.toHaveTextContent("beta");
   });
 });

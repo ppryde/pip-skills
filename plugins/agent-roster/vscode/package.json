@@ -1,0 +1,16 @@
+{
+  "name": "agent-roster-vscode",
+  "displayName": "agent-roster helper",
+  "description": "Opens or focuses a terminal tab attached to a tmux session when the agent-roster mod asks (vscode://pip.agent-roster-vscode/attach), and tells the roster which folders each window shows.",
+  "publisher": "pip",
+  "version": "0.0.4",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri"
+  ],
+  "contributes": {}
+}
