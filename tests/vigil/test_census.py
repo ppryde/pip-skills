@@ -1,11 +1,12 @@
 import json
+import os
+import sys
 import time
 
 from scripts import census
 
 
 def _store(store_file, root, pct, *, updated=None, sid="s1"):
-    import os
     store_file.parent.mkdir(parents=True, exist_ok=True)
     store_file.write_text(json.dumps({
         "version": 1,
@@ -18,17 +19,6 @@ def _store(store_file, root, pct, *, updated=None, sid="s1"):
             }
         },
     }))
-
-
-class TestStorePath:
-    def test_censusstore_env_wins(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "x.json"))
-        assert census.store_path() == tmp_path / "x.json"
-
-    def test_rooted_at_config_dir(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("CENSUS_STORE", raising=False)
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-        assert census.store_path() == tmp_path / "cfg" / "census" / "status.json"
 
 
 class TestContextPercent:
@@ -184,3 +174,133 @@ class TestCmdContextIntegration:
         # no census entry and no transcript in a tmp root -> unknown, not a crash
         assert main(["--root", str(repo), "context"]) == 0
         assert "ctx unknown" in capsys.readouterr().out
+
+
+class TestCliFailures:
+    def _fake(self, tmp_path, body):
+        script = tmp_path / "fake-census"
+        script.write_text("#!/bin/sh\n" + body + "\n")
+        script.chmod(0o755)
+        return script
+
+    def test_missing_cli_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(tmp_path / "does-not-exist"))
+        assert census.context_percent(tmp_path) is None
+
+    def test_nonzero_exit_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "exit 3")))
+        assert census.context_percent(tmp_path) is None
+
+    def test_junk_output_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "echo not-json")))
+        assert census.context_percent(tmp_path) is None
+
+    def test_slow_cli_reads_none(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, "exec sleep 5")))
+        monkeypatch.setattr(census, "_TIMEOUT_SECONDS", 0.2)
+        assert census.context_percent(tmp_path) is None
+
+    def test_own_stale_entry_never_falls_back_to_sibling(self, tmp_path, monkeypatch):
+        store = tmp_path / "census" / "status.json"
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        root = os.path.realpath(str(tmp_path))
+        store.parent.mkdir(parents=True)
+        store.write_text(json.dumps({"version": 1, "limits": None, "sessions": {
+            "me": {"worktree_cwd": root, "updated_at": time.time() - 999,
+                   "payload": {"context_window": {"used_percentage": 10}}},
+            "sib": {"worktree_cwd": root, "updated_at": time.time(),
+                    "payload": {"context_window": {"used_percentage": 80}}},
+        }}))
+        assert census.context_percent(tmp_path, session_id="me") is None
+
+    def test_failed_session_call_never_falls_back_to_worktree(self, tmp_path, monkeypatch):
+        entry = json.dumps({"updated_at": time.time(),
+                            "payload": {"context_window": {"used_percentage": 80}}})
+        body = f"case \"$*\" in *--session*) exit 3;; esac\necho '{entry}'"
+        monkeypatch.setenv("CENSUS_CLI", str(self._fake(tmp_path, body)))
+        assert census.context_percent(tmp_path, session_id="x") is None
+
+
+class TestCliCalls:
+    def _logging_fake(self, tmp_path, monkeypatch, entries):
+        """Fake census: logs argv, prints entries['session'|'worktree']."""
+        log = tmp_path / "argv.log"
+        script = tmp_path / "fake-census"
+        lines = ['echo "$*" >> ' + str(log), 'case "$*" in']
+        for key, pct_age in entries.items():
+            pct, age = pct_age
+            entry = json.dumps({"updated_at": time.time() - age,
+                                "payload": {"context_window": {"used_percentage": pct}}})
+            lines.append(f"  *--{key}*) echo '{entry}';;")
+        lines += ["esac"]
+        script.write_text("#!/bin/sh\n" + "\n".join(lines) + "\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("CENSUS_CLI", str(script))
+        return log
+
+    def test_worktree_read_returns_pct(self, tmp_path, monkeypatch):
+        self._logging_fake(tmp_path, monkeypatch, {"worktree": (42, 0)})
+        assert census.context_percent(tmp_path) == 42
+
+    def test_session_id_is_asked_first(self, tmp_path, monkeypatch):
+        log = self._logging_fake(tmp_path, monkeypatch, {"session": (42, 0)})
+        assert census.context_percent(tmp_path, session_id="abc") == 42
+        assert log.read_text().splitlines()[0] == "read --session abc"
+
+    def test_stale_own_entry_makes_no_worktree_call(self, tmp_path, monkeypatch):
+        log = self._logging_fake(
+            tmp_path, monkeypatch, {"session": (42, 999), "worktree": (80, 0)}
+        )
+        assert census.context_percent(tmp_path, session_id="abc") is None
+        assert log.read_text().splitlines() == ["read --session abc"]
+
+
+class TestCensusCliDiscovery:
+    @staticmethod
+    def _pointer(tmp_path, monkeypatch, target):
+        monkeypatch.delenv("CENSUS_CLI", raising=False)
+        monkeypatch.delenv("CENSUS_STORE", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        monkeypatch.setenv("PATH", str(tmp_path / "emptybin"))
+        pointer = tmp_path / "cfg" / "census" / "cli.path"
+        pointer.parent.mkdir(parents=True)
+        pointer.write_text(str(target))
+        return pointer
+
+    def test_pointer_to_existing_cli_is_used(self, tmp_path, monkeypatch):
+        fake = tmp_path / "cli.py"
+        fake.write_text("")
+        self._pointer(tmp_path, monkeypatch, fake)
+        assert census.census_cli() == [sys.executable, str(fake)]
+
+    def test_pointer_to_missing_file_falls_through_to_none(self, tmp_path, monkeypatch):
+        self._pointer(tmp_path, monkeypatch, tmp_path / "gone.py")
+        assert census.census_cli() is None
+
+    def test_missing_pointer_falls_through_to_path(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CENSUS_CLI", raising=False)
+        monkeypatch.delenv("CENSUS_STORE", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        binary = tmp_path / "bin" / "census"
+        binary.parent.mkdir()
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+        monkeypatch.setenv("PATH", str(binary.parent))
+        assert census.census_cli() == [str(binary)]
+
+    def test_census_cli_env_beats_pointer(self, tmp_path, monkeypatch):
+        fake = tmp_path / "cli.py"
+        fake.write_text("")
+        self._pointer(tmp_path, monkeypatch, fake)
+        monkeypatch.setenv("CENSUS_CLI", "/somewhere/census")
+        assert census.census_cli() == ["/somewhere/census"]
+
+    def test_census_store_json_resolves_pointer_in_parent(self, tmp_path, monkeypatch):
+        fake = tmp_path / "cli.py"
+        fake.write_text("")
+        self._pointer(tmp_path, monkeypatch, tmp_path / "unused.py")
+        store = tmp_path / "elsewhere" / "status.json"
+        store.parent.mkdir()
+        (store.parent / "cli.path").write_text(str(fake))
+        monkeypatch.setenv("CENSUS_STORE", str(store))
+        assert census.census_cli() == [sys.executable, str(fake)]
