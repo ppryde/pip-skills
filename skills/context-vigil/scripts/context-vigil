@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# context-vigil launcher — runs the bundled Python package from any cwd.
+# `hook` invocations swallow every failure and exit 0: a broken context-vigil
+# must never break Claude Code (a Stop hook exiting 2 would force the model to
+# keep going; any other failure would surface as a hook error every turn).
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+py="${CONTEXT_VIGIL_PYTHON:-python3}"
+export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+if [ "${1:-}" = "hook" ]; then
+  "$py" -m context_vigil.cli "$@" 2>/dev/null || true
+  exit 0
+fi
+exec "$py" -m context_vigil.cli "$@"

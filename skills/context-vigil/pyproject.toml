@@ -1,0 +1,20 @@
+[tool.pytest.ini_options]
+testpaths = ["../../tests/context_vigil_suite"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+pythonpath = ["scripts"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.mypy]
+python_version = "3.9"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+mypy_path = "scripts"
+packages = ["context_vigil"]

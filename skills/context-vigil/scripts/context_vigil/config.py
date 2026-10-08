@@ -1,0 +1,183 @@
+"""Layered settings: env → worktree → global → default, re-read on every call.
+
+Nothing is cached, so a `config set` takes effect on the very next hook call.
+An invalid value at any layer is skipped (never raised) so a typo in an env
+var or a hand-edited file degrades to the next layer instead of breaking hooks.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Dict, Tuple
+
+from context_vigil import paths
+
+DEFAULTS: Dict[str, object] = {
+    "context.threshold": 35,
+    "context.window": 200000,
+    "context.mode": "local",
+    "nudge.repeat_step": 5,
+    "handover.max_tokens": 8000,
+    "handover.cooldown_seconds": 60,
+    "handover.archive_keep": 20,
+    "last_light.enabled": False,
+    "last_light.threshold": 25,
+    "last_light.lead_seconds": 300,
+}
+KEYS = tuple(DEFAULTS)
+ENV_VARS: Dict[str, str] = {
+    "context.threshold": "CONTEXT_VIGIL_THRESHOLD",
+    "context.window": "CONTEXT_VIGIL_WINDOW",
+    "context.mode": "CONTEXT_VIGIL_MODE",
+    "nudge.repeat_step": "CONTEXT_VIGIL_REPEAT_STEP",
+    "handover.max_tokens": "CONTEXT_VIGIL_HANDOVER_MAX_TOKENS",
+    "handover.cooldown_seconds": "CONTEXT_VIGIL_COOLDOWN_SECONDS",
+    "handover.archive_keep": "CONTEXT_VIGIL_ARCHIVE_KEEP",
+    "last_light.enabled": "CONTEXT_VIGIL_LAST_LIGHT",
+    "last_light.threshold": "CONTEXT_VIGIL_LAST_LIGHT_THRESHOLD",
+    "last_light.lead_seconds": "CONTEXT_VIGIL_LAST_LIGHT_LEAD_SECONDS",
+}
+_MODES = ("local", "remote")
+GLOBAL_ONLY = frozenset({"last_light.enabled", "last_light.threshold",
+                         "last_light.lead_seconds"})
+_TRUE = ("true", "on", "yes", "1")
+_FALSE = ("false", "off", "no", "0")
+
+
+class ConfigError(ValueError):
+    """An unknown key or an out-of-range value."""
+
+
+def coerce(key: str, raw: object) -> object:
+    if key not in DEFAULTS:
+        raise ConfigError(f"unknown key {key!r}; known: {', '.join(KEYS)}")
+    if key == "context.mode":
+        if raw not in _MODES:
+            raise ConfigError("context.mode must be local or remote")
+        return raw
+    if key == "last_light.enabled":
+        if isinstance(raw, bool):
+            return raw
+        word = str(raw).strip().lower()
+        if word in _TRUE:
+            return True
+        if word in _FALSE:
+            return False
+        raise ConfigError("last_light.enabled must be on or off")
+    try:
+        number = int(str(raw))
+    except ValueError as exc:
+        raise ConfigError(f"{key} must be a whole number") from exc
+    if key == "context.threshold" and not 1 <= number <= 95:
+        raise ConfigError("context.threshold must be a whole number 1–95")
+    if key == "context.window" and number <= 0:
+        raise ConfigError("context.window must be a positive whole number")
+    if key == "nudge.repeat_step" and not 1 <= number <= 50:
+        raise ConfigError("nudge.repeat_step must be a whole number 1–50")
+    if key == "handover.max_tokens" and number <= 0:
+        raise ConfigError("handover.max_tokens must be a positive whole number")
+    if key == "handover.cooldown_seconds" and not 0 <= number <= 3600:
+        raise ConfigError("handover.cooldown_seconds must be a whole number 0–3600")
+    if key == "handover.archive_keep" and not 0 <= number <= 1000:
+        raise ConfigError("handover.archive_keep must be a whole number 0–1000")
+    if key == "last_light.threshold" and not 1 <= number <= 95:
+        raise ConfigError("last_light.threshold must be a whole number 1–95")
+    if key == "last_light.lead_seconds" and not 1 <= number <= 3600:
+        raise ConfigError("last_light.lead_seconds must be a whole number 1–3600")
+    return number
+
+
+def _read(path: Path) -> Dict[str, object]:
+    try:
+        data = json.loads(paths.read_private(path))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _valid(key: str, raw: object) -> Tuple[bool, object]:
+    try:
+        return True, coerce(key, raw)
+    except ConfigError:
+        return False, None
+
+
+def resolve(cwd: Path) -> Dict[str, Tuple[object, str]]:
+    layers = (
+        ("worktree", _read(paths.worktree_config_path(cwd))),
+        ("global", _read(paths.global_config_path())),
+    )
+    result: Dict[str, Tuple[object, str]] = {}
+    for key, default in DEFAULTS.items():
+        chosen: Tuple[object, str] = (default, "default")
+        env_raw = os.environ.get(ENV_VARS[key])
+        ok, value = _valid(key, env_raw) if env_raw is not None else (False, None)
+        if ok:
+            chosen = (value, "env")
+        else:
+            for layer, data in layers:
+                if layer == "worktree" and key in GLOBAL_ONLY:
+                    continue
+                if key in data:
+                    ok, value = _valid(key, data[key])
+                    if ok:
+                        chosen = (value, layer)
+                        break
+        result[key] = chosen
+    return result
+
+
+def load(cwd: Path) -> Dict[str, object]:
+    return {key: value for key, (value, _) in resolve(cwd).items()}
+
+
+def set_value(cwd: Path, key: str, raw: str, worktree: bool = False) -> object:
+    if worktree and key in GLOBAL_ONLY:
+        raise ConfigError(f"{key} is global only — set it without --worktree")
+    value = coerce(key, raw)
+    path = paths.worktree_config_path(cwd) if worktree else paths.global_config_path()
+    data = _read(path)
+    data[key] = value
+    paths.write_private(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return value
+
+
+def threshold(cwd: Path) -> int:
+    return int(str(load(cwd)["context.threshold"]))
+
+
+def window(cwd: Path) -> int:
+    return int(str(load(cwd)["context.window"]))
+
+
+def mode(cwd: Path) -> str:
+    return str(load(cwd)["context.mode"])
+
+
+def repeat_step(cwd: Path) -> int:
+    return int(str(load(cwd)["nudge.repeat_step"]))
+
+
+def handover_max_tokens(cwd: Path) -> int:
+    return int(str(load(cwd)["handover.max_tokens"]))
+
+
+def cooldown_seconds(cwd: Path) -> int:
+    return int(str(load(cwd)["handover.cooldown_seconds"]))
+
+
+def archive_keep(cwd: Path) -> int:
+    return int(str(load(cwd)["handover.archive_keep"]))
+
+
+def last_light_enabled(cwd: Path) -> bool:
+    return load(cwd)["last_light.enabled"] is True
+
+
+def last_light_threshold(cwd: Path) -> int:
+    return int(str(load(cwd)["last_light.threshold"]))
+
+
+def last_light_lead_seconds(cwd: Path) -> int:
+    return int(str(load(cwd)["last_light.lead_seconds"]))

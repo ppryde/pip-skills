@@ -25,6 +25,11 @@ section is "Plugins" and not "Skills".
 - **vitals** — on-demand session vital signs sized for a phone (context, model, cost, rate-limit pace, git/PR, tools), read from census + git + the transcript; `/vitals:vitals [style]` picks one (lean, detailed, playful)
 - **vigil** — portable context handover: measure ctx %, hand over in-process via /clear, resume from a re-injected handover (vigil)
 
+Standalone skills (folders under `skills/`, no plugin wrapper — destined for
+the agents.md library):
+
+- **context-vigil** — census + vigil + handover-work in one portable skill: ctx % watch, nudge, structured handover, tmux auto-/clear, resume; self-installs its hooks
+
 ## Tool Discipline
 
 Skills in this repo instruct Claude to read doctrine files, scan templates, and search codebases.

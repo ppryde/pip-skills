@@ -41,6 +41,12 @@ plugins/overseer/dashboard/frontend/src/board/almoner/fixture.local.ts
 # 936e42d is that "I will remember not to commit it" is not a control.
 /local/
 
+# Untracked review / scratch artefacts produced inside the checkout: review-panel
+# runs, scratch notes and dashboard logs can quote code, env and transcripts.
+/.review-panel/
+/scratch/
+/scratchpad_*.log
+
 # Engine-written API types a mod gets laid beside it on every load.
 plugins/*/.claude-plugin/types/
 
