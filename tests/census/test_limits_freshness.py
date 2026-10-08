@@ -17,7 +17,7 @@ def _payload(sid, cwd, rate, **extra):
 
 
 def _read(store_file):
-    return json.loads(store_file.read_text())
+    return st.read_all()
 
 
 NOW = 1000.0

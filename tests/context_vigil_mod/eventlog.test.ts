@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { appendLine, dayKey, makeRecord } from '../core/eventlog'
+import { appendLine, dayKey, makeRecord } from '../../plugins/context-vigil-mod/core/eventlog'
 
 test('dayKey is the UTC date', () => {
   expect(dayKey(Date.UTC(2026, 9, 4, 23, 59))).toBe('2026-10-04')

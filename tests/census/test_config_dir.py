@@ -5,21 +5,42 @@ from scripts import store as st
 
 
 class TestStorePath:
-    def test_censusstore_override_wins(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "x.json"))
+    def test_censusstore_json_value_names_its_parent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "x" / "status.json"))
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-        assert st.store_path() == tmp_path / "x.json"
+        assert st.census_dir() == tmp_path / "x"
+        assert st.store_path() == tmp_path / "x" / "status.json"
+
+    def test_censusstore_dir_value_is_the_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "c"))
+        assert st.census_dir() == tmp_path / "c"
+        assert st.sessions_dir() == tmp_path / "c" / "sessions"
+        assert st.limits_path("k") == tmp_path / "c" / "limits" / "k.json"
 
     def test_rooted_at_config_dir(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CENSUS_STORE", raising=False)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude-personal"))
-        assert st.store_path() == tmp_path / ".claude-personal" / "census" / "status.json"
+        assert st.census_dir() == tmp_path / ".claude-personal" / "census"
 
     def test_falls_back_to_home_claude(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CENSUS_STORE", raising=False)
         monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         monkeypatch.setattr(st.Path, "home", classmethod(lambda cls: tmp_path))
-        assert st.store_path() == tmp_path / ".claude" / "census" / "status.json"
+        assert st.census_dir() == tmp_path / ".claude" / "census"
+
+
+class TestSafeSessionId:
+    def test_uuid_is_safe(self):
+        sid = "0c843531-0068-439d-bb54-2a3b48806e82"
+        assert st.safe_session_id(sid) == sid
+
+    def test_rejects_unsafe(self):
+        for bad in ["", "../x", "a/b", ".hidden", "x" * 129, None, 7, "a b"]:
+            assert st.safe_session_id(bad) is None, bad
+
+    def test_session_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "c"))
+        assert st.session_path("s1") == tmp_path / "c" / "sessions" / "s1.json"
 
 
 class TestAccountIsolation:
@@ -39,8 +60,10 @@ class TestAccountIsolation:
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(work))
         st.ingest(json.dumps({"session_id": "w1", "cwd": "/proj/work"}), now=2.0)
 
-        p_store = json.loads((personal / "census" / "status.json").read_text())
-        w_store = json.loads((work / "census" / "status.json").read_text())
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(personal))
+        p_store = st.read_all()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(work))
+        w_store = st.read_all()
 
         # sessions do not leak across accounts
         assert set(p_store["sessions"]) == {"p1"}

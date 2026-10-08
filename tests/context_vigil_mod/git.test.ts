@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
+import { GIT_ARGV, parseGit, touchesGit, watchPaths } from '../../plugins/context-vigil-mod/core/git'
 
 const ok = (stdout: string) => ({ exitCode: 0, stdout })
 const fail = { exitCode: 128, stdout: '' }

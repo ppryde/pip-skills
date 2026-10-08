@@ -11,7 +11,7 @@ def _payload(sid="s1", cwd="/wt/a", **extra):
 
 
 def _read(store_file):
-    return json.loads(store_file.read_text())
+    return st.read_all()
 
 
 def _init_git_repo(path, branch=None):

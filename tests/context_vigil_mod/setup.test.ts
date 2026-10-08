@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { DEFAULTS } from '../core/settings'
-import { ALIASES, FLOW, STEPS, TELL, applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
-import type { StepId } from '../types'
+import { DEFAULTS } from '../../plugins/context-vigil-mod/core/settings'
+import { ALIASES, FLOW, STEPS, TELL, applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../../plugins/context-vigil-mod/core/setup'
+import type { StepId } from '../../plugins/context-vigil-mod/types'
 
 const ALL = Object.keys(STEPS) as StepId[]
 

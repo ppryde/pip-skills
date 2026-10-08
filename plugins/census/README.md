@@ -1,6 +1,6 @@
 # census
 
-Records the Claude Code **status-line payload** into a single worktree-indexed store, so any tool
+Records the Claude Code **status-line payload** into a per-session, worktree-indexed store, so any tool
 can read a session's live context %, model, PR status, and 5-hour / 7-day rate-limit usage.
 
 One writer (the status line, every turn), many readers (vigil, the overseer dashboard, agent-ui).
@@ -17,21 +17,66 @@ worktrees).
 
 ## Store
 
-One JSON file at `$CLAUDE_CONFIG_DIR/census/status.json` — i.e. `~/.claude/census/status.json` by
-default, or `~/.claude-personal/census/status.json` when that account sets `CLAUDE_CONFIG_DIR`
-(override the path entirely with `CENSUS_STORE`):
+A folder at `$CLAUDE_CONFIG_DIR/census/` — i.e. `~/.claude/census/` by default, or
+`~/.claude-personal/census/` when that account sets `CLAUDE_CONFIG_DIR` (override the folder
+entirely with `CENSUS_STORE`, which names the census directory; a value ending in `.json`, the v1
+meaning, is read as its parent directory for one release):
 
-```json
-{
-  "version": 1,
-  "limits": { "five_hour": {"used_percentage": 23.5, "resets_at": 1738425600}, "updated_at": 1738420000 },
-  "sessions": {
-    "<session_id>": { "worktree_cwd": "<abs path>", "updated_at": 1738420000, "active_at": 1738419700, "branch": "<git branch or null>", "payload": { "...verbatim..." } }
-  }
-}
+```
+census/
+  cli.path                    where this census lives, for other tools
+  limits/<account key>.json   rate limits, one file per Claude account, forward-only merge
+  sessions/<session_id>.json  one file per session, atomic replace
+  status.json.v1-migrated     present for 7 days after a v1 migration, then deleted
 ```
 
-- Rate limits are account-global, so they are hoisted to the top level. Not last-write-wins:
+`sessions/<session_id>.json`:
+
+```json
+{ "version": 2, "account": "<account key>", "org": "<organizationUuid or null>",
+  "worktree_cwd": "<abs path>", "updated_at": 1738420000, "active_at": 1738419700,
+  "branch": "<git branch or null>", "tmux_pane": "%3", "payload": { "...verbatim..." } }
+```
+
+`limits/<account key>.json`:
+
+```json
+{ "version": 2, "account": "<account key>", "org": "<uuid|null>", "org_name": "<name|null>",
+  "billing": "<billingType|null>",
+  "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+  "seven_day": { "used_percentage": 41.0, "resets_at": 1738800000 },
+  "updated_at": 1738420000 }
+```
+
+**Account key.** Limits belong to a Claude account, not to a folder, so several config dirs may
+share one census folder (set `CENSUS_STORE` to the same directory in each) without mixing figures.
+The key is `oauthAccount.accountUuid` read from `$CLAUDE_CONFIG_DIR/.claude.json` (else
+`~/.claude.json`); with no `oauthAccount` (a pure API key), an unreadable file or an unsafe value it
+is `cfg-` plus the first 12 hex of the SHA-256 of the resolved config dir. Resolved once per
+process; never raises.
+
+**Any window kind.** Every `rate_limits` entry that is an object with `used_percentage` and
+`resets_at` is a window (`five_hour`, `seven_day`, a future `spend_limit`...) and is merged
+forward-only. An entry of any other shape is stored verbatim, last write wins, until its real shape
+is known. Such entries are never pruned: if Claude Code stops sending one, its last value stays
+until the file is removed.
+
+**Finding census.** Each `census ingest` writes the resolved path of its own `cli.py` to `cli.path`
+(only when it changed), so other tools can locate census without walking plugin directories.
+Readers use `CENSUS_CLI`, else `cli.path`, else `census` on `PATH`.
+
+**No lock; Windows-safe.** Each session writes only its own file (temp file plus `os.replace`), so
+sessions never contend. Only each account's limits file is shared, and its merge only ever moves forward, so a
+lost race costs at most one refresh of a lower figure and can never stick wrong. A session id that
+is not a safe filename (`[A-Za-z0-9._-]+`, up to 128 chars) is refused.
+
+Pruning is write-side: each ingest deletes session files whose `updated_at` is more than 24 h older
+than that ingest; reads never delete.
+
+`census read` prints the unchanged v1 view (`{version: 1, limits, sessions}`), so readers see no
+difference.
+
+- Rate limits are per account, so they live in their own `limits/<account key>.json`. Not last-write-wins:
   usage only rises until a window resets, so a later `resets_at` wins outright (new window)
   and within one window the higher percentage wins. That ordering reads the readings
   themselves, so it needs neither write order nor a trustworthy clock, and a dormant
@@ -55,16 +100,27 @@ default, or `~/.claude-personal/census/status.json` when that account sets `CLAU
   only when the payload's activity counters (prompt id, cost, API duration, token totals, cache
   requests) change between ingests. Readers derive `stale` (not rendered for 90s — dead or closed)
   and `idle` (still rendering, no activity for 10 min — open, nobody working) from the two.
-- Sessions are keyed by `session_id`; readers resolve the freshest entry **by worktree cwd**.
+- Sessions are keyed by `session_id` (one file each); readers resolve the freshest entry **by worktree cwd**.
+
+## Upgrading from v1
+
+Automatic. The first `census` run on a v1 `status.json` splits it into per-session files and
+`limits/<calling account key>.json`, then renames it to `status.json.v1-migrated`, kept for 7 days and then deleted. Migration is idempotent; if another process holds the migration lock, that run skips
+migration but still records its own session. Run
+`census install --yes` once per account to replace an old hand-made launcher with the managed one.
 
 ## Usage
 
-Wire it into your status line (idempotent; edits `~/.claude/statusline-command.sh` by sentinel):
-
 ```bash
-census install-statusline          # add the guarded ingest line
-census install-statusline --uninstall
+census install            # dry run: what it would add or replace
+census install --yes      # launcher at ~/.local/bin/census + status-line block
+census uninstall --yes    # remove both; --purge also deletes this account's data
 ```
+
+In a marketplace install the launcher follows census upgrades on its own: if the version directory it was installed from is gone it runs the newest live one. Re-run `census install --yes` only if the plugin moves. `--purge` deletes only census's own files (`sessions/`, `limits/`, `limits.json`, `status.json*`, lock and temp files) and removes the directory only if that leaves it empty.
+
+`--shim PATH` and `--statusline PATH` override the launcher and status-line script locations. Both are idempotent. The older
+`census install-statusline [--uninstall]` still works as a **deprecated alias** for one release.
 
 Or add the one line yourself, after your script slurps stdin into `$input`:
 
@@ -77,7 +133,8 @@ Read it back:
 ```bash
 census read --worktree "$PWD"      # freshest session for this worktree, + limits
 census read --session <id>
-census read --limits               # just the account rate limits
+census read --limits               # the calling account's rate limits
+census read --limits --all         # every account in this folder, keyed by account key
 census read                        # the whole store
 ```
 
@@ -91,16 +148,17 @@ limits = store.limits()
 
 ## Guarantees
 
-- **Concurrency-safe:** the read-modify-write is held under `fcntl.flock`, so every session writing
-  each turn cannot lose each other's entries.
+- **Concurrency-safe without a lock:** one file per session, replaced atomically, so every session
+  writing each turn cannot lose each other's entries (and it works on Windows).
 - **Degrades quietly:** missing `rate_limits` (non-Pro/Max, or pre-first-response) leaves the last
   known limits untouched; a blank context window (post-`/compact`) keeps the prior reading rather
   than reporting unknown.
 - **Staleness:** readers flag entries older than ~90s so a consumer can distinguish a live reading
   from one frozen by a dead session.
-- **Multi-account safe:** the store is rooted at `CLAUDE_CONFIG_DIR`, the same boundary Claude Code
-  uses to separate accounts. A personal (Max) account and a work (API) account each get their own
-  store file — sessions and rate limits never commingle, even when both share one status-line script.
+- **Multi-account safe:** limits are keyed by Claude account (see Account key), and `census read`
+  answers for the calling account. By default the store is rooted at `CLAUDE_CONFIG_DIR`, so a
+  personal (Max) and a work (API) account get separate folders; or share one folder via
+  `CENSUS_STORE` and the per-account limits files keep them apart.
 - **Records each session's git branch (fail-safe):** ingest resolves the current branch for the
   worktree cwd at record time; if that resolution fails for any reason the entry's `branch` is
   simply `null` rather than blocking the ingest or breaking the status line.

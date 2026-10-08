@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { FIELD_NAMES, fresh, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
+import { FIELD_NAMES, fresh, INPUT_SCHEMA, cleanName, injectText, instructionText, limitResumeText, nextThreshold, grownEnough, parseFields, renderHandover, resumeText, reusable } from '../../plugins/context-vigil-mod/core/handover'
 
 const S = { nudgeAt: 35, step: 5 }
 

@@ -147,7 +147,7 @@
     {
       "name": "census",
       "source": "./plugins/census",
-      "description": "Records the Claude Code status-line payload into a single worktree-indexed store, so any tool can read a session's live context %, model, PR status, and 5h/7d rate-limit usage. One writer (the status line), many readers. Pure stdlib, quarantine-safe.",
+      "description": "Records the Claude Code status-line payload into a per-session, worktree-indexed store, so any tool can read a session's live context %, model, PR status, and 5h/7d rate-limit usage. Lock-free and Windows-safe; one writer per session, many readers. Pure stdlib.",
       "category": "engineering",
       "tags": [
         "statusline",

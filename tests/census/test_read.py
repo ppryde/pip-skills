@@ -84,7 +84,7 @@ class TestLimitsAndReadAll:
 
     def test_normalise_is_used_for_keys(self, store_file, tmp_path):
         st.ingest(_payload("s1", str(tmp_path)), now=1.0)
-        stored = json.loads(store_file.read_text())["sessions"]["s1"]["worktree_cwd"]
+        stored = st.read_all()["sessions"]["s1"]["worktree_cwd"]
         assert stored == normalise(str(tmp_path))
 
 

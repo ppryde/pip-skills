@@ -9,11 +9,12 @@ installed from the marketplace.
 ```
 tests/
   <plugin>/        # the plugin's pytest suite (test_*.py, conftest.py, fixtures)
-  run.sh           # run every suite
+  run.sh           # run every pytest suite
+  run-mods.sh      # run the TypeScript suites of the Claude Code mods
   README.md        # this file
 ```
 
-Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`.
+Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`, plus the two mods' TypeScript suites, `agent_roster/` and `context_vigil_mod/` (the latter also holds a pytest suite).
 
 ## How a suite finds its code
 
@@ -39,6 +40,27 @@ into one shared run without renaming those packages.
 ./tests/run.sh -k some_test    # extra args forwarded to pytest
 cd plugins/overseer && ../../.venv/bin/python -m pytest   # a single suite
 ```
+
+## Mod tests (TypeScript)
+
+`agent_roster/` and `context_vigil_mod/` hold the `*.test.ts[x]` suites of the
+`agent-roster` and `context-vigil-mod` Claude Code mods. Their imports point at
+the real sources (`'../../plugins/<mod>/core/...'`), so editors and `tsc`
+resolve them where they sit. They cannot run there, though: `claude plugin
+test <dir>` only runs inside a mod folder (one that contains the hooks module)
+and does not follow a symlinked `tests/`.
+
+```bash
+bash tests/run-mods.sh                    # every mod
+bash tests/run-mods.sh context-vigil-mod  # one mod
+```
+
+`run-mods.sh` stages each mod in a temp dir: it copies the plugin, copies that
+mod's tests into `<tmp>/<mod>/tests/` with the `../../plugins/<mod>/` import
+prefix rewritten to `../`, runs `claude plugin test` on the copy, and removes
+it afterwards. If the engine reports a stale "rollout switch ... not
+refreshed", the runner refreshes it with one `claude -p` call and retries once.
+`plugins/context-vigil-mod/scripts/typecheck.sh` typechecks the tests in place.
 
 ## What is NOT here (and why)
 
