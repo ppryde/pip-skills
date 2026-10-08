@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { V } from '../core/voice'
+import { V } from '../../plugins/context-vigil-mod/core/voice'
 import { START, human, turn, world, type World } from './world'
 
 const MIN = 60_000

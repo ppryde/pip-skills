@@ -85,4 +85,4 @@ The mod stands down (no arming, clearing or bar; one notice) when classic contex
 
 ## Verify
 
-`SMOKES.md` is the owner-run live checklist; `PROBES.md` records the engine behaviours this relies on. Gates: `claude plugin validate`, `claude plugin test`, `bash scripts/typecheck.sh`, `pytest tests/context_vigil_mod`.
+`SMOKES.md` is the owner-run live checklist; `PROBES.md` records the engine behaviours this relies on. Gates: `claude plugin validate`, `bash tests/run-mods.sh context-vigil-mod` (the TypeScript tests live in `tests/context_vigil_mod/`, outside the plugin; the runner stages a copy of the mod and runs `claude plugin test` on it), `bash scripts/typecheck.sh` (also typechecks those tests), `pytest tests/context_vigil_mod`.

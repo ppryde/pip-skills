@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
+import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../../plugins/context-vigil-mod/core/arming'
 
 const MIN = 60_000
 const S = { idleMin: 30, auto: true }

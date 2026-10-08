@@ -124,4 +124,4 @@ or for one session, `claude --plugin-dir plugins/agent-roster`.
 - Read-only: it cannot switch you into another session or tmux pane.
 - The registry and transcript formats are Claude Code internals, not a
   published API; a release can move them.
-- `claude plugin test plugins/agent-roster` runs `hooks/roster.test.ts`.
+- The tests live in `tests/agent_roster/` (so they do not ship with the plugin); run them with `bash tests/run-mods.sh agent-roster`, which stages a copy of the mod and runs `claude plugin test` on it.
