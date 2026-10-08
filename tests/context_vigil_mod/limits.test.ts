@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { HOP_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
+import { HOP_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../../plugins/context-vigil-mod/core/limits'
 
 const T = Date.UTC(2026, 9, 4, 12)
 const iso = (ms: number) => new Date(ms).toISOString()

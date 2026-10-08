@@ -1,4 +1,8 @@
+from pathlib import Path
+
 import pytest
+
+_CENSUS_CLI = Path(__file__).resolve().parents[2] / "plugins" / "census" / "scripts" / "cli.py"
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +48,8 @@ def _no_ambient_task_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OVERSEER_CENTRAL", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CODE_TASK_LIST_ID", raising=False)
     monkeypatch.delenv("CENSUS_STORE", raising=False)
+    # Hermetic census lookup: the repo's own CLI, never a real pointer or PATH entry.
+    monkeypatch.setenv("CENSUS_CLI", str(_CENSUS_CLI))
     # WF-113: work verbs stamp the calling Claude session as a card's
     # orchestrator, and the PreToolUse guard reads OVERSEER_GUARD. A suite run
     # from inside Claude Code inherits both — strip them so no test depends

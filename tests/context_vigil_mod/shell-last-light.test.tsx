@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { START, human, turn, usageTurn, world, type World } from './world'
-import { V } from '../core/voice'
+import { V } from '../../plugins/context-vigil-mod/core/voice'
 
 const MIN = 60_000
 const TOOL = 'mcp__context-vigil-mod__vigil_handover'

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { COMMANDS, NAME, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
+import { COMMANDS, NAME, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../../plugins/context-vigil-mod/core/name'
 
 test('names', () => {
   expect(NAME).toBe('context-vigil-mod')

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { classicHooksInstalled } from '../core/interlock'
+import { classicHooksInstalled } from '../../plugins/context-vigil-mod/core/interlock'
 
 const settings = (cmd: string) => JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: cmd }] }] } })
 // The same fixture string is used by tests/context_vigil_mod/test_install.py (Task 16).

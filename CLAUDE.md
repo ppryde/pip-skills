@@ -11,7 +11,7 @@ section is "Plugins" and not "Skills".
 
 - **agent-roster** — a mod: `/roster` opens a live pane of every Claude session on the machine, across accounts (tmux name, repo/worktree, branch, status, last active, last prompt); read from the session registry; no skills
 - **almoner** — one triaged, read-only digest of what is asking for your attention across configured sources (Notion today), gathered into a per-account SQLite store; no skills yet
-- **census** — records the status-line payload (context %, model, PR state, 5h/7d rate limits) into one worktree-indexed store; one writer, many readers
+- **census** — records the status-line payload (context %, model, PR state, 5h/7d rate limits) into a per-session, worktree-indexed store; one writer, many readers
 - **chronicle** — per-session token, cost, tool, subagent and per-file churn accounting, read from the transcripts on disk; pull only, no hooks (chronicle, chronicle-reconcile: the ad-hoc audit of the store against the console, run by hand and never from sync)
 - **context-vigil-mod** — context handover as a Claude Code mod (no tmux, no status line): threshold nudge + vigil bar, auto handover with in-process /clear and resume, last light, limit latch and configurable early stop; runs side by side with classic context-vigil; no skills (commands /vho, /vhandoff, /vsetup)
 - **django-inquisition** — Django ORM performance audit against ~70 heuristics, ranked by impact (optimise-orm)
@@ -22,6 +22,7 @@ section is "Plugins" and not "Skills".
 - **review-panel** — composable code review: reviewer lenses × orchestration strategies, composed into named profiles (convene, reviewers, strategies)
 - **test-crucible** — make a test suite faster or drier by measuring the whole suite first, not the part you pointed at (test-suite-health)
 - **tribunal** — PR comment review, categorisation, prioritisation and resolution (reckoning)
+- **vitals** — on-demand session vital signs sized for a phone (context, model, cost, rate-limit pace, git/PR, tools), read from census + git + the transcript; `/vitals:vitals [style]` picks one (lean, detailed, playful)
 - **vigil** — portable context handover: measure ctx %, hand over in-process via /clear, resume from a re-injected handover (vigil)
 
 Standalone skills (folders under `skills/`, no plugin wrapper — destined for

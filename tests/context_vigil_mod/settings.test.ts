@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
+import { DEFAULTS, STORE_KEY, loadSettings, pendingKey } from '../../plugins/context-vigil-mod/core/settings'
 
 test('store keys', () => {
   expect(STORE_KEY).toBe('settings')

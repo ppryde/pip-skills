@@ -1,32 +1,39 @@
-"""Census store: one worktree-indexed JSON file of status-line payloads.
+"""Census store: lock-free per-session files plus one forward-merged limits file.
 
-Quarantine-safe: every public entry point swallows read / parse / lock / write
+Quarantine-safe: every public entry point swallows read / parse / write
 failures and never raises. A broken store must never break the status-line
 render or the CLI command it piggybacks on.
 
-Layout of ``~/.claude/census/status.json`` (override with ``CENSUS_STORE``)::
+Layout of ``~/.claude/census/`` (override with ``CENSUS_STORE``)::
 
-    {
-      "version": 1,
-      "limits": { "five_hour": {...}, "seven_day": {...}, "updated_at": <epoch> },
-      "sessions": {
-        "<session_id>": {
+    sessions/<session_id>.json   one file per session, written only by that session
+        {
+          "version": 2,
           "worktree_cwd": "<abs path>",
-          "updated_at": <epoch — last time the status line ran for this session>,
-          "active_at": <epoch — last time the session's activity counters moved>,
+          "updated_at": <epoch - last time the status line ran for this session>,
+          "active_at": <epoch - last time the session's activity counters moved>,
           "branch": "<current git branch, null when unresolvable/detached>",
           "tmux_pane": "<%N, absent when the session isn't running inside tmux>",
           "payload": { ...full status-line payload verbatim... }
         }
-      }
-    }
+    limits/<account key>.json    one per Claude ACCOUNT (not per folder), merged forward-only
+        { "version": 2, "account": key, "org": ..., "org_name": ..., "billing": ...,
+          "five_hour": {...}, "seven_day": {...}, <any other window>: {...},
+          "updated_at": <epoch> }
+
+``ingest`` takes no lock: a session writes only its own file (temp file +
+``os.replace``), and limits only ever move forward, so racing writers cost at
+most one refresh of a lower figure. ``read_all`` assembles the v1 view
+(``{version: 1, limits, sessions}``) that ``census read`` prints. A legacy
+``status.json`` (v1) is the old single-file store.
 """
 from __future__ import annotations
 
-import fcntl
+import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -37,8 +44,13 @@ from scripts import resolve
 
 STORE_ENV = "CENSUS_STORE"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
-STORE_RELPATH = ("census", "status.json")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # on-disk files (sessions/<sid>.json, limits.json)
+VIEW_VERSION = 1     # the shape `census read` prints — unchanged from v1
+SESSIONS_DIRNAME = "sessions"
+LIMITS_DIRNAME = "limits"
+LIMITS_FILENAME = "limits.json"   # the first v2 build's single file; migrated away
+LEGACY_FILENAME = "status.json"
+_SAFE_SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
 STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
@@ -60,8 +72,6 @@ _SAME_WINDOW_TOLERANCE_SECONDS = 60
 # nothing: no real window falls in the eight-to-ten-day band, and no plausible
 # corruption does either.
 _MAX_WINDOW_HORIZON_SECONDS = 10 * 24 * 3600
-_LOCK_ATTEMPTS = 50                  # 50 × 10ms = 0.5s bounded wait for the lock
-_LOCK_DELAY_SECONDS = 0.01
 _GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
 
 
@@ -78,45 +88,207 @@ def config_dir() -> Path:
     return Path(override) if override else Path.home() / ".claude"
 
 
-def store_path() -> Path:
+def census_dir() -> Path:
+    """This account's census directory.
+
+    ``CENSUS_STORE`` overrides it. In v1 that variable named the ``status.json``
+    file itself, so a value ending ``.json`` still means "its parent directory".
+    """
     override = os.environ.get(STORE_ENV)
     if override:
+        path = Path(override)
+        return path.parent if path.suffix == ".json" else path
+    return config_dir() / "census"
+
+
+def pointer_path() -> Path:
+    """Where census publishes its own CLI location, for other tools to find."""
+    return census_dir() / "cli.path"
+
+
+def publish_location(cli: Path) -> None:
+    """Record ``cli``'s resolved path in ``pointer_path()``, rewriting only on change.
+
+    Atomic (temp file + ``os.replace``) so readers never see half a path. Never
+    raises: a pointer that cannot be written must not disturb the status line.
+    """
+    try:
+        target = pointer_path()
+        wanted = str(cli.resolve()).encode("utf-8")
+        try:
+            if target.read_bytes() == wanted:
+                return
+        except OSError:
+            pass
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".cli.path.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(wanted)
+            os.replace(tmp, target)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except Exception:  # noqa: BLE001, S110 - best-effort pointer, never raises
+        pass
+
+
+def store_path() -> Path:
+    """The LEGACY v1 single-file store; present only until migrated. A
+    ``CENSUS_STORE`` ending ``.json`` names that file exactly (v1 honoured any name)."""
+    override = os.environ.get(STORE_ENV)
+    if override and Path(override).suffix == ".json":
         return Path(override)
-    return config_dir().joinpath(*STORE_RELPATH)
+    return census_dir() / LEGACY_FILENAME
+
+
+def sessions_dir() -> Path:
+    return census_dir() / SESSIONS_DIRNAME
+
+
+_SAFE_KEY = _SAFE_SID
+# The first six are identity, not limits: never served as a limit, never overwritten by one.
+_LIMITS_META = ("version", "account", "org", "org_name", "billing")
+_LIMITS_RESERVED = (*_LIMITS_META, "updated_at")
+
+_ACCOUNTS: dict[str, dict[str, Any]] = {}
+
+
+def reset_account_cache() -> None:
+    """Forget resolved accounts (tests; a process normally resolves once)."""
+    _ACCOUNTS.clear()
+
+
+def _claude_json_path() -> Path:
+    override = os.environ.get(CONFIG_DIR_ENV)
+    return (Path(override) if override else Path.home()) / ".claude.json"
+
+
+def _cfg_key() -> str:
+    try:
+        resolved = str(config_dir().resolve())
+    except (OSError, RuntimeError):
+        resolved = str(config_dir())
+    return "cfg-" + hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+
+
+def _text_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def account_info() -> dict[str, Any]:
+    """The calling Claude account: ``{key, org, org_name, billing}``. Never raises.
+
+    ``key`` is ``oauthAccount.accountUuid`` from the account's ``.claude.json``
+    (``$CLAUDE_CONFIG_DIR/.claude.json``, else ``~/.claude.json``). Without one
+    (a pure API key, a missing or malformed file, an unsafe value) it is
+    ``cfg-`` + 12 hex of the SHA-256 of the resolved config dir. Cached per
+    process, keyed by the file consulted.
+    """
+    try:
+        path = _claude_json_path()
+        cache_key = str(path)
+    except Exception:  # noqa: BLE001 - e.g. no resolvable home
+        return {"key": "cfg-unknown", "org": None, "org_name": None, "billing": None}
+    cached = _ACCOUNTS.get(cache_key)
+    if cached is not None:
+        return cached
+    info: dict[str, Any] = {"key": None, "org": None, "org_name": None, "billing": None}
+    try:
+        oauth = (_read_json(path) or {}).get("oauthAccount")
+        uuid = oauth.get("accountUuid") if isinstance(oauth, dict) else None
+        if isinstance(uuid, str) and _SAFE_KEY.match(uuid) and isinstance(oauth, dict):
+            info = {
+                "key": uuid,
+                "org": _text_or_none(oauth.get("organizationUuid")),
+                "org_name": _text_or_none(oauth.get("organizationName")),
+                "billing": _text_or_none(oauth.get("billingType")),
+            }
+    except Exception:  # noqa: BLE001, S110 - fall back to the cfg- key
+        pass
+    if info["key"] is None:
+        info["key"] = _cfg_key()
+    _ACCOUNTS[cache_key] = info
+    return info
+
+
+def limits_dir() -> Path:
+    return census_dir() / LIMITS_DIRNAME
+
+
+def limits_path(key: str | None = None) -> Path:
+    return limits_dir() / f"{key or account_info()['key']}.json"
+
+
+def legacy_limits_path() -> Path:
+    """The first v2 build's single ``limits.json``; present only until migrated."""
+    return census_dir() / LIMITS_FILENAME
+
+
+def safe_session_id(sid: object) -> str | None:
+    """``sid`` when it is safe as a filename, else None (never a path escape)."""
+    return sid if isinstance(sid, str) and _SAFE_SID.match(sid) else None
+
+
+def session_path(sid: str) -> Path:
+    return sessions_dir() / f"{sid}.json"
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"version": SCHEMA_VERSION, "limits": None, "sessions": {}}
+    """An empty v1-shaped dict, the input to the pure ``merge``."""
+    return {"version": VIEW_VERSION, "limits": None, "sessions": {}}
 
 
-def _load(path: Path) -> dict[str, Any]:
-    """Load the store, healing any missing/corrupt shape into a valid skeleton."""
+def _read_json(path: Path) -> dict[str, Any] | None:
+    """A JSON object from ``path``, or None when missing, unreadable or not an object."""
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
-        return _empty_store()
-    if not isinstance(data, dict):
-        return _empty_store()
-    data.setdefault("version", SCHEMA_VERSION)
-    if not isinstance(data.get("sessions"), dict):
-        data["sessions"] = {}
-    if "limits" not in data:
-        data["limits"] = None
-    return data
+        return None
+    return data if isinstance(data, dict) else None
+
+
+_REPLACE_RETRIES = 3
+_REPLACE_RETRY_SECONDS = 0.02
 
 
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
+    """Write ``data`` to ``path`` via a same-directory temp file and ``os.replace``.
+
+    Atomic for readers on POSIX and Windows: they see the old file or the new one,
+    never half of either. On Windows a replace can be briefly refused
+    (PermissionError) while a reader has the target open, hence the short retry.
+    Raises OSError for the caller to swallow.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".status.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
             json.dump(data, handle)
-        os.replace(tmp, path)
+        for attempt in range(_REPLACE_RETRIES + 1):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == _REPLACE_RETRIES:
+                    raise
+                time.sleep(_REPLACE_RETRY_SECONDS)
     except OSError:
         try:
             os.unlink(tmp)
         except OSError:
             pass
+        raise
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _context_is_blank(payload: dict[str, Any]) -> bool:
@@ -219,10 +391,20 @@ def _active_at(previous: Any, payload: dict[str, Any], now: float) -> float:
     return prior_active
 
 
-_LIMIT_WINDOWS = ("five_hour", "seven_day")
+_KNOWN_WINDOWS = ("five_hour", "seven_day")
 
 
-def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
+def _is_window(value: Any, key: str | None = None) -> bool:
+    """A rate-limit window: any object carrying ``used_percentage`` and ``resets_at``.
+
+    The two windows v1 knew by name stay windows whatever they carry, so a
+    half-formed reading is still gated and ordered, never stored verbatim."""
+    if not isinstance(value, dict):
+        return False
+    return key in _KNOWN_WINDOWS or ("used_percentage" in value and "resets_at" in value)
+
+
+def _live_limits(limits: Any, now: float, verbatim: bool = False) -> dict[str, Any] | None:
     """Keep only rate-limit windows whose reset time is still in the FUTURE.
 
     A window whose ``resets_at`` is in the past belongs to an EXPIRED window — a
@@ -237,13 +419,20 @@ def _live_limits(limits: Any, now: float) -> dict[str, Any] | None:
     single wrong-unit or corrupt value (a millisecond epoch reads as a reset
     tens of thousands of years out) would stay "live" forever and, being the
     latest window, would out-rank every honest reading indefinitely.
+
+    Any key whose value is window-shaped is a window (``five_hour``, ``seven_day``,
+    a future ``spend_limit``...). With ``verbatim`` an entry of any other shape is
+    kept as is (its real shape is not known yet); identity keys never are.
     """
     if not isinstance(limits, dict):
         return None
     live: dict[str, Any] = {}
-    for key in _LIMIT_WINDOWS:
-        window = limits.get(key)
-        if not isinstance(window, dict):
+    for key, window in limits.items():
+        if key in _LIMITS_RESERVED:
+            continue
+        if not _is_window(window, key):
+            if verbatim and key not in _KNOWN_WINDOWS:
+                live[key] = window
             continue
         resets = _number(window.get("resets_at"))
         if resets is None:
@@ -295,7 +484,9 @@ def _window_is_fresher(incoming: dict[str, Any], stored: dict[str, Any]) -> bool
     return incoming_pct > stored_pct
 
 
-def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -> None:
+def _hoist_limits(
+    store: dict[str, Any], incoming: dict[str, Any], now: float
+) -> None:
     """Fold live rate-limit windows into top-level ``limits``, highest-usage-wins.
 
     ``resets_at`` gating alone is not enough. A dormant session's 5h window can
@@ -313,31 +504,35 @@ def _hoist_limits(store: dict[str, Any], incoming: dict[str, Any], now: float) -
     """
     stored = store.get("limits")
     stored = stored if isinstance(stored, dict) else {}
-    live = _live_limits(stored, now) or {}
+    live = _live_limits(stored, now, verbatim=True) or {}
     merged = dict(live)
 
     changed = False
     for key, window in incoming.items():
         current = merged.get(key)
-        if not isinstance(current, dict) or _window_is_fresher(window, current):
+        if not _is_window(window, key):  # unknown shape: last write wins...
+            if _is_window(current, key):
+                continue  # ...but never over a live window
+            if current != window or key not in merged:
+                merged[key] = window
+                changed = True
+        elif not isinstance(current, dict) or _window_is_fresher(window, current):
             merged[key] = window
             changed = True
 
     # A window ``_live_limits`` just dropped (expired, or implausibly distant)
     # is a change to the account figure too.
     dropped = any(
-        isinstance(stored.get(key), dict) and key not in live for key in _LIMIT_WINDOWS
+        _is_window(value, key) and key not in live
+        for key, value in stored.items()
+        if key not in _LIMITS_RESERVED
     )
 
     # ``updated_at`` means "when the account figure last MOVED", not "when a
     # status line last rendered". A reading that loses the ordering leaves it
     # alone, so a latched figure cannot masquerade as a fresh observation.
     #
-    # No reader is served this today: both ``_live_limits`` here and the
-    # dashboard's own limits section whitelist the two window keys. The field
-    # is written either way — it predates this ordering rule — so the choice is
-    # not whether to have it but whether it tells the truth. Kept honest rather
-    # than exposed: an API field nothing consumes would be dead surface.
+    # The v1 view serves it (``census read``), so it must tell the truth.
     previous_updated = _number(stored.get("updated_at"))
     store["limits"] = {
         **merged,
@@ -388,6 +583,7 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
             capture_output=True,
             text=True,
             timeout=_GIT_BRANCH_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -399,6 +595,34 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
     return branch
 
 
+def build_entry(
+    previous: Any,
+    payload: dict[str, Any],
+    worktree: str | None,
+    tmux_pane: str | None,
+    now: float,
+) -> dict[str, Any]:
+    """The v2 session file body for one ingest (v1's per-session rules, unchanged)."""
+    if _context_is_blank(payload) and isinstance(previous, dict):
+        prior_payload = previous.get("payload")
+        if isinstance(prior_payload, dict) and isinstance(
+            prior_payload.get("context_window"), dict
+        ):
+            payload = {**payload, "context_window": prior_payload["context_window"]}
+    entry: dict[str, Any] = {
+        "version": SCHEMA_VERSION,
+        "worktree_cwd": worktree,
+        "updated_at": now,
+        "active_at": _active_at(previous, payload, now),
+        "branch": _git_branch(worktree),
+        "payload": payload,
+    }
+    # Replaced wholesale each ingest: a session that left tmux must not keep a pane.
+    if tmux_pane is not None:
+        entry["tmux_pane"] = tmux_pane
+    return entry
+
+
 def merge(
     store: dict[str, Any],
     payload: dict[str, Any],
@@ -406,98 +630,251 @@ def merge(
     tmux_pane: str | None,
     now: float,
 ) -> dict[str, Any]:
-    """Fold one status-line payload into ``store`` in place; return ``store``.
-
-    - Upserts the session entry keyed by ``session_id`` (no-op without one).
-    - Preserves the prior context window when the incoming one is blank.
-    - Stamps ``active_at`` only when the activity fingerprint moved, so a
-      timer-driven rerun of the status line refreshes ``updated_at`` alone.
-    - Hoists ``rate_limits`` to top-level ``limits``, but only LIVE windows
-      (``resets_at`` in the future), and only when the incoming reading orders
-      above the stored one — a frozen reading from a dormant session must not
-      clobber the current account figure.
-    - Prunes stale sessions.
-    """
+    """Fold one payload into a v1-shaped dict in place; return it. Pure (no I/O
+    beyond git); kept for unit tests of the per-session and limits rules."""
     sid = payload.get("session_id")
     if not isinstance(sid, str) or not sid:
         return store
-
     sessions = store["sessions"]
-    previous = sessions.get(sid)
-
-    if _context_is_blank(payload) and isinstance(previous, dict):
-        prior_payload = previous.get("payload")
-        if isinstance(prior_payload, dict) and isinstance(
-            prior_payload.get("context_window"), dict
-        ):
-            payload = {**payload, "context_window": prior_payload["context_window"]}
-
-    active = _active_at(previous, payload, now)
-    sessions[sid] = {
-        "worktree_cwd": worktree,
-        "updated_at": now,
-        "active_at": active,
-        "branch": _git_branch(worktree),
-        "payload": payload,
-    }
-    # Sibling fields (worktree_cwd, payload) are replaced wholesale on every
-    # ingest, not merged with the previous entry — an untethered session (e.g.
-    # one that has moved out of tmux) must not go on reporting a stale pane.
-    # tmux_pane follows the same rule: present this ingest → stored; absent →
-    # the key is left out of the freshly-built dict, so a repeat ingest
-    # without TMUX_PANE drops any pane recorded by a prior ingest.
-    if tmux_pane is not None:
-        sessions[sid]["tmux_pane"] = tmux_pane
-
-    incoming = _live_limits(payload.get("rate_limits"), now)
+    entry = build_entry(sessions.get(sid), payload, worktree, tmux_pane, now)
+    entry.pop("version", None)
+    sessions[sid] = entry
+    incoming = _live_limits(payload.get("rate_limits"), now, verbatim=True)
     if incoming:
         _hoist_limits(store, incoming, now)
-
     _prune(sessions, now)
     return store
+
+
+def _stored_limits(key: str | None = None) -> dict[str, Any] | None:
+    """An account's limits minus the file's identity fields (v1-compatible)."""
+    data = _read_json(limits_path(key))
+    if data is None:
+        return None
+    return {k: v for k, v in data.items() if k not in _LIMITS_META}
+
+
+def _identity() -> dict[str, Any]:
+    info = account_info()
+    return {"account": info["key"], "org": info["org"],
+            "org_name": info["org_name"], "billing": info["billing"]}
+
+
+def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
+    """Forward-only merge into the calling account's limits file; no lock.
+
+    Two sessions may race here. The ordering (``_window_is_fresher``) only moves
+    forward, so the loser of a race costs one refresh of a lower figure, and the
+    next write from the working session restores it. Written only on change.
+    """
+    path = limits_path()
+    current = _read_json(path) or {}
+    holder: dict[str, Any] = {"limits": _stored_limits() or {}}
+    _hoist_limits(holder, incoming, now)
+    body = {"version": SCHEMA_VERSION, **_identity(), **holder["limits"]}
+    if json.dumps(body, sort_keys=True) != json.dumps(current, sort_keys=True):
+        _atomic_write(path, body)
+
+
+def _fold_old_limits(old: dict[str, Any], now: float) -> None:
+    """Fold a pre-account limits dict (v1 ``status.json`` or v2 ``limits.json``) into
+    the calling account's file through the forward-only merge."""
+    old = {k: v for k, v in old.items() if k not in _LIMITS_META}
+    path = limits_path()
+    if not path.exists() and _create_limits_file(
+        path, {"version": SCHEMA_VERSION, **_identity(), **old}
+    ):
+        return  # no account file existed: keep the legacy figures as they were
+    # A file exists (or a fresh ingest just created it): merge, never overwrite.
+    incoming = _live_limits(old, now, verbatim=True)
+    if incoming:
+        _merge_limits_file(incoming, now)
+
+
+def _create_limits_file(path: Path, body: dict[str, Any]) -> bool:
+    """Create ``path`` only if it does not exist (hard link is exclusive and atomic).
+    False when it already exists, so a concurrent fresher file is never clobbered.
+    Where hard links are refused (FAT/exFAT, some SMB/FUSE mounts) it falls back to an
+    ``O_EXCL`` create: still exclusive, though a reader may briefly see a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(body, handle)
+        os.link(tmp, path)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return _create_exclusive(path, body)
+    finally:
+        _unlink(Path(tmp))
+
+
+def _create_exclusive(path: Path, body: dict[str, Any]) -> bool:
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as handle:
+        json.dump(body, handle)
+    return True
+
+
+def _migrate_limits_json(now: float) -> None:
+    """Move the first v2 build's folder-wide ``limits.json`` to the calling account."""
+    legacy = legacy_limits_path()
+    if not legacy.exists():
+        return
+    old = _read_json(legacy)
+    if old is not None:
+        _fold_old_limits(old, now)
+    _unlink(legacy)
+
+
+def _session_files() -> list[Path]:
+    try:
+        names = os.listdir(sessions_dir())
+    except OSError:
+        return []
+    return [
+        sessions_dir() / name
+        for name in sorted(names)
+        if not name.startswith(".") and name.endswith(".json")
+    ]
+
+
+_STRAY_TMP_SECONDS = 3600
+
+
+MIGRATED_SUFFIX = ".v1-migrated"
+MIGRATED_KEEP_SECONDS = 7 * 24 * 3600
+_MIGRATE_LOCK = ".migrate.lock"
+_MIGRATE_LOCK_STALE_SECONDS = 60
+
+
+def migrate(now: float | None = None) -> bool:
+    """Split a v1 ``status.json`` into v2 files, then retire it. Never raises.
+
+    One migrator per account at a time: ``O_CREAT | O_EXCL`` on ``.migrate.lock``
+    (portable, unlike flock). A lock older than a minute is a crashed migrator's
+    and is broken. Returns True only when this call migrated.
+    """
+    if now is None:
+        now = time.time()
+    lock: Path | None = None
+    try:
+        _migrate_limits_json(now)
+    except Exception:  # noqa: BLE001, S110 - a reader must never fail on migration
+        pass
+    try:
+        legacy = store_path()
+        if not legacy.exists():
+            return False
+        lock = census_dir() / _MIGRATE_LOCK
+        # Lock age is wall-clock time.time() on purpose (mtime is wall-clock), unlike `now`.
+        if lock.exists() and time.time() - lock.stat().st_mtime > _MIGRATE_LOCK_STALE_SECONDS:
+            _unlink(lock)
+        os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except Exception:  # noqa: BLE001 - a reader must never fail on migration
+        return False
+    try:
+        data = _read_json(legacy) or {}
+        sessions = data.get("sessions")
+        for sid, entry in (sessions.items() if isinstance(sessions, dict) else []):
+            safe = safe_session_id(sid)
+            if safe is None or not isinstance(entry, dict):
+                continue
+            current = _read_json(session_path(safe))
+            if current is not None and (_number(current.get("updated_at")) or 0.0) >= (
+                _number(entry.get("updated_at")) or 0.0
+            ):
+                continue
+            _atomic_write(session_path(safe), {"version": SCHEMA_VERSION, **entry})
+        old_limits = data.get("limits")
+        if isinstance(old_limits, dict):
+            _fold_old_limits(old_limits, now)
+        os.replace(legacy, legacy.with_name(legacy.name + MIGRATED_SUFFIX))
+        _unlink(legacy.with_name(legacy.name + ".lock"))
+        for stray in census_dir().glob(".status.*.tmp"):
+            _unlink(stray)
+        return True
+    except Exception:  # noqa: BLE001 - never raise from a reader
+        return False
+    finally:
+        _unlink(lock)
+
+
+def _sweep(now: float) -> None:
+    """Ingest-side housekeeping: prune session files past the TTL (by their own
+    ``updated_at`` against this ingest's ``now``, as v1 did) and delete stray temp
+    files older than an hour (by mtime)."""
+    for path in _session_files():
+        entry = _read_json(path)
+        if entry is None:
+            # Unparseable: age it by mtime so a corrupt file cannot live forever.
+            try:
+                if time.time() - path.stat().st_mtime > SESSION_TTL_SECONDS:
+                    _unlink(path)
+            except OSError:
+                pass
+            continue
+        if now - (_number(entry.get("updated_at")) or 0.0) > SESSION_TTL_SECONDS:
+            _unlink(path)
+    wall = time.time()
+    for folder in (sessions_dir(), limits_dir(), census_dir()):
+        try:
+            strays = [
+                p for p in folder.iterdir() if p.name.startswith(".") and p.name.endswith(".tmp")
+            ]
+        except OSError:
+            continue
+        for stray in strays:
+            try:
+                if wall - stray.stat().st_mtime > _STRAY_TMP_SECONDS:
+                    _unlink(stray)
+            except OSError:
+                pass
+    retired = store_path().with_name(store_path().name + MIGRATED_SUFFIX)
+    try:
+        if wall - retired.stat().st_mtime > MIGRATED_KEEP_SECONDS:
+            _unlink(retired)
+    except OSError:
+        pass
 
 
 def ingest(raw: str, now: float | None = None) -> None:
     """Parse a status-line payload from ``raw`` and record it. Never raises.
 
-    Holds an exclusive ``fcntl.flock`` for the read-modify-write so concurrent
-    per-turn writers from every session cannot lose each other's entries.
+    No lock: this session writes only its own file; limits merge forward-only.
     """
-    if now is None:
-        now = time.time()
     try:
-        payload = json.loads(raw)
-    except ValueError:
-        return
-    if not isinstance(payload, dict) or not payload.get("session_id"):
-        return
-
-    path = store_path()
-    lock_path = path.with_name(path.name + ".lock")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "w") as lock:
-            if not _acquire(lock):
-                return
-            store = _load(path)
-            # census-card-claim-design.md §2: ingest runs as a child of the
-            # session process (the status-line pipeline), so TMUX_PANE is
-            # already in its environment — no new plumbing needed to capture it.
-            tmux_pane = os.environ.get("TMUX_PANE") or None
-            merge(store, payload, resolve.worktree_cwd(payload), tmux_pane, now)
-            _atomic_write(path, store)
-    except OSError:
+        _ingest(raw, time.time() if now is None else now)
+    except Exception:  # noqa: BLE001 - quarantine: a broken store must never break the status line
         return
 
 
-def _acquire(lock: Any) -> bool:
-    for _ in range(_LOCK_ATTEMPTS):
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            time.sleep(_LOCK_DELAY_SECONDS)
-    return False
+def _ingest(raw: str, now: float) -> None:
+    migrate(now)
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        return
+    sid = safe_session_id(payload.get("session_id"))
+    if sid is None:
+        return
+    path = session_path(sid)
+    # census-card-claim-design.md section 2: ingest runs inside the session's
+    # status line, so TMUX_PANE is already in its environment.
+    tmux_pane = os.environ.get("TMUX_PANE") or None
+    entry = build_entry(_read_json(path), payload, resolve.worktree_cwd(payload), tmux_pane, now)
+    info = account_info()
+    entry["account"] = info["key"]
+    entry["org"] = info["org"]
+    _atomic_write(path, entry)
+    incoming = _live_limits(payload.get("rate_limits"), now, verbatim=True)
+    if incoming:
+        _merge_limits_file(incoming, now)
+    _sweep(now)
 
 
 # --- Readers -------------------------------------------------------------------
@@ -520,9 +897,25 @@ def _with_meta(entry: dict[str, Any], limits: Any, now: float) -> dict[str, Any]
     return result
 
 
-def read_all() -> dict[str, Any]:
-    """The whole store, healed to a valid shape."""
-    return _load(store_path())
+def _view_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    out = dict(entry)
+    out.pop("version", None)
+    return out
+
+
+def _all_sessions() -> dict[str, dict[str, Any]]:
+    sessions: dict[str, dict[str, Any]] = {}
+    for path in _session_files():
+        entry = _read_json(path)
+        if entry is not None:
+            sessions[path.name[: -len(".json")]] = _view_entry(entry)
+    return sessions
+
+
+def read_all(now: float | None = None) -> dict[str, Any]:
+    """The whole store as the v1 view: ``{version: 1, limits, sessions}``."""
+    migrate()
+    return {"version": VIEW_VERSION, "limits": _stored_limits(), "sessions": _all_sessions()}
 
 
 def limits(now: float | None = None) -> dict[str, Any] | None:
@@ -531,9 +924,33 @@ def limits(now: float | None = None) -> dict[str, Any] | None:
     A window whose reset time has passed since it was written is dropped, so a
     reader never sees a fossil reading even if no fresh write has replaced it yet.
     """
+    migrate()
     if now is None:
         now = time.time()
-    return _live_limits(_load(store_path()).get("limits"), now)
+    return _live_limits(_stored_limits(), now, verbatim=True)
+
+
+def all_limits(now: float | None = None) -> dict[str, Any]:
+    """Every account's limits file in this folder, keyed by account key (minus ``version``)."""
+    migrate()
+    if now is None:
+        now = time.time()
+    out: dict[str, Any] = {}
+    try:
+        names = sorted(os.listdir(limits_dir()))
+    except OSError:
+        return out
+    for name in names:
+        if name.startswith(".") or not name.endswith(".json"):
+            continue
+        data = _read_json(limits_dir() / name)
+        if data is None:
+            continue
+        live = _live_limits(data, now, verbatim=True) or {}
+        meta = {k: v for k, v in data.items() if k in _LIMITS_RESERVED and k != "version"}
+        out[name[: -len(".json")]] = {**{k: meta[k] for k in meta if k != "updated_at"}, **live,
+                                      **({"updated_at": meta["updated_at"]} if "updated_at" in meta else {})}
+    return out
 
 
 def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | None:
@@ -549,15 +966,15 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
     ``idle`` flags so a consumer can distinguish a live reading from one frozen
     by a dead session, and a working session from a dozing one.
     """
+    migrate()
     if now is None:
         now = time.time()
     key = resolve.normalise(cwd)
-    store = _load(store_path())
 
     best: dict[str, Any] | None = None
     best_rank = (-1.0, -1.0)
-    for entry in store.get("sessions", {}).values():
-        if not isinstance(entry, dict) or entry.get("worktree_cwd") != key:
+    for entry in _all_sessions().values():
+        if entry.get("worktree_cwd") != key:
             continue
         rank = (_entry_activity(entry), _number(entry.get("updated_at")) or 0.0)
         if rank > best_rank:
@@ -565,14 +982,17 @@ def latest_for_worktree(cwd: str, now: float | None = None) -> dict[str, Any] | 
 
     if best is None:
         return None
-    return _with_meta(best, _live_limits(store.get("limits"), now), now)
+    return _with_meta(best, _live_limits(_stored_limits(), now, verbatim=True), now)
 
 
 def for_session(sid: str, now: float | None = None) -> dict[str, Any] | None:
+    migrate()
     if now is None:
         now = time.time()
-    store = _load(store_path())
-    entry = store.get("sessions", {}).get(sid)
-    if not isinstance(entry, dict):
+    safe = safe_session_id(sid)
+    if safe is None:
         return None
-    return _with_meta(entry, _live_limits(store.get("limits"), now), now)
+    entry = _read_json(session_path(safe))
+    if entry is None:
+        return None
+    return _with_meta(_view_entry(entry), _live_limits(_stored_limits(), now, verbatim=True), now)

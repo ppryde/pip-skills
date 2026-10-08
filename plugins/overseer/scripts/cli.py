@@ -179,13 +179,6 @@ def _context_footer(repo_root: Path) -> str:
     return ""
 
 
-def _census_cli() -> Path | None:
-    """Best-effort locate the sibling census plugin's CLI (soft dependency)."""
-    here = Path(__file__).resolve()  # plugins/overseer/scripts/cli.py
-    candidate = here.parent.parent.parent / "census" / "scripts" / "cli.py"
-    return candidate if candidate.exists() else None
-
-
 def _census_session_live(session_id: str) -> bool:
     """Is ``session_id`` live in census (fresh within its 90s staleness horizon)?
 
@@ -196,12 +189,12 @@ def _census_session_live(session_id: str) -> bool:
     False, i.e. "treat the holder as stale": a claim must not wedge just
     because census is down.
     """
-    cli = _census_cli()
-    if cli is None:
+    cmd = liveness.census_cli()
+    if cmd is None:
         return False
     try:
         result = subprocess.run(
-            [sys.executable, str(cli), "read", "--session", session_id],
+            [*cmd, "read", "--session", session_id],
             capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.SubprocessError):

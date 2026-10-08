@@ -21,7 +21,7 @@ import {
   transcriptFacts,
   vscodeUri,
   windowFolderFor,
-} from './register'
+} from '../../plugins/agent-roster/hooks/register'
 
 const DAY = 86_400_000
 const base = { sessionId: '', account: 'personal', cwd: '/r', repo: 'r', kind: 'interactive' }
