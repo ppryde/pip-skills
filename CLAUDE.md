@@ -22,6 +22,7 @@ section is "Plugins" and not "Skills".
 - **review-panel** — composable code review: reviewer lenses × orchestration strategies, composed into named profiles (convene, reviewers, strategies)
 - **test-crucible** — make a test suite faster or drier by measuring the whole suite first, not the part you pointed at (test-suite-health)
 - **tribunal** — PR comment review, categorisation, prioritisation and resolution (reckoning)
+- **vitals** — on-demand session vital signs sized for a phone (context, model, cost, rate-limit pace, git/PR, tools), read from census + git + the transcript; `/vitals:vitals [style]` picks one (lean, detailed, playful)
 - **vigil** — portable context handover: measure ctx %, hand over in-process via /clear, resume from a re-injected handover (vigil)
 
 ## Tool Discipline

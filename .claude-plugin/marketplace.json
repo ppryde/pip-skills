@@ -1,6 +1,6 @@
 {
   "name": "pip-skills",
-  "version": "1.35.0",
+  "version": "1.36.0",
   "owner": {
     "name": "Pip",
     "url": "https://github.com/ppryde/pip-skills"
@@ -183,7 +183,14 @@
       "source": "./plugins/almoner",
       "description": "One triaged view of what is asking for your attention. Gathers configured sources (Notion first) read-only, collapses each conversation into one row, marks what awaits you by the last-speaker rule, and caches every gather in a local SQLite store read through a 7/14/30-day window. The overseer dashboard grows an Almoner page when it is present.",
       "category": "engineering",
-      "tags": ["triage", "inbox", "notion", "digest", "sqlite", "dashboard"]
+      "tags": [
+        "triage",
+        "inbox",
+        "notion",
+        "digest",
+        "sqlite",
+        "dashboard"
+      ]
     },
     {
       "name": "agent-roster",
@@ -212,6 +219,20 @@
         "rate-limits",
         "remote-control",
         "mod"
+      ]
+    },
+    {
+      "name": "vitals",
+      "source": "./plugins/vitals",
+      "description": "On-demand session vital signs sized for a phone: context, model, cost, rate-limit windows with pace forecasts, git/PR state and tool counts. /vitals:vitals [style], or /vitals:lean, /vitals:detailed, /vitals:playful. Reads census, git and the transcript; writes nothing.",
+      "category": "engineering",
+      "tags": [
+        "status",
+        "context",
+        "rate-limits",
+        "mobile",
+        "census",
+        "session"
       ]
     }
   ]

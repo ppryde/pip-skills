@@ -14,7 +14,7 @@ tests/
   README.md        # this file
 ```
 
-Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, plus the two mods' TypeScript suites, `agent_roster/` and `context_vigil_mod/` (the latter also holds a pytest suite).
+Currently relocated: `overseer/`, `census/`, `vigil/`, `review-clone/`, `chronicle/`, `almoner/`, `vitals/`, plus the two mods' TypeScript suites, `agent_roster/` and `context_vigil_mod/` (the latter also holds a pytest suite).
 
 ## How a suite finds its code
 
