@@ -61,6 +61,16 @@ class TestMigrate:
         os.utime(lock, (old, old))
         assert st.migrate(now=200.0) is True
 
+    def test_migrates_where_hard_links_are_unsupported(self, store_file, monkeypatch):
+        # FAT/exFAT and some SMB/FUSE mounts refuse os.link with a plain OSError.
+        def no_links(src, dst):
+            raise PermissionError(1, "Operation not permitted")
+        monkeypatch.setattr(st.os, "link", no_links)
+        _write_v1(store_file)
+        assert st.migrate(now=200.0) is True
+        assert not store_file.exists()
+        assert st.read_all()["limits"]["five_hour"]["used_percentage"] == 55
+
     def test_two_accounts_migrate_independently(self, tmp_path, monkeypatch):
         for account in ("a", "b"):
             path = tmp_path / account / "census" / "status.json"

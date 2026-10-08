@@ -693,7 +693,9 @@ def _fold_old_limits(old: dict[str, Any], now: float) -> None:
 
 def _create_limits_file(path: Path, body: dict[str, Any]) -> bool:
     """Create ``path`` only if it does not exist (hard link is exclusive and atomic).
-    False when it already exists, so a concurrent fresher file is never clobbered."""
+    False when it already exists, so a concurrent fresher file is never clobbered.
+    Where hard links are refused (FAT/exFAT, some SMB/FUSE mounts) it falls back to an
+    ``O_EXCL`` create: still exclusive, though a reader may briefly see a partial file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
@@ -703,8 +705,20 @@ def _create_limits_file(path: Path, body: dict[str, Any]) -> bool:
         return True
     except FileExistsError:
         return False
+    except OSError:
+        return _create_exclusive(path, body)
     finally:
         _unlink(Path(tmp))
+
+
+def _create_exclusive(path: Path, body: dict[str, Any]) -> bool:
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as handle:
+        json.dump(body, handle)
+    return True
 
 
 def _migrate_limits_json(now: float) -> None:
