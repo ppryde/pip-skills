@@ -14,6 +14,14 @@ With tmux the `/clear` and the resume are hands-free; without it you type
 - tmux 3.2 or newer (optional) — only needed for hands-free auto mode; older tmux
   lacks `new-session -e`, and `claude-tmux` says so and starts plain `claude`
 
+Run one context watcher per account, not several. The `vigil` plugin and
+`context-vigil-mod` also nudge and hand over on their own hooks; installed beside
+this skill, a session can be nudged or cleared twice. The installer only detects
+another context-vigil install.
+
+If the `census` plugin already owns your status line, install leaves it in place:
+it splices its own capture line into that script, or prints the one line to add.
+
 ## Install
 
     wf agents add skills context-vigil --global
