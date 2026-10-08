@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { GIT_ARGV, parseGit, touchesGit, watchPaths } from '../../plugins/context-vigil-mod/core/git'
+import { GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../../plugins/context-vigil-mod/core/git'
 
 const ok = (stdout: string) => ({ exitCode: 0, stdout })
 const fail = { exitCode: 128, stdout: '' }
@@ -20,4 +20,13 @@ test('tools that can change git', () => {
   for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash']) expect(touchesGit(t)).toBe(true)
   for (const t of ['Read', 'Grep', 'Glob', 'mcp__x__y']) expect(touchesGit(t)).toBe(false)
 })
-test('watch paths', () => expect(watchPaths('/repo')).toEqual(['/repo/.git/HEAD', '/repo/.git/index']))
+test('watch paths come from the real git dir, so a worktree watches its own HEAD and index', () => {
+  expect(watchPaths(ok('/repo/.git\n'))).toEqual(['/repo/.git/HEAD', '/repo/.git/index'])
+  expect(watchPaths(ok('/repo/.git/worktrees/w2\n'))).toEqual(['/repo/.git/worktrees/w2/HEAD', '/repo/.git/worktrees/w2/index'])
+})
+test('watch paths: a failed or odd answer watches nothing', () => {
+  expect(watchPaths(fail)).toEqual([])
+  expect(watchPaths(ok(''))).toEqual([])
+  expect(watchPaths(ok('.git'))).toEqual([])
+  expect(GIT_DIR_ARGV).toEqual(['git', 'rev-parse', '--absolute-git-dir'])
+})

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import { classicHooksInstalled } from '../../plugins/context-vigil-mod/core/interlock'
 
 const settings = (cmd: string) => JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: cmd }] }] } })
-// The same fixture string is used by tests/context_vigil_mod/test_install.py (Task 16).
+// The same fixture string is used by test_install.py beside this file (Task 16).
 const CLASSIC_CMD = '"/s/context-vigil/scripts/context-vigil" hook stop'
 
 test('classic hook commands are detected', () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # User-level install for context-vigil-mod: lists this plugin folder in
-# env.CLAUDE_CODE_PLUGIN_DIRS of the CURRENT account's settings.json only
+# env.CLAUDE_CODE_PLUGIN_DIRS of the user's settings.json only
 # ($CLAUDE_CONFIG_DIR, else ~/.claude). Never a repo's .claude/settings.json.
 set -euo pipefail
 cmd="${1:-status}"
@@ -35,7 +35,7 @@ case "$cmd" in
     fi
     if has_ours; then echo "context-vigil-mod already installed in $file"; exit 0; fi
     if [ -z "$current" ]; then write "$plugin"; else write "$current:$plugin"; fi
-    echo "context-vigil-mod installed in $file — start a new session, then run /vsetup"
+    echo "context-vigil-mod installed in $file — start a new session, then run /vigil-setup"
     ;;
   uninstall)
     if [ ! -f "$file" ] || ! has_ours; then echo "context-vigil-mod not installed in $file — nothing to remove"; exit 0; fi

@@ -1,15 +1,20 @@
 export const NAME = 'context-vigil-mod'
 export const TOOL = 'vigil_handover'
 export const TOOL_FULL = `mcp__${NAME}__${TOOL}`
-export const COMMANDS = { handover: 'vho', handoff: 'vhandoff', setup: 'vsetup' } as const
+export const COMMANDS = { handover: 'vigil-handover', handoverShort: 'vho', setup: 'vigil-setup', overrides: 'vigil-overrides' } as const
 
-export function configRoot(env: { CLAUDE_CONFIG_DIR?: string; HOME?: string }): string {
+// null when neither is set: a relative `.claude` would land under the session's cwd, so callers write nothing.
+export function configRoot(env: { CLAUDE_CONFIG_DIR?: string; HOME?: string }): string | null {
   if (env.CLAUDE_CONFIG_DIR) return env.CLAUDE_CONFIG_DIR.replace(/\/+$/, '')
-  return env.HOME ? `${env.HOME.replace(/\/+$/, '')}/.claude` : '.claude'
+  return env.HOME ? `${env.HOME.replace(/\/+$/, '')}/.claude` : null
 }
 
 export function handoverPath(root: string, session: string, n: number): string {
   return `${root}/${NAME}/handovers/${session}-${n}.md`
+}
+
+export function overridesPath(root: string): string {
+  return `${root}/${NAME}/overrides.json`
 }
 
 export function eventsPath(root: string, day: string, session: string): string {

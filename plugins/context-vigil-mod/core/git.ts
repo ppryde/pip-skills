@@ -23,6 +23,11 @@ export function touchesGit(tool: string): boolean {
   return TOUCH.has(tool)
 }
 
-export function watchPaths(root: string): string[] {
-  return [`${root}/.git/HEAD`, `${root}/.git/index`]
+// The session's own git dir: in a worktree `<root>/.git` is a file, so HEAD and index live elsewhere.
+export const GIT_DIR_ARGV = ['git', 'rev-parse', '--absolute-git-dir'] as const
+
+/** What to watch for a `git rev-parse --absolute-git-dir` answer; nothing when it failed. */
+export function watchPaths(gitDir: RunOut): string[] {
+  const dir = gitDir.exitCode === 0 ? gitDir.stdout.trim() : ''
+  return dir.startsWith('/') ? [`${dir}/HEAD`, `${dir}/index`] : []
 }

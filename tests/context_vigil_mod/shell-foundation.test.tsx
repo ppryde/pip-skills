@@ -8,7 +8,7 @@ const MIN = 60_000
 test('session start registers commands and the tool, resolves the config dir', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  expect(w.registered.commands.sort()).toEqual(['vhandoff', 'vho', 'vsetup'])
+  expect(w.registered.commands.sort()).toEqual(['vho', 'vigil-handover', 'vigil-overrides', 'vigil-setup'])
   expect(w.registered.tools).toEqual(['vigil_handover'])
 })
 
@@ -23,6 +23,33 @@ test('arm and disarm are logged to a per-session day file when auto mode is on',
   expect(w.files.get(day ?? '')).toContain('"kind":"arm"')
   await $.prompt.submit(human('back'))
   expect(w.files.get(day ?? '')).toContain('"kind":"disarm"')
+})
+
+test('a resume after the idle window counts as the person here: no arm off the old idle time', async ($, on) => {
+  const w = world(on, { store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  w.sessionId.value = 's2'
+  await $.classic.SessionStart({ source: 'resume' } as never)
+  await $.turn.complete(turn())
+  expect(w.state.get('context-vigil-mod.mode')).toBe('attended')
+  expect([...w.files.values()].join('')).not.toContain('"kind":"arm"')
+})
+
+test('no HOME and no CLAUDE_CONFIG_DIR: nothing is written anywhere, and a handover is refused, not misplaced', async ($, on) => {
+  const w = world(on, { env: {}, store: { settings: { auto: true } } })
+  await $.session.start(START)
+  await $.prompt.submit(human('go'))
+  await w.clock.advance(31 * MIN)
+  await $.turn.complete(turn())                                  // an arm line would be logged with a root
+  await $.command.run({ command: 'vho', args: '', origin: { kind: 'composer' } as never } as never)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__context-vigil-mod__vigil_handover', tool_use_id: 'h', goal: 'G', state: 'S', next_step: 'N', session_name: 'Name' } as never) as { result?: string }
+  expect(r.result).toContain('not saved')
+  expect(w.notices).toContain(V.handoverFailed)
+  expect([...w.files.keys()]).toEqual([])
+  expect(w.commands).not.toContain('clear')
 })
 
 test('auto mode off: the mode still moves to auto, but no arm line is logged', async ($, on) => {
@@ -101,6 +128,17 @@ test('classic.SessionStart returns watch paths for .git', async ($, on) => {
   expect(r.watchPaths).toEqual(['/repo/.git/HEAD', '/repo/.git/index'])
 })
 
+test('classic.SessionStart in a worktree watches that worktree\'s git dir; no git dir, no watch', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  w.git.dir = '/repo/.git/worktrees/w2'
+  const r = await $.classic.SessionStart({ source: 'startup' } as never)
+  expect(r.watchPaths).toEqual(['/repo/.git/worktrees/w2/HEAD', '/repo/.git/worktrees/w2/index'])
+  w.git.dir = null
+  const none = await $.classic.SessionStart({ source: 'startup' } as never)
+  expect(none.watchPaths ?? []).toEqual([])
+})
+
 test('a human prompt racing an agent step is not erased: lastHumanAt survives and the mode ends attended', async ($, on) => {
   const w = world(on, { store: { settings: { auto: true } } })
   await $.session.start(START)
@@ -109,7 +147,7 @@ test('a human prompt racing an agent step is not erased: lastHumanAt survives an
   await Promise.all([$.turn.complete(turn()), $.prompt.submit(human('here I am'))])
   expect(w.state.get('context-vigil-mod.mode')).toBe('attended')   // 'go' is 31 min old: only 'here I am' can make it attended
   // The agent step may land first and arm; the human then disarms it. What must never happen is arm without that disarm.
-  const lines = [...w.files.values()].join('').split('\n').filter(Boolean).map(l => JSON.parse(l).kind as string)
+  const lines = [...w.files].filter(([k]) => k.includes('/events/')).map(([, t]) => t).join('').split('\n').filter(Boolean).map(l => JSON.parse(l).kind as string)
   expect(lines.filter(k => k === 'arm').length).toBe(lines.filter(k => k === 'disarm').length)
 })
 
@@ -129,6 +167,9 @@ test('two events racing the first log of a day both land in the file', async ($,
   let open = () => {}
   w.fsRead.gate = new Promise<void>(r => { open = r })
   const arm = $.turn.complete(turn())
+  // The arm decides first and parks on the gated read; only then does the disarm race it, so
+  // which of the two the mode sees first is fixed and both log lines are owed.
+  await w.clock.advance(1)
   const disarm = $.prompt.submit(human('back'))
   await w.clock.advance(1)
   open()

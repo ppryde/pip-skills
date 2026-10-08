@@ -34,9 +34,21 @@ describe('loadSettings', () => {
     expect(s.limitWindows).toEqual(['seven_day'])
     expect(s.rcAutoClear).toBe('unanswered')
   })
+  test('a windows list with nothing valid left keeps the defaults, not an empty watch', () => {
+    expect(loadSettings({ limitWindows: [] }).limitWindows).toEqual(['seven_day', 'spend_limit'])
+    expect(loadSettings({ limitWindows: ['bogus'] }).limitWindows).toEqual(['seven_day', 'spend_limit'])
+  })
   test('the defaults object is never shared', () => {
     const s = loadSettings(undefined)
     s.limitWindows.push('spend_limit')
     expect(DEFAULTS.limitWindows).toEqual(['seven_day', 'spend_limit'])
   })
+})
+
+test('0.1.3 modelThresholds ride along untouched until they have moved, so a settings save keeps them', () => {
+  const legacy = { '[1m]': { nudgeAt: 50 } }
+  const s = loadSettings({ nudgeAt: 40, modelThresholds: legacy })
+  expect(s.modelThresholds).toEqual(legacy)
+  expect(JSON.parse(JSON.stringify({ ...s, bar: false })).modelThresholds).toEqual(legacy)
+  expect('modelThresholds' in loadSettings({ nudgeAt: 40 })).toBe(false)
 })

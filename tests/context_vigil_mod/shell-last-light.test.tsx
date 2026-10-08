@@ -84,7 +84,7 @@ test('on return after expiry the prompt is held and the choice asked; resume car
   await $.tool.call(write)
   await $.turn.complete(turn('ll'))
   await w.clock.advance(70 * MIN)
-  w.askAnswer.value = 'Resume from handover'
+  w.askAnswer.value = V.lastLightResume
   const r = await $.prompt.submit(human('morning!'))
   expect((r as { drop?: string }).drop).toBeDefined()
   await w.clock.settle()
@@ -112,7 +112,7 @@ test('carry on submits the held prompt unchanged into the same conversation', as
   await $.tool.call(write)
   await $.turn.complete(turn('ll'))
   await w.clock.advance(70 * MIN)
-  w.askAnswer.value = 'Carry on'
+  w.askAnswer.value = V.lastLightCarryOn
   await $.prompt.submit(human('morning!'))
   await w.clock.settle()
   expect(w.submits.at(-1)?.text).toBe('morning!')
@@ -263,7 +263,7 @@ async function heldReturn($: any, w: ReturnType<typeof world>, answer: string) {
 
 test('a rejected follow-up after a resume clear keeps the held message visible', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Resume from handover')
+  await heldReturn($, w, V.lastLightResume)
   await $.prompt.submit(human('morning!'))
   await w.clock.settle()
   w.sessionId.value = 's2'
@@ -275,7 +275,7 @@ test('a rejected follow-up after a resume clear keeps the held message visible',
 
 test('a rejected carry-on submit keeps the held message visible', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Carry on')
+  await heldReturn($, w, V.lastLightCarryOn)
   w.submitRefused.value = true
   await $.prompt.submit(human('morning!')).catch(() => null)
   await w.clock.settle()
@@ -284,7 +284,7 @@ test('a rejected carry-on submit keeps the held message visible', async ($, on) 
 
 test('the held prompt is dropped with a voice string', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Carry on')
+  await heldReturn($, w, V.lastLightCarryOn)
   const r = await $.prompt.submit(human('morning!'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
 })
@@ -526,7 +526,7 @@ test('R1-14: a subagent turn neither moves the cache clock nor re-arms the last-
 
 test('R1-19: a second prompt while the return question is open joins the first; nothing is lost', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Resume from handover')
+  await heldReturn($, w, V.lastLightResume)
   const a = await $.prompt.submit(human('one'))
   const b = await $.prompt.submit(human('two'))
   expect((a as { drop?: string }).drop).toBeDefined()
@@ -550,7 +550,7 @@ test('after a restart the first prompt is held and offered a choice, however lon
   const now = 20 * HOUR
   const w = world(on, { ...LL, now, store: { ...LL.store, 'pending:s1': storedLastLight(now, 8 * HOUR) } })
   await $.session.start(START)                      // a fresh process: lastApiAt is unknown
-  w.askAnswer.value = 'Carry on'
+  w.askAnswer.value = V.lastLightCarryOn
   const r = await $.prompt.submit(human('morning'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
   await w.clock.settle()
@@ -573,7 +573,7 @@ test('an in-process /resume holds the first prompt for a stored last-light hando
   await $.session.start(START)
   w.sessionId.value = 's2'
   await $.classic.SessionStart({ source: 'resume' } as never)
-  w.askAnswer.value = 'Carry on'
+  w.askAnswer.value = V.lastLightCarryOn
   const r = await $.prompt.submit(human('morning'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
 })
@@ -581,7 +581,7 @@ test('an in-process /resume holds the first prompt for a stored last-light hando
 // R2-11: the held messages live in $.state, so a reload while the ask is open loses nothing.
 test('a reload while the ask is open re-opens it; whichever answer acts first sends the held text once (R2-11)', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Carry on')
+  await heldReturn($, w, V.lastLightCarryOn)
   w.askHold.held = true
   const r = await $.prompt.submit(human('one'))
   expect((r as { drop?: string }).drop).toBe(V.heldForLastLight)
@@ -590,16 +590,16 @@ test('a reload while the ask is open re-opens it; whichever answer acts first se
   await $.session.start(START)                        // the reload: module variables are gone, $.state is not
   await w.clock.advance(1)
   expect(w.askHold.waiting.length).toBe(2)            // the new module asks again, it does not forget
-  w.askHold.waiting[1]?.('Carry on')
+  w.askHold.waiting[1]?.(V.lastLightCarryOn)
   await w.clock.settle()
-  w.askHold.waiting[0]?.('Carry on')                  // the old dialog answers late: inert
+  w.askHold.waiting[0]?.(V.lastLightCarryOn)                  // the old dialog answers late: inert
   await w.clock.settle()
   expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
 })
 
 test('a /clear while the return question is open still sends the held text after the injected handover (R3-02)', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Carry on')
+  await heldReturn($, w, V.lastLightCarryOn)
   w.askHold.held = true
   await $.prompt.submit(human('one'))
   await w.clock.advance(1)
@@ -609,14 +609,14 @@ test('a /clear while the return question is open still sends the held text after
   expect(ss.additionalContext?.join('\n')).toContain('## Goal')
   await w.clock.advance(500)
   expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
-  w.askHold.waiting[0]?.('Carry on')                  // the dialog outlives the clear: inert, nothing twice
+  w.askHold.waiting[0]?.(V.lastLightCarryOn)                  // the dialog outlives the clear: inert, nothing twice
   await w.clock.settle()
   expect(w.submits.filter(s => s.text === 'one').length).toBe(1)
 })
 
 test('a second held message while a Resume is already queued rides the clear with the first (R3-02)', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Resume from handover')
+  await heldReturn($, w, V.lastLightResume)
   w.clearHold.held = true
   await $.prompt.submit(human('one'))
   await w.clock.settle()
@@ -636,7 +636,7 @@ test('a second held message while a Resume is already queued rides the clear wit
 
 test('a /resume while the return question is open never submits the held text into the other conversation; a notice carries it (R3-02)', async ($, on) => {
   const w = world(on, LL)
-  await heldReturn($, w, 'Carry on')
+  await heldReturn($, w, V.lastLightCarryOn)
   w.askHold.held = true
   await $.prompt.submit(human('one'))
   await w.clock.advance(1)
@@ -644,7 +644,7 @@ test('a /resume while the return question is open never submits the held text in
   await $.classic.SessionStart({ source: 'resume' } as never)
   await w.clock.settle()
   expect(w.notices.some(n => n.includes('held message was not sent') && n.includes('one'))).toBe(true)
-  w.askHold.waiting[0]?.('Carry on')
+  w.askHold.waiting[0]?.(V.lastLightCarryOn)
   await w.clock.settle()
   expect(w.submits.filter(s => s.text === 'one').length).toBe(0)
 })
@@ -671,4 +671,16 @@ test('under stand-down last light logs a skip, never "fired", and spends no arm 
   expect(asks(w)).toBe(0)
   expect(eventLog(w)).not.toContain('last_light.fired')
   expect(eventLog(w)).toContain('"reason":"standdown"')
+})
+
+test('last light reads overrides.json again when it decides: a hand-edit while idle counts', async ($, on) => {
+  const path = '/cfg/context-vigil-mod/overrides.json'
+  const w = world(on, { ...LL, files: { [path]: JSON.stringify({ overrides: [{ window: 1_000_000, lastLightAt: 50 }] }) } })
+  await $.session.start(START)
+  await $.prompt.submit(human('hi'))
+  await $.session.measure(measure(30))
+  await $.turn.complete(turn())
+  w.files.set(path, JSON.stringify({ overrides: [{ window: 1_000_000, lastLightAt: 20 }] }))
+  await w.clock.advance(55 * MIN)
+  expect(asks(w)).toBe(1)
 })

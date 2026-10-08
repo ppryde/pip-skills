@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { DEFAULTS } from '../../plugins/context-vigil-mod/core/settings'
-import { ALIASES, FLOW, STEPS, TELL, applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../../plugins/context-vigil-mod/core/setup'
+import { ALIASES, FLOW, STEPS, TELL, applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../../plugins/context-vigil-mod/core/setup'
 import type { StepId } from '../../plugins/context-vigil-mod/types'
 
 const ALL = Object.keys(STEPS) as StepId[]
 
-describe('cards fit AskUserQuestion', () => {
+describe('steps fit $.ui.ask', () => {
   test('headers ≤ 12 UTF-16 units; 2–4 options including Tell me more', () => {
     for (const id of ALL) {
       const q = questionFor(id)
       expect(q.header.length).toBeLessThanOrEqual(12)
       expect(q.options.length).toBeGreaterThanOrEqual(2)
       expect(q.options.length).toBeLessThanOrEqual(4)
-      expect(q.options.at(-1)?.label).toBe(TELL)
+      expect(q.options.at(-1)).toBe(TELL)
       expect(q.question.endsWith('?')).toBe(true)
     }
   })
@@ -20,9 +20,20 @@ describe('cards fit AskUserQuestion', () => {
     const q = questionFor('bar', true)
     expect(q.question.startsWith(STEPS.bar.explain)).toBe(true)
     expect(q.question.endsWith(STEPS.bar.question)).toBe(true)
-    expect(stepForQuestion(q.question)).toBe('bar')
-    expect(stepForQuestion(STEPS.bar.question)).toBe('bar')
-    expect(stepForQuestion('something else?')).toBe(undefined)
+    expect(questionFor('bar').question).toBe(STEPS.bar.question)
+  })
+  test('options are labels only: the recommendation rides in the label, never a second line', () => {
+    for (const id of ALL) {
+      const labels = questionFor(id).options
+      for (const label of labels) expect(typeof label).toBe('string')
+      // Every single-choice step marks exactly one recommendation; windows defaults to both.
+      const recs = labels.filter(l => l.endsWith(' (Recommended)'))
+      expect(recs.length).toBe(id === 'limit_windows' ? 0 : 1)
+    }
+    expect(questionFor('nudge').options).toEqual(['25%', '35% (Recommended)', '50%', TELL])
+    expect(questionFor('bar').options).toEqual(['On (Recommended)', 'Off', TELL])
+    expect(questionFor('auto').options).toEqual(['Off (Recommended)', 'On', TELL])
+    expect(questionFor('rc').options).toEqual(['No (Recommended)', 'Yes', TELL])
   })
   test('last light says it needs a 1-hour cache and stays off for a 5-minute one', () => {
     const t = STEPS.last_light.explain
@@ -36,10 +47,13 @@ describe('cards fit AskUserQuestion', () => {
     expect(STEPS.bar.explain).toContain('Off = a notice line instead')
     expect(STEPS.auto.question).toBe("While you're away and I'm still working, may I hand over, clear and carry on by myself?")
     expect(STEPS.idle.question).toBe('Auto handovers pause while you\'re interacting. How long without a message from you before I treat the session as unattended?')
-    expect(STEPS.idle.options.map(o => o.description)).toEqual(['You step away properly when you leave', 'Recommended', 'You flit between windows and come back later'])
+    // The hints that were option descriptions now live in Tell me more.
+    expect(STEPS.idle.explain).toContain('15 min suits stepping away properly when you leave')
+    expect(STEPS.idle.explain).toContain('60 min suits flitting between windows and coming back later')
+    expect(STEPS.rc.explain).toContain('never clear within 2 minutes')
     expect(STEPS.last_light.question).toBe('When we\'re both idle, write a handover just before the 1-hour cache expires, so coming back is cheap?')
     expect(STEPS.last_light.explain).toContain('Works only with a 1-hour prompt cache')
-    expect(STEPS.last_light_at.question).toBe('Only bother when context is at least…?')
+    expect(STEPS.last_light_at.question).toBe('Last light: only write the before-the-cache-expires handover when context is at least what %?')
     expect(STEPS.limits.question).toBe('Near a 7-day or spend limit, stop early with a handover so no work is lost?')
     expect(STEPS.limit_pct.question).toBe('Stop at what % of the limit?')
     expect(STEPS.limit_windows.options.map(o => o.label)).toEqual(['Weekly (seven_day)', 'Spend cap (spend_limit)'])
@@ -125,6 +139,20 @@ describe('applyAnswers', () => {
     const bad = applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: 'lots' }])
     expect(bad.retell).toEqual(['limit_pct'])
     expect(bad.settings.limitPct).toBe(95)
+    expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer: '97%' }]).settings.limitPct).toBe(97)
+    // Whole numbers only: no truncating 98.9, no trailing junk.
+    for (const answer of ['98.9', '95abc', '0', '101']) {
+      expect(applyAnswers(DEFAULTS, [{ step: 'limit_pct', answer }]).retell).toEqual(['limit_pct'])
+    }
+  })
+  test('nudge and last-light thresholds take Other as a number 1–100', () => {
+    expect(applyAnswers(DEFAULTS, [{ step: 'nudge', answer: '40' }]).settings.nudgeAt).toBe(40)
+    expect(applyAnswers(DEFAULTS, [{ step: 'last_light_at', answer: '20%' }]).settings.lastLightAt).toBe(20)
+    for (const answer of ['20.5', '20abc', '0', '101', 'lots']) {
+      const r = applyAnswers(DEFAULTS, [{ step: 'last_light_at', answer }])
+      expect(r.retell).toEqual(['last_light_at'])
+      expect(r.settings.lastLightAt).toBe(25)
+    }
   })
   test('windows multi-select, comma-joined, any order; empty is re-asked', () => {
     expect(applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'spend_limit' }]).settings.limitWindows).toEqual(['spend_limit'])
@@ -134,6 +162,10 @@ describe('applyAnswers', () => {
     const empty = applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: '' }])
     expect(empty.retell).toEqual(['limit_windows'])
     expect(empty.settings.limitWindows).toEqual(DEFAULTS.limitWindows)
+    // An "Other" that names no window is re-asked too, never stored as empty.
+    const unknown = applyAnswers(DEFAULTS, [{ step: 'limit_windows', answer: 'monthly' }])
+    expect(unknown.retell).toEqual(['limit_windows'])
+    expect(unknown.settings.limitWindows).toEqual(DEFAULTS.limitWindows)
   })
   test('an unknown label is retold', () => {
     expect(applyAnswers(DEFAULTS, [{ step: 'bar', answer: 'Maybe' }]).retell).toEqual(['bar'])

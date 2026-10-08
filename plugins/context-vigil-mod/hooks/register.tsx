@@ -1,17 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Activity, Awaiting, EventKind, EventRecord, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Settings, StepId } from '../types'
-import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath } from '../core/name'
+import type { Activity, Awaiting, EventKind, EventRecord, Git, Latch, Mode, Pending, PhoneFacts, PendingReason, RateLimit, Override, Settings, StepId } from '../types'
+import { ASK, DEFAULT_OVERRIDES, checkOverrides, fromModelThresholds, formatKey, formatOverride, formatWindow, overridesJson, ordered, parseKey, parseOverridesArgs, patternFor, removeOverride, resolve, sameKey, setOverride } from '../core/overrides'
+import type { Resolved } from '../core/overrides'
+import { COMMANDS, TOOL, TOOL_FULL, classicSessionPath, configRoot, eventsPath, handoverPath, overridesPath } from '../core/name'
 import { DEFAULTS, PENDING_KEEP_MS, PENDING_PREFIX, STORE_KEY, loadSettings, pendingKey } from '../core/settings'
 import { EMPTY_ACTIVITY, WORKING_MS, armed, classifyOrigin, mode, onPhone, record, transition } from '../core/arming'
 import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
-import { COALESCE_MS, GIT_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
+import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, limitResumeText, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
 import { TAIL_CMD, type CacheTtl, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
-import { applyAnswers, extractAnswers, isStep, nextCard, questionFor, stepForQuestion } from '../core/setup'
+import { applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../core/setup'
 import { RESUME_DELAY_MS, earlyStopDue, formatHHMM, latchCleared, latchFromMeasure, latchFromStopFailure, nextHop } from '../core/limits'
 import { classicHooksInstalled } from '../core/interlock'
 import { V } from '../core/voice'
@@ -23,6 +25,8 @@ import type { WaitReason } from '../core/voice'
 // fresh session may forget.
 const modeA = atom({ plugin: 'context-vigil-mod', key: 'mode' } as const, 'idle')
 const contextA = atom({ plugin: 'context-vigil-mod', key: 'contextPct' } as const, null)
+const windowA = atom({ plugin: 'context-vigil-mod', key: 'contextWindow' } as const, null as number | null)
+const modelA = atom({ plugin: 'context-vigil-mod', key: 'contextModel' } as const, null as string | null)
 const baselineA = atom({ plugin: 'context-vigil-mod', key: 'baselinePct' } as const, null as number | null)
 const lastNudgedA = atom({ plugin: 'context-vigil-mod', key: 'lastNudged' } as const, null)
 const barShownA = atom({ plugin: 'context-vigil-mod', key: 'barShown' } as const, false)
@@ -70,7 +74,7 @@ let latchTimer: { cancel: () => void } | null = null
 let rcAsked = false
 
 // Module caches: rebuilt at session.start / after a hot reload.
-let root = '/nonexistent'
+let root: string | null = null   // null: no config dir known, so nothing is written (configRoot)
 let session = 'unknown'
 let cwd = ''
 let settings: Settings = DEFAULTS
@@ -122,6 +126,7 @@ async function appendToDayFile($: EngineInterface, path: string, rec: EventRecor
 }
 
 async function log($: EngineInterface, kind: EventKind, fields: Record<string, unknown> = {}) {
+  if (!root) return
   const now = await nowMs($)
   const path = eventsPath(root, dayKey(now), session)
   const rec = makeRecord(now, session, kind, fields)
@@ -199,18 +204,61 @@ async function dropParkedClear($: EngineInterface, pending: Pending, cause: 'hum
   await log($, 'guard.wait', { reason: 'parked-dropped', cause })
 }
 
-function cardPrompt(questions: unknown[]): string {
-  return 'context-vigil-mod setup: call the AskUserQuestion tool now with exactly these questions (JSON, use as-is): ' +
-    `${JSON.stringify(questions)} — then stop; do nothing else this turn.`
-}
-
+// Setup asks through $.ui.ask, one step at a time: no prompt is submitted and nothing
+// reaches the model. The dialog does not pass through this mod's own tool.call hook
+// (PROBES.md §6), so answers are applied here, not there.
 async function startSetup($: EngineInterface, only?: string) {
   if (only !== undefined && !isStep(only)) { await notify($, V.setupUsage); return }
-  setupRun = { only, asked: [] }
-  const ids = nextCard(settings, [], only)
-  if (!ids.length) { setupRun = null; await notify($, V.setupSaved); return }
-  setupRun.asked.push(...ids)
-  submitSoon($, { text: cardPrompt(ids.map(id => questionFor(id))) })
+  const run = { only, asked: [] as StepId[] }
+  setupRun = run
+  if (!nextCard(settings, [], only).length) { setupRun = null; await notify($, V.setupSaved); return }
+  // After the command has replied: the dialogs follow it rather than holding it open.
+  $.clock.after(0, () => { void askSteps($, run).catch(err => timerFailed($, 'setup', err)) })
+}
+
+async function askSteps($: EngineInterface, run: NonNullable<typeof setupRun>) {
+  for (;;) {
+    // A clear can land inside any await (a store write included): never ask into the new session.
+    if (setupRun !== run) return
+    const id = nextCard(settings, run.asked, run.only)[0]
+    if (id === undefined) break
+    let explain = false
+    for (;;) {
+      const q = questionFor(id, explain)
+      const answer = await $.ui
+        .ask(q.question, { header: q.header, options: q.options, ...(q.multiSelect ? { multiSelect: true as const } : {}) })
+        .then(a => ({ a }), (err: unknown) => ({ err }))
+      // A clear or another /vigil-setup took over while the dialog was open: its answer is not ours.
+      if (setupRun !== run) return
+      // A dismissal and a failed dialog reject alike (no reason is typed): either way stop, log
+      // why, and say so, so a failure is never silent. What was answered is already saved.
+      if ('err' in answer) {
+        setupRun = null
+        await log($, 'setup', { steps: [id], stopped: String(answer.err).slice(0, 200) })
+        await notify($, V.setupStopped)
+        return
+      }
+      await observe($, { kind: 'human-command', at: await nowMs($) })
+      await reloadSettings($)
+      const applied = applyAnswers(settings, [{ step: id, answer: answer.a }])
+      if (setupRun !== run) return
+      await log($, 'setup', { steps: [id], retell: applied.retell })
+      // The log write is an await too: a newer /vigil-setup or a clear may have taken over during it.
+      if (setupRun !== run) return
+      if (applied.retell.length) { explain = true; continue }
+      settings = applied.settings
+      await $.store.set(STORE_KEY, settings)
+      if (id === 'rc') await log($, 'rc.answer', { answer: settings.rcAutoClear })
+      break
+    }
+    run.asked.push(id)
+  }
+  if (setupRun !== run) return
+  setupRun = null
+  await notify($, V.setupSaved)
+  // The person who just answered is here: a clear parked while they were away is offered, never run.
+  const parked = clearParked ? await read($, pendingA) : null
+  if (parked) await notify($, V.pendingOffer(parked.path))
 }
 
 // Spec §2 / pre-flight F24: asked when auto mode would first arm on the phone.
@@ -254,6 +302,8 @@ function resetCaches() {
   lastLightTimer?.cancel()
   lastLightTimer = null
   setupRun = null
+  overridesRun = null
+  ambiguityTold.clear()
   countdownTick?.cancel()
   countdownTick = null
 }
@@ -261,6 +311,136 @@ function resetCaches() {
 async function savePhoneFacts($: EngineInterface) {
   const { lastHumanOrigin, lastBridgeAt } = activity
   await update($, phoneA, () => ({ lastHumanOrigin, lastBridgeAt }))
+}
+
+// overrides.json is the person's to edit: read whenever a threshold is decided, written only when
+// missing (the default override, so it is visible) or by /vigil-overrides. A fault drops only its override,
+// and is told once per distinct file text.
+let overrides: Override[] = DEFAULT_OVERRIDES
+let faultsToldFor: string | null = null
+const ambiguityTold = new Set<string>()
+
+async function loadOverrides($: EngineInterface): Promise<{ faults: string[] }> {
+  if (!root) { overrides = DEFAULT_OVERRIDES; return { faults: [] } }
+  const path = overridesPath(root)
+  const text = await $.fs.read(path).then(t => String(t), () => null)
+  if (text === null) {
+    overrides = DEFAULT_OVERRIDES
+    await $.fs.write(path, overridesJson(DEFAULT_OVERRIDES)).catch(() => {})
+    return { faults: [] }
+  }
+  const checked = checkOverrides(text)
+  // A file that does not parse names no override to drop: keep the last good read (the default
+  // override before any) rather than lose every override to one stray comma.
+  if (!checked.fileFault) overrides = checked.overrides
+  if (checked.faults.length && text !== faultsToldFor) {
+    faultsToldFor = text
+    await notify($, checked.fileFault
+      ? V.overridesFileFault(path, checked.faults[0] ?? '', ordered(overrides).map(o => `  ${formatOverride(o)}`).join('\n') || '  (no overrides)')
+      : V.overridesFaults(path, checked.faults.length, checked.faults.map(f => `  ${f}`).join('\n')))
+  }
+  return { faults: checked.faults }
+}
+
+async function saveOverrides($: EngineInterface, next: Override[]): Promise<boolean> {
+  if (!root) return false
+  const ok = await $.fs.write(overridesPath(root), overridesJson(next)).then(() => true, () => false)
+  if (ok) { overrides = next; await log($, 'setup', { overrides: next }) }
+  return ok
+}
+
+// Overrides 0.1.3 saved in the settings store move to overrides.json once; one already in the file
+// for the same key stands. The store field is dropped only after the file is written.
+async function migrateModelThresholds($: EngineInterface) {
+  const raw = await $.store.get(STORE_KEY)
+  if (!root || !raw || typeof raw !== 'object' || !('modelThresholds' in raw)) return
+  const { overrides: moved, dropped } = fromModelThresholds(raw)
+  const fresh = moved.filter(m => !overrides.some(o => sameKey(o, m)))
+  const kept = moved.filter(m => !fresh.includes(m))
+  if (fresh.length && !(await saveOverrides($, fresh.reduce(setOverride, overrides)))) return
+  const { modelThresholds: _gone, ...rest } = raw as Record<string, unknown>
+  await $.store.set(STORE_KEY, rest)
+  settings = loadSettings(rest)
+  if (moved.length || dropped.length) {
+    await notify($, V.overridesMigrated(overridesPath(root), fresh.map(o => `  ${formatOverride(o)}`).join('\n'), kept.map(o => formatKey(o)).join(', '), dropped.join(', ')))
+  }
+}
+
+async function thresholds($: EngineInterface): Promise<Resolved> {
+  return resolve({ nudgeAt: settings.nudgeAt, step: settings.step, lastLightAt: settings.lastLightAt }, overrides, await read($, modelA), await read($, windowA))
+}
+
+async function tellAmbiguity($: EngineInterface, r: Resolved) {
+  if (!r.ambiguous) return
+  const { model, window, fields } = r.ambiguous
+  const key = `${formatKey(model)}|${formatKey(window)}`
+  if (ambiguityTold.has(key)) return
+  ambiguityTold.add(key)
+  await notify($, V.overridesAmbiguous(formatKey(model), formatKey(window), fields.map(f => `${f} ${r.values[f]}%`).join(', '), formatKey({ ...model, ...window })))
+}
+
+async function overridesReport($: EngineInterface, faults: string[]): Promise<string> {
+  const here = await thresholds($)
+  const model = await read($, modelA)
+  const window = await read($, windowA)
+  const from = (k: 'nudgeAt' | 'step' | 'lastLightAt') => here.from[k] ? formatKey(here.from[k]!) : 'settings'
+  const ambiguous = here.ambiguous ? [`⚠️ ${formatKey(here.ambiguous.model)} and ${formatKey(here.ambiguous.window)} both set ${here.ambiguous.fields.join(', ')}; the window wins`] : []
+  return V.overridesList(
+    root ? overridesPath(root) : '',
+    ordered(overrides).map(o => `  ${formatOverride(o)}`).join('\n'),
+    `nudge ${settings.nudgeAt}%, step ${settings.step}%, last light ${settings.lastLightAt}%`,
+    `${model ?? 'model unknown'} · ${window === null ? 'window not measured yet' : formatWindow(window)}`,
+    `nudge ${here.values.nudgeAt}% (${from('nudgeAt')}), step ${here.values.step}% (${from('step')}), last light ${here.values.lastLightAt}% (${from('lastLightAt')})`,
+    [...ambiguous, ...faults.map(f => `⚠️ ${f} — ignored`)].join('\n'),
+  )
+}
+
+// /vigil-overrides add: an override for the session you are in, asked through $.ui.ask like setup.
+let overridesRun: object | null = null
+
+async function askOverrides($: EngineInterface, run: object) {
+  const ask = async (question: string, header: string, options: string[]) => {
+    const a = await $.ui.ask(question, { header, options }).then(x => String(x), () => null)
+    if (overridesRun !== run) return null
+    // An answer is the person here, as in setup: the idle window starts again.
+    if (a !== null) {
+      await observe($, { kind: 'human-command', at: await nowMs($) })
+      if (overridesRun !== run) return null
+    }
+    return a
+  }
+  const model = await read($, modelA)
+  const window = await read($, windowA)
+  const pattern = model ? patternFor(model) : null
+  const keys: { label: string; key: Pick<Override, 'model' | 'window'> }[] = []
+  if (pattern && window !== null) keys.push({ label: `${pattern} on ${formatWindow(window)}`, key: { model: pattern, window } })
+  if (window !== null) keys.push({ label: `Any model on ${formatWindow(window)}`, key: { window } })
+  if (pattern) keys.push({ label: `${pattern} on any window`, key: { model: pattern } })
+  for (const w of [1_000_000, 200_000]) if (keys.length < 2 && w !== window) keys.push({ label: `Any model on ${formatWindow(w)}`, key: { window: w } })
+  const which = await ask(ASK.key, '🔧 Covers', keys.map(k => k.label))
+  if (which === null) { await notify($, V.overridesStopped); return }
+  const key = keys.find(k => k.label === which)?.key ?? parseKey(which)
+  if (!key) { await notify($, V.overridesBadKey(which)); return }
+  const base = (await thresholds($)).values
+  const pct = (label: string | null, lo: number, hi: number): number | null | undefined => {
+    if (label === null) return undefined
+    if (label.startsWith('Inherit')) return null
+    const n = Number(label.replace(/%.*$/, '').trim())
+    return Number.isInteger(n) && n >= lo && n <= hi ? n : undefined
+  }
+  const nudgeAt = pct(await ask(ASK.nudge(formatKey(key)), '🎚️ Nudge at', [`Inherit (${base.nudgeAt}%)`, '25%', '35%', '50%']), 1, 100)
+  if (nudgeAt === undefined) { await notify($, V.overridesStopped); return }
+  const step = pct(await ask(ASK.step, '📏 Step', [`Inherit (${base.step}%)`, '5%', '10%']), 1, 50)
+  if (step === undefined) { await notify($, V.overridesStopped); return }
+  const lastLightAt = pct(await ask(ASK.lastLight, 'Last light', [`Inherit (${base.lastLightAt}%)`, '25%', '50%']), 1, 100)
+  if (lastLightAt === undefined) { await notify($, V.overridesStopped); return }
+  const override: Override = { ...key, ...(nudgeAt !== null ? { nudgeAt } : {}), ...(step !== null ? { step } : {}), ...(lastLightAt !== null ? { lastLightAt } : {}) }
+  if (nudgeAt === null && step === null && lastLightAt === null) { await notify($, V.overridesNothingSet); return }
+  const { faults } = await loadOverrides($)
+  if (overridesRun !== run) return
+  if (!(await saveOverrides($, setOverride(overrides, override)))) { await notify($, V.overridesUnwritable); return }
+  overridesRun = null
+  await notify($, await overridesReport($, faults))
 }
 
 async function bindSession($: EngineInterface) {
@@ -274,6 +454,8 @@ async function bindSession($: EngineInterface) {
   session = await $.session.id()
   cwd = await $.session.cwd()
   settings = loadSettings(await $.store.get(STORE_KEY))
+  await loadOverrides($)
+  await migrateModelThresholds($)
   lastApiMirror = await read($, lastApiA)
 }
 
@@ -284,8 +466,9 @@ async function reloadSettings($: EngineInterface) {
 }
 
 async function checkInterlock($: EngineInterface) {
-  const text = await $.fs.read(`${root}/settings.json`).then(t => String(t)).catch(() => null)
-  const record = await $.fs.exists(classicSessionPath(root, session)).catch(() => false)
+  const at = root
+  const text = at ? await $.fs.read(`${at}/settings.json`).then(t => String(t)).catch(() => null) : null
+  const record = at ? await $.fs.exists(classicSessionPath(at, session)).catch(() => false) : false
   const classic = classicHooksInstalled(text) || record
   const was = standDown
   standDown = classic
@@ -314,6 +497,12 @@ async function resetSessionState($: EngineInterface) {
   await update($, ttlReadA, () => false)
   await update($, ttlInfoDismissedA, () => false)
   await update($, returnHeldA, () => null)
+  // A resume or fork may be a different model and window: never keep the last session's until the
+  // next measure, or /vigil-overrides would list or add for the wrong session.
+  const model = await $.session.model().catch(() => null)
+  const window = (await $.session.usage().catch(() => null))?.context?.window ?? null
+  await update($, modelA, () => model)
+  await update($, windowA, () => window)
 }
 
 async function prunePending($: EngineInterface) {
@@ -635,7 +824,8 @@ function scheduleLastLight($: EngineInterface, lastApiAt: number, now: number) {
 async function readTtl($: EngineInterface): Promise<CacheTtl> {
   let writes = null
   try {
-    const path = (await read($, transcriptA)) ?? transcriptPathFor(root, await $.session.cwd(), await $.session.id())
+    const path = (await read($, transcriptA)) ?? (root ? transcriptPathFor(root, await $.session.cwd(), await $.session.id()) : null)
+    if (!path) return ttlFromWrites(null)
     const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', path])
     if (r.exitCode === 0) writes = parseWrites(r.stdout)
   } catch { /* unknown */ }
@@ -677,9 +867,11 @@ async function maybeFireLastLight($: EngineInterface) {
   const lastApiAt = await read($, lastApiA)
   const youIdle = lastApiAt !== null && (activity.lastHumanAt === null || activity.lastHumanAt <= lastApiAt)
   const agentIdle = activity.lastAgentAt === null || now - activity.lastAgentAt >= WORKING_MS
+  // The file may have been edited while everyone was idle: decide on what it says now.
+  await loadOverrides($)
   const verdict = shouldFire({
     enabled: settings.lastLight, youIdle, agentIdle,
-    contextPct: await read($, contextA), threshold: settings.lastLightAt,
+    contextPct: await read($, contextA), threshold: (await thresholds($)).values.lastLightAt,
     pending: (await read($, pendingA)) !== null, latched: (await readLatch($)) !== null,
     armed: lastLightArmed,
   })
@@ -722,11 +914,14 @@ export const register: Register = on => {
     const r = await next(e)
     await bindSession($)
     await $.command.register({ name: COMMANDS.handover, description: V.cmdHandover })
-    await $.command.register({ name: COMMANDS.handoff, description: V.cmdHandover })
+    await $.command.register({ name: COMMANDS.handoverShort, description: V.cmdHandoverShort })
     await $.command.register({ name: COMMANDS.setup, description: V.cmdSetup })
+    await $.command.register({ name: COMMANDS.overrides, description: V.cmdOverrides })
     await $.tool.register({ name: TOOL, description: TOOL_DESCRIPTION, inputSchema: INPUT_SCHEMA as unknown as Record<string, unknown> })
     await checkInterlock($)
     await checkLatch($, [])   // a latch another process left behind and never lifted
+    // One still live gets this process's lift timer: its setter may have exited (setLatch arms it for an existing latch).
+    await setLatch($, await readLatch($))
     await prunePending($)
     const stored = (await $.store.get(pendingKey(session))) as Pending | null | undefined
     const live = await read($, pendingA)
@@ -758,8 +953,11 @@ export const register: Register = on => {
 
   on('classic.SessionStart', async ($, e, next) => {
     const r = await next(e)
-    const repo = await $.session.repo().catch(() => null)
-    const watch = repo ? watchPaths(repo.root) : []
+    const gitDir = await $.process
+      .run(GIT_DIR_ARGV, { cwd: await $.session.cwd() })
+      .then(x => ({ exitCode: x.exitCode, stdout: x.stdout }))
+      .catch(() => ({ exitCode: 1, stdout: '' }))
+    const watch = watchPaths(gitDir)
     const out = watch.length ? { ...r, watchPaths: [...(r.watchPaths ?? []), ...watch] } : r
     if (e.transcript_path) await update($, transcriptA, () => e.transcript_path ?? null)
     if (e.source === 'resume' || e.source === 'fork') {
@@ -767,6 +965,8 @@ export const register: Register = on => {
       // session that only this event announces. Rebind it; whatever it parked is offered, never
       // the old session's.
       session = await $.session.id()
+      // A resume is the person acting now: the old conversation's idle time must not read as away.
+      activity = { ...EMPTY_ACTIVITY, ...(await read($, phoneA)), lastHumanAt: await nowMs($) }
       resetCaches()
       // R2-16: process-wide jobs belong to the conversation that is gone.
       if (resumeChain || limitResume) await log($, 'guard.wait', { reason: 'resume-dropped', cause: 'session-changed' })
@@ -970,9 +1170,15 @@ export const register: Register = on => {
     const pct = e.context.percent ?? null
     const prevPct = await read($, contextA)
     await update($, contextA, () => pct)
+    await update($, windowA, () => e.context.window)
+    const model = await $.session.model().catch(() => null)
+    await update($, modelA, () => model)
+    await loadOverrides($)
+    const levels = await thresholds($)
+    await tellAmbiguity($, levels)
     if (pct !== null && (await read($, baselineA)) === null) await update($, baselineA, () => pct)
     const limits = e.rateLimits as RateLimit[]
-    await setLatch($, latchFromMeasure(limits))
+    await setLatch($, latchFromMeasure(limits, await nowMs($)))
     await checkLatch($, limits)
     const limitDue = earlyStopDue(limits, settings, firedEarlyStops)
     if (limitDue && !standDown) {
@@ -984,12 +1190,13 @@ export const register: Register = on => {
       if (started === 'covered' && limitResume) limitResume.path = (await read($, pendingA))?.path ?? limitResume.path
     }
     if (pct !== null && !standDown) {
-      const due = nextThreshold(pct, settings, await read($, lastNudgedA))
+      const { nudgeAt, step } = levels.values
+      const due = nextThreshold(pct, { nudgeAt, step }, await read($, lastNudgedA))
       if (due !== null) {
         const now = await nowMs($)
         const unattended = armed(activity, now, settings)
         const baseline = await read($, baselineA)
-        if (unattended && !grownEnough(pct, baseline, settings.step)) {
+        if (unattended && !grownEnough(pct, baseline, step)) {
           // Held back, not spent: the step stays due until the growth is there.
           if (pct !== prevPct) await log($, 'guard.baseline', { pct, baseline })
         } else {
@@ -1008,39 +1215,33 @@ export const register: Register = on => {
     return { text: V.settingUp }
   })
 
-  on('tool.call', { tool: 'AskUserQuestion' } as never, async ($, e, next) => {
-    const r = await next(e) as { context?: string[] }
-    // An answered question is a human act, whoever asked it; a dismissed card observes nothing (R1-03).
-    if (Object.keys(extractAnswers(e, r)).length) await observe($, { kind: 'human-command', at: await nowMs($) })
-    // Captured once: a clear landing during an await below resets the module's setupRun.
-    const run = setupRun
-    if (!run) return r as never
-    const pairs = Object.entries(extractAnswers(e, r))
-      .map(([q, answer]) => ({ step: stepForQuestion(q), answer }))
-      .filter((p): p is { step: StepId; answer: string } => p.step !== undefined)
-    if (!pairs.length) return r as never
-    await reloadSettings($)
-    const applied = applyAnswers(settings, pairs)
-    settings = applied.settings
-    await $.store.set(STORE_KEY, settings)
-    await log($, 'setup', { steps: pairs.map(p => p.step), retell: applied.retell })
-    if (pairs.some(p => p.step === 'rc')) await log($, 'rc.answer', { answer: settings.rcAutoClear })
-    const more = (prompt: string) => ({ ...r, context: [...(r.context ?? []), prompt] }) as never
-    if (applied.retell.length) return more(cardPrompt(applied.retell.map(id => questionFor(id, true))))
-    const ids = nextCard(settings, run.asked, run.only)
-    if (ids.length) {
-      run.asked.push(...ids)
-      return more(cardPrompt(ids.map(id => questionFor(id))))
+  on('command.run', { command: COMMANDS.overrides }, async ($, e) => {
+    await observe($, { kind: 'human-command', at: await nowMs($) })
+    const cmd = parseOverridesArgs((e as unknown as { args?: string }).args ?? '')
+    if (cmd.op === 'error') return { text: V.overridesUsage }
+    if (cmd.op === 'add') {
+      const run = {}
+      overridesRun = run
+      $.clock.after(0, () => { void askOverrides($, run).catch(err => timerFailed($, 'overrides', err)) })
+      return { text: V.overridesAdding }
     }
-    if (setupRun === run) setupRun = null
-    await notify($, V.setupSaved)
-    // The person who just answered is here: a clear parked while they were away is offered, never run.
-    const parked = clearParked ? await read($, pendingA) : null
-    if (parked) await notify($, V.pendingOffer(parked.path))
+    const { faults } = await loadOverrides($)
+    if (cmd.op === 'rm') {
+      const r = removeOverride(overrides, cmd.key)
+      if (!r.removed) return { text: V.overridesNoOverride(formatKey(cmd.key)) }
+      if (!(await saveOverrides($, r.overrides))) return { text: V.overridesUnwritable }
+    }
+    return { text: await overridesReport($, faults) }
+  })
+
+  on('tool.call', { tool: 'AskUserQuestion' } as never, async ($, e, next) => {
+    const r = await next(e)
+    // An answered question is a human act, whoever asked it; a dismissed one observes nothing (R1-03).
+    if (Object.keys(extractAnswers(e, r)).length) await observe($, { kind: 'human-command', at: await nowMs($) })
     return r as never
   })
 
-  for (const command of [COMMANDS.handover, COMMANDS.handoff]) {
+  for (const command of [COMMANDS.handover, COMMANDS.handoverShort]) {
     on('command.run', { command }, async $ => {
       // R2-14: the reply says what actually happened (a notice also went out for latch and in-flight).
       const outcome = await startHandover($, 'request', true)
@@ -1063,11 +1264,17 @@ export const register: Register = on => {
     const reason = awaiting?.reason ?? 'request'
     const resume = awaiting?.resume ?? false
     await update($, awaitingA, () => null)
+    // No config dir known: a handover written anywhere else would be lost or misplaced; save nothing.
+    const at = root
+    if (!at) {
+      await notify($, V.handoverFailed)
+      return { result: 'Handover not saved: no config dir (HOME and CLAUDE_CONFIG_DIR are unset). Nothing was cleared; tell the person.' } as never
+    }
     // The count lives in $.state and a restart or --resume starts it at 0: skip files already on disk (R1-18).
     let n = (await read($, handoverCountA)) + 1
-    while (await $.fs.exists(handoverPath(root, session, n)).catch(() => false)) n++
+    while (await $.fs.exists(handoverPath(at, session, n)).catch(() => false)) n++
     await update($, handoverCountA, () => n)
-    const path = handoverPath(root, session, n)
+    const path = handoverPath(at, session, n)
     const now = await nowMs($)
     const markdown = renderHandover(parsed.fields, {
       session, at: new Date(now).toISOString(), cwd, branch: git.branch, dirty: git.dirty,
@@ -1128,14 +1335,15 @@ export const register: Register = on => {
       )
     }
     const pct = (await read($, contextA)) ?? 0
-    const step = (await read($, lastNudgedA)) ?? settings.nudgeAt
+    const { nudgeAt, step: every } = (await thresholds($)).values
+    const step = (await read($, lastNudgedA)) ?? nudgeAt
     const latch = await readLatch($)
     return (
       <Box>
-        <Text>{V.barLine(pct, settings.nudgeAt, latch ? formatHHMM(latch.resetsAtMs) : null)}   </Text>
+        <Text>{V.barLine(pct, nudgeAt, latch ? formatHHMM(latch.resetsAtMs) : null)}   </Text>
         <Button key="handover" hotkey="1" plain label={V.barHandover} onPress={() => barChoice($, 'handover')} />
         <Text>   </Text>
-        <Button key="later" hotkey="2" plain label={V.barLater(step + settings.step)} onPress={() => barChoice($, 'later')} />
+        <Button key="later" hotkey="2" plain label={V.barLater(step + every)} onPress={() => barChoice($, 'later')} />
         <Text>   </Text>
         <Button key="dismiss" hotkey="0" plain label={V.barDismiss} onPress={() => barChoice($, 'dismiss')} />
       </Box>
