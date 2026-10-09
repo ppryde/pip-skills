@@ -215,7 +215,13 @@ def apply_census(v: Vitals, entry: dict[str, Any]) -> None:
     updated = _num(entry.get("updated_at"))
     if updated is not None:
         v.age = max(0.0, v.now - updated)
-    v.stale = bool(entry.get("stale")) or (v.age is not None and v.age > STALE_SECONDS)
+    # census judges liveness itself (by process for a census-mod session, which does not
+    # write on a timer); only an entry with no verdict falls back to the age rule
+    verdict = entry.get("stale")
+    if isinstance(verdict, bool):
+        v.stale = verdict
+    else:
+        v.stale = v.age is not None and v.age > STALE_SECONDS
     v.idle = bool(entry.get("idle"))
     owner = payload.get("session_id")
     if v.session_id and isinstance(owner, str) and owner != v.session_id:

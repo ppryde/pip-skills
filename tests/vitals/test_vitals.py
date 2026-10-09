@@ -110,10 +110,29 @@ def test_expired_and_malformed_windows_dropped():
     assert v.windows == []
 
 
-def test_stale_flag_from_age_even_if_census_says_fresh():
+def test_census_verdict_wins_over_age():
+    """A census-mod session does not write on a timer: old updated_at, process alive."""
+    live = Vitals(now=NOW)
+    vitals.apply_census(live, entry(updated_at=NOW - 6000, stale=False))
+    assert not live.stale and live.age == 6000
+    dead = Vitals(now=NOW)
+    vitals.apply_census(dead, entry(updated_at=NOW - 1, stale=True))
+    assert dead.stale
+
+
+def test_age_rule_when_census_gave_no_verdict():
+    for verdict in ({}, {"stale": "yes"}, {"stale": None}):
+        e = entry(updated_at=NOW - 600)
+        e.pop("stale", None)
+        e.update(verdict)
+        v = Vitals(now=NOW)
+        vitals.apply_census(v, e)
+        assert v.stale, verdict
+    fresh = entry(updated_at=NOW - 5)
+    fresh.pop("stale")
     v = Vitals(now=NOW)
-    vitals.apply_census(v, entry(updated_at=NOW - 600))
-    assert v.stale
+    vitals.apply_census(v, fresh)
+    assert not v.stale
 
 
 def test_ctx_pct_derived_when_missing():
@@ -307,7 +326,7 @@ def test_playful_verdict_follows_thresholds():
 
 def test_stale_reading_shows_age_without_hiding_the_verdict():
     v = Vitals(now=NOW)
-    vitals.apply_census(v, entry(updated_at=NOW - 300))
+    vitals.apply_census(v, entry(updated_at=NOW - 300, stale=True))
     v.ctx_pct = 85
     assert "reading is 5m old" in vitals.render_compact(v)
     playful = vitals.render_playful(v)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 
 from scripts import liveness
 
@@ -15,7 +17,7 @@ def test_live_session_ids_returns_none_without_census(tmp_path, monkeypatch):
 def test_live_session_ids_reads_census_store(tmp_path, monkeypatch):
     store = tmp_path / "census" / "status.json"
     store.parent.mkdir(parents=True)
-    now = 1_000_000.0
+    now = time.time()  # census (the real CLI) judges against the real clock
     store.write_text(json.dumps({
         "version": 1,
         "limits": None,
@@ -29,11 +31,11 @@ def test_live_session_ids_reads_census_store(tmp_path, monkeypatch):
     assert liveness.live_session_ids() == {"sess-live"}
 
 
-def test_live_session_ids_exactly_at_horizon_is_live(tmp_path, monkeypatch):
+def test_live_session_ids_just_inside_the_horizon_is_live(tmp_path, monkeypatch):
     store = tmp_path / "status.json"
-    now = 1_000_000.0
+    now = time.time()  # census (the real CLI) judges against the real clock
     store.write_text(json.dumps({
-        "sessions": {"sess-edge": {"updated_at": now - liveness.STALE_HORIZON_SECONDS}},
+        "sessions": {"sess-edge": {"updated_at": now - liveness.STALE_HORIZON_SECONDS + 10}},
     }))
     monkeypatch.setenv("CENSUS_STORE", str(store))
     monkeypatch.setattr(liveness, "_now_epoch", lambda: now)
@@ -56,7 +58,7 @@ def test_live_session_ids_none_when_sessions_key_missing(tmp_path, monkeypatch):
 
 def test_live_session_ids_skips_malformed_entries(tmp_path, monkeypatch):
     store = tmp_path / "status.json"
-    now = 1_000_000.0
+    now = time.time()  # census (the real CLI) judges against the real clock
     store.write_text(json.dumps({
         "sessions": {
             "sess-good": {"updated_at": now},
@@ -74,7 +76,7 @@ def test_live_session_ids_honours_config_dir_fallback(tmp_path, monkeypatch):
     config = tmp_path / "cfg"
     store = config / "census" / "status.json"
     store.parent.mkdir(parents=True)
-    now = 1_000_000.0
+    now = time.time()  # census (the real CLI) judges against the real clock
     store.write_text(json.dumps({"sessions": {"sess-live": {"updated_at": now}}}))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
     monkeypatch.setattr(liveness, "_now_epoch", lambda: now)
@@ -113,7 +115,7 @@ def test_cli_timeout_is_unknown(tmp_path, monkeypatch):
 
 
 def test_fake_cli_view_yields_only_fresh_sessions(tmp_path, monkeypatch):
-    now = 1_000_000.0
+    now = time.time()  # census (the real CLI) judges against the real clock
     view = {
         "version": 1,
         "limits": None,
@@ -133,7 +135,7 @@ def test_fake_cli_view_yields_only_fresh_sessions(tmp_path, monkeypatch):
 def test_reads_v2_session_files(tmp_path, monkeypatch):
     sessions = tmp_path / "census" / "sessions"
     sessions.mkdir(parents=True)
-    now = 1_000_000.0
+    now = time.time()  # census (the real CLI) judges against the real clock
     (sessions / "live.json").write_text(json.dumps({"version": 2, "updated_at": now}))
     (sessions / "old.json").write_text(json.dumps({"version": 2, "updated_at": now - 999}))
     monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "census"))
@@ -190,3 +192,42 @@ class TestCensusCliDiscovery:
         (store.parent / "cli.path").write_text(str(fake))
         monkeypatch.setenv("CENSUS_STORE", str(store))
         assert liveness.census_cli() == [sys.executable, str(fake)]
+
+
+def _view(monkeypatch, sessions):
+    monkeypatch.setattr(liveness, "_census_view", lambda: {"version": 1, "sessions": sessions})
+    monkeypatch.setattr(liveness, "_now_epoch", lambda: 1_000_000.0)
+
+
+def test_census_stale_false_keeps_an_old_entry_live(monkeypatch):
+    """A census-mod session has no heartbeat: ancient updated_at, process alive."""
+    _view(monkeypatch, {"mod": {"updated_at": 1.0, "stale": False}})
+    assert liveness.live_session_ids() == {"mod"}
+
+
+def test_census_stale_true_beats_a_fresh_updated_at(monkeypatch):
+    _view(monkeypatch, {"gone": {"updated_at": 1_000_000.0, "stale": True}, "ok": {"updated_at": 1_000_000.0}})
+    assert liveness.live_session_ids() == {"ok"}
+
+
+def test_a_non_bool_stale_falls_back_to_the_age_rule(monkeypatch):
+    _view(monkeypatch, {"a": {"updated_at": 1_000_000.0, "stale": "no"}, "b": {"updated_at": 1.0, "stale": None}})
+    assert liveness.live_session_ids() == {"a"}
+
+
+def test_end_to_end_a_census_mod_session_is_judged_by_its_process(tmp_path, monkeypatch):
+    """Through the real census CLI: updated_at is ancient, the process (this one) is alive."""
+    config = tmp_path / "cfg"
+    (config / "sessions").mkdir(parents=True)
+    start = "Thu Oct  9 10:00:00 2026"
+    (config / "sessions" / f"{os.getpid()}.json").write_text(json.dumps({"procStart": start}))
+    census = tmp_path / "census" / "sessions"
+    census.mkdir(parents=True)
+    live = {"version": 2, "updated_at": 1.0, "payload": {"census_mod": {"pid": os.getpid(), "proc_start": start}}}
+    ended = {"version": 2, "updated_at": time.time(),
+             "payload": {"census_mod": {"pid": os.getpid(), "proc_start": start, "ended": 5}}}
+    (census / "live.json").write_text(json.dumps(live))
+    (census / "ended.json").write_text(json.dumps(ended))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "census"))
+    assert liveness.live_session_ids() == {"live"}
