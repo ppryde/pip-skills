@@ -13,6 +13,7 @@ section is "Plugins" and not "Skills".
 - **almoner** — one triaged, read-only digest of what is asking for your attention across configured sources (Notion today), gathered into a per-account SQLite store; no skills yet
 - **census** — records the status-line payload (context %, model, PR state, 5h/7d rate limits) into a per-session, worktree-indexed store; one writer, many readers
 - **chronicle** — per-session token, cost, tool, subagent and per-file churn accounting, read from the transcripts on disk; pull only, no hooks (chronicle, chronicle-reconcile: the ad-hoc audit of the store against the console, run by hand and never from sync)
+- **census-mod** — census v2 recorded and drawn by a mod: records every interactive session into the census store through `census ingest` (no heartbeat; liveness by process) and draws the status line in the band above the prompt; git/gh only when something can have changed; shadow mode via `CENSUS_MOD_STORE`; needs the census plugin; no skills
 - **context-vigil-mod** — context handover as a Claude Code mod (no tmux, no status line): threshold nudge + vigil bar, auto handover with in-process /clear and resume, last light, limit latch and configurable early stop; runs side by side with classic context-vigil; no skills (commands /vho, /vhandoff, /vsetup)
 - **django-inquisition** — Django ORM performance audit against ~70 heuristics, ranked by impact (optimise-orm)
 - **email-absolution** — righteous HTML email construction (elder, scribe, visitation)

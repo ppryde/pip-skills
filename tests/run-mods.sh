@@ -17,7 +17,7 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # plugin name : tests dir (under tests/)
-MODS=("agent-roster:agent_roster" "context-vigil-mod:context_vigil_mod")
+MODS=("agent-roster:agent_roster" "census-mod:census_mod" "context-vigil-mod:context_vigil_mod")
 ONLY="${1:-}"
 
 TMP="$(mktemp -d)"
