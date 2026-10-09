@@ -5,8 +5,6 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
-Use whichever Python launcher works on this machine for every command below: `python3`, else `python`, else `py -3` (Windows).
-
 # /census:vitals-lean
 
 Three lines, emoji gauges, nothing wasted. The one to glance at from a phone.

@@ -5,8 +5,6 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
-Use whichever Python launcher works on this machine for every command below: `python3`, else `python`, else `py -3` (Windows).
-
 # /census-mod:vitals-detailed
 
 Sectioned readout with the figures behind the gauges. The rate-limit **pace** line projects usage at reset from the rate so far this window (shown once 5% of the window has elapsed).
