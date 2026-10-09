@@ -5,6 +5,7 @@ import {
   attachCommand,
   claudePidsIn,
   configDirTag,
+  newestPerPid,
   grouped,
   headline,
   matchTarget,
@@ -361,4 +362,28 @@ test('the Remote Control text warns of dirs that could not be read', async () =>
   const text = summary([{ ...base, pid: 1, status: 'busy', lastActive: 0 }], 60_000, ['personal: EACCES'])
 
   expect(text.split('\n').at(-1)).toBe('! could not read personal: EACCES')
+})
+
+test('relative dirs fold "." and ".." too, so two spellings are one dir', async () => {
+  expect(resolveConfigDirs('foo/../bar:bar/:./bar', '/h', '/h/.claude')).toEqual([
+    { dir: '/h/.claude' },
+    { dir: 'bar', tag: 'bar' },
+  ])
+})
+
+test('a UNC entry switches the split to ";" like a drive letter', async () => {
+  expect(resolveConfigDirs('\\\\srv\\a\\.claude-x;\\\\srv\\b\\.claude-y', '/h', '/h/.claude')).toEqual([
+    { dir: '/h/.claude' },
+    { dir: '\\\\srv\\a\\.claude-x', tag: 'x' },
+    { dir: '\\\\srv\\b\\.claude-y', tag: 'y' },
+  ])
+})
+
+test('one pid in several registries keeps only the most recently active row', async () => {
+  const mk = (configDir: string, lastActive: number) => ({ configDir, row: { ...base, pid: 7, status: 'idle', lastActive } })
+  const found = [mk('/own', 100), mk('/other', 900), { configDir: '/own', row: { ...base, pid: 8, status: 'idle', lastActive: 1 } }]
+
+  expect(newestPerPid(found).map(f => `${f.configDir}:${f.row.pid}`)).toEqual(['/other:7', '/own:8'])
+  // A tie keeps the first, the own dir's.
+  expect(newestPerPid([mk('/own', 5), mk('/other', 5)]).map(f => f.configDir)).toEqual(['/own'])
 })

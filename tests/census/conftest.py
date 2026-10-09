@@ -1,5 +1,7 @@
 import pytest
 
+# `scripts` is the shipped package; plugins/census/pyproject.toml puts it on pythonpath.
+
 
 @pytest.fixture
 def store_file(tmp_path, monkeypatch):
@@ -19,6 +21,12 @@ def _isolated_account(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    # nothing the developer exported may steer the drawer, the cache or the side channel
+    for name in (
+        "CENSUS_STORE", "AGENT_UI_STATUSLINE_CACHE", "CENSUS_STATUSLINE_SEGMENTS", "CENSUS_STATUSLINE_COLOR",
+        "CENSUS_STATUSLINE_MASCOT", "CENSUS_STATUSLINE_GIT_TTL", "CLAUDE_COST_BUDGET", "CLAUDE_PROFILE", "NO_COLOR",
+    ):
+        monkeypatch.delenv(name, raising=False)
     reset = getattr(store, "reset_account_cache", None)
     if reset:
         reset()

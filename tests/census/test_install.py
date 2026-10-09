@@ -161,7 +161,7 @@ def test_cli_install_and_uninstall_wiring(tmp_path, monkeypatch, capsys):
     from scripts import cli
 
     shim, status = _paths(tmp_path)
-    args = ["--shim", str(shim), "--statusline", str(status)]
+    args = ["--shim", str(shim), "--script", str(status)]
     assert cli.main(["install", *args]) == 0
     assert not shim.exists()
     assert cli.main(["install", "--yes", *args]) == 0

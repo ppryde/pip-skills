@@ -14,31 +14,33 @@ def normalise(path: str) -> str:
     return os.path.realpath(path)
 
 
+def _candidates(payload: dict[str, Any]) -> list[Any]:
+    worktree = payload.get("worktree")
+    workspace = payload.get("workspace")
+    return [
+        worktree.get("path") if isinstance(worktree, dict) else None,
+        workspace.get("current_dir") if isinstance(workspace, dict) else None,
+        payload.get("cwd"),
+    ]
+
+
 def worktree_cwd(payload: dict[str, Any]) -> str | None:
     """The worktree-level directory to index this session by.
 
-    First present wins:
+    First usable wins:
       1. ``worktree.path``          — ``--worktree`` sessions
       2. ``workspace.current_dir``  — ``git worktree add`` sessions and the plain case
       3. ``cwd``                    — last resort
 
+    A candidate that is not a non-empty string, or that cannot be resolved (an
+    embedded NUL, an unencodable name), is skipped for the next, not fatal.
     Returns a normalised absolute path, or None if the payload carries no usable
     directory.
     """
-    worktree = payload.get("worktree")
-    if isinstance(worktree, dict):
-        path = worktree.get("path")
-        if isinstance(path, str) and path:
-            return normalise(path)
-
-    workspace = payload.get("workspace")
-    if isinstance(workspace, dict):
-        current = workspace.get("current_dir")
-        if isinstance(current, str) and current:
-            return normalise(current)
-
-    cwd = payload.get("cwd")
-    if isinstance(cwd, str) and cwd:
-        return normalise(cwd)
-
+    for candidate in _candidates(payload):
+        if isinstance(candidate, str) and candidate:
+            try:
+                return normalise(candidate)
+            except (ValueError, OSError):
+                continue
     return None

@@ -97,6 +97,7 @@ class TestHoistOrdering:
         dormant = {"prompt_id": "p1", "cost": {"total_cost_usd": 1.0}}
         st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=100.0)
         st.ingest(_payload("working", "/wt/b", self._rate(60), prompt_id="w1"), now=200.0)
+        assert self._pct(store_file) == 60
         # The dormant session's status line reruns on the timer: same frozen
         # 36%, and it writes LAST.
         st.ingest(_payload("dormant", "/wt/a", self._rate(36), **dormant), now=260.0)
@@ -233,11 +234,13 @@ class TestHoistOrdering:
     def test_an_implausibly_distant_reset_is_refused(self, store_file):
         """A wrong-unit value (a millisecond epoch) or a corrupt one would
         otherwise be the latest window forever and out-rank every real reading."""
-        st.ingest(_payload("s1", "/wt/a", self._rate(20, resets_at=10_000.0)), now=100.0)
-        st.ingest(_payload("bogus", "/wt/b", self._rate(7, resets_at=10_000.0 * 1000)), now=110.0)
+        # Refused with nothing to compare against: it is never stored, never served.
+        st.ingest(_payload("bogus", "/wt/b", self._rate(7, resets_at=10_000.0 * 1000)), now=100.0)
+        assert st.limits(now=100.0) is None
+        # And it does not displace a genuine reading either.
+        st.ingest(_payload("s1", "/wt/a", self._rate(20, resets_at=10_000.0)), now=105.0)
+        st.ingest(_payload("bogus2", "/wt/c", self._rate(7, resets_at=10_000.0 * 1000)), now=110.0)
         assert self._pct(store_file) == 20
-        # And it is never served, even with nothing to compare against.
-        assert st.limits(now=110.0)["five_hour"]["used_percentage"] == 20
 
     def test_a_genuine_seven_day_window_survives_a_slow_clock(self, store_file):
         """The ceiling is measured against our own clock, so it must leave slack

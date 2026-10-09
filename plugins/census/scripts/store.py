@@ -34,13 +34,12 @@ import json
 import math
 import os
 import re
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-from scripts import resolve
+from scripts import gitcache, resolve
 
 STORE_ENV = "CENSUS_STORE"
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
@@ -50,7 +49,7 @@ SESSIONS_DIRNAME = "sessions"
 LIMITS_DIRNAME = "limits"
 LIMITS_FILENAME = "limits.json"   # the first v2 build's single file; migrated away
 LEGACY_FILENAME = "status.json"
-_SAFE_SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SAFE_SID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 SESSION_TTL_SECONDS = 24 * 3600      # prune entries older than this on write
 STALE_HORIZON_SECONDS = 90           # readers flag entries older than this as stale
@@ -72,7 +71,6 @@ _SAME_WINDOW_TOLERANCE_SECONDS = 60
 # nothing: no real window falls in the eight-to-ten-day band, and no plausible
 # corruption does either.
 _MAX_WINDOW_HORIZON_SECONDS = 10 * 24 * 3600
-_GIT_BRANCH_TIMEOUT_SECONDS = 2      # bounded wait; a hung/slow git must never hang the status line
 
 
 def config_dir() -> Path:
@@ -200,7 +198,7 @@ def account_info() -> dict[str, Any]:
     try:
         oauth = (_read_json(path) or {}).get("oauthAccount")
         uuid = oauth.get("accountUuid") if isinstance(oauth, dict) else None
-        if isinstance(uuid, str) and _SAFE_KEY.match(uuid) and isinstance(oauth, dict):
+        if isinstance(uuid, str) and _SAFE_KEY.fullmatch(uuid) and isinstance(oauth, dict):
             info = {
                 "key": uuid,
                 "org": _text_or_none(oauth.get("organizationUuid")),
@@ -230,7 +228,7 @@ def legacy_limits_path() -> Path:
 
 def safe_session_id(sid: object) -> str | None:
     """``sid`` when it is safe as a filename, else None (never a path escape)."""
-    return sid if isinstance(sid, str) and _SAFE_SID.match(sid) else None
+    return sid if isinstance(sid, str) and _SAFE_SID.fullmatch(sid) else None
 
 
 def session_path(sid: str) -> Path:
@@ -246,7 +244,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     """A JSON object from ``path``, or None when missing, unreadable or not an object."""
     try:
         data = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # RecursionError: absurdly nested JSON
         return None
     return data if isinstance(data, dict) else None
 
@@ -314,7 +312,10 @@ def _number(value: Any) -> float | None:
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError:  # an int too large for a float
+        return None
     return number if math.isfinite(number) else None  # rejects NaN and ±inf
 
 
@@ -570,29 +571,16 @@ def _prune(sessions: dict[str, Any], now: float) -> None:
 def _git_branch(worktree_cwd: str | None) -> str | None:
     """The current branch name at ``worktree_cwd``, or None on ANY failure.
 
-    Quarantine-safe by construction: a missing git binary, a non-repo cwd, a
-    detached HEAD, or a slow/hanging git process must never raise or block —
-    census's whole contract is to never break the status line. Bounded by a
-    short timeout so a stalled git process cannot hang the caller.
+    Read through the git cache (one ``git status`` pass per worktree per TTL,
+    shared with the status-line drawer), so a warm ingest runs no git. Quarantine-
+    safe by construction: a missing git binary, a non-repo cwd, a detached HEAD, or
+    a slow/hanging git process must never raise or block — census's whole contract
+    is to never break the status line.
     """
     if not worktree_cwd:
         return None
-    try:
-        result = subprocess.run(
-            ["git", "-C", worktree_cwd, "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_BRANCH_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    branch = result.stdout.strip()
-    if not branch or branch == "HEAD":  # blank, or detached HEAD
-        return None
-    return branch
+    state = gitcache.lookup(census_dir() / gitcache.DIRNAME, worktree_cwd)
+    return None if state.get("detached") else state.get("branch")
 
 
 def build_entry(
@@ -724,6 +712,8 @@ def _create_exclusive(path: Path, body: dict[str, Any]) -> bool:
 def _migrate_limits_json(now: float) -> None:
     """Move the first v2 build's folder-wide ``limits.json`` to the calling account."""
     legacy = legacy_limits_path()
+    if legacy == store_path():  # a v1 store a user named limits.json: the status-file migration owns it
+        return
     if not legacy.exists():
         return
     old = _read_json(legacy)
@@ -835,6 +825,7 @@ def _sweep(now: float) -> None:
                     _unlink(stray)
             except OSError:
                 pass
+    gitcache.prune(census_dir() / gitcache.DIRNAME, SESSION_TTL_SECONDS, wall)
     retired = store_path().with_name(store_path().name + MIGRATED_SUFFIX)
     try:
         if wall - retired.stat().st_mtime > MIGRATED_KEEP_SECONDS:

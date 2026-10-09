@@ -49,8 +49,9 @@ def test_purge_keeps_dir_with_unrelated_files(tmp_path):
 def test_purge_dry_run_changes_nothing(tmp_path):
     data = tmp_path / "census"
     _census_files(data)
+    before = sorted(str(p.relative_to(data)) for p in data.rglob("*"))
     ins.uninstall(tmp_path / "nope", tmp_path / "nope.sh", data, apply=False)
-    assert (data / "limits.json").exists() and (data / "sessions" / "s1.json").exists()
+    assert sorted(str(p.relative_to(data)) for p in data.rglob("*")) == before
 
 
 def test_cli_purge_with_json_store_never_removes_parent(tmp_path, monkeypatch):
@@ -59,7 +60,7 @@ def test_cli_purge_with_json_store_never_removes_parent(tmp_path, monkeypatch):
     (home / "keep.txt").write_text("x")
     (home / "census.json").write_text("{}")
     monkeypatch.setenv("CENSUS_STORE", str(home / "census.json"))
-    args = ["--shim", str(tmp_path / "s"), "--statusline", str(tmp_path / "none.sh")]
+    args = ["--shim", str(tmp_path / "s"), "--script", str(tmp_path / "none.sh")]
     assert cli.main(["uninstall", "--purge", "--yes", *args]) == 0
     assert (home / "keep.txt").read_text() == "x"
 
@@ -79,7 +80,9 @@ def _fake_cache(tmp_path, versions, orphaned=()):
 
 
 def _run(shim: Path, *args: str) -> str:
-    return subprocess.run(["sh", str(shim), *args], capture_output=True, text=True, check=True).stdout.strip()
+    done = subprocess.run(["sh", str(shim), *args], capture_output=True, text=True, check=True)
+    assert done.stderr == ""  # anything on stderr would leak into the status line
+    return done.stdout.strip()
 
 
 def test_shim_follows_upgrade_to_highest_version(tmp_path):

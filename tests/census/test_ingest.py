@@ -1,4 +1,5 @@
 import json
+import shutil
 
 from scripts import store as st
 
@@ -257,6 +258,7 @@ class TestActivityTracking:
         """A bool, a NaN or a numeric STRING is not a usable timestamp. NaN is
         the dangerous one: json round-trips it and every comparison is false."""
         for bad in (True, float("nan"), "700", None):
+            shutil.rmtree(st.census_dir(), ignore_errors=True)  # else the first seed's migration shadows the rest
             store_file.parent.mkdir(parents=True, exist_ok=True)
             store_file.write_text(
                 json.dumps(
