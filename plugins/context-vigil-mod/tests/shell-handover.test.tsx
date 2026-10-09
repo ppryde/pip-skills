@@ -310,6 +310,23 @@ test('an already-named old session keeps its name: no rename, resume still submi
   expect(w.submits.at(-1)?.text).toContain('Resume from the handover')
 })
 
+test('no sh (Windows): the name check reads the transcript file instead of grep', async ($, on) => {
+  const w = world(on)
+  w.shell.value = false
+  w.files.set('/t/s1.jsonl', '{"type":"user"}\n')
+  await handoverThenClear($, w)
+  expect(w.greps).toEqual([])
+  expect(w.renames).toEqual(['Fix the bar'])
+})
+
+test('no sh: a transcript that already holds a title is not renamed', async ($, on) => {
+  const w = world(on)
+  w.shell.value = false
+  w.files.set('/t/s1.jsonl', '{"type":"custom-title","customTitle":"mine"}\n')
+  await handoverThenClear($, w)
+  expect(w.commands).not.toContain('rename')
+})
+
 test('a failed name check neither renames nor notifies, and still resumes', async ($, on) => {
   const w = world(on)
   w.grepFails.value = true

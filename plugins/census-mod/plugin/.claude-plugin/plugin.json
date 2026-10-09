@@ -1,6 +1,6 @@
 {
   "name": "census-mod",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Standalone census as a Claude Code mod: records every interactive session into the census store through its own bundled ingest, draws the status line above the prompt or below it, and ships /census-mod:vitals. Does not need the census plugin (install one or the other). No heartbeat; git and gh only when something can have changed.",
   "author": {
     "name": "Pip",

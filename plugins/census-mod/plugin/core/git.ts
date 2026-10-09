@@ -1,3 +1,4 @@
+import { isAbsolute } from './home'
 import type { GitState } from './types'
 
 // Exactly one status call (no untracked scan: the changes segment never counted untracked files).
@@ -35,14 +36,15 @@ export function parseStatus(stdout: string): GitState {
 /** What to watch for a `rev-parse --absolute-git-dir --show-toplevel` answer; nothing when it failed. */
 export function watchPaths(out: RunOut): string[] {
   const dir = out.exitCode === 0 ? (out.stdout.split('\n')[0] ?? '').trim() : ''
-  return dir.startsWith('/') ? [`${dir}/HEAD`, `${dir}/index`] : []
+  // git prints forward slashes even on Windows (`C:/repo/.git`)
+  return isAbsolute(dir) ? [`${dir}/HEAD`, `${dir}/index`] : []
 }
 
 /** The linked worktree's top level, or null in the main checkout (git dir is `<repo>/.git`). */
 export function worktreeOf(out: RunOut): string | null {
   if (out.exitCode !== 0) return null
   const [dir = '', top = ''] = out.stdout.split('\n').map(l => l.trim())
-  return /\/\.git\/worktrees\/[^/]+$/.test(dir) && top.startsWith('/') ? top : null
+  return /[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.test(dir) && isAbsolute(top) ? top : null
 }
 
 const TOUCH = new Set(['Edit', 'Write', 'NotebookEdit', 'Bash'])

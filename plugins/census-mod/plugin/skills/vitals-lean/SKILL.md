@@ -2,7 +2,7 @@
 name: vitals-lean
 description: Show this session's vital signs in three lean lines — context gauge, model and cost; branch, PR and uncommitted work; rate-limit windows (a fourth line only when the reading may not be live). Phone-sized. Use when the user runs /census-mod:vitals-lean or asks for a quick status check.
 disable-model-invocation: true
-allowed-tools: Bash(python3:*)
+allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
 # /census-mod:vitals-lean
@@ -11,7 +11,7 @@ Three lines, emoji gauges, nothing wasted. The one to glance at from a phone.
 
 ## Reading
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1`
 
 ## What to do
 

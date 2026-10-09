@@ -1,10 +1,10 @@
 ---
 description: Show this session's vital signs (census-mod) — your default style, or name lean or detailed.
 argument-hint: "[lean|detailed] | default <style>"
-allowed-tools: Bash(python3:*), AskUserQuestion
+allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*), AskUserQuestion
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
 
 The reading above is the person's saved default style (lean until they choose one).
 

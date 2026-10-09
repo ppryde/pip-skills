@@ -202,6 +202,14 @@ block of `settings.json`:
 
 or for one session, `claude --plugin-dir plugins/agent-roster/plugin`.
 
+## Windows
+
+The registry listing works on Windows: the config dir is `CLAUDE_CONFIG_DIR`, else `<home>\.claude` (home: `HOME`, else `USERPROFILE`,
+else `HOMEDRIVE`+`HOMEPATH`), `ROSTER_CONFIG_DIRS` takes `;`-separated drive paths and `~\` expands with that home. Liveness comes
+from `tasklist` (if it cannot run, every registry row is trusted), `/roster kill` uses `taskkill /PID <pid> /F`. tmux, `ps` and
+`id` do not exist there, so the stray-pane sweep, `/roster open`, the VS Code helper and its offer are skipped without a message.
+A session that Claude Code did not register is therefore not listed on Windows.
+
 ## Limits
 
 - Read-only: it cannot switch you into another session or tmux pane.

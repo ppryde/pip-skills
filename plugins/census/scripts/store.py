@@ -925,6 +925,34 @@ def _registry_proc_start(pid: int, config: Path | None = None) -> str | None:
     return start if isinstance(start, str) else None
 
 
+def _windows_pid_alive(pid: int) -> bool | None:
+    """Is a process with this pid still running (Windows)? True/False, or None when the OS cannot be asked.
+
+    OpenProcess with the least right that lets GetExitCodeProcess answer; STILL_ACTIVE (259) means running.
+    Never ``os.kill``: on Windows any signal but CTRL_C/CTRL_BREAK terminates the target."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    except (ImportError, AttributeError, OSError):
+        return None
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    ERROR_ACCESS_DENIED = 5
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Access denied: it exists, it is just not ours. Anything else (invalid parameter): no such process.
+        return True if kernel32.GetLastError() == ERROR_ACCESS_DENIED else False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return None
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _process_gone(mod: dict[str, Any], config: Path | None) -> bool:
     """Is the session process named by ``census_mod`` gone? Its pid must be a real int
     above 1; ``os.kill(pid, 0)`` failing with anything but EPERM means gone; and the
@@ -934,13 +962,18 @@ def _process_gone(mod: dict[str, Any], config: Path | None) -> bool:
     pid = mod.get("pid")
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
         return True
-    try:
-        os.kill(pid, 0)
-    except OSError as exc:
-        # Only EPERM means "it exists, it is just not ours". EACCES (also a PermissionError), ESRCH and
-        # anything else leave no process we can vouch for: gone.
-        if exc.errno != errno.EPERM:
+    if os.name == "nt":
+        # os.kill(pid, 0) would TERMINATE the process here; ask the OS without touching it.
+        if _windows_pid_alive(pid) is False:
             return True
+    else:
+        try:
+            os.kill(pid, 0)
+        except OSError as exc:
+            # Only EPERM means "it exists, it is just not ours". EACCES (also a PermissionError), ESRCH and
+            # anything else leave no process we can vouch for: gone.
+            if exc.errno != errno.EPERM:
+                return True
     recorded = mod.get("proc_start")
     return not isinstance(recorded, str) or _registry_proc_start(pid, config) != recorded
 

@@ -1,6 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { HOME_VARS_CHECKED, configRootOf, expandHome, homeOf, joinPath } from '../core/home'
+import type { HomeEnv } from '../core/home'
+import { claudePidsInTasklist, killArgv, onWindowsPath } from '../core/windows'
 import type { SessionRow } from '../types'
 
 const PANE = 'agent-roster'
@@ -14,8 +17,32 @@ const RECENT_MS = 24 * 3600_000
 const SUMMARY_ROWS = 15
 
 // Each live Claude process writes <config dir>/sessions/<pid>.json.
+async function homeEnvOf($: EngineInterface): Promise<HomeEnv> {
+  return {
+    CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
+    HOME: await $.env.get('HOME'),
+    USERPROFILE: await $.env.get('USERPROFILE'),
+    HOMEDRIVE: await $.env.get('HOMEDRIVE'),
+    HOMEPATH: await $.env.get('HOMEPATH'),
+  }
+}
+
+/** The home dir (HOME, USERPROFILE, HOMEDRIVE+HOMEPATH); '' when none is set. */
+async function homeDirOf($: EngineInterface): Promise<string> {
+  return homeOf(await homeEnvOf($)) ?? ''
+}
+
+/** The own config dir: CLAUDE_CONFIG_DIR, else <home>/.claude. Throws, naming the variables checked, when neither can be told. */
 async function configDirOf($: EngineInterface): Promise<string> {
-  return (await $.env.get('CLAUDE_CONFIG_DIR')) || `${await $.env.get('HOME')}/.claude`
+  const dir = configRootOf(await homeEnvOf($))
+  if (!dir) throw new Error(`no config dir: none of ${HOME_VARS_CHECKED} is set`)
+
+  return dir
+}
+
+/** Whether the roster runs on Windows: its config dir is a drive or UNC path. Where `ps`, `tmux`, `id` and `kill` do not exist. */
+async function onWindows($: EngineInterface): Promise<boolean> {
+  return onWindowsPath(await configDirOf($).catch(() => ''))
 }
 
 export type ConfigDir = { dir: string; tag?: string }
@@ -70,7 +97,7 @@ export function resolveConfigDirs(raw: string | undefined, home: string, own: st
   for (const entry of raw.split(separator)) {
     const text = entry.trim()
     if (!text) continue
-    const dir = resolved(/^~([\\/]|$)/.test(text) ? home + text.slice(1) : text)
+    const dir = resolved(expandHome(text, { HOME: home }))
     if (seen.has(key(dir))) continue
     seen.add(key(dir))
     dirs.push({ dir, tag: configDirTag(dir) })
@@ -402,7 +429,7 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   const dirs = resolveConfigDirs(
     // ROSTER_CONFIG_DIRS outranks what `/roster setup` saved.
     (await $.env.get('ROSTER_CONFIG_DIRS'))?.trim() || joinDirs(await storedDirs($)) || undefined,
-    (await $.env.get('HOME')) ?? '',
+    await homeDirOf($),
     await configDirOf($),
   )
   const found: { row: SessionRow; configDir: string }[] = []
@@ -412,7 +439,7 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
     const name = tag ?? 'own dir'
     let entries: Awaited<ReturnType<typeof listRegistry>>
     try {
-      entries = await listRegistry($, `${configDir}/sessions`)
+      entries = await listRegistry($, joinPath(configDir, 'sessions'))
     } catch (err) {
       // One unreadable dir must not hide the others' sessions.
       warnings.push(`${name}: ${String(err).slice(0, 120)}`)
@@ -421,7 +448,7 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
     }
     for (const entry of entries) {
       if (!entry.name.endsWith('.json')) continue
-      const file = `${configDir}/sessions/${entry.name}`
+      const file = joinPath(configDir, 'sessions', entry.name)
       let text: unknown
       try {
         text = await $.fs.read(file)
@@ -495,6 +522,14 @@ export function claudePidsIn(psOutput: string): Set<number> {
 
 async function liveClaudePids($: EngineInterface, pids: number[]): Promise<Set<number>> {
   if (pids.length === 0) return new Set()
+  if (await onWindows($)) {
+    const list = await $.process.run(['tasklist', '/FO', 'CSV', '/NH']).catch(() => undefined)
+    // Without a process list nothing can be told dead: the registry stands as it is.
+    if (list?.exitCode !== 0) return new Set(pids)
+    const running = claudePidsInTasklist(list.stdout)
+
+    return new Set(pids.filter(p => running.has(p)))
+  }
   const ps = await $.process.run(['ps', '-o', 'pid=,comm=', '-p', pids.join(',')])
 
   return claudePidsIn(ps.stdout)
@@ -592,7 +627,7 @@ export function startMatches(startedAt: unknown, etimeMs: number | null, now: nu
 export function otherClaudeDirs(home: string, names: readonly string[], listed: readonly string[]): string[] {
   const skip = new Set(listed.map(resolved))
 
-  return names.filter(n => n.startsWith('.claude')).map(n => `${home}/${n}`).filter(dir => !skip.has(resolved(dir)))
+  return names.filter(n => n.startsWith('.claude')).map(n => joinPath(home, n)).filter(dir => !skip.has(resolved(dir)))
 }
 
 /**
@@ -636,6 +671,8 @@ async function strayPanes(
   registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
   listedDirs: readonly string[],
 ): Promise<SessionRow[]> {
+  // tmux and ps are POSIX: no sweep on Windows, and nothing to say about it.
+  if (await onWindows($)) return []
   const sweeps: string[] = []
   for (const socket of await tmuxSockets($)) {
     const panes = await $.process
@@ -670,14 +707,14 @@ async function registeredElsewhere(
   listedDirs: readonly string[],
 ): Promise<Map<number, string>> {
   const found = new Map<number, string>()
-  const home = (await $.env.get('HOME')) ?? ''
+  const home = await homeDirOf($)
   if (!home) return found
   const names = (await $.fs.list(home).catch(() => [])).map(e => e.name)
   const now = Date.now()
   for (const dir of otherClaudeDirs(home, names, listedDirs)) {
     for (const [panePid, pid] of claudeOf) {
       if (found.has(panePid)) continue
-      const text = await $.fs.read(`${dir}/sessions/${pid}.json`).catch(() => undefined)
+      const text = await $.fs.read(joinPath(dir, 'sessions', `${pid}.json`)).catch(() => undefined)
       let record: { pid?: unknown; startedAt?: unknown } | undefined
       try {
         record = typeof text === 'string' ? (JSON.parse(text) as { pid?: unknown; startedAt?: unknown }) : undefined
@@ -784,6 +821,7 @@ export function matchTarget(rows: SessionRow[], target: string): SessionRow[] {
 
 /** Every tmux server socket of this user: the default one first, any other under the tmux dir after. */
 async function tmuxSockets($: EngineInterface): Promise<string[]> {
+  if (await onWindows($)) return []
   const uid = await $.process
     .run(['id', '-u'])
     .then(r => r.stdout.trim())
@@ -851,10 +889,10 @@ async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
   const isWholeSession = Boolean(socket && r.tmux) && mayKillTmuxSession(r, panes, self)
   const run = isWholeSession
     ? await $.process.run(['tmux', '-L', socket!, 'kill-session', '-t', `=${r.tmux}`])
-    : await $.process.run(['kill', String(r.pid)])
+    : await $.process.run(killArgv(r.pid, await onWindows($)))
   if (run.exitCode !== 0) return `Could not kill ${name}: ${run.stderr.trim() || `exit ${run.exitCode}`}`
 
-  return isWholeSession ? `Killed tmux session ${name} (socket ${socket}).` : `Sent SIGTERM to ${name}.`
+  return isWholeSession ? `Killed tmux session ${name} (socket ${socket}).` : `${(await onWindows($)) ? 'Ended' : 'Sent SIGTERM to'} ${name}.`
 }
 
 async function killFromPane($: EngineInterface, r: SessionRow) {
@@ -917,12 +955,13 @@ export function windowFolderFor(
 
 /** The open VS Code window folder showing this session's repo, if the helper reported one. */
 async function vscodeFolderFor($: EngineInterface, r: SessionRow): Promise<string | undefined> {
-  const dir = `${await $.env.get('HOME')}/${VSCODE_WINDOWS_DIR}`
+  if (await onWindows($)) return undefined // the VS Code helper and `ps` are macOS/Linux
+  const dir = joinPath(await homeDirOf($), VSCODE_WINDOWS_DIR)
   const windows: VscodeWindow[] = []
   for (const entry of await $.fs.list(dir).catch(() => [])) {
     if (!entry.name.endsWith('.json')) continue
     try {
-      const w = JSON.parse(String(await $.fs.read(`${dir}/${entry.name}`))) as VscodeWindow
+      const w = JSON.parse(String(await $.fs.read(joinPath(dir, entry.name)))) as VscodeWindow
       if (typeof w.pid === 'number' && Array.isArray(w.folders)) windows.push(w)
     } catch {
       // Half-written or foreign: skip it.
@@ -992,9 +1031,9 @@ async function openSession($: EngineInterface, r: SessionRow): Promise<string> {
       }
     }
     // The helper honours only a link carrying the token it finds in this file.
-    const home = await $.env.get('HOME')
+    const home = await homeDirOf($)
     const isArmed = await $.fs
-      .write(`${home}/${VSCODE_NONCE_FILE}`, nonce)
+      .write(joinPath(home, VSCODE_NONCE_FILE), nonce)
       .then(() => true)
       .catch(() => false)
     if (isRaised && isArmed) {
@@ -1055,8 +1094,8 @@ async function helperInstalled($: EngineInterface, home: string): Promise<boolea
 
 /** Builds the helper and installs it into Default and every VS Code profile. */
 async function installHelper($: EngineInterface): Promise<string> {
-  const home = await $.env.get('HOME')
-  const storage = await $.fs.read(`${home}/${VSCODE_STORAGE}`).catch(() => undefined)
+  const home = await homeDirOf($)
+  const storage = await $.fs.read(joinPath(home, VSCODE_STORAGE)).catch(() => undefined)
   let profiles: string[] = []
   try {
     profiles = profileNames(JSON.parse(String(storage)))
@@ -1091,8 +1130,9 @@ async function offerHelper($: EngineInterface) {
   if (typeof choice === 'string' || (typeof choice === 'number' && choice > Date.now())) return
   // A -p or SDK run draws nowhere: nobody to ask.
   if ((await $.session.surfaces()).length === 0) return
-  const home = (await $.env.get('HOME')) ?? ''
-  if (!(await $.fs.exists(`${home}/.vscode`))) return
+  if (await onWindows($)) return // no VS Code helper offer where there is no tmux to attach to
+  const home = await homeDirOf($)
+  if (!home || !(await $.fs.exists(joinPath(home, '.vscode')))) return
   if (await helperInstalled($, home)) {
     await $.store.set(HELPER_CHOICE, 'installed')
     return
@@ -1136,7 +1176,7 @@ export type Account = { dir: string; tag: string; live: number }
 
 /** `~/…` for a path under HOME, else the path. */
 export function tildePath(dir: string, home: string): string {
-  return home && (dir === home || dir.startsWith(`${home}/`)) ? `~${dir.slice(home.length)}` : dir
+  return home && (dir === home || dir.startsWith(`${home}/`) || dir.startsWith(`${home}\\`)) ? `~${dir.slice(home.length)}` : dir
 }
 
 /** The option label for an account. It never holds a comma: the answer joins labels with commas. */
@@ -1189,7 +1229,7 @@ async function storedDirs($: EngineInterface): Promise<string[]> {
 async function liveCounts($: EngineInterface, dirs: readonly string[]): Promise<Map<string, number>> {
   const pidsOf = new Map<string, number[]>()
   for (const dir of dirs) {
-    const entries = await $.fs.list(`${dir}/sessions`).catch(() => [])
+    const entries = await $.fs.list(joinPath(dir, 'sessions')).catch(() => [])
     pidsOf.set(dir, entries.flatMap(e => (/^\d+\.json$/.test(e.name) ? [Number.parseInt(e.name, 10)] : [])))
   }
   const alive = await liveClaudePids($, [...new Set([...pidsOf.values()].flat())]).catch(() => new Set<number>())
@@ -1203,7 +1243,7 @@ async function discoverAccounts($: EngineInterface, home: string, own: string): 
   const names = (await $.fs.list(home).catch(() => [])).map(e => e.name)
   const candidates: string[] = []
   for (const dir of otherClaudeDirs(home, names, [own])) {
-    if (await $.fs.exists(`${dir}/sessions`).catch(() => false)) candidates.push(dir)
+    if (await $.fs.exists(joinPath(dir, 'sessions')).catch(() => false)) candidates.push(dir)
   }
   const counts = await liveCounts($, candidates)
 
@@ -1215,11 +1255,11 @@ async function resolveTyped($: EngineInterface, typed: readonly string[], home: 
   const dirs: string[] = []
   const rejected: string[] = []
   for (const text of typed) {
-    const dir = resolved(/^~([\\/]|$)/.test(text) ? home + text.slice(1) : text)
+    const dir = resolved(expandHome(text, { HOME: home }))
     const absolute = dir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(dir) || dir.startsWith('\\\\')
     if (!absolute) rejected.push(`${text} (not an absolute path)`)
     else if (!(await $.fs.exists(dir).catch(() => false))) rejected.push(`${text} (no such folder)`)
-    else if (!(await $.fs.exists(`${dir}/sessions`).catch(() => false))) rejected.push(`${text} (no sessions/ folder)`)
+    else if (!(await $.fs.exists(joinPath(dir, 'sessions')).catch(() => false))) rejected.push(`${text} (no sessions/ folder)`)
     else dirs.push(dir)
   }
 
@@ -1235,7 +1275,7 @@ async function runSetup($: EngineInterface): Promise<void> {
   if (setupRunning) return
   setupRunning = true
   try {
-    const home = (await $.env.get('HOME')) ?? ''
+    const home = await homeDirOf($)
     const own = await configDirOf($)
     const current = await storedDirs($)
     const found = await discoverAccounts($, home, own)

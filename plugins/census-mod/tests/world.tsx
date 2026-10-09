@@ -34,12 +34,19 @@ export type World = {
   answer: { value: (q: { header: string; question: string; options: string[] }) => string | null }
   /** census-mod's own bundled recorder (`<plugin root>/scripts/cli.py`): present unless a test removes it. */
   bundle: { present: boolean }
+  /** The Python launchers that run (`python3`, `python`, `py -3`): the others fail to spawn. */
+  pythons: { value: string[] }
+  /** Whether `sh` runs (it does not on Windows); when not, spawning it throws. */
+  shell: { value: boolean }
   below: { text: string }              // what another mod beneath this one draws in the band ('' = nothing)
 }
 
 /** Where the recorder is, whatever folder the plugin sits in (the kit stages it in a temp dir). */
 export const BUNDLED_CLI = /\/scripts\/cli\.py$/
 export const REGISTRY = '/cfg/sessions'
+
+/** The kit resolves a relative path against the plugin folder; a Windows path (`C:\\x`) is relative on this machine, so undo that. */
+const winPath = (p: string): string => p.match(/\/([A-Za-z]:\\.*|\\\\.*)$/)?.[1] ?? p
 
 export function world(on: On, opts: { now?: number; env?: Record<string, string>; files?: Record<string, string> } = {}): World {
   const w: World = {
@@ -55,7 +62,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true },
+    logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true }, pythons: { value: ['python3'] }, shell: { value: true },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -64,14 +71,14 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('store.delete', (_$, e) => { w.store.delete(e.key); return { value: undefined } })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   mock.env(on, opts.env ?? { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u' })
-  on('fs.read', (_$, e) => { const t = w.files.get(real(e.path)); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
+  on('fs.read', (_$, e) => { const t = w.files.get(real(winPath(e.path))); return t === undefined ? { deny: `ENOENT ${e.path}` } : { value: t as never } })
   on('fs.exists', (_$, e) => {
-    const path = (e as { path: string }).path
+    const path = winPath((e as { path: string }).path)
     if (w.files.has(real(path))) return { value: true }
     return { value: w.bundle.present && BUNDLED_CLI.test(path) }
   })
   on('fs.list', (_$, e) => {
-    const path = (e as { path: string }).path
+    const path = winPath((e as { path: string }).path)
     if (path === REGISTRY) w.registryLists.count++
     const names = w.dirs.get(path)
     return names ? { value: names.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
@@ -80,7 +87,16 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     const init = (e as unknown as { init?: { cwd?: string; stdin?: string; env?: Record<string, string>; timeoutMs?: number } }).init ?? {}
     const run: Run = { argv: [...e.argv], cwd: init.cwd, stdin: init.stdin, env: init.env, timeoutMs: init.timeoutMs }
     w.runs.push(run)
-    const [cmd, ...args] = e.argv
+    // Windows spells move/del through cmd; the fake files treat them as mv/rm
+    const argv = e.argv[0] === 'cmd' && e.argv[2] === 'move' ? ['mv', '-f', e.argv[4] ?? '', e.argv[5] ?? ''] : e.argv[0] === 'cmd' && e.argv[2] === 'del' ? ['rm', '-f', e.argv[e.argv.length - 1] ?? ''] : e.argv
+    const [cmd, ...args] = argv
+    if (args[args.length - 1] === '--version') {
+      const launcher = [cmd, ...args.slice(0, -1)].join(' ')
+      if (!w.pythons.value.includes(launcher)) throw new Error(`spawn ${cmd} ENOENT`)
+      return { value: done(0, 'Python 3.12.0') }
+    }
+    if (cmd === 'sh' && !w.shell.value) throw new Error('spawn sh ENOENT')
+    if (cmd === 'sh' && e.argv[2] === 'exit 0') return { value: done(0) }
     if (cmd === 'git' && args.includes('status')) { await w.gitGate.value; return { value: done(w.git.exitCode, w.git.status) } }
     if (cmd === 'git' && args.includes('rev-parse')) return { value: done(w.git.exitCode, w.git.dir) }
     if (cmd === 'gh') {
@@ -90,10 +106,10 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'grep') return { value: w.titles.has(e.argv[e.argv.length - 1] ?? '') ? done(0, w.titles.get(e.argv[e.argv.length - 1] ?? '')) : done(1) }
     if (cmd === 'sh' && e.argv[2]?.includes('custom-title')) { const t = w.titles.get(e.argv[4] ?? ''); return { value: t ? done(0, t) : done(1) } }
     if (cmd === 'sh' && e.argv[2]?.includes('cache_creation')) return { value: done(0, w.tail.value) }
-    if (cmd === 'cp') { w.cps.push([...e.argv]); const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.set(to ?? '', t); return { value: done(0) } }
-    if (cmd === 'mv') { if (w.mvFails.value) return { value: done(1) }; const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.links.delete(to ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
-    if (cmd === 'rm') { w.files.delete(e.argv[e.argv.length - 1] ?? ''); return { value: done(0) } }
-    if (args.includes('ingest')) {
+    if (cmd === 'cp') { w.cps.push([...argv]); const [, , from, to] = argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.set(to ?? '', t); return { value: done(0) } }
+    if (cmd === 'mv') { if (w.mvFails.value) return { value: done(1) }; const [, , from, to] = argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.links.delete(to ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
+    if (cmd === 'rm') { w.files.delete(argv[argv.length - 1] ?? ''); return { value: done(0) } }
+    if (args.includes('ingest') && cmd !== 'sh') {
       w.ingests.push({ payload: JSON.parse(init.stdin ?? '{}'), argv: [...e.argv], env: init.env, timeoutMs: init.timeoutMs })
       return { value: done(0) }
     }
@@ -117,8 +133,8 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('classic.CwdChanged', () => ({}))
   on('classic.PostCompact', () => ({}))
   on('ui.toast', (_$, e) => { w.toasts.push(e.text); return { value: undefined } })
-  on('fs.write', (_$, e) => { w.files.set(real(e.path), e.text); return { value: undefined } })
-  on('fs.stat', (_$, e) => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(e.path), realPath: real(e.path) } as never }))
+  on('fs.write', (_$, e) => { w.files.set(real(winPath(e.path)), e.text); return { value: undefined } })
+  on('fs.stat', (_$, e) => ({ value: { kind: 'file' as const, size: 1, mtimeMs: 0, isLink: w.links.has(winPath(e.path)), realPath: real(winPath(e.path)) } as never }))
   // $.ui.ask runs as an AskUserQuestion tool call; its answers sit on the result, keyed by question text.
   on('tool.call', async (_$, e) => {
     const input = e as unknown as { tool: string; questions?: { question: string; header?: string; options?: (string | { label: string })[] }[] }

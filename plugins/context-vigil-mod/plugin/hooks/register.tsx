@@ -10,7 +10,8 @@ import type { Signal } from '../core/arming'
 import { appendLine, dayKey, makeRecord } from '../core/eventlog'
 import { COALESCE_MS, GIT_ARGV, GIT_DIR_ARGV, parseGit, touchesGit, watchPaths } from '../core/git'
 import { INPUT_SCHEMA, TOOL_DESCRIPTION, fresh, grownEnough, injectText, instructionText, isHandoverRequest, limitResumeText, mentionsHandover, nextThreshold, parseFields, renderHandover, resumeText, reusable } from '../core/handover'
-import { TAIL_CMD, type CacheTtl, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
+import { HOME_VARS_CHECKED } from '../core/home'
+import { TAIL_CMD, type CacheTtl, cacheLinesFromText, parseWrites, transcriptPathFor, ttlFromWrites } from '../core/cache-ttl'
 import { TTL_1H, fireAt, holdOnReturn, rearm, shouldFire } from '../core/last-light'
 import { clearGate, needsRcQuestion } from '../core/surfaces'
 import { applyAnswers, extractAnswers, isStep, nextCard, questionFor } from '../core/setup'
@@ -496,7 +497,13 @@ async function bindSession($: EngineInterface) {
   lastLightArmed = false
   standDown = false
   rcAsked = false
-  root = configRoot({ CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'), HOME: await $.env.get('HOME') })
+  root = configRoot({
+    CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
+    HOME: await $.env.get('HOME'),
+    USERPROFILE: await $.env.get('USERPROFILE'),
+    HOMEDRIVE: await $.env.get('HOMEDRIVE'),
+    HOMEPATH: await $.env.get('HOMEPATH'),
+  })
   session = await $.session.id()
   cwd = await $.session.cwd()
   settings = loadSettings(await $.store.get(STORE_KEY))
@@ -834,9 +841,20 @@ async function barChoice($: EngineInterface, action: 'handover' | 'later' | 'dis
   if (action === 'handover') await startHandover($, 'request', true)
 }
 
+// Whether `sh` runs here (it does not on Windows); asked once per process.
+let shellRuns: boolean | undefined
+async function hasShell($: EngineInterface): Promise<boolean> {
+  if (shellRuns === undefined) shellRuns = await $.process.run(['sh', '-c', 'exit 0'], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
+  return shellRuns
+}
+
 // Does the transcript hold a custom-title line? null = could not tell.
 async function sessionNamed($: EngineInterface, transcriptPath: string): Promise<boolean | null> {
   try {
+    if (!(await hasShell($))) {
+      const text = await $.fs.read(transcriptPath).catch(() => undefined) // over the read cap or missing: cannot tell
+      return typeof text === 'string' ? text.includes('"type":"custom-title"') : null
+    }
     const r = await $.process.run(['grep', '-c', '-F', '"type":"custom-title"', transcriptPath])
     if (r.exitCode === 0) return Number.parseInt(r.stdout, 10) > 0
     return r.exitCode === 1 ? false : null
@@ -876,8 +894,13 @@ async function readTtl($: EngineInterface): Promise<CacheTtl> {
   try {
     const path = (await read($, transcriptA)) ?? (root ? transcriptPathFor(root, await $.session.cwd(), await $.session.id()) : null)
     if (!path) return ttlFromWrites(null)
-    const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', path])
-    if (r.exitCode === 0) writes = parseWrites(r.stdout)
+    if (await hasShell($)) {
+      const r = await $.process.run(['sh', '-c', TAIL_CMD, 'sh', path])
+      if (r.exitCode === 0) writes = parseWrites(r.stdout)
+    } else {
+      const text = await $.fs.read(path).catch(() => undefined)
+      if (typeof text === 'string') writes = parseWrites(cacheLinesFromText(text))
+    }
   } catch { /* unknown */ }
   return ttlFromWrites(writes)
 }
@@ -1340,7 +1363,7 @@ export const register: Register = on => {
     const at = root
     if (!at) {
       await notify($, V.handoverFailed)
-      return { result: 'Handover not saved: no config dir (HOME and CLAUDE_CONFIG_DIR are unset). Nothing was cleared; tell the person.' } as never
+      return { result: `Handover not saved: no config dir (checked ${HOME_VARS_CHECKED}; none is set). Nothing was cleared; tell the person.` } as never
     }
     // The count lives in $.state and a restart or --resume starts it at 0: skip files already on disk (R1-18).
     let n = (await read($, handoverCountA)) + 1

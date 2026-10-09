@@ -89,6 +89,17 @@ A mod loads from disk: `claude --plugin-dir plugins/census-mod/plugin` for one s
 the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the account's `settings.json` `env` for every
 session. Run it beside your status line first (shadow mode, below). Do not install the census plugin as well: the two are alternatives.
 
+## Windows
+
+Works on Windows. The config dir is `CLAUDE_CONFIG_DIR`, else `<home>\.claude` (home: `HOME`, else `USERPROFILE`, else
+`HOMEDRIVE`+`HOMEPATH`); `~`, `~/` and `~\` in `CENSUS_STORE` and `CENSUS_MOD_STORE` expand with the same home, and every path keeps the
+separator of its base (no `C:\Users\you/.claude`). Recording runs the bundled recorder with the first of `python3`, `python`, `py -3`
+that answers `--version` (chosen once per process); with none the band still draws, nothing is recorded and one log line says so.
+`/census-setup` writes `settings.json` through a temp file and `cmd /c move` (no `cp -p`/`mv`); `/census-mod:vitals` tries the same three
+launchers. The cache lifetime and session title are read with `tail`/`grep` where `sh` runs (Git Bash) and from the transcript file
+itself where it does not (a transcript over the engine's 4 MiB read cap is then skipped: the cache stays at the 5-minute default and the title at its
+last value). Liveness on Windows asks the OS (`OpenProcess`) and never `os.kill`, which there ends the process.
+
 ## What it records, and when
 
 | Event | Why |

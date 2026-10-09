@@ -1,4 +1,6 @@
 // /census-setup: the questions, what an answer means, and the settings.json surgery. Pure: no `$`.
+import { expandHome, joinPath } from './home'
+import type { HomeEnv } from './home'
 import { DEFAULT_SEGMENTS } from './render'
 
 export type RecordMode = 'yes' | 'shadow' | 'no'
@@ -103,7 +105,7 @@ export function writerActive(entries: { updatedAt: number; hasCensusMod: boolean
 
 // ---- settings: env > $.store > defaults ----------------------------------------------------------
 
-export type SetupEnv = { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string; HOME?: string }
+export type SetupEnv = HomeEnv & { CENSUS_MOD_STORE?: string; CENSUS_STATUSLINE_SEGMENTS?: string; CENSUS_MOD_PLACEMENT?: string }
 export type Effective = { record: RecordMode; shadowDir: string | null; draw: boolean; placement: Placement; segments: string | undefined; pr: boolean }
 
 /**
@@ -113,12 +115,12 @@ export type Effective = { record: RecordMode; shadowDir: string | null; draw: bo
  */
 export function effective(saved: Saved, env: SetupEnv, det: Detection, configRoot: string | null): Effective {
   const envShadow = env.CENSUS_MOD_STORE?.trim()
-  const shadowAt = configRoot ? `${configRoot}/${SHADOW_DIRNAME}` : null
+  const shadowAt = configRoot ? joinPath(configRoot, SHADOW_DIRNAME) : null
   let record: RecordMode = saved.record ?? (det.ingestBlock ? 'no' : 'yes')
   let shadowDir: string | null = record === 'shadow' ? shadowAt : null
   if (envShadow) {
     record = 'shadow'
-    shadowDir = envShadow.startsWith('~/') && env.HOME ? env.HOME.replace(/\/+$/, '') + envShadow.slice(1) : envShadow
+    shadowDir = expandHome(envShadow, env)
   }
   if (record === 'shadow' && !shadowDir) record = 'no' // nowhere to write
   const envSegments = env.CENSUS_STATUSLINE_SEGMENTS?.trim()

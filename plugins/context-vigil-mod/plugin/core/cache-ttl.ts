@@ -1,12 +1,19 @@
 // Which prompt-cache lifetime the session's main conversation is writing — PROBES §11.
 // Asked once, when last light is about to act. 'unknown' (nothing found) never fires: warming
 // a cold 5-minute cache is the opposite of what last light is for.
+import { joinPath } from './home'
+
 export type CacheTtl = '1h' | '5m' | 'unknown'
 export type Writes = { h1: number; m5: number }
 
 // Reads the usage split off the end of the transcript without ever loading a whole row: grep -o
 // prints only each row's `cache_creation` object. Positional args: $1 = transcript path.
 export const TAIL_CMD = 'tail -c 65536 "$1" | grep -o \'"cache_creation":{[^}]*}\''
+
+/** What TAIL_CMD prints, from the file's text: for where there is no sh/tail/grep (Windows). */
+export function cacheLinesFromText(text: string, bytes = 65536): string {
+  return (text.slice(-bytes).match(/"cache_creation":\{[^}]*\}/g) ?? []).join('\n')
+}
 
 const field = (line: string, key: string): number => {
   const m = new RegExp(`"ephemeral_${key}_input_tokens":(\\d+)`).exec(line)
@@ -35,5 +42,5 @@ export function ttlFromWrites(w: Writes | null): CacheTtl {
 
 // Where Claude Code keeps a session's transcript, for when no event has carried the path yet.
 export function transcriptPathFor(configRoot: string, cwd: string, sessionId: string): string {
-  return `${configRoot}/projects/${cwd.replace(/[^A-Za-z0-9]/g, '-')}/${sessionId}.jsonl`
+  return joinPath(configRoot, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'), `${sessionId}.jsonl`)
 }
