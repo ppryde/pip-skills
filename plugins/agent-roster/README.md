@@ -1,7 +1,7 @@
 # agent-roster
 
 `/roster` opens a pane of every Claude Code session running on this machine,
-across both accounts, in three sections:
+in three sections:
 
 - **Needs you** (red, with a red `?`) and **Working** (green): one card each, its border
   the status. The card leads with the session's title (your `/rename`, else
@@ -49,8 +49,11 @@ window and writes `~/.cache/agent-roster/vscode-windows/<pid>.json` naming the
 window's folders, removed when the window closes; files whose extension host
 pid has died are ignored. The first time the mod loads
 with VS Code present and no helper, it asks once — **Install**, **Not now**
-(asks again next session) or **Never** — and remembers the answer per account
-in `$.store`. **Install** builds the helper and installs it into Default and
+(asks again in the first session started 24 hours later) or **Never** — and
+remembers the answer in `$.store`. The session that asks holds the question
+for 10 minutes first, so other sessions starting at the same moment stay
+quiet (two starting within the same instant can still both ask); closing it
+without answering lets a session started after those 10 minutes ask again. **Install** builds the helper and installs it into Default and
 every profile VS Code's storage lists: a window loads only its own profile's
 extensions, and one without the helper is invisible to the roster (and
 answers the link with "cannot be installed because it was not found").
@@ -71,28 +74,64 @@ control Terminal.
 
 ## Killing a session
 
-Each row but the session the pane runs in has a **kill** button (click it in
+Each row but the session the pane runs in, and those still at a startup
+prompt, has a **kill** button (click it in
 fullscreen, or Tab to it and Enter). The first press only arms the row:
 **confirm kill** or **cancel**. From the phone, or anywhere a pane is not to
-hand, `/roster kill <tmux-name|pid>`; a tmux name both accounts use is
-refused as ambiguous, with the pids to kill by.
+hand, `/roster kill <tmux-name|pid>`; a tmux name held on two tmux servers is
+refused as ambiguous, with the pids to kill by. A session at a startup prompt
+is refused too: it has not registered, so the pid the roster holds for it is
+the pane's first process, which may be a shell; open it and answer the prompt,
+or close its pane.
 
-A session in tmux is ended with `tmux kill-session`, so no orphaned shell pane
-is left. The socket is found by matching the session's pid against each
-server's pane pids (the wrapper's `claude-personal` and `claude` first, then
-any server under `/tmp/tmux-<uid>/`), never by name alone. A session outside
-tmux gets SIGTERM. The session the command or pane runs in is always refused.
+A session in its own tmux session is ended with `tmux kill-session`, so no
+orphaned shell pane is left. The socket is found by matching the session's pid
+against each server's pane pids (the default server first, then any server
+under `/tmp/tmux-<uid>/`), never by name alone. Otherwise the session gets
+SIGTERM, which can leave a shell pane behind: when it shares a tmux session
+with the one the command or pane runs in (by pane or by name), when no tmux
+server shows its pid, or when it runs outside tmux. The session the command or
+pane runs in is always refused.
+
+## Several accounts: `ROSTER_CONFIG_DIRS`
+
+By default the roster reads one config dir. To see every account's sessions in
+one pane, list the config dirs, separated by `:`, in `ROSTER_CONFIG_DIRS`, and
+set it in each account's `settings.json` `env`:
+
+```json
+{ "env": { "ROSTER_CONFIG_DIRS": "~/.claude:~/.claude-personal" } }
+```
+
+`~` is your home folder, repeats are read once, and a dir that does not exist
+yet is an empty registry. A dir that exists but cannot be read (permissions, a
+dead mount) is named in a warning line at the foot of the Remote Control text
+and under the pane's header, and the other dirs still show. Rows from a dir
+other than the session's own carry a tag from its name (`.claude-personal`
+becomes `personal`, `.claude` becomes `claude`): on a card it ends the
+tmux · repo · branch line, on an idle line it follows the tmux name, and in the
+Remote Control text it ends the row:
+
+```
+2 need you · 1 working · 0 idle
+
+NEEDS YOU
+• Demo cards — cc-ledger-2 · ledger · 2m · input needed · personal
+```
+
+On Windows, separate with `;` (an entry starting `C:\` switches the split to
+`;`). The session's own dir is always read, listed or not.
 
 ## Where the data comes from
 
 Nothing is scraped from tmux. Every live Claude process keeps a registry file,
 `<config dir>/sessions/<pid>.json`, holding its tmux session name, cwd,
 status (`busy`, `idle`, `waiting` + `waitingFor`, `shell`) and the time of its
-last status change. The mod reads both config dirs (`~/.claude-personal` as
-`personal`, `~/.claude` as `work`) every 5 s and drops entries whose pid is no
+last status change. The mod reads the config dir (`$CLAUDE_CONFIG_DIR`, else
+`~/.claude`, or the dirs in `ROSTER_CONFIG_DIRS`) every 5 s and drops entries whose pid is no
 longer running (the registry outlives crashed processes). A session held at a startup
 prompt (trusting a folder, logging in) has not registered yet, so the roster
-also lists the panes on the wrapper's tmux sockets: one running Claude with no
+also lists the panes on every tmux server: one running Claude with no
 registry entry shows under *Needs you* as "at a startup prompt". If a scan
 fails, the header says why in red and the last good roster stays on screen.
 
@@ -111,13 +150,13 @@ text when it runs over Remote Control.
 
 It is a mod (a plugin of function hooks), early access in Claude Code 2.1.287.
 For every session, interactive and remote alike, name the folder in the `env`
-block of each account's `settings.json`:
+block of `settings.json`:
 
 ```json
 { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/repos/pip-skills/plugins/agent-roster" } }
 ```
 
-or for one session, `claude --plugin-dir plugins/agent-roster`.
+or for one session, `claude --plugin-dir plugins/agent-roster/plugin`.
 
 ## Limits
 

@@ -25,8 +25,17 @@ function spendNonce(given) {
 
   return expected.length >= 16 && given === expected
 }
-// A Dock-launched VS Code may not have Homebrew on PATH: find tmux itself.
-const TMUX = ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'].find(p => fs.existsSync(p))
+// A Dock-launched VS Code may not have Homebrew on PATH: find tmux itself,
+// the usual places first, then the extension host's PATH (MacPorts, Nix).
+const TMUX = [
+  '/opt/homebrew/bin/tmux',
+  '/usr/local/bin/tmux',
+  '/usr/bin/tmux',
+  ...(process.env.PATH ?? '')
+    .split(require('path').delimiter)
+    .filter(Boolean)
+    .map(dir => require('path').join(dir, 'tmux')),
+].find(p => fs.existsSync(p))
 // A client started from a tab's shell sits a level or two below it (zsh, a
 // wrapper function's subshell); further up is VS Code itself.
 const ANCESTOR_DEPTH = 4

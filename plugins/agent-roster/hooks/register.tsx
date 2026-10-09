@@ -13,11 +13,58 @@ const PROMPT_MAX = 160
 const RECENT_MS = 24 * 3600_000
 const SUMMARY_ROWS = 15
 
-// Each live Claude process writes <config dir>/sessions/<pid>.json; one config dir per account.
-const ACCOUNTS = [
-  { account: 'personal', dir: '.claude-personal' },
-  { account: 'work', dir: '.claude' },
-]
+// Each live Claude process writes <config dir>/sessions/<pid>.json.
+async function configDirOf($: EngineInterface): Promise<string> {
+  return (await $.env.get('CLAUDE_CONFIG_DIR')) || `${await $.env.get('HOME')}/.claude`
+}
+
+export type ConfigDir = { dir: string; tag?: string }
+
+/** The tag a foreign config dir's rows carry: `.claude-personal` is `personal`, `.claude` is `claude`. */
+export function configDirTag(dir: string): string {
+  const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? dir
+
+  return name.replace(/^\.claude-/, '').replace(/^\./, '')
+}
+
+// "." and ".." folded away, trailing separators dropped: two spellings of one dir compare equal.
+function resolved(path: string): string {
+  const sep = path.includes('\\') && !path.includes('/') ? '\\' : '/'
+  const out: string[] = []
+  for (const part of path.split(/[\\/]/)) {
+    if (part === '.' || (part === '' && out.length > 0)) continue
+    if (part === '..' && out.length > 1) out.pop()
+    else out.push(part)
+  }
+
+  return out.join(sep) || sep
+}
+
+/**
+ * The config dirs to read, from `ROSTER_CONFIG_DIRS`. The mod cannot see the
+ * platform, so it splits on ":" unless an entry starts with a drive letter
+ * (`C:\`), then on ";". `~` (or `~/`, `~\`) is HOME. Deduped by resolved path; the session's
+ * own dir is always read, first and untagged, listed or not. Unset or blank: the own dir alone.
+ */
+export function resolveConfigDirs(raw: string | undefined, home: string, own: string): ConfigDir[] {
+  if (!raw?.trim()) return [{ dir: own }]
+  const separator = /(^|;)[A-Za-z]:[\\/]/.test(raw) ? ';' : ':'
+  // Windows paths ignore case: "C:\\U" and "c:\\u" are one dir.
+  const key = (dir: string) => (separator === ';' ? dir.toLowerCase() : dir)
+  const seen = new Set<string>([key(resolved(own))])
+  // Always first: a list must not hide the person's own sessions.
+  const dirs: ConfigDir[] = [{ dir: own }]
+  for (const entry of raw.split(separator)) {
+    const text = entry.trim()
+    if (!text) continue
+    const dir = resolved(/^~([\\/]|$)/.test(text) ? home + text.slice(1) : text)
+    if (seen.has(key(dir))) continue
+    seen.add(key(dir))
+    dirs.push({ dir, tag: configDirTag(dir) })
+  }
+
+  return dirs
+}
 
 const sessions = atom({ plugin: 'agent-roster', key: 'sessions' } as const, {
   rows: [],
@@ -57,7 +104,7 @@ export function projectSlug(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, '-')
 }
 
-export function toRow(raw: unknown, account: string): SessionRow | undefined {
+export function toRow(raw: unknown): SessionRow | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const d = raw as Record<string, unknown>
   // pid 0 or 1 would make `kill` signal a process group or init: never a session.
@@ -68,7 +115,6 @@ export function toRow(raw: unknown, account: string): SessionRow | undefined {
   return {
     pid,
     sessionId: String(d.sessionId ?? ''),
-    account,
     tmux: tmux || undefined,
     cwd: d.cwd,
     ...repoOf(d.cwd),
@@ -205,7 +251,7 @@ const label = (r: SessionRow) => r.title ?? (r.worktree ? `${r.repo}/${r.worktre
 const nameOf = (r: SessionRow) => r.tmux ?? `pid ${r.pid}`
 
 /** The roster as plain text for Remote Control: sections, one or two lines a session. */
-export function summary(rows: SessionRow[], now: number): string {
+export function summary(rows: SessionRow[], now: number, warnings: string[] = []): string {
   const { waiting, busy, recent, older } = grouped(rows, now)
   const lines = [headline(rows)]
   let budget = SUMMARY_ROWS
@@ -214,8 +260,8 @@ export function summary(rows: SessionRow[], now: number): string {
     lines.push('', heading)
     for (const r of list.slice(0, budget)) {
       const why = r.status === 'waiting' && r.waitingFor ? ` · ${r.waitingFor}` : ''
-      const work = r.account === 'work' ? ' · work' : ''
-      lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${why}${work}`)
+      const account = r.account ? ` · ${r.account}` : ''
+      lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${why}${account}`)
       if (r.prompt) lines.push(`   you${r.promptAt ? ` ${ago(r.promptAt, now)}` : ''}: ${r.prompt}`)
     }
     budget -= list.length
@@ -224,6 +270,7 @@ export function summary(rows: SessionRow[], now: number): string {
   section('WORKING', busy)
   section('IDLE, LAST 24H', recent)
   if (older.length) lines.push('', `+ ${older.length} idle for over a day`)
+  if (warnings.length) lines.push('', ...warnings.map(w => `! could not read ${w}`))
 
   return lines.join('\n')
 }
@@ -309,19 +356,44 @@ async function branchOf($: EngineInterface, cwd: string) {
   return branch
 }
 
-async function scan($: EngineInterface): Promise<SessionRow[]> {
-  const home = await $.env.get('HOME')
+/**
+ * The registry's entries. A missing folder (no session has run yet) is an
+ * empty registry; any other failure rejects, so the last good roster stays up
+ * with the reason instead of an empty one.
+ */
+export async function listRegistry($: EngineInterface, dir: string) {
+  try {
+    return await $.fs.list(dir)
+  } catch (err) {
+    if (!(await $.fs.exists(dir).catch(() => true))) return []
+    throw err
+  }
+}
+
+async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings: string[] }> {
+  const dirs = resolveConfigDirs(
+    (await $.env.get('ROSTER_CONFIG_DIRS')) || undefined,
+    (await $.env.get('HOME')) ?? '',
+    await configDirOf($),
+  )
   const found: { row: SessionRow; configDir: string }[] = []
-  for (const { account, dir } of ACCOUNTS) {
-    const configDir = `${home}/${dir}`
-    const entries = await $.fs.list(`${configDir}/sessions`).catch(() => [])
+  const warnings: string[] = []
+  for (const { dir: configDir, tag } of dirs) {
+    let entries: Awaited<ReturnType<typeof listRegistry>>
+    try {
+      entries = await listRegistry($, `${configDir}/sessions`)
+    } catch (err) {
+      // One unreadable dir must not hide the others' sessions.
+      warnings.push(`${tag ?? 'own dir'}: ${String(err).slice(0, 120)}`)
+      continue
+    }
     for (const entry of entries) {
       if (!entry.name.endsWith('.json')) continue
       const text = await $.fs.read(`${configDir}/sessions/${entry.name}`).catch(() => undefined)
       if (typeof text !== 'string') continue
       try {
-        const row = toRow(JSON.parse(text), account)
-        if (row) found.push({ row, configDir })
+        const row = toRow(JSON.parse(text))
+        if (row) found.push({ row: tag ? { ...row, account: tag } : row, configDir })
       } catch {
         // A file caught mid-write; the next poll reads it whole.
       }
@@ -329,6 +401,8 @@ async function scan($: EngineInterface): Promise<SessionRow[]> {
   }
   // The registry outlives crashed processes, and their pids get reused: keep
   // only pids still running Claude.
+  // Every dir failing is a failed scan: the last good roster stays up with the reason.
+  if (warnings.length === dirs.length) throw new Error(warnings.join('; '))
   const alive = await liveClaudePids(
     $,
     found.map(f => f.row.pid),
@@ -352,10 +426,10 @@ async function scan($: EngineInterface): Promise<SessionRow[]> {
   )
   const strays = await strayPanes($, {
     pids: new Set(live.map(f => f.row.pid)),
-    tmuxNames: new Set(live.filter(f => f.row.tmux).map(f => `${f.row.account}:${f.row.tmux}`)),
+    tmuxNames: new Set(live.flatMap(f => (f.row.tmux ? [f.row.tmux] : []))),
   })
 
-  return [...registered, ...strays]
+  return { rows: [...registered, ...strays], warnings }
 }
 
 // What tmux reports per pane, tab-separated, for the unregistered-session sweep.
@@ -384,6 +458,16 @@ async function liveClaudePids($: EngineInterface, pids: number[]): Promise<Set<n
   return claudePidsIn(ps.stdout)
 }
 
+const STARTUP_PROMPT = 'at a startup prompt (not registered yet)'
+
+/**
+ * A row from the tmux sweep, not the registry. Its pid is the pane's first
+ * process, which may be a shell above Claude, so it is never offered a kill.
+ */
+export function isStray(r: SessionRow): boolean {
+  return r.sessionId === '' && r.waitingFor === STARTUP_PROMPT
+}
+
 /**
  * Panes running Claude with no registry entry: a session held at a startup
  * prompt (trusting a folder, a login) has not registered yet, and it is
@@ -391,34 +475,24 @@ async function liveClaudePids($: EngineInterface, pids: number[]): Promise<Set<n
  */
 export function strayRows(
   panes: string,
-  socket: string,
   registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
 ): SessionRow[] {
-  const account = socket === 'claude-personal' ? 'personal' : socket === 'claude' ? 'work' : socket
   const rows: SessionRow[] = []
   for (const line of panes.split('\n')) {
     const [tmux, pidText, command, cwd, activity] = line.split('\t')
     const pid = Number(pidText)
     // A registered session whose pane holds a shell above Claude shows the
     // shell's pid here: its tmux name still says it is listed already.
-    // The wrapper's sockets map to the registry's accounts; on any other the
-    // account is unknown, so a registered session of that name on any account counts.
-    const isWrapperSocket = socket === 'claude-personal' || socket === 'claude'
-    const isListed =
-      registered.pids.has(pid) ||
-      (isWrapperSocket
-        ? registered.tmuxNames.has(`${account}:${tmux}`)
-        : [...registered.tmuxNames].some(key => key.endsWith(`:${tmux}`)))
+    const isListed = registered.pids.has(pid) || registered.tmuxNames.has(tmux ?? '')
     if (!tmux || !cwd || !(pid > 1) || isListed || !CLAUDE_COMMAND.test(command ?? '')) continue
     rows.push({
       pid,
       sessionId: '',
-      account,
       tmux,
       cwd,
       ...repoOf(cwd),
       status: 'waiting',
-      waitingFor: 'at a startup prompt (not registered yet)',
+      waitingFor: STARTUP_PROMPT,
       kind: 'interactive',
       lastActive: Number(activity) * 1000 || 0,
     })
@@ -432,11 +506,11 @@ async function strayPanes(
   registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
 ): Promise<SessionRow[]> {
   const rows: SessionRow[] = []
-  for (const socket of KNOWN_SOCKETS) {
+  for (const socket of await tmuxSockets($)) {
     const panes = await $.process
       .run(['tmux', '-L', socket, 'list-panes', '-a', '-F', PANE_FORMAT])
       .catch(() => undefined)
-    if (panes?.exitCode === 0) rows.push(...strayRows(panes.stdout, socket, registered))
+    if (panes?.exitCode === 0) rows.push(...strayRows(panes.stdout, registered))
   }
 
   return rows
@@ -455,21 +529,26 @@ function refresh($: EngineInterface): Promise<void> {
 
 async function rescan($: EngineInterface) {
   let rows: SessionRow[]
+  let warnings: string[]
   try {
-    rows = sorted(await scan($))
+    const scanned = await scan($)
+    rows = sorted(scanned.rows)
+    warnings = scanned.warnings
   } catch (err) {
     // Keep the last good roster on screen and say why it is stale.
     await update($, sessions, held => ({ ...held, error: String(err).slice(0, 200) }))
     return
   }
   const selfId = await $.session.id()
-  await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId }))
+  await update($, sessions, () => ({ rows, checkedAt: Date.now(), selfId, warnings }))
   const waiting = rows.filter(r => r.status === 'waiting').length
   $.ui.status(waiting ? `agents: ${waiting} waiting` : undefined)
 }
 
 /** A refresh the person asked for: branches re-read now, not when their minute is up. */
 async function refreshNow($: EngineInterface) {
+  // A scan already running would put the branches it read back after a clear.
+  await scanning?.catch(() => undefined)
   branches.clear()
   await rescanAfterCurrent($)
 }
@@ -488,8 +567,16 @@ export function matchTarget(rows: SessionRow[], target: string): SessionRow[] {
   return rows.filter(r => r.tmux === target || String(r.pid) === target)
 }
 
-// The wrapper's sockets first; any other server under the tmux dir after.
-const KNOWN_SOCKETS = ['claude-personal', 'claude', 'default']
+/** Every tmux server socket of this user: the default one first, any other under the tmux dir after. */
+async function tmuxSockets($: EngineInterface): Promise<string[]> {
+  const uid = await $.process
+    .run(['id', '-u'])
+    .then(r => r.stdout.trim())
+    .catch(() => '')
+  const listed = uid ? await $.fs.list(`/tmp/tmux-${uid}`).catch(() => []) : []
+
+  return [...new Set(['default', ...listed.map(s => s.name)])]
+}
 
 /** The pids of every pane in a tmux session on one socket; undefined when it is not there. */
 async function panePids($: EngineInterface, socket: string, tmux: string): Promise<number[] | undefined> {
@@ -503,11 +590,8 @@ async function panePids($: EngineInterface, socket: string, tmux: string): Promi
 /** The tmux socket whose session of this name has the session's own pid in a pane. */
 async function socketOf($: EngineInterface, r: SessionRow): Promise<string | undefined> {
   if (!r.tmux) return undefined
-  const uid = (await $.process.run(['id', '-u'])).stdout.trim()
-  const listed = await $.fs.list(`/tmp/tmux-${uid}`).catch(() => [])
-  const sockets = [...new Set([...KNOWN_SOCKETS, ...listed.map(s => s.name)])]
-  for (const socket of sockets) {
-    // A name alone is not enough: both accounts' sockets can hold the same one.
+  for (const socket of await tmuxSockets($)) {
+    // A name alone is not enough: two sockets can each hold a session of that name.
     if ((await panePids($, socket, r.tmux))?.includes(r.pid)) return socket
   }
 
@@ -518,17 +602,17 @@ async function socketOf($: EngineInterface, r: SessionRow): Promise<string | und
  * Whether `kill-session` may end the target's whole tmux session. Only when
  * this session is known and the target holds it neither by pane (a shell above
  * Claude shows the shell's pid there, so that alone is not enough) nor by tmux
- * name on the same account; otherwise only the target process is signalled.
+ * name; otherwise only the target process is signalled.
  */
 export function mayKillTmuxSession(
-  target: { tmux?: string; account: string },
+  target: { tmux?: string },
   targetPanes: readonly number[],
-  self: { pid: number; tmux?: string; account: string } | undefined,
+  self: { pid: number; tmux?: string } | undefined,
 ): boolean {
   if (!self) return false
   if (targetPanes.includes(self.pid)) return false
 
-  return !(self.tmux && self.tmux === target.tmux && self.account === target.account)
+  return !(self.tmux && self.tmux === target.tmux)
 }
 
 /**
@@ -541,6 +625,9 @@ async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
   const selfId = await $.session.id()
   const self = selfId ? (await read($, sessions)).rows.find(s => s.sessionId === selfId) : undefined
   if ((selfId && r.sessionId === selfId) || r.pid === self?.pid) return `Refused: ${name} is this session.`
+  if (isStray(r)) {
+    return `Refused: ${name} is at a startup prompt and not registered yet, so its pid may be a shell; open it to answer the prompt, or close its pane.`
+  }
   if (!(await liveClaudePids($, [r.pid])).has(r.pid)) {
     return `Refused: pid ${r.pid} is no longer a Claude session; refresh and try again.`
   }
@@ -728,7 +815,7 @@ async function openFromPane($: EngineInterface, r: SessionRow) {
   $.ui.toast(await openSession($, r).catch(err => `Could not open: ${String(err)}`))
 }
 
-// The VS Code helper is offered once per account: `$.store` keeps the answer.
+// The VS Code helper is offered once: `$.store` keeps the answer.
 const HELPER_CHOICE = 'vscodeHelper'
 const VSCODE_STORAGE = 'Library/Application Support/Code/User/globalStorage/storage.json'
 const HELPER_QUESTION =
@@ -779,6 +866,9 @@ async function installHelper($: EngineInterface): Promise<string> {
   return `Installed the VS Code helper into ${where}. Reload open VS Code windows (Developer: Reload Window) so open can find them.`
 }
 
+// How long an open helper question keeps other sessions from asking it too.
+const ASK_HOLD_MS = 10 * 60_000
+
 /** Asks once, the first time the mod loads with VS Code present and no helper. */
 async function offerHelper($: EngineInterface) {
   // 'installed' or 'never' settle it; a number is "Not now" until then.
@@ -792,8 +882,10 @@ async function offerHelper($: EngineInterface) {
     await $.store.set(HELPER_CHOICE, 'installed')
     return
   }
-  // Rejects when dismissed: ask again next session. Many sessions start at
-  // once, so "Not now" waits a day rather than asking in every one.
+  // Many sessions start at once: the first to get here claims the question for
+  // a while, so the rest stay quiet while it is open. Dismissed, the claim just
+  // lapses and a later session asks; "Not now" waits a day.
+  await $.store.set(HELPER_CHOICE, Date.now() + ASK_HOLD_MS)
   const answer = await $.ui
     .ask(HELPER_QUESTION, { header: 'VS Code', options: ['Install', 'Not now', 'Never'] })
     .catch(() => undefined)
@@ -821,7 +913,7 @@ export const register: Register = on => {
     await $.command
       .register({
         name: COMMAND,
-        description: 'Every Claude session on this machine: tmux name, repo, status, last active',
+        description: 'Claude sessions in this config dir, plus tmux startup prompts: tmux name, repo, status, last active',
       })
       .catch(() => undefined)
     // After the session settles, so the question is not the first thing drawn.
@@ -845,7 +937,7 @@ export const register: Register = on => {
       const matches = matchTarget(rows, target)
       if (matches.length === 0) return { text: `No live session named ${target}.` }
       if (matches.length > 1) {
-        const pids = matches.map(m => `${m.pid} (${m.account})`).join(', ')
+        const pids = matches.map(m => m.pid).join(', ')
         return { text: `${target} is ambiguous; ${verb} by pid: ${pids}` }
       }
       const message =
@@ -857,8 +949,8 @@ export const register: Register = on => {
       return { text: message }
     }
     if (e.origin.kind === 'bridge') {
-      const { rows, checkedAt } = await read($, sessions)
-      return { text: summary(rows, checkedAt) }
+      const { rows, checkedAt, warnings } = await read($, sessions)
+      return { text: summary(rows, checkedAt, warnings) }
     }
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
 
@@ -867,7 +959,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { rows, checkedAt, selfId, error } = await read($, sessions)
+    const { rows, checkedAt, selfId, error, warnings = [] } = await read($, sessions)
     const pending = await read($, pendingKill)
     const isShowingOlder = await read($, showOlder)
     const tabs = repoTabs(rows)
@@ -898,9 +990,11 @@ export const register: Register = on => {
               open
             </Button>
           )}
-          <Button key={`kill-${r.pid}`} dimColor onPress={() => void update($, pendingKill, () => r.pid)}>
-            kill
-          </Button>
+          {!isStray(r) && (
+            <Button key={`kill-${r.pid}`} dimColor onPress={() => void update($, pendingKill, () => r.pid)}>
+              kill
+            </Button>
+          )}
         </Box>
       )
 
@@ -909,8 +1003,8 @@ export const register: Register = on => {
         nameOf(r),
         r.worktree ? `${r.repo}/${r.worktree}` : r.repo,
         r.branch,
-        r.account === 'work' ? 'work' : undefined,
         r.kind === 'bg' ? 'bg' : undefined,
+        r.account,
       ]
         .filter(Boolean)
         .join(' · ')
@@ -955,7 +1049,7 @@ export const register: Register = on => {
         <Box flexGrow={1}>
           <Text dimColor wrap="truncate-end">
             {r.status === 'shell' ? '$' : '·'} <Text bold>{label(r)}</Text> {nameOf(r)}
-            {r.account === 'work' ? ' · work' : ''}
+            {r.account ? ` · ${r.account}` : ''}
           </Text>
         </Box>
         <Text dimColor>{ago(r.lastActive, checkedAt)}</Text>
@@ -1012,6 +1106,11 @@ export const register: Register = on => {
             refresh
           </Button>
         </Box>
+        {warnings.map(w => (
+          <Text key={`warn-${w}`} color="yellow" wrap="truncate-end">
+            could not read {w}
+          </Text>
+        ))}
         {error && (
           <Text color="red" wrap="truncate-end">
             Last scan failed, showing the one before: {error}

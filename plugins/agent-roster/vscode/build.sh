@@ -39,7 +39,7 @@ rm -f "$out"
 (cd "$stage" && zip -qr "$out" '[Content_Types].xml' extension.vsixmanifest extension)
 echo "$out"
 # A window with its own VS Code profile loads only that profile's extensions:
-# `sh build.sh install Personal Work` installs into Default and each named one.
+# `sh build.sh install Alpha Beta` installs into Default and each named one.
 # One profile failing must not stop the rest: each is tried, failures named last.
 if [ "${1:-}" = install ]; then
   shift
