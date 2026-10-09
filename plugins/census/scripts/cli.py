@@ -116,6 +116,14 @@ def cmd_read(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_where(args: argparse.Namespace) -> int:
+    """Read-only: where census and census-mod are, as one JSON object (no shell variables needed)."""
+    from scripts import where as wh
+
+    print(json.dumps(wh.report(), indent=2))
+    return 0
+
+
 def _statusline_path() -> Path:
     return st.config_dir() / "statusline-command.sh"
 
@@ -196,6 +204,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--preview", action="store_true", help="draw a canned payload and the live census store; no stdin, no ingest"
     )
     line.set_defaults(func=cmd_statusline)
+
+    sub.add_parser(
+        "where", help="read-only: the config dir, census dir, plugin installs and whether census-mod is enabled, as JSON"
+    ).set_defaults(func=cmd_where)
 
     read = sub.add_parser("read", help="print store contents as JSON")
     group = read.add_mutually_exclusive_group()

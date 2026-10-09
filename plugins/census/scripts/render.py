@@ -51,6 +51,8 @@ PREVIEW_PAYLOAD: dict[str, Any] = {
     "context_window": {"used_percentage": 42},
     "cost": {"total_cost_usd": 3.10, "total_duration_ms": 6_480_000},
     "prompt_cache": {"hit_ratio": 0.93, "requests": 12, "warm": True, "expires_at": None, "misses": 0},
+    # canned, so the default `pr` segment is visible in a preview
+    "pr": {"number": 12, "url": "https://github.com/example/repo/pull/12", "review_state": "approved"},
 }
 
 

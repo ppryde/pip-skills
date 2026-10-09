@@ -19,19 +19,36 @@ never a `census` already on `PATH`, which may be another plugin's launcher. Use
 stands for `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py"` (or the `python`
 form); write the whole thing out each time.
 
+Never build a command from shell variables in braces or with default values
+(a dollar sign, a brace and a colon-dash fallback): Claude Code stops to ask about
+"a variable in braces" even for a read-only check. Every path you need (the config
+dir, the census dir, `settings.json`) comes from `CENSUS where` below.
+
 ## Steps
 
-1. **Two censuses.** The same plugin is published twice, as `census@pip-skills`
-   and `census@wf-claude-market`. If both are installed, tell the person to
-   disable the one this skill is not part of (the other marketplace's, not the
-   copy you are running): both write the same launcher, `~/.local/bin/census`,
-   and install refuses a launcher it does not own. Do not continue until they
-   have.
+1. **Look around.** Run `CENSUS where`. It is read-only and prints one JSON
+   object: `config_dir`, `census_dir`, `settings_path`, the current `status_line`
+   command, every census in the plugin cache (`census_installs`, with
+   `enabled_census`), and `census_mod` (installed, enabled).
+   - **census-mod first.** If `census_mod.enabled` is true (or it is installed and
+     not disabled), say so: census-mod records sessions and draws the status
+     line from inside Claude Code, above the input or below it, with no status
+     line command at all. Recommend `/census-setup` (its guided setup: record,
+     band, placement, layout) instead of installing a command status line. Only
+     carry on with this skill if the person still wants the command status line,
+     and tell them not to run both against the same store (census-mod's setup
+     can remove an existing one).
+   - **Two censuses.** The same plugin is published twice, as `census@pip-skills`
+     and `census@wf-claude-market`. If `enabled_census` shows both enabled, tell
+     the person to disable the one this skill is not part of (the other
+     marketplace's, not the copy you are running): both write the same
+     launcher, `~/.local/bin/census`, and install refuses a launcher it does
+     not own. Do not continue until they have.
 
 2. **Preview.** Run `CENSUS statusline --preview` and show the output. It draws
-   a canned payload plus the live census store (their real rate limits). It does
-   not ingest anything and reads nothing from stdin (it may cache git state for
-   the current directory).
+   a canned payload (including a canned PR, so the `pr` segment shows) plus the
+   live census store (their real rate limits). It does not ingest anything and
+   reads nothing from stdin (it may cache git state for the current directory).
 
 3. **Choose segments.** Ask which segments they want and in what order. The
    names are `context`, `cache`, `limits`, `cost`, `model`, `git`, `dir`,
@@ -43,9 +60,8 @@ form); write the whole thing out each time.
    they are happy. Keeping the default is fine: then pass no `--segments`.
 
 4. **Dry run.** Run `CENSUS install --statusline [--segments "<list>"]` (no
-   `--yes`) and show what it would do. It sets `statusLine` in
-   `$CLAUDE_CONFIG_DIR/settings.json` (else `~/.claude/settings.json`), with a
-   60 second refresh interval, and installs the launcher.
+   `--yes`) and show what it would do. It sets `statusLine` in the `settings_path`
+   from step 1, with a 60 second refresh interval, and installs the launcher.
    - If it refuses because a `statusLine` already exists, say what is there and
      that `--replace` backs it up to `<census dir>/statusline.previous.json` and
      swaps; only add `--replace` if they agree.

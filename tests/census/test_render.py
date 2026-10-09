@@ -347,6 +347,12 @@ def test_preview_payload_is_json_serialisable_and_drawable():
     assert "🧠" in out and "💸" in out
 
 
+def test_the_canned_preview_carries_a_pr_so_the_default_pr_segment_shows():
+    out = rd.draw(rd.preview_payload(NOW), env=PLAIN, now=NOW, limits=None, git=GIT)
+    assert out.split("\n")[1].endswith("🔀 #12 approved")
+    assert rd.PREVIEW_PAYLOAD["pr"] == {"number": 12, "url": "https://github.com/example/repo/pull/12", "review_state": "approved"}
+
+
 class TestReviewRound2:
     def test_windows_path_is_shortened_like_a_posix_one(self):
         p = payload(workspace={"current_dir": "C:\\Users\\pip\\repos\\pip-skills"})

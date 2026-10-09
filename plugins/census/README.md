@@ -257,6 +257,7 @@ census install            # dry run: what it would add or replace
 census install --yes      # launcher at ~/.local/bin/census + ingest block in a bash status-line script (prints the line to add by hand when there is no script)
 census install --statusline [--replace] [--segments LIST] --yes   # set settings.json statusLine to `census statusline`
 census uninstall --yes    # remove the launcher and block; restore a replaced statusLine; --purge also deletes data
+census where              # read-only JSON: config dir, census dir, settings path, status line, plugin installs, census-mod enabled
 ```
 
 `--statusline` skips the bash-block step, still installs the launcher (on Windows the command is `python "<census dir>\launcher.py" statusline`, a stable file that follows plugin upgrades), and needs a readable `settings.json`
