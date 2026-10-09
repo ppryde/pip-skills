@@ -221,7 +221,7 @@ right (green below 75, orange from 75, red from 90; the cost bar eats `$`).
 
 ```
 🧠 ••••ᗧ••••• 42% │ 🎯 93% ⟳ 50m │ ⏳ ••ᗧ••••••• 23% ⟳ 2h10m │ 📅 ᗧ••••••••• 4% ⟳ 3d4h │ 💸 ••ᗧ$$$$$$$ $3.10 │ 🐌 $1.55/hr
-🦾 Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1
+✻  Opus 5.5 │ 🌿 feat/x │ 📁 …/pip/repos/pip-skills │ ✏️ 3  ⬆️ 1 │ 🔀 #12 approved
 ```
 
 | Segment | Shows |
@@ -230,18 +230,19 @@ right (green below 75, orange from 75, red from 90; the cost bar eats `$`).
 | `cache` 🎯/🧊 | `prompt_cache` hit rate, `⟳` expiry while warm, `✗N` misses; hidden with no requests |
 | `limits` ⏳ 📅 | this account's census limits (5h, 7d), live windows only, each its own segment |
 | `cost` 💸 🐌/🔥/🚀 | `cost.total_cost_usd` against the budget, and `$`/hour (🔥 from 8, 🚀 from 20) |
-| `model` | the account mascot (🦾 work, 🎮 personal) and `model.display_name` |
+| `model` | the mascot, a bold ✻ in Claude's orange (`#D97757`, truecolor; plain with colour off) in a two-column slot like an emoji, and `model.display_name` |
 | `git` 🌿 | branch (short SHA when detached) |
 | `dir` 📁 | the last three path components, with a leading `…` |
 | `changes` | ✏️ uncommitted (always shown), ⬆️ unpushed (when an upstream exists) |
+| `pr` 🔀 | the branch's open PR from `payload.pr` (never a `gh` call): `#12` and its review state, green `approved`, yellow `pending`, red `changes_requested`; hidden without a PR |
 
 Configuration, all optional, read from the environment (so it can live in `settings.json` `env`):
 
 - `CENSUS_STATUSLINE_SEGMENTS`: comma list and order; `/` starts a new line; unknown names are ignored. Default
-  `context,cache,limits,cost/model,git,dir,changes`.
+  `context,cache,limits,cost/model,git,dir,changes,pr`.
 - `CENSUS_STATUSLINE_COLOR`: `auto` (default: on unless `NO_COLOR` is set), `always`, `never`.
 - `CENSUS_STATUSLINE_GIT_TTL`: seconds git state is cached (default 15; `0` disables).
-- `CLAUDE_COST_BUDGET` (default 20), `CENSUS_STATUSLINE_MASCOT`, `CLAUDE_PROFILE` / `CLAUDE_CONFIG_DIR` (mascot).
+- `CLAUDE_COST_BUDGET` (default 20), `CENSUS_STATUSLINE_MASCOT` (any string, drawn as given; default ✻).
 - `AGENT_UI_STATUSLINE_CACHE`: when set, the raw payload is also written to `<dir>/<session_id>.json`.
 
 Git state is cached per worktree under `<census dir>/gitcache/`: one `git status --porcelain=2 --branch -uno` pass (untracked files are never listed, so never counted) fills

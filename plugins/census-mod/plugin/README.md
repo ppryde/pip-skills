@@ -31,7 +31,8 @@ account's `settings.json` `statusLine`, whether its script carries census's inge
 into the store in the last few minutes. Then:
 
 1. **Record**: the real store, a shadow store (`<config dir>/census-shadow`), or no.
-2. **Band**: draw the status line above the prompt, or not.
+2. **Band**: draw the status line, or not. If yes, **where**: above the input (the band) or below it,
+   under Claude Code's hint line (recommended for a new install; see "The band").
 3. **Two writers**, only when recording to the real store while this account's status line
    also records: remove this account's `statusLine` (offered only with the band on; it is
    backed up exactly to `<census dir>/census-mod.statusline.json` and `settings.json` is
@@ -106,17 +107,27 @@ measurable from a mod and is left out.
 ## The band
 
 Same segments as `census statusline`, in `CENSUS_STATUSLINE_SEGMENTS` syntax (`,` joins on
-a line, `/` starts the next; default `context,cache,limits,cost/model,git,dir,changes`).
-Also read: `CENSUS_STATUSLINE_MASCOT`, `CLAUDE_COST_BUDGET`, `CLAUDE_PROFILE`,
-`CLAUDE_CONFIG_DIR`. `NO_COLOR`/`CENSUS_STATUSLINE_COLOR` are not read: the terminal's
+a line, `/` starts the next; default `context,cache,limits,cost/model,git,dir,changes,pr`).
+Also read: `CENSUS_STATUSLINE_MASCOT` (any string, drawn as given; the default is a bold ✻ in
+Claude's orange, `#D97757`, in a two-column slot like an emoji), `CLAUDE_COST_BUDGET`. `NO_COLOR`/`CENSUS_STATUSLINE_COLOR` are not read: the terminal's
 theme and the surface decide colour.
 
-The band nests what other mods draw beneath it (`await next(e)`), yields to a survey,
-keeps to `maxRows`, and drops whole trailing parts of a line that is wider than
-`bodyColumns`. A 30 s tick redraws the countdowns; it never records.
+**Placement.** `/census-setup` asks where the status line goes (`CENSUS_MOD_PLACEMENT=above|below`
+overrides the answer; an install that never answered stays *above*, the setup recommends *below*):
 
-Differences from `census statusline`: a PR on the branch shows as `· PR #n` after the
-branch; `spend_limit` is recorded but not drawn; colours are `Text` colours (green, red,
+- *Above the input*: the band. Ours first, whatever other mods draw beneath it after; yields to a
+  survey, keeps to `maxRows`, and drops whole trailing parts of a line wider than `bodyColumns`.
+- *Below the input*: under Claude Code's own hint line. The engine always draws its permission
+  pill and hint first and a mod's tree cannot go above them, so the engine's line leads and our
+  rows follow on their own lines (a tree without it would put row one on the pill's line). Drawn
+  while you type and while the model works; rows are clipped to the viewport width.
+
+Only the chosen site draws; the other passes through untouched. A 30 s tick redraws the
+countdowns; it never records.
+
+The `pr` segment, `🔀 #12 approved` (green approved, yellow pending, red changes_requested), ends
+line two and is hidden without a PR; the mod's data is its gh cache. Differences from
+`census statusline`: `spend_limit` is recorded but not drawn; colours are `Text` colours (green, red,
 gray, `yellowBright`, `#ff8700` for orange).
 
 ## Shadow mode

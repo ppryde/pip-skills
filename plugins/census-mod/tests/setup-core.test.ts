@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import {
-  NO_DETECTION, PRESETS, Q, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
+  NO_DETECTION, PRESETS, placementFrom, Q, atLeast, commandIsCensus, effective, hasIngestBlock, parseSettings, presetFrom, recordFrom,
   backupBlocks, removeStatusLine, restoreStatusLine, scriptCandidates, statusLineCommand, writerActive, writersFrom,
 } from '../plugin/core/setup'
 
@@ -10,7 +10,7 @@ const CFG = '/home/u/.claude'
 // ---- defaults and precedence -------------------------------------------------------------------
 
 test('before any answer: record to the real store only when the status line has no census ingest block; draw yes; gh yes', async () => {
-  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ record: 'yes', shadowDir: null, draw: true, segments: undefined, pr: true })
+  expect(effective({}, {}, NO_DETECTION, CFG)).toEqual({ record: 'yes', shadowDir: null, draw: true, placement: 'above', segments: undefined, pr: true })
   expect(effective({}, {}, WITH_BLOCK, CFG)).toMatchObject({ record: 'no', draw: true, pr: true })
 })
 
@@ -33,7 +33,7 @@ test('shadow with nowhere to write records nothing', async () => {
 })
 
 test('the three layouts', async () => {
-  expect(PRESETS.two).toBe('context,cache,limits,cost/model,git,dir,changes')
+  expect(PRESETS.two).toBe('context,cache,limits,cost/model,git,dir,changes,pr')
   expect(PRESETS.compact.includes('/')).toBe(false) // one line
   expect(PRESETS.minimal).toBe('context,limits/git')
 })
@@ -165,4 +165,24 @@ test('%USERPROFILE% expands from USERPROFILE itself, and only falls back to HOME
   expect(scriptCandidates('"%USERPROFILE%\\line.cmd"', '/home/u', 'C:\\Users\\u')).toEqual(['C:\\Users\\u\\line.cmd'])
   expect(scriptCandidates('"%USERPROFILE%\\line.cmd"', 'C:\\Users\\h', undefined)).toEqual(['C:\\Users\\h\\line.cmd'])
   expect(scriptCandidates('"$HOME/line.sh"', '/home/u', 'C:\\Users\\u')).toEqual(['/home/u/line.sh']) // $HOME stays HOME
+})
+
+// ---- placement ------------------------------------------------------------------------------------------
+
+test('placement: the environment, then the answer, then above (an existing install does not move)', async () => {
+  expect(effective({}, {}, NO_DETECTION, CFG).placement).toBe('above')
+  expect(effective({ placement: 'below' }, {}, NO_DETECTION, CFG).placement).toBe('below')
+  expect(effective({ placement: 'below' }, { CENSUS_MOD_PLACEMENT: 'above' }, NO_DETECTION, CFG).placement).toBe('above')
+  expect(effective({ placement: 'above' }, { CENSUS_MOD_PLACEMENT: ' BELOW ' }, NO_DETECTION, CFG).placement).toBe('below')
+  expect(effective({ placement: 'below' }, { CENSUS_MOD_PLACEMENT: 'sideways' }, NO_DETECTION, CFG).placement).toBe('below') // not a placement: ignored
+})
+
+test('the placement question recommends below for a new install and maps back to a value', async () => {
+  expect(Q.where()).toEqual({
+    header: '📍 Where',
+    question: 'Where should the status line go?',
+    options: ['Above the input (the band)', "Below the input (under Claude Code's hint line) (Recommended)"],
+  })
+  expect(Q.where().options.map(placementFrom)).toEqual(['above', 'below'])
+  expect(placementFrom('nope')).toBeNull()
 })
