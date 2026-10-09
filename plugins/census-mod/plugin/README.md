@@ -18,6 +18,39 @@ steady-state cost is about zero.
   made they are left out for that write (and looked for again on the next ones), and census
   falls back to its 90 s rule for that write.
 
+## Setup
+
+Run **`/census-setup`** (the first session after install offers it once). It asks a few
+questions one at a time through `$.ui.ask`, so nothing reaches the model and the phone can
+answer; every answer is saved as it is given. First it looks, with no questions: the census
+CLI and its version (0.5.0 or newer is needed for liveness; older offers recording off), this
+account's `settings.json` `statusLine`, whether its script carries census's ingest block
+(or the command is `census ingest` / `census statusline`), and whether another writer wrote
+into the store in the last few minutes. Then:
+
+1. **Record**: the real store, a shadow store (`<config dir>/census-shadow`), or no.
+2. **Band**: draw the status line above the prompt, or not.
+3. **Two writers**, only when recording to the real store while this account's status line
+   also records: remove this account's `statusLine` (offered only with the band on; it is
+   backed up exactly to `<census dir>/census-mod.statusline.json` and `settings.json` is
+   rewritten atomically with every other key kept; invalid JSON is never edited), keep the
+   status line and not record, or keep both. The shared status-line script and the census
+   launcher are never touched.
+4. **Layout** (band on): your two lines (the default), compact (one line), or minimal.
+5. **PR**: show the branch's PR using `gh`; No means `gh` is never called.
+
+`/census-setup off` (or answering No to record and band) stops recording and drawing and puts
+a removed status line back exactly, but only if `settings.json` has no status line now (or
+already has that one); otherwise it says so and keeps the backup.
+
+The payload's `census_mod.git` (`branch`, `uncommitted`, `ahead`, `has_upstream`, `detached`, or null when unknown) carries the git state from the mod's own `-uno` pass, so readers need not shell out to git or gh. For a phone-sized readout of a session, see `/census:vitals` in the census plugin.
+
+Precedence: an environment variable (`CENSUS_MOD_STORE`, `CENSUS_STATUSLINE_SEGMENTS`) wins,
+then the answers (kept in `$.store`), then the defaults. Before any answer the mod records to
+the real store **only if** this account's status line does not carry the census ingest block
+(otherwise it records nothing until you answer), draws the band, and uses `gh`. Dismissing the
+first-session offer keeps those defaults and is never repeated.
+
 It needs the **census plugin** (any version at or above 0.5.0, for the process-liveness
 reader) for the CLI. Without it the band still draws, nothing is recorded, and one line
 says so: "census not found — install the census plugin".

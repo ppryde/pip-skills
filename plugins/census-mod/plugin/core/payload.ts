@@ -70,6 +70,8 @@ export function buildPayload(s: Snap, now: number, event: Event, ended?: string)
     ...(s.proc ? { pid: s.proc.pid, proc_start: s.proc.procStart } : {}),
     event,
     ...(ended !== undefined ? { ended } : {}),
+    // The `-uno` git pass, in gitcache's field names, so readers never shell out to git themselves.
+    git: s.git ? { branch: s.git.branch, uncommitted: s.git.uncommitted, ahead: s.git.ahead, has_upstream: s.git.hasUpstream, detached: s.git.detached } : null,
   }
   return p
 }

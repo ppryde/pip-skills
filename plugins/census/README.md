@@ -21,7 +21,7 @@ worktrees).
 ## Writers
 
 Census is fed by exactly one kind of writer per store: the status-line hook (`census ingest`, or `census statusline`
-which also draws the line) **or** the census-mod mod. Run one, not both, against the same store. Readers do not
+which also draws the line) **or** the census-mod mod. Run one, not both, against the same store; the mod's `/census-setup` detects a status line that records and offers to remove it (backed up, undoable with `/census-setup off`). Readers do not
 care which: they see the same entries, and `stale` (see Liveness) is judged by process for the mod's sessions.
 
 ## Store

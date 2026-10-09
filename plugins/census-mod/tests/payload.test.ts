@@ -40,7 +40,10 @@ test('the payload is the status-line shape census reads, with a census_mod block
     session_name: 'census mod',
     pr: { number: 102, url: 'https://github.com/o/r/pull/102', review_state: 'approved' },
     version: '2.1.289',
-    census_mod: { version: 1, pid: 22695, proc_start: 'Sun Oct  4 22:57:51 2026', event: 'turn.complete' },
+    census_mod: {
+      version: 1, pid: 22695, proc_start: 'Sun Oct  4 22:57:51 2026', event: 'turn.complete',
+      git: { branch: 'feat/x', uncommitted: 2, ahead: 1, has_upstream: true, detached: false },
+    },
   })
 })
 
@@ -53,7 +56,7 @@ test('rate limits become census windows: epoch SECONDS and a percent, or the win
 
 test('what cannot be known is omitted or null, never faked; a worktree and a clean exit are marked', async () => {
   const p = buildPayload(
-    snap({ ctxPct: null, ctxWindow: null, costUsd: null, startedAt: null, rateLimits: [], model: null, sessionName: null, pr: null, version: null, proc: null, transcriptPath: null, worktreePath: '/wt', counters: EMPTY_COUNTERS }),
+    snap({ ctxPct: null, ctxWindow: null, costUsd: null, startedAt: null, rateLimits: [], model: null, sessionName: null, pr: null, git: null, version: null, proc: null, transcriptPath: null, worktreePath: '/wt', counters: EMPTY_COUNTERS }),
     T0, 'session.end', 'prompt_input_exit',
   )
 
@@ -65,7 +68,7 @@ test('what cannot be known is omitted or null, never faked; a worktree and a cle
   expect(p).not.toHaveProperty('transcript_path')
   expect(p.worktree).toEqual({ path: '/wt' })
   expect(p.prompt_cache).toEqual({ warm: false, ttl: '1h', requests: 0 })
-  expect(p.census_mod).toEqual({ version: 1, event: 'session.end', ended: 'prompt_input_exit' })
+  expect(p.census_mod).toEqual({ version: 1, event: 'session.end', ended: 'prompt_input_exit', git: null })
 })
 
 test('a PR with no review decision carries no review_state; a compaction makes the cache cold', async () => {
@@ -79,4 +82,12 @@ test('model ids become display names the way the status line spells them', async
   expect(modelOf('claude-opus-5-5[1m]')).toEqual({ id: 'claude-opus-5-5', display_name: 'Opus 5.5' })
   expect(modelOf('claude-haiku-4-5-20251001')).toEqual({ id: 'claude-haiku-4-5-20251001', display_name: 'Haiku 4.5' })
   expect(modelOf('something-else')).toEqual({ id: 'something-else', display_name: 'something-else' })
+})
+
+test('census_mod.git is the -uno pass in census\'s gitcache names, detached HEAD included', async () => {
+  const git = { branch: 'abc1234', detached: true, uncommitted: 0, ahead: 0, hasUpstream: false }
+
+  expect((buildPayload(snap({ git }), T0, 'turn.complete').census_mod as { git: unknown }).git).toEqual({
+    branch: 'abc1234', uncommitted: 0, ahead: 0, has_upstream: false, detached: true,
+  })
 })
