@@ -83,11 +83,11 @@ Readers use `CENSUS_CLI`, else `cli.path`, else `census` on `PATH`.
 
 **Windows-safe, no global lock.** Each session writes only its own file (temp file plus `os.replace`), so
 sessions never contend. Only each account's limits file is shared, and its merge only ever moves forward. That merge
-runs under a short per-file `O_EXCL` lock (`limits/<key>.json.lock`; never held across sessions' other work, waited for
-at most a quarter second, a crashed holder's lock taken over after 5 s, and gone without it if the folder is unwritable).
-With or without the lock it looks again just before writing, merges onto what it finds, and without the lock checks
-afterwards that its figures survived, redoing the merge (up to four times) if an older write landed on top. So a
-stale snapshot cannot replace a newer window. A session id that
+runs under a short per-file `O_EXCL` lock (`limits/<key>.json.lock`): waited for at most a quarter second, a crashed
+holder's lock taken over after 5 s by an atomic rename. A writer that waits out a live holder **skips** its merge instead
+of writing from a stale snapshot, and the session's next ingest carries the reading. Only where no lock file can be made
+at all does a merge go on unlocked; it then re-reads just before writing and checks afterwards that its figures survived
+(redoing the merge up to four times), which narrows the race but cannot close it: that path is best effort. A session id that
 is not a safe filename (`[A-Za-z0-9._-]+`, up to 128 chars) is refused.
 
 Pruning is write-side: each ingest deletes session files whose `updated_at` is more than 24 h older

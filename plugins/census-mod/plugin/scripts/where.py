@@ -22,7 +22,7 @@ def _settings(path: Path) -> tuple[bool, bool | None, dict[str, Any]]:
     """(exists, valid, data): valid is None when there is no file; data is {} unless it is a JSON object."""
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):   # no file; or the config dir is itself a file
         return False, None, {}
     except OSError:  # there, but not readable (permissions, a directory): it exists, and is no use
         return True, False, {}

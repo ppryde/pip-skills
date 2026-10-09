@@ -697,30 +697,59 @@ _LOCK_STALE_SECONDS = 5.0   # a lock older than this was left by a crashed write
 _MERGE_ATTEMPTS = 4
 
 
-def _acquire_limits_lock(lock: Path) -> bool:
-    """Take the limits file's lock (``O_CREAT | O_EXCL``, portable). False if it could not be had within
-    ``_LOCK_WAIT_SECONDS`` or the folder is unwritable: the merge then goes on WITHOUT it and relies on
-    re-reading before and after its write. The status line never blocks on this."""
+LOCK_HELD, LOCK_BUSY, LOCK_UNAVAILABLE = "held", "busy", "unavailable"
+
+
+def _take_over_stale_lock(lock: Path) -> None:
+    """Remove a lock left by a crashed writer, atomically. Rename it aside (only one waiter's rename can win the
+    SAME file), then judge the file we actually hold: if it is not stale after all (a fresh lock took the name between
+    our look and our rename) put it back with ``os.link``, which refuses to overwrite, instead of deleting it."""
+    aside = lock.with_name(f"{lock.name}.stale.{os.getpid()}.{time.monotonic_ns()}")
+    try:
+        os.rename(lock, aside)
+    except OSError:
+        return   # someone else took it over first (or it was released)
+    try:
+        if time.time() - aside.stat().st_mtime > _LOCK_STALE_SECONDS:
+            return
+        try:
+            os.link(aside, lock)   # a live lock we grabbed by mistake: give it back
+        except OSError:
+            pass
+    except OSError:
+        pass
+    finally:
+        _unlink(aside)
+
+
+def _acquire_limits_lock(lock: Path) -> str:
+    """Take the limits file's lock (``O_CREAT | O_EXCL``, portable).
+
+    ``LOCK_HELD``: it is ours. ``LOCK_BUSY``: another live writer held it for the whole wait (``_LOCK_WAIT_SECONDS``):
+    the caller must NOT write from a snapshot taken around then; it skips this merge and the session's next ingest
+    carries the reading. ``LOCK_UNAVAILABLE``: the folder cannot hold a lock file at all, so the merge goes on without
+    one and relies on re-reading before and after its write. The status line never blocks on any of this."""
     try:
         lock.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
-        return False
+        return LOCK_UNAVAILABLE
     deadline = time.monotonic() + _LOCK_WAIT_SECONDS
     while True:
         try:
             os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-            return True
+            return LOCK_HELD
         except FileExistsError:
             try:
                 if time.time() - lock.stat().st_mtime > _LOCK_STALE_SECONDS:
-                    _unlink(lock)
+                    _take_over_stale_lock(lock)
+                    continue
             except OSError:
-                pass   # it vanished between the two calls: the next pass takes it
+                continue   # it vanished between the two calls: the next pass takes it
             if time.monotonic() >= deadline:
-                return False
+                return LOCK_BUSY
             time.sleep(0.005)
         except OSError:
-            return False
+            return LOCK_UNAVAILABLE
 
 
 def _release_limits_lock(lock: Path) -> None:
@@ -748,14 +777,18 @@ def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
     """Forward-only merge into the calling account's limits file.
 
     Several sessions may merge at once, and a writer holding a stale snapshot must not replace a newer window. The
-    merge runs under a short ``O_EXCL`` lock file when it can get one (never blocking for long, never a global
-    lock: one per account file). Whether or not it has the lock it looks again just before writing, and merges onto
-    what it finds if the file changed; and when it had no lock it checks afterwards that its figures survived,
-    redoing the merge (bounded) if an older write landed on top. Written only on change.
+    merge runs under a short ``O_EXCL`` lock file (one per account file, never held across other work). A writer
+    that waited out a live holder SKIPS its merge (the next ingest carries the reading) rather than write from a
+    stale snapshot. Only where no lock file can be made at all does it go on unlocked: it looks again just before
+    writing, merges onto what it finds, and checks afterwards that its figures survived, redoing the merge (bounded)
+    if an older write landed on top. That unlocked path narrows the race but cannot close it. Written only on change.
     """
     path = limits_path()
     lock = path.with_name(path.name + ".lock")
-    held = _acquire_limits_lock(lock)
+    state = _acquire_limits_lock(lock)
+    if state == LOCK_BUSY:
+        return   # a live writer is mid-merge: do not write around it; the next ingest merges this reading
+    held = state == LOCK_HELD
     try:
         for _ in range(_MERGE_ATTEMPTS):
             current = _read_json(path) or {}
@@ -1004,10 +1037,17 @@ def _windows_pid_alive(pid: int) -> bool | None:
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     STILL_ACTIVE = 259
     ERROR_ACCESS_DENIED = 5
+    # Without signatures ctypes assumes C int for every argument and result, which truncates a 64-bit HANDLE.
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = wintypes.BOOL
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         # Access denied: it exists, it is just not ours. Anything else (invalid parameter): no such process.
-        return True if kernel32.GetLastError() == ERROR_ACCESS_DENIED else False
+        return kernel32.GetLastError() == ERROR_ACCESS_DENIED
     try:
         code = wintypes.DWORD()
         if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
