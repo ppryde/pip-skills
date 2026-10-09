@@ -1,16 +1,27 @@
 import json
+import os
 import subprocess
 import sys
 import unicodedata
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
 from scripts import vitals
 from scripts.vitals import Vitals, Window
 
+PLUGIN = Path(__file__).resolve().parents[2] / "plugins" / "census"
+CENSUS_CLI = PLUGIN / "scripts" / "cli.py"
 NOW = 1_791_243_480.0
 HOUR = 3600
+
+
+@pytest.fixture(autouse=True)
+def _vitals_env(tmp_path, monkeypatch):
+    """Every source vitals consults is pinned inside tmp_path; census is a fake that is not there."""
+    monkeypatch.setenv("CENSUS_CLI", str(tmp_path / "no-census.py"))
+    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
 
 
 def entry(**overrides):
@@ -59,7 +70,7 @@ def entry(**overrides):
 def full_vitals():
     v = Vitals(now=NOW)
     vitals.apply_census(v, entry())
-    v.dirty, v.untracked, v.ahead, v.behind = 2, 1, 1, 0
+    v.dirty, v.ahead = 2, 1
     v.pr_number, v.pr_state = 102, "open"
     v.tools = Counter({"Bash": 7, "Write": 1, "Agent": 2, "Read": 4, "Edit": 3, "Grep": 1})
     v.prompts = 3
@@ -245,37 +256,121 @@ def git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-def test_git_branch_dirty_and_untracked(tmp_path):
+def make_repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "feat/v")
-    git(
-        repo,
-        "-c",
-        "user.email=a@b",
-        "-c",
-        "user.name=a",
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "x",
-    )
+    git(repo, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x")
+    return repo
+
+
+BLOCK = {"branch": "feat/blk", "uncommitted": 4, "ahead": 2, "has_upstream": True, "detached": False}
+
+
+def test_git_comes_from_the_census_block_and_runs_no_git(monkeypatch):
+    seen = []
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
+    v = Vitals(now=NOW)
+    vitals.apply_git(v, entry(git=BLOCK), "/repo")
+    assert (v.branch, v.dirty, v.ahead) == ("feat/blk", 4, 2)
+    assert seen == []
+
+
+def test_ahead_is_unknown_without_an_upstream():
+    v = Vitals(now=NOW)
+    vitals.apply_git(v, entry(git={**BLOCK, "has_upstream": False, "ahead": 0}), "/repo")
+    assert v.ahead is None
+    assert "↑" not in (vitals.sync_line(v) or "")
+
+
+def test_a_detached_block_shows_its_short_sha():
+    v = Vitals(now=NOW)
+    vitals.apply_git(v, entry(git={**BLOCK, "branch": "abc1234", "detached": True}), "/repo")
+    assert v.branch == "abc1234"
+
+
+@pytest.mark.parametrize("bad", [
+    {"branch": 3}, {"uncommitted": "x"}, {"uncommitted": None}, {"ahead": None}, {"has_upstream": "yes"}, "junk", [],
+])
+def test_a_malformed_block_is_the_same_as_none(bad, monkeypatch):
+    seen = []
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
+    block = bad if not isinstance(bad, dict) else {**BLOCK, **bad}
+    vitals.apply_git(Vitals(now=NOW), entry(git=block), "/repo")
+    assert len(seen) == 1  # fell back to asking git
+
+
+def test_no_block_falls_back_to_one_uno_status_in_the_worktree(tmp_path):
+    repo = make_repo(tmp_path)
     (repo / "a.txt").write_text("a")
     git(repo, "add", "a.txt")
     (repo / "new").mkdir()
     (repo / "new" / "b.txt").write_text("b")
-    (repo / "new" / "c.txt").write_text("c")
     v = Vitals(now=NOW)
-    vitals.apply_git(v, str(repo), with_pr=False)
-    assert (v.branch, v.dirty, v.untracked) == ("feat/v", 1, 2)  # files, not dirs
-    assert v.ahead is None  # no upstream
+    vitals.apply_git(v, entry(worktree_cwd=str(repo)), "/elsewhere")
+    assert (v.branch, v.dirty) == ("feat/v", 1)  # untracked files are not counted
+    assert v.ahead is None
+
+
+def test_the_fallback_argv_is_the_uno_status_with_no_optional_locks(monkeypatch):
+    seen = []
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append((cmd, kw.get("cwd"))) or (_ for _ in ()).throw(OSError()))
+    vitals.apply_git(Vitals(now=NOW), None, "/repo")
+    assert seen == [(["git", "--no-optional-locks", "status", "--porcelain=2", "--branch", "-uno"], "/repo")]
 
 
 def test_git_outside_repo_leaves_fields_empty(tmp_path):
     v = Vitals(now=NOW)
-    vitals.apply_git(v, str(tmp_path), with_pr=False)
+    vitals.apply_git(v, None, str(tmp_path))
     assert v.branch is None and v.dirty is None
+
+
+# ----------------------------------------------------------------------- PR
+
+
+def test_the_pr_comes_from_the_payload():
+    e = entry()
+    e["payload"]["pr"] = {"number": 77, "url": "https://x/77", "review_state": "Approved"}
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, e)
+    assert (v.pr_number, v.pr_state) == (77, "approved")
+
+
+@pytest.mark.parametrize("pr", [{}, {"number": "x"}, {"number": None}, "junk", None])
+def test_no_usable_pr_leaves_it_out(pr):
+    e = entry()
+    e["payload"]["pr"] = pr
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, e)
+    assert v.pr_number is None and v.pr_state is None
+
+
+def test_vitals_never_calls_gh(tmp_path, monkeypatch):
+    """A gh on PATH that fails the test if it is ever run."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "gh-was-run"
+    gh = bin_dir / "gh"
+    gh.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    repo = make_repo(tmp_path)
+    e = entry(worktree_cwd=str(repo))
+    e["payload"]["pr"] = {"number": 5, "review_state": "open"}
+    v = Vitals(now=NOW)
+    vitals.apply_census(v, e)
+    vitals.apply_git(v, e, str(repo))                       # the fallback path
+    vitals.apply_git(Vitals(now=NOW), entry(git=BLOCK), str(repo))   # the block path
+    assert not marker.exists()
+    assert v.pr_number == 5
+    src = Path(vitals.__file__).read_text()
+    assert '"gh"' not in src and "'gh'" not in src
+
+
+def test_untracked_is_not_in_any_style():
+    for style in vitals.STYLES:
+        out = vitals.RENDERERS[style](full_vitals())
+        assert "untracked" not in out and "unbaptised" not in out and " new" not in out
 
 
 # ------------------------------------------------------------------- render
@@ -300,7 +395,7 @@ def test_compact_is_lean_and_complete():
     assert "ctx 9%" in lines[0] and "88k/1M" in lines[0]
     assert "Opus 5.5 · high · $0.90" in out
     assert "feat/x · PR #102 open" in out
-    assert "2 dirty · 1 new · ↑1 ↓0" in out
+    assert "2 dirty · ↑1" in out and "new" not in out and "↓" not in out
     assert "5h 3%" in out and "7d 22%" in out
     assert "18 tools · 2 agents" in out
 
@@ -358,7 +453,7 @@ def long_vitals():
         }
     )
     v.windows.append(Window("seven_day_opus_extra", 100, NOW + 86400))
-    v.dirty, v.untracked, v.ahead, v.behind = 12345, 6789, 123, 456
+    v.dirty, v.ahead = 12345, 123
     return v
 
 
@@ -463,19 +558,19 @@ def fake_census(tmp_path, monkeypatch):
 
 
 def test_gather_prefers_own_session(fake_census, tmp_path):
-    v = vitals.gather("sess-1", str(tmp_path), with_pr=False)
+    v = vitals.gather("sess-1", str(tmp_path))
     assert v.model == "Opus 5.5"
     assert fake_census.read_text().splitlines() == ["read --session sess-1"]
 
 
 def test_gather_falls_back_to_worktree(fake_census, tmp_path):
-    v = vitals.gather("other", str(tmp_path), with_pr=False)
+    v = vitals.gather("other", str(tmp_path))
     assert v.model == "Opus 5.5"
     assert fake_census.read_text().splitlines()[1].startswith("read --worktree ")
 
 
 def test_no_census_still_prints(tmp_path, capsys):
-    assert vitals.main(["--no-pr", "--cwd", str(tmp_path)]) == 0
+    assert vitals.main(["--cwd", str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "no census reading yet" in out and "ctx ?%" in out
 
@@ -488,7 +583,6 @@ def test_cli_runs_as_script(fake_census, tmp_path):
             "playful",
             "--session",
             "sess-1",
-            "--no-pr",
             "--cwd",
             str(tmp_path),
         ],
@@ -497,3 +591,132 @@ def test_cli_runs_as_script(fake_census, tmp_path):
         check=True,
     )
     assert "THE SANCTUM'S VITAL SIGNS" in result.stdout
+
+
+# ----------------------------------------------- resolving census (the real one)
+
+
+@pytest.fixture
+def real_census_env(tmp_path, monkeypatch):
+    """The environment census itself reads, pinned inside tmp_path; no CENSUS_CLI override,
+    no PATH, and no sibling cli.py (vitals pretends to live elsewhere)."""
+    monkeypatch.delenv("CENSUS_CLI", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    monkeypatch.setattr(vitals, "__file__", str(tmp_path / "elsewhere" / "vitals.py"))
+    return dict(os.environ)
+
+
+def test_its_own_plugin_cli_is_used_first(tmp_path, monkeypatch):
+    monkeypatch.delenv("CENSUS_CLI", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    assert vitals.census_cli() == CENSUS_CLI
+
+
+def test_census_cli_env_is_authoritative_over_the_sibling(tmp_path, monkeypatch):
+    other = tmp_path / "other.py"
+    other.write_text("")
+    monkeypatch.setenv("CENSUS_CLI", str(other))
+    assert vitals.census_cli() == other
+    monkeypatch.setenv("CENSUS_CLI", str(tmp_path / "gone.py"))
+    assert vitals.census_cli() is None  # refused, not skipped past to the sibling
+
+
+def test_cli_path_pointer_in_a_census_store_dir_is_followed(tmp_path, monkeypatch, real_census_env):
+    store = tmp_path / "census"
+    store.mkdir()
+    (store / "cli.path").write_text(str(CENSUS_CLI))
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+    assert vitals.census_cli() == CENSUS_CLI
+
+
+def test_a_dotjson_store_is_a_directory_like_any_other(tmp_path, monkeypatch, real_census_env):
+    (tmp_path / "pointer-parent").mkdir()
+    (tmp_path / "pointer-parent" / "cli.path").write_text(str(CENSUS_CLI))
+    monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "pointer-parent" / "status.json"))
+    assert vitals.census_cli() is None
+
+
+def test_gather_reads_a_session_recorded_by_the_real_census(tmp_path, monkeypatch):
+    store = tmp_path / "census"
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+    monkeypatch.delenv("CENSUS_CLI", raising=False)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    payload = entry()["payload"] | {"cwd": str(tmp_path), "session_id": "sess-1"}
+    ingest = subprocess.run(
+        [sys.executable, str(CENSUS_CLI), "ingest"], input=json.dumps(payload),
+        capture_output=True, text=True, env=dict(os.environ), check=False,
+    )
+    assert ingest.returncode == 0, ingest.stderr
+    v = vitals.gather("sess-1", str(tmp_path))
+    assert v.has_reading and v.model == "Opus 5.5"
+    assert v.dirty == 0 and v.branch is None  # not a repo: the block's null-safe values
+
+
+def test_a_census_override_is_one_path_never_a_command_line(monkeypatch):
+    monkeypatch.setenv("CENSUS_CLI", f"{sys.executable} -c 'print(1)'")
+    assert vitals.census_cli() is None
+
+
+@pytest.mark.parametrize("bad", ["relative/cli.py", "cli.py"])
+def test_a_relative_census_path_is_refused(bad, monkeypatch):
+    monkeypatch.setenv("CENSUS_CLI", bad)
+    assert vitals.census_cli() is None
+
+
+def test_a_directory_or_a_plain_data_file_is_not_a_census_cli(tmp_path, monkeypatch):
+    data = tmp_path / "notes.txt"
+    data.write_text("hi")
+    for target in (tmp_path, data):
+        monkeypatch.setenv("CENSUS_CLI", str(target))
+        assert vitals.census_cli() is None
+
+
+def test_a_python_script_and_an_executable_are_both_accepted(tmp_path, monkeypatch):
+    script = tmp_path / "cli.py"
+    script.write_text("")
+    program = tmp_path / "census"
+    program.write_text("#!/bin/sh\n")
+    program.chmod(0o755)
+    monkeypatch.setenv("CENSUS_CLI", str(script))
+    assert vitals.census_cli() == script
+    monkeypatch.setenv("CENSUS_CLI", str(program))
+    assert vitals.census_cli() == program
+
+
+def test_a_pointer_to_a_missing_or_relative_file_is_ignored(tmp_path, monkeypatch, real_census_env):
+    store = tmp_path / "census"
+    store.mkdir()
+    monkeypatch.setenv("CENSUS_STORE", str(store))
+    for recorded in ("gone/cli.py", str(tmp_path / "gone" / "cli.py")):
+        (store / "cli.path").write_text(recorded)
+        assert vitals.census_cli() is None
+
+
+def test_each_call_site_builds_its_own_argv(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
+    script = tmp_path / "cli.py"
+    script.write_text("")
+    program = tmp_path / "census"
+    program.write_text("#!/bin/sh\n")
+    program.chmod(0o755)
+    monkeypatch.setenv("CENSUS_CLI", str(script))
+    vitals.census_entry("s 1", "/repo")
+    monkeypatch.setenv("CENSUS_CLI", str(program))
+    vitals.census_entry("s 1", "/repo")
+    assert seen[0] == [sys.executable, str(script), "read", "--session", "s 1"]
+    assert seen[2] == [str(program), "read", "--session", "s 1"]
+
+
+def test_git_is_asked_not_to_take_optional_locks(monkeypatch):
+    seen = []
+    monkeypatch.setattr(vitals.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or (_ for _ in ()).throw(OSError()))
+    vitals.apply_git(Vitals(now=NOW), None, "/repo")
+    assert seen[0][:3] == ["git", "--no-optional-locks", "status"]
+
+
+def test_clip_counts_wide_characters_as_two_columns():
+    assert width(vitals.clip("日本語日本語", 7)) <= 7
+    assert vitals.clip("日本語日本語", 7).endswith("…")
+    assert vitals.clip("日本語", 6) == "日本語"
+    assert vitals.clip("abcdefgh", 5) == "abcd…"
