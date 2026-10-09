@@ -797,7 +797,12 @@ def _with_pending(incoming: dict[str, Any], files: list[Path]) -> dict[str, Any]
     for file in files:
         data = _read_json(file) or {}
         for key, window in data.items():
-            if key in _LIMITS_RESERVED or not _is_window(window, key):
+            if key in _LIMITS_RESERVED:
+                continue
+            if not _is_window(window, key):
+                # unknown shape: kept verbatim as the main merge does (last write wins), never over a window
+                if not _is_window(merged.get(key), key):
+                    merged[key] = window
                 continue
             current = merged.get(key)
             if not isinstance(current, dict) or _window_is_fresher(window, current):
@@ -828,18 +833,22 @@ def _merge_limits_file(incoming: dict[str, Any], now: float) -> None:
     queued = _pending_files()
     incoming = _with_pending(incoming, queued)
     try:
+        confirmed = False
         for _ in range(_MERGE_ATTEMPTS):
             current = _read_json(path) or {}
             body = _merged_limits_body(current, incoming, now)
             if json.dumps(body, sort_keys=True) == json.dumps(current, sort_keys=True):
+                confirmed = True   # already in the file
                 break
             if (_read_json(path) or {}) != current:
                 continue   # it changed since we read it: merge onto the new contents instead
             _atomic_write(path, body)
             if held or _keeps(_read_json(path) or {}, body):
+                confirmed = True
                 break
-        for file in queued:   # folded in (or already covered): only now, after a write that did not raise
-            _unlink(file)
+        if confirmed:   # only a merge we know landed lets the queue go; otherwise the next ingest tries again
+            for file in queued:
+                _unlink(file)
     finally:
         if held:
             _release_limits_lock(lock)
