@@ -11,7 +11,12 @@ steady-state cost is about zero.
   glyphs, colours and thresholds (`plugins/census/scripts/render.py` is the reference).
 - **No heartbeat.** The payload carries `census_mod.{version,pid,proc_start,event,ended}`
   so a reader can tell "open but idle" from "gone" by the session's process. (The reader
-  side lives in census and ships separately.)
+  side is census 0.5.0: `stale` when `census_mod.ended` is set, the pid is gone, or Claude
+  Code's registry file `<config dir>/sessions/<pid>.json` is missing or has a different
+  `procStart` string; see the census README, "Liveness".) `pid` and `proc_start` come from
+  that same registry, matched by session id; if the entry cannot be found when a write is
+  made they are left out for that write (and looked for again on the next ones), and census
+  falls back to its 90 s rule for that write.
 
 It needs the **census plugin** (any version at or above 0.5.0, for the process-liveness
 reader) for the CLI. Without it the band still draws, nothing is recorded, and one line
