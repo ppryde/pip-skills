@@ -305,3 +305,71 @@ class TestASkippedReadingIsNotLost:
         st.ingest(payload("b", 70), now=NOW)
         assert set(st.all_limits(now=NOW)) == {st.limits_path().stem}
         lock.unlink()
+
+
+class TestQueueSurvivesUnconfirmedMerges:
+    @pytest.fixture(autouse=True)
+    def _store(self, store_file, monkeypatch):
+        monkeypatch.setattr(st, "_LOCK_WAIT_SECONDS", 0.02)
+        return store_file
+
+    def _queue(self, extra=None):
+        st.ingest(payload("a", 40), now=NOW)
+        lock = st.limits_path().with_name(st.limits_path().name + ".lock")
+        lock.write_text("")
+        reading = {"five_hour": {"used_percentage": 70, "resets_at": NOW + 3 * 3600}, **(extra or {})}
+        st._merge_limits_file(reading, NOW)
+        lock.unlink()
+
+    def _pending(self):
+        return sorted(st.limits_dir().glob("*.pending.*"))
+
+    def test_an_unknown_shaped_entry_in_a_queue_file_is_kept_verbatim(self):
+        self._queue({"spend_limit_note": {"text": "hello"}, "plan": "max"})
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        stored = json.loads(st.limits_path().read_text())
+        assert stored["plan"] == "max" and stored["spend_limit_note"] == {"text": "hello"}
+        assert stored["five_hour"]["used_percentage"] == 70 and self._pending() == []
+
+    def test_an_unknown_entry_never_replaces_a_live_window(self):
+        self._queue({"five_hour_extra": 1})
+        # a queued junk value under a key that is a live window in the file must not displace it
+        queued = self._pending()[0]
+        data = json.loads(queued.read_text())
+        data["seven_day"] = "junk"
+        queued.write_text(json.dumps(data))
+        st.ingest(payload("x", 20, NOW + 3 * 3600), now=NOW)   # puts a real window in the file...
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert isinstance(json.loads(st.limits_path().read_text())["five_hour"], dict)
+
+    def test_when_every_attempt_runs_out_the_queue_stays(self, monkeypatch):
+        self._queue()
+        assert len(self._pending()) == 1
+        # the file keeps changing under us, so no attempt can confirm its merge
+        flip = {"n": 0}
+        real = st._read_json
+
+        def read(p):
+            data = real(p)
+            if Path(p) == st.limits_path():
+                flip["n"] += 1
+                return {**(data or {}), "noise": flip["n"]}
+            return data
+
+        monkeypatch.setattr(st, "_read_json", read)
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        monkeypatch.setattr(st, "_read_json", real)
+        assert len(self._pending()) == 1                    # not deleted without a confirmed merge
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert five_hour() == 70 and self._pending() == []   # and delivered once it can be confirmed
+
+    def test_a_confirmed_merge_deletes_the_queue(self):
+        self._queue()
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert self._pending() == [] and five_hour() == 70
+
+    def test_a_queue_already_covered_by_the_file_is_confirmed_and_cleared(self):
+        self._queue()
+        st.ingest(payload("z", 95), now=NOW)   # the file now holds more than the queue
+        st.ingest(json.dumps({"session_id": "d", "cwd": "/wt/d"}), now=NOW)
+        assert self._pending() == [] and five_hour() == 95
