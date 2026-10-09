@@ -272,7 +272,7 @@ export function summary(rows: SessionRow[], now: number, warnings: string[] = []
     if (list.length === 0 || budget <= 0) return
     lines.push('', heading)
     for (const r of list.slice(0, budget)) {
-      const why = r.status === 'waiting' && r.waitingFor ? ` · ${r.waitingFor}` : ''
+      const why = r.status === 'waiting' && r.waitingFor ? ` · ${r.waitingFor}` : r.note ? ` · ${r.note}` : ''
       const account = r.account ? ` · ${r.account}` : ''
       lines.push(`• ${label(r)} — ${nameOf(r)} · ${r.repo} · ${ago(r.lastActive, now)}${why}${account}`)
       if (r.prompt) lines.push(`   you${r.promptAt ? ` ${ago(r.promptAt, now)}` : ''}: ${r.prompt}`)
@@ -468,7 +468,7 @@ async function scan($: EngineInterface): Promise<{ rows: SessionRow[]; warnings:
   const strays = await strayPanes($, {
     pids: new Set(live.map(f => f.row.pid)),
     tmuxNames: new Set(live.flatMap(f => (f.row.tmux ? [f.row.tmux] : []))),
-  })
+  }, dirs.map(d => d.dir))
 
   return { rows: [...registered, ...strays], warnings }
 }
@@ -506,7 +506,31 @@ const STARTUP_PROMPT = 'at a startup prompt (not registered yet)'
  * process, which may be a shell above Claude, so it is never offered a kill.
  */
 export function isStray(r: SessionRow): boolean {
-  return r.sessionId === '' && r.waitingFor === STARTUP_PROMPT
+  return r.sessionId === '' && (r.waitingFor === STARTUP_PROMPT || r.note !== undefined)
+}
+
+const AGENTS_VIEW = 'agents view'
+const inAnotherAccount = (tag: string) => `running in another account (${tag}) — set ROSTER_CONFIG_DIRS to list it`
+
+/** From `ps -o pid=,args=` output: the pids running Claude's agents view (`claude agents`). */
+export function agentsViewPidsIn(psOutput: string): Set<number> {
+  const pids = new Set<number>()
+  for (const line of psOutput.split('\n')) {
+    const match = /^\s*(\d+)\s+\S+\s+agents(\s|$)/.exec(line)
+    if (match) pids.add(Number(match[1]))
+  }
+
+  return pids
+}
+
+/**
+ * The other `.claude*` dirs under HOME, whose registries this session is not
+ * reading: a pane with no entry here may be registered in one of them.
+ */
+export function otherClaudeDirs(home: string, names: readonly string[], listed: readonly string[]): string[] {
+  const skip = new Set(listed.map(resolved))
+
+  return names.filter(n => n.startsWith('.claude')).map(n => `${home}/${n}`).filter(dir => !skip.has(resolved(dir)))
 }
 
 /**
@@ -517,6 +541,7 @@ export function isStray(r: SessionRow): boolean {
 export function strayRows(
   panes: string,
   registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
+  context: { elsewhere?: ReadonlyMap<number, string>; agentsView?: ReadonlySet<number> } = {},
 ): SessionRow[] {
   const rows: SessionRow[] = []
   for (const line of panes.split('\n')) {
@@ -526,14 +551,16 @@ export function strayRows(
     // shell's pid here: its tmux name still says it is listed already.
     const isListed = registered.pids.has(pid) || registered.tmuxNames.has(tmux ?? '')
     if (!tmux || !cwd || !(pid > 1) || isListed || !CLAUDE_COMMAND.test(command ?? '')) continue
+    const account = context.elsewhere?.get(pid)
+    const note = account !== undefined ? inAnotherAccount(account) : context.agentsView?.has(pid) ? AGENTS_VIEW : undefined
     rows.push({
       pid,
       sessionId: '',
       tmux,
       cwd,
       ...repoOf(cwd),
-      status: 'waiting',
-      waitingFor: STARTUP_PROMPT,
+      // A note explains a pane that is not waiting on anyone; only a true stray is a startup prompt.
+      ...(note !== undefined ? { status: 'idle', note } : { status: 'waiting', waitingFor: STARTUP_PROMPT }),
       kind: 'interactive',
       lastActive: Number(activity) * 1000 || 0,
     })
@@ -545,16 +572,43 @@ export function strayRows(
 async function strayPanes(
   $: EngineInterface,
   registered: { pids: ReadonlySet<number>; tmuxNames: ReadonlySet<string> },
+  listedDirs: readonly string[],
 ): Promise<SessionRow[]> {
-  const rows: SessionRow[] = []
+  const sweeps: string[] = []
   for (const socket of await tmuxSockets($)) {
     const panes = await $.process
       .run(['tmux', '-L', socket, 'list-panes', '-a', '-F', PANE_FORMAT])
       .catch(() => undefined)
-    if (panes?.exitCode === 0) rows.push(...strayRows(panes.stdout, registered))
+    if (panes?.exitCode === 0) sweeps.push(panes.stdout)
+  }
+  // Only a pane nothing here lists can be a stray: the rest need no extra look.
+  const candidates = [...new Set(sweeps.flatMap(s => strayRows(s, registered).map(r => r.pid)))]
+  if (candidates.length === 0) return []
+  const context = { elsewhere: await registeredElsewhere($, candidates, listedDirs), agentsView: await agentsViewPids($, candidates) }
+
+  return sweeps.flatMap(s => strayRows(s, registered, context))
+}
+
+/** Candidate pids registered in another `.claude*` dir under HOME (one exists per dir and pid), by that dir's tag. */
+async function registeredElsewhere($: EngineInterface, pids: number[], listedDirs: readonly string[]): Promise<Map<number, string>> {
+  const found = new Map<number, string>()
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!home) return found
+  const names = (await $.fs.list(home).catch(() => [])).map(e => e.name)
+  for (const dir of otherClaudeDirs(home, names, listedDirs)) {
+    for (const pid of pids) {
+      if (!found.has(pid) && (await $.fs.exists(`${dir}/sessions/${pid}.json`).catch(() => false))) found.set(pid, configDirTag(dir))
+    }
   }
 
-  return rows
+  return found
+}
+
+/** Which candidate pids run `claude agents`: one batched `ps` for all of them. */
+async function agentsViewPids($: EngineInterface, pids: number[]): Promise<Set<number>> {
+  const ps = await $.process.run(['ps', '-o', 'pid=,args=', '-p', pids.join(',')]).catch(() => undefined)
+
+  return ps ? agentsViewPidsIn(ps.stdout) : new Set()
 }
 
 // One scan at a time: a slow scan finishing after a newer one would put older rows back.
@@ -667,7 +721,7 @@ async function killSession($: EngineInterface, r: SessionRow): Promise<string> {
   const self = selfId ? (await read($, sessions)).rows.find(s => s.sessionId === selfId) : undefined
   if ((selfId && r.sessionId === selfId) || r.pid === self?.pid) return `Refused: ${name} is this session.`
   if (isStray(r)) {
-    return `Refused: ${name} is at a startup prompt and not registered yet, so its pid may be a shell; open it to answer the prompt, or close its pane.`
+    return `Refused: ${name} is not a session of this registry (${r.note ?? 'at a startup prompt, not registered yet'}), so its pid may be a shell; open it, or close its pane.`
   }
   if (!(await liveClaudePids($, [r.pid])).has(r.pid)) {
     return `Refused: pid ${r.pid} is no longer a Claude session; refresh and try again.`
@@ -1076,6 +1130,7 @@ export const register: Register = on => {
             ? {r.waitingFor ?? 'waiting on you'}
           </Text>
         )}
+        {r.note && <Text dimColor>{r.note}</Text>}
         {r.prompt && (
           <Text dimColor italic wrap="truncate-end">
             you{r.promptAt ? ` ${ago(r.promptAt, checkedAt)} ago` : ''}: {r.prompt}
@@ -1091,6 +1146,7 @@ export const register: Register = on => {
           <Text dimColor wrap="truncate-end">
             {r.status === 'shell' ? '$' : '·'} <Text bold>{label(r)}</Text> {nameOf(r)}
             {r.account ? ` · ${r.account}` : ''}
+            {r.note ? ` · ${r.note}` : ''}
           </Text>
         </Box>
         <Text dimColor>{ago(r.lastActive, checkedAt)}</Text>
