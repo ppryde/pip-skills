@@ -208,3 +208,40 @@ class TestVitalsFlag:
         fake.mkdir()
         monkeypatch.setattr(wh, "__file__", str(fake / "where.py"))
         assert wh.report()["vitals"] is False
+
+
+class TestAlternatives:
+    """census and census-mod are alternatives: `where` says so from whichever side it runs."""
+
+    def test_census_says_use_census_setup_when_census_mod_is_installed(self, cfg):
+        install(cfg, "pip-skills", "census-mod", "0.4.0")
+        settings(cfg, {"enabledPlugins": {"census-mod@pip-skills": True}})
+        notes = wh.report()["notes"]
+        assert notes == ["census-mod is installed — use /census-setup instead; install one or the other (census and census-mod are alternatives)."]
+
+    def test_no_note_when_census_mod_is_not_there(self, cfg):
+        assert wh.report()["notes"] == []
+
+    def test_a_disabled_census_mod_is_still_a_note_if_installed_and_not_disabled_only(self, cfg):
+        install(cfg, "pip-skills", "census-mod", "0.4.0")
+        settings(cfg, {"enabledPlugins": {"census-mod@pip-skills": False}})
+        assert wh.report()["notes"] == []
+
+    def test_run_from_inside_census_mod_it_warns_about_an_enabled_census_plugin(self, cfg, monkeypatch, tmp_path):
+        plugin = tmp_path / "census-mod-plugin"
+        (plugin / "scripts").mkdir(parents=True)
+        (plugin / "hooks").mkdir()
+        (plugin / "hooks" / "hooks.json").write_text("{}")
+        monkeypatch.setattr(wh, "__file__", str(plugin / "scripts" / "where.py"))
+        settings(cfg, {"enabledPlugins": {"census@pip-skills": True, "census@wf-claude-market": False}})
+        assert wh.report()["notes"] == [
+            "the census plugin is enabled too (census@pip-skills) — census-mod replaces it; disable it: claude plugin disable census@pip-skills"
+        ]
+
+    def test_run_from_inside_census_mod_with_no_census_plugin_has_no_note(self, cfg, monkeypatch, tmp_path):
+        plugin = tmp_path / "census-mod-plugin"
+        (plugin / "scripts").mkdir(parents=True)
+        (plugin / "hooks").mkdir()
+        (plugin / "hooks" / "hooks.json").write_text("{}")
+        monkeypatch.setattr(wh, "__file__", str(plugin / "scripts" / "where.py"))
+        assert wh.report()["notes"] == []

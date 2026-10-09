@@ -19,33 +19,32 @@ export type World = {
   gh: { stdout: string; exitCode: number; throws: boolean }
   titles: Map<string, string>          // transcript path -> grep output
   tail: { value: string }              // transcript tail grep output
-  which: { value: string }             // `command -v census` output ('' = not found)
   logs: string[]
   invalidations: { count: number }
   surfaces: { value: string[] }
-  /** A census plugin beside this one, answered for WHATEVER folder the plugin sits in (the kit stages it in a temp dir). */
-  sibling: { layout: 'repo' | 'cache' | null; versions: Record<string, { orphaned?: boolean; cli?: boolean }> }
   toasts: string[]
-  where: { stdout: string; exitCode: number; calls: string[][] } // what `<cli> where` answers
   gitGate: { value: Promise<void> | null } // while set, `git status` waits on it
   registryLists: { count: number }        // reads of the session registry directory
   links: Map<string, string>            // symlink path -> target
   mvFails: { value: boolean }           // makes `mv` exit 1
   cps: string[][]                       // argv of every `cp`
   asks: { header: string; question: string; options: string[] }[]
-  /** Answers each question: a label, or null to dismiss; the default picks the first option. */
   askGate: { value: Promise<void> | null } // while set, every ask waits on it before answering
+  /** Answers each question: a label, or null to dismiss; the default picks the first option. */
   answer: { value: (q: { header: string; question: string; options: string[] }) => string | null }
+  /** census-mod's own bundled recorder (`<plugin root>/scripts/cli.py`): present unless a test removes it. */
+  bundle: { present: boolean }
   below: { text: string }              // what another mod beneath this one draws in the band ('' = nothing)
 }
 
-export const CLI = '/plugins/census/scripts/cli.py'
+/** Where the recorder is, whatever folder the plugin sits in (the kit stages it in a temp dir). */
+export const BUNDLED_CLI = /\/scripts\/cli\.py$/
 export const REGISTRY = '/cfg/sessions'
 
 export function world(on: On, opts: { now?: number; env?: Record<string, string>; files?: Record<string, string> } = {}): World {
   const w: World = {
     clock: mock.clock(on, { now: opts.now ?? 1_791_000_000_000 }),
-    files: new Map(Object.entries({ '/cfg/census/cli.path': CLI, [CLI]: '', ...(opts.files ?? {}) })),
+    files: new Map(Object.entries({ ...(opts.files ?? {}) })),
     dirs: new Map([[REGISTRY, ['22695.json']]]),
     store: new Map([['census-mod:setup', { offered: true }]]), // already offered: setup tests start it themselves
     sessionId: { value: 's1' },
@@ -56,7 +55,7 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     git: { status: '# branch.oid abc1234def\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -0\n1 .M N... 100644 100644 100644 a b f.ts\n', dir: '/repo/.git\n/repo\n', exitCode: 0 },
     gh: { stdout: '[]', exitCode: 0, throws: false },
     titles: new Map(), tail: { value: '"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":100}\n' },
-    which: { value: '' }, logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], where: { stdout: '{"vitals": false}', exitCode: 0, calls: [] }, gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, sibling: { layout: null, versions: {} },
+    logs: [], invalidations: { count: 0 }, surfaces: { value: ['terminal'] }, below: { text: '' }, toasts: [], gitGate: { value: null }, registryLists: { count: 0 }, links: new Map(), mvFails: { value: false }, cps: [], asks: [], askGate: { value: null }, answer: { value: q => q.options[0] ?? null }, bundle: { present: true },
   }
   w.files.set(`${REGISTRY}/22695.json`, JSON.stringify({ pid: 22695, sessionId: 's1', procStart: 'Sun Oct  4 22:57:51 2026', version: '2.1.289' }))
   const real = (p: string): string => w.links.get(p) ?? p
@@ -69,19 +68,10 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
   on('fs.exists', (_$, e) => {
     const path = (e as { path: string }).path
     if (w.files.has(real(path))) return { value: true }
-    if (w.sibling.layout === 'repo') return { value: /\/census\/scripts\/cli\.py$/.test(path) && !path.startsWith('/cfg') && path !== CLI }
-    if (w.sibling.layout === 'cache') {
-      const m = /\/census\/([^/]+)\/(\.orphaned_at|scripts\/cli\.py)$/.exec(path)
-      const v = m ? w.sibling.versions[m[1] ?? ''] : undefined
-      return { value: m?.[2] === '.orphaned_at' ? v?.orphaned === true : v?.cli !== false && v !== undefined }
-    }
-    return { value: false }
+    return { value: w.bundle.present && BUNDLED_CLI.test(path) }
   })
   on('fs.list', (_$, e) => {
     const path = (e as { path: string }).path
-    if (w.sibling.layout === 'cache' && /\/census$/.test(path) && !path.startsWith('/cfg')) {
-      return { value: Object.keys(w.sibling.versions).map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) as never }
-    }
     if (path === REGISTRY) w.registryLists.count++
     const names = w.dirs.get(path)
     return names ? { value: names.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) as never } : { deny: 'ENOENT' }
@@ -100,11 +90,9 @@ export function world(on: On, opts: { now?: number; env?: Record<string, string>
     if (cmd === 'grep') return { value: w.titles.has(e.argv[e.argv.length - 1] ?? '') ? done(0, w.titles.get(e.argv[e.argv.length - 1] ?? '')) : done(1) }
     if (cmd === 'sh' && e.argv[2]?.includes('custom-title')) { const t = w.titles.get(e.argv[4] ?? ''); return { value: t ? done(0, t) : done(1) } }
     if (cmd === 'sh' && e.argv[2]?.includes('cache_creation')) return { value: done(0, w.tail.value) }
-    if (cmd === 'sh' && e.argv[2]?.includes('command -v census')) return { value: w.which.value ? done(0, `${w.which.value}\n`) : done(1) }
     if (cmd === 'cp') { w.cps.push([...e.argv]); const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.set(to ?? '', t); return { value: done(0) } }
     if (cmd === 'mv') { if (w.mvFails.value) return { value: done(1) }; const [, , from, to] = e.argv; const t = w.files.get(from ?? ''); if (t === undefined) return { value: done(1) }; w.files.delete(from ?? ''); w.links.delete(to ?? ''); w.files.set(to ?? '', t); return { value: done(0) } }
     if (cmd === 'rm') { w.files.delete(e.argv[e.argv.length - 1] ?? ''); return { value: done(0) } }
-    if (args[0] === 'where' && cmd !== 'git') { w.where.calls.push([...e.argv]); return { value: done(w.where.exitCode, w.where.stdout) } }
     if (args.includes('ingest')) {
       w.ingests.push({ payload: JSON.parse(init.stdin ?? '{}'), argv: [...e.argv], env: init.env, timeoutMs: init.timeoutMs })
       return { value: done(0) }

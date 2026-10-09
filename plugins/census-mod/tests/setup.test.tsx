@@ -29,7 +29,7 @@ const doubleWriter = (w: World) => {
 }
 
 test('/census-setup is a registered command that asks, in order: record, draw (and where), layout, PR', async ($, on) => {
-  const w = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
+  const w = world(on)
   const r = await setupRun($, w)
 
   expect(r.text).toContain('questions follow')
@@ -37,7 +37,7 @@ test('/census-setup is a registered command that asks, in order: record, draw (a
   expect(saved(w)).toMatchObject({ record: 'yes', draw: true, placement: 'below', preset: 'two', pr: true, offered: true })
   expect(w.toasts.at(-1)).toBe('🧭 census-mod is set up')
   expect(w.logs.join('\n')).toContain('undo any time: /census-setup off')
-  expect(w.logs.at(-1)).toBe('📊 /census:vitals shows this session on your phone')
+  expect(w.logs.at(-1)).toBe('📊 /census-mod:vitals shows this session on your phone')
 })
 
 test('the exact questions', async ($, on) => {
@@ -45,20 +45,20 @@ test('the exact questions', async ($, on) => {
   await setupRun($, w)
 
   expect(w.asks).toEqual([
-    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
+    { header: '📝 Record', question: "Record this account's sessions into census? That's what the overseer dashboard, /census-mod:vitals and session liveness read (context, cost, limits, git, PR) — without it they see nothing from this account.", options: ['Yes — record into census (dashboards, vitals and liveness use it) (Recommended)', "No — don't record (dashboards and vitals won't see this account)"] },
     { header: '🎛️ Draw', question: 'Should census-mod draw your status line, and where?', options: ["Yes — below the input, under Claude Code's hint line (Recommended)", 'Yes — above the input, in the band', 'No — record only, draw nothing'] },
     { header: '📐 Layout', question: 'Which segments in the band? (CENSUS_STATUSLINE_SEGMENTS still overrides this.)', options: ['Your two lines (Recommended)', 'Compact — one line', 'Minimal — context, limits / git'] },
     { header: '🔀 PR', question: "Show the branch's open PR (number, review state) using gh? No means gh is never called.", options: ['Yes (Recommended)', "No — never call gh"] },
   ])
 })
 
-test('step 1 asks nothing: it reports the CLI, the status line and any other writer', async ($, on) => {
+test('step 1 asks nothing: it reports the status line, any other writer and whether the census plugin is enabled', async ($, on) => {
   const w = world(on)
   doubleWriter(w)
   await setupRun($, w)
   const log = w.logs.join('\n')
 
-  expect(log).toContain('census CLI: /plugins/census/scripts/cli.py')
+  expect(log).toContain('the census plugin: not enabled')
   expect(log).toContain('status line: bash ~/.claude/line.sh (it records into census)')
   expect(log).toContain('another writer on the store: no')
 })
@@ -377,54 +377,6 @@ test('CENSUS_MOD_STORE outranks an answer of No', async ($, on) => {
   expect(w.ingests.at(-1)?.env).toEqual({ CENSUS_STORE: '/cfg/census-x' })
 })
 
-// ---- census too old or missing ----------------------------------------------------------------------------------------
-
-test('census older than 0.5.0 is said so and recording is offered off', async ($, on) => {
-  const w = world(on, { files: { '/plugins/census/.claude-plugin/plugin.json': JSON.stringify({ version: '0.4.0' }) } })
-  await setupRun($, w)
-
-  expect(w.asks[0]).toEqual({
-    header: '📝 Census',
-    question: 'The census plugin here is 0.4.0; census-mod needs 0.5.0 or newer to tell a live session from a gone one. Record anyway?',
-    options: ["Don't record (Recommended)", 'Record anyway'],
-  })
-  expect(headers(w)).not.toContain('📝 Record')
-  expect(saved(w)).toMatchObject({ record: 'no' })
-})
-
-test('...and Record anyway carries on to the record question', async ($, on) => {
-  const w = world(on, { files: { '/plugins/census/.claude-plugin/plugin.json': JSON.stringify({ version: '0.4.0' }) } })
-  w.answer.value = q => (q.header === '📝 Census' ? 'Record anyway' : q.options[0] ?? null)
-  await setupRun($, w)
-
-  expect(headers(w)).toContain('📝 Record')
-})
-
-test('no census at all: says so and does not ask about recording', async ($, on) => {
-  const w = world(on)
-  w.files.delete('/cfg/census/cli.path')
-  await setupRun($, w)
-
-  expect(headers(w)).not.toContain('📝 Record')
-  expect(w.logs.join('\n')).toContain('census not found')
-})
-
-test('no census at all: the summary says recording is off, not on', async ($, on) => {
-  const w = world(on)
-  w.files.delete('/cfg/census/cli.path')
-  await setupRun($, w)
-  const log = w.logs.join('\n')
-
-  expect(log).toContain('recording: off — census was not found')
-  expect(log).not.toContain('recording: into census')
-})
-
-test('the question names /census:vitals only when vitals.py sits beside the CLI', async ($, on) => {
-  const withIt = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
-  await setupRun($, withIt)
-  expect(withIt.asks.find(a => a.header === '📝 Record')?.question).toContain('/census:vitals')
-})
-
 // ---- the one-time offer ----------------------------------------------------------------------------------------------------
 
 test('the first session after install is offered setup, once', async ($, on) => {
@@ -583,14 +535,6 @@ test('a dismissed /census-setup counts as offered: the next session does not off
   expect(saved(w).offered).toBe(true)
 })
 
-test('the vitals line appears only when this census build ships vitals', async ($, on) => {
-  const w = world(on)
-  await setupRun($, w)
-
-  expect(w.logs.join('\n')).not.toContain('/census:vitals')
-  expect(w.logs.at(-1)).toContain('undo any time')
-})
-
 test('"Below" is stored, and the summary says so', async ($, on) => {
   const w = world(on)
   w.answer.value = q => (q.header === '🎛️ Draw' ? pick(w, 'Yes — below')(q) : q.options[0] ?? null)
@@ -632,7 +576,7 @@ test('where the status line already feeds census: Replace first, then Shadow, Ye
 
   expect(w.asks.find(a => a.header === '📝 Record')).toEqual({
     header: '📝 Record',
-    question: "Your status line already records this account's sessions into census — the store the overseer dashboard and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
+    question: "Your status line already records this account's sessions into census — the store the overseer dashboard, /census-mod:vitals and liveness read. Replace it with census-mod (records and draws the line; yours is backed up), compare first, or leave recording to your status line (it keeps feeding census)?",
     options: [
       'Replace my status line — census-mod records and draws it (Recommended)',
       "Shadow — record into a separate store to compare; dashboards won't see it",
@@ -662,49 +606,77 @@ test('CENSUS_MOD_STORE still forces shadow even where Shadow was never offered',
   expect(w.logs.join('\n')).toContain('recording: shadow store /cfg/census-x')
 })
 
-// ---- a census found on PATH or via CENSUS_CLI: ask it, do not guess a path ----------------------------------------
 
-test('a launcher on PATH is asked `where`: vitals true shows the line', async ($, on) => {
+// ---- census and census-mod are alternatives ------------------------------------------------------------------------
+
+const SETTINGS_WITH = (enabled: Record<string, boolean>) => settings({ enabledPlugins: enabled })
+
+test('with no census plugin anywhere, setup asks nothing about one', async ($, on) => {
   const w = world(on)
-  w.files.delete('/cfg/census/cli.path')
-  w.which.value = '/usr/local/bin/census'
-  w.where.stdout = JSON.stringify({ vitals: true })
   await setupRun($, w)
 
-  expect(w.where.calls).toContainEqual(['/usr/local/bin/census', 'where'])
-  expect(w.logs.join('\n')).toContain('/census:vitals shows this session')
+  expect(headers(w)).not.toContain('⚠️ census')
+  expect(w.logs.join('\n')).toContain('the census plugin: not enabled')
 })
 
-async function launcherWithoutVitals($: Engine, on: On, reply: { stdout: string; exitCode: number }) {
-  const w = world(on, { files: { '/usr/local/bin/vitals.py': '' } }) // a stray file beside it proves nothing
-  w.files.delete('/cfg/census/cli.path')
-  w.which.value = '/usr/local/bin/census'
-  Object.assign(w.where, reply)
-  await setupRun($, w)
-  expect(w.logs.join('\n')).not.toContain('/census:vitals')
-}
-
-test('...vitals false leaves the line out, whatever sits beside the launcher', async ($, on) => {
-  await launcherWithoutVitals($, on, { stdout: '{"vitals": false}', exitCode: 0 })
-})
-
-test('...and an older census with no `where` does too', async ($, on) => {
-  await launcherWithoutVitals($, on, { stdout: '', exitCode: 2 })
-})
-
-test('a CENSUS_CLI executable is asked too', async ($, on) => {
-  const w = world(on, { env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/u', CENSUS_CLI: '/opt/bin/census' }, files: { '/opt/bin/census': '' } })
-  w.files.delete('/cfg/census/cli.path')
-  w.where.stdout = JSON.stringify({ vitals: true })
+test('an enabled census plugin stops setup first: census-mod replaces it, and the message says how to disable it', async ($, on) => {
+  const w = world(on)
+  w.files.set(SETTINGS, SETTINGS_WITH({ 'census@pip-skills': true, 'census-mod@pip-skills': true }))
   await setupRun($, w)
 
-  expect(w.where.calls).toContainEqual(['/opt/bin/census', 'where'])
+  expect(w.asks[0]).toEqual({
+    header: '⚠️ census',
+    question: 'census-mod replaces the census plugin, and census@pip-skills is still enabled here. Disable it first (claude plugin disable census@pip-skills), or two writers will share one store. Stop here, or continue anyway?',
+    options: ["Stop — I'll disable census first (Recommended)", 'Continue anyway (two writers)'],
+  })
+  expect(w.asks).toHaveLength(1) // Stop (the default answer) ends setup: no Record question
+  expect(w.logs.join('\n')).toContain('claude plugin disable census@pip-skills')
+  expect(saved(w).record).toBeUndefined()
 })
 
-test('a Python CLI is not asked: vitals.py beside it decides', async ($, on) => {
-  const w = world(on, { files: { '/plugins/census/scripts/vitals.py': '' } })
+test('...every enabled census@<marketplace> is named', async ($, on) => {
+  const w = world(on)
+  w.files.set(SETTINGS, SETTINGS_WITH({ 'census@pip-skills': true, 'census@wf-claude-market': true, 'census@old': false }))
   await setupRun($, w)
 
-  expect(w.where.calls).toEqual([])
-  expect(w.logs.join('\n')).toContain('/census:vitals shows this session')
+  expect(w.asks[0]?.question).toContain('census@pip-skills, census@wf-claude-market is still enabled')
+  expect(w.asks[0]?.question).toContain('claude plugin disable census@pip-skills; claude plugin disable census@wf-claude-market')
+  expect(w.asks[0]?.question).not.toContain('census@old')
+})
+
+test('Continue anyway carries on, with a warning about two writers', async ($, on) => {
+  const w = world(on)
+  w.files.set(SETTINGS, SETTINGS_WITH({ 'census@wf-claude-market': true }))
+  w.answer.value = q => (q.header === '⚠️ census' ? 'Continue anyway (two writers)' : q.options[0] ?? null)
+  await setupRun($, w)
+
+  expect(headers(w)).toContain('📝 Record')
+  expect(w.logs.join('\n')).toContain('two writers on one store')
+})
+
+test('a disabled census plugin, or census-mod itself, is not a conflict', async ($, on) => {
+  const w = world(on)
+  w.files.set(SETTINGS, SETTINGS_WITH({ 'census@pip-skills': false, 'census-mod@pip-skills': true }))
+  await setupRun($, w)
+
+  expect(headers(w)).not.toContain('⚠️ census')
+})
+
+test('a dismissed exclusivity question stops setup quietly with what was answered kept', async ($, on) => {
+  const w = world(on)
+  w.files.set(SETTINGS, SETTINGS_WITH({ 'census@pip-skills': true }))
+  w.answer.value = () => null
+  await setupRun($, w)
+
+  expect(w.toasts.at(-1)).toContain('census-setup stopped')
+})
+
+// ---- vitals is always bundled -------------------------------------------------------------------------------------------
+
+test('the record question and the summary always name /census-mod:vitals: it ships inside census-mod', async ($, on) => {
+  const w = world(on)
+  await setupRun($, w)
+
+  expect(w.asks.find(a => a.header === '📝 Record')?.question).toContain('/census-mod:vitals')
+  expect(w.logs.at(-1)).toBe('📊 /census-mod:vitals shows this session on your phone')
 })

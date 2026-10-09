@@ -35,8 +35,9 @@ which account it touches.
    object: `config_dir`, `census_dir`, `settings_path`, the current `status_line`
    command, every census in the plugin cache (`census_installs`, with
    `enabled_census`), and `census_mod` (installed, enabled).
-   - **census-mod first.** If `census_mod.enabled` is true (or it is installed and
-     not disabled), say so: census-mod records sessions and draws the status
+   - **census-mod first.** census and census-mod are alternatives: install one or the
+     other. If `notes` in the output says census-mod is installed (or
+     `census_mod.enabled` is true), say so: census-mod records sessions and draws the status
      line from inside Claude Code, above the input or below it, with no status
      line command at all. Recommend `/census-setup` (its guided setup: record,
      band, placement, layout) instead of installing a command status line. Only
