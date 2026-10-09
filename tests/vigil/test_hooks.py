@@ -183,11 +183,15 @@ class TestStopHook:
         result = _run(STOP, {"cwd": str(tmp_path)}, env, tmp_path)
         assert result.returncode == 0
         assert not st.clear_flag(tmp_path).exists()  # consumed
-        deadline = time.time() + 3
-        while time.time() < deadline and not marker.exists():
+        # The clear runs in a detached process: wait for BOTH calls, not just the
+        # first line landing, or a loaded machine reads the file between them.
+        deadline = time.time() + 5
+        calls: list[str] = []
+        while time.time() < deadline and len(calls) < 2:
+            if marker.exists():
+                calls = marker.read_text().strip().splitlines()
             time.sleep(0.05)
         assert marker.exists()
-        calls = marker.read_text().strip().splitlines()
         assert calls[0] == "rename-window -t %9 fix the auth bug"
         assert calls[1] == "send-keys -t %9 /clear Enter"
 
