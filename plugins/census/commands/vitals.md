@@ -1,10 +1,14 @@
 ---
 description: Show this session's vital signs (census) — your default style, or name lean or detailed.
 argument-hint: "[lean|detailed] | default <style>"
-allowed-tools: Bash(python3:*), AskUserQuestion
+allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*), AskUserQuestion
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
+Use whichever Python launcher works on this machine for every command below: `python3`, else `python`, else `py -3` (Windows).
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --session "${CLAUDE_SESSION_ID}" 2>&1`
+
+Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
 
 The reading above is the person's saved default style (lean until they choose one).
 

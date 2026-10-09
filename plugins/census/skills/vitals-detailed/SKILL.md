@@ -2,8 +2,10 @@
 name: vitals-detailed
 description: Show this session's vital signs in full — context headroom and cache warmth, cost and token totals, git sync and lines changed, tool breakdown, and each rate-limit window with its reset time and a pace forecast. Use when the user runs /census:vitals-detailed or wants the full session analytics.
 disable-model-invocation: true
-allowed-tools: Bash(python3:*)
+allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
+
+Use whichever Python launcher works on this machine for every command below: `python3`, else `python`, else `py -3` (Windows).
 
 # /census:vitals-detailed
 
@@ -11,7 +13,9 @@ Sectioned readout with the figures behind the gauges. The rate-limit **pace** li
 
 ## Reading
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1`
+
+Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
 
 ## What to do
 

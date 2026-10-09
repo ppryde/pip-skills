@@ -5,6 +5,8 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
+Use whichever Python launcher works on this machine for every command below: `python3`, else `python`, else `py -3` (Windows).
+
 # /census-mod:vitals-lean
 
 Three lines, emoji gauges, nothing wasted. The one to glance at from a phone.
@@ -12,6 +14,8 @@ Three lines, emoji gauges, nothing wasted. The one to glance at from a phone.
 ## Reading
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style compact --session "${CLAUDE_SESSION_ID}" 2>&1`
+
+Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
 
 ## What to do
 

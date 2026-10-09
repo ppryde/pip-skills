@@ -5,6 +5,8 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*), Bash(python:*), Bash(py:*)
 ---
 
+Use whichever Python launcher works on this machine for every command below: `python3`, else `python`, else `py -3` (Windows).
+
 # /census-mod:vitals-detailed
 
 Sectioned readout with the figures behind the gauges. The rate-limit **pace** line projects usage at reset from the rate so far this window (shown once 5% of the window has elapsed).
@@ -12,6 +14,8 @@ Sectioned readout with the figures behind the gauges. The rate-limit **pace** li
 ## Reading
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1 || python "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1 || py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/vitals.py" --style detailed --session "${CLAUDE_SESSION_ID}" 2>&1`
+
+Launcher: wherever this file says `python3`, use the first of `python3`, `python` and `py -3` that exists on this machine.
 
 ## What to do
 
