@@ -1,7 +1,8 @@
 """A per-worktree cache of git state, so a status line that refreshes every few
 seconds runs no ``git`` at all on most refreshes.
 
-One entry per worktree, one git pass (``status --porcelain=2 --branch``) fills
+One entry per worktree, one git pass (``status --porcelain=2 --branch -uno``; untracked files
+are never listed, so never counted) fills
 branch, uncommitted and ahead together. An entry is expired when it is older than
 the TTL, or when the ``HEAD`` file's mtime changed (a checkout invalidates at
 once, without a git call). Nothing here raises: git is best-effort.
@@ -111,7 +112,7 @@ def _run_git(worktree: str) -> dict[str, Any] | None:
     """One git pass, or None on any failure (no git, not a repo, timeout)."""
     try:
         result = subprocess.run(
-            ["git", "--no-optional-locks", "-C", worktree, "status", "--porcelain=2", "--branch"],
+            ["git", "--no-optional-locks", "-C", worktree, "status", "--porcelain=2", "--branch", "-uno"],
             capture_output=True,
             text=True,
             errors="replace",

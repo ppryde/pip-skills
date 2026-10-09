@@ -568,6 +568,13 @@ def _prune(sessions: dict[str, Any], now: float) -> None:
         sessions.pop(sid, None)
 
 
+# The additive per-session ``git`` block: the git cache's fields, and the empty value of each.
+_NO_GIT: dict[str, Any] = {
+    "branch": None, "uncommitted": 0, "ahead": 0, "has_upstream": False, "detached": False,
+}
+GIT_FIELDS = tuple(_NO_GIT)
+
+
 def _git_branch(worktree_cwd: str | None) -> str | None:
     """The current branch name at ``worktree_cwd``, or None on ANY failure.
 
@@ -577,10 +584,43 @@ def _git_branch(worktree_cwd: str | None) -> str | None:
     a slow/hanging git process must never raise or block — census's whole contract
     is to never break the status line.
     """
+    return _branch_of(_git_state(worktree_cwd))
+
+
+def _git_state(worktree_cwd: str | None) -> dict[str, Any]:
+    """The git block for ``worktree_cwd`` from the git cache: exactly ``GIT_FIELDS``, null-safe
+    (a missing cwd, a non-repo or a failed git is the empty block)."""
     if not worktree_cwd:
-        return None
+        return dict(_NO_GIT)
     state = gitcache.lookup(census_dir() / gitcache.DIRNAME, worktree_cwd)
+    return {k: state.get(k, v) for k, v in _NO_GIT.items()}
+
+
+def _branch_of(state: dict[str, Any]) -> str | None:
+    """The top-level ``branch``: the block's branch, None on a detached HEAD."""
     return None if state.get("detached") else state.get("branch")
+
+
+def _count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _mod_git(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The git block the census mod sent (``census_mod.git``), when every field has its
+    proper type; None otherwise, so the cache fills the block instead."""
+    mod = payload.get("census_mod")
+    block = mod.get("git") if isinstance(mod, dict) else None
+    if not isinstance(block, dict) or any(k not in block for k in _NO_GIT):
+        return None
+    branch = block["branch"]
+    ok = (
+        (branch is None or isinstance(branch, str))
+        and _count(block["uncommitted"])
+        and _count(block["ahead"])
+        and isinstance(block["has_upstream"], bool)
+        and isinstance(block["detached"], bool)
+    )
+    return {k: block[k] for k in _NO_GIT} if ok else None
 
 
 def build_entry(
@@ -597,12 +637,15 @@ def build_entry(
             prior_payload.get("context_window"), dict
         ):
             payload = {**payload, "context_window": prior_payload["context_window"]}
+    # The mod sends its own git state (census_mod.git) and needs no git here; otherwise one pass of the cache.
+    git_block = _mod_git(payload) or _git_state(worktree)
     entry: dict[str, Any] = {
         "version": SCHEMA_VERSION,
         "worktree_cwd": worktree,
         "updated_at": now,
         "active_at": _active_at(previous, payload, now),
-        "branch": _git_branch(worktree),
+        "branch": _branch_of(git_block),
+        "git": git_block,
         "payload": payload,
     }
     # Replaced wholesale each ingest: a session that left tmux must not keep a pane.

@@ -111,6 +111,21 @@ than that ingest; reads never delete.
   and `idle` (still rendering, no activity for 10 min — open, nobody working) from the two.
 - Sessions are keyed by `session_id` (one file each); readers resolve the freshest entry **by worktree cwd**.
 
+## The `git` block
+
+Every session record carries an additive `git` block, which `census read` shows in all its forms (the full view's
+`sessions.<sid>`, `--session`, `--worktree`):
+
+```json
+"git": { "branch": "feat/x", "uncommitted": 3, "ahead": 1, "has_upstream": true, "detached": false }
+```
+
+`branch` is the short SHA on a detached HEAD; `uncommitted` counts tracked changes only; `ahead` is 0 without an
+upstream. Source, in order: the payload's `census_mod.git` when it has all five fields with the right types (the mod
+reads git itself, so ingest runs none), else the git cache described under Status line. The top-level `branch`
+stays as it was (null on a detached HEAD); when the mod supplies the block it is taken from it. Records written
+before this block have none, and readers fall back to their own `git`.
+
 ## Liveness
 
 `stale` normally means "the status line has not rendered this session for 90 s". A session recorded by the
@@ -178,7 +193,7 @@ Configuration, all optional, read from the environment (so it can live in `setti
 - `CLAUDE_COST_BUDGET` (default 20), `CENSUS_STATUSLINE_MASCOT`, `CLAUDE_PROFILE` / `CLAUDE_CONFIG_DIR` (mascot).
 - `AGENT_UI_STATUSLINE_CACHE`: when set, the raw payload is also written to `<dir>/<session_id>.json`.
 
-Git state is cached per worktree under `<census dir>/gitcache/`: one `git status --porcelain=2 --branch` pass fills
+Git state is cached per worktree under `<census dir>/gitcache/`: one `git status --porcelain=2 --branch -uno` pass (untracked files are never listed, so never counted) fills
 branch, uncommitted and ahead, and an entry expires after the TTL or as soon as `HEAD` changes, so most refreshes run
 no git. The ✏️ and ⬆️ counts can lag a commit or edit by up to the TTL (a checkout shows at once). Ingest's recorded `branch` reads through the same cache. A draw error prints a one-line `🤖 <model>`, never a
 traceback. `census statusline --preview` draws a canned payload against the live store, with no ingest.
