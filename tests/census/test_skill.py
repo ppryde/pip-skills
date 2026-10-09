@@ -74,3 +74,19 @@ def test_the_command_runs_the_default_readout_and_lets_the_model_pick_a_style_fr
     for style in ("lean", "detailed", "playful"):
         assert style in text
     assert "never pasting the user's own text" in text  # the user's words never reach a command
+
+
+def test_the_command_asks_for_a_default_style_once_when_the_marker_ends_the_reading():
+    text = " ".join((COMMANDS / "vitals.md").read_text().split())
+    assert "(vitals: no default style chosen yet)" in text
+    assert "AskUserQuestion" in text
+    for part in ("📊 Vitals", "Which style should /census:vitals show by default?", "Lean — up to seven lines (Recommended)",
+                 "Detailed — the full readout", "Playful — the Witchfinder's reading"):
+        assert part in text
+    assert "--set-default" in text and "default <style>" in text
+
+
+def test_the_command_sets_the_default_only_from_the_fixed_list():
+    text = " ".join((COMMANDS / "vitals.md").read_text().split())
+    assert "--set-default <lean|detailed|playful>" in text
+    assert "never the raw" in text

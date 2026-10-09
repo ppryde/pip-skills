@@ -765,3 +765,95 @@ def test_the_census_argv_is_single_tokens_whatever_the_session_id_holds(monkeypa
 
     assert seen[0][-3:] == ["read", "--session", "x; rm -rf / $(id) 'q' \"r\""]
     assert vitals._one_arg("a b; c") == "a b; c" and vitals._one_arg("") == ""
+
+
+# ------------------------------------------------------------------------ the default style
+
+
+@pytest.fixture
+def census_home(tmp_path, monkeypatch):
+    """The census dir (and so vitals.json) pinned inside tmp_path."""
+    monkeypatch.delenv("CENSUS_STORE", raising=False)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    return tmp_path / "cfg" / "census"
+
+
+MARKER = "(vitals: no default style chosen yet)"
+
+
+def run(capsys, *argv):
+    code = vitals.main([*argv])
+    return code, capsys.readouterr().out
+
+
+class TestDefaultStyle:
+    def test_nothing_saved_is_lean_with_one_final_marker_line(self, census_home, tmp_path, capsys):
+        code, out = run(capsys, "--cwd", str(tmp_path))
+        assert code == 0
+        assert out.rstrip("\n").splitlines()[-1] == MARKER
+        assert out.count(MARKER) == 1
+        assert "ctx ?%" in out  # the lean (compact) readout
+
+    def test_set_default_saves_and_the_next_run_uses_it_with_no_marker(self, census_home, tmp_path, capsys):
+        code, out = run(capsys, "--set-default", "playful", "--cwd", str(tmp_path))
+        assert code == 0 and "playful" in out
+        assert json.loads((census_home / "vitals.json").read_text()) == {"default_style": "playful"}
+        code, out = run(capsys, "--cwd", str(tmp_path))
+        assert "THE SANCTUM'S VITAL SIGNS" in out and MARKER not in out
+
+    @pytest.mark.parametrize("given,saved", [
+        ("lean", "compact"), ("brief", "compact"), ("compact", "compact"), ("full", "detailed"), ("trend", "detailed"),
+        ("detailed", "detailed"), ("drama", "playful"), ("witchfinder", "playful"), ("PLAYFUL", "playful"),
+    ])
+    def test_set_default_takes_names_and_aliases(self, census_home, tmp_path, capsys, given, saved):
+        assert run(capsys, "--set-default", given, "--cwd", str(tmp_path))[0] == 0
+        assert json.loads((census_home / "vitals.json").read_text())["default_style"] == saved
+
+    @pytest.mark.parametrize("bad", ["", "rm -rf /", "lean; ls", "$(id)", "fancy", "lean detailed"])
+    def test_anything_else_is_an_error_and_nothing_is_written(self, census_home, tmp_path, capsys, bad):
+        assert run(capsys, "--set-default", bad, "--cwd", str(tmp_path))[0] == 2
+        assert not (census_home / "vitals.json").exists()
+
+    def test_an_explicit_style_wins_and_shows_no_marker(self, census_home, tmp_path, capsys):
+        run(capsys, "--set-default", "playful", "--cwd", str(tmp_path))
+        _, out = run(capsys, "detailed", "--cwd", str(tmp_path))
+        assert "THE SANCTUM'S" not in out and MARKER not in out
+        _, out = run(capsys, "--style", "compact", "--cwd", str(tmp_path))
+        assert "ctx ?%" in out and MARKER not in out
+
+    def test_an_explicit_style_before_any_default_does_not_nag(self, census_home, tmp_path, capsys):
+        _, out = run(capsys, "playful", "--cwd", str(tmp_path))
+        assert MARKER not in out
+
+    @pytest.mark.parametrize("content", ["{ nope", "[]", "42", '{"default_style": "fancy"}', '{"default_style": 7}', "{}", ""])
+    def test_a_corrupt_or_odd_file_is_unset_and_never_raises(self, census_home, tmp_path, capsys, content):
+        census_home.mkdir(parents=True)
+        (census_home / "vitals.json").write_text(content)
+        assert vitals.read_default() is None
+        _, out = run(capsys, "--cwd", str(tmp_path))
+        assert MARKER in out
+
+    def test_setting_it_again_replaces_it_atomically(self, census_home, tmp_path, capsys):
+        run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
+        run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
+        assert vitals.read_default() == "detailed"
+        assert sorted(p.name for p in census_home.iterdir()) == ["vitals.json"]  # no temp file left
+
+    def test_it_lives_in_the_census_dir_so_it_is_per_account(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("CENSUS_STORE", raising=False)
+        for name in ("a", "b"):
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / name))
+            run(capsys, "--set-default", "playful" if name == "a" else "lean", "--cwd", str(tmp_path))
+        assert json.loads((tmp_path / "a" / "census" / "vitals.json").read_text())["default_style"] == "playful"
+        assert json.loads((tmp_path / "b" / "census" / "vitals.json").read_text())["default_style"] == "compact"
+
+    def test_a_dotjson_census_store_keeps_it_beside_the_file(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("CENSUS_STORE", str(tmp_path / "legacy" / "status.json"))
+        run(capsys, "--set-default", "detailed", "--cwd", str(tmp_path))
+        assert (tmp_path / "legacy" / "vitals.json").is_file()
+
+    def test_an_unwritable_census_dir_says_so_and_does_not_traceback(self, census_home, tmp_path, monkeypatch, capsys):
+        (tmp_path / "cfg").mkdir()
+        (tmp_path / "cfg" / "census").write_text("a file where the directory should be")
+        code, out = run(capsys, "--set-default", "lean", "--cwd", str(tmp_path))
+        assert code == 1 and "could not save" in out

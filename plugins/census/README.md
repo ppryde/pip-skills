@@ -129,8 +129,16 @@ before this block have none, and readers fall back to their own `git`.
 ## Vitals
 
 An on-demand readout of the current session's vital signs, sized for a phone (no line wider than 44 display columns;
-branch, session and tool names are clipped to fit). It writes nothing. It was the separate `vitals` plugin and is now
+branch, session and tool names are clipped to fit). It writes nothing but one preference (below). It was the separate `vitals` plugin and is now
 part of census, so it needs no sibling plugin and reads census through this plugin's own `cli.py`.
+
+**Default style.** The first time `/census:vitals` runs it shows the lean readout, ends it with the line
+`(vitals: no default style chosen yet)`, and the command asks once which style to show by default (lean, detailed or
+playful). The answer is saved per account in `<census dir>/vitals.json` (`{"default_style": "compact|detailed|playful"}`,
+written atomically; a missing or corrupt file just means "not chosen yet"). From then on a bare `/census:vitals` shows
+that style; naming a style (`/census:vitals detailed`) overrides it for that run, and `/census:vitals default playful`
+changes it. From a shell: `vitals.py --set-default <lean|detailed|playful>` (a name or alias such as `brief`, `full`,
+`trend`, `drama`; anything else is an error and nothing is written).
 
 | Source | Gives |
 |---|---|

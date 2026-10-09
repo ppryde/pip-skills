@@ -31,6 +31,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 import unicodedata
@@ -741,15 +742,56 @@ def _clean_session(value: str | None) -> str | None:
     return value
 
 
-def resolve_style(words: list[str]) -> str:
-    """The first word naming a style or alias wins; otherwise compact."""
+def style_named(words: list[str]) -> str | None:
+    """The first word naming a style or alias, as a style; None when none does."""
     for word in " ".join(words).split():
         w = word.lower()
         if w in STYLES:
             return w
         if w in ALIASES:
             return ALIASES[w]
-    return "compact"
+    return None
+
+
+def resolve_style(words: list[str]) -> str:
+    """The first word naming a style or alias wins; otherwise compact."""
+    return style_named(words) or "compact"
+
+
+# ------------------------------------------------------------------- the saved default
+
+PREF_FILE = "vitals.json"
+NO_DEFAULT_MARKER = "(vitals: no default style chosen yet)"
+
+
+def pref_path() -> Path:
+    """Per account: beside the sessions, in the census dir (census's own rule, so a ``.json`` store works too)."""
+    return store.census_dir() / PREF_FILE
+
+
+def read_default() -> str | None:
+    """The saved default style, or None when there is none or the file is unreadable or odd. Never raises."""
+    try:
+        data = json.loads(pref_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return None
+    style = data.get("default_style") if isinstance(data, dict) else None
+    return style if isinstance(style, str) and style in STYLES else None
+
+
+def write_default(style: str) -> None:
+    """Save ``style`` atomically (same-directory temp file, then replace). Raises OSError."""
+    path = pref_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{PREF_FILE}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"default_style": style}, handle)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def _emit(text: str) -> None:
@@ -772,11 +814,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vitals", description=__doc__.splitlines()[0])
     parser.add_argument("words", nargs="*", help="style name or alias (from /census:vitals arguments)")
     parser.add_argument("--style", choices=STYLES)
+    parser.add_argument("--set-default", metavar="STYLE", help="save the default style (lean|detailed|playful or an alias), then show it")
     parser.add_argument("--session", help="session id (default: freshest for the worktree)")
     parser.add_argument("--cwd", default=os.getcwd())
     args = parser.parse_args(argv)
     session = _clean_session(args.session) or _clean_session(os.environ.get("CLAUDE_SESSION_ID"))
-    style = args.style or resolve_style(args.words)
+    explicit = args.style or style_named(args.words)
+    if args.set_default is not None:
+        # exactly one name or alias, nothing else: "lean; ls" or "lean detailed" is not a style
+        word = args.set_default.strip().lower()
+        chosen = word if word in STYLES else ALIASES.get(word)
+        if chosen is None:
+            print(f"vitals: {args.set_default!r} is not a style; use lean, detailed or playful", file=sys.stderr)
+            return 2
+        try:
+            write_default(chosen)
+        except OSError as exc:
+            _emit(f"(vitals could not save the default style: {type(exc).__name__}: {exc})")
+            return 1
+        _emit(f"(vitals: default style saved: {chosen})")
+        explicit = chosen
+    saved = None if explicit else read_default()
+    style = explicit or saved or "compact"
     try:
         vitals = gather(session, args.cwd)
         reading = RENDERERS[style](vitals)
@@ -786,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
     if not vitals.has_reading:
         _emit("(no census reading yet — census's status-line hook or the census-mod mod feeds it)")
     _emit(reading)
+    if not explicit and saved is None:
+        _emit(NO_DEFAULT_MARKER)  # the command asks the person once, then runs --set-default
     return 0
 
 
